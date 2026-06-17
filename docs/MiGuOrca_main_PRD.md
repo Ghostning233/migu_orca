@@ -626,11 +626,6 @@ migu_orca/
     rules/
     system/
 
-  data/
-    requests/
-    ab_exports/
-    cache/
-
   logs/
 
   script/
@@ -692,7 +687,6 @@ migu_orca/
 | .python-version | Python 版本声明 |
 | docs/ | PRD、设计文档、接口文档、测试手册 |
 | config/ | 用户配置、规则配置、系统配置 |
-| data/ | 本地运行数据，使用 JSON 文件持久化 |
 | logs/ | 日志文件目录 |
 | script/ | 同步、部署、环境辅助脚本 |
 | tools/ | 外部服务调试脚本目录 |
@@ -874,15 +868,11 @@ src/
 
 配置文件用于记录用户的部分信息和规则偏好。MVP 阶段先使用 JSON，后续如有需要再迁移到数据库或管理界面。
 
-### 14.9 data 目录说明
+### 14.9 运行数据目录说明
 
-| 路径 | 说明 |
-| --- | --- |
-| data/requests/ | Request、Request 状态、用户修改历史、AB 调用结果 |
-| data/ab_exports/ | AB 调用失败时生成的 JSON 降级配置 |
-| data/cache/ | MiKan 页面、RSS 拉取结果等可丢弃缓存 |
+MVP 需要使用本地 JSON 文件进行持久化，但运行数据目录暂不在基础框架中创建。
 
-data/ 是运行时数据目录，不应与 docs/ 或 config/ 混用。
+后续在实现 M11 存储与状态管理模块时，再确定 Request、AB 降级配置、缓存等运行数据的具体目录结构。
 
 ### 14.10 tools 目录说明
 

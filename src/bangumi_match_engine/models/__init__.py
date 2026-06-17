@@ -1,2 +1,0 @@
-"""Bangumi match engine models."""
-

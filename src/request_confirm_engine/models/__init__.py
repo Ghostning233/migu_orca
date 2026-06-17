@@ -1,2 +1,0 @@
-"""Request confirmation engine models."""
-

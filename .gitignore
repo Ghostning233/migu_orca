@@ -8,14 +8,6 @@ __pycache__/
 logs/*
 !logs/.gitkeep
 
-data/requests/*
-!data/requests/.gitkeep
-data/ab_exports/*
-!data/ab_exports/.gitkeep
-data/cache/*
-!data/cache/.gitkeep
-
 *.log
 .env
 .env.*
-

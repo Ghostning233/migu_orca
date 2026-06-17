@@ -1,2 +1,0 @@
-"""Torrent filter engine models."""
-

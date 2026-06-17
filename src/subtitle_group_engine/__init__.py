@@ -1,2 +1,0 @@
-"""Subtitle group engine."""
-

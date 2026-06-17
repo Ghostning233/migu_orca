@@ -1,2 +1,0 @@
-"""Storage engine models."""
-

@@ -1,2 +1,0 @@
-"""Auto Bangumi engine controllers."""
-

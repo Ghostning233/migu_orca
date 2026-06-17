@@ -3,7 +3,7 @@ name = "migu_orca"
 version = "0.1.0"
 description = "MiKan and Bangumi RSS orchestration for Auto Bangumi"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = "==3.13.12"
 dependencies = []
 
 [dependency-groups]
@@ -21,17 +21,4 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = [
     "src/apps",
-    "src/request_engine",
-    "src/bangumi_match_engine",
-    "src/mikan_engine",
-    "src/rss_engine",
-    "src/subtitle_group_engine",
-    "src/torrent_filter_engine",
-    "src/folder_naming_engine",
-    "src/user_config_engine",
-    "src/request_confirm_engine",
-    "src/auto_bangumi_engine",
-    "src/storage_engine",
-    "src/log_engine",
-    "src/system_config_engine",
 ]
