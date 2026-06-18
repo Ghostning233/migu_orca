@@ -31,6 +31,19 @@ MiGu 来源于 Mikan + Bangumi。ORCA 表示 Orchestrated RSS Coordination for A
 | 环境变量前缀 | MIGU_ORCA_ |
 | 日志名 | migu_orca |
 
+### 1.2 开发与工具约定
+
+本项目使用 `UV` 进行 Python 包管理和命令执行。
+
+统一约定如下：
+
+1. 安装依赖使用 `uv sync`。
+2. 运行测试使用 `uv run pytest`。
+3. 运行项目入口或脚本时优先使用 `uv run <command>`。
+4. 不要直接使用 `python` 运行测试或脚本，避免绕过项目统一环境。
+
+该约定适用于后续的开发、测试、验收和自动化执行流程。
+
 ## 2. 项目背景
 
 用户有观看、收藏番剧的需求，目前主要通过 MiKanProject 获取番剧 RSS，并使用 Auto Bangumi 配合 qBittorrent 实现自动下载。
