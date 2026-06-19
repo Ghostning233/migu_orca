@@ -1,0 +1,141 @@
+# M01 用户输入与 Request 管理模块 PRD
+
+## 1. 模块目标
+
+M01 负责接收标准化后的用户输入，创建、组装和管理 Request 对象。第一阶段重点是生成状态明确、结构完整、可被人工确认的 Request。
+
+## 2. 模块边界
+
+本模块负责：
+
+1. 校验单番剧输入结构。
+2. 创建 request_id。
+3. 管理第一阶段必要状态。
+4. 组装 source_info 和 confirmable_config。
+5. 输出 Request 数据结构。
+
+本模块不负责：
+
+1. 真实持久化实现。
+2. 完整用户确认交互。
+3. Auto Bangumi 提交状态。
+4. RSS 拉取、解析和筛选规则。
+
+## 3. 输入数据
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| raw_title | string | 是 | 用户原始番剧名 |
+| matched_bangumi | object | 是 | M02 输出的匹配番剧 |
+| rss_sources | array | 是 | M03/M04/M06 汇总后的 RSS 源信息 |
+| selected_subtitle_group | string | 是 | M05 推荐的字幕组 |
+| selected_rss_url | string | 是 | 推荐字幕组对应 RSS |
+| filter_rule | object | 是 | 当前筛选规则 |
+| effective_seed_names | array | 是 | 当前有效种子名列表 |
+| expected_folder_name | string | 是 | M07 输出的文件夹名 |
+
+## 4. 输出数据
+
+输出 Request 对象。
+
+```json
+{
+  "request_id": "req_20260618_0001",
+  "status": "PENDING_CONFIRM",
+  "input": {},
+  "source_info": {},
+  "confirmable_config": {},
+  "ab_submit_result": null,
+  "created_at": "2026-06-18T00:00:00+08:00",
+  "updated_at": "2026-06-18T00:00:00+08:00"
+}
+```
+
+## 5. 核心流程
+
+1. 校验 raw_title 非空。
+2. 创建 Request 初始对象，状态为 CREATED。
+3. 接收流程编排模块传入的源信息和可确认配置。
+4. 组装 source_info。
+5. 组装 confirmable_config。
+6. 将状态更新为 PENDING_CONFIRM。
+7. 返回 Request。
+
+## 6. 规则定义
+
+1. 第一阶段 Request 最终状态只要求覆盖 CREATED、SEARCHING、PENDING_CONFIRM、FAILED。
+2. 主 PRD 中 ACCEPTED、AB_SUBMITTING、AB_SUBMITTED 等状态保留给后续阶段。
+3. effective_seed_names 不允许直接编辑，只能由字幕组或筛选规则变化后重新计算。
+4. ab_submit_result 在第一阶段固定为 null。
+5. request_id 需要全局唯一，具体生成规则待技术设计确认。
+
+## 7. 异常场景
+
+| 场景 | 处理方式 |
+| --- | --- |
+| raw_title 为空 | 返回输入校验失败 |
+| 缺少 matched_bangumi | 不生成 PENDING_CONFIRM Request |
+| 缺少 rss_sources | 可返回失败或生成诊断型 Request，策略待确认 |
+| selected_rss_url 不在 rss_sources 中 | 返回配置组装错误 |
+| effective_seed_names 与选中 RSS 不一致 | 返回数据一致性错误 |
+
+## 8. 数据结构
+
+### 8.1 RequestInput
+
+```json
+{
+  "raw_title": "咒术回战第三季",
+  "season_hint": null,
+  "subtitle_group_hint": null,
+  "folder_name_hint": null
+}
+```
+
+### 8.2 RequestStatus
+
+```text
+CREATED
+SEARCHING
+PENDING_CONFIRM
+FAILED
+```
+
+### 8.3 ConfirmableConfig
+
+```json
+{
+  "selected_subtitle_group": "拨雪",
+  "selected_rss_url": "https://example.invalid/rss.xml",
+  "filter_rule": {},
+  "effective_seed_names": [],
+  "expected_folder_name": "[26Win-咒回S3P1-拨雪 (26)]"
+}
+```
+
+## 9. 接口定义
+
+```text
+create_request(input) -> request
+mark_searching(request_id) -> request
+build_pending_request(request_id, source_info, confirmable_config) -> request
+mark_failed(request_id, error) -> request
+```
+
+第一阶段如果不实现持久化，上述接口可以返回内存对象。
+
+## 10. 验收标准
+
+1. 能基于输入和各模块结果生成完整 Request。
+2. Request 中 ab_submit_result 为 null。
+3. Request 状态能明确表示待确认。
+4. 输入、源信息、可确认配置三类字段边界清晰。
+5. 缺少关键字段时能返回明确错误。
+
+## 11. 待确认问题
+
+| 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
+| --- | --- | --- | --- |
+| Q-M01-01 | 第一阶段是否需要持久化 Request？ | 否 | 当前按可不持久化处理 |
+| Q-M01-02 | Request 过期时间如何定义？ | 否 | 第一阶段暂不实现自动过期 |
+| Q-M01-03 | FAILED 是否纳入主状态流转表？ | 否 | 作为流程错误表达建议保留 |
