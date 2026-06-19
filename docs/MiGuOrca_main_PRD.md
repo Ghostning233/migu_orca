@@ -146,15 +146,19 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 | M09 | Request 确认交互模块 | 暂缓 | P2 | docs/modules/M09-request-confirmation-PRD.md |
 | M10 | Auto Bangumi 集成模块 | 暂缓 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | 暂缓 | P2 | docs/modules/M11-storage-state-PRD.md |
-| M12 | 日志与错误处理模块 | PRD 编写中 | P0 | docs/modules/M12-log-error-PRD.md |
+| M12 | 日志与错误处理模块 | PRD 编写中 | P0-基础优先 | docs/modules/M12-log-error-PRD.md |
 | M13 | Web UI / 管理界面模块 | 暂缓 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | PRD 编写中 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
 
-建议按可测试的底层能力优先实现，最后再做入口编排。
+建议按可测试的底层能力优先实现。日志系统是第一阶段最高优先级基础模块，应先于其他模块完成库接口和运行时初始化能力。
 
 ```text
+M12 日志与错误处理
+  ↓
+M14 系统配置
+  ↓
 M08 用户规则配置
   ↓
 M03 MiKan 静态数据源
@@ -172,16 +176,16 @@ M07 文件夹命名
 M01 Request 管理
   ↓
 M00 入口与流程编排
-  ↓
-M12 日志与错误处理
 ```
 
 说明：
 
-1. 第一阶段先用静态数据和规则模块验证完整 Request 生成链路。
-2. Request 管理应在上游模块输出结构基本稳定后实现。
-3. 入口编排最后串联各模块，并提供 CLI 或库函数包装。
-4. 确认交互、持久化和 AB 对接全部后置。
+1. M12 先行提供统一日志库接口，其他模块不得自行实现日志系统。
+2. M14 提供系统配置和日志目录等运行配置。
+3. 第一阶段再用静态数据和规则模块验证完整 Request 生成链路。
+4. Request 管理应在上游模块输出结构基本稳定后实现。
+5. 入口编排最后串联各模块，并提供 CLI 或库函数包装。
+6. 确认交互、持久化和 AB 对接全部后置。
 
 ## 9. 后续阶段路线图
 

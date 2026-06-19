@@ -4,6 +4,8 @@
 
 M14 负责管理系统级配置。第一阶段仅保留 Request 生成链路必要配置，例如静态数据路径、日志配置和运行环境配置。
 
+第一阶段系统配置文件固定按 JSON 处理，默认配置目录为 `~/.config/migu_orca`。静态数据路径由 M14 统一提供，M03 只消费配置结果。
+
 ## 2. 模块边界
 
 本模块负责：
@@ -12,6 +14,7 @@ M14 负责管理系统级配置。第一阶段仅保留 Request 生成链路必�
 2. 提供环境变量覆盖规则。
 3. 提供静态 RSS 模拟数据路径配置。
 4. 提供日志配置。
+5. 提供第一阶段默认输出格式配置。
 
 本模块不负责：
 
@@ -19,6 +22,7 @@ M14 负责管理系统级配置。第一阶段仅保留 Request 生成链路必�
 2. qBittorrent 配置。
 3. 用户偏好规则。
 4. 配置管理 UI。
+5. 第一阶段 AB、qBittorrent 配置校验。
 
 ## 3. 输入数据
 
@@ -31,9 +35,13 @@ M14 负责管理系统级配置。第一阶段仅保留 Request 生成链路必�
 
 ```json
 {
+  "config_dir": "~/.config/migu_orca",
+  "config_format": "json",
   "static_mikan_data_path": "config/system/static_mikan_sources.json",
-  "log_path": "logs/migu_orca.log",
-  "log_level": "INFO"
+  "log_dir": "logs/",
+  "log_level": "INFO",
+  "log_console_enabled": true,
+  "output_default_format": "json"
 }
 ```
 
@@ -43,7 +51,8 @@ M14 负责管理系统级配置。第一阶段仅保留 Request 生成链路必�
 2. 读取配置文件。
 3. 应用 `MIGU_ORCA_` 前缀环境变量覆盖。
 4. 校验第一阶段必要字段。
-5. 返回系统配置对象。
+5. 不校验 AB、qBittorrent 配置。
+6. 返回系统配置对象。
 
 ## 6. 规则定义
 
@@ -51,7 +60,9 @@ M14 负责管理系统级配置。第一阶段仅保留 Request 生成链路必�
 2. 配置目录沿用主 PRD：`~/.config/migu_orca`。
 3. 第一阶段不要求 AB、qBittorrent 配置可用。
 4. 第一阶段必须支持静态数据源相关配置或默认路径。
-5. 配置格式建议 JSON，但未最终确认。
+5. 第一阶段配置格式固定为 JSON。
+6. 静态数据路径由 M14 统一管理，M03 不自行决定系统配置来源。
+7. AB、qBittorrent 配置不作为第一阶段必要字段。
 
 ## 7. 异常场景
 
@@ -67,9 +78,12 @@ M14 负责管理系统级配置。第一阶段仅保留 Request 生成链路必�
 ```json
 {
   "system_config": {
+    "config_dir": "~/.config/migu_orca",
+    "config_format": "json",
     "static_mikan_data_path": "config/system/static_mikan_sources.json",
-    "log_path": "logs/migu_orca.log",
+    "log_dir": "logs/",
     "log_level": "INFO",
+    "log_console_enabled": true,
     "output_default_format": "json"
   }
 }
@@ -89,11 +103,20 @@ validate_system_config(system_config) -> validation_result
 3. 不要求 AB 或 qBittorrent 配置存在。
 4. 配置错误时返回明确错误。
 5. 输出可供 M03、M12、M00 使用。
+6. 静态数据路径由 M14 输出，并可被 M03 消费。
 
-## 11. 待确认问题
+## 11. 已确认事项与待确认问题
+
+### 11.1 已确认事项
+
+| 编号 | 事项 | 当前结论 |
+| --- | --- | --- |
+| D-M14-01 | 系统配置文件路径和格式 | 第一阶段按 JSON 和 `~/.config/migu_orca` 处理 |
+| D-M14-02 | 静态数据路径归属 | 由 M14 提供，M03 消费配置结果 |
+| D-M14-03 | AB、qBittorrent 配置是否进入第一阶段必要字段 | 不作为第一阶段必要字段，也不做可用性校验 |
+
+### 11.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
-| Q-M14-01 | 系统配置文件路径和格式是否固定？ | 否 | 暂按 JSON 和 `~/.config/migu_orca` |
-| Q-M14-02 | 静态数据路径由 M03 自定义还是统一由 M14 管理？ | 否 | 建议由 M14 提供 |
-| Q-M14-03 | AB、qBittorrent 配置是否仍保留字段但第一阶段不校验？ | 否 | 暂不作为第一阶段必要字段 |
+| 无 | 暂无 | 否 | - |
