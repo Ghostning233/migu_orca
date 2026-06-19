@@ -26,7 +26,8 @@ M04 负责读取 M03 提供的 RSS 数据，解析出种子条目，供 M06 进�
 | --- | --- | --- | --- |
 | rss_url | string | 是 | RSS 地址或静态数据标识 |
 | source_type | string | 是 | static_fixture、remote 等 |
-| rss_content | string/null | 否 | 静态 RSS 内容，组织方式待确认 |
+| rss_content | string/null | 否 | 静态 RSS 内容；第一阶段优先从仓库内 fixture 读取，也可由 M03 直接传入 |
+| fixture_path | string/null | 否 | 仓库内 RSS fixture 路径，source_type 为 static_fixture 时可用 |
 
 ## 4. 输出数据
 
@@ -49,7 +50,7 @@ M04 负责读取 M03 提供的 RSS 数据，解析出种子条目，供 M06 进�
 ## 5. 核心流程
 
 1. 接收 RSS 源信息。
-2. 根据 source_type 读取静态 RSS 内容或远程内容。
+2. 根据 source_type 读取静态 RSS fixture、静态 RSS 内容或远程内容。
 3. 解析 XML。
 4. 遍历 item 节点并提取种子字段。
 5. 返回结构化种子列表。
@@ -113,11 +114,18 @@ parse_rss(rss_source) -> parsed_rss
 4. 空 RSS 不导致程序崩溃。
 5. 输出可直接交给 M06 处理。
 
-## 11. 待确认问题
+## 11. 已确认事项与待确认问题
+
+### 11.1 已确认事项
+
+| 编号 | 事项 | 当前结论 |
+| --- | --- | --- |
+| D-M04-01 | 静态 RSS 读取方式 | 第一阶段优先由 M03 提供 fixture_path，M04 按路径读取；测试可直接传入 rss_content |
+
+### 11.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
 | Q-M04-01 | 第一阶段必须支持哪些 RSS 字段？ | 是 | 本文先要求 title、link，其他字段可选 |
 | Q-M04-02 | item 缺少 title 或 link 时跳过还是失败？ | 是 | 待确认 |
-| Q-M04-03 | 静态 RSS 内容由 M03 传入还是 M04 自行按路径读取？ | 是 | 待确认 |
 | Q-M04-04 | 是否需要保留 RSS 原始字段 raw？ | 否 | 建议保留用于排错 |

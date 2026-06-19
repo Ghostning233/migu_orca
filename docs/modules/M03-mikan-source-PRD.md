@@ -67,9 +67,10 @@ M03 为第一阶段 Request 生成链路提供 MiKan 数据源能力。第一阶
 
 1. 第一阶段数据源必须允许离线运行。
 2. 静态 RSS 列表用于模拟 MiKanProject 数据。
-3. 静态数据需要表达番剧、别名、MiKan URL、字幕组、RSS URL 的关系。
-4. 不在第一阶段实现登录、反爬、页面结构兼容和访问频率控制。
-5. 后续真实 MiKan 访问应通过同一模块接口替换，不影响 M00 编排。
+3. 静态 MiKan/RSS 数据必须纳入仓库并作为测试 fixture，保证离线验收可重复。
+4. 静态数据需要表达番剧、别名、MiKan URL、字幕组、RSS URL、RSS fixture 路径或 RSS 内容的关系。
+5. 不在第一阶段实现登录、反爬、页面结构兼容和访问频率控制。
+6. 后续真实 MiKan 访问应通过同一模块接口替换，不影响 M00 编排。
 
 ## 7. 异常场景
 
@@ -94,7 +95,9 @@ M03 为第一阶段 Request 生成链路提供 MiKan 数据源能力。第一阶
   "rss_sources": [
     {
       "subtitle_group": "拨雪",
-      "rss_url": "https://example.invalid/rss/bocchi.xml"
+      "rss_url": "https://example.invalid/rss/bocchi.xml",
+      "source_type": "static_fixture",
+      "fixture_path": "fixtures/rss/jujutsu_s3_bocchi.xml"
     }
   ]
 }
@@ -115,11 +118,18 @@ list_rss_sources(matched_bangumi) -> rss_sources
 4. 输出能标识数据来自静态模拟源。
 5. 后续替换真实 MiKan 访问时，不需要改 M00 的主流程定义。
 
-## 11. 待确认问题
+## 11. 已确认事项与待确认问题
+
+### 11.1 已确认事项
+
+| 编号 | 事项 | 当前结论 |
+| --- | --- | --- |
+| D-M03-01 | 第一阶段静态 MiKan/RSS 数据组织方式 | 纳入仓库并作为测试 fixture，保证离线验收可重复 |
+| D-M03-02 | 静态 RSS 内容组织方式 | M03 输出 fixture_path 或等价静态内容标识，M04 负责按路径读取或接收测试传入内容 |
+
+### 11.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
-| Q-M03-01 | 静态 RSS 模拟数据放在文档示例、JSON 文件、测试 fixture，还是代码内常量？ | 是 | 本文建议使用 JSON 或测试 fixture，但不定稿 |
-| Q-M03-02 | 静态 RSS 是否保存 RSS 内容全文，还是只保存 URL 并由 M04 读取本地文件？ | 是 | 待确认 |
 | Q-M03-03 | 后续真实 MiKan 是否需要登录？ | 否 | 第一阶段不处理 |
 | Q-M03-04 | 页面结构变化兼容策略是什么？ | 否 | 后续真实爬虫阶段定义 |

@@ -51,6 +51,67 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 }
 ```
 
+第一阶段 Request 完整结构建议如下：
+
+```json
+{
+  "request_id": "req_20260618_0001",
+  "status": "PENDING_CONFIRM",
+  "input": {
+    "raw_title": "咒术回战第三季",
+    "season_hint": null,
+    "subtitle_group_hint": null,
+    "folder_name_hint": null
+  },
+  "source_info": {
+    "matched_bangumi": {
+      "title": "咒术回战 第三季",
+      "mikan_url": "https://example.invalid/bangumi/1",
+      "match_score": 0.91,
+      "aliases": ["咒术回战", "咒回", "Jujutsu Kaisen"]
+    },
+    "rss_sources": [
+      {
+        "subtitle_group": "拨雪",
+        "rss_url": "https://example.invalid/rss/bocchi.xml",
+        "source_type": "static_fixture",
+        "total_seed_count": 12,
+        "valid_seed_count": 8,
+        "invalid_seed_count": 4,
+        "valid_seed_names": [
+          "[拨雪] 咒术回战 第三季 - 01 [1080p][CHS].mkv"
+        ],
+        "excluded_seed_names": [
+          {
+            "name": "[拨雪] 咒术回战 第三季 - 01 [720p].mkv",
+            "reason": "分辨率不符合默认规则",
+            "rule": "resolution"
+          }
+        ]
+      }
+    ]
+  },
+  "confirmable_config": {
+    "selected_subtitle_group": "拨雪",
+    "selected_rss_url": "https://example.invalid/rss/bocchi.xml",
+    "filter_rule": {
+      "resolution": "1080p",
+      "subtitle_language": "CHS",
+      "exclude_keywords": ["合集", "总集篇", "NCOP", "NCED", "PV", "SP", "先行"],
+      "include_keywords": [],
+      "episode_strategy": "normal_episode"
+    },
+    "effective_seed_names": [
+      "[拨雪] 咒术回战 第三季 - 01 [1080p][CHS].mkv"
+    ],
+    "expected_folder_name": "[26Win-咒回S3P1-拨雪 (26)]"
+  },
+  "ab_submit_result": null,
+  "created_at": "2026-06-18T00:00:00+08:00",
+  "updated_at": "2026-06-18T00:00:00+08:00"
+}
+```
+
 ## 5. 核心流程
 
 1. 校验 raw_title 非空。
@@ -64,7 +125,7 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 ## 6. 规则定义
 
 1. 第一阶段 Request 最终状态只要求覆盖 CREATED、SEARCHING、PENDING_CONFIRM、FAILED。
-2. 主 PRD 中 ACCEPTED、AB_SUBMITTING、AB_SUBMITTED 等状态保留给后续阶段。
+2. ACCEPTED、MODIFIED、CANCELLED、EXPIRED、AB_SUBMITTING、AB_SUBMITTED 等状态保留给 M09、M10、M11 后续阶段。
 3. effective_seed_names 不允许直接编辑，只能由字幕组或筛选规则变化后重新计算。
 4. ab_submit_result 在第一阶段固定为 null。
 5. request_id 需要全局唯一，具体生成规则待技术设计确认。
@@ -110,6 +171,30 @@ FAILED
   "filter_rule": {},
   "effective_seed_names": [],
   "expected_folder_name": "[26Win-咒回S3P1-拨雪 (26)]"
+}
+```
+
+### 8.4 SourceInfo
+
+```json
+{
+  "matched_bangumi": {},
+  "rss_sources": []
+}
+```
+
+### 8.5 Request
+
+```json
+{
+  "request_id": "req_20260618_0001",
+  "status": "PENDING_CONFIRM",
+  "input": {},
+  "source_info": {},
+  "confirmable_config": {},
+  "ab_submit_result": null,
+  "created_at": "2026-06-18T00:00:00+08:00",
+  "updated_at": "2026-06-18T00:00:00+08:00"
 }
 ```
 
