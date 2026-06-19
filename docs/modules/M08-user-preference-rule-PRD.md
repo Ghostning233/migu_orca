@@ -2,13 +2,13 @@
 
 ## 1. 模块目标
 
-M08 负责提供第一阶段 Request 生成所需的用户偏好和默认规则配置，包括分辨率、字幕语言、字幕组偏好、排除关键词、包含关键词和命名模板。
+M08 负责提供第一阶段 Request 生成所需的用户偏好和规则配置。第一阶段项目不内置默认筛选规则，筛选规则由用户自行配置和管理。
 
 ## 2. 模块边界
 
 本模块负责：
 
-1. 提供默认筛选规则。
+1. 提供用户筛选规则读取能力。
 2. 提供默认命名规则。
 3. 提供字幕组偏好配置。
 4. 提供单番特殊配置的预留结构。
@@ -32,14 +32,11 @@ M08 负责提供第一阶段 Request 生成所需的用户偏好和默认规则�
 ```json
 {
   "filter_rule": {
-    "resolution": "1080p",
-    "subtitle_language": "CHS",
-    "exclude_keywords": ["合集", "总集篇", "NCOP", "NCED", "PV", "SP", "先行"],
-    "include_keywords": [],
-    "episode_strategy": "normal_episode"
+    "must_contain": "",
+    "must_not_contain": ""
   },
   "naming_rule": {
-    "template": "[{season_code}-{title_short_name}{season_part}-{subtitle_group_short_name} ({ab_season_number})]"
+    "template": "{title}"
   },
   "subtitle_group_preference": []
 }
@@ -54,8 +51,8 @@ M08 负责提供第一阶段 Request 生成所需的用户偏好和默认规则�
 
 ## 6. 规则定义
 
-1. 第一阶段可以使用内置默认配置。
-2. 第一阶段可使用内置默认配置；如使用配置文件，优先使用 JSON。
+1. 第一阶段项目不内置默认筛选规则。
+2. 第一阶段可使用内置空规则；如使用配置文件，优先使用 JSON。
 3. 规则合并优先级建议为：单番特殊配置 > 用户配置 > 系统默认配置。
 4. M08 只提供规则，不执行筛选或命名。
 
@@ -74,13 +71,11 @@ M08 负责提供第一阶段 Request 生成所需的用户偏好和默认规则�
 
 ```json
 {
-  "default_resolution": "1080p",
-  "default_subtitle_language": "CHS",
+  "must_contain": "",
+  "must_not_contain": "",
   "preferred_subtitle_groups": [],
   "blocked_subtitle_groups": [],
-  "exclude_keywords": ["合集", "总集篇", "NCOP", "NCED", "PV", "SP", "先行"],
-  "include_keywords": [],
-  "naming_template": "[{season_code}-{title_short_name}{season_part}-{subtitle_group_short_name} ({ab_season_number})]"
+  "naming_template": "{title}"
 }
 ```
 
@@ -94,8 +89,8 @@ get_naming_rule(raw_title = null) -> naming_rule
 
 ## 10. 验收标准
 
-1. 无用户配置时能返回默认规则。
-2. 默认筛选规则与 M06 第一阶段默认规则一致。
+1. 无用户配置时能返回空筛选规则。
+2. 筛选规则结构与 M06 第一阶段 `must_contain` / `must_not_contain` 结构一致。
 3. 配置错误时能给出明确错误或降级行为。
 4. 输出可供 M05、M06、M07 使用。
 

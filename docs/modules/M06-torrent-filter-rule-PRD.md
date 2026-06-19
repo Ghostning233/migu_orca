@@ -2,7 +2,7 @@
 
 ## 1. 模块目标
 
-M06 负责根据筛选规则从 RSS 种子列表中计算有效种子，并输出被排除种子的原因。
+M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效种子，并输出被排除种子的原因。
 
 有效种子由本模块统一定义：按筛选规则去除重复种子、无效种子和不符合规则种子后，最终保留下来的种子。
 
@@ -10,7 +10,7 @@ M06 负责根据筛选规则从 RSS 种子列表中计算有效种子，并输�
 
 本模块负责：
 
-1. 识别种子是否符合默认筛选规则。
+1. 识别种子是否符合用户配置的筛选规则。
 2. 输出 valid_seed_names。
 3. 输出 excluded_seed_names 及排除原因。
 4. 统计 total_seed_count、valid_seed_count、invalid_seed_count。
@@ -34,15 +34,16 @@ M06 负责根据筛选规则从 RSS 种子列表中计算有效种子，并输�
 ```json
 {
   "total_seed_count": 12,
-  "valid_seed_count": 8,
-  "invalid_seed_count": 4,
+  "valid_seed_count": 11,
+  "invalid_seed_count": 1,
   "valid_seed_names": [
-    "[拨雪] 咒术回战 第三季 - 01 [1080p][CHS].mkv"
+    "[Loli] 咒术回战 第三季 - 04 [1080p][CHS].mkv"
   ],
   "excluded_seed_names": [
     {
-      "name": "[拨雪] 咒术回战 第三季 - 01 [720p].mkv",
-      "reason": "分辨率不符合默认规则"
+      "name": "[Loli] 咒术回战 第三季 - 04 V2 [1080p][CHS].mkv",
+      "reason": "命中必须不含规则：V2|V3|1-|2-|3-|Fin|合集",
+      "rule": "must_not_contain"
     }
   ]
 }
@@ -51,34 +52,33 @@ M06 负责根据筛选规则从 RSS 种子列表中计算有效种子，并输�
 ## 5. 核心流程
 
 1. 接收一个 RSS 下的 seeds。
-2. 对每个种子名称应用排除关键词规则。
-3. 应用分辨率规则。
-4. 应用字幕语言规则。
-5. 识别正片候选。
-6. 对同一集多版本进行去重。
-7. 输出有效种子和排除原因。
+2. 对每个种子名称应用“必须包含”规则。
+3. 对每个种子名称应用“必须不含”规则。
+4. 输出有效种子和排除原因。
 
 ## 6. 规则定义
 
-第一阶段默认规则如下：
+第一阶段筛选逻辑照搬 qBittorrent 的“必须包含”和“必须不含”逻辑。
+
+项目本身不内置默认筛选规则。筛选规则需要用户自行配置和管理。
+
+用户配置示例：
 
 ```json
 {
-  "resolution": "1080p",
-  "subtitle_language": "CHS",
-  "exclude_keywords": ["合集", "总集篇", "NCOP", "NCED", "PV", "SP", "先行"],
-  "include_keywords": [],
-  "episode_strategy": "normal_episode"
+  "must_contain": "",
+  "must_not_contain": "V2|V3|1-|2-|3-|Fin|合集"
 }
 ```
 
 第一阶段规则约束：
 
-1. 第一阶段默认分辨率按 1080p 处理。
-2. 第一阶段默认字幕语言按 CHS 处理。
-3. 包含排除关键词的种子默认排除。
-4. 多版本去重、v2/v3、重制版处理细则未定稿，不应写死为最终规则。
-5. 每个被排除种子必须输出可读 reason。
+1. `must_contain` 为空时，不启用必须包含限制。
+2. `must_not_contain` 为空时，不启用必须不含限制。
+3. `must_contain` 和 `must_not_contain` 的匹配语义按 qBittorrent 规则处理，第一阶段可先按正则或等价字符串匹配实现，最终技术细节由 TD 固化。
+4. 项目不根据分辨率、字幕语言、集数、v2/v3、合集等内置默认筛选规则。
+5. 如用户希望排除 V2、V3、合集等内容，应写入 `must_not_contain`。
+6. 每个被排除种子必须输出可读 reason。
 
 ## 7. 异常场景
 
@@ -86,8 +86,8 @@ M06 负责根据筛选规则从 RSS 种子列表中计算有效种子，并输�
 | --- | --- |
 | seeds 为空 | 返回 total_seed_count 为 0 |
 | 种子名称为空 | 排除并标记名称缺失 |
-| 无法识别集数 | 是否排除待确认 |
-| 多版本冲突 | 按待确认规则处理 |
+| must_contain 不匹配 | 排除并标记必须包含规则未命中 |
+| must_not_contain 命中 | 排除并标记必须不含规则命中 |
 | 所有种子被排除 | 返回空 valid_seed_names 和排除原因 |
 | filter_rule 缺字段 | 使用默认值或报错待确认 |
 
@@ -97,11 +97,8 @@ M06 负责根据筛选规则从 RSS 种子列表中计算有效种子，并输�
 
 ```json
 {
-  "resolution": "1080p",
-  "subtitle_language": "CHS",
-  "exclude_keywords": ["合集", "总集篇", "NCOP", "NCED", "PV", "SP", "先行"],
-  "include_keywords": [],
-  "episode_strategy": "normal_episode"
+  "must_contain": "",
+  "must_not_contain": "V2|V3|1-|2-|3-|Fin|合集"
 }
 ```
 
@@ -109,9 +106,9 @@ M06 负责根据筛选规则从 RSS 种子列表中计算有效种子，并输�
 
 ```json
 {
-  "name": "[字幕组] 番名 - 01 [720p].mkv",
-  "reason": "分辨率不符合默认规则",
-  "rule": "resolution"
+  "name": "[字幕组] 番名 - 04 V2.mkv",
+  "reason": "命中必须不含规则：V2|V3|1-|2-|3-|Fin|合集",
+  "rule": "must_not_contain"
 }
 ```
 
@@ -126,8 +123,9 @@ filter_seeds(seeds, filter_rule) -> filtered_seed_result
 1. 能输出有效种子名列表。
 2. 能输出每个被排除种子的原因。
 3. 统计数量满足 total = valid + invalid。
-4. 默认规则与本文档第一阶段默认规则保持一致。
-5. 不把 v2/v3 等未确认细则写死为最终规则。
+4. 项目不内置默认筛选规则。
+5. 能通过用户配置的 `must_contain` 和 `must_not_contain` 完成筛选。
+6. 不把 v2/v3 等规则写死为项目默认规则。
 
 ## 11. 已确认事项与待确认问题
 
@@ -135,14 +133,12 @@ filter_seeds(seeds, filter_rule) -> filtered_seed_result
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
-| D-M06-01 | 第一阶段默认分辨率 | 1080p |
-| D-M06-02 | 第一阶段默认字幕语言 | CHS |
+| D-M06-01 | 第一阶段筛选逻辑 | 照搬 qBittorrent 的“必须包含”和“必须不含”逻辑 |
+| D-M06-02 | 项目默认筛选规则 | 项目不内置默认筛选规则，规则由用户自行配置和管理 |
+| D-M06-03 | 用户规则示例 | `must_not_contain = "V2|V3|1-|2-|3-|Fin|合集"` |
 
 ### 11.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
-| Q-M06-03 | 规则优先级如何定义？ | 是 | 待确认 |
-| Q-M06-04 | v2/v3 修正版是优先保留还是默认排除？ | 是 | 待确认 |
-| Q-M06-05 | 合集是否一律排除？ | 是 | 暂按排除关键词处理 |
-| Q-M06-06 | 重制版、先行版、SP、OVA 如何处理？ | 否 | 第一阶段先作为待确认细则 |
+| Q-M06-04 | qBittorrent 规则语义在代码中采用正则还是完全兼容 qBittorrent 实现？ | 是 | TD 中确认 |

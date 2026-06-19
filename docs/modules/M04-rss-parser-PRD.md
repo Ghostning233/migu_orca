@@ -33,12 +33,12 @@ M04 负责读取 M03 提供的 RSS 数据，解析出种子条目，供 M06 进�
 
 ```json
 {
-  "rss_url": "https://example.invalid/rss/bocchi.xml",
-  "subtitle_group": "拨雪",
+  "rss_url": "https://example.invalid/rss/loli.xml",
+  "subtitle_group": "Loli",
   "total_seed_count": 12,
   "seeds": [
     {
-      "title": "[拨雪] 咒术回战 第三季 - 01 [1080p][CHS].mkv",
+      "title": "[Loli] 咒术回战 第三季 - 04 [1080p][CHS].mkv",
       "link": "https://example.invalid/torrent/1",
       "published_at": "2026-06-18T00:00:00+08:00",
       "guid": "torrent-1"

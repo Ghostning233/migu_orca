@@ -48,8 +48,8 @@ M03 为第一阶段 Request 生成链路提供 MiKan 数据源能力。第一阶
 {
   "rss_sources": [
     {
-      "subtitle_group": "拨雪",
-      "rss_url": "https://example.invalid/rss/bocchi.xml",
+      "subtitle_group": "Loli",
+      "rss_url": "https://example.invalid/rss/loli.xml",
       "source_type": "static_fixture"
     }
   ]
@@ -94,10 +94,10 @@ M03 为第一阶段 Request 生成链路提供 MiKan 数据源能力。第一阶
   "mikan_url": "https://example.invalid/bangumi/1",
   "rss_sources": [
     {
-      "subtitle_group": "拨雪",
-      "rss_url": "https://example.invalid/rss/bocchi.xml",
+      "subtitle_group": "Loli",
+      "rss_url": "https://example.invalid/rss/loli.xml",
       "source_type": "static_fixture",
-      "fixture_path": "fixtures/rss/jujutsu_s3_bocchi.xml"
+      "fixture_path": "fixtures/rss/jujutsu_s3_loli.xml"
     }
   ]
 }
