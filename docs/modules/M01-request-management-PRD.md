@@ -72,39 +72,36 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
     },
     "rss_sources": [
       {
-        "subtitle_group": "拨雪",
-        "rss_url": "https://example.invalid/rss/bocchi.xml",
+        "subtitle_group": "Loli",
+        "rss_url": "https://example.invalid/rss/loli.xml",
         "source_type": "static_fixture",
         "total_seed_count": 12,
         "valid_seed_count": 8,
         "invalid_seed_count": 4,
         "valid_seed_names": [
-          "[拨雪] 咒术回战 第三季 - 01 [1080p][CHS].mkv"
+          "[Loli] 咒术回战 第三季 - 04 [1080p][CHS].mkv"
         ],
         "excluded_seed_names": [
           {
-            "name": "[拨雪] 咒术回战 第三季 - 01 [720p].mkv",
-            "reason": "分辨率不符合默认规则",
-            "rule": "resolution"
+            "name": "[Loli] 咒术回战 第三季 - 04 V2 [1080p][CHS].mkv",
+            "reason": "命中必须不含规则：V2|V3|1-|2-|3-|Fin|合集",
+            "rule": "must_not_contain"
           }
         ]
       }
     ]
   },
   "confirmable_config": {
-    "selected_subtitle_group": "拨雪",
-    "selected_rss_url": "https://example.invalid/rss/bocchi.xml",
+    "selected_subtitle_group": "Loli",
+    "selected_rss_url": "https://example.invalid/rss/loli.xml",
     "filter_rule": {
-      "resolution": "1080p",
-      "subtitle_language": "CHS",
-      "exclude_keywords": ["合集", "总集篇", "NCOP", "NCED", "PV", "SP", "先行"],
-      "include_keywords": [],
-      "episode_strategy": "normal_episode"
+      "must_contain": "",
+      "must_not_contain": "V2|V3|1-|2-|3-|Fin|合集"
     },
     "effective_seed_names": [
-      "[拨雪] 咒术回战 第三季 - 01 [1080p][CHS].mkv"
+      "[Loli] 咒术回战 第三季 - 04 [1080p][CHS].mkv"
     ],
-    "expected_folder_name": "[26Win-咒回S3P1-拨雪 (26)]"
+    "expected_folder_name": "咒术回战 第三季"
   },
   "ab_submit_result": null,
   "created_at": "2026-06-18T00:00:00+08:00",
@@ -166,11 +163,11 @@ FAILED
 
 ```json
 {
-  "selected_subtitle_group": "拨雪",
+  "selected_subtitle_group": "Loli",
   "selected_rss_url": "https://example.invalid/rss.xml",
   "filter_rule": {},
   "effective_seed_names": [],
-  "expected_folder_name": "[26Win-咒回S3P1-拨雪 (26)]"
+  "expected_folder_name": "咒术回战 第三季"
 }
 ```
 
