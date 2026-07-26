@@ -1,0 +1,36 @@
+[
+  {
+    "bangumi_id": "mikan_static_001",
+    "title": "咒术回战 第三季",
+    "aliases": ["咒术回战第三季", "咒回第三季", "Jujutsu Kaisen Season 3"],
+    "mikan_url": "https://example.invalid/bangumi/jujutsu-s3",
+    "rss_sources": [
+      {
+        "subtitle_group": "Loli",
+        "rss_url": "https://example.invalid/rss/jujutsu-loli.xml",
+        "source_type": "static_fixture",
+        "fixture_path": "fixtures/rss/jujutsu_s3_loli.xml"
+      },
+      {
+        "subtitle_group": "喵萌",
+        "rss_url": "https://example.invalid/rss/jujutsu-moe.xml",
+        "source_type": "static_fixture",
+        "fixture_path": "fixtures/rss/jujutsu_s3_moe.xml"
+      }
+    ]
+  },
+  {
+    "bangumi_id": "mikan_static_002",
+    "title": "葬送的芙莉莲",
+    "aliases": ["芙莉莲", "Frieren"],
+    "mikan_url": "https://example.invalid/bangumi/frieren",
+    "rss_sources": [
+      {
+        "subtitle_group": "喵萌",
+        "rss_url": "https://example.invalid/rss/frieren-moe.xml",
+        "source_type": "static_fixture",
+        "fixture_path": "fixtures/rss/frieren_moe.xml"
+      }
+    ]
+  }
+]

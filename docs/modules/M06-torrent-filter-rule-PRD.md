@@ -58,7 +58,8 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
 
 ## 6. 规则定义
 
-第一阶段筛选逻辑照搬 qBittorrent 的“必须包含”和“必须不含”逻辑。
+第一阶段借用 qBittorrent 的“必须包含”和“必须不含”概念，但明确采用 Python
+`re.search` 语义，不声明与 qBittorrent 完全兼容。
 
 项目本身不内置默认筛选规则。筛选规则需要用户自行配置和管理。
 
@@ -75,10 +76,12 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
 
 1. `must_contain` 为空时，不启用必须包含限制。
 2. `must_not_contain` 为空时，不启用必须不含限制。
-3. `must_contain` 和 `must_not_contain` 的匹配语义按 qBittorrent 规则处理，第一阶段可先按正则或等价字符串匹配实现，最终技术细节由 TD 固化。
-4. 项目不根据分辨率、字幕语言、集数、v2/v3、合集等内置默认筛选规则。
-5. 如用户希望排除 V2、V3、合集等内容，应写入 `must_not_contain`。
-6. 每个被排除种子必须输出可读 reason。
+3. `must_contain` 和 `must_not_contain` 使用 Python `re.search`。
+4. 非法正则返回配置错误。
+5. 先应用 `must_not_contain`，再应用 `must_contain`。
+6. 项目不根据分辨率、字幕语言、集数、v2/v3、合集等内置默认筛选规则。
+7. 如用户希望排除 V2、V3、合集等内容，应写入 `must_not_contain`。
+8. 每个被排除种子必须输出可读 reason。
 
 ## 7. 异常场景
 
@@ -89,7 +92,7 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
 | must_contain 不匹配 | 排除并标记必须包含规则未命中 |
 | must_not_contain 命中 | 排除并标记必须不含规则命中 |
 | 所有种子被排除 | 返回空 valid_seed_names 和排除原因 |
-| filter_rule 缺字段 | 使用默认值或报错待确认 |
+| filter_rule 缺字段 | 返回配置错误 |
 
 ## 8. 数据结构
 
@@ -141,4 +144,4 @@ filter_seeds(seeds, filter_rule) -> filtered_seed_result
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
-| Q-M06-04 | qBittorrent 规则语义在代码中采用正则还是完全兼容 qBittorrent 实现？ | 是 | TD 中确认 |
+| Q-M06-04 | qBittorrent 规则语义在代码中采用正则还是完全兼容 qBittorrent 实现？ | 否 | 已确认：Python re.search，不声明完全兼容 |

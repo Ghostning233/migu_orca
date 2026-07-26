@@ -54,12 +54,13 @@ M04 负责读取 M03 提供的 RSS 数据，解析出种子条目，供 M06 进�
 3. 解析 XML。
 4. 遍历 item 节点并提取种子字段。
 5. 返回结构化种子列表。
-6. 对缺失字段输出 warnings 或错误，边界待确认。
+6. item 缺少 title 或 link 时跳过并输出 warning。
+7. 没有任何有效 item 时该 RSS 解析失败。
 
 ## 6. 规则定义
 
 1. 第一阶段至少需要解析 title 和 link。
-2. published_at、guid 可解析则保留，不可解析时处理策略待确认。
+2. published_at、guid 可解析则保留，否则置空。
 3. RSS 中 item 的 title 作为种子名称来源。
 4. 不在本模块识别集数、分辨率和字幕语言。
 5. 不在本模块去重。
@@ -71,9 +72,9 @@ M04 负责读取 M03 提供的 RSS 数据，解析出种子条目，供 M06 进�
 | RSS 内容为空 | 返回 RSS_EMPTY |
 | XML 格式非法 | 返回 RSS_PARSE_FAILED |
 | 没有 item | 返回空 seeds |
-| item 缺少 title | 跳过或报错待确认 |
-| item 缺少 link | 跳过或保留待确认 |
-| 发布时间格式异常 | 保留原始值或置空待确认 |
+| item 缺少 title | 跳过并记录 warning |
+| item 缺少 link | 跳过并记录 warning |
+| 发布时间格式异常 | 置空 |
 
 ## 8. 数据结构
 
@@ -84,8 +85,7 @@ M04 负责读取 M03 提供的 RSS 数据，解析出种子条目，供 M06 进�
   "title": "[字幕组] 番名 - 01 [1080p][CHS].mkv",
   "link": "https://example.invalid/torrent/1",
   "published_at": null,
-  "guid": null,
-  "raw": {}
+  "guid": null
 }
 ```
 
@@ -126,6 +126,6 @@ parse_rss(rss_source) -> parsed_rss
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
-| Q-M04-01 | 第一阶段必须支持哪些 RSS 字段？ | 是 | 本文先要求 title、link，其他字段可选 |
-| Q-M04-02 | item 缺少 title 或 link 时跳过还是失败？ | 是 | 待确认 |
-| Q-M04-04 | 是否需要保留 RSS 原始字段 raw？ | 否 | 建议保留用于排错 |
+| Q-M04-01 | 第一阶段必须支持哪些 RSS 字段？ | 否 | 已确认：title、link 必需，published_at、guid 可选 |
+| Q-M04-02 | item 缺少 title 或 link 时跳过还是失败？ | 否 | 已确认：跳过并记录 warning |
+| Q-M04-04 | 是否需要保留 RSS 原始字段 raw？ | 否 | 已确认：Stage 1 不保留 |
