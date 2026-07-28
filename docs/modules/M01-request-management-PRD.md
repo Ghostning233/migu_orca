@@ -10,9 +10,8 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 
 1. 校验单番剧输入结构。
 2. 创建 request_id。
-3. 管理第一阶段必要状态。
-4. 组装 source_info 和 confirmable_config。
-5. 输出 Request 数据结构。
+3. 组装 source_info 和 confirmable_config。
+4. 输出状态为 PENDING_CONFIRM 的 Request 快照。
 
 本模块不负责：
 
@@ -28,8 +27,8 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 | raw_title | string | 是 | 用户原始番剧名 |
 | matched_bangumi | object | 是 | M02 输出的匹配番剧 |
 | rss_sources | array | 是 | M03/M04/M06 汇总后的 RSS 源信息 |
-| selected_subtitle_group | string | 是 | M05 推荐的字幕组 |
-| selected_rss_url | string | 是 | 推荐字幕组对应 RSS |
+| selected_subtitle_group | string/null | 是 | M05 推荐的字幕组；无有效种子时为 null |
+| selected_rss_url | string/null | 是 | 推荐字幕组对应 RSS；无有效种子时为 null |
 | filter_rule | object | 是 | 当前筛选规则 |
 | effective_seed_names | array | 是 | 当前有效种子名列表 |
 | expected_folder_name | string | 是 | M07 输出的文件夹名 |
@@ -58,10 +57,7 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
   "request_id": "req_20260618_0001",
   "status": "PENDING_CONFIRM",
   "input": {
-    "raw_title": "咒术回战第三季",
-    "season_hint": null,
-    "subtitle_group_hint": null,
-    "folder_name_hint": null
+    "raw_title": "咒术回战第三季"
   },
   "source_info": {
     "matched_bangumi": {
@@ -101,7 +97,8 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
     "effective_seed_names": [
       "[Loli] 咒术回战 第三季 - 04 [1080p][CHS].mkv"
     ],
-    "expected_folder_name": "咒术回战 第三季"
+    "expected_folder_name": "咒术回战 第三季",
+    "warnings": []
   },
   "ab_submit_result": null,
   "created_at": "2026-06-18T00:00:00+08:00",
@@ -112,20 +109,23 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 ## 5. 核心流程
 
 1. 校验 raw_title 非空。
-2. 创建 Request 初始对象，状态为 CREATED。
-3. 接收流程编排模块传入的源信息和可确认配置。
+2. 接收流程编排模块传入的源信息和可确认配置。
+3. 创建 request_id。
 4. 组装 source_info。
 5. 组装 confirmable_config。
-6. 将状态更新为 PENDING_CONFIRM。
+6. 创建状态为 PENDING_CONFIRM 的 Request 快照。
 7. 返回 Request。
 
 ## 6. 规则定义
 
-1. 第一阶段 Request 最终状态只要求覆盖 CREATED、SEARCHING、PENDING_CONFIRM、FAILED。
-2. ACCEPTED、MODIFIED、CANCELLED、EXPIRED、AB_SUBMITTING、AB_SUBMITTED 等状态保留给 M09、M10、M11 后续阶段。
-3. effective_seed_names 不允许直接编辑，只能由字幕组或筛选规则变化后重新计算。
-4. ab_submit_result 在第一阶段固定为 null。
-5. request_id 需要全局唯一，具体生成规则待技术设计确认。
+1. 第一阶段成功输出的 Request 只使用 `PENDING_CONFIRM`。
+2. 第一阶段 Request 是一次计算得到的待确认快照，不是完整生命周期或持久化状态机。
+3. 流程失败使用独立 ErrorResult，不创建 `FAILED` Request。
+4. CREATED、SEARCHING 等内部过程不建模为 Request 状态。
+5. ACCEPTED、MODIFIED、CANCELLED、EXPIRED、AB_SUBMITTING、AB_SUBMITTED 等状态保留给 M09、M10、M11 后续阶段。
+6. effective_seed_names 不允许直接编辑，只能由字幕组或筛选规则变化后重新计算。
+7. ab_submit_result 在第一阶段固定为 null。
+8. request_id 需要全局唯一，具体生成规则由 Stage 1 短规格确认。
 
 ## 7. 异常场景
 
@@ -133,7 +133,7 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 | --- | --- |
 | raw_title 为空 | 返回输入校验失败 |
 | 缺少 matched_bangumi | 不生成 PENDING_CONFIRM Request |
-| 缺少 rss_sources | 可返回失败或生成诊断型 Request，策略待确认 |
+| 缺少 rss_sources | 返回流程失败，不生成 Request |
 | selected_rss_url 不在 rss_sources 中 | 返回配置组装错误 |
 | effective_seed_names 与选中 RSS 不一致 | 返回数据一致性错误 |
 
@@ -143,21 +143,17 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 
 ```json
 {
-  "raw_title": "咒术回战第三季",
-  "season_hint": null,
-  "subtitle_group_hint": null,
-  "folder_name_hint": null
+  "raw_title": "咒术回战第三季"
 }
 ```
 
 ### 8.2 RequestStatus
 
 ```text
-CREATED
-SEARCHING
 PENDING_CONFIRM
-FAILED
 ```
+
+该枚举仅表示第一阶段成功输出状态，不代表完整 Request 状态集合。
 
 ### 8.3 ConfirmableConfig
 
@@ -167,7 +163,8 @@ FAILED
   "selected_rss_url": "https://example.invalid/rss.xml",
   "filter_rule": {},
   "effective_seed_names": [],
-  "expected_folder_name": "咒术回战 第三季"
+  "expected_folder_name": "咒术回战 第三季",
+  "warnings": []
 }
 ```
 
@@ -198,13 +195,10 @@ FAILED
 ## 9. 接口定义
 
 ```text
-create_request(input) -> request
-mark_searching(request_id) -> request
-build_pending_request(request_id, source_info, confirmable_config) -> request
-mark_failed(request_id, error) -> request
+build_pending_request(input, source_info, confirmable_config) -> request
 ```
 
-第一阶段如果不实现持久化，上述接口可以返回内存对象。
+第一阶段不实现持久化，上述接口返回内存对象。失败由入口流程返回独立 ErrorResult。
 
 ## 10. 验收标准
 
@@ -220,4 +214,4 @@ mark_failed(request_id, error) -> request
 | --- | --- | --- | --- |
 | Q-M01-01 | 第一阶段是否需要持久化 Request？ | 否 | 当前按可不持久化处理 |
 | Q-M01-02 | Request 过期时间如何定义？ | 否 | 第一阶段暂不实现自动过期 |
-| Q-M01-03 | FAILED 是否纳入主状态流转表？ | 否 | 作为流程错误表达建议保留 |
+| Q-M01-03 | FAILED 是否纳入主状态流转表？ | 否 | 已确认不纳入；失败使用独立 ErrorResult |

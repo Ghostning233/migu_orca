@@ -4,7 +4,7 @@
 
 M05 负责从多个候选 RSS 源中推荐一个字幕组，作为 Request 的默认 selected_subtitle_group。
 
-第一阶段只使用固定字幕组优先级选择字幕组，不使用有效种子数、更新稳定性、历史质量评分等复杂规则。
+第一阶段使用用户配置的字幕组优先级，并且只从存在有效种子的 RSS 中选择。
 
 ## 2. 模块边界
 
@@ -26,7 +26,7 @@ M05 负责从多个候选 RSS 源中推荐一个字幕组，作为 Request 的�
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | rss_sources | array | 是 | 包含字幕组、RSS、有效种子数 |
-| user_preference | object/null | 否 | 用户字幕组偏好，第一阶段可为空且不参与排序 |
+| user_preference | object | 是 | 包含用户配置的 subtitle_group_priority |
 
 ## 4. 输出数据
 
@@ -34,62 +34,40 @@ M05 负责从多个候选 RSS 源中推荐一个字幕组，作为 Request 的�
 {
   "selected_subtitle_group": "Loli",
   "selected_rss_url": "https://example.invalid/rss/loli.xml",
-  "reason": "命中第一阶段固定字幕组优先级",
-  "score": 10000
+  "reason": "命中用户字幕组优先级"
 }
 ```
 
 ## 5. 核心流程
 
 1. 接收带 subtitle_group 和 rss_url 的 RSS 源列表。
-2. 按第一阶段固定字幕组优先级表为候选 RSS 打分。
-3. 只要候选 RSS 中出现优先级表内字幕组，就选择分数最高的字幕组。
-4. 第一阶段不因 valid_seed_count 为 0 而排除候选字幕组。
-5. 第一阶段不使用有效种子数、字幕语言、分辨率、更新时间、历史质量评分参与推荐排序。
-6. 如果候选 RSS 中没有任何优先级表内字幕组，则按候选 RSS 原始顺序选择第一个，并输出 warning。
+2. 排除 `valid_seed_count = 0` 的候选。
+3. 按用户配置的 `subtitle_group_priority` 选择第一个存在的字幕组。
+4. 用户优先级未命中时，选择第一个存在有效种子的候选并输出 warning。
+5. 所有候选均无有效种子时，不设置默认字幕组和 RSS，并输出 warning。
 
 ## 6. 规则定义
 
-1. 第一阶段固定字幕组优先级如下，分数从 10000 开始，每后一位递减 100。
-
-| 字幕组 | 分数 |
-| --- | --- |
-| Loli | 10000 |
-| 喵萌 | 9900 |
-| 爱恋 | 9800 |
-| 桜都 | 9700 |
-| Lilith | 9600 |
-| 北宇 | 9500 |
-| Ani | 9400 |
-| KF | 9300 |
-| TOC | 9200 |
-
-2. 第一阶段只按上表选择字幕组，不排除有效种子数为 0 的字幕组。
-3. 第一阶段不实现复杂字幕组质量评分。
-4. 第一阶段不基于历史下载成功率评分。
-5. 推荐结果只是默认值，后续阶段用户可修改。
+1. 字幕组优先级由用户 JSON 配置，不写死在代码中。
+2. 只推荐至少有一个有效种子的字幕组。
+3. 第一阶段不实现复杂质量评分或历史学习。
+4. 推荐结果只是默认值，后续阶段用户可修改。
 
 ## 7. 异常场景
 
 | 场景 | 处理方式 |
 | --- | --- |
 | 候选为空 | 返回无可推荐字幕组 |
-| 全部 valid_seed_count 为 0 | 仍按固定字幕组优先级选择 |
-| 用户偏好指定字幕组不存在 | 第一阶段不使用 user_preference 排序，仅输出 warning |
-| 多个候选评分相同 | 按候选 RSS 原始顺序选择靠前者 |
-| 候选均不在优先级表内 | 按候选 RSS 原始顺序选择第一个，并输出 warning |
+| 全部 valid_seed_count 为 0 | 不设置默认字幕组，生成带 warning 的 Request |
+| 用户优先级没有命中候选 | 选择第一个有效候选，并输出 warning |
 
 ## 8. 数据结构
 
 ```json
 {
-  "subtitle_group_score": {
-    "subtitle_group": "Loli",
-    "rss_url": "https://example.invalid/rss.xml",
-    "valid_seed_count": 0,
-    "score": 10000,
-    "reasons": ["命中第一阶段固定优先级：Loli"]
-  }
+  "selected_subtitle_group": "Loli",
+  "selected_rss_url": "https://example.invalid/rss.xml",
+  "reason": "命中用户字幕组优先级"
 }
 ```
 
@@ -105,7 +83,7 @@ recommend_subtitle_group(rss_sources, user_preference = null) -> subtitle_group_
 2. 推荐结果包含 selected_subtitle_group 和 selected_rss_url。
 3. 无候选时返回明确错误。
 4. 不依赖真实历史数据。
-5. 即使有效种子数为 0，只要命中固定优先级表，也能选出优先级最高的字幕组。
+5. 所有候选均无有效种子时返回空选择和 warning。
 
 ## 11. 已确认事项与待确认问题
 
@@ -113,9 +91,9 @@ recommend_subtitle_group(rss_sources, user_preference = null) -> subtitle_group_
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
-| D-M05-01 | 第一阶段字幕组优先级 | Loli=10000，喵萌=9900，爱恋=9800，桜都=9700，Lilith=9600，北宇=9500，Ani=9400，KF=9300，TOC=9200 |
-| D-M05-02 | 有效种子数为 0 时是否可推荐 | 第一阶段可推荐，只按固定字幕组优先级选择 |
-| D-M05-03 | 同分策略 | 同分时按候选 RSS 原始顺序选择靠前者 |
+| D-M05-01 | 第一阶段字幕组优先级 | 由用户 JSON 配置 |
+| D-M05-02 | 有效种子数为 0 时是否可推荐 | 不推荐；全部为 0 时输出空选择和 warning |
+| D-M05-03 | 优先级未命中 | 选择第一个有效候选并输出 warning |
 
 ### 11.2 待确认问题
 

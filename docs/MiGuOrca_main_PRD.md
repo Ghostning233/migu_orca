@@ -8,7 +8,7 @@
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
 | 当前版本 | v0.3 |
-| 文档状态 | 优化中 |
+| 文档状态 | Stage 1 基线已确认 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -130,62 +130,57 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 
 主 PRD 只定义概念边界，不维护完整字段结构。字段、状态、错误和接口定义由对应模块 PRD 维护。
 
+第一阶段输出的 Request 是一次计算得到的“待确认快照”，只承诺成功结果状态为
+`PENDING_CONFIRM`。它不是完整的 Request 生命周期或持久化状态机。确认、修改、
+取消、过期、提交及失败历史等状态，在后续实现 M09、M10、M11 时再定义。
+
 ## 7. 模块划分
 
 | 模块编号 | 模块名称 | 第一阶段状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
-| M00 | 入口与流程编排模块 | PRD 编写中 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
-| M01 | 用户输入与 Request 管理模块 | PRD 编写中 | P0 | docs/modules/M01-request-management-PRD.md |
-| M02 | 番剧搜索与匹配模块 | PRD 编写中 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
-| M03 | MiKan 数据源模块 | PRD 编写中 | P0 | docs/modules/M03-mikan-source-PRD.md |
-| M04 | RSS 解析模块 | PRD 编写中 | P0 | docs/modules/M04-rss-parser-PRD.md |
-| M05 | 字幕组评估模块 | PRD 编写中 | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
-| M06 | 种子筛选规则模块 | PRD 编写中 | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
-| M07 | 文件夹命名模块 | PRD 编写中 | P1 | docs/modules/M07-folder-naming-PRD.md |
-| M08 | 用户偏好与规则配置模块 | PRD 编写中 | P1 | docs/modules/M08-user-preference-rule-PRD.md |
+| M00 | 入口与流程编排模块 | Stage 1 已确认 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
+| M01 | 用户输入与 Request 管理模块 | Stage 1 已确认 | P0 | docs/modules/M01-request-management-PRD.md |
+| M02 | 番剧搜索与匹配模块 | Stage 1 已确认 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
+| M03 | MiKan 数据源模块 | Stage 1 已确认 | P0 | docs/modules/M03-mikan-source-PRD.md |
+| M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
+| M05 | 字幕组评估模块 | Stage 1 已确认 | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
+| M06 | 种子筛选规则模块 | Stage 1 已确认 | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
+| M07 | 文件夹命名模块 | Stage 1 已确认 | P1 | docs/modules/M07-folder-naming-PRD.md |
+| M08 | 用户偏好与规则配置模块 | Stage 1 已确认 | P1 | docs/modules/M08-user-preference-rule-PRD.md |
 | M09 | Request 确认交互模块 | 暂缓 | P2 | docs/modules/M09-request-confirmation-PRD.md |
 | M10 | Auto Bangumi 集成模块 | 暂缓 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | 暂缓 | P2 | docs/modules/M11-storage-state-PRD.md |
-| M12 | 日志与错误处理模块 | PRD 编写中 | P0-基础优先 | docs/modules/M12-log-error-PRD.md |
+| M12 | 日志与错误处理模块 | Stage 1 最小化 | P1 | docs/modules/M12-log-error-PRD.md |
 | M13 | Web UI / 管理界面模块 | 暂缓 | P2 | docs/modules/M13-web-ui-PRD.md |
-| M14 | 系统配置模块 | PRD 编写中 | P1 | docs/modules/M14-system-config-PRD.md |
+| M14 | 系统配置模块 | Stage 1 最小化 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
 
-建议按可测试的底层能力优先实现。日志系统是第一阶段最高优先级基础模块，应先于其他模块完成库接口和运行时初始化能力。
+第一阶段按可运行的纵向链路推进，避免先建设尚未验证的基础设施。
 
 ```text
-M12 日志与错误处理
+共享数据契约与 fixture
   ↓
-M14 系统配置
+M02 + M03 候选读取与匹配
   ↓
-M08 用户规则配置
+M04 + M06 RSS 解析与筛选
   ↓
-M03 MiKan 静态数据源
+M05 + M07 订阅默认值
   ↓
-M04 RSS 解析
+M01 Request 快照
   ↓
-M06 种子筛选规则
+M00 CLI 与流程编排
   ↓
-M02 番剧搜索与匹配
-  ↓
-M05 字幕组评估
-  ↓
-M07 文件夹命名
-  ↓
-M01 Request 管理
-  ↓
-M00 入口与流程编排
+最小配置与日志收尾
 ```
 
 说明：
 
-1. M12 先行提供统一日志库接口，其他模块不得自行实现日志系统。
-2. M14 提供系统配置和日志目录等运行配置。
-3. 第一阶段再用静态数据和规则模块验证完整 Request 生成链路。
-4. Request 管理应在上游模块输出结构基本稳定后实现。
-5. 入口编排最后串联各模块，并提供 CLI 或库函数包装。
-6. 确认交互、持久化和 AB 对接全部后置。
+1. 每一步先补行为测试，再实现最小功能。
+2. M02 与 M03 合入 catalog_engine，M04 与 M06 合入 rss_engine。
+3. M05 与 M07 合入 subscription_engine。
+4. M08、M12、M14 在 Stage 1 只提供普通基础模块，不建立独立 engine。
+5. 确认交互、持久化和 AB 对接全部后置。
 
 ## 9. 后续阶段路线图
 
@@ -206,6 +201,9 @@ M00 入口与流程编排
 | D-MAIN-01 | 第一阶段入口形态 | M00 | 同时支持内部 `generate_request` 能力和最小 CLI 包装 |
 | D-MAIN-02 | 第一阶段 Request 输出形式 | M00 | 以 JSON 对象为主，终端展示作为包装能力 |
 | D-MAIN-03 | 第一阶段静态数据组织方式 | M03、M04 | 静态 MiKan/RSS 数据纳入仓库并作为测试 fixture，保证离线验收可重复 |
+| D-MAIN-04 | 第一阶段实现定位 | 全部 | 最小离线技术探针，不提前建设完整长期架构 |
+| D-MAIN-05 | Stage 1 代码结构 | 全部 | 保留 apps/engine/controllers/models，总量收敛为 4 个 engine |
+| D-MAIN-06 | Stage 1 Request 状态 | M00、M01 | Request 是 PENDING_CONFIRM 快照，不是完整状态机；失败使用独立 ErrorResult |
 
 ## 11. 文档职责边界
 
@@ -214,6 +212,7 @@ M00 入口与流程编排
 | docs/MiGuOrca_main_PRD.md | 项目级目标、第一阶段范围、模块划分、验收标准、路线图 |
 | docs/modules/*.md | 模块目标、边界、输入输出、流程、规则、异常、接口、验收 |
 | docs/design/architecture.md | 技术架构、目录结构、分层原则、测试组织规范 |
+| docs/design/stage1-spec.md | Stage 1 唯一技术行为基线、数据契约、规则与验收用例 |
 | docs/api/ | 后续接口、数据结构和对外 API 说明 |
 | docs/test_manual/ | 后续真实环境验证、手动测试记录 |
 
@@ -235,6 +234,6 @@ M00 入口与流程编排
 
 ## 13. 下一步工作
 
-1. 编写第一阶段最小技术方案，明确数据模型、fixture 和模块接口。
-2. 补齐静态 MiKan/RSS fixture。
-3. 按第 8 节顺序进入 TDD 实现。
+1. 按 `docs/design/stage1-spec.md` 补齐 fixture 和验收测试。
+2. 按第 8 节实现最小纵向链路。
+3. 通过 `uv run pytest` 和 CLI 示例完成 Stage 1 验收。
