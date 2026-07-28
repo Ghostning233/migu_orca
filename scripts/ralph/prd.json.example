@@ -1,0 +1,19 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage1-offline-request",
+  "description": "MiGuOrca Stage 1 - offline request generation",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Example story",
+      "description": "As a developer, I want an example story so that I can see the prd.json format.",
+      "acceptanceCriteria": [
+        "Example criterion",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    }
+  ]
+}
