@@ -22,7 +22,7 @@ shared / 外部适配
 - `shared` 只存放跨 engine 契约、错误、配置和日志等基础能力。
 - 外部系统接入后放在对应 engine 的适配目录，不让领域规则直接依赖网络客户端。
 
-## 3. Stage 1 目录
+## 3. 当前目录
 
 ```text
 src/
@@ -46,6 +46,9 @@ src/
     controllers/
     models/
 
+  ab_engine/
+    controllers/
+
   shared/
     config.py
     errors.py
@@ -55,17 +58,18 @@ src/
 
 职责映射：
 
-| 代码模块 | PRD 职责 | Stage 1 责任 |
+| 代码模块 | PRD 职责 | 当前责任 |
 | --- | --- | --- |
-| `apps/migu_orca_entry` | M00 | CLI、流程编排、统一结果 |
+| `apps/migu_orca_entry` | M00 | CLI、流程编排、统一结果、显式 AB 提交入口 |
 | `catalog_engine` | M02、M03 | 静态候选读取、标题匹配 |
 | `rss_engine` | M04、M06 | RSS 解析、正则筛选 |
 | `subscription_engine` | M05、M07 | 字幕组选择、文件夹名 |
-| `request_engine` | M01 | Request 契约与快照组装 |
+| `request_engine` | M01、M09 | Request 契约、快照组装、确认、取消、受限修改 |
+| `ab_engine` | M10 | AB 提交结果契约、payload 映射、fake client、fallback JSON、AB config 读取 |
 | `shared/config.py` | M08、M14 的最小子集 | 用户 JSON 与默认路径 |
 | `shared/logging.py` | M12 的最小子集 | 标准库日志初始化 |
 
-M09、M10、M11、M13 不属于 Stage 1，不提前创建空实现目录。
+M11、M13 仍未实现，不提前创建空实现目录。真实 Auto Bangumi HTTP adapter 属于 Stage 4，应在 `ab_engine` 的现有 client 协议边界内演进，不反向污染 Request 生成和确认逻辑。
 
 ## 4. 拆分规则
 
@@ -96,7 +100,7 @@ M09、M10、M11、M13 不属于 Stage 1，不提前创建空实现目录。
 
 ## 7. 测试
 
-Stage 1 延续当前约定：测试文件与被测文件放在同一目录，使用 `*_test.py`。
+当前延续既有约定：测试文件与被测文件放在同一目录，使用 `*_test.py`。
 
 测试分为：
 
@@ -119,6 +123,4 @@ uv run pytest
 
 ## 9. 后续演进
 
-真实 MiKan 接入优先作为 `catalog_engine` 的新适配器；Auto Bangumi 接入可在形成稳定
-提交契约后新增独立 engine；持久化状态机在 M11 阶段设计，不反向扩大 Stage 1
-Request 快照的职责。
+真实 MiKan 接入优先作为 `catalog_engine` 的新适配器；Auto Bangumi 已形成独立 `ab_engine` 和稳定提交契约，下一步应只替换真实 HTTP client adapter 注入点；持久化状态机在 M11 阶段设计，不反向扩大 Request 快照的职责。

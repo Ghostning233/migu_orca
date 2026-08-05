@@ -1,92 +1,24 @@
 ## Codebase Patterns
 - Keep learnings about this codebase in this file as iterations progress.
 - Ralph defaults to the local Codex CLI; use `./scripts/ralph/ralph.sh` or pass `--tool codex` explicitly.
-- Stage 1 and Stage 2 are complete on `main`; archived Ralph records live under `scripts/ralph/archive/`.
-- Stage 3 Ralph work uses branch `agent/stage3-auto-bangumi-integration` and should complete one `passes=false` story per iteration.
-- Stage 3 should prefer offline-testable contracts and fake clients before any real Auto Bangumi network integration.
-- Keep AB submission separate from Request generation and confirmation; CLI submission must be explicitly requested.
+- Stage 1, Stage 2, and Stage 3 are complete; archived Ralph records live under `scripts/ralph/archive/`.
+- Stage 4 Ralph work uses branch `agent/stage4-real-auto-bangumi-client` and should complete one `passes=false` story per iteration.
 - Preserve the existing top-level JSON result envelope and convert expected business failures with `Stage1Error.as_dict()` or a compatible ErrorResult shape.
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
-- Stage 3 AB subscription payloads use the internal keys `title`, `rss_url`, `save_path`, and `filter_rule`.
-- AB clients should expose `create_subscription(payload)` and go through `submit_ab_subscription(...)` to normalize success/failure into the stable submit result envelope.
+- AB subscription payloads use the internal keys `title`, `rss_url`, `save_path`, and `filter_rule`.
+- AB clients must expose `create_subscription(payload)` and go through `submit_ab_subscription(...)` to normalize success/failure into the stable submit result envelope.
 - AB fallback JSON is opt-in via `submit_ab_subscription(..., fallback_enabled=True)` and is built from the prepared AB payload plus the structured failure reason.
 - AB system config loading lives in `ab_engine.controllers.ab_config`, requires an explicit JSON path, and deliberately does not read environment overrides or include token values in errors.
-- CLI AB submission is an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; the current CLI uses `FakeAutoBangumiClient` until a real client adapter exists.
+- CLI AB submission is an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; default generation and confirmation paths must not contact external systems.
+- Stage 4 should replace the current fake-only CLI submission path with a real AB HTTP adapter while keeping fake-client injection available for tests.
 
-## 2026-08-05 17:55 CST - Stage 3 PRD Setup
+## 2026-08-05 18:35 CST - Stage 4 PRD Setup
 Thread: unavailable
-- Archived the completed Stage 2 Ralph PRD and progress log to `scripts/ralph/archive/2026-08-05-stage2-request-confirmation/`.
-- Created Stage 3 PRD for Auto Bangumi integration on branch `agent/stage3-auto-bangumi-integration`.
-- Split Stage 3 into US-021 through US-026: result contract, payload mapping, fake client, fallback JSON, AB config loading, and CLI submit action.
+- Archived the completed Stage 3 Ralph PRD and progress log to `scripts/ralph/archive/2026-08-05-stage3-auto-bangumi-integration/`.
+- Created Stage 4 PRD for real Auto Bangumi HTTP client integration on branch `agent/stage4-real-auto-bangumi-client`.
+- Split Stage 4 into US-027 through US-032: adapter boundary, injectable HTTP transport, payload validation, CLI real-client injection, network error normalization, and usage documentation.
 - **Learnings for future iterations:**
-  - Build Stage 3 from stable local contracts first; defer real AB API details until the internal submit shape is tested.
-  - Treat fallback JSON as a first-class output rather than an exception side effect.
----
-## 2026-08-05 18:01 CST - US-021
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented the Auto Bangumi submit result contract with success and failure constructors.
-- Added defensive copying so result objects do not retain mutable caller-owned response, fallback, or error dictionaries.
-- Files changed: `pyproject.toml`, `src/ab_engine/__init__.py`, `src/ab_engine/controllers/__init__.py`, `src/ab_engine/controllers/submit_result.py`, `src/ab_engine/controllers/submit_result_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
-- **Learnings for future iterations:**
-  - AB submission result constructors return plain JSON-serializable dictionaries matching the existing CLI envelope style.
-  - Expected AB failures should use `Stage1Error.as_dict()` or a compatible structured error dictionary.
-  - New top-level engine packages must be added to `[tool.hatch.build.targets.wheel].packages` in `pyproject.toml`.
----
-## 2026-08-05 18:03 CST - US-022
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented pure Request-to-Auto-Bangumi subscription payload mapping for accepted Requests.
-- Added validation for non-ACCEPTED Requests and missing `confirmable_config.selected_rss_url` or `confirmable_config.expected_folder_name`.
-- Files changed: `src/ab_engine/controllers/subscription_payload.py`, `src/ab_engine/controllers/subscription_payload_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
-- **Learnings for future iterations:**
-  - AB payload preparation belongs in `ab_engine.controllers` and should remain a pure dictionary-to-dictionary mapping.
-  - The mapper reads title from `source_info.matched_bangumi.title`, falling back to `input.raw_title` when the matched title is unavailable.
-  - Missing required AB payload fields are represented with `Stage1Error` type `missing_ab_payload_field`.
----
-## 2026-08-05 18:06 CST - US-023
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented the offline Auto Bangumi client contract with `AutoBangumiClient`, `FakeAutoBangumiClient`, and `submit_ab_subscription`.
-- Added success and controlled-failure normalization into the existing AB submit result envelope.
-- Files changed: `src/ab_engine/controllers/ab_client.py`, `src/ab_engine/controllers/ab_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
-- **Learnings for future iterations:**
-  - AB clients should implement `create_subscription(payload)` and let controller orchestration convert responses/errors into stable result dictionaries.
-  - The fake client deep-copies payloads and responses so tests can verify contracts without mutable caller-owned state leaking across boundaries.
-  - Subscription IDs are read from `id`, `subscription_id`, or `ab_subscription_id` to keep the future real client adapter flexible.
----
-## 2026-08-05 18:10 CST - US-024
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented pure Auto Bangumi fallback JSON generation from prepared AB subscription payloads and structured failure reasons.
-- Added opt-in fallback generation to `submit_ab_subscription(..., fallback_enabled=True)` while keeping fallback output disabled by default.
-- Hardened AB failure result error copying so `Stage1Error.details` mutations cannot leak into returned result dictionaries.
-- Files changed: `src/ab_engine/controllers/fallback_config.py`, `src/ab_engine/controllers/fallback_config_test.py`, `src/ab_engine/controllers/ab_client.py`, `src/ab_engine/controllers/ab_client_test.py`, `src/ab_engine/controllers/submit_result.py`, `src/ab_engine/controllers/submit_result_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
-- **Learnings for future iterations:**
-  - Keep fallback generation pure and pass the explicit `fallback_enabled` flag through submit orchestration rather than making client implementations decide.
-  - Use `failure_reason` for the structured error dictionary inside fallback JSON.
-  - Deep-copy `Stage1Error.as_dict()` results at result boundaries because `details` is caller-owned mutable data.
----
-## 2026-08-05 18:13 CST - US-025
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented minimal Auto Bangumi system config loading from an explicit JSON path.
-- Added `AutoBangumiConfig` with `endpoint`, `token`, and `fallback_enabled`, plus validation for missing files, invalid JSON, non-object JSON, and field type errors.
-- Files changed: `src/ab_engine/controllers/ab_config.py`, `src/ab_engine/controllers/ab_config_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
-- **Learnings for future iterations:**
-  - Use `load_ab_config(path)` for AB system settings; callers must provide the config path explicitly.
-  - AB config validation raises `Stage1Error` with `failed_step` set to `load_ab_config`.
-  - Keep token values out of error details and logs; field validation reports only the field name.
----
-## 2026-08-05 18:16 CST - US-026
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented the explicit CLI Auto Bangumi submit action for accepted Requests.
-- Added `apply_ab_submit_action(...)` to load explicit AB config, map the accepted Request to an AB payload, submit via the offline fake client by default, attach `ab_submit_result` to both the top-level envelope and Request snapshot, and return stable ErrorResult envelopes for submit-preparation failures.
-- Covered success, fallback-enabled AB failure, fallback-disabled AB failure, missing config, non-accepted Request, and end-to-end CLI JSON output.
-- Files changed: `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
-- **Learnings for future iterations:**
-  - AB CLI submission requires `--action accept --submit-ab --ab-config <path>` so generation and confirmation never contact external systems by default.
-  - AB submit failures remain inside the normalized `ab_submit_result`; top-level `error` is reserved for pipeline failures such as missing config or invalid Request status.
-  - The CLI currently uses `FakeAutoBangumiClient` for offline behavior; replace that injection point when adding a real Auto Bangumi adapter.
+  - Stage 3 already established the stable submit envelope, fallback JSON, config loader, payload mapper, and explicit CLI submit flag.
+  - Stage 4 should focus on the network adapter seam only; do not expand into persistence, Web UI, or real MiKan access in this stage.
+  - Keep token values out of all error details, logs, fixtures, and documentation examples.
 ---

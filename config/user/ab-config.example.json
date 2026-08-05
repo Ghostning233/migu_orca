@@ -1,0 +1,5 @@
+{
+  "endpoint": "http://auto-bangumi.local",
+  "token": "replace-with-token",
+  "fallback_enabled": true
+}

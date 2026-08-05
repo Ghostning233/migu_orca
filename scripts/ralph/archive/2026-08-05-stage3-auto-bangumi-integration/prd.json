@@ -1,0 +1,107 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage3-auto-bangumi-integration",
+  "description": "MiGuOrca Stage 3：在已接受 Request 基础上实现 Auto Bangumi 提交准备、离线可测的提交客户端、失败降级 JSON 和最小 CLI 提交流程；优先保证契约稳定，不依赖真实外部服务。",
+  "userStories": [
+    {
+      "id": "US-021",
+      "title": "定义 Auto Bangumi 提交结果契约",
+      "description": "As a caller, I want a stable submit result object so that Auto Bangumi success, failure, and fallback states are represented consistently.",
+      "acceptanceCriteria": [
+        "新增 AB 提交结果结构，包含 success、ab_subscription_id、ab_response、fallback_config 和 error",
+        "成功结果必须包含 ab_subscription_id 且 fallback_config 和 error 为 null",
+        "失败结果必须包含结构化 error，允许 fallback_config 为对象或 null",
+        "结果构造函数不访问网络、不读取配置、不修改 Request",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-022",
+      "title": "实现 Request 到 AB 订阅 payload 的映射",
+      "description": "As an integration developer, I want accepted Requests to be converted into an Auto Bangumi subscription payload so that submission logic has a single input contract.",
+      "acceptanceCriteria": [
+        "只接受状态为 ACCEPTED 的 Request，其他状态返回明确错误",
+        "payload 从 confirmable_config 读取 selected_rss_url、expected_folder_name 和 filter_rule",
+        "缺少 selected_rss_url 或 expected_folder_name 时返回明确错误",
+        "payload 包含番剧标题、RSS URL、保存目录名和筛选规则字段",
+        "映射函数不访问网络、不读取配置、不做持久化",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-023",
+      "title": "实现离线可测的 Auto Bangumi client 契约",
+      "description": "As a developer, I want a fake Auto Bangumi client with the same submit interface so that Stage 3 can be tested without a real AB server.",
+      "acceptanceCriteria": [
+        "新增 Auto Bangumi client 接口或协议，提供 create_subscription(payload) 能力",
+        "新增 fake client，支持返回成功响应和可控失败响应",
+        "成功响应能转换为 AB 提交成功结果",
+        "失败响应能转换为结构化 AB 提交失败结果",
+        "实现不调用真实网络、不依赖外部服务",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-024",
+      "title": "实现 Auto Bangumi 降级 JSON 生成",
+      "description": "As a user, I want a fallback JSON when Auto Bangumi submission fails so that I can manually create or debug the subscription.",
+      "acceptanceCriteria": [
+        "基于 AB payload 生成 fallback_config",
+        "fallback_config 包含番剧标题、RSS URL、保存目录名、筛选规则和失败原因",
+        "fallback_enabled 为 false 时失败结果不包含 fallback_config",
+        "fallback_enabled 为 true 时失败结果包含可 JSON 序列化的 fallback_config",
+        "降级生成不访问网络、不做持久化",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-025",
+      "title": "提供最小 AB 系统配置读取",
+      "description": "As a CLI caller, I want Auto Bangumi endpoint and token to be loaded from an explicit config file so that real submission can be configured later without hardcoding secrets.",
+      "acceptanceCriteria": [
+        "新增最小 AB 配置结构，包含 endpoint、token 和 fallback_enabled",
+        "支持从显式 JSON 路径读取 AB 配置",
+        "配置文件不存在、JSON 非法或字段类型错误时返回明确 ErrorResult",
+        "不新增环境变量覆盖、不新增多 profile 合并、不记录 token 明文日志",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-026",
+      "title": "接入 CLI 的 Auto Bangumi 提交动作",
+      "description": "As a user, I want the CLI to submit an accepted Request through the Stage 3 Auto Bangumi flow so that the terminal workflow can produce either an AB result or fallback JSON.",
+      "acceptanceCriteria": [
+        "CLI 新增显式提交参数，默认生成和确认流程不自动访问外部系统",
+        "提交动作复用 Request accept 结果和 AB payload 映射",
+        "提交成功时输出包含 ab_submit_result 的 JSON envelope",
+        "提交失败且允许降级时输出包含 fallback_config 的 JSON envelope",
+        "预期业务错误使用稳定 ErrorResult 结构",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
