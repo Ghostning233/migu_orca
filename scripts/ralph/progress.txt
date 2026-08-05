@@ -7,6 +7,7 @@
 - Keep AB submission separate from Request generation and confirmation; CLI submission must be explicitly requested.
 - Preserve the existing top-level JSON result envelope and convert expected business failures with `Stage1Error.as_dict()` or a compatible ErrorResult shape.
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
+- Stage 3 AB subscription payloads use the internal keys `title`, `rss_url`, `save_path`, and `filter_rule`.
 
 ## 2026-08-05 17:55 CST - Stage 3 PRD Setup
 Thread: unavailable
@@ -27,4 +28,15 @@ Thread: https://codex.openai.com/threads/unavailable
   - AB submission result constructors return plain JSON-serializable dictionaries matching the existing CLI envelope style.
   - Expected AB failures should use `Stage1Error.as_dict()` or a compatible structured error dictionary.
   - New top-level engine packages must be added to `[tool.hatch.build.targets.wheel].packages` in `pyproject.toml`.
+---
+## 2026-08-05 18:03 CST - US-022
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented pure Request-to-Auto-Bangumi subscription payload mapping for accepted Requests.
+- Added validation for non-ACCEPTED Requests and missing `confirmable_config.selected_rss_url` or `confirmable_config.expected_folder_name`.
+- Files changed: `src/ab_engine/controllers/subscription_payload.py`, `src/ab_engine/controllers/subscription_payload_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - AB payload preparation belongs in `ab_engine.controllers` and should remain a pure dictionary-to-dictionary mapping.
+  - The mapper reads title from `source_info.matched_bangumi.title`, falling back to `input.raw_title` when the matched title is unavailable.
+  - Missing required AB payload fields are represented with `Stage1Error` type `missing_ab_payload_field`.
 ---
