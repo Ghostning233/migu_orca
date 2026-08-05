@@ -1,6 +1,6 @@
 {
   "project": "MiGuOrca",
-  "branchName": "ralph/stage1-offline-request",
+  "branchName": "main",
   "description": "MiGuOrca Stage 1：基于仓库内静态 MiKan 和 RSS fixture，将单个番剧名称离线转换为结构完整的 PENDING_CONFIRM Request 快照。",
   "userStories": [
     {
@@ -16,8 +16,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；shared.models 已定义对应跨引擎数据契约，uv run pytest 通过。"
     },
     {
       "id": "US-002",
@@ -32,8 +32,8 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；shared.errors.Stage1Error 可转换结构化 ErrorResult，uv run pytest 通过。"
     },
     {
       "id": "US-003",
@@ -50,8 +50,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；config/system、fixtures/rss 和 config/user 已纳入仓库，uv run pytest 通过。"
     },
     {
       "id": "US-004",
@@ -67,8 +67,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；catalog_engine 支持静态 catalog 加载校验，uv run pytest 通过。"
     },
     {
       "id": "US-005",
@@ -84,8 +84,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；shared.config 支持固定 JSON 用户规则加载，uv run pytest 通过。"
     },
     {
       "id": "US-006",
@@ -101,8 +101,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；catalog_engine 支持标准化标题和别名精确匹配，uv run pytest 通过。"
     },
     {
       "id": "US-007",
@@ -119,8 +119,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；catalog_engine 支持 SequenceMatcher 模糊匹配与歧义保护，uv run pytest 通过。"
     },
     {
       "id": "US-008",
@@ -137,8 +137,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；rss_engine 支持 static_fixture RSS 解析与 warning，uv run pytest 通过。"
     },
     {
       "id": "US-009",
@@ -157,8 +157,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；rss_engine 支持用户正则筛选和排除原因，uv run pytest 通过。"
     },
     {
       "id": "US-010",
@@ -174,8 +174,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；subscription_engine 支持按用户优先级选择字幕组，uv run pytest 通过。"
     },
     {
       "id": "US-011",
@@ -191,8 +191,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；subscription_engine 支持安全文件夹名生成，uv run pytest 通过。"
     },
     {
       "id": "US-012",
@@ -210,8 +210,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；request_engine 可组装 PENDING_CONFIRM Request 快照，uv run pytest 通过。"
     },
     {
       "id": "US-013",
@@ -229,8 +229,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；entry_controller 编排完整离线 Request 生成流程，uv run pytest 通过。"
     },
     {
       "id": "US-014",
@@ -246,8 +246,8 @@
         "Typecheck passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；shared.logging 支持控制台和可选文件日志，uv run pytest 通过。"
     },
     {
       "id": "US-015",
@@ -265,8 +265,8 @@
         "Typecheck passes"
       ],
       "priority": 15,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 1 已在 main 完成；migu-orca CLI 可离线输出 JSON Request，uv run pytest 通过。"
     }
   ]
 }
