@@ -1,272 +1,86 @@
 {
   "project": "MiGuOrca",
-  "branchName": "main",
-  "description": "MiGuOrca Stage 1：基于仓库内静态 MiKan 和 RSS fixture，将单个番剧名称离线转换为结构完整的 PENDING_CONFIRM Request 快照。",
+  "branchName": "agent/stage2-request-confirmation",
+  "description": "MiGuOrca Stage 2：在 Stage 1 离线 PENDING_CONFIRM Request 基础上，提供最小 Request 确认、取消和后续修改能力，不做持久化、Auto Bangumi 调用或 Web UI。",
   "userStories": [
     {
-      "id": "US-001",
-      "title": "定义 Stage 1 跨引擎数据契约",
-      "description": "As a developer, I want stable Stage 1 domain models so that catalog, RSS, subscription, and request engines exchange consistent data.",
+      "id": "US-016",
+      "title": "定义 Request 接受与取消状态流转",
+      "description": "As a caller, I want a pending Request to be accepted or cancelled explicitly so that Stage 2 has a stable confirmation state contract.",
       "acceptanceCriteria": [
-        "定义 EntryRequest、RssSource、BangumiCandidate、MatchedBangumi、RssSeed 和 ParsedRss 数据结构",
-        "定义 FilterRule、UserPreference、ExcludedSeed、FilteredRss 和 SubtitleGroupSelection 数据结构",
-        "可选字段 published_at、guid、selected_subtitle_group 和 selected_rss_url 明确允许 null",
-        "数据结构不包含 Request 持久化、确认状态机、Auto Bangumi 或 qBittorrent 字段",
-        "Tests pass",
-        "Typecheck passes"
+        "提供 accept_request(request) 能将 PENDING_CONFIRM Request 转为 ACCEPTED",
+        "提供 cancel_request(request, reason) 能将 PENDING_CONFIRM Request 转为 CANCELLED 并记录取消原因",
+        "接受和取消均更新 updated_at，并记录 user_action.action、reason 和 decided_at",
+        "非 PENDING_CONFIRM Request 不允许再次接受或取消，并返回明确错误",
+        "取消原因为空时返回明确错误",
+        "函数不修改原始 Request 对象",
+        "函数不调用 Auto Bangumi、不做持久化、不重新读取 RSS",
+        "Tests pass"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Stage 1 已在 main 完成；shared.models 已定义对应跨引擎数据契约，uv run pytest 通过。"
+      "notes": "已实现 accept_request 和 cancel_request 的 in-memory 状态流转；uv run pytest 通过。"
     },
     {
-      "id": "US-002",
-      "title": "定义统一的 Stage 1 ErrorResult",
-      "description": "As a caller, I want structured errors so that every expected Stage 1 failure identifies its type and failed step.",
+      "id": "US-017",
+      "title": "提供 Request 摘要展示契约",
+      "description": "As a CLI caller, I want a compact summary of the generated Request so that users can decide whether to accept, modify, or cancel.",
       "acceptanceCriteria": [
-        "ErrorResult 包含 error_type、error_message、failed_step 和 details 字段",
-        "可预期业务异常可以稳定转换为 ErrorResult",
-        "失败结果使用 success=false、request=null 和非空 error",
-        "失败流程不创建 FAILED Request",
-        "Tests pass",
-        "Typecheck passes"
+        "摘要包含 request_id、status、番剧标题、候选字幕组统计、当前选中字幕组、有效种子数、文件夹名和 warnings",
+        "摘要不丢失原始 Request JSON 输出能力",
+        "摘要函数不访问网络、不做持久化",
+        "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Stage 1 已在 main 完成；shared.errors.Stage1Error 可转换结构化 ErrorResult，uv run pytest 通过。"
+      "notes": "已实现 summarize_request 的紧凑摘要契约；uv run pytest 通过。"
     },
     {
-      "id": "US-003",
-      "title": "建立可重复运行的静态候选与 RSS fixture",
-      "description": "As a developer, I want repository-owned fixtures so that Stage 1 can be developed and verified without network access.",
+      "id": "US-018",
+      "title": "实现最小 CLI 确认动作",
+      "description": "As a user, I want the CLI to accept or cancel a generated Request so that Stage 2 can complete a terminal confirmation loop.",
       "acceptanceCriteria": [
-        "在 config/system/static_mikan_sources.json 提供至少一组可成功匹配的番剧候选",
-        "候选数据包含 bangumi_id、title、aliases、mikan_url 和 rss_sources",
-        "每个 RSS 来源包含 subtitle_group、rss_url、source_type=static_fixture 和 fixture_path",
-        "在 fixtures/rss 下提供可解析的 XML，并覆盖多个字幕组及缺少必需字段的 item",
-        "在 config/user/default_rules.json 提供 filter_rule 和 subtitle_group_priority",
-        "fixture 中不包含真实 MiKan、Auto Bangumi 或 qBittorrent 在线依赖",
-        "Tests pass",
-        "Typecheck passes"
+        "CLI 支持生成后通过参数执行 accept 动作",
+        "CLI 支持生成后通过参数执行 cancel 动作并接收取消原因",
+        "成功时输出更新后的 Request JSON",
+        "失败时输出结构化 ErrorResult",
+        "不调用 Auto Bangumi、不做持久化",
+        "Tests pass"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Stage 1 已在 main 完成；config/system、fixtures/rss 和 config/user 已纳入仓库，uv run pytest 通过。"
+      "notes": "已实现 CLI --action accept|cancel 和 --cancel-reason；成功输出更新后的 Request JSON，失败输出结构化 ErrorResult；uv run pytest 通过。"
     },
     {
-      "id": "US-004",
-      "title": "实现静态番剧目录加载与校验",
-      "description": "As a catalog engine caller, I want validated static candidates so that title matching receives reliable offline source data.",
+      "id": "US-019",
+      "title": "定义 Request 修改补丁契约",
+      "description": "As a caller, I want a validated modify patch contract so that users can change only confirmable fields.",
       "acceptanceCriteria": [
-        "从显式路径加载静态候选 JSON，并返回 BangumiCandidate 列表",
-        "候选及 RSS 来源的必填字符串和数组字段均进行类型校验",
-        "不存在的文件、非法 JSON、非法根节点和非法字段返回 catalog_load_failed ErrorResult",
-        "加载过程不发起任何网络请求",
-        "测试可以传入临时 catalog 路径",
-        "Tests pass",
-        "Typecheck passes"
+        "修改补丁只允许 selected_subtitle_group、filter_rule 和 expected_folder_name",
+        "不可直接修改 effective_seed_names、source_info 和 matched_bangumi",
+        "非法字段返回明确错误",
+        "补丁校验不访问网络、不做持久化",
+        "Tests pass"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Stage 1 已在 main 完成；catalog_engine 支持静态 catalog 加载校验，uv run pytest 通过。"
+      "notes": "已实现 validate_modify_patch 的补丁字段和值校验；uv run pytest 通过。"
     },
     {
-      "id": "US-005",
-      "title": "实现固定 JSON 用户规则加载",
-      "description": "As a user, I want my filter and subtitle preferences loaded from JSON so that Stage 1 uses explicit rules instead of built-in assumptions.",
+      "id": "US-020",
+      "title": "实现字幕组与筛选规则修改后重新计算",
+      "description": "As a user, I want modified subtitle group or filter rules to recompute effective seeds so that the Request remains internally consistent.",
       "acceptanceCriteria": [
-        "从显式路径加载 filter_rule.must_contain、filter_rule.must_not_contain 和 subtitle_group_priority",
-        "缺失文件、非法 JSON、缺失字段或字段类型错误返回配置错误",
-        "配置错误时不静默回退到内置筛选规则",
-        "不实现 profile、环境变量覆盖、配置合并、单番覆盖或命名模板",
-        "测试可以传入临时用户配置路径",
-        "Tests pass",
-        "Typecheck passes"
+        "修改 selected_subtitle_group 时重新选择对应 RSS 和 effective_seed_names",
+        "修改 filter_rule 时基于已有 source_info 重新计算有效种子",
+        "修改 expected_folder_name 时复用现有安全文件夹名规则",
+        "修改后 Request 状态保持 PENDING_CONFIRM",
+        "不重新读取 RSS、不调用 Auto Bangumi、不做持久化",
+        "Tests pass"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Stage 1 已在 main 完成；shared.config 支持固定 JSON 用户规则加载，uv run pytest 通过。"
-    },
-    {
-      "id": "US-006",
-      "title": "实现标准化标题与别名精确匹配",
-      "description": "As a user, I want exact title and alias matches to resolve deterministically so that common inputs select the intended anime.",
-      "acceptanceCriteria": [
-        "标题标准化会去除首尾空白、转为小写并移除全部空白字符",
-        "标准化后的 raw_title 依次与候选 title 和 aliases 进行精确匹配",
-        "唯一精确匹配返回 title、mikan_url、aliases 和 match_score=1.0",
-        "空 raw_title 返回 invalid_input 错误",
-        "多个候选精确命中时返回歧义错误，不按输入顺序静默选择",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；catalog_engine 支持标准化标题和别名精确匹配，uv run pytest 通过。"
-    },
-    {
-      "id": "US-007",
-      "title": "实现 SequenceMatcher 模糊匹配与歧义保护",
-      "description": "As a user, I want a conservative fuzzy match fallback so that minor title differences can resolve without silently choosing unreliable results.",
-      "acceptanceCriteria": [
-        "仅在精确匹配失败后使用 difflib.SequenceMatcher",
-        "每个候选使用 title 和 aliases 中的最高相似度作为候选得分",
-        "唯一最高分且得分不低于 0.6 时返回该候选",
-        "最高分低于 0.6 时返回 bangumi_match_failed，并在 details 中包含最高分和阈值",
-        "多个候选最高分相同时返回 ambiguous_bangumi_match",
-        "空候选列表返回明确匹配错误",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；catalog_engine 支持 SequenceMatcher 模糊匹配与歧义保护，uv run pytest 通过。"
-    },
-    {
-      "id": "US-008",
-      "title": "解析 static_fixture RSS 为结构化种子",
-      "description": "As an RSS engine caller, I want static XML parsed into normalized seed records so that filtering can operate without network access.",
-      "acceptanceCriteria": [
-        "仅接受 source_type=static_fixture，并使用 Python 标准库 XML 解析 fixture_path",
-        "每个有效 item 至少输出非空 title 和 link",
-        "published_at 和 guid 作为可选字段输出，无法解析的发布时间置为 null",
-        "缺少 title 或 link 的 item 被跳过并产生包含 item 位置的 warning",
-        "非法 XML、无法读取的文件或没有有效 item 时返回 rss_parse_failed",
-        "输出不保留未使用的原始 XML 字段",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；rss_engine 支持 static_fixture RSS 解析与 warning，uv run pytest 通过。"
-    },
-    {
-      "id": "US-009",
-      "title": "按用户正则规则筛选 RSS 种子",
-      "description": "As a user, I want RSS entries filtered by my regular expressions so that the Request contains only acceptable seed names.",
-      "acceptanceCriteria": [
-        "must_contain 和 must_not_contain 使用 Python re.search 语义",
-        "空字符串表示不启用对应规则",
-        "每个种子先应用 must_not_contain，再应用 must_contain",
-        "非法正则返回 config_error，不静默忽略",
-        "重复或名称无效的种子被排除并提供可读原因",
-        "输出 total_seed_count、valid_seed_count、invalid_seed_count、valid_seed_names 和 excluded_seed_names",
-        "统计始终满足 total_seed_count = valid_seed_count + invalid_seed_count",
-        "项目不内置 V2、V3、分辨率、字幕语言或合集筛选规则",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；rss_engine 支持用户正则筛选和排除原因，uv run pytest 通过。"
-    },
-    {
-      "id": "US-010",
-      "title": "按用户优先级选择默认字幕组",
-      "description": "As a user, I want a default subtitle group selected from usable RSS sources so that the generated Request has a sensible initial choice.",
-      "acceptanceCriteria": [
-        "只从 valid_seed_count 大于 0 的 RSS 来源中选择字幕组",
-        "按照 subtitle_group_priority 顺序选择第一个存在的字幕组",
-        "优先级未命中时选择第一个有有效种子的候选并产生 warning",
-        "所有候选均无有效种子时返回 null 字幕组和 null RSS，并产生 warning",
-        "选择结果同时包含 selected_subtitle_group 和 selected_rss_url",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 10,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；subscription_engine 支持按用户优先级选择字幕组，uv run pytest 通过。"
-    },
-    {
-      "id": "US-011",
-      "title": "从匹配番剧全名生成安全文件夹名",
-      "description": "As a user, I want a safe expected folder name so that the Request can show a usable directory name without creating files.",
-      "acceptanceCriteria": [
-        "expected_folder_name 直接来源于 matched_bangumi.title",
-        "生成前去除标题首尾空白",
-        "将正斜杠、反斜杠和 NUL 路径危险字符替换为下划线",
-        "标题为空或清理后为空时返回 folder_name_failed",
-        "不创建真实目录，也不实现简称、季数推断、模板或用户覆盖",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 11,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；subscription_engine 支持安全文件夹名生成，uv run pytest 通过。"
-    },
-    {
-      "id": "US-012",
-      "title": "组装 PENDING_CONFIRM Request 快照",
-      "description": "As a caller, I want analyzed source data assembled into one immutable Request snapshot so that it can be reviewed by later stages.",
-      "acceptanceCriteria": [
-        "生成全局唯一的 request_id，并为 created_at 和 updated_at 写入 ISO-8601 时间",
-        "Request 状态固定为 PENDING_CONFIRM",
-        "source_info 包含 matched_bangumi 及全部 RSS 来源的总数、有效数、无效数和排除原因",
-        "confirmable_config 包含选中字幕组、选中 RSS、当前筛选规则、选中 RSS 的有效种子名、文件夹名和 warnings",
-        "没有默认字幕组时 effective_seed_names 为空数组",
-        "ab_submit_result 固定为 null",
-        "组装过程不实现持久化或完整 Request 状态机",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 12,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；request_engine 可组装 PENDING_CONFIRM Request 快照，uv run pytest 通过。"
-    },
-    {
-      "id": "US-013",
-      "title": "编排单番剧离线 Request 生成流程",
-      "description": "As an application caller, I want one generate_request operation so that a title can traverse the complete Stage 1 pipeline.",
-      "acceptanceCriteria": [
-        "generate_request 按用户配置加载、候选加载、番剧匹配、RSS 解析、种子筛选、字幕组选择、命名和 Request 组装的顺序执行",
-        "单个 RSS 解析失败时跳过该来源并把原因加入 warnings",
-        "全部 RSS 解析失败时返回 failed_step=parse_rss 的结构化错误",
-        "所有 RSS 均无有效种子时仍返回 PENDING_CONFIRM Request，且默认字幕组和 RSS 为 null",
-        "成功结果结构固定为 success=true、非空 request 和 error=null",
-        "流程不访问真实 MiKan、Auto Bangumi、qBittorrent 或其他网络服务",
-        "意外异常在入口边界转换为 unexpected_error",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 13,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；entry_controller 编排完整离线 Request 生成流程，uv run pytest 通过。"
-    },
-    {
-      "id": "US-014",
-      "title": "配置 Stage 1 控制台与可选文件日志",
-      "description": "As an operator, I want minimal diagnostic logging so that CLI failures can be investigated without introducing a logging subsystem.",
-      "acceptanceCriteria": [
-        "使用 Python 标准库 logging，默认日志级别为 INFO",
-        "默认只配置控制台 handler，未指定日志文件时不创建运行日志文件",
-        "指定日志文件路径时增加文件 handler 并写入日志",
-        "engine 模块不自行初始化全局日志",
-        "日志初始化或写入问题不得替换原始业务 ErrorResult",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 14,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；shared.logging 支持控制台和可选文件日志，uv run pytest 通过。"
-    },
-    {
-      "id": "US-015",
-      "title": "提供 migu-orca CLI 与端到端离线验收",
-      "description": "As a user, I want a minimal CLI so that I can turn one anime title into a JSON Request from the terminal.",
-      "acceptanceCriteria": [
-        "提供 migu-orca 命令并接收一个必填番剧名称位置参数",
-        "CLI 支持显式 catalog 路径、用户配置路径和可选 log-file 参数",
-        "成功时向标准输出写入 UTF-8 JSON EntryResult，并以退出码 0 结束",
-        "失败时输出结构化 ErrorResult，并以非零退出码结束",
-        "端到端测试覆盖精确标题、别名、低分匹配、同分歧义、RSS warning、非法正则和全零有效种子场景",
-        "uv run migu-orca \"番剧名\" 可在断网环境生成 PENDING_CONFIRM Request",
-        "README 说明 uv sync、uv run pytest 和 CLI 离线运行示例",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 15,
-      "passes": true,
-      "notes": "Stage 1 已在 main 完成；migu-orca CLI 可离线输出 JSON Request，uv run pytest 通过。"
+      "notes": "已实现 modify_request 的 in-memory 修改与重新计算；uv run pytest 通过。"
     }
   ]
 }

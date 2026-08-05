@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from catalog_engine.controllers.catalog_controller import load_catalog, match_bangumi
-from request_engine.controllers.request_controller import build_pending_request
+from request_engine.controllers.request_controller import (
+    accept_request,
+    build_pending_request,
+    cancel_request,
+)
 from rss_engine.controllers.rss_controller import filter_seeds, parse_rss
 from shared.config import (
     DEFAULT_CATALOG_PATH,
@@ -90,12 +94,51 @@ def generate_request(
         return {"success": False, "request": None, "error": error.as_dict()}
 
 
+def apply_confirmation_action(
+    result: dict[str, Any],
+    action: str | None,
+    *,
+    cancel_reason: str | None = None,
+) -> dict[str, Any]:
+    if action is None or not result["success"]:
+        return result
+
+    try:
+        request = result["request"]
+        if action == "accept":
+            updated_request = accept_request(request)
+        elif action == "cancel":
+            updated_request = cancel_request(request, cancel_reason or "")
+        else:
+            raise Stage1Error(
+                "invalid_confirmation_action",
+                "不支持的确认动作",
+                "confirm_request",
+                {"action": action},
+            )
+        return {"success": True, "request": updated_request, "error": None}
+    except Stage1Error as exc:
+        LOGGER.warning("Request 确认失败：%s", exc.message)
+        return {"success": False, "request": None, "error": exc.as_dict()}
+    except Exception as exc:  # pragma: no cover - safety boundary
+        LOGGER.exception("Request 确认发生未预期错误")
+        error = Stage1Error(
+            "unexpected_error",
+            "Request 确认发生未预期错误",
+            "confirm_request",
+            {"reason": str(exc)},
+        )
+        return {"success": False, "request": None, "error": error.as_dict()}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="离线生成 MiGuOrca Request")
     parser.add_argument("title", help="番剧名称")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     parser.add_argument("--user-config", type=Path, default=DEFAULT_USER_CONFIG_PATH)
     parser.add_argument("--log-file", type=Path)
+    parser.add_argument("--action", choices=["accept", "cancel"])
+    parser.add_argument("--cancel-reason")
     args = parser.parse_args(argv)
 
     configure_logging(args.log_file)
@@ -103,6 +146,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         EntryRequest(raw_title=args.title),
         catalog_path=args.catalog,
         user_config_path=args.user_config,
+    )
+    result = apply_confirmation_action(
+        result,
+        args.action,
+        cancel_reason=args.cancel_reason,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["success"] else 1

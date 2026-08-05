@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from apps.migu_orca_entry.controllers.entry_controller import generate_request, main
+from apps.migu_orca_entry.controllers.entry_controller import (
+    apply_confirmation_action,
+    generate_request,
+    main,
+)
 from shared.models import EntryRequest
 
 
@@ -34,6 +38,51 @@ def test_main_prints_json(capsys) -> None:
     output = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert output["request"]["status"] == "PENDING_CONFIRM"
+
+
+def test_apply_confirmation_action_accepts_generated_request() -> None:
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    confirmed = apply_confirmation_action(result, "accept")
+
+    assert confirmed["success"] is True
+    assert confirmed["request"]["status"] == "ACCEPTED"
+    assert confirmed["request"]["user_action"]["action"] == "ACCEPT"
+    assert result["request"]["status"] == "PENDING_CONFIRM"
+
+
+def test_main_can_cancel_generated_request(capsys) -> None:
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "cancel",
+            "--cancel-reason",
+            "稍后再订阅",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["status"] == "CANCELLED"
+    assert output["request"]["user_action"]["reason"] == "稍后再订阅"
+
+
+def test_main_returns_structured_error_for_cancel_without_reason(capsys) -> None:
+    exit_code = main(["芙莉莲", "--action", "cancel"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert output == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "invalid_cancel_reason",
+            "error_message": "取消原因不能为空",
+            "failed_step": "cancel_request",
+            "details": {},
+        },
+    }
 
 
 def test_all_filtered_out_still_returns_request_without_selection(
