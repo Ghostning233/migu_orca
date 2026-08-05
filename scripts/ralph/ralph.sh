@@ -5,7 +5,7 @@
 set -e
 
 # Parse arguments
-TOOL="amp" # Default to amp for backwards compatibility
+TOOL="codex" # Default to the available local Codex CLI for this project.
 MAX_ITERATIONS=10
 
 while [[ $# -gt 0 ]]; do

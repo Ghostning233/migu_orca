@@ -1,3 +1,15 @@
 ## Codebase Patterns
-- Initial Ralph run pending.
 - Keep learnings about this codebase in this file as iterations progress.
+- Ralph defaults to the local Codex CLI; use `./scripts/ralph/ralph.sh` or pass `--tool codex` explicitly.
+- Current Ralph Stage 1 PRD is reconciled against `main`; all Stage 1 stories are marked complete after offline CLI and pytest verification.
+
+## 2026-08-05 17:08 CST - Ralph Stage 1 Reconciliation
+Thread: unavailable
+- Aligned `scripts/ralph/prd.json` branchName with the merged `main` branch.
+- Marked US-001 through US-015 as passing because Stage 1 is already implemented and verified on `main`.
+- Updated `scripts/ralph/ralph.sh` to default to the installed local `codex` CLI instead of unavailable `amp`.
+- Verification basis: `uv run pytest` passed with 19 tests, and `uv run migu-orca "咒术回战第三季"` produced a `PENDING_CONFIRM` Request.
+- **Learnings for future iterations:**
+  - Stage 1 should be treated as complete; future Ralph PRDs should target Stage 2 or later.
+  - This project uses `uv run pytest` as the primary quality gate.
+---
