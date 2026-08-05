@@ -10,6 +10,7 @@
 - Stage 3 AB subscription payloads use the internal keys `title`, `rss_url`, `save_path`, and `filter_rule`.
 - AB clients should expose `create_subscription(payload)` and go through `submit_ab_subscription(...)` to normalize success/failure into the stable submit result envelope.
 - AB fallback JSON is opt-in via `submit_ab_subscription(..., fallback_enabled=True)` and is built from the prepared AB payload plus the structured failure reason.
+- AB system config loading lives in `ab_engine.controllers.ab_config`, requires an explicit JSON path, and deliberately does not read environment overrides or include token values in errors.
 
 ## 2026-08-05 17:55 CST - Stage 3 PRD Setup
 Thread: unavailable
@@ -64,4 +65,15 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep fallback generation pure and pass the explicit `fallback_enabled` flag through submit orchestration rather than making client implementations decide.
   - Use `failure_reason` for the structured error dictionary inside fallback JSON.
   - Deep-copy `Stage1Error.as_dict()` results at result boundaries because `details` is caller-owned mutable data.
+---
+## 2026-08-05 18:13 CST - US-025
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented minimal Auto Bangumi system config loading from an explicit JSON path.
+- Added `AutoBangumiConfig` with `endpoint`, `token`, and `fallback_enabled`, plus validation for missing files, invalid JSON, non-object JSON, and field type errors.
+- Files changed: `src/ab_engine/controllers/ab_config.py`, `src/ab_engine/controllers/ab_config_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Use `load_ab_config(path)` for AB system settings; callers must provide the config path explicitly.
+  - AB config validation raises `Stage1Error` with `failed_step` set to `load_ab_config`.
+  - Keep token values out of error details and logs; field validation reports only the field name.
 ---
