@@ -4,6 +4,7 @@
 - Current Ralph Stage 1 PRD is reconciled against `main`; all Stage 1 stories are marked complete after offline CLI and pytest verification.
 - Stage 2 Ralph work uses branch `agent/stage2-request-confirmation` and should complete one `passes=false` story per iteration.
 - Stage 2 Request confirmation helpers derive in-memory contracts in `request_engine.controllers.request_controller` and should preserve the full Request JSON shape separately from compact views.
+- Entry CLI post-generation actions should preserve the existing `success`/`request`/`error` envelope and convert expected business failures with `Stage1Error.as_dict()`.
 
 ## 2026-08-05 17:08 CST - Ralph Stage 1 Reconciliation
 Thread: unavailable
@@ -38,4 +39,16 @@ Thread: unavailable
 - **Learnings for future iterations:**
   - Request summary fields should be derived from `source_info` and `confirmable_config`; do not rebuild them by rereading RSS or config.
   - Compact summaries intentionally omit full `source_info`; use the original Request object when raw JSON is needed.
+---
+
+## 2026-08-05 17:41 CST - US-018
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented CLI confirmation actions after Request generation with `--action accept|cancel` and `--cancel-reason`.
+- Successful accept/cancel actions now output the updated Request JSON in the existing success envelope.
+- Cancel without a non-empty reason now returns a structured ErrorResult and exit code 1.
+- Files changed: `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/ralph.sh`.
+- Verification: `uv run pytest` passed with 28 tests.
+- **Learnings for future iterations:**
+  - Keep CLI action post-processing in the entry controller so Request generation remains reusable and confirmation helpers stay in `request_engine`.
+  - Preserve the top-level JSON result envelope for both generation and confirmation actions.
 ---

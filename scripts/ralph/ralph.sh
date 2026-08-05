@@ -90,15 +90,20 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   # Run the selected tool with the ralph prompt
   if [[ "$TOOL" == "amp" ]]; then
     OUTPUT=$(cat "$SCRIPT_DIR/prompt.md" | amp --dangerously-allow-all 2>&1 | tee /dev/stderr) || true
+    COMPLETION_OUTPUT="$OUTPUT"
   elif [[ "$TOOL" == "codex" ]]; then
-    OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox - < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr) || true
+    LAST_MESSAGE_FILE=$(mktemp)
+    OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox --output-last-message "$LAST_MESSAGE_FILE" - < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr) || true
+    COMPLETION_OUTPUT=$(cat "$LAST_MESSAGE_FILE" 2>/dev/null || true)
+    rm -f "$LAST_MESSAGE_FILE"
   else
     # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
     OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
+    COMPLETION_OUTPUT="$OUTPUT"
   fi
 
   # Check for completion signal
-  if echo "$OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+  if echo "$COMPLETION_OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
     echo ""
     echo "Ralph completed all tasks!"
     echo "Completed at iteration $i of $MAX_ITERATIONS"
