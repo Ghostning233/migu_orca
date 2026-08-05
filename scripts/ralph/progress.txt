@@ -8,6 +8,7 @@
 - Preserve the existing top-level JSON result envelope and convert expected business failures with `Stage1Error.as_dict()` or a compatible ErrorResult shape.
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
 - Stage 3 AB subscription payloads use the internal keys `title`, `rss_url`, `save_path`, and `filter_rule`.
+- AB clients should expose `create_subscription(payload)` and go through `submit_ab_subscription(...)` to normalize success/failure into the stable submit result envelope.
 
 ## 2026-08-05 17:55 CST - Stage 3 PRD Setup
 Thread: unavailable
@@ -39,4 +40,15 @@ Thread: https://codex.openai.com/threads/unavailable
   - AB payload preparation belongs in `ab_engine.controllers` and should remain a pure dictionary-to-dictionary mapping.
   - The mapper reads title from `source_info.matched_bangumi.title`, falling back to `input.raw_title` when the matched title is unavailable.
   - Missing required AB payload fields are represented with `Stage1Error` type `missing_ab_payload_field`.
+---
+## 2026-08-05 18:06 CST - US-023
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the offline Auto Bangumi client contract with `AutoBangumiClient`, `FakeAutoBangumiClient`, and `submit_ab_subscription`.
+- Added success and controlled-failure normalization into the existing AB submit result envelope.
+- Files changed: `src/ab_engine/controllers/ab_client.py`, `src/ab_engine/controllers/ab_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - AB clients should implement `create_subscription(payload)` and let controller orchestration convert responses/errors into stable result dictionaries.
+  - The fake client deep-copies payloads and responses so tests can verify contracts without mutable caller-owned state leaking across boundaries.
+  - Subscription IDs are read from `id`, `subscription_id`, or `ab_subscription_id` to keep the future real client adapter flexible.
 ---
