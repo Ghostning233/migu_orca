@@ -11,6 +11,7 @@
 - AB clients should expose `create_subscription(payload)` and go through `submit_ab_subscription(...)` to normalize success/failure into the stable submit result envelope.
 - AB fallback JSON is opt-in via `submit_ab_subscription(..., fallback_enabled=True)` and is built from the prepared AB payload plus the structured failure reason.
 - AB system config loading lives in `ab_engine.controllers.ab_config`, requires an explicit JSON path, and deliberately does not read environment overrides or include token values in errors.
+- CLI AB submission is an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; the current CLI uses `FakeAutoBangumiClient` until a real client adapter exists.
 
 ## 2026-08-05 17:55 CST - Stage 3 PRD Setup
 Thread: unavailable
@@ -76,4 +77,16 @@ Thread: https://codex.openai.com/threads/unavailable
   - Use `load_ab_config(path)` for AB system settings; callers must provide the config path explicitly.
   - AB config validation raises `Stage1Error` with `failed_step` set to `load_ab_config`.
   - Keep token values out of error details and logs; field validation reports only the field name.
+---
+## 2026-08-05 18:16 CST - US-026
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the explicit CLI Auto Bangumi submit action for accepted Requests.
+- Added `apply_ab_submit_action(...)` to load explicit AB config, map the accepted Request to an AB payload, submit via the offline fake client by default, attach `ab_submit_result` to both the top-level envelope and Request snapshot, and return stable ErrorResult envelopes for submit-preparation failures.
+- Covered success, fallback-enabled AB failure, fallback-disabled AB failure, missing config, non-accepted Request, and end-to-end CLI JSON output.
+- Files changed: `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - AB CLI submission requires `--action accept --submit-ab --ab-config <path>` so generation and confirmation never contact external systems by default.
+  - AB submit failures remain inside the normalized `ab_submit_result`; top-level `error` is reserved for pipeline failures such as missing config or invalid Request status.
+  - The CLI currently uses `FakeAutoBangumiClient` for offline behavior; replace that injection point when adding a real Auto Bangumi adapter.
 ---

@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+from datetime import UTC, datetime
 import json
 import logging
 from pathlib import Path
 from typing import Any, Sequence
 
+from ab_engine.controllers.ab_client import (
+    AutoBangumiClient,
+    FakeAutoBangumiClient,
+    submit_ab_subscription,
+)
+from ab_engine.controllers.ab_config import load_ab_config
+from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
 from catalog_engine.controllers.catalog_controller import load_catalog, match_bangumi
 from request_engine.controllers.request_controller import (
     accept_request,
@@ -131,6 +140,66 @@ def apply_confirmation_action(
         return {"success": False, "request": None, "error": error.as_dict()}
 
 
+def apply_ab_submit_action(
+    result: dict[str, Any],
+    submit_ab: bool,
+    *,
+    ab_config_path: Path | None = None,
+    client: AutoBangumiClient | None = None,
+) -> dict[str, Any]:
+    if not submit_ab or not result["success"]:
+        return result
+
+    try:
+        if ab_config_path is None:
+            raise Stage1Error(
+                "config_error",
+                "提交 Auto Bangumi 必须显式提供配置文件路径",
+                "load_ab_config",
+                {"field": "ab_config"},
+            )
+
+        ab_config = load_ab_config(ab_config_path)
+        request = result["request"]
+        payload = build_ab_subscription_payload(request)
+        ab_submit_result = submit_ab_subscription(
+            client or FakeAutoBangumiClient(),
+            payload,
+            fallback_enabled=ab_config.fallback_enabled,
+        )
+        updated_request = deepcopy(request)
+        updated_request["ab_submit_result"] = ab_submit_result
+        updated_request["updated_at"] = datetime.now(UTC).isoformat()
+        return {
+            "success": True,
+            "request": updated_request,
+            "ab_submit_result": ab_submit_result,
+            "error": None,
+        }
+    except Stage1Error as exc:
+        LOGGER.warning("Auto Bangumi 提交准备失败：%s", exc.message)
+        return {
+            "success": False,
+            "request": None,
+            "ab_submit_result": None,
+            "error": exc.as_dict(),
+        }
+    except Exception as exc:  # pragma: no cover - safety boundary
+        LOGGER.exception("Auto Bangumi 提交发生未预期错误")
+        error = Stage1Error(
+            "unexpected_error",
+            "Auto Bangumi 提交发生未预期错误",
+            "submit_ab_subscription",
+            {"reason": str(exc)},
+        )
+        return {
+            "success": False,
+            "request": None,
+            "ab_submit_result": None,
+            "error": error.as_dict(),
+        }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="离线生成 MiGuOrca Request")
     parser.add_argument("title", help="番剧名称")
@@ -139,6 +208,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--log-file", type=Path)
     parser.add_argument("--action", choices=["accept", "cancel"])
     parser.add_argument("--cancel-reason")
+    parser.add_argument(
+        "--submit-ab",
+        action="store_true",
+        help="显式提交已接受 Request 到 Auto Bangumi",
+    )
+    parser.add_argument("--ab-config", type=Path)
     args = parser.parse_args(argv)
 
     configure_logging(args.log_file)
@@ -151,6 +226,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         result,
         args.action,
         cancel_reason=args.cancel_reason,
+    )
+    result = apply_ab_submit_action(
+        result,
+        args.submit_ab,
+        ab_config_path=args.ab_config,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["success"] else 1

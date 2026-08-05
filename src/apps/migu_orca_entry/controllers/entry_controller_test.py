@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.migu_orca_entry.controllers.entry_controller import (
+    apply_ab_submit_action,
     apply_confirmation_action,
     generate_request,
     main,
 )
+from shared.errors import Stage1Error
 from shared.models import EntryRequest
 
 
@@ -68,6 +71,164 @@ def test_main_can_cancel_generated_request(capsys) -> None:
     assert output["request"]["user_action"]["reason"] == "稍后再订阅"
 
 
+def test_apply_ab_submit_action_skips_when_not_requested() -> None:
+    result = apply_confirmation_action(
+        generate_request(EntryRequest(raw_title="芙莉莲")),
+        "accept",
+    )
+
+    submitted = apply_ab_submit_action(result, False)
+
+    assert submitted is result
+    assert submitted["request"]["ab_submit_result"] is None
+
+
+def test_apply_ab_submit_action_attaches_success_result_to_accepted_request(
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=False)
+    result = apply_confirmation_action(
+        generate_request(EntryRequest(raw_title="芙莉莲")),
+        "accept",
+    )
+
+    submitted = apply_ab_submit_action(result, True, ab_config_path=config)
+
+    assert submitted["success"] is True
+    assert submitted["error"] is None
+    assert submitted["ab_submit_result"] == {
+        "success": True,
+        "ab_subscription_id": "fake-ab-subscription",
+        "ab_response": {"id": "fake-ab-subscription", "status": "created"},
+        "fallback_config": None,
+        "error": None,
+    }
+    assert submitted["request"]["ab_submit_result"] == submitted["ab_submit_result"]
+    assert result["request"]["ab_submit_result"] is None
+
+
+def test_apply_ab_submit_action_outputs_fallback_config_for_ab_failure(
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=True)
+    client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "离线模拟失败",
+            "create_ab_subscription",
+            {"status_code": 503},
+        )
+    )
+    result = apply_confirmation_action(
+        generate_request(EntryRequest(raw_title="芙莉莲")),
+        "accept",
+    )
+
+    submitted = apply_ab_submit_action(
+        result,
+        True,
+        ab_config_path=config,
+        client=client,
+    )
+
+    assert submitted["success"] is True
+    ab_submit_result = submitted["ab_submit_result"]
+    assert ab_submit_result["success"] is False
+    assert ab_submit_result["error"]["error_type"] == "ab_submit_failed"
+    assert ab_submit_result["fallback_config"]["title"] == "葬送的芙莉莲"
+    assert ab_submit_result["fallback_config"]["rss_url"]
+    assert ab_submit_result["fallback_config"]["save_path"] == "葬送的芙莉莲"
+    assert (
+        ab_submit_result["fallback_config"]["failure_reason"]
+        == ab_submit_result["error"]
+    )
+
+
+def test_apply_ab_submit_action_keeps_fallback_disabled_by_config(
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=False)
+    client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "离线模拟失败",
+            "create_ab_subscription",
+        )
+    )
+    result = apply_confirmation_action(
+        generate_request(EntryRequest(raw_title="芙莉莲")),
+        "accept",
+    )
+
+    submitted = apply_ab_submit_action(
+        result,
+        True,
+        ab_config_path=config,
+        client=client,
+    )
+
+    assert submitted["success"] is True
+    assert submitted["ab_submit_result"]["success"] is False
+    assert submitted["ab_submit_result"]["fallback_config"] is None
+
+
+def test_apply_ab_submit_action_requires_explicit_config_path() -> None:
+    result = apply_confirmation_action(
+        generate_request(EntryRequest(raw_title="芙莉莲")),
+        "accept",
+    )
+
+    submitted = apply_ab_submit_action(result, True)
+
+    assert submitted == {
+        "success": False,
+        "request": None,
+        "ab_submit_result": None,
+        "error": {
+            "error_type": "config_error",
+            "error_message": "提交 Auto Bangumi 必须显式提供配置文件路径",
+            "failed_step": "load_ab_config",
+            "details": {"field": "ab_config"},
+        },
+    }
+
+
+def test_apply_ab_submit_action_rejects_non_accepted_request(tmp_path: Path) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=True)
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    submitted = apply_ab_submit_action(result, True, ab_config_path=config)
+
+    assert submitted["success"] is False
+    assert submitted["ab_submit_result"] is None
+    assert submitted["error"]["error_type"] == "invalid_request_status"
+    assert submitted["error"]["failed_step"] == "build_ab_subscription_payload"
+
+
+def test_main_can_submit_accepted_request_to_fake_ab(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=False)
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--submit-ab",
+            "--ab-config",
+            str(config),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["status"] == "ACCEPTED"
+    assert output["ab_submit_result"]["success"] is True
+    assert output["request"]["ab_submit_result"] == output["ab_submit_result"]
+
+
 def test_main_returns_structured_error_for_cancel_without_reason(capsys) -> None:
     exit_code = main(["芙莉莲", "--action", "cancel"])
 
@@ -110,3 +271,18 @@ def test_all_filtered_out_still_returns_request_without_selection(
     assert confirmable["selected_subtitle_group"] is None
     assert confirmable["selected_rss_url"] is None
     assert confirmable["warnings"]
+
+
+def _ab_config(tmp_path: Path, *, fallback_enabled: bool) -> Path:
+    path = tmp_path / "ab-config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "endpoint": "http://auto-bangumi.local",
+                "token": "secret-token",
+                "fallback_enabled": fallback_enabled,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
