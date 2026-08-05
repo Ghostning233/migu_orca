@@ -102,6 +102,33 @@ def cancel_request(request: dict[str, Any], reason: str) -> dict[str, Any]:
     return updated
 
 
+def summarize_request(request: dict[str, Any]) -> dict[str, Any]:
+    confirmable = request.get("confirmable_config", {})
+    source_info = request.get("source_info", {})
+    matched = source_info.get("matched_bangumi", {})
+    rss_sources = source_info.get("rss_sources", [])
+
+    return {
+        "request_id": request.get("request_id"),
+        "status": request.get("status"),
+        "bangumi_title": matched.get("title"),
+        "candidate_subtitle_groups": [
+            {
+                "subtitle_group": source.get("subtitle_group"),
+                "rss_url": source.get("rss_url"),
+                "total_seed_count": source.get("total_seed_count", 0),
+                "valid_seed_count": source.get("valid_seed_count", 0),
+                "invalid_seed_count": source.get("invalid_seed_count", 0),
+            }
+            for source in rss_sources
+        ],
+        "selected_subtitle_group": confirmable.get("selected_subtitle_group"),
+        "effective_seed_count": len(confirmable.get("effective_seed_names", [])),
+        "expected_folder_name": confirmable.get("expected_folder_name"),
+        "warnings": list(confirmable.get("warnings", [])),
+    }
+
+
 def _copy_pending_request(
     request: dict[str, Any],
     failed_step: str,

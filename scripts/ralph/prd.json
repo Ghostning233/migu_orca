@@ -32,8 +32,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现 summarize_request 的紧凑摘要契约；uv run pytest 通过。"
     },
     {
       "id": "US-018",
