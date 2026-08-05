@@ -1,86 +1,106 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage2-request-confirmation",
-  "description": "MiGuOrca Stage 2：在 Stage 1 离线 PENDING_CONFIRM Request 基础上，提供最小 Request 确认、取消和后续修改能力，不做持久化、Auto Bangumi 调用或 Web UI。",
+  "branchName": "agent/stage4-real-auto-bangumi-client",
+  "description": "MiGuOrca Stage 4：在 Stage 3 离线 Auto Bangumi 契约基础上，实现真实 Auto Bangumi HTTP client adapter、CLI 注入真实 client 的显式路径、网络错误标准化和离线可重复测试；默认流程仍不得隐式访问外部系统。",
   "userStories": [
     {
-      "id": "US-016",
-      "title": "定义 Request 接受与取消状态流转",
-      "description": "As a caller, I want a pending Request to be accepted or cancelled explicitly so that Stage 2 has a stable confirmation state contract.",
+      "id": "US-027",
+      "title": "定义真实 Auto Bangumi HTTP API 适配边界",
+      "description": "As an integration developer, I want the real Auto Bangumi adapter boundary to be explicit so that network behavior does not leak into domain mapping or CLI confirmation logic.",
       "acceptanceCriteria": [
-        "提供 accept_request(request) 能将 PENDING_CONFIRM Request 转为 ACCEPTED",
-        "提供 cancel_request(request, reason) 能将 PENDING_CONFIRM Request 转为 CANCELLED 并记录取消原因",
-        "接受和取消均更新 updated_at，并记录 user_action.action、reason 和 decided_at",
-        "非 PENDING_CONFIRM Request 不允许再次接受或取消，并返回明确错误",
-        "取消原因为空时返回明确错误",
-        "函数不修改原始 Request 对象",
-        "函数不调用 Auto Bangumi、不做持久化、不重新读取 RSS",
-        "Tests pass"
+        "新增真实 AB HTTP client adapter 的模块边界和公开构造入口",
+        "adapter 实现现有 AutoBangumiClient 协议的 create_subscription(payload) 能力",
+        "adapter 只接收 AutoBangumiConfig 和 prepared payload，不直接读取 Request",
+        "adapter 不改变 Stage 3 的 submit result envelope",
+        "默认 CLI 未显式提交时不实例化真实 adapter",
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "已实现 accept_request 和 cancel_request 的 in-memory 状态流转；uv run pytest 通过。"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-017",
-      "title": "提供 Request 摘要展示契约",
-      "description": "As a CLI caller, I want a compact summary of the generated Request so that users can decide whether to accept, modify, or cancel.",
+      "id": "US-028",
+      "title": "实现可注入 HTTP transport 的 AB client",
+      "description": "As a developer, I want the real AB client to use an injectable transport so that network behavior can be tested without a live Auto Bangumi server.",
       "acceptanceCriteria": [
-        "摘要包含 request_id、status、番剧标题、候选字幕组统计、当前选中字幕组、有效种子数、文件夹名和 warnings",
-        "摘要不丢失原始 Request JSON 输出能力",
-        "摘要函数不访问网络、不做持久化",
-        "Tests pass"
+        "HTTP transport 可在测试中替换，不要求真实网络可用",
+        "请求 endpoint 来自显式 AB config",
+        "认证 token 不进入日志、错误 details 或测试快照输出",
+        "成功 HTTP 响应转换为现有 ab_response 字典",
+        "HTTP 非成功响应转换为 Stage1Error 或兼容 ErrorResult",
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "已实现 summarize_request 的紧凑摘要契约；uv run pytest 通过。"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-018",
-      "title": "实现最小 CLI 确认动作",
-      "description": "As a user, I want the CLI to accept or cancel a generated Request so that Stage 2 can complete a terminal confirmation loop.",
+      "id": "US-029",
+      "title": "校验 AB 创建订阅请求 payload",
+      "description": "As a caller, I want invalid AB payloads to fail before network submission so that predictable user errors do not become ambiguous HTTP failures.",
       "acceptanceCriteria": [
-        "CLI 支持生成后通过参数执行 accept 动作",
-        "CLI 支持生成后通过参数执行 cancel 动作并接收取消原因",
-        "成功时输出更新后的 Request JSON",
-        "失败时输出结构化 ErrorResult",
-        "不调用 Auto Bangumi、不做持久化",
-        "Tests pass"
+        "真实 client 在发送前校验 title、rss_url、save_path 和 filter_rule",
+        "缺失或类型错误返回稳定结构化错误",
+        "payload 校验不读取配置、不访问网络",
+        "校验规则与 Stage 3 payload mapper 保持兼容",
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "已实现 CLI --action accept|cancel 和 --cancel-reason；成功输出更新后的 Request JSON，失败输出结构化 ErrorResult；uv run pytest 通过。"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-019",
-      "title": "定义 Request 修改补丁契约",
-      "description": "As a caller, I want a validated modify patch contract so that users can change only confirmable fields.",
+      "id": "US-030",
+      "title": "将 CLI 显式提交路径切换为真实 AB client 注入点",
+      "description": "As a CLI user, I want --submit-ab to use the configured real AB client path while keeping tests able to inject fake clients.",
       "acceptanceCriteria": [
-        "修改补丁只允许 selected_subtitle_group、filter_rule 和 expected_folder_name",
-        "不可直接修改 effective_seed_names、source_info 和 matched_bangumi",
-        "非法字段返回明确错误",
-        "补丁校验不访问网络、不做持久化",
-        "Tests pass"
+        "CLI 在 --submit-ab 且提供 --ab-config 时构造真实 AB client",
+        "默认生成、修改、取消和未提交路径不访问外部系统",
+        "测试仍可通过 apply_ab_submit_action 注入 FakeAutoBangumiClient",
+        "提交成功输出仍包含 top-level ab_submit_result 和 request.ab_submit_result",
+        "提交失败且 fallback_enabled 为 true 时继续输出 fallback_config",
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "已实现 validate_modify_patch 的补丁字段和值校验；uv run pytest 通过。"
+      "passes": false,
+      "notes": ""
     },
     {
-      "id": "US-020",
-      "title": "实现字幕组与筛选规则修改后重新计算",
-      "description": "As a user, I want modified subtitle group or filter rules to recompute effective seeds so that the Request remains internally consistent.",
+      "id": "US-031",
+      "title": "标准化 AB 网络异常和超时错误",
+      "description": "As a user, I want connection, timeout, invalid response, and authentication failures to be reported consistently so that the fallback JSON remains actionable.",
       "acceptanceCriteria": [
-        "修改 selected_subtitle_group 时重新选择对应 RSS 和 effective_seed_names",
-        "修改 filter_rule 时基于已有 source_info 重新计算有效种子",
-        "修改 expected_folder_name 时复用现有安全文件夹名规则",
-        "修改后 Request 状态保持 PENDING_CONFIRM",
-        "不重新读取 RSS、不调用 Auto Bangumi、不做持久化",
-        "Tests pass"
+        "连接失败、超时、非 JSON 响应、缺少订阅 ID 均映射为稳定错误类型",
+        "错误 details 不包含 token 明文",
+        "fallback_enabled 为 true 时网络失败结果包含可 JSON 序列化 fallback_config",
+        "异常处理不吞掉预期业务错误的 failed_step",
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "已实现 modify_request 的 in-memory 修改与重新计算；uv run pytest 通过。"
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-032",
+      "title": "补充真实 AB client 使用文档和示例配置",
+      "description": "As an operator, I want clear documentation for configuring and running the real Auto Bangumi submission path so that secrets and fallback behavior are handled safely.",
+      "acceptanceCriteria": [
+        "README 说明 AB config JSON 字段和 CLI 提交命令",
+        "示例配置不得包含真实 token",
+        "文档明确默认流程不访问外部系统",
+        "文档说明当前真实 AB API 字段仍需按部署验证",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": ""
     }
   ]
 }
