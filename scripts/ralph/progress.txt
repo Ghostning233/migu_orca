@@ -1,80 +1,18 @@
 ## Codebase Patterns
 - Keep learnings about this codebase in this file as iterations progress.
 - Ralph defaults to the local Codex CLI; use `./scripts/ralph/ralph.sh` or pass `--tool codex` explicitly.
-- Current Ralph Stage 1 PRD is reconciled against `main`; all Stage 1 stories are marked complete after offline CLI and pytest verification.
-- Stage 2 Ralph work uses branch `agent/stage2-request-confirmation` and should complete one `passes=false` story per iteration.
-- Stage 2 Request confirmation helpers derive in-memory contracts in `request_engine.controllers.request_controller` and should preserve the full Request JSON shape separately from compact views.
-- Entry CLI post-generation actions should preserve the existing `success`/`request`/`error` envelope and convert expected business failures with `Stage1Error.as_dict()`.
-- Stage 2 Request modify patch validation belongs in `request_engine.controllers.request_controller`; keep it non-mutating and separate from later recomputation/apply behavior.
-- Stage 2 Request modifications should validate patches first, then recompute from stored `source_info` without reparsing RSS or calling external systems.
+- Stage 1 and Stage 2 are complete on `main`; archived Ralph records live under `scripts/ralph/archive/`.
+- Stage 3 Ralph work uses branch `agent/stage3-auto-bangumi-integration` and should complete one `passes=false` story per iteration.
+- Stage 3 should prefer offline-testable contracts and fake clients before any real Auto Bangumi network integration.
+- Keep AB submission separate from Request generation and confirmation; CLI submission must be explicitly requested.
+- Preserve the existing top-level JSON result envelope and convert expected business failures with `Stage1Error.as_dict()` or a compatible ErrorResult shape.
 
-## 2026-08-05 17:08 CST - Ralph Stage 1 Reconciliation
+## 2026-08-05 17:55 CST - Stage 3 PRD Setup
 Thread: unavailable
-- Aligned `scripts/ralph/prd.json` branchName with the merged `main` branch.
-- Marked US-001 through US-015 as passing because Stage 1 is already implemented and verified on `main`.
-- Updated `scripts/ralph/ralph.sh` to default to the installed local `codex` CLI instead of unavailable `amp`.
-- Verification basis: `uv run pytest` passed with 19 tests, and `uv run migu-orca "咒术回战第三季"` produced a `PENDING_CONFIRM` Request.
+- Archived the completed Stage 2 Ralph PRD and progress log to `scripts/ralph/archive/2026-08-05-stage2-request-confirmation/`.
+- Created Stage 3 PRD for Auto Bangumi integration on branch `agent/stage3-auto-bangumi-integration`.
+- Split Stage 3 into US-021 through US-026: result contract, payload mapping, fake client, fallback JSON, AB config loading, and CLI submit action.
 - **Learnings for future iterations:**
-  - Stage 1 should be treated as complete; future Ralph PRDs should target Stage 2 or later.
-  - This project uses `uv run pytest` as the primary quality gate.
----
-
-## 2026-08-05 17:25 CST - US-016
-Thread: unavailable
-- Replaced the Ralph PRD with Stage 2 request confirmation stories and set the working branch to `agent/stage2-request-confirmation`.
-- Implemented `accept_request(request)` and `cancel_request(request, reason)` for in-memory `PENDING_CONFIRM` Request state transitions.
-- Added validation for non-pending requests and empty cancel reasons.
-- Added tests covering accept, cancel, original object immutability, invalid status, and empty cancel reason.
-- Files changed: `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/ralph.sh`, `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`.
-- **Learnings for future iterations:**
-  - Stage 2 confirmation state transitions currently live in `request_engine.controllers.request_controller` because they are Request contract operations, not UI behavior.
-  - Expected business errors still use `Stage1Error`; consider renaming or aliasing this before Stage 2 grows further.
----
-
-## 2026-08-05 17:38 CST - US-017
-Thread: unavailable
-- Implemented `summarize_request(request)` for compact confirmation summaries derived from an existing Request.
-- Summary includes request id, status, matched title, candidate subtitle group seed counts, selected subtitle group, effective seed count, expected folder name, and warnings.
-- Preserved the original full Request JSON contract by keeping summary generation separate and non-mutating.
-- Files changed: `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`.
-- Verification: `uv run pytest` passed with 25 tests.
-- **Learnings for future iterations:**
-  - Request summary fields should be derived from `source_info` and `confirmable_config`; do not rebuild them by rereading RSS or config.
-  - Compact summaries intentionally omit full `source_info`; use the original Request object when raw JSON is needed.
----
-
-## 2026-08-05 17:41 CST - US-018
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented CLI confirmation actions after Request generation with `--action accept|cancel` and `--cancel-reason`.
-- Successful accept/cancel actions now output the updated Request JSON in the existing success envelope.
-- Cancel without a non-empty reason now returns a structured ErrorResult and exit code 1.
-- Files changed: `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/ralph.sh`.
-- Verification: `uv run pytest` passed with 28 tests.
-- **Learnings for future iterations:**
-  - Keep CLI action post-processing in the entry controller so Request generation remains reusable and confirmation helpers stay in `request_engine`.
-  - Preserve the top-level JSON result envelope for both generation and confirmation actions.
----
-
-## 2026-08-05 17:44 CST - US-019
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented `validate_modify_patch(patch)` for the Stage 2 Request modification contract.
-- Restricted patches to `selected_subtitle_group`, `filter_rule`, and `expected_folder_name`; direct changes to computed/source fields now return structured `Stage1Error`s.
-- Added value validation for nullable/string subtitle group, non-empty folder name, string regex filter fields, and illegal nested filter fields.
-- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Verification: `uv run pytest` passed with 40 tests.
-- **Learnings for future iterations:**
-  - Treat modify validation as a pure contract helper; US-020 should call it before applying changes and recomputing from existing `source_info`.
-  - `filter_rule` patch values should stay limited to the existing `must_contain` and `must_not_contain` regex fields.
----
-
-## 2026-08-05 17:47 CST - US-020
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented `modify_request(request, patch)` for in-memory Request modifications.
-- Recomputed selected RSS URL, effective seed names, RSS source counts, and excluded seed metadata from existing `source_info`.
-- Reused folder-name sanitization for modified `expected_folder_name` and kept modified Requests in `PENDING_CONFIRM`.
-- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Verification: `uv run pytest` passed with 46 tests.
-- **Learnings for future iterations:**
-  - Source recomputation can use `valid_seed_names` plus `excluded_seed_names[].name`; no RSS fixture or network access is needed.
-  - `modify_request` should remain a pure Request contract helper and should not be mixed with CLI result-envelope handling.
+  - Build Stage 3 from stable local contracts first; defer real AB API details until the internal submit shape is tested.
+  - Treat fallback JSON as a first-class output rather than an exception side effect.
 ---
