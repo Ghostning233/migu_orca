@@ -24,6 +24,7 @@ packages = [
     "src/catalog_engine",
     "src/rss_engine",
     "src/subscription_engine",
+    "src/ab_engine",
     "src/request_engine",
     "src/shared",
 ]

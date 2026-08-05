@@ -6,6 +6,7 @@
 - Stage 3 should prefer offline-testable contracts and fake clients before any real Auto Bangumi network integration.
 - Keep AB submission separate from Request generation and confirmation; CLI submission must be explicitly requested.
 - Preserve the existing top-level JSON result envelope and convert expected business failures with `Stage1Error.as_dict()` or a compatible ErrorResult shape.
+- Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
 
 ## 2026-08-05 17:55 CST - Stage 3 PRD Setup
 Thread: unavailable
@@ -15,4 +16,15 @@ Thread: unavailable
 - **Learnings for future iterations:**
   - Build Stage 3 from stable local contracts first; defer real AB API details until the internal submit shape is tested.
   - Treat fallback JSON as a first-class output rather than an exception side effect.
+---
+## 2026-08-05 18:01 CST - US-021
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Auto Bangumi submit result contract with success and failure constructors.
+- Added defensive copying so result objects do not retain mutable caller-owned response, fallback, or error dictionaries.
+- Files changed: `pyproject.toml`, `src/ab_engine/__init__.py`, `src/ab_engine/controllers/__init__.py`, `src/ab_engine/controllers/submit_result.py`, `src/ab_engine/controllers/submit_result_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - AB submission result constructors return plain JSON-serializable dictionaries matching the existing CLI envelope style.
+  - Expected AB failures should use `Stage1Error.as_dict()` or a compatible structured error dictionary.
+  - New top-level engine packages must be added to `[tool.hatch.build.targets.wheel].packages` in `pyproject.toml`.
 ---
