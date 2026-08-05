@@ -78,6 +78,48 @@ def test_submit_ab_subscription_converts_controlled_failure_to_submit_result() -
     }
 
 
+def test_submit_ab_subscription_adds_fallback_config_when_enabled() -> None:
+    client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "Auto Bangumi 提交失败",
+            "create_ab_subscription",
+            {"status_code": 503},
+        )
+    )
+
+    result = submit_ab_subscription(client, _payload(), fallback_enabled=True)
+
+    assert result["success"] is False
+    assert result["fallback_config"] == {
+        "title": "番剧",
+        "rss_url": "https://example.invalid/rss.xml",
+        "save_path": "番剧",
+        "filter_rule": {"must_contain": "1080p"},
+        "failure_reason": {
+            "error_type": "ab_submit_failed",
+            "error_message": "Auto Bangumi 提交失败",
+            "failed_step": "create_ab_subscription",
+            "details": {"status_code": 503},
+        },
+    }
+
+
+def test_submit_ab_subscription_keeps_fallback_config_disabled_by_default() -> None:
+    client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "Auto Bangumi 提交失败",
+            "create_ab_subscription",
+        )
+    )
+
+    result = submit_ab_subscription(client, _payload())
+
+    assert result["success"] is False
+    assert result["fallback_config"] is None
+
+
 def test_fake_client_records_payload_calls_without_retaining_mutable_objects() -> None:
     payload = _payload()
     client = FakeAutoBangumiClient(response={"id": "sub-123"})

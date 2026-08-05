@@ -106,3 +106,17 @@ def test_ab_submit_failure_defensively_copies_objects() -> None:
     assert result["fallback_config"] == {
         "manual": {"rss_url": "https://example.invalid/rss.xml"},
     }
+
+
+def test_ab_submit_failure_defensively_copies_stage_error_details() -> None:
+    error = Stage1Error(
+        "failed",
+        "failed",
+        "submit_ab_subscription",
+        {"reason": "timeout"},
+    )
+
+    result = ab_submit_failure(error)
+    error.details["reason"] = "changed"
+
+    assert result["error"]["details"] == {"reason": "timeout"}

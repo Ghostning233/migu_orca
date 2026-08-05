@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Protocol
 
+from ab_engine.controllers.fallback_config import build_ab_fallback_config
 from ab_engine.controllers.submit_result import ab_submit_failure, ab_submit_success
 from shared.errors import Stage1Error
 
@@ -47,6 +48,8 @@ class FakeAutoBangumiClient:
 def submit_ab_subscription(
     client: AutoBangumiClient,
     payload: dict[str, Any],
+    *,
+    fallback_enabled: bool = False,
 ) -> dict[str, Any]:
     """Submit a prepared AB payload through a client and normalize the result."""
 
@@ -54,7 +57,10 @@ def submit_ab_subscription(
         ab_response = client.create_subscription(deepcopy(payload))
         return ab_submit_success(_subscription_id(ab_response), ab_response)
     except Stage1Error as error:
-        return ab_submit_failure(error)
+        fallback_config = (
+            build_ab_fallback_config(payload, error) if fallback_enabled else None
+        )
+        return ab_submit_failure(error, fallback_config=fallback_config)
 
 
 def _subscription_id(ab_response: dict[str, Any]) -> str:

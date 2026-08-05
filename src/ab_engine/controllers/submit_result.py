@@ -48,5 +48,5 @@ def ab_submit_failure(
 
 def _error_to_dict(error: Stage1Error | dict[str, Any]) -> dict[str, Any]:
     if isinstance(error, Stage1Error):
-        return error.as_dict()
+        return deepcopy(error.as_dict())
     return deepcopy(error)

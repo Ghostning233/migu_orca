@@ -9,6 +9,7 @@
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
 - Stage 3 AB subscription payloads use the internal keys `title`, `rss_url`, `save_path`, and `filter_rule`.
 - AB clients should expose `create_subscription(payload)` and go through `submit_ab_subscription(...)` to normalize success/failure into the stable submit result envelope.
+- AB fallback JSON is opt-in via `submit_ab_subscription(..., fallback_enabled=True)` and is built from the prepared AB payload plus the structured failure reason.
 
 ## 2026-08-05 17:55 CST - Stage 3 PRD Setup
 Thread: unavailable
@@ -51,4 +52,16 @@ Thread: https://codex.openai.com/threads/unavailable
   - AB clients should implement `create_subscription(payload)` and let controller orchestration convert responses/errors into stable result dictionaries.
   - The fake client deep-copies payloads and responses so tests can verify contracts without mutable caller-owned state leaking across boundaries.
   - Subscription IDs are read from `id`, `subscription_id`, or `ab_subscription_id` to keep the future real client adapter flexible.
+---
+## 2026-08-05 18:10 CST - US-024
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented pure Auto Bangumi fallback JSON generation from prepared AB subscription payloads and structured failure reasons.
+- Added opt-in fallback generation to `submit_ab_subscription(..., fallback_enabled=True)` while keeping fallback output disabled by default.
+- Hardened AB failure result error copying so `Stage1Error.details` mutations cannot leak into returned result dictionaries.
+- Files changed: `src/ab_engine/controllers/fallback_config.py`, `src/ab_engine/controllers/fallback_config_test.py`, `src/ab_engine/controllers/ab_client.py`, `src/ab_engine/controllers/ab_client_test.py`, `src/ab_engine/controllers/submit_result.py`, `src/ab_engine/controllers/submit_result_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Keep fallback generation pure and pass the explicit `fallback_enabled` flag through submit orchestration rather than making client implementations decide.
+  - Use `failure_reason` for the structured error dictionary inside fallback JSON.
+  - Deep-copy `Stage1Error.as_dict()` results at result boundaries because `details` is caller-owned mutable data.
 ---
