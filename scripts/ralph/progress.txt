@@ -5,6 +5,7 @@
 - Stage 2 Ralph work uses branch `agent/stage2-request-confirmation` and should complete one `passes=false` story per iteration.
 - Stage 2 Request confirmation helpers derive in-memory contracts in `request_engine.controllers.request_controller` and should preserve the full Request JSON shape separately from compact views.
 - Entry CLI post-generation actions should preserve the existing `success`/`request`/`error` envelope and convert expected business failures with `Stage1Error.as_dict()`.
+- Stage 2 Request modify patch validation belongs in `request_engine.controllers.request_controller`; keep it non-mutating and separate from later recomputation/apply behavior.
 
 ## 2026-08-05 17:08 CST - Ralph Stage 1 Reconciliation
 Thread: unavailable
@@ -51,4 +52,16 @@ Thread: https://codex.openai.com/threads/unavailable
 - **Learnings for future iterations:**
   - Keep CLI action post-processing in the entry controller so Request generation remains reusable and confirmation helpers stay in `request_engine`.
   - Preserve the top-level JSON result envelope for both generation and confirmation actions.
+---
+
+## 2026-08-05 17:44 CST - US-019
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented `validate_modify_patch(patch)` for the Stage 2 Request modification contract.
+- Restricted patches to `selected_subtitle_group`, `filter_rule`, and `expected_folder_name`; direct changes to computed/source fields now return structured `Stage1Error`s.
+- Added value validation for nullable/string subtitle group, non-empty folder name, string regex filter fields, and illegal nested filter fields.
+- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Verification: `uv run pytest` passed with 40 tests.
+- **Learnings for future iterations:**
+  - Treat modify validation as a pure contract helper; US-020 should call it before applying changes and recomputing from existing `source_info`.
+  - `filter_rule` patch values should stay limited to the existing `must_contain` and `must_not_contain` regex fields.
 ---

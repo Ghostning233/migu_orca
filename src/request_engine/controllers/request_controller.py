@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import UTC, datetime
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -18,6 +19,12 @@ from shared.models import (
 PENDING_CONFIRM = "PENDING_CONFIRM"
 ACCEPTED = "ACCEPTED"
 CANCELLED = "CANCELLED"
+MODIFY_PATCH_FIELDS = {
+    "selected_subtitle_group",
+    "filter_rule",
+    "expected_folder_name",
+}
+FILTER_RULE_PATCH_FIELDS = {"must_contain", "must_not_contain"}
 
 
 def build_pending_request(
@@ -129,6 +136,54 @@ def summarize_request(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def validate_modify_patch(patch: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(patch, dict):
+        raise Stage1Error(
+            "invalid_modify_patch",
+            "修改补丁必须是对象",
+            "validate_modify_patch",
+        )
+
+    illegal_fields = sorted(set(patch) - MODIFY_PATCH_FIELDS)
+    if illegal_fields:
+        raise Stage1Error(
+            "invalid_modify_patch_field",
+            "修改补丁包含不可修改字段",
+            "validate_modify_patch",
+            {
+                "illegal_fields": illegal_fields,
+                "allowed_fields": sorted(MODIFY_PATCH_FIELDS),
+            },
+        )
+
+    validated = deepcopy(patch)
+    if "selected_subtitle_group" in validated:
+        group = validated["selected_subtitle_group"]
+        if group is not None and not isinstance(group, str):
+            raise Stage1Error(
+                "invalid_modify_patch",
+                "selected_subtitle_group 必须是字符串或 null",
+                "validate_modify_patch",
+                {"field": "selected_subtitle_group"},
+            )
+
+    if "expected_folder_name" in validated:
+        folder_name = validated["expected_folder_name"]
+        if not isinstance(folder_name, str) or not folder_name.strip():
+            raise Stage1Error(
+                "invalid_modify_patch",
+                "expected_folder_name 必须是非空字符串",
+                "validate_modify_patch",
+                {"field": "expected_folder_name"},
+            )
+        validated["expected_folder_name"] = folder_name.strip()
+
+    if "filter_rule" in validated:
+        validated["filter_rule"] = _validate_filter_rule_patch(validated["filter_rule"])
+
+    return validated
+
+
 def _copy_pending_request(
     request: dict[str, Any],
     failed_step: str,
@@ -142,6 +197,54 @@ def _copy_pending_request(
             {"status": status},
         )
     return deepcopy(request)
+
+
+def _validate_filter_rule_patch(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise Stage1Error(
+            "invalid_modify_patch",
+            "filter_rule 必须是对象",
+            "validate_modify_patch",
+            {"field": "filter_rule"},
+        )
+
+    illegal_fields = sorted(set(value) - FILTER_RULE_PATCH_FIELDS)
+    if illegal_fields:
+        raise Stage1Error(
+            "invalid_modify_patch_field",
+            "filter_rule 包含不可修改字段",
+            "validate_modify_patch",
+            {
+                "illegal_fields": [f"filter_rule.{field}" for field in illegal_fields],
+                "allowed_fields": sorted(FILTER_RULE_PATCH_FIELDS),
+            },
+        )
+
+    validated = deepcopy(value)
+    for field, rule in validated.items():
+        if not isinstance(rule, str):
+            raise Stage1Error(
+                "invalid_modify_patch",
+                "filter_rule 字段必须是字符串",
+                "validate_modify_patch",
+                {"field": f"filter_rule.{field}"},
+            )
+        _compile_patch_regex(rule, field)
+    return validated
+
+
+def _compile_patch_regex(value: str, field: str) -> None:
+    if not value:
+        return
+    try:
+        re.compile(value)
+    except re.error as exc:
+        raise Stage1Error(
+            "invalid_modify_patch",
+            f"filter_rule.{field} 不是合法正则",
+            "validate_modify_patch",
+            {"field": f"filter_rule.{field}", "rule": value, "reason": str(exc)},
+        ) from exc
 
 
 def _rss_result_to_dict(result: FilteredRss) -> dict[str, Any]:

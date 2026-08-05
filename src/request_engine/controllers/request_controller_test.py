@@ -7,6 +7,7 @@ from request_engine.controllers.request_controller import (
     build_pending_request,
     cancel_request,
     summarize_request,
+    validate_modify_patch,
 )
 from shared.errors import Stage1Error
 from shared.models import (
@@ -171,3 +172,70 @@ def test_summarize_request_does_not_mutate_or_replace_original_json_contract() -
     ]
     assert "source_info" in request
     assert "source_info" not in summary
+
+
+def test_validate_modify_patch_allows_only_confirmable_fields() -> None:
+    patch = {
+        "selected_subtitle_group": "NC",
+        "filter_rule": {"must_contain": "1080p", "must_not_contain": "SP"},
+        "expected_folder_name": "  番剧 NC  ",
+    }
+
+    validated = validate_modify_patch(patch)
+
+    assert validated == {
+        "selected_subtitle_group": "NC",
+        "filter_rule": {"must_contain": "1080p", "must_not_contain": "SP"},
+        "expected_folder_name": "番剧 NC",
+    }
+    assert patch["expected_folder_name"] == "  番剧 NC  "
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["effective_seed_names", "source_info", "matched_bangumi", "status"],
+)
+def test_validate_modify_patch_rejects_unconfirmable_fields(field: str) -> None:
+    with pytest.raises(Stage1Error) as error:
+        validate_modify_patch({field: "value"})
+
+    assert error.value.error_type == "invalid_modify_patch_field"
+    assert error.value.details["illegal_fields"] == [field]
+    assert error.value.details["allowed_fields"] == [
+        "expected_folder_name",
+        "filter_rule",
+        "selected_subtitle_group",
+    ]
+
+
+def test_validate_modify_patch_rejects_illegal_filter_rule_fields() -> None:
+    with pytest.raises(Stage1Error) as error:
+        validate_modify_patch({"filter_rule": {"effective_seed_names": []}})
+
+    assert error.value.error_type == "invalid_modify_patch_field"
+    assert error.value.details["illegal_fields"] == [
+        "filter_rule.effective_seed_names"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("patch", "field"),
+    [
+        ([], None),
+        ({"selected_subtitle_group": 1}, "selected_subtitle_group"),
+        ({"expected_folder_name": "  "}, "expected_folder_name"),
+        ({"filter_rule": []}, "filter_rule"),
+        ({"filter_rule": {"must_contain": 1080}}, "filter_rule.must_contain"),
+        ({"filter_rule": {"must_not_contain": "["}}, "filter_rule.must_not_contain"),
+    ],
+)
+def test_validate_modify_patch_rejects_invalid_patch_values(
+    patch: object,
+    field: str | None,
+) -> None:
+    with pytest.raises(Stage1Error) as error:
+        validate_modify_patch(patch)  # type: ignore[arg-type]
+
+    assert error.value.error_type == "invalid_modify_patch"
+    if field is not None:
+        assert error.value.details["field"] == field

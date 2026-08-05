@@ -63,8 +63,8 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现 validate_modify_patch 的补丁字段和值校验；uv run pytest 通过。"
     },
     {
       "id": "US-020",
