@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
+from shared.errors import Stage1Error
 from shared.models import (
     EntryRequest,
     FilteredRss,
@@ -12,6 +14,10 @@ from shared.models import (
     MatchedBangumi,
     SubtitleGroupSelection,
 )
+
+PENDING_CONFIRM = "PENDING_CONFIRM"
+ACCEPTED = "ACCEPTED"
+CANCELLED = "CANCELLED"
 
 
 def build_pending_request(
@@ -38,7 +44,7 @@ def build_pending_request(
 
     return {
         "request_id": str(uuid4()),
-        "status": "PENDING_CONFIRM",
+        "status": PENDING_CONFIRM,
         "input": asdict(entry),
         "source_info": {
             "matched_bangumi": asdict(matched),
@@ -60,6 +66,55 @@ def build_pending_request(
         "created_at": created_at,
         "updated_at": created_at,
     }
+
+
+def accept_request(request: dict[str, Any]) -> dict[str, Any]:
+    updated = _copy_pending_request(request, "accept_request")
+    decided_at = datetime.now(UTC).isoformat()
+    updated["status"] = ACCEPTED
+    updated["updated_at"] = decided_at
+    updated["user_action"] = {
+        "action": "ACCEPT",
+        "reason": None,
+        "decided_at": decided_at,
+    }
+    return updated
+
+
+def cancel_request(request: dict[str, Any], reason: str) -> dict[str, Any]:
+    clean_reason = reason.strip()
+    if not clean_reason:
+        raise Stage1Error(
+            "invalid_cancel_reason",
+            "取消原因不能为空",
+            "cancel_request",
+        )
+
+    updated = _copy_pending_request(request, "cancel_request")
+    decided_at = datetime.now(UTC).isoformat()
+    updated["status"] = CANCELLED
+    updated["updated_at"] = decided_at
+    updated["user_action"] = {
+        "action": "CANCEL",
+        "reason": clean_reason,
+        "decided_at": decided_at,
+    }
+    return updated
+
+
+def _copy_pending_request(
+    request: dict[str, Any],
+    failed_step: str,
+) -> dict[str, Any]:
+    status = request.get("status")
+    if status != PENDING_CONFIRM:
+        raise Stage1Error(
+            "invalid_request_status",
+            "只有 PENDING_CONFIRM Request 可以执行确认操作",
+            failed_step,
+            {"status": status},
+        )
+    return deepcopy(request)
 
 
 def _rss_result_to_dict(result: FilteredRss) -> dict[str, Any]:

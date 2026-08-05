@@ -2,6 +2,7 @@
 - Keep learnings about this codebase in this file as iterations progress.
 - Ralph defaults to the local Codex CLI; use `./scripts/ralph/ralph.sh` or pass `--tool codex` explicitly.
 - Current Ralph Stage 1 PRD is reconciled against `main`; all Stage 1 stories are marked complete after offline CLI and pytest verification.
+- Stage 2 Ralph work uses branch `agent/stage2-request-confirmation` and should complete one `passes=false` story per iteration.
 
 ## 2026-08-05 17:08 CST - Ralph Stage 1 Reconciliation
 Thread: unavailable
@@ -12,4 +13,16 @@ Thread: unavailable
 - **Learnings for future iterations:**
   - Stage 1 should be treated as complete; future Ralph PRDs should target Stage 2 or later.
   - This project uses `uv run pytest` as the primary quality gate.
+---
+
+## 2026-08-05 17:25 CST - US-016
+Thread: unavailable
+- Replaced the Ralph PRD with Stage 2 request confirmation stories and set the working branch to `agent/stage2-request-confirmation`.
+- Implemented `accept_request(request)` and `cancel_request(request, reason)` for in-memory `PENDING_CONFIRM` Request state transitions.
+- Added validation for non-pending requests and empty cancel reasons.
+- Added tests covering accept, cancel, original object immutability, invalid status, and empty cancel reason.
+- Files changed: `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`.
+- **Learnings for future iterations:**
+  - Stage 2 confirmation state transitions currently live in `request_engine.controllers.request_controller` because they are Request contract operations, not UI behavior.
+  - Expected business errors still use `Stage1Error`; consider renaming or aliasing this before Stage 2 grows further.
 ---
