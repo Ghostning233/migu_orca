@@ -6,6 +6,7 @@
 - Stage 2 Request confirmation helpers derive in-memory contracts in `request_engine.controllers.request_controller` and should preserve the full Request JSON shape separately from compact views.
 - Entry CLI post-generation actions should preserve the existing `success`/`request`/`error` envelope and convert expected business failures with `Stage1Error.as_dict()`.
 - Stage 2 Request modify patch validation belongs in `request_engine.controllers.request_controller`; keep it non-mutating and separate from later recomputation/apply behavior.
+- Stage 2 Request modifications should validate patches first, then recompute from stored `source_info` without reparsing RSS or calling external systems.
 
 ## 2026-08-05 17:08 CST - Ralph Stage 1 Reconciliation
 Thread: unavailable
@@ -64,4 +65,16 @@ Thread: https://codex.openai.com/threads/unavailable
 - **Learnings for future iterations:**
   - Treat modify validation as a pure contract helper; US-020 should call it before applying changes and recomputing from existing `source_info`.
   - `filter_rule` patch values should stay limited to the existing `must_contain` and `must_not_contain` regex fields.
+---
+
+## 2026-08-05 17:47 CST - US-020
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented `modify_request(request, patch)` for in-memory Request modifications.
+- Recomputed selected RSS URL, effective seed names, RSS source counts, and excluded seed metadata from existing `source_info`.
+- Reused folder-name sanitization for modified `expected_folder_name` and kept modified Requests in `PENDING_CONFIRM`.
+- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Verification: `uv run pytest` passed with 46 tests.
+- **Learnings for future iterations:**
+  - Source recomputation can use `valid_seed_names` plus `excluded_seed_names[].name`; no RSS fixture or network access is needed.
+  - `modify_request` should remain a pure Request contract helper and should not be mixed with CLI result-envelope handling.
 ---

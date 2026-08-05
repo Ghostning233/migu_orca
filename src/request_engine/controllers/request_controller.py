@@ -15,6 +15,7 @@ from shared.models import (
     MatchedBangumi,
     SubtitleGroupSelection,
 )
+from subscription_engine.controllers.subscription_controller import generate_folder_name
 
 PENDING_CONFIRM = "PENDING_CONFIRM"
 ACCEPTED = "ACCEPTED"
@@ -184,6 +185,47 @@ def validate_modify_patch(patch: dict[str, Any]) -> dict[str, Any]:
     return validated
 
 
+def modify_request(request: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    validated = validate_modify_patch(patch)
+    updated = _copy_pending_request(request, "modify_request")
+    confirmable = updated["confirmable_config"]
+    source_info = updated["source_info"]
+    rss_sources = source_info.get("rss_sources", [])
+
+    if "filter_rule" in validated:
+        next_filter_rule = {
+            **confirmable.get("filter_rule", {}),
+            **validated["filter_rule"],
+        }
+        confirmable["filter_rule"] = next_filter_rule
+        for source in rss_sources:
+            _recompute_source_seed_filter(source, next_filter_rule)
+
+    if "selected_subtitle_group" in validated:
+        selected_group = validated["selected_subtitle_group"]
+        selected_source = _find_rss_source_by_group(rss_sources, selected_group)
+        confirmable["selected_subtitle_group"] = selected_group
+        confirmable["selected_rss_url"] = (
+            selected_source.get("rss_url") if selected_source else None
+        )
+
+    if "expected_folder_name" in validated:
+        confirmable["expected_folder_name"] = generate_folder_name(
+            validated["expected_folder_name"]
+        )
+
+    selected_source = _find_rss_source_by_group(
+        rss_sources,
+        confirmable.get("selected_subtitle_group"),
+    )
+    confirmable["effective_seed_names"] = (
+        list(selected_source.get("valid_seed_names", [])) if selected_source else []
+    )
+    updated["status"] = PENDING_CONFIRM
+    updated["updated_at"] = datetime.now(UTC).isoformat()
+    return updated
+
+
 def _copy_pending_request(
     request: dict[str, Any],
     failed_step: str,
@@ -243,6 +285,91 @@ def _compile_patch_regex(value: str, field: str) -> None:
             "invalid_modify_patch",
             f"filter_rule.{field} 不是合法正则",
             "validate_modify_patch",
+            {"field": f"filter_rule.{field}", "rule": value, "reason": str(exc)},
+        ) from exc
+
+
+def _find_rss_source_by_group(
+    rss_sources: list[dict[str, Any]],
+    subtitle_group: str | None,
+) -> dict[str, Any] | None:
+    if subtitle_group is None:
+        return None
+    for source in rss_sources:
+        if source.get("subtitle_group") == subtitle_group:
+            return source
+    raise Stage1Error(
+        "invalid_modify_patch",
+        "selected_subtitle_group 不在候选 RSS 中",
+        "modify_request",
+        {"field": "selected_subtitle_group", "value": subtitle_group},
+    )
+
+
+def _recompute_source_seed_filter(
+    source: dict[str, Any],
+    filter_rule: dict[str, str],
+) -> None:
+    must_contain = _compile_request_filter_rule(
+        filter_rule.get("must_contain", ""),
+        "must_contain",
+    )
+    must_not_contain = _compile_request_filter_rule(
+        filter_rule.get("must_not_contain", ""),
+        "must_not_contain",
+    )
+    seed_names = _source_seed_names(source)
+    valid: list[str] = []
+    excluded: list[dict[str, str]] = []
+    for seed_name in seed_names:
+        if must_not_contain and must_not_contain.search(seed_name):
+            excluded.append(
+                {
+                    "name": seed_name,
+                    "reason": f"命中必须不含规则：{filter_rule['must_not_contain']}",
+                    "rule": "must_not_contain",
+                }
+            )
+        elif must_contain and not must_contain.search(seed_name):
+            excluded.append(
+                {
+                    "name": seed_name,
+                    "reason": f"未命中必须包含规则：{filter_rule['must_contain']}",
+                    "rule": "must_contain",
+                }
+            )
+        else:
+            valid.append(seed_name)
+
+    source["total_seed_count"] = len(seed_names)
+    source["valid_seed_count"] = len(valid)
+    source["invalid_seed_count"] = len(excluded)
+    source["valid_seed_names"] = valid
+    source["excluded_seed_names"] = excluded
+
+
+def _source_seed_names(source: dict[str, Any]) -> list[str]:
+    seed_names: list[str] = []
+    for seed_name in source.get("valid_seed_names", []):
+        if seed_name not in seed_names:
+            seed_names.append(seed_name)
+    for seed in source.get("excluded_seed_names", []):
+        seed_name = seed.get("name")
+        if seed_name and seed_name not in seed_names:
+            seed_names.append(seed_name)
+    return seed_names
+
+
+def _compile_request_filter_rule(value: str, field: str) -> re.Pattern[str] | None:
+    if not value:
+        return None
+    try:
+        return re.compile(value)
+    except re.error as exc:  # pragma: no cover - validate_modify_patch guards this
+        raise Stage1Error(
+            "invalid_modify_patch",
+            f"filter_rule.{field} 不是合法正则",
+            "modify_request",
             {"field": f"filter_rule.{field}", "rule": value, "reason": str(exc)},
         ) from exc
 

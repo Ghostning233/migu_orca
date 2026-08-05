@@ -6,6 +6,7 @@ from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
     cancel_request,
+    modify_request,
     summarize_request,
     validate_modify_patch,
 )
@@ -239,3 +240,91 @@ def test_validate_modify_patch_rejects_invalid_patch_values(
     assert error.value.error_type == "invalid_modify_patch"
     if field is not None:
         assert error.value.details["field"] == field
+
+
+def test_modify_request_switches_selected_group_and_effective_seed_names() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(request, {"selected_subtitle_group": "NC"})
+
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
+    assert modified["status"] == "PENDING_CONFIRM"
+    assert modified["updated_at"] >= request["updated_at"]
+    assert modified["confirmable_config"]["selected_subtitle_group"] == "NC"
+    assert (
+        modified["confirmable_config"]["selected_rss_url"]
+        == "https://example.invalid/nc.xml"
+    )
+    assert modified["confirmable_config"]["effective_seed_names"] == [
+        "[NC] 番剧 - 01"
+    ]
+
+
+def test_modify_request_recomputes_filter_rule_from_existing_source_info() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(
+        request,
+        {"filter_rule": {"must_contain": "02", "must_not_contain": ""}},
+    )
+
+    confirmable = modified["confirmable_config"]
+    loli_source = modified["source_info"]["rss_sources"][0]
+    assert confirmable["filter_rule"] == {
+        "must_contain": "02",
+        "must_not_contain": "",
+    }
+    assert confirmable["effective_seed_names"] == ["[Loli] 番剧 - 02"]
+    assert loli_source["valid_seed_count"] == 1
+    assert loli_source["invalid_seed_count"] == 2
+    assert loli_source["valid_seed_names"] == ["[Loli] 番剧 - 02"]
+    assert loli_source["excluded_seed_names"] == [
+        {
+            "name": "[Loli] 番剧 - 01",
+            "reason": "未命中必须包含规则：02",
+            "rule": "must_contain",
+        },
+        {
+            "name": "[Loli] 番剧 - SP",
+            "reason": "未命中必须包含规则：02",
+            "rule": "must_contain",
+        },
+    ]
+
+
+def test_modify_request_sanitizes_expected_folder_name() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(request, {"expected_folder_name": " 番剧/NC\\版 "})
+
+    assert modified["confirmable_config"]["expected_folder_name"] == "番剧_NC_版"
+
+
+def test_modify_request_allows_clearing_selected_group() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(request, {"selected_subtitle_group": None})
+
+    assert modified["confirmable_config"]["selected_subtitle_group"] is None
+    assert modified["confirmable_config"]["selected_rss_url"] is None
+    assert modified["confirmable_config"]["effective_seed_names"] == []
+
+
+def test_modify_request_rejects_unknown_group_without_mutating_original() -> None:
+    request = _pending_request_with_sources()
+
+    with pytest.raises(Stage1Error) as error:
+        modify_request(request, {"selected_subtitle_group": "Unknown"})
+
+    assert error.value.error_type == "invalid_modify_patch"
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
+
+
+def test_modify_request_rejects_non_pending_request() -> None:
+    accepted = accept_request(_pending_request_with_sources())
+
+    with pytest.raises(Stage1Error) as error:
+        modify_request(accepted, {"selected_subtitle_group": "NC"})
+
+    assert error.value.error_type == "invalid_request_status"
+    assert error.value.details == {"status": "ACCEPTED"}

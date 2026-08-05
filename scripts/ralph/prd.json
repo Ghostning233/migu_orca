@@ -79,8 +79,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现 modify_request 的 in-memory 修改与重新计算；uv run pytest 通过。"
     }
   ]
 }
