@@ -1,0 +1,158 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage7-flask-web-ui",
+  "description": "MiGuOrca Stage 7：基于 Stage 6 本地 JSON 持久化能力，引入 Flask 后端 Web UI / 管理界面 MVP。实现方式必须参考 /home/ghostning/github/user_level_flask 的应用结构与 API 编排方式，包括 create_app、Blueprint registry、统一 JSON API 响应、class-based views、Pydantic 请求校验、wsgi 入口和 Flask test client 测试。Stage 7 聚焦本地可用 Web UI，不纳入真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理或批量季度订阅。",
+  "userStories": [
+    {
+      "id": "US-047",
+      "title": "建立 Flask Web 应用骨架和运行入口",
+      "description": "As a maintainer, I want a Flask application skeleton that matches the reference project structure so that later Web UI and API modules have a consistent backend entrypoint.",
+      "acceptanceCriteria": [
+        "在项目依赖中加入 Flask，并按需加入 Pydantic；版本选择应与 Python 3.13.12 兼容",
+        "新增 `src/apps/base.py`，提供 `create_app(config_name: str | None = None)`，结构参考 `/home/ghostning/github/user_level_flask/src/apps/base.py`",
+        "新增 `src/apps/registry.py`，通过 `ALL_BLUEPRINTS` 集中注册 Web/API 蓝图，结构参考参考项目",
+        "新增 `src/wsgi.py`，暴露 `app = create_app(...)`，支持 `uv run flask --app wsgi:app run` 或等价方式启动",
+        "新增健康检查 Blueprint，提供 `/healthz` 和 `/readiness`，返回可测试的成功响应",
+        "不得影响现有 `migu-orca` CLI 命令和默认离线生成行为",
+        "新增 Flask app/test client 测试，覆盖 app 创建、Blueprint 注册、健康检查入口",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Reference project: /home/ghostning/github/user_level_flask. Prefer the same app factory + registry pattern, but keep MiGuOrca dependencies minimal."
+    },
+    {
+      "id": "US-048",
+      "title": "复用或移植统一 Flask API 响应层",
+      "description": "As a developer, I want Web API responses to follow a consistent structure so that frontend pages and tests can handle success and failure uniformly.",
+      "acceptanceCriteria": [
+        "新增 `src/extensions/flask_api/` 或等价扩展模块，结构参考 `/home/ghostning/github/user_level_flask/src/extensions/flask_api/`",
+        "提供 `ok_response(result)`，成功响应 JSON 形态为 `{ \"ok\": true, \"result\": ... }`",
+        "提供 `failed_response(error_type, error_message, error_data=None)`，失败响应 JSON 形态为 `{ \"ok\": false, \"error_type\": ..., \"error_message\": ... }`，存在 error_data 时才输出该字段",
+        "提供 `route(...)` 和 `class_route(...)`，支持 Blueprint 函数视图和 class-based view 注册",
+        "提供 `GetView`、`PostView` 或等价 class-based base view，支持 Pydantic 请求校验；校验失败返回统一 JSON 错误",
+        "将现有 `Stage1Error` 或兼容业务错误转换为统一 API 错误响应，错误中不得泄露本地绝对路径、token、完整 endpoint URL、原始 HTML 或 RSS XML",
+        "新增扩展层单元测试，覆盖成功响应、业务错误、校验错误和未处理异常在 debug/test 环境中的行为",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "If directly copying from the reference project, remove unrelated auth/Kong/admin-log behavior unless needed by MiGuOrca."
+    },
+    {
+      "id": "US-049",
+      "title": "提供本地存储 Request 查询 API",
+      "description": "As a Web UI user, I want backend APIs for listing and loading saved Requests so that the browser can display existing local state.",
+      "acceptanceCriteria": [
+        "新增 Web/API Blueprint，例如 `src/apps/migu_orca_web/`，并通过 `apps.registry.ALL_BLUEPRINTS` 注册",
+        "新增 `GET /api/v1/requests`，读取 `storage_dir` query 参数或默认 `.migu_orca/storage`，返回已保存 Request 摘要列表",
+        "新增 `GET /api/v1/requests/<request_id>`，读取完整 Request snapshot",
+        "查询逻辑必须复用 Stage 6 的 `storage_engine.controllers.request_repository` 和 `request_engine.controllers.request_controller.summarize_request(...)`",
+        "查询 API 必须只读本地 storage，不触发真实 MiKan、Auto Bangumi 或 qBittorrent",
+        "不存在、损坏或非法 request_id 返回统一 API 错误响应，且不泄露本地绝对路径",
+        "新增 Flask test client 覆盖空列表、正常列表、详情读取、缺失 request_id 和非法路径片段",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Keep URL/API naming close to the reference project's Blueprint + class_route style, but domain path should be MiGuOrca-specific."
+    },
+    {
+      "id": "US-050",
+      "title": "提供 Web API 生成并保存 Request",
+      "description": "As a Web UI user, I want to submit a title from the browser and save the generated Request so that I can inspect or confirm it later.",
+      "acceptanceCriteria": [
+        "新增 `POST /api/v1/requests`，请求 JSON 至少支持 `title`、`storage_dir`、`save_request`，并使用 Pydantic 或等价模型校验",
+        "默认数据源仍为 `static-fixture`，不得在未显式请求时访问真实 MiKan、Auto Bangumi 或 qBittorrent",
+        "当 `save_request=true` 时复用现有 CLI orchestration 或 controller 能力生成并保存 Request，返回统一 API 成功响应和 `saved_request` 元数据",
+        "当 `save_request` 未传或为 false 时只生成 Request，不写入 storage 目录",
+        "生成失败、保存失败和输入校验失败返回统一 API 错误响应，且不泄露本地绝对路径、token、完整 endpoint URL、原始 HTML 或 RSS XML",
+        "新增 Flask test client 覆盖生成不保存、生成并保存、缺失 title、非法 storage_dir 或保存失败等场景",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "This story should not add real MiKan mode to Web UI unless needed for a minimal seam; real MiKan search optimization remains backlog. Stage 7 allows storage_dir from Web API body/query for local validation convenience."
+    },
+    {
+      "id": "US-051",
+      "title": "建立服务端渲染 Web UI shell",
+      "description": "As a Web UI user, I want a browser page served by Flask so that I can access MiGuOrca without using the CLI.",
+      "acceptanceCriteria": [
+        "新增 Flask 模板和静态资源目录，优先放在 `src/apps/migu_orca_web/templates/` 和 `src/apps/migu_orca_web/static/` 或 Flask 约定路径下",
+        "新增 Web Blueprint，提供 `GET /index`，返回 HTML 页面而不是 JSON",
+        "新增 `GET /`，直接重定向到 `/index`",
+        "页面必须包含应用标题、当前 Stage 7 Web UI MVP 标识、Request 生成表单、Request 列表容器和详情容器",
+        "页面设计需保持轻量但可用，避免引入复杂前端构建链；可使用原生 HTML/CSS/少量 JS",
+        "页面不得展示 token、完整 endpoint URL、原始 HTML 或 RSS XML",
+        "新增 Flask test client 覆盖 HTML 页面可访问、关键文本和表单字段存在",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Use Flask server-rendered UI first. Do not introduce React/Vite unless explicitly approved later. The Web UI canonical homepage is `/index`; root `/` should redirect to `/index`."
+    },
+    {
+      "id": "US-052",
+      "title": "实现 Request 列表和详情浏览交互",
+      "description": "As a Web UI user, I want to list saved Requests and inspect details in the browser so that I can understand the generated subscription plan.",
+      "acceptanceCriteria": [
+        "Web UI 可以调用 `GET /api/v1/requests` 并渲染已保存 Request 摘要列表",
+        "点击或选择某个 Request 后，Web UI 可以调用 `GET /api/v1/requests/<request_id>` 并渲染完整详情",
+        "详情页或详情区域至少展示 title、request_id、status、selected RSS/source、filter_rule、folder_name、valid seed titles 或等价字段",
+        "空列表、加载中和错误状态都有明确页面反馈",
+        "列表和详情交互不得触发真实 MiKan、Auto Bangumi 或 qBittorrent",
+        "新增后端/模板/静态资源测试或等价测试，覆盖 API 数据被页面脚本或模板引用的关键路径",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Keep this as read-only browsing. Stage 7 is a minimum viable Web UI and must not implement confirm/cancel/modify actions unless explicitly re-scoped."
+    },
+    {
+      "id": "US-053",
+      "title": "在 Web UI 展示状态历史和 AB 提交结果",
+      "description": "As an operator, I want the UI to show saved status history and Auto Bangumi results so that I can audit past actions and fallback output.",
+      "acceptanceCriteria": [
+        "新增只读 API 或扩展详情 API，使 Web UI 能获取 `history/<request_id>.json` 和 `ab_results/<request_id>.json` 中的可用数据",
+        "缺少 history 或 ab_results 时应返回空数据或明确的非致命状态，不影响 Request 详情展示",
+        "Web UI 详情区域展示状态历史 timeline 或表格，至少包含 action、previous_status、next_status、timestamp",
+        "Web UI 展示 AB 提交结果摘要，包括 success、ab_subscription_id、fallback_config 是否存在；fallback_config 可折叠查看",
+        "任何错误响应、页面文本和持久化数据展示不得包含 token、完整 endpoint URL、原始 HTML 或 RSS XML",
+        "新增 Flask test client 或 repository/API 测试覆盖存在、缺失、损坏 history/ab_results 的处理",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Stage 6 already has repositories for requests and AB results; history repository currently writes events and may need a read helper."
+    },
+    {
+      "id": "US-054",
+      "title": "补充 Stage 7 Flask Web UI 文档和验收说明",
+      "description": "As a maintainer, I want documentation for the Flask Web UI so that users can run, inspect, and validate the MVP locally.",
+      "acceptanceCriteria": [
+        "README 说明 Stage 7 Flask Web UI MVP 能力、启动命令、`/` 到 `/index` 的重定向、默认 storage 行为和与 CLI 的关系",
+        "README 或 docs 说明 API 结构参考 `/home/ghostning/github/user_level_flask`，包括 app factory、registry、Blueprint、统一响应和 class-based view 约定",
+        "README 给出本地生成并保存 Request、启动 Web UI、打开 `/index` 页面、列出/读取 Request 的验收流程",
+        "文档明确说明 Stage 7 暂不做认证、复杂配置管理、真实 MiKan 搜索优化、批量季度订阅和 qBittorrent 直连",
+        "文档继续指向 `docs/backlog.md`，说明真实 MiKan 搜索/RSS 解析优化仍作为后续待办跟踪",
+        "scripts/ralph/progress.txt 记录 Stage 7 PRD setup、参考项目结构和可复用约定",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Final Stage 7 story should leave docs consistent with implemented endpoints and commands."
+    }
+  ]
+}
