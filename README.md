@@ -63,11 +63,11 @@ MVP 聚焦单番剧的订阅闭环：
 ## Ralph 开发流
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
-- 当前活跃阶段：Stage 4，真实 Auto Bangumi HTTP client adapter
+- 当前活跃阶段：Stage 5，真实 MiKanProject 数据源 adapter PRD
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 6`
 
-Stage 4 的目标是把 Stage 3 的 fake-client 提交流程替换为可测试的真实 AB HTTP adapter 注入点，同时保持默认 CLI 流程不隐式访问外部系统。
+Stage 5 的目标是在 Stage 4 真实 AB 提交链路基础上，增加显式启用、可注入 transport、离线可测的真实 MiKanProject 数据源 adapter，同时保持默认 CLI 流程继续使用静态 fixture。
 
 ## 参考文档
 
