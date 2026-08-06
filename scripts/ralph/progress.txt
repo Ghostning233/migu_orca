@@ -18,6 +18,23 @@
 - In CLI AB submission, `apply_ab_submit_action(...)` loads explicit AB config, builds the prepared payload, then uses an injected test client or `ab_http_client.create_auto_bangumi_http_client(ab_config)` for real submission.
 - Standardize real AB network failures inside `ab_http_client.py`: auth uses `ab_auth_failed`, timeouts use `ab_timeout`, connection failures use `ab_connection_failed`, and details must stay token-free.
 - The real AB HTTP client validates response objects include `id`, `subscription_id`, or `ab_subscription_id` before returning; missing IDs use `invalid_ab_response` at `create_ab_subscription`.
+- Public docs should state that Stage 4's real AB API endpoint, request fields, and response fields still require validation against the operator's deployed Auto Bangumi version.
+
+## 2026-08-06 09:30 CST - US-032
+Thread: https://codex.openai.com/threads/unavailable
+- Updated README usage documentation for the Stage 4 real Auto Bangumi HTTP submit path.
+- Documented the AB config JSON fields, explicit CLI submit command, fallback behavior, token handling, default non-network behavior, and deployment-validation caveat for real AB API fields.
+- Confirmed the existing example config uses a placeholder token and does not contain a real secret.
+- Ran `uv run pytest -q`, `uv run python -m compileall -q src`, and `git diff --check`; all passed.
+- Files changed
+  - `README.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep public docs explicit that `--submit-ab --ab-config <path>` is the only CLI path that contacts Auto Bangumi.
+  - Document real AB integration fields as deployment-sensitive until the project validates them against a live Auto Bangumi version.
+  - No nearby module `CODEX.md` update was needed for this docs-only story; reusable documentation guidance is consolidated in this progress log.
+---
 
 ## 2026-08-06 09:28 CST - US-031
 Thread: https://codex.openai.com/threads/unavailable
