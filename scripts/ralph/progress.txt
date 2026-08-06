@@ -45,3 +45,20 @@ Thread: https://codex.openai.com/threads/unavailable
   - Stage 8 should improve operator confidence before adding more external integrations: make modes, defaults, saving behavior, errors, and list/detail navigation explicit in the UI.
   - Prefer static DOM tests and Flask test-client coverage for UI contract checks; use browser verification when available, otherwise document the manual browser verification gap.
   - Keep all UI rendering paths aligned with the existing sensitive-output policy: no tokens, full endpoint URLs, raw HTML/RSS XML, cookies, or absolute local paths.
+---
+
+## 2026-08-06 15:14 CST - US-055
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Stage 8 Web UI shell identity on `/index`, replacing Stage 7 MVP text with Stage 8 Web UI Usability in the document title and visible header.
+- Added a top-of-page runtime mode summary stating local JSON storage, default fixture-backed generation, and no implicit access to real MiKan, Auto Bangumi, or qBittorrent.
+- Added header anchor navigation to the generation form, Request list, Request detail, and acceptance notes sections, plus matching section IDs and lightweight CSS for wrapping navigation.
+- Updated Flask test-client coverage for the Stage 8 label, offline/local mode hints, navigation links, anchor targets, and sensitive-content guards.
+- Ran `uv run pytest`: 209 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser` tool not exposed); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The Web UI shell test in `src/apps/migu_orca_web/views_test.py::test_index_serves_web_ui_shell` is the right place to pin static header/navigation copy and sensitive-content guards.
+  - `/index` page navigation can stay server-rendered with section IDs in the Jinja template; no JavaScript is needed for same-page jumps.
+  - Browser verification may be unavailable in Ralph Codex sessions, so progress entries should explicitly record the manual verification gap.
+---

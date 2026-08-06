@@ -3,21 +3,29 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MiGuOrca Stage 7 Web UI MVP</title>
+    <title>MiGuOrca Stage 8 Web UI Usability</title>
     <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
     <script defer src="{{ url_for('migu_orca_web.static', filename='app.js') }}"></script>
   </head>
   <body>
     <header class="app-header">
-      <div>
-        <p class="stage-label">Stage 7 Web UI MVP</p>
+      <div class="header-copy">
+        <p class="stage-label">Stage 8 Web UI Usability</p>
         <h1>MiGuOrca</h1>
+        <p class="mode-summary">
+          运行模式：本地 JSON storage；默认使用仓库 fixture-backed 生成；不会隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent。
+        </p>
       </div>
-      <span class="mode-badge">Local JSON</span>
+      <nav class="top-nav" aria-label="页面导航">
+        <a href="#generate-panel">生成表单</a>
+        <a href="#request-list-panel">Request 列表</a>
+        <a href="#request-detail-panel">Request 详情</a>
+        <a href="#acceptance-panel">验收说明</a>
+      </nav>
     </header>
 
     <main class="app-layout">
-      <section class="panel generate-panel" aria-labelledby="generate-heading">
+      <section id="generate-panel" class="panel generate-panel" aria-labelledby="generate-heading">
         <h2 id="generate-heading">Request 生成</h2>
         <form id="request-generate-form" method="post">
           <label for="request-title">标题</label>
@@ -47,7 +55,7 @@
         </form>
       </section>
 
-      <section class="panel request-list-panel" aria-labelledby="request-list-heading">
+      <section id="request-list-panel" class="panel request-list-panel" aria-labelledby="request-list-heading">
         <div class="panel-heading">
           <h2 id="request-list-heading">Request 列表</h2>
           <button id="request-list-refresh" type="button">刷新</button>
@@ -57,11 +65,19 @@
         </div>
       </section>
 
-      <section class="panel request-detail-panel" aria-labelledby="request-detail-heading">
+      <section id="request-detail-panel" class="panel request-detail-panel" aria-labelledby="request-detail-heading">
         <h2 id="request-detail-heading">Request 详情</h2>
         <div id="request-detail-container" class="empty-state" aria-live="polite">
           选择一个 Request 后查看详情。
         </div>
+      </section>
+
+      <section id="acceptance-panel" class="panel acceptance-panel" aria-labelledby="acceptance-heading">
+        <h2 id="acceptance-heading">验收说明</h2>
+        <p>
+          使用 `uv run flask --app wsgi:app run` 启动本地 Web UI，并以 `uv run pytest` 和
+          `uv run python -m compileall -q src` 作为 Stage 8 质量检查。
+        </p>
       </section>
     </main>
   </body>

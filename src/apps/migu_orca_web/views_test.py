@@ -44,10 +44,23 @@ def test_index_serves_web_ui_shell() -> None:
     assert response.status_code == 200
     assert "text/html" in response.content_type
     assert "MiGuOrca" in html
-    assert "Stage 7 Web UI MVP" in html
+    assert "Stage 8 Web UI Usability" in html
+    assert "Stage 7 Web UI MVP" not in html
+    assert "运行模式：本地 JSON storage" in html
+    assert "fixture-backed" in html
+    assert "不会隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent" in html
     assert "Request 生成" in html
     assert "Request 列表" in html
     assert "Request 详情" in html
+    assert "验收说明" in html
+    assert 'href="#generate-panel"' in html
+    assert 'href="#request-list-panel"' in html
+    assert 'href="#request-detail-panel"' in html
+    assert 'href="#acceptance-panel"' in html
+    assert 'id="generate-panel"' in html
+    assert 'id="request-list-panel"' in html
+    assert 'id="request-detail-panel"' in html
+    assert 'id="acceptance-panel"' in html
     assert 'id="request-generate-form"' in html
     assert 'name="title"' in html
     assert 'name="storage_dir"' in html

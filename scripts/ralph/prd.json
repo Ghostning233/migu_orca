@@ -18,7 +18,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Keep the UI server-rendered and lightweight. If dev-browser is unavailable, record manual browser verification in progress.txt."
     },
     {

@@ -17,12 +17,17 @@ body {
 }
 
 .app-header {
-  align-items: center;
+  align-items: flex-start;
   background: #ffffff;
   border-bottom: 1px solid #d8dde5;
   display: flex;
+  gap: 24px;
   justify-content: space-between;
   padding: 24px clamp(20px, 5vw, 56px);
+}
+
+.header-copy {
+  max-width: 760px;
 }
 
 .stage-label {
@@ -42,7 +47,7 @@ p {
 h1 {
   font-size: clamp(2rem, 4vw, 3rem);
   line-height: 1.05;
-  margin-bottom: 0;
+  margin-bottom: 10px;
 }
 
 h2 {
@@ -50,15 +55,36 @@ h2 {
   margin-bottom: 18px;
 }
 
-.mode-badge {
-  background: #e7f4ee;
-  border: 1px solid #b9dccd;
-  border-radius: 999px;
-  color: #185d45;
-  font-size: 0.85rem;
+.mode-summary {
+  color: #3d4654;
+  line-height: 1.55;
+  margin: 0;
+}
+
+.top-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  max-width: 420px;
+}
+
+.top-nav a {
+  background: #edf3f7;
+  border: 1px solid #c8d5df;
+  border-radius: 6px;
+  color: #22577a;
+  font-size: 0.9rem;
   font-weight: 700;
-  padding: 8px 12px;
-  white-space: nowrap;
+  padding: 8px 10px;
+  text-decoration: none;
+}
+
+.top-nav a:hover,
+.top-nav a:focus {
+  border-color: #22577a;
+  box-shadow: 0 0 0 2px #d7e9f2;
+  outline: none;
 }
 
 .app-layout {
@@ -79,6 +105,16 @@ h2 {
 
 .request-detail-panel {
   grid-column: 1 / -1;
+}
+
+.acceptance-panel {
+  grid-column: 1 / -1;
+}
+
+.acceptance-panel p {
+  color: #3d4654;
+  line-height: 1.55;
+  margin-bottom: 0;
 }
 
 .panel-heading {
@@ -283,9 +319,12 @@ button {
 
 @media (max-width: 760px) {
   .app-header {
-    align-items: flex-start;
     flex-direction: column;
-    gap: 16px;
+  }
+
+  .top-nav {
+    justify-content: flex-start;
+    max-width: none;
   }
 
   .app-layout {
