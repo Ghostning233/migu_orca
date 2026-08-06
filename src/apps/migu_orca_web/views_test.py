@@ -51,11 +51,32 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'name="storage_dir"' in html
     assert 'name="save_request"' in html
     assert 'id="request-list-container"' in html
+    assert 'id="request-list-refresh"' in html
     assert 'id="request-detail-container"' in html
+    assert "/migu-orca-static/app.js" in html
     assert "token" not in html.lower()
     assert "http://" not in html
     assert "https://" not in html
     assert "<rss" not in html.lower()
+
+
+def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "/api/v1/requests" in script
+    assert "loadList" in script
+    assert "loadDetail" in script
+    assert "request-list-refresh" in script
+    assert "selected_rss_url ? \"已选择\" : \"未选择\"" in script
+    assert "有效种子标题" in script
+    assert "folder_name" in script
+    assert "filter_rule" in script
+    assert "token" not in script.lower()
+    assert "http://" not in script
+    assert "https://" not in script
+    assert "<rss" not in script.lower()
 
 
 def test_list_requests_returns_empty_list_for_missing_storage_dir(

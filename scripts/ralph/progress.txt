@@ -25,6 +25,7 @@
 - Stage 7 Web API may accept `storage_dir` from query/body for local validation convenience; keep errors sanitized and avoid leaking absolute paths.
 - Stage 7 Request query APIs live in `apps.migu_orca_web`; use `class_route`/`GetView`, return `{"requests": [...]}` for lists and `{"request": ...}` for detail, and keep storage access read-only through Stage 6 repositories.
 - Stage 7 Web API mutation endpoints can reuse `apps.migu_orca_entry.controllers.entry_controller` orchestration; convert returned `success=false` error dictionaries into `Stage1Error` so `extensions.flask_api` produces the unified sanitized envelope.
+- Use a module-specific `static_url_path` for the Stage 7 Web Blueprint; Flask's default `/static` route can mask colocated Blueprint assets.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 7 Web UI work unless explicitly pulled into scope.
 
 ## 2026-08-06 13:34 CST - Stage 7 PRD Setup
@@ -149,4 +150,26 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep Stage 7 server-rendered page routes on the `migu_orca_web` Blueprint and keep JSON API routes on `migu_orca_web_api`.
   - The Web UI shell intentionally contains static containers first; later interaction stories can attach minimal JavaScript without introducing a frontend build chain.
   - No dev-browser or Playwright MCP tool was exposed in this session, so UI stories should note manual browser verification unless a browser connector becomes available.
+---
+## 2026-08-06 14:29 CST - US-052
+Thread: https://codex.openai.com/threads/unavailable
+- What was implemented
+  - Added a minimal server-served Web UI script that calls `GET /api/v1/requests` to render saved Request summaries with loading, empty, selected, and error states.
+  - Added read-only detail browsing that calls `GET /api/v1/requests/<request_id>` and renders title, request_id, status, selected source summary, filter rule fields, folder name, seed count, and valid seed titles without exposing raw RSS URLs.
+  - Wired the existing Request generation form to the Web API so generated Requests can be inspected immediately, and saved Requests refresh the list.
+  - Added Web UI styles for list/detail states and moved Blueprint static assets to `/migu-orca-static/` to avoid Flask default static route masking.
+  - Added Flask test-client coverage for the static interaction script, endpoint wiring, key detail labels, and sensitive-content guardrails.
+  - Browser testing tools were not available in this session; manual browser verification is still needed.
+- Files changed
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Blueprint static files need a module-specific URL path in this app because the default Flask `/static` route can otherwise return 404 for Web module assets.
+  - The UI should summarize selected RSS presence/source instead of printing `selected_rss_url`, preserving the Stage 7 sensitive-output rule.
+  - Static-file Flask tests are useful here because browser automation is not exposed in the current session.
 ---

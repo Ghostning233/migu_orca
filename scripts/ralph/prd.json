@@ -114,7 +114,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Keep this as read-only browsing. Stage 7 is a minimum viable Web UI and must not implement confirm/cancel/modify actions unless explicitly re-scoped."
     },
     {

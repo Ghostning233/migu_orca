@@ -26,6 +26,7 @@ web_blueprint = Blueprint(
     "migu_orca_web",
     __name__,
     static_folder="static",
+    static_url_path="/migu-orca-static",
     template_folder="templates",
 )
 

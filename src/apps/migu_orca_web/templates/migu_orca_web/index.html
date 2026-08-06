@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MiGuOrca Stage 7 Web UI MVP</title>
     <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
+    <script defer src="{{ url_for('migu_orca_web.static', filename='app.js') }}"></script>
   </head>
   <body>
     <header class="app-header">
@@ -49,16 +50,16 @@
       <section class="panel request-list-panel" aria-labelledby="request-list-heading">
         <div class="panel-heading">
           <h2 id="request-list-heading">Request 列表</h2>
-          <button type="button">刷新</button>
+          <button id="request-list-refresh" type="button">刷新</button>
         </div>
-        <div id="request-list-container" class="empty-state">
+        <div id="request-list-container" class="empty-state" aria-live="polite">
           暂无已加载的 Request。
         </div>
       </section>
 
       <section class="panel request-detail-panel" aria-labelledby="request-detail-heading">
         <h2 id="request-detail-heading">Request 详情</h2>
-        <div id="request-detail-container" class="empty-state">
+        <div id="request-detail-container" class="empty-state" aria-live="polite">
           选择一个 Request 后查看详情。
         </div>
       </section>
