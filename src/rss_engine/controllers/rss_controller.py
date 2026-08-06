@@ -4,6 +4,7 @@ import re
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
+from mikan_engine.controllers.mikan_client import MikanTransport, UrlopenMikanTransport
 from shared.errors import Stage1Error
 from shared.models import (
     ExcludedSeed,
@@ -15,18 +16,36 @@ from shared.models import (
 )
 
 
-def parse_rss(source: RssSource, project_root: Path) -> ParsedRss:
-    if source.source_type != "static_fixture":
+DEFAULT_RSS_TIMEOUT_SECONDS = 10.0
+
+
+def parse_rss(
+    source: RssSource,
+    project_root: Path,
+    *,
+    transport: MikanTransport | None = None,
+    timeout: float = DEFAULT_RSS_TIMEOUT_SECONDS,
+) -> ParsedRss:
+    if source.source_type == "static_fixture":
+        root = _load_static_fixture(source, project_root)
+    elif source.source_type == "mikan_http":
+        root = _load_mikan_http(source, transport=transport, timeout=timeout)
+    else:
         raise Stage1Error(
             "rss_parse_failed",
             f"Stage 1 不支持 RSS 类型：{source.source_type}",
             "parse_rss",
         )
+
+    return _parse_rss_root(source, root)
+
+
+def _load_static_fixture(source: RssSource, project_root: Path) -> ElementTree.Element:
     fixture_path = Path(source.fixture_path)
     if not fixture_path.is_absolute():
         fixture_path = project_root / fixture_path
     try:
-        root = ElementTree.parse(fixture_path).getroot()
+        return ElementTree.parse(fixture_path).getroot()
     except (OSError, ElementTree.ParseError) as exc:
         raise Stage1Error(
             "rss_parse_failed",
@@ -35,6 +54,47 @@ def parse_rss(source: RssSource, project_root: Path) -> ParsedRss:
             {"reason": str(exc)},
         ) from exc
 
+
+def _load_mikan_http(
+    source: RssSource,
+    *,
+    transport: MikanTransport | None,
+    timeout: float,
+) -> ElementTree.Element:
+    rss_url = source.rss_url.strip()
+    if not rss_url:
+        raise Stage1Error(
+            "rss_parse_failed",
+            "MiKan RSS URL 不能为空",
+            "parse_rss",
+            {"source_type": source.source_type},
+        )
+
+    rss_transport = transport or UrlopenMikanTransport()
+    try:
+        xml_text = rss_transport.get_text(rss_url, timeout=timeout)
+    except Stage1Error:
+        raise
+    except Exception as exc:
+        raise Stage1Error(
+            "rss_parse_failed",
+            "MiKan RSS 读取失败",
+            "parse_rss",
+            {"reason": exc.__class__.__name__},
+        ) from exc
+
+    try:
+        return ElementTree.fromstring(xml_text)
+    except ElementTree.ParseError as exc:
+        raise Stage1Error(
+            "rss_parse_failed",
+            f"MiKan RSS XML 无法解析：{source.subtitle_group}",
+            "parse_rss",
+            {"reason": str(exc)},
+        ) from exc
+
+
+def _parse_rss_root(source: RssSource, root: ElementTree.Element) -> ParsedRss:
     seeds: list[RssSeed] = []
     warnings: list[str] = []
     for index, item in enumerate(root.findall(".//item"), start=1):

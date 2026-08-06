@@ -9,6 +9,21 @@ from shared.errors import Stage1Error
 from shared.models import FilterRule, ParsedRss, RssSeed, RssSource
 
 
+class FakeTransport:
+    def __init__(self, response: str = "") -> None:
+        self.response = response
+        self.requests: list[tuple[str, float]] = []
+
+    def get_text(self, url: str, *, timeout: float) -> str:
+        self.requests.append((url, timeout))
+        return self.response
+
+
+class FailingTransport:
+    def get_text(self, url: str, *, timeout: float) -> str:
+        raise OSError("network failed with hidden xml <rss>secret</rss>")
+
+
 def test_parse_rss_skips_item_missing_link(tmp_path: Path) -> None:
     fixture = tmp_path / "feed.xml"
     fixture.write_text(
@@ -24,6 +39,93 @@ def test_parse_rss_skips_item_missing_link(tmp_path: Path) -> None:
 
     assert [seed.title for seed in parsed.seeds] == ["有效条目"]
     assert parsed.warnings
+
+
+def test_parse_static_fixture_does_not_call_transport(tmp_path: Path) -> None:
+    fixture = tmp_path / "feed.xml"
+    fixture.write_text(
+        """<rss><channel>
+        <item><title>离线条目</title><link>https://example.invalid/1</link></item>
+        </channel></rss>""",
+        encoding="utf-8",
+    )
+    transport = FailingTransport()
+    source = RssSource("组", "https://example.invalid/rss", "static_fixture", str(fixture))
+
+    parsed = parse_rss(source, tmp_path, transport=transport)
+
+    assert [seed.title for seed in parsed.seeds] == ["离线条目"]
+
+
+def test_parse_mikan_http_rss_uses_injected_transport_and_existing_contract() -> None:
+    transport = FakeTransport(
+        """<rss><channel>
+        <item>
+          <title>[喵萌] 番剧 - 01 [1080p]</title>
+          <link>https://example.invalid/torrent/1</link>
+          <pubDate>Thu, 06 Aug 2026 10:00:00 GMT</pubDate>
+          <guid>torrent-1</guid>
+        </item>
+        <item>
+          <title>[喵萌] 番剧 - SP [720p]</title>
+          <link>https://example.invalid/torrent/sp</link>
+        </item>
+        </channel></rss>"""
+    )
+    source = RssSource(
+        "喵萌",
+        "https://mikan.example/RSS/Bangumi?bangumiId=100&subgroupid=10",
+        "mikan_http",
+        "",
+    )
+
+    parsed = parse_rss(source, Path.cwd(), transport=transport, timeout=3)
+    filtered = filter_seeds(
+        parsed,
+        FilterRule(must_contain="1080p", must_not_contain="SP"),
+    )
+
+    assert transport.requests == [(source.rss_url, 3)]
+    assert parsed.source is source
+    assert parsed.seeds[0].published_at == "Thu, 06 Aug 2026 10:00:00 GMT"
+    assert parsed.seeds[0].guid == "torrent-1"
+    assert [seed.title for seed in filtered.valid_seeds] == [
+        "[喵萌] 番剧 - 01 [1080p]"
+    ]
+    assert filtered.total_seed_count == 2
+
+
+def test_parse_mikan_http_read_failure_is_content_free_stage1_error() -> None:
+    source = RssSource(
+        "喵萌",
+        "https://mikan.example/RSS/Bangumi?bangumiId=100",
+        "mikan_http",
+        "",
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        parse_rss(source, Path.cwd(), transport=FailingTransport())
+
+    assert error.value.error_type == "rss_parse_failed"
+    assert error.value.failed_step == "parse_rss"
+    assert "hidden xml" not in error.value.message
+    assert "hidden xml" not in str(error.value.details)
+
+
+def test_parse_mikan_http_invalid_xml_does_not_include_raw_xml() -> None:
+    source = RssSource(
+        "喵萌",
+        "https://mikan.example/RSS/Bangumi?bangumiId=100",
+        "mikan_http",
+        "",
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        parse_rss(source, Path.cwd(), transport=FakeTransport("<rss>secret"))
+
+    assert error.value.error_type == "rss_parse_failed"
+    assert "secret" not in error.value.message
+    assert "secret" not in str(error.value.details)
 
 
 def test_parse_rss_fails_when_no_item_is_valid(tmp_path: Path) -> None:

@@ -13,6 +13,7 @@
 - MiKan search URLs are built from explicit `MikanConfig.search_endpoint` by appending a URL-encoded `searchstr` query parameter.
 - MiKan Bangumi page RSS discovery emits real sources as `RssSource(source_type="mikan_http", fixture_path="")`, using injected `MikanTransport` and offline HTML parser tests.
 - RSS parsing and filtering live in `rss_engine.controllers.rss_controller`; real RSS HTTP reads should reuse the existing `ParsedRss`, `RssSeed`, and `FilteredRss` contracts.
+- `parse_rss(...)` remains backward-compatible for `static_fixture`; pass `transport=` and `timeout=` only when testing or wiring `source_type="mikan_http"` real RSS reads.
 - CLI AB submission remains an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; real MiKan opt-in must not implicitly submit to Auto Bangumi.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, fixtures, or documentation examples.
 
@@ -58,4 +59,16 @@ Thread: https://codex.openai.com/threads/unavailable
   - `list_rss_sources(...)` now reads `matched_bangumi.mikan_url` through the injected `MikanTransport` and forwards `MikanConfig.timeout_seconds`.
   - Real MiKan RSS sources use `source_type="mikan_http"` with an empty `fixture_path`; keep `static_fixture` behavior isolated in catalog/RSS fixture loading.
   - The Bangumi page parser recognizes RSS links from table rows or anchor metadata and drops non-HTTP(S), non-RSS, and duplicate URLs.
+---
+## 2026-08-06 09:56 CST - US-036
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented `source_type="mikan_http"` RSS XML loading in `rss_engine.controllers.rss_controller.parse_rss(...)` through the injectable `MikanTransport.get_text(url, *, timeout)` seam.
+- Preserved fixture-backed `source_type="static_fixture"` behavior and reused the existing `ParsedRss`, `RssSeed`, `FilteredRss`, and `filter_seeds(...)` contracts for real RSS XML.
+- Added offline fake-transport tests for MiKan RSS success, timeout forwarding, fixture mode not touching HTTP transport, content-free read failures, and content-free XML parse failures.
+- Files changed: `src/rss_engine/controllers/rss_controller.py`, `src/rss_engine/controllers/rss_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Keep `parse_rss(source, project_root)` unchanged for default fixture generation; `transport=` and `timeout=` are opt-in hooks for real MiKan RSS tests and future CLI wiring.
+  - `mikan_http` RSS parsing should never include raw RSS XML in `Stage1Error.message` or `details`.
+  - US-037 can inject the same MiKan transport into RSS parsing when wiring explicit real MiKan CLI mode.
 ---
