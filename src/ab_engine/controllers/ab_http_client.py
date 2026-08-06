@@ -95,6 +95,7 @@ class AutoBangumiHttpClient:
     def create_subscription(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Create a subscription from an already prepared AB payload."""
 
+        validated_payload = _validate_subscription_payload(payload)
         return self._transport.post_json(
             self._config.endpoint,
             {
@@ -102,7 +103,7 @@ class AutoBangumiHttpClient:
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
-            deepcopy(payload),
+            validated_payload,
             timeout=self._timeout,
         )
 
@@ -115,3 +116,30 @@ def create_auto_bangumi_http_client(
     """Build the real Auto Bangumi HTTP client from explicit AB config."""
 
     return AutoBangumiHttpClient(config, transport=transport)
+
+
+def _validate_subscription_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    validated: dict[str, Any] = {}
+    for field in ("title", "rss_url", "save_path"):
+        validated[field] = _required_payload_string(payload.get(field), field)
+    filter_rule = payload.get("filter_rule")
+    if not isinstance(filter_rule, dict):
+        raise Stage1Error(
+            "invalid_ab_payload",
+            "Auto Bangumi payload 字段类型错误",
+            "validate_ab_subscription_payload",
+            {"field": "filter_rule", "expected_type": "object"},
+        )
+    validated["filter_rule"] = deepcopy(filter_rule)
+    return validated
+
+
+def _required_payload_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise Stage1Error(
+            "invalid_ab_payload",
+            "Auto Bangumi payload 缺少必填字符串字段",
+            "validate_ab_subscription_payload",
+            {"field": field, "expected_type": "string"},
+        )
+    return value.strip()

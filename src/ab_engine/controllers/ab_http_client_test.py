@@ -10,7 +10,13 @@ from ab_engine.controllers.ab_http_client import (
     AutoBangumiHttpClient,
     create_auto_bangumi_http_client,
 )
+from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
+from request_engine.controllers.request_controller import (
+    accept_request,
+    build_pending_request,
+)
 from shared.errors import Stage1Error
+from shared.models import EntryRequest, FilterRule, MatchedBangumi, SubtitleGroupSelection
 
 
 class _FakeHttpResponse:
@@ -51,6 +57,16 @@ class _RecordingTransport:
         return self._response
 
 
+class _ExplodingConfig:
+    @property
+    def endpoint(self) -> str:
+        raise AssertionError("config endpoint should not be read for invalid payload")
+
+    @property
+    def token(self) -> str:
+        raise AssertionError("config token should not be read for invalid payload")
+
+
 def _config() -> AutoBangumiConfig:
     return AutoBangumiConfig(
         endpoint="http://auto-bangumi.local/api/subscribe",
@@ -66,6 +82,18 @@ def _payload() -> dict[str, Any]:
         "save_path": "番剧",
         "filter_rule": {"must_contain": "1080p"},
     }
+
+
+def _accepted_request() -> dict[str, Any]:
+    pending = build_pending_request(
+        EntryRequest("番剧"),
+        MatchedBangumi("番剧 标准标题", [], "https://example.invalid/bangumi", 1.0),
+        [],
+        SubtitleGroupSelection("Loli", "https://example.invalid/rss.xml", []),
+        FilterRule(must_contain="1080p", must_not_contain="SP"),
+        "番剧 标准标题",
+    )
+    return accept_request(pending)
 
 
 def test_http_client_constructor_returns_protocol_compatible_client() -> None:
@@ -130,6 +158,96 @@ def test_http_client_uses_injected_transport_without_network() -> None:
             "timeout": 30,
         }
     ]
+
+
+def test_http_client_accepts_stage3_payload_mapper_output() -> None:
+    transport = _RecordingTransport({"id": "sub-123", "status": "created"})
+    client = create_auto_bangumi_http_client(_config(), transport=transport)
+
+    response = client.create_subscription(
+        build_ab_subscription_payload(_accepted_request())
+    )
+
+    assert response == {"id": "sub-123", "status": "created"}
+    assert transport.calls[0]["payload"] == {
+        "title": "番剧 标准标题",
+        "rss_url": "https://example.invalid/rss.xml",
+        "save_path": "番剧 标准标题",
+        "filter_rule": {"must_contain": "1080p", "must_not_contain": "SP"},
+    }
+
+
+def test_http_client_trims_core_payload_strings_before_transport() -> None:
+    transport = _RecordingTransport({"id": "sub-123", "status": "created"})
+    client = create_auto_bangumi_http_client(_config(), transport=transport)
+    payload = {
+        "title": " 番剧 ",
+        "rss_url": " https://example.invalid/rss.xml ",
+        "save_path": " 番剧 ",
+        "filter_rule": {"must_contain": "1080p"},
+    }
+
+    client.create_subscription(payload)
+
+    assert transport.calls[0]["payload"] == {
+        "title": "番剧",
+        "rss_url": "https://example.invalid/rss.xml",
+        "save_path": "番剧",
+        "filter_rule": {"must_contain": "1080p"},
+    }
+
+
+def test_http_client_copies_validated_filter_rule_before_transport() -> None:
+    transport = _RecordingTransport({"id": "sub-123", "status": "created"})
+    payload = _payload()
+    client = create_auto_bangumi_http_client(_config(), transport=transport)
+
+    client.create_subscription(payload)
+    payload["filter_rule"]["must_contain"] = "changed"
+
+    assert transport.calls[0]["payload"]["filter_rule"] == {"must_contain": "1080p"}
+
+
+def test_http_client_rejects_invalid_payload_before_config_or_transport() -> None:
+    transport = _RecordingTransport({"id": "sub-123", "status": "created"})
+    client = AutoBangumiHttpClient(_ExplodingConfig(), transport=transport)  # type: ignore[arg-type]
+
+    try:
+        client.create_subscription({"rss_url": "https://example.invalid/rss.xml"})
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict == {
+        "error_type": "invalid_ab_payload",
+        "error_message": "Auto Bangumi payload 缺少必填字符串字段",
+        "failed_step": "validate_ab_subscription_payload",
+        "details": {"field": "title", "expected_type": "string"},
+    }
+    assert transport.calls == []
+
+
+def test_http_client_rejects_invalid_filter_rule_before_transport() -> None:
+    transport = _RecordingTransport({"id": "sub-123", "status": "created"})
+    client = create_auto_bangumi_http_client(_config(), transport=transport)
+    payload = _payload()
+    payload["filter_rule"] = []
+
+    try:
+        client.create_subscription(payload)
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict == {
+        "error_type": "invalid_ab_payload",
+        "error_message": "Auto Bangumi payload 字段类型错误",
+        "failed_step": "validate_ab_subscription_payload",
+        "details": {"field": "filter_rule", "expected_type": "object"},
+    }
+    assert transport.calls == []
 
 
 def test_http_non_success_response_becomes_structured_error_without_token(

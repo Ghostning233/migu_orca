@@ -14,6 +14,24 @@
 - CLI AB submission is an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; default generation and confirmation paths must not contact external systems.
 - Stage 4 should replace the current fake-only CLI submission path with a real AB HTTP adapter while keeping fake-client injection available for tests.
 - The real AB HTTP client accepts an `AutoBangumiHttpTransport` injection; use `UrlopenAutoBangumiHttpTransport` only as the default real-network transport and keep tests offline with recording/fake transports.
+- Validate real AB payloads inside `AutoBangumiHttpClient.create_subscription(...)` before reading config or calling transport; invalid payloads use `invalid_ab_payload` at `validate_ab_subscription_payload`.
+
+## 2026-08-06 09:22 CST - US-029
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented real Auto Bangumi subscription payload validation for `title`, `rss_url`, `save_path`, and `filter_rule` before HTTP submission.
+- Added stable structured `Stage1Error` failures for missing/non-string core fields and non-object `filter_rule`, without reading AB config or calling the transport on invalid payloads.
+- Added offline tests for validation failure isolation, Stage 3 mapper compatibility, string trimming, and filter rule copy isolation.
+- Ran `uv run pytest -q`, `uv run python -m compileall -q src`, and `git diff --check`; all passed.
+- Files changed
+  - `src/ab_engine/controllers/ab_http_client.py`
+  - `src/ab_engine/controllers/ab_http_client_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep real AB payload validation at the HTTP adapter boundary so invalid caller input fails before endpoint/token access and before any transport call.
+  - Stage 3 mapper output remains the compatibility contract for valid AB payloads; tests can build an accepted request and pass `build_ab_subscription_payload(...)` into the real client.
+  - There are no nearby `src` CODEX.md files yet; reusable AB patterns continue to be consolidated in `scripts/ralph/progress.txt`.
+---
 
 ## 2026-08-06 09:19 CST - US-028
 Thread: https://codex.openai.com/threads/unavailable
