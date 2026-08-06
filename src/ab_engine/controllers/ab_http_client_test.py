@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from typing import Any, Mapping
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
-from ab_engine.controllers.ab_client import AutoBangumiClient
+from ab_engine.controllers.ab_client import AutoBangumiClient, submit_ab_subscription
 from ab_engine.controllers.ab_config import AutoBangumiConfig
 from ab_engine.controllers.ab_http_client import (
     AutoBangumiHttpClient,
@@ -33,6 +33,20 @@ class _FakeHttpResponse:
         return json.dumps(self._body, ensure_ascii=False).encode("utf-8")
 
 
+class _RawHttpResponse:
+    def __init__(self, body: bytes) -> None:
+        self._body = body
+
+    def __enter__(self) -> _RawHttpResponse:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self._body
+
+
 class _RecordingTransport:
     def __init__(self, response: dict[str, Any]) -> None:
         self._response = response
@@ -55,6 +69,21 @@ class _RecordingTransport:
             }
         )
         return self._response
+
+
+class _FailingTransport:
+    def __init__(self, error: Exception) -> None:
+        self._error = error
+
+    def post_json(
+        self,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        raise self._error
 
 
 class _ExplodingConfig:
@@ -279,3 +308,180 @@ def test_http_non_success_response_becomes_structured_error_without_token(
         "details": {"status_code": 503},
     }
     assert "secret-token" not in repr(error_dict)
+
+
+def test_http_auth_failure_becomes_stable_error_without_token(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):  # type: ignore[no-untyped-def]
+        raise HTTPError(request.full_url, 401, "bad secret-token", {}, None)
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client.urlopen", fake_urlopen)
+    client = create_auto_bangumi_http_client(_config())
+
+    try:
+        client.create_subscription(_payload())
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict == {
+        "error_type": "ab_auth_failed",
+        "error_message": "Auto Bangumi 认证失败",
+        "failed_step": "create_ab_subscription",
+        "details": {"status_code": 401},
+    }
+    assert "secret-token" not in repr(error_dict)
+
+
+def test_http_connection_failure_becomes_stable_error_without_reason(
+    monkeypatch,
+) -> None:
+    def fake_urlopen(request, timeout):  # type: ignore[no-untyped-def]
+        raise URLError("connection refused secret-token")
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client.urlopen", fake_urlopen)
+    client = create_auto_bangumi_http_client(_config())
+
+    try:
+        client.create_subscription(_payload())
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict == {
+        "error_type": "ab_connection_failed",
+        "error_message": "Auto Bangumi HTTP 连接失败",
+        "failed_step": "create_ab_subscription",
+        "details": {"category": "connection"},
+    }
+    assert "secret-token" not in repr(error_dict)
+
+
+def test_http_timeout_becomes_stable_error_without_reason(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):  # type: ignore[no-untyped-def]
+        raise TimeoutError("timed out secret-token")
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client.urlopen", fake_urlopen)
+    client = create_auto_bangumi_http_client(_config())
+
+    try:
+        client.create_subscription(_payload())
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict == {
+        "error_type": "ab_timeout",
+        "error_message": "Auto Bangumi HTTP 请求超时",
+        "failed_step": "create_ab_subscription",
+        "details": {"category": "timeout"},
+    }
+    assert "secret-token" not in repr(error_dict)
+
+
+def test_injected_transport_timeout_is_normalized() -> None:
+    client = create_auto_bangumi_http_client(
+        _config(),
+        transport=_FailingTransport(TimeoutError("secret-token")),
+    )
+
+    try:
+        client.create_subscription(_payload())
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict["error_type"] == "ab_timeout"
+    assert error_dict["failed_step"] == "create_ab_subscription"
+    assert "secret-token" not in repr(error_dict)
+
+
+def test_injected_stage_error_preserves_failed_step() -> None:
+    client = create_auto_bangumi_http_client(
+        _config(),
+        transport=_FailingTransport(
+            Stage1Error(
+                "invalid_ab_payload",
+                "业务错误",
+                "validate_ab_subscription_payload",
+            )
+        ),
+    )
+
+    try:
+        client.create_subscription(_payload())
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict["error_type"] == "invalid_ab_payload"
+    assert error_dict["failed_step"] == "validate_ab_subscription_payload"
+
+
+def test_non_json_response_becomes_invalid_ab_response(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):  # type: ignore[no-untyped-def]
+        return _RawHttpResponse(b"not-json")
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client.urlopen", fake_urlopen)
+    client = create_auto_bangumi_http_client(_config())
+
+    try:
+        client.create_subscription(_payload())
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict == {
+        "error_type": "invalid_ab_response",
+        "error_message": "Auto Bangumi 响应不是合法 JSON",
+        "failed_step": "create_ab_subscription",
+        "details": {},
+    }
+
+
+def test_non_object_response_becomes_invalid_ab_response(monkeypatch) -> None:
+    def fake_urlopen(request, timeout):  # type: ignore[no-untyped-def]
+        return _RawHttpResponse(b'["sub-123"]')
+
+    monkeypatch.setattr("ab_engine.controllers.ab_http_client.urlopen", fake_urlopen)
+    client = create_auto_bangumi_http_client(_config())
+
+    try:
+        client.create_subscription(_payload())
+    except Stage1Error as error:
+        error_dict = error.as_dict()
+    else:
+        raise AssertionError("expected Stage1Error")
+
+    assert error_dict == {
+        "error_type": "invalid_ab_response",
+        "error_message": "Auto Bangumi 响应必须是 JSON 对象",
+        "failed_step": "create_ab_subscription",
+        "details": {},
+    }
+
+
+def test_missing_subscription_id_builds_json_serializable_fallback_config() -> None:
+    client = create_auto_bangumi_http_client(
+        _config(),
+        transport=_RecordingTransport({"status": "created"}),
+    )
+
+    result = submit_ab_subscription(client, _payload(), fallback_enabled=True)
+
+    assert result["success"] is False
+    assert result["error"] == {
+        "error_type": "invalid_ab_response",
+        "error_message": "Auto Bangumi 响应缺少订阅 ID",
+        "failed_step": "create_ab_subscription",
+        "details": {"fields": ["id", "subscription_id", "ab_subscription_id"]},
+    }
+    assert result["fallback_config"]["failure_reason"] == result["error"]
+    assert json.loads(json.dumps(result["fallback_config"], ensure_ascii=False)) == result[
+        "fallback_config"
+    ]

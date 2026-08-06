@@ -16,6 +16,26 @@
 - The real AB HTTP client accepts an `AutoBangumiHttpTransport` injection; use `UrlopenAutoBangumiHttpTransport` only as the default real-network transport and keep tests offline with recording/fake transports.
 - Validate real AB payloads inside `AutoBangumiHttpClient.create_subscription(...)` before reading config or calling transport; invalid payloads use `invalid_ab_payload` at `validate_ab_subscription_payload`.
 - In CLI AB submission, `apply_ab_submit_action(...)` loads explicit AB config, builds the prepared payload, then uses an injected test client or `ab_http_client.create_auto_bangumi_http_client(ab_config)` for real submission.
+- Standardize real AB network failures inside `ab_http_client.py`: auth uses `ab_auth_failed`, timeouts use `ab_timeout`, connection failures use `ab_connection_failed`, and details must stay token-free.
+- The real AB HTTP client validates response objects include `id`, `subscription_id`, or `ab_subscription_id` before returning; missing IDs use `invalid_ab_response` at `create_ab_subscription`.
+
+## 2026-08-06 09:28 CST - US-031
+Thread: https://codex.openai.com/threads/unavailable
+- Standardized real Auto Bangumi HTTP error mapping for auth failures, connection failures, timeouts, invalid JSON/text responses, non-object responses, and missing subscription IDs.
+- Kept token-bearing values out of structured error details while preserving expected `Stage1Error.failed_step` values from injected/business failures.
+- Added offline tests covering urlopen failures, injected transport timeout normalization, invalid responses, missing subscription ID fallback JSON serialization, and failed-step preservation.
+- Ran `uv run pytest -q` and `uv run python -m compileall -q src`; both passed.
+- Files changed
+  - `src/ab_engine/controllers/ab_http_client.py`
+  - `src/ab_engine/controllers/ab_http_client_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Normalize real AB network and response errors at the adapter boundary so `submit_ab_subscription(...)` can keep building the stable submit envelope and fallback config.
+  - Do not expose raw urllib reasons, HTTP reason phrases, endpoints, headers, or tokens in AB error details; stable categories and status codes are enough.
+  - Missing real AB subscription IDs should fail at `create_ab_subscription`, before the response is treated as a successful submit.
+  - There are no nearby `src` CODEX.md files; reusable AB network patterns are consolidated in this progress log.
+---
 
 ## 2026-08-06 09:25 CST - US-030
 Thread: https://codex.openai.com/threads/unavailable
