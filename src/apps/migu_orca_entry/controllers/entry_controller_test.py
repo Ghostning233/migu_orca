@@ -92,6 +92,23 @@ def test_main_without_submit_ab_does_not_build_real_ab_client(
     assert output["request"]["ab_submit_result"] is None
 
 
+def test_generate_request_default_path_does_not_build_real_mikan_client(
+    monkeypatch,
+) -> None:
+    def fail_if_called(*args: object) -> None:
+        raise AssertionError("real MiKan client should not be created")
+
+    monkeypatch.setattr(
+        "mikan_engine.controllers.mikan_client.create_mikan_client",
+        fail_if_called,
+    )
+
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    assert result["success"] is True
+    assert result["request"]["source_info"]["matched_bangumi"]["title"] == "葬送的芙莉莲"
+
+
 def test_apply_ab_submit_action_skips_when_not_requested() -> None:
     result = apply_confirmation_action(
         generate_request(EntryRequest(raw_title="芙莉莲")),

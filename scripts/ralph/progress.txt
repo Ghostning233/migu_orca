@@ -8,6 +8,7 @@
 - The existing static catalog path is `shared.config.DEFAULT_CATALOG_PATH`, loaded through `catalog_engine.controllers.catalog_controller.load_catalog(...)`.
 - Catalog matching currently accepts a list of `BangumiCandidate` values and returns both `MatchedBangumi` plus the selected candidate; real MiKan source work should preserve that matching contract.
 - Existing `RssSource` values carry `subtitle_group`, `rss_url`, `source_type`, and `fixture_path`; Stage 5 should add real MiKan handling without regressing `source_type=static_fixture`.
+- Real MiKan source boundaries live under `src/mikan_engine`; construct clients only from explicit `MikanConfig` loaded by `load_mikan_config(path)`.
 - RSS parsing and filtering live in `rss_engine.controllers.rss_controller`; real RSS HTTP reads should reuse the existing `ParsedRss`, `RssSeed`, and `FilteredRss` contracts.
 - CLI AB submission remains an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; real MiKan opt-in must not implicitly submit to Auto Bangumi.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, fixtures, or documentation examples.
@@ -21,4 +22,15 @@ Thread: https://codex.openai.com/threads/unavailable
   - Stage 5 should focus on the MiKan source seam only; do not expand into persistence, Web UI, batch season lists, or direct qBittorrent integration.
   - Keep all real MiKan behavior opt-in and injectable so tests remain offline and deterministic.
   - Preserve Stage 4 Auto Bangumi submit behavior while replacing only the upstream data source when explicitly requested.
+---
+## 2026-08-06 09:46 CST - US-033
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the explicit real MiKan source boundary with `MikanConfig`, `load_mikan_config(path)`, `MikanClient`, `MikanTransport`, and `create_mikan_client(...)`.
+- Added focused tests for explicit JSON config loading, config validation, client construction, boundary methods, and the default `generate_request` path not creating a real MiKan client.
+- Files changed: `pyproject.toml`, `src/mikan_engine/__init__.py`, `src/mikan_engine/controllers/__init__.py`, `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/mikan_engine/controllers/mikan_config.py`, `src/mikan_engine/controllers/mikan_config_test.py`, `src/mikan_engine/models/__init__.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Keep Stage 5 MiKan client construction in `mikan_engine`; CLI integration should depend on this explicit boundary rather than importing transport behavior into request matching.
+  - The initial US-033 client methods are boundary placeholders; US-034 and US-035 should replace the stable `mikan_not_implemented` errors with injectable transport-backed behavior.
+  - Default `generate_request` is now guarded by a regression test that fails if the real MiKan client factory is invoked without an explicit opt-in path.
 ---

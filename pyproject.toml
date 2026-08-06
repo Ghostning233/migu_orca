@@ -22,6 +22,7 @@ build-backend = "hatchling.build"
 packages = [
     "src/apps",
     "src/catalog_engine",
+    "src/mikan_engine",
     "src/rss_engine",
     "src/subscription_engine",
     "src/ab_engine",
