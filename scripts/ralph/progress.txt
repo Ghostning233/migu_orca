@@ -10,6 +10,7 @@
 - New top-level Python packages must be added to `[tool.hatch.build.targets.wheel].packages` in `pyproject.toml` so `uv run` installs them for CLI/tests.
 - Stage 6 storage layout is centralized in `storage_engine.controllers.storage_config`; use `load_storage_config(...)` and `ensure_storage_layout(...)` instead of duplicating path conventions.
 - Request persistence lives in `storage_engine.controllers.request_repository`; save/load complete Request dictionaries by `request_id` and keep error details to stable IDs, directory names, and filenames rather than absolute paths.
+- Status history persistence lives in `storage_engine.controllers.history_repository`; append separate per-request JSON arrays under `history/` and keep transition metadata out of the saved Request snapshot contract.
 - CLI Request persistence is opt-in via `--save-request`; use `--storage-dir` to override the default `.migu_orca/storage` root, and expose save metadata as top-level `saved_request`.
 - Existing Request summaries are produced by `request_engine.controllers.request_controller.summarize_request(...)`; query/list views should reuse that contract where possible.
 - CLI real MiKan mode is explicit: use `--source mikan --mikan-config <path>`; default `--source static-fixture` stays offline and catalog-backed.
@@ -63,4 +64,17 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep CLI persistence as a final opt-in post-processing step so generation, confirmation, and AB submission can compose without changing their existing result contracts.
   - Save success metadata should stay at top-level `saved_request` and contain stable local JSON identifiers, not absolute paths.
   - Tests can monkeypatch the CLI module's imported `load_storage_config` to assert the default no-save path does not initialize storage.
+---
+## 2026-08-06 13:10 CST - US-043
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented per-request local JSON status history persistence for saved Request workflows.
+- Added `append_status_history(...)` and wired explicit `--save-request` mode to record successful modify, accept, and cancel transitions without changing the Request snapshot fields.
+- Added `--modify-patch` as a JSON-object CLI input so pending Requests can be modified before optional confirmation and audited when saved.
+- Ensured history write failures return a stable storage error envelope without reporting `saved_request` or `saved_history` success metadata.
+- Files changed: `src/storage_engine/controllers/history_repository.py`, `src/storage_engine/controllers/history_repository_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Keep status history as a separate persistence concern under `history/`; do not add transition audit fields to the saved Request snapshot contract.
+  - Build history events at the CLI orchestration layer where both previous and updated Request snapshots are available.
+  - User-provided modify patches should be parsed as JSON objects before request generation, then validated by `request_engine.controllers.request_controller.modify_request(...)`.
 ---

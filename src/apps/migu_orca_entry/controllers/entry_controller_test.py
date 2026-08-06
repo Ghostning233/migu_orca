@@ -7,6 +7,7 @@ from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.migu_orca_entry.controllers.entry_controller import (
     apply_ab_submit_action,
     apply_confirmation_action,
+    apply_modify_action,
     apply_request_save_action,
     generate_request,
     main,
@@ -162,6 +163,127 @@ def test_main_can_save_accepted_request(
     assert json.loads(saved_path.read_text(encoding="utf-8"))["status"] == "ACCEPTED"
 
 
+def test_main_save_request_records_accept_history(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    history_path = storage_dir / "history" / f"{request_id}.json"
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert output["saved_history"] == [
+        {
+            "request_id": request_id,
+            "storage": "local_json",
+            "directory": "history",
+            "filename": f"{request_id}.json",
+            "event_count": 1,
+        }
+    ]
+    assert history == [
+        {
+            "request_id": request_id,
+            "previous_status": "PENDING_CONFIRM",
+            "next_status": "ACCEPTED",
+            "action": "ACCEPT",
+            "timestamp": output["request"]["updated_at"],
+        }
+    ]
+
+
+def test_main_save_request_records_cancel_history_with_reason(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "cancel",
+            "--cancel-reason",
+            "稍后再订阅",
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    history = json.loads(
+        (storage_dir / "history" / f"{request_id}.json").read_text(encoding="utf-8")
+    )
+    assert exit_code == 0
+    assert history[0]["action"] == "CANCEL"
+    assert history[0]["details"] == {"reason": "稍后再订阅"}
+
+
+def test_main_save_request_records_modify_history(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+    patch = {"expected_folder_name": "芙莉莲 修改版"}
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--modify-patch",
+            json.dumps(patch, ensure_ascii=False),
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    history = json.loads(
+        (storage_dir / "history" / f"{request_id}.json").read_text(encoding="utf-8")
+    )
+    assert exit_code == 0
+    assert output["request"]["status"] == "PENDING_CONFIRM"
+    assert output["request"]["confirmable_config"]["expected_folder_name"] == (
+        "芙莉莲 修改版"
+    )
+    assert history == [
+        {
+            "request_id": request_id,
+            "previous_status": "PENDING_CONFIRM",
+            "next_status": "PENDING_CONFIRM",
+            "action": "MODIFY",
+            "timestamp": output["request"]["updated_at"],
+            "details": {"patch": patch},
+        }
+    ]
+
+
+def test_apply_modify_action_returns_structured_error() -> None:
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    modified = apply_modify_action(result, {"selected_subtitle_group": "Unknown"})
+
+    assert modified["success"] is False
+    assert modified["error"]["error_type"] == "invalid_modify_patch"
+    assert modified["error"]["failed_step"] == "modify_request"
+
+
 def test_main_save_request_uses_documented_default_storage_dir(
     capsys,
     monkeypatch,
@@ -217,6 +339,54 @@ def test_apply_request_save_action_returns_stable_error(
             "details": {"directory": "requests"},
         },
     }
+    assert str(tmp_path) not in str(saved)
+
+
+def test_apply_request_save_action_returns_stable_error_for_history_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    def fail_append_history(*args: object) -> None:
+        raise Stage1Error(
+            "storage_error",
+            "保存 Request 状态历史失败",
+            "append_status_history",
+            {"request_id": "stable-id", "directory": "history"},
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.append_status_history",
+        fail_append_history,
+    )
+
+    saved = apply_request_save_action(
+        result,
+        True,
+        storage_dir=tmp_path / "migu-state",
+        history_events=[
+            {
+                "request_id": result["request"]["request_id"],
+                "previous_status": "PENDING_CONFIRM",
+                "next_status": "ACCEPTED",
+                "action": "ACCEPT",
+                "timestamp": result["request"]["updated_at"],
+            }
+        ],
+    )
+
+    assert saved == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "storage_error",
+            "error_message": "保存 Request 状态历史失败",
+            "failed_step": "append_status_history",
+            "details": {"request_id": "stable-id", "directory": "history"},
+        },
+    }
+    assert "saved_request" not in saved
     assert str(tmp_path) not in str(saved)
 
 

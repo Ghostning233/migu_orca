@@ -20,6 +20,7 @@ from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
     cancel_request,
+    modify_request,
 )
 from rss_engine.controllers.rss_controller import filter_seeds, parse_rss
 from shared.config import (
@@ -31,6 +32,7 @@ from shared.config import (
 from shared.errors import Stage1Error
 from shared.logging import configure_logging
 from shared.models import EntryRequest, FilteredRss
+from storage_engine.controllers.history_repository import append_status_history
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
 from subscription_engine.controllers.subscription_controller import (
@@ -194,6 +196,30 @@ def apply_confirmation_action(
         return {"success": False, "request": None, "error": error.as_dict()}
 
 
+def apply_modify_action(
+    result: dict[str, Any],
+    patch: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if patch is None or not result["success"]:
+        return result
+
+    try:
+        updated_request = modify_request(result["request"], patch)
+        return {"success": True, "request": updated_request, "error": None}
+    except Stage1Error as exc:
+        LOGGER.warning("Request 修改失败：%s", exc.message)
+        return {"success": False, "request": None, "error": exc.as_dict()}
+    except Exception as exc:  # pragma: no cover - safety boundary
+        LOGGER.exception("Request 修改发生未预期错误")
+        error = Stage1Error(
+            "unexpected_error",
+            "Request 修改发生未预期错误",
+            "modify_request",
+            {"reason": str(exc)},
+        )
+        return {"success": False, "request": None, "error": error.as_dict()}
+
+
 def apply_ab_submit_action(
     result: dict[str, Any],
     submit_ab: bool,
@@ -260,6 +286,7 @@ def apply_request_save_action(
     save_request: bool,
     *,
     storage_dir: Path | None = None,
+    history_events: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     if not save_request or not result["success"]:
         return result
@@ -267,7 +294,13 @@ def apply_request_save_action(
     try:
         config = load_storage_config(storage_dir)
         saved_request = save_request_snapshot(config, result["request"])
-        return {**result, "saved_request": saved_request}
+        saved_history = [
+            append_status_history(config, event) for event in history_events or []
+        ]
+        saved = {**result, "saved_request": saved_request}
+        if saved_history:
+            saved["saved_history"] = saved_history
+        return saved
     except Stage1Error as exc:
         LOGGER.warning("Request 保存失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
@@ -295,6 +328,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     parser.add_argument("--mikan-config", type=Path)
     parser.add_argument("--log-file", type=Path)
+    parser.add_argument(
+        "--modify-patch",
+        help="确认前应用的 Request 修改补丁 JSON 对象",
+    )
     parser.add_argument("--action", choices=["accept", "cancel"])
     parser.add_argument("--cancel-reason")
     parser.add_argument(
@@ -316,6 +353,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     configure_logging(args.log_file)
+    modify_patch_result = _parse_modify_patch_arg(args.modify_patch)
+    if not modify_patch_result["success"]:
+        print(json.dumps(modify_patch_result, ensure_ascii=False, indent=2))
+        return 1
+    modify_patch = modify_patch_result["patch"]
+    history_events: list[dict[str, Any]] = []
     result = generate_request(
         EntryRequest(raw_title=args.title),
         catalog_path=args.catalog,
@@ -323,11 +366,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_mode="mikan_http" if args.source == "mikan" else "static_fixture",
         mikan_config_path=args.mikan_config,
     )
+    if modify_patch is not None:
+        previous_request = result["request"] if result["success"] else None
+        result = apply_modify_action(result, modify_patch)
+        if result["success"] and previous_request is not None:
+            history_events.append(
+                _build_history_event(
+                    previous_request,
+                    result["request"],
+                    action="MODIFY",
+                    details={"patch": modify_patch},
+                )
+            )
+    previous_request = result["request"] if result["success"] else None
     result = apply_confirmation_action(
         result,
         args.action,
         cancel_reason=args.cancel_reason,
     )
+    if result["success"] and previous_request is not None and args.action is not None:
+        history_events.append(
+            _build_history_event(
+                previous_request,
+                result["request"],
+                action=args.action.upper(),
+                details=_confirmation_history_details(args.action, args.cancel_reason),
+            )
+        )
     result = apply_ab_submit_action(
         result,
         args.submit_ab,
@@ -337,6 +402,60 @@ def main(argv: Sequence[str] | None = None) -> int:
         result,
         args.save_request,
         storage_dir=args.storage_dir,
+        history_events=history_events,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["success"] else 1
+
+
+def _parse_modify_patch_arg(value: str | None) -> dict[str, Any]:
+    if value is None:
+        return {"success": True, "patch": None, "error": None}
+
+    try:
+        patch = json.loads(value)
+    except json.JSONDecodeError as exc:
+        error = Stage1Error(
+            "invalid_modify_patch",
+            "修改补丁必须是 JSON 对象",
+            "parse_modify_patch",
+            {"reason": exc.msg},
+        )
+        return {"success": False, "request": None, "error": error.as_dict()}
+    if not isinstance(patch, dict):
+        error = Stage1Error(
+            "invalid_modify_patch",
+            "修改补丁必须是 JSON 对象",
+            "parse_modify_patch",
+        )
+        return {"success": False, "request": None, "error": error.as_dict()}
+    return {"success": True, "patch": patch, "error": None}
+
+
+def _build_history_event(
+    previous_request: dict[str, Any],
+    next_request: dict[str, Any],
+    *,
+    action: str,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    timestamp = next_request.get("updated_at") or datetime.now(UTC).isoformat()
+    event = {
+        "request_id": next_request.get("request_id"),
+        "previous_status": previous_request.get("status"),
+        "next_status": next_request.get("status"),
+        "action": action,
+        "timestamp": timestamp,
+    }
+    if details:
+        event["details"] = details
+    return event
+
+
+def _confirmation_history_details(
+    action: str,
+    cancel_reason: str | None,
+) -> dict[str, Any] | None:
+    if action == "cancel":
+        return {"reason": cancel_reason or ""}
+    return None
