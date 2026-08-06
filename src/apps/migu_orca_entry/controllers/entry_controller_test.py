@@ -7,12 +7,19 @@ from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.migu_orca_entry.controllers.entry_controller import (
     apply_ab_submit_action,
     apply_confirmation_action,
+    apply_modify_action,
+    apply_request_save_action,
     generate_request,
+    list_saved_requests,
+    load_saved_request,
     main,
 )
 from mikan_engine.controllers.mikan_config import MikanConfig
+from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
+from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.storage_config import load_storage_config
 
 
 def test_generate_request_end_to_end() -> None:
@@ -91,6 +98,416 @@ def test_main_without_submit_ab_does_not_build_real_ab_client(
     assert output["request"]["status"] == "ACCEPTED"
     assert output.get("ab_submit_result") is None
     assert output["request"]["ab_submit_result"] is None
+
+
+def test_main_without_save_request_does_not_touch_storage(
+    capsys,
+    monkeypatch,
+) -> None:
+    def fail_if_called(*args: object) -> None:
+        raise AssertionError("storage should not be loaded")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.load_storage_config",
+        fail_if_called,
+    )
+
+    exit_code = main(["芙莉莲"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["status"] == "PENDING_CONFIRM"
+    assert "saved_request" not in output
+
+
+def test_main_can_save_generated_request_to_explicit_storage_dir(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(["芙莉莲", "--save-request", "--storage-dir", str(storage_dir)])
+
+    output = json.loads(capsys.readouterr().out)
+    request = output["request"]
+    saved = output["saved_request"]
+    saved_path = storage_dir / "requests" / f"{request['request_id']}.json"
+    assert exit_code == 0
+    assert saved == {
+        "request_id": request["request_id"],
+        "storage": "local_json",
+        "directory": "requests",
+        "filename": f"{request['request_id']}.json",
+    }
+    assert json.loads(saved_path.read_text(encoding="utf-8")) == request
+    assert (storage_dir / "history").is_dir()
+    assert (storage_dir / "ab_results").is_dir()
+
+
+def test_main_can_save_accepted_request(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    saved_path = storage_dir / "requests" / output["saved_request"]["filename"]
+    assert exit_code == 0
+    assert output["request"]["status"] == "ACCEPTED"
+    assert json.loads(saved_path.read_text(encoding="utf-8"))["status"] == "ACCEPTED"
+
+
+def test_main_can_list_saved_request_summaries(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    save_request_snapshot(load_storage_config(storage_dir), request)
+
+    exit_code = main(["--list-requests", "--storage-dir", str(storage_dir)])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output == {
+        "success": True,
+        "requests": [summarize_request(request)],
+        "error": None,
+    }
+
+
+def test_main_can_load_saved_request_by_id(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    save_request_snapshot(load_storage_config(storage_dir), request)
+
+    exit_code = main(
+        [
+            "--load-request",
+            request["request_id"],
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output == {"success": True, "request": request, "error": None}
+
+
+def test_main_load_saved_request_returns_stable_missing_error(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        ["--load-request", "missing-request", "--storage-dir", str(storage_dir)]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert output == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "request_not_found",
+            "error_message": "未找到已保存的 Request",
+            "failed_step": "load_request_snapshot",
+            "details": {"request_id": "missing-request"},
+        },
+    }
+    assert str(tmp_path) not in str(output)
+
+
+def test_list_saved_requests_returns_stable_error_for_corrupt_request(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+    config = load_storage_config(storage_dir)
+    config.requests_dir.mkdir(parents=True)
+    (config.requests_dir / "broken.json").write_text("{", encoding="utf-8")
+
+    result = list_saved_requests(storage_dir=storage_dir)
+
+    assert result["success"] is False
+    assert result["requests"] is None
+    assert result["error"]["error_type"] == "storage_json_error"
+    assert result["error"]["failed_step"] == "load_request_snapshot"
+    assert result["error"]["details"]["request_id"] == "broken"
+    assert str(tmp_path) not in str(result)
+
+
+def test_load_saved_request_rejects_nested_request_id(tmp_path: Path) -> None:
+    result = load_saved_request("nested/request", storage_dir=tmp_path / "migu-state")
+
+    assert result["success"] is False
+    assert result["request"] is None
+    assert result["error"]["error_type"] == "invalid_request_id"
+    assert result["error"]["failed_step"] == "load_request_snapshot"
+
+
+def test_main_storage_query_does_not_generate_request(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("request generation should not run")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.generate_request",
+        fail_if_called,
+    )
+
+    exit_code = main(["--list-requests", "--storage-dir", str(storage_dir)])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output == {"success": True, "requests": [], "error": None}
+
+
+def test_main_save_request_records_accept_history(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    history_path = storage_dir / "history" / f"{request_id}.json"
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert output["saved_history"] == [
+        {
+            "request_id": request_id,
+            "storage": "local_json",
+            "directory": "history",
+            "filename": f"{request_id}.json",
+            "event_count": 1,
+        }
+    ]
+    assert history == [
+        {
+            "request_id": request_id,
+            "previous_status": "PENDING_CONFIRM",
+            "next_status": "ACCEPTED",
+            "action": "ACCEPT",
+            "timestamp": output["request"]["updated_at"],
+        }
+    ]
+
+
+def test_main_save_request_records_cancel_history_with_reason(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "cancel",
+            "--cancel-reason",
+            "稍后再订阅",
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    history = json.loads(
+        (storage_dir / "history" / f"{request_id}.json").read_text(encoding="utf-8")
+    )
+    assert exit_code == 0
+    assert history[0]["action"] == "CANCEL"
+    assert history[0]["details"] == {"reason": "稍后再订阅"}
+
+
+def test_main_save_request_records_modify_history(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+    patch = {"expected_folder_name": "芙莉莲 修改版"}
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--modify-patch",
+            json.dumps(patch, ensure_ascii=False),
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    history = json.loads(
+        (storage_dir / "history" / f"{request_id}.json").read_text(encoding="utf-8")
+    )
+    assert exit_code == 0
+    assert output["request"]["status"] == "PENDING_CONFIRM"
+    assert output["request"]["confirmable_config"]["expected_folder_name"] == (
+        "芙莉莲 修改版"
+    )
+    assert history == [
+        {
+            "request_id": request_id,
+            "previous_status": "PENDING_CONFIRM",
+            "next_status": "PENDING_CONFIRM",
+            "action": "MODIFY",
+            "timestamp": output["request"]["updated_at"],
+            "details": {"patch": patch},
+        }
+    ]
+
+
+def test_apply_modify_action_returns_structured_error() -> None:
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    modified = apply_modify_action(result, {"selected_subtitle_group": "Unknown"})
+
+    assert modified["success"] is False
+    assert modified["error"]["error_type"] == "invalid_modify_patch"
+    assert modified["error"]["failed_step"] == "modify_request"
+
+
+def test_main_save_request_uses_documented_default_storage_dir(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    default_storage_dir = tmp_path / "default-storage"
+
+    monkeypatch.setattr(
+        "storage_engine.controllers.storage_config.DEFAULT_STORAGE_DIR",
+        default_storage_dir,
+    )
+
+    exit_code = main(["芙莉莲", "--save-request"])
+
+    output = json.loads(capsys.readouterr().out)
+    saved_path = default_storage_dir / "requests" / output["saved_request"]["filename"]
+    assert exit_code == 0
+    assert saved_path.exists()
+
+
+def test_apply_request_save_action_returns_stable_error(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    def fail_save(*args: object) -> None:
+        raise Stage1Error(
+            "storage_error",
+            "保存 Request JSON 失败",
+            "save_request_snapshot",
+            {"directory": "requests"},
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.save_request_snapshot",
+        fail_save,
+    )
+
+    saved = apply_request_save_action(
+        result,
+        True,
+        storage_dir=tmp_path / "migu-state",
+    )
+
+    assert saved == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "storage_error",
+            "error_message": "保存 Request JSON 失败",
+            "failed_step": "save_request_snapshot",
+            "details": {"directory": "requests"},
+        },
+    }
+    assert str(tmp_path) not in str(saved)
+
+
+def test_apply_request_save_action_returns_stable_error_for_history_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    def fail_append_history(*args: object) -> None:
+        raise Stage1Error(
+            "storage_error",
+            "保存 Request 状态历史失败",
+            "append_status_history",
+            {"request_id": "stable-id", "directory": "history"},
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.append_status_history",
+        fail_append_history,
+    )
+
+    saved = apply_request_save_action(
+        result,
+        True,
+        storage_dir=tmp_path / "migu-state",
+        history_events=[
+            {
+                "request_id": result["request"]["request_id"],
+                "previous_status": "PENDING_CONFIRM",
+                "next_status": "ACCEPTED",
+                "action": "ACCEPT",
+                "timestamp": result["request"]["updated_at"],
+            }
+        ],
+    )
+
+    assert saved == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "storage_error",
+            "error_message": "保存 Request 状态历史失败",
+            "failed_step": "append_status_history",
+            "details": {"request_id": "stable-id", "directory": "history"},
+        },
+    }
+    assert "saved_request" not in saved
+    assert str(tmp_path) not in str(saved)
 
 
 def test_generate_request_default_path_does_not_build_real_mikan_client(
@@ -384,6 +801,186 @@ def test_main_can_submit_accepted_request_to_real_ab_client_factory(
     assert len(factory_configs) == 1
     assert factory_configs[0].endpoint == "http://auto-bangumi.local"
     assert client.calls
+
+
+def test_main_save_request_persists_successful_ab_submit_result(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=False)
+    storage_dir = tmp_path / "migu-state"
+    client = FakeAutoBangumiClient()
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda ab_config: client,
+    )
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--submit-ab",
+            "--ab-config",
+            str(config),
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    ab_result_path = storage_dir / "ab_results" / f"{request_id}.json"
+    request_path = storage_dir / "requests" / f"{request_id}.json"
+    saved_ab_result = json.loads(ab_result_path.read_text(encoding="utf-8"))
+    saved_request = json.loads(request_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert output["saved_ab_result"] == {
+        "request_id": request_id,
+        "storage": "local_json",
+        "directory": "ab_results",
+        "filename": f"{request_id}.json",
+    }
+    assert saved_ab_result["request_id"] == request_id
+    assert saved_ab_result["ab_submit_result"] == output["ab_submit_result"]
+    assert saved_request["ab_submit_result"] == output["ab_submit_result"]
+    assert "secret-token" not in str(saved_ab_result)
+
+
+def test_main_save_request_persists_fallback_ab_submit_result(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=True)
+    storage_dir = tmp_path / "migu-state"
+    client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "离线模拟失败",
+            "create_ab_subscription",
+            {"status_code": 503},
+        )
+    )
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda ab_config: client,
+    )
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--submit-ab",
+            "--ab-config",
+            str(config),
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    saved_ab_result = json.loads(
+        (storage_dir / "ab_results" / f"{request_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    loaded_exit_code = main(
+        ["--load-request", request_id, "--storage-dir", str(storage_dir)]
+    )
+    loaded_output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["ab_submit_result"]["success"] is False
+    assert output["ab_submit_result"]["fallback_config"]["title"] == "葬送的芙莉莲"
+    assert saved_ab_result["ab_submit_result"]["fallback_config"] == (
+        output["ab_submit_result"]["fallback_config"]
+    )
+    assert loaded_exit_code == 0
+    assert loaded_output["request"]["ab_submit_result"] == output["ab_submit_result"]
+    assert "secret-token" not in str(saved_ab_result)
+    assert "http://auto-bangumi.local" not in str(saved_ab_result)
+
+
+def test_main_save_request_without_submit_ab_does_not_create_ab_result_record(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["ab_submit_result"] is None
+    assert "saved_ab_result" not in output
+    assert list((storage_dir / "ab_results").glob("*.json")) == []
+
+
+def test_apply_request_save_action_returns_stable_error_for_ab_result_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=False)
+    result = apply_confirmation_action(
+        generate_request(EntryRequest(raw_title="芙莉莲")),
+        "accept",
+    )
+    submitted = apply_ab_submit_action(
+        result,
+        True,
+        ab_config_path=config,
+        client=FakeAutoBangumiClient(),
+    )
+
+    def fail_save_ab_result(*args: object) -> None:
+        raise Stage1Error(
+            "storage_error",
+            "保存 Auto Bangumi 提交结果失败",
+            "save_ab_submit_result",
+            {"request_id": "stable-id", "directory": "ab_results"},
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.save_ab_submit_result",
+        fail_save_ab_result,
+    )
+
+    saved = apply_request_save_action(
+        submitted,
+        True,
+        storage_dir=tmp_path / "migu-state",
+    )
+
+    assert saved == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "storage_error",
+            "error_message": "保存 Auto Bangumi 提交结果失败",
+            "failed_step": "save_ab_submit_result",
+            "details": {"request_id": "stable-id", "directory": "ab_results"},
+        },
+    }
+    assert "saved_request" not in saved
+    assert "saved_ab_result" not in saved
+    assert str(tmp_path) not in str(saved)
 
 
 def test_main_returns_structured_error_for_cancel_without_reason(capsys) -> None:

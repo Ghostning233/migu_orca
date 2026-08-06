@@ -1,111 +1,118 @@
 ## Codebase Patterns
-- Stage 1 through Stage 4 are complete; archived Ralph records live under `scripts/ralph/archive/`.
-- Stage 5 Ralph work uses branch `agent/stage5-real-mikan-source` and should complete one `passes=false` story per iteration.
+- Stage 1 through Stage 5 are complete; archived Ralph records live under `scripts/ralph/archive/`.
+- Stage 6 Ralph work uses branch `agent/stage6-request-persistence` and should complete one `passes=false` story per iteration.
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
 - Preserve the existing top-level JSON result envelope and convert expected business failures with `Stage1Error.as_dict()` or a compatible ErrorResult shape.
-- Default CLI request generation must remain offline and fixture-backed unless the user explicitly opts into a real external integration.
+- Default CLI request generation must remain offline and fixture-backed unless the user explicitly opts into real external integrations.
+- Default CLI request generation must not write local storage unless the user explicitly opts into persistence.
 - Real external adapters should live behind engine-specific client/transport seams, with tests using injected fake transports instead of live network access.
-- The existing static catalog path is `shared.config.DEFAULT_CATALOG_PATH`, loaded through `catalog_engine.controllers.catalog_controller.load_catalog(...)`.
-- Catalog matching currently accepts a list of `BangumiCandidate` values and returns both `MatchedBangumi` plus the selected candidate; real MiKan source work should preserve that matching contract.
-- Existing `RssSource` values carry `subtitle_group`, `rss_url`, `source_type`, and `fixture_path`; Stage 5 should add real MiKan handling without regressing `source_type=static_fixture`.
-- Real MiKan source boundaries live under `src/mikan_engine`; construct clients only from explicit `MikanConfig` loaded by `load_mikan_config(path)`.
-- MiKan HTTP reads use the injectable `MikanTransport.get_text(url, *, timeout)` seam; tests should pass fake transports and must not require live MiKanProject access.
-- MiKan search URLs are built from explicit `MikanConfig.search_endpoint` by appending a URL-encoded `searchstr` query parameter.
-- MiKan Bangumi page RSS discovery emits real sources as `RssSource(source_type="mikan_http", fixture_path="")`, using injected `MikanTransport` and offline HTML parser tests.
-- RSS parsing and filtering live in `rss_engine.controllers.rss_controller`; real RSS HTTP reads should reuse the existing `ParsedRss`, `RssSeed`, and `FilteredRss` contracts.
-- `parse_rss(...)` remains backward-compatible for `static_fixture`; pass `transport=` and `timeout=` only when testing or wiring `source_type="mikan_http"` real RSS reads.
-- CLI AB submission remains an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; real MiKan opt-in must not implicitly submit to Auto Bangumi.
+- Request construction and confirmation logic live in `request_engine`; Stage 6 persistence should store snapshots/history without expanding Request domain rules unnecessarily.
+- New top-level Python packages must be added to `[tool.hatch.build.targets.wheel].packages` in `pyproject.toml` so `uv run` installs them for CLI/tests.
+- Stage 6 storage layout is centralized in `storage_engine.controllers.storage_config`; use `load_storage_config(...)` and `ensure_storage_layout(...)` instead of duplicating path conventions.
+- Request persistence lives in `storage_engine.controllers.request_repository`; save/load complete Request dictionaries by `request_id` and keep error details to stable IDs, directory names, and filenames rather than absolute paths.
+- Status history persistence lives in `storage_engine.controllers.history_repository`; append separate per-request JSON arrays under `history/` and keep transition metadata out of the saved Request snapshot contract.
+- CLI Request persistence is opt-in via `--save-request`; use `--storage-dir` to override the default `.migu_orca/storage` root, and expose save metadata as top-level `saved_request`.
+- Existing Request summaries are produced by `request_engine.controllers.request_controller.summarize_request(...)`; query/list views should reuse that contract where possible.
+- Saved Request query paths should dispatch before generation in the CLI so list/load remains local-only and cannot touch MiKan, Auto Bangumi, or qBittorrent integrations.
 - CLI real MiKan mode is explicit: use `--source mikan --mikan-config <path>`; default `--source static-fixture` stays offline and catalog-backed.
-- Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, fixtures, or documentation examples.
-- Normalize real MiKan transport failures at the `MikanClient` boundary so injected transports and default HTTP reads produce the same sanitized `mikan_http_failed`, `mikan_connection_failed`, `mikan_timeout`, or `mikan_parse_failed` errors.
-- MiKan documentation and example configs should use placeholder endpoints only, with the public config shape `search_endpoint` plus `timeout_seconds`.
+- CLI AB submission remains explicit: use `--action accept --submit-ab --ab-config <path>`; persistence must not implicitly submit to Auto Bangumi.
+- Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, persisted errors, fixtures, or documentation examples.
+- AB submit result persistence lives in `storage_engine.controllers.ab_result_repository`; write separate per-request JSON records under `ab_results/` only when `request.ab_submit_result` is an object from explicit `--submit-ab`.
+- MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 6 persistence work unless explicitly pulled into scope.
 
-## 2026-08-06 09:45 CST - Stage 5 PRD Setup
+## 2026-08-06 12:55 CST - Stage 6 PRD Setup
 Thread: https://codex.openai.com/threads/unavailable
-- Confirmed Stage 4 Ralph work is complete, archived under `scripts/ralph/archive/2026-08-06-stage4-real-auto-bangumi-client/`, and merged to GitHub `main` through PR #11.
-- Created the active Stage 5 PRD for explicit real MiKanProject data source integration on branch `agent/stage5-real-mikan-source`.
-- Split Stage 5 into US-033 through US-039: MiKan config/client boundary, injectable search transport, Bangumi page RSS discovery, real RSS HTTP reading, explicit CLI wiring, error standardization, and usage documentation.
+- Confirmed Stage 5 Ralph work is complete, archived under `scripts/ralph/archive/2026-08-06-stage5-real-mikan-source/`, and merged to GitHub `main` through PR #12.
+- Created the active Stage 6 PRD for local JSON Request persistence, status history, query/recovery CLI, and AB result persistence on branch `agent/stage6-request-persistence`.
+- Split Stage 6 into US-040 through US-046: storage config/path boundary, Request repository, explicit CLI save mode, status history, query/recovery, AB result/fallback persistence, and documentation.
+- Recorded that real MiKan search/RSS parsing compatibility improvements remain in `docs/backlog.md` and are intentionally not blocking Stage 6.
 - **Learnings for future iterations:**
-  - Stage 5 should focus on the MiKan source seam only; do not expand into persistence, Web UI, batch season lists, or direct qBittorrent integration.
-  - Keep all real MiKan behavior opt-in and injectable so tests remain offline and deterministic.
-  - Preserve Stage 4 Auto Bangumi submit behavior while replacing only the upstream data source when explicitly requested.
+  - Keep persistence opt-in so existing offline generation tests stay deterministic and do not write runtime files by default.
+  - Prefer local JSON repository seams before introducing SQLite or any database dependency.
+  - Treat saved Request snapshots, state history, and AB submit results as separate persistence concerns even if they share the same storage root.
 ---
-## 2026-08-06 09:46 CST - US-033
+## 2026-08-06 12:59 CST - US-040
 Thread: https://codex.openai.com/threads/unavailable
-- Implemented the explicit real MiKan source boundary with `MikanConfig`, `load_mikan_config(path)`, `MikanClient`, `MikanTransport`, and `create_mikan_client(...)`.
-- Added focused tests for explicit JSON config loading, config validation, client construction, boundary methods, and the default `generate_request` path not creating a real MiKan client.
-- Files changed: `pyproject.toml`, `src/mikan_engine/__init__.py`, `src/mikan_engine/controllers/__init__.py`, `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/mikan_engine/controllers/mikan_config.py`, `src/mikan_engine/controllers/mikan_config_test.py`, `src/mikan_engine/models/__init__.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Implemented a new `storage_engine` package boundary for local JSON persistence configuration.
+- Added `StorageConfig`, `load_storage_config(...)`, and `ensure_storage_layout(...)` with predictable `requests`, `history`, and `ab_results` subdirectories.
+- Added offline tests for default and caller-overridden storage paths, directory creation, stable storage errors, and the default `generate_request` path remaining non-persistent.
+- Files changed: `pyproject.toml`, `src/storage_engine/__init__.py`, `src/storage_engine/controllers/__init__.py`, `src/storage_engine/controllers/storage_config.py`, `src/storage_engine/controllers/storage_config_test.py`, `src/storage_engine/models/__init__.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
 - Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
 - **Learnings for future iterations:**
-  - Keep Stage 5 MiKan client construction in `mikan_engine`; CLI integration should depend on this explicit boundary rather than importing transport behavior into request matching.
-  - The initial US-033 client methods are boundary placeholders; US-034 and US-035 should replace the stable `mikan_not_implemented` errors with injectable transport-backed behavior.
-  - Default `generate_request` is now guarded by a regression test that fails if the real MiKan client factory is invoked without an explicit opt-in path.
+  - Add every new top-level package to Hatch's explicit package list in `pyproject.toml`; otherwise installed CLI/test environments may not include it.
+  - Keep Stage 6 path conventions centralized in `storage_engine.controllers.storage_config` so later repositories and CLI actions share one layout.
+  - Storage initialization is explicit; importing the storage config module or generating a Request must not create runtime directories.
 ---
-## 2026-08-06 09:49 CST - US-034
+## 2026-08-06 13:03 CST - US-041
 Thread: https://codex.openai.com/threads/unavailable
-- Implemented transport-backed real MiKan search in `MikanClient.list_bangumi_candidates(...)`, including URL construction from explicit config, timeout forwarding, default urllib transport, and offline HTML parsing into `BangumiCandidate` values.
-- Added focused fake-transport tests for encoded `searchstr` requests, timeout/config use, search fixture parsing, duplicate Bangumi result suppression, empty-input validation, aliases, `mikan_url`, and empty `rss_sources`.
-- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Implemented a focused local JSON Request repository for saving and loading complete Request snapshots by `request_id`.
+- Added request ID filename validation to reject traversal and nested path fragments before writing or reading.
+- Added stable Stage1Error surfaces for missing snapshots, write failures, invalid JSON, and non-object JSON without leaking absolute local paths.
+- Files changed: `src/storage_engine/controllers/request_repository.py`, `src/storage_engine/controllers/request_repository_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
 - Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
 - **Learnings for future iterations:**
-  - `MikanTransport.get_text(url, *, timeout)` is the reusable seam for Stage 5 MiKan HTTP reads; keep future RSS/page tests on fake transports.
-  - Search parsing currently recognizes Bangumi candidates from anchors whose `href` contains `/Home/Bangumi/`, using anchor text as the canonical title and the anchor `title` attribute as an alias when present.
-  - US-035 can reuse the default `UrlopenMikanTransport` but should keep `list_rss_sources(...)` page parsing and RSS URL validation separate from search parsing.
+  - Keep Request repository APIs dictionary-based so persistence does not change the Request top-level contract from `request_engine`.
+  - Validate `request_id` as a single filename segment before appending `.json`; `Path.resolve(...).relative_to(...)` alone still allows nested paths under `requests`.
+  - Repository error details should expose stable identifiers such as `request_id`, `directory`, and `filename`, not absolute storage paths or underlying OS error strings.
 ---
-## 2026-08-06 09:53 CST - US-035
+## 2026-08-06 13:06 CST - US-042
 Thread: https://codex.openai.com/threads/unavailable
-- Implemented transport-backed MiKan Bangumi page RSS discovery in `MikanClient.list_rss_sources(...)`.
-- Added offline parser coverage for table-row RSS links, relative URL normalization, `http`/`https` absolute URL validation, duplicate RSS URL suppression, metadata-based subtitle group names, empty URL validation, and stable parse failures when no RSS sources are found.
-- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
-- **Learnings for future iterations:**
-  - `list_rss_sources(...)` now reads `matched_bangumi.mikan_url` through the injected `MikanTransport` and forwards `MikanConfig.timeout_seconds`.
-  - Real MiKan RSS sources use `source_type="mikan_http"` with an empty `fixture_path`; keep `static_fixture` behavior isolated in catalog/RSS fixture loading.
-  - The Bangumi page parser recognizes RSS links from table rows or anchor metadata and drops non-HTTP(S), non-RSS, and duplicate URLs.
----
-## 2026-08-06 09:56 CST - US-036
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented `source_type="mikan_http"` RSS XML loading in `rss_engine.controllers.rss_controller.parse_rss(...)` through the injectable `MikanTransport.get_text(url, *, timeout)` seam.
-- Preserved fixture-backed `source_type="static_fixture"` behavior and reused the existing `ParsedRss`, `RssSeed`, `FilteredRss`, and `filter_seeds(...)` contracts for real RSS XML.
-- Added offline fake-transport tests for MiKan RSS success, timeout forwarding, fixture mode not touching HTTP transport, content-free read failures, and content-free XML parse failures.
-- Files changed: `src/rss_engine/controllers/rss_controller.py`, `src/rss_engine/controllers/rss_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
-- **Learnings for future iterations:**
-  - Keep `parse_rss(source, project_root)` unchanged for default fixture generation; `transport=` and `timeout=` are opt-in hooks for real MiKan RSS tests and future CLI wiring.
-  - `mikan_http` RSS parsing should never include raw RSS XML in `Stage1Error.message` or `details`.
-  - US-037 can inject the same MiKan transport into RSS parsing when wiring explicit real MiKan CLI mode.
----
-## 2026-08-06 10:00 CST - US-037
-Thread: https://codex.openai.com/threads/unavailable
-- Wired explicit CLI MiKan mode through `--source mikan --mikan-config <path>` while keeping the default static fixture workflow unchanged.
-- Extended `generate_request(...)` to support injected fake MiKan clients and fake RSS transports for offline tests, discover RSS sources from matched real MiKan candidates, and pass the configured transport/timeout into RSS parsing.
-- Verified real MiKan mode composes with `--action accept --submit-ab --ab-config <path>` without making AB submission implicit.
+- Implemented explicit CLI Request saving with `--save-request` and optional `--storage-dir`.
+- Added a CLI save action that runs after generation, confirmation, and optional AB submission, preserving the existing success/request/error envelope and adding non-sensitive `saved_request` metadata on success.
+- Added tests proving default CLI generation does not touch storage, explicit static-fixture saves create the JSON layout and snapshot, accepted Requests are saved after confirmation, the documented default storage root works, and save failures return stable errors.
 - Files changed: `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
 - Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
 - **Learnings for future iterations:**
-  - Keep CLI source selection explicit: `static_fixture` maps to `--source static-fixture`, and real MiKan maps to internal `source_mode="mikan_http"`.
-  - `generate_request(...)` can now accept `mikan_client=` and `mikan_rss_transport=` for deterministic MiKan flow tests.
-  - Real MiKan mode still returns the existing `success`/`request`/`error` envelope before optional confirmation and AB submission actions run.
+  - Keep CLI persistence as a final opt-in post-processing step so generation, confirmation, and AB submission can compose without changing their existing result contracts.
+  - Save success metadata should stay at top-level `saved_request` and contain stable local JSON identifiers, not absolute paths.
+  - Tests can monkeypatch the CLI module's imported `load_storage_config` to assert the default no-save path does not initialize storage.
 ---
-## 2026-08-06 10:03 CST - US-038
+## 2026-08-06 13:10 CST - US-043
 Thread: https://codex.openai.com/threads/unavailable
-- Standardized MiKan client transport failures so HTTP non-success, connection failures, timeouts, and injected parser errors map to stable token-free and content-free `Stage1Error` values.
-- Added regression tests proving error details omit endpoint URLs, raw HTML, and sensitive strings while preserving the correct failed step for search and Bangumi RSS source discovery.
-- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Implemented per-request local JSON status history persistence for saved Request workflows.
+- Added `append_status_history(...)` and wired explicit `--save-request` mode to record successful modify, accept, and cancel transitions without changing the Request snapshot fields.
+- Added `--modify-patch` as a JSON-object CLI input so pending Requests can be modified before optional confirmation and audited when saved.
+- Ensured history write failures return a stable storage error envelope without reporting `saved_request` or `saved_history` success metadata.
+- Files changed: `src/storage_engine/controllers/history_repository.py`, `src/storage_engine/controllers/history_repository_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
 - Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
 - **Learnings for future iterations:**
-  - Route MiKan HTTP reads through the client boundary helper so fake transports cannot leak raw exception messages or details.
-  - Preserve only safe structured details for MiKan network errors: `status_code` for HTTP failures and `category` for connection/timeout failures.
-  - Page parser failures should remain generic and must not echo raw MiKan HTML or RSS XML.
+  - Keep status history as a separate persistence concern under `history/`; do not add transition audit fields to the saved Request snapshot contract.
+  - Build history events at the CLI orchestration layer where both previous and updated Request snapshots are available.
+  - User-provided modify patches should be parsed as JSON objects before request generation, then validated by `request_engine.controllers.request_controller.modify_request(...)`.
 ---
-## 2026-08-06 10:05 CST - US-039
+## 2026-08-06 13:14 CST - US-044
 Thread: https://codex.openai.com/threads/unavailable
-- Documented the Stage 5 real MiKanProject source behavior in README, including the default offline source, explicit `--source mikan --mikan-config <path>` opt-in, combined MiKan plus AB submit command, parser validation caveats, and sensitive-data handling requirements.
-- Added a safe placeholder MiKan config example with `search_endpoint` and `timeout_seconds`.
-- Files changed: `README.md`, `config/user/mikan-config.example.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Implemented local-only query and recovery entries for saved Request snapshots.
+- Added `list_request_snapshots(...)` and CLI helpers for `--list-requests` summary output and `--load-request <request_id>` full JSON recovery.
+- Made the CLI title optional only for storage query actions, with early query dispatch so list/load do not generate Requests or contact external integrations.
+- Added stable error coverage for missing, nested, and corrupted saved Request reads.
+- Files changed: `src/storage_engine/controllers/request_repository.py`, `src/storage_engine/controllers/request_repository_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
 - Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
 - **Learnings for future iterations:**
-  - Keep MiKan examples token-free and endpoint-placeholder based; do not document real cookies, account details, or complete private deployment URLs.
-  - README should describe the default source as `static-fixture` and the real source as the explicit `--source mikan --mikan-config <path>` path.
-  - Real MiKan parser behavior depends on current MiKanProject page structure, so docs should call out live-site validation even when offline parser tests pass.
+  - Dispatch storage query modes before generation in `main(...)` to preserve the local-only contract.
+  - Keep list output summary-based via `summarize_request(...)` and load output as the complete saved Request envelope.
+  - Repository listing should reuse `load_request_snapshot(...)` so corrupted JSON and invalid request IDs produce the same stable errors as direct loads.
+---
+## 2026-08-06 13:17 CST - US-045
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented local JSON persistence for Auto Bangumi submit outcomes in saved Request workflows.
+- Added a focused `ab_result_repository` that saves and loads per-request AB result records under `ab_results/` with request ID path validation and stable storage errors.
+- Wired explicit CLI `--save-request` mode to emit `saved_ab_result` metadata only when `--submit-ab` produced a Request-level `ab_submit_result`; ordinary saved Requests do not create AB result records.
+- Added regression coverage for successful AB result persistence, fallback-enabled failure persistence and recovery through `--load-request`, no-submit save behavior, repository corruption/missing errors, and stable save failure output.
+- Files changed: `src/storage_engine/controllers/ab_result_repository.py`, `src/storage_engine/controllers/ab_result_repository_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Keep AB submit outcomes as separate `ab_results/` records while also saving the final Request snapshot with its `ab_submit_result` for load-based recovery.
+  - Gate AB result persistence on an object-valued `request.ab_submit_result`; the existence of the `ab_results/` directory alone should not imply a submission happened.
+  - Storage failure outputs should omit partial success metadata such as `saved_request` and `saved_ab_result`, even if an earlier file write already occurred.
+---
+## 2026-08-06 13:22 CST - US-046
+Thread: https://codex.openai.com/threads/unavailable
+- Documented Stage 6 local JSON persistence behavior in README, including the default no-write contract, explicit save/query CLI examples, storage directory layout, runtime data guidance, and the MiKan compatibility backlog pointer.
+- Marked the final Stage 6 PRD story as passing.
+- Files changed: `README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep README CLI examples aligned with `entry_controller.main(...)` argument names because Stage 6 user-facing behavior is entirely CLI-driven.
+  - Documentation should state both sides of opt-in behavior: default commands do not write storage, while `--save-request` writes JSON records under the configured storage root.
+  - Runtime storage under `.migu_orca/storage` should be treated as generated local data and kept out of Git.
 ---
