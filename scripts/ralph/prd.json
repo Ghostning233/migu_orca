@@ -38,7 +38,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "If directly copying from the reference project, remove unrelated auth/Kong/admin-log behavior unless needed by MiGuOrca."
     },
     {

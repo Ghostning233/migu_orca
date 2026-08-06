@@ -14,7 +14,10 @@
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, absolute local paths, or other sensitive config values in structured error details, logs, persisted errors, fixtures, API responses, UI text, or documentation examples.
 - Stage 7 Flask Web UI must reference `/home/ghostning/github/user_level_flask` for structure: `src/apps/base.py:create_app`, `src/apps/registry.py:ALL_BLUEPRINTS`, module Blueprints, `extensions/flask_api` style response helpers, class-based `GetView`/`PostView`, Pydantic validators, `src/wsgi.py`, and Flask test client coverage.
 - Stage 7 Flask blueprints should be exposed as per-module `blueprints` lists and registered centrally through `apps.registry.ALL_BLUEPRINTS`.
-- Until the unified `extensions.flask_api` layer lands, Stage 7 health endpoints return the target JSON envelope directly: `{ok: true, result: "ok"}`.
+- Health endpoints still return the target JSON envelope directly: `{ok: true, result: "ok"}`; API blueprints added after US-048 should use `extensions.flask_api`.
+- Stage 7 unified API helpers live in `extensions.flask_api`; use `ok_response(...)`, `failed_response(...)`, `route(...)`, `class_route(...)`, `GetView`, and `PostView` for JSON APIs.
+- `extensions.flask_api` converts `Stage1Error`, `APIException`, and Pydantic `ValidationError` into the shared response envelope; unexpected exceptions re-raise under testing/debug and become generic `internal_server_error` responses otherwise.
+- API error responses must pass through the extension sanitizer before exposing details; it redacts absolute paths, URLs, token-like keys/strings, and raw HTML/RSS content.
 - Keep Stage 7 as a Flask server-rendered Web UI MVP with minimal JavaScript; do not introduce React/Vite or a separate frontend build unless explicitly approved.
 - Stage 7 canonical Web UI homepage is `/index`; root `/` should redirect to `/index`.
 - Stage 7 is a minimum viable Web UI and should not implement confirm/cancel/modify actions unless explicitly re-scoped.
@@ -57,4 +60,29 @@ Thread: https://codex.openai.com/threads/unavailable
   - Stage 7 should follow the reference Flask project’s app factory plus registry pattern, but keep the MiGuOrca skeleton minimal until later stories add API helpers and UI modules.
   - Health endpoints currently return the intended JSON response envelope directly; later unified API response work can replace that with shared decorators/helpers.
   - `uv run flask --app wsgi:app routes` is a quick smoke check for the `src/wsgi.py` entrypoint and registered URL rules.
+---
+## 2026-08-06 14:10 CST - US-048
+Thread: https://codex.openai.com/threads/unavailable
+- What was implemented
+  - Added the Stage 7 `extensions.flask_api` package with shared `ok_response(...)` and `failed_response(...)` JSON envelopes.
+  - Added `route(...)` and `class_route(...)` helpers for function views and Flask class-based views.
+  - Added `APIBaseView`, `GetView`, and `PostView` with Pydantic request validation support.
+  - Converted `Stage1Error`, `APIException`, and Pydantic validation errors into sanitized API error responses, while keeping unexpected exceptions visible in testing/debug.
+  - Added Pydantic as a runtime dependency and included `src/extensions` in the package build list.
+  - Added focused Flask test-client and app-context tests for success responses, business errors, validation errors, sanitization, and unexpected exception behavior.
+- Files changed
+  - `pyproject.toml`
+  - `uv.lock`
+  - `src/extensions/__init__.py`
+  - `src/extensions/flask_api/__init__.py`
+  - `src/extensions/flask_api/api.py`
+  - `src/extensions/flask_api/api_test.py`
+  - `src/extensions/flask_api/exceptions.py`
+  - `src/extensions/flask_api/views.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Future Stage 7 API blueprints should use `extensions.flask_api` instead of returning Flask dictionaries directly.
+  - Pydantic validation failures are returned under `error_data.errors`, so frontend code should read validation details there.
+  - The sanitizer is intentionally conservative and can replace full string values with redaction markers when raw RSS or HTML appears.
 ---
