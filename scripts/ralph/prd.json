@@ -96,7 +96,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Prefer DOM restructuring in app.js plus CSS improvements. Do not change saved Request snapshot schema."
     },
     {

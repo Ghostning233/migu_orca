@@ -26,6 +26,7 @@
 - Web API mutation endpoints can reuse `apps.migu_orca_entry.controllers.entry_controller` orchestration; convert returned `success=false` error dictionaries into `Stage1Error` so `extensions.flask_api` produces the unified sanitized envelope.
 - Use module-specific static URL path `/migu-orca-static/`; Flask's default `/static` route can mask colocated Blueprint assets.
 - Request detail responses include optional `history` and `ab_result` sections; missing optional records should not fail the Request detail load, and damaged optional records should return section-local error metadata.
+- Stage 8 Request detail usability changes should stay as client-side DOM projections over the existing `/api/v1/requests/<request_id>` payload; do not change the saved Request snapshot schema for layout-only work.
 - Web UI must scrub fallback config display values before rendering so URL-like strings and credential-like keys are redacted in collapsible JSON.
 - Web UI form usability contracts are pinned in `src/apps/migu_orca_web/views_test.py` through server-rendered DOM assertions plus static `app.js` and `style.css` checks.
 - Stage 8 browser-only preferences belong in `src/apps/migu_orca_web/static/app.js` with `localStorage` keys scoped to `miguOrca.web.*`; do not persist UI preferences through storage JSON or Web API payloads.
@@ -114,4 +115,20 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep Stage 8 Request list search/filter/sort browser-only over the existing summary payload; this story intentionally adds no backend search API.
   - `loadedRequests` should remain the source list while `renderList()` derives the visible list from current controls, so clearing filters restores the last loaded data without another request.
   - Static UI tests can pin list behavior through stable IDs and script hooks when browser automation is unavailable.
+---
+
+## 2026-08-06 15:29 CST - US-059
+Thread: https://codex.openai.com/threads/unavailable
+- Reworked Request detail rendering into Overview, Source, Filter, Seeds, and Audit sections while keeping the Web API payload and saved Request snapshot schema unchanged.
+- Added an Overview copy button for `request_id`, RSS presence-only display in Source, filter/folder/seed-count fields in Filter, a collapsed native Seeds disclosure for the full effective seed title list, and Audit grouping for status history plus Auto Bangumi result summaries.
+- Preserved non-fatal missing/damaged optional detail behavior through the existing history and AB result renderers, including the existing no-history and no-AB-result messages.
+- Added static tests for detail section hooks, copy behavior wiring, seed disclosure, RSS URL redaction guard, and matching CSS selectors.
+- Ran `uv run pytest`: 216 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed after tool search); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Detail-page layout changes can be implemented entirely in `renderDetailPayload(...)` and helper renderers in `src/apps/migu_orca_web/static/app.js`; the API already returns the complete snapshot plus optional `history` and `ab_result` sections.
+  - Keep RSS handling in the UI presence-based (`已选择`/`未选择`) rather than rendering `selected_rss_url`, so detail usability work does not weaken the sensitive-output policy.
+  - Native `<details>` works well for Stage 8 no-build disclosure controls and can be pinned through static script/CSS assertions when browser automation is unavailable.
 ---

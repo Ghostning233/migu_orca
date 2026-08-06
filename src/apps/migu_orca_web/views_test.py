@@ -113,10 +113,51 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "fallback_config" in script
     assert "folder_name" in script
     assert "filter_rule" in script
+    assert "Overview" in script
+    assert "Source" in script
+    assert "Filter" in script
+    assert "Seeds" in script
+    assert "Audit" in script
+    assert "复制 request_id" in script
+    assert "copyTextToClipboard" in script
+    assert "navigator.clipboard.writeText" in script
+    assert "查看完整有效种子标题列表" in script
+    assert "seed-details" in script
+    assert "暂无状态历史。" in script
+    assert "暂无 Auto Bangumi 提交结果。" in script
     assert "token" not in script.lower()
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'createDetailSection("Overview", "overview-section")' in script
+    assert 'createDetailSection("Source", "source-section")' in script
+    assert 'createDetailSection("Filter", "filter-section")' in script
+    assert 'createDetailSection("Seeds", "seeds-section")' in script
+    assert 'createDetailSection("Audit", "audit-group-section")' in script
+    assert '["request_id", request.request_id]' in script
+    assert '["status", request.status]' in script
+    assert '["原始标题", input.raw_title]' in script
+    assert '["匹配标题", matched.title]' in script
+    assert "copyButton.className = \"secondary-button copy-request-id\"" in script
+    assert "copyTextToClipboard(request.request_id)" in script
+    assert '["RSS 来源", config.selected_rss_url ? "已选择" : "未选择"]' in script
+    assert '["must_contain", filterRule.must_contain]' in script
+    assert '["must_not_contain", filterRule.must_not_contain]' in script
+    assert '["folder_name", config.expected_folder_name]' in script
+    assert '["有效种子数", effectiveSeeds.length]' in script
+    assert "document.createElement(\"details\")" in script
+    assert "seedSummary.textContent" in script
+    assert "renderHistorySection(auditSection, payload.history)" in script
+    assert "renderAbResultSection(auditSection, payload.ab_result)" in script
+    assert "selected_rss_url" in script
+    assert "addDetailRow(fields, \"selected_rss_url\"" not in script
 
 
 def test_static_app_script_wires_request_list_filter_sort_controls() -> None:
@@ -222,6 +263,19 @@ def test_static_style_defines_request_list_filter_controls() -> None:
     assert "select" in css
     assert "grid-template-columns: minmax(180px, 1fr)" in css
     assert "grid-template-columns: 1fr" in css
+
+
+def test_static_style_defines_request_detail_sections() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ".detail-section" in css
+    assert ".overview-actions" in css
+    assert ".copy-request-id" in css
+    assert ".seed-details summary" in css
+    assert ".audit-section" in css
+    assert ".fallback-config" in css
 
 
 def test_list_requests_returns_empty_list_for_missing_storage_dir(

@@ -293,6 +293,31 @@
     list.append(term, description);
   }
 
+  function createDetailSection(title, className) {
+    const section = document.createElement("section");
+    section.className = "detail-section " + className;
+    const heading = document.createElement("h4");
+    heading.textContent = title;
+    section.appendChild(heading);
+    return section;
+  }
+
+  function detailList(rows) {
+    const fields = document.createElement("dl");
+    fields.className = "detail-grid";
+    for (const [label, value] of rows) {
+      addDetailRow(fields, label, value);
+    }
+    return fields;
+  }
+
+  function copyTextToClipboard(value) {
+    if (!value || !navigator.clipboard || !navigator.clipboard.writeText) {
+      return;
+    }
+    navigator.clipboard.writeText(String(value)).catch(() => {});
+  }
+
   function renderSeedList(container, seeds) {
     if (!Array.isArray(seeds) || !seeds.length) {
       const empty = document.createElement("p");
@@ -313,11 +338,7 @@
   }
 
   function renderHistorySection(container, history) {
-    const section = document.createElement("section");
-    section.className = "audit-section";
-    const heading = document.createElement("h4");
-    heading.textContent = "状态历史";
-    section.appendChild(heading);
+    const section = createDetailSection("状态历史", "audit-section");
 
     if (history && history.error) {
       const message = document.createElement("p");
@@ -359,11 +380,7 @@
   }
 
   function renderAbResultSection(container, abResult) {
-    const section = document.createElement("section");
-    section.className = "audit-section";
-    const heading = document.createElement("h4");
-    heading.textContent = "Auto Bangumi 结果";
-    section.appendChild(heading);
+    const section = createDetailSection("Auto Bangumi 结果", "audit-section");
 
     if (abResult && abResult.error) {
       const message = document.createElement("p");
@@ -385,11 +402,11 @@
       return;
     }
 
-    const fields = document.createElement("dl");
-    fields.className = "detail-grid";
-    addDetailRow(fields, "success", result.success);
-    addDetailRow(fields, "ab_subscription_id", result.ab_subscription_id);
-    addDetailRow(fields, "fallback_config", result.fallback_config ? "存在" : "无");
+    const fields = detailList([
+      ["success", result.success],
+      ["ab_subscription_id", result.ab_subscription_id],
+      ["fallback_config", result.fallback_config ? "存在" : "无"],
+    ]);
     section.appendChild(fields);
 
     if (result.fallback_config) {
@@ -412,6 +429,7 @@
     const matched = sourceInfo.matched_bangumi || {};
     const config = request.confirmable_config || {};
     const filterRule = config.filter_rule || {};
+    const effectiveSeeds = config.effective_seed_names || [];
 
     detailContainer.className = "request-detail";
     detailContainer.replaceChildren();
@@ -419,26 +437,67 @@
     const heading = document.createElement("h3");
     heading.textContent = input.raw_title || matched.title || "Request";
 
-    const fields = document.createElement("dl");
-    fields.className = "detail-grid";
-    addDetailRow(fields, "request_id", request.request_id);
-    addDetailRow(fields, "status", request.status);
-    addDetailRow(fields, "匹配标题", matched.title);
-    addDetailRow(fields, "字幕组", config.selected_subtitle_group);
-    addDetailRow(fields, "RSS 来源", config.selected_rss_url ? "已选择" : "未选择");
-    addDetailRow(fields, "必须包含", filterRule.must_contain);
-    addDetailRow(fields, "必须排除", filterRule.must_not_contain);
-    addDetailRow(fields, "folder_name", config.expected_folder_name);
-    addDetailRow(fields, "有效种子数", (config.effective_seed_names || []).length);
+    const overviewSection = createDetailSection("Overview", "overview-section");
+    const overviewHeader = document.createElement("div");
+    overviewHeader.className = "overview-actions";
+    const overviewFields = detailList([
+      ["request_id", request.request_id],
+      ["status", request.status],
+      ["原始标题", input.raw_title],
+      ["匹配标题", matched.title],
+    ]);
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "secondary-button copy-request-id";
+    copyButton.textContent = "复制 request_id";
+    copyButton.addEventListener("click", () => {
+      copyTextToClipboard(request.request_id);
+    });
+    overviewHeader.append(overviewFields, copyButton);
+    overviewSection.appendChild(overviewHeader);
 
-    const seedsHeading = document.createElement("h4");
-    seedsHeading.textContent = "有效种子标题";
+    const sourceSection = createDetailSection("Source", "source-section");
+    sourceSection.appendChild(
+      detailList([
+        ["字幕组", config.selected_subtitle_group],
+        ["RSS 来源", config.selected_rss_url ? "已选择" : "未选择"],
+        ["匹配番剧标题", matched.title],
+      ]),
+    );
+
+    const filterSection = createDetailSection("Filter", "filter-section");
+    filterSection.appendChild(
+      detailList([
+        ["must_contain", filterRule.must_contain],
+        ["must_not_contain", filterRule.must_not_contain],
+        ["folder_name", config.expected_folder_name],
+        ["有效种子数", effectiveSeeds.length],
+      ]),
+    );
+
+    const seedsSection = createDetailSection("Seeds", "seeds-section");
+    const seedDetails = document.createElement("details");
+    seedDetails.className = "seed-details";
+    const seedSummary = document.createElement("summary");
+    seedSummary.textContent =
+      "查看完整有效种子标题列表 (" + effectiveSeeds.length + ")";
     const seedsContainer = document.createElement("div");
-    renderSeedList(seedsContainer, config.effective_seed_names);
+    renderSeedList(seedsContainer, effectiveSeeds);
+    seedDetails.append(seedSummary, seedsContainer);
+    seedsSection.appendChild(seedDetails);
 
-    detailContainer.append(heading, fields, seedsHeading, seedsContainer);
-    renderHistorySection(detailContainer, payload.history);
-    renderAbResultSection(detailContainer, payload.ab_result);
+    const auditSection = createDetailSection("Audit", "audit-group-section");
+    renderHistorySection(auditSection, payload.history);
+    renderAbResultSection(auditSection, payload.ab_result);
+
+    detailContainer.append(
+      heading,
+      overviewSection,
+      sourceSection,
+      filterSection,
+      seedsSection,
+      auditSection,
+    );
   }
 
   async function loadDetail(requestId) {
