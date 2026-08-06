@@ -106,9 +106,11 @@ class MikanClient:
             self._config.search_endpoint,
             normalized_title,
         )
-        html = self._transport.get_text(
+        html = _read_mikan_text(
+            self._transport,
             search_url,
             timeout=self._config.timeout_seconds,
+            failed_step="mikan_search",
         )
         return _parse_search_candidates(html, self._config.search_endpoint)
 
@@ -120,9 +122,11 @@ class MikanClient:
                 "MiKan 番剧页 URL 不能为空",
                 "mikan_list_rss_sources",
             )
-        html = self._transport.get_text(
+        html = _read_mikan_text(
+            self._transport,
             mikan_url,
             timeout=self._config.timeout_seconds,
+            failed_step="mikan_list_rss_sources",
         )
         return _parse_bangumi_rss_sources(html, mikan_url)
 
@@ -142,6 +146,82 @@ def _build_search_url(search_endpoint: str, raw_title: str) -> str:
     query = parse_qsl(parsed.query, keep_blank_values=True)
     query.append(("searchstr", raw_title))
     return urlunparse(parsed._replace(query=urlencode(query)))
+
+
+def _read_mikan_text(
+    transport: MikanTransport,
+    url: str,
+    *,
+    timeout: float,
+    failed_step: str,
+) -> str:
+    try:
+        return transport.get_text(url, timeout=timeout)
+    except HTTPError as exc:
+        raise _mikan_http_failed(failed_step, exc.code) from exc
+    except URLError as exc:
+        raise _mikan_network_error(failed_step, exc) from exc
+    except TimeoutError as exc:
+        raise _mikan_timeout(failed_step) from exc
+    except ConnectionError as exc:
+        raise _mikan_connection_failed(failed_step) from exc
+    except Stage1Error as exc:
+        raise _sanitize_mikan_stage_error(exc, failed_step) from exc
+
+
+def _sanitize_mikan_stage_error(error: Stage1Error, failed_step: str) -> Stage1Error:
+    if error.error_type == "mikan_http_failed":
+        status_code = error.details.get("status_code")
+        return _mikan_http_failed(
+            failed_step,
+            status_code if isinstance(status_code, int) else None,
+        )
+    if error.error_type == "mikan_timeout":
+        return _mikan_timeout(failed_step)
+    if error.error_type == "mikan_connection_failed":
+        return _mikan_connection_failed(failed_step)
+    if error.error_type == "mikan_parse_failed":
+        return Stage1Error(
+            "mikan_parse_failed",
+            "MiKan 页面解析失败",
+            failed_step,
+        )
+    return error
+
+
+def _mikan_network_error(failed_step: str, error: URLError) -> Stage1Error:
+    reason = getattr(error, "reason", None)
+    if isinstance(reason, TimeoutError):
+        return _mikan_timeout(failed_step)
+    return _mikan_connection_failed(failed_step)
+
+
+def _mikan_http_failed(failed_step: str, status_code: int | None) -> Stage1Error:
+    details = {"status_code": status_code} if status_code is not None else {}
+    return Stage1Error(
+        "mikan_http_failed",
+        "MiKan HTTP 请求失败",
+        failed_step,
+        details,
+    )
+
+
+def _mikan_connection_failed(failed_step: str) -> Stage1Error:
+    return Stage1Error(
+        "mikan_connection_failed",
+        "MiKan HTTP 连接失败",
+        failed_step,
+        {"category": "connection"},
+    )
+
+
+def _mikan_timeout(failed_step: str) -> Stage1Error:
+    return Stage1Error(
+        "mikan_timeout",
+        "MiKan HTTP 请求超时",
+        failed_step,
+        {"category": "timeout"},
+    )
 
 
 def _parse_search_candidates(html: str, search_endpoint: str) -> list[BangumiCandidate]:

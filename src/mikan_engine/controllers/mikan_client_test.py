@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.error import HTTPError, URLError
+
 import pytest
 
 from mikan_engine.controllers.mikan_client import create_mikan_client
@@ -16,6 +18,14 @@ class FakeTransport:
     def get_text(self, url: str, *, timeout: float) -> str:
         self.requests.append((url, timeout))
         return self.response
+
+
+class ErrorTransport:
+    def __init__(self, error: Exception) -> None:
+        self.error = error
+
+    def get_text(self, url: str, *, timeout: float) -> str:
+        raise self.error
 
 
 def test_create_mikan_client_keeps_explicit_config_and_transport() -> None:
@@ -110,6 +120,104 @@ def test_mikan_client_rejects_empty_search_title_before_transport() -> None:
     assert error.value.error_type == "invalid_input"
     assert error.value.failed_step == "mikan_search"
     assert transport.requests == []
+
+
+def test_mikan_search_http_failure_is_stable_and_url_free() -> None:
+    http_error = HTTPError(
+        "https://mikan.example/Home/Search?searchstr=secret-token",
+        503,
+        "backend leaked secret-token",
+        {},
+        None,
+    )
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search?cookie=secret-token",
+            timeout_seconds=5,
+        ),
+        transport=ErrorTransport(http_error),
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.list_bangumi_candidates("芙莉莲")
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_http_failed",
+        "error_message": "MiKan HTTP 请求失败",
+        "failed_step": "mikan_search",
+        "details": {"status_code": 503},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_search_connection_failure_is_stable_and_reason_free() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=ErrorTransport(URLError("connection failed with cookie=secret-token")),
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.list_bangumi_candidates("芙莉莲")
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_connection_failed",
+        "error_message": "MiKan HTTP 连接失败",
+        "failed_step": "mikan_search",
+        "details": {"category": "connection"},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_search_timeout_is_stable_and_reason_free() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=ErrorTransport(URLError(TimeoutError("timed out secret-token"))),
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.list_bangumi_candidates("芙莉莲")
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_timeout",
+        "error_message": "MiKan HTTP 请求超时",
+        "failed_step": "mikan_search",
+        "details": {"category": "timeout"},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_injected_stage_error_is_sanitized() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=ErrorTransport(
+            Stage1Error(
+                "mikan_parse_failed",
+                "raw <html>secret-token</html>",
+                "fake_step",
+                {"html": "<html>secret-token</html>"},
+            )
+        ),
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.list_bangumi_candidates("芙莉莲")
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_parse_failed",
+        "error_message": "MiKan 页面解析失败",
+        "failed_step": "mikan_search",
+        "details": {},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
 
 
 def test_mikan_client_exposes_rss_source_listing_boundary() -> None:
@@ -254,3 +362,31 @@ def test_mikan_client_raises_parse_error_when_bangumi_page_has_no_rss_sources() 
 
     assert error.value.error_type == "mikan_parse_failed"
     assert error.value.failed_step == "mikan_list_rss_sources"
+    assert "<html" not in str(error.value.as_dict())
+
+
+def test_mikan_bangumi_page_http_failure_uses_rss_listing_step() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/search",
+            timeout_seconds=5,
+        ),
+        transport=ErrorTransport(TimeoutError("timeout with secret-token")),
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1?cookie=secret-token",
+        match_score=1,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.list_rss_sources(matched)
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_timeout",
+        "error_message": "MiKan HTTP 请求超时",
+        "failed_step": "mikan_list_rss_sources",
+        "details": {"category": "timeout"},
+    }
+    assert "secret-token" not in str(error.value.as_dict())

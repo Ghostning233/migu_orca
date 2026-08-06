@@ -17,6 +17,7 @@
 - CLI AB submission remains an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; real MiKan opt-in must not implicitly submit to Auto Bangumi.
 - CLI real MiKan mode is explicit: use `--source mikan --mikan-config <path>`; default `--source static-fixture` stays offline and catalog-backed.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, fixtures, or documentation examples.
+- Normalize real MiKan transport failures at the `MikanClient` boundary so injected transports and default HTTP reads produce the same sanitized `mikan_http_failed`, `mikan_connection_failed`, `mikan_timeout`, or `mikan_parse_failed` errors.
 
 ## 2026-08-06 09:45 CST - Stage 5 PRD Setup
 Thread: https://codex.openai.com/threads/unavailable
@@ -84,4 +85,15 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep CLI source selection explicit: `static_fixture` maps to `--source static-fixture`, and real MiKan maps to internal `source_mode="mikan_http"`.
   - `generate_request(...)` can now accept `mikan_client=` and `mikan_rss_transport=` for deterministic MiKan flow tests.
   - Real MiKan mode still returns the existing `success`/`request`/`error` envelope before optional confirmation and AB submission actions run.
+---
+## 2026-08-06 10:03 CST - US-038
+Thread: https://codex.openai.com/threads/unavailable
+- Standardized MiKan client transport failures so HTTP non-success, connection failures, timeouts, and injected parser errors map to stable token-free and content-free `Stage1Error` values.
+- Added regression tests proving error details omit endpoint URLs, raw HTML, and sensitive strings while preserving the correct failed step for search and Bangumi RSS source discovery.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Route MiKan HTTP reads through the client boundary helper so fake transports cannot leak raw exception messages or details.
+  - Preserve only safe structured details for MiKan network errors: `status_code` for HTTP failures and `category` for connection/timeout failures.
+  - Page parser failures should remain generic and must not echo raw MiKan HTML or RSS XML.
 ---
