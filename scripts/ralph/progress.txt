@@ -13,6 +13,8 @@
 - Real external adapters should live behind engine-specific client/transport seams, with tests using injected fake transports instead of live network access.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, absolute local paths, or other sensitive config values in structured error details, logs, persisted errors, fixtures, API responses, UI text, or documentation examples.
 - Stage 7 Flask Web UI must reference `/home/ghostning/github/user_level_flask` for structure: `src/apps/base.py:create_app`, `src/apps/registry.py:ALL_BLUEPRINTS`, module Blueprints, `extensions/flask_api` style response helpers, class-based `GetView`/`PostView`, Pydantic validators, `src/wsgi.py`, and Flask test client coverage.
+- Stage 7 Flask blueprints should be exposed as per-module `blueprints` lists and registered centrally through `apps.registry.ALL_BLUEPRINTS`.
+- Until the unified `extensions.flask_api` layer lands, Stage 7 health endpoints return the target JSON envelope directly: `{ok: true, result: "ok"}`.
 - Keep Stage 7 as a Flask server-rendered Web UI MVP with minimal JavaScript; do not introduce React/Vite or a separate frontend build unless explicitly approved.
 - Stage 7 canonical Web UI homepage is `/index`; root `/` should redirect to `/index`.
 - Stage 7 is a minimum viable Web UI and should not implement confirm/cancel/modify actions unless explicitly re-scoped.
@@ -31,4 +33,28 @@ Thread: https://codex.openai.com/threads/unavailable
   - Build Web UI on top of Stage 6 local JSON storage first; this gives the browser a stable data source without requiring live MiKan or Auto Bangumi.
   - Keep API response shape consistent with the reference Flask project: `{ok: true, result: ...}` for success and `{ok: false, error_type, error_message, ...}` for failure.
   - Prefer copying or adapting small reference modules only when they serve the Stage 7 API structure; remove unrelated auth, Kong, Redis, admin-log, Sentry, or deployment behavior unless explicitly required.
+---
+## 2026-08-06 14:03 CST - US-047
+Thread: https://codex.openai.com/threads/unavailable
+- What was implemented
+  - Added the Flask application skeleton for Stage 7 with `create_app(config_name: str | None = None)`, centralized Blueprint registration, health/readiness endpoints, and a WSGI entrypoint.
+  - Added Flask as a Python 3.13.12-compatible runtime dependency via `uv add 'Flask>=3.1,<4'`.
+  - Added Flask test-client coverage for app creation, Blueprint registration, and `/healthz` plus `/readiness`.
+  - Verified `uv run flask --app wsgi:app routes` exposes `/healthz` and `/readiness`.
+- Files changed
+  - `pyproject.toml`
+  - `uv.lock`
+  - `src/apps/base.py`
+  - `src/apps/base_test.py`
+  - `src/apps/registry.py`
+  - `src/apps/healthz/__init__.py`
+  - `src/apps/healthz/views.py`
+  - `src/apps/healthz/views_test.py`
+  - `src/wsgi.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Stage 7 should follow the reference Flask project’s app factory plus registry pattern, but keep the MiGuOrca skeleton minimal until later stories add API helpers and UI modules.
+  - Health endpoints currently return the intended JSON response envelope directly; later unified API response work can replace that with shared decorators/helpers.
+  - `uv run flask --app wsgi:app routes` is a quick smoke check for the `src/wsgi.py` entrypoint and registered URL rules.
 ---

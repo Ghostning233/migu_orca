@@ -19,7 +19,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Reference project: /home/ghostning/github/user_level_flask. Prefer the same app factory + registry pattern, but keep MiGuOrca dependencies minimal."
     },
     {
