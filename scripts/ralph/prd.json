@@ -75,7 +75,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "This story should not add real MiKan mode to Web UI unless needed for a minimal seam; real MiKan search optimization remains backlog. Stage 7 allows storage_dir from Web API body/query for local validation convenience."
     },
     {

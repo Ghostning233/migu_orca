@@ -4,10 +4,12 @@ from pathlib import Path
 from typing import Any
 
 from flask.testing import FlaskClient
+import pytest
 
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from request_engine.controllers.request_controller import summarize_request
+from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
@@ -137,3 +139,135 @@ def test_list_requests_returns_unified_error_for_damaged_snapshot(
     assert payload["error_data"]["failed_step"] == "load_request_snapshot"
     assert payload["error_data"]["details"]["request_id"] == "broken"
     assert str(tmp_path) not in str(payload)
+
+
+def test_create_request_generates_without_writing_storage(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "storage_dir": str(storage_dir),
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    request = payload["result"]["request"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert request["input"]["raw_title"] == "芙莉莲"
+    assert payload["result"]["summary"] == summarize_request(request)
+    assert "saved_request" not in payload["result"]
+    assert not storage_dir.exists()
+
+
+def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "storage_dir": str(storage_dir),
+            "save_request": True,
+        },
+    )
+
+    payload = response.get_json()
+    saved_request = payload["result"]["saved_request"]
+    saved_path = storage_dir / "requests" / saved_request["filename"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert saved_request == {
+        "request_id": payload["result"]["request"]["request_id"],
+        "storage": "local_json",
+        "directory": "requests",
+        "filename": f"{payload['result']['request']['request_id']}.json",
+    }
+    assert saved_path.exists()
+
+
+def test_create_request_returns_validation_error_for_missing_title() -> None:
+    response = _client().post(
+        "/api/v1/requests",
+        json={"save_request": False},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert payload["error_data"]["errors"][0]["field"] == "title"
+
+
+def test_create_request_returns_validation_error_for_blank_title() -> None:
+    response = _client().post(
+        "/api/v1/requests",
+        json={"title": "   "},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert payload["error_data"]["errors"][0]["field"] == "title"
+
+
+def test_create_request_returns_validation_error_for_invalid_storage_dir_type() -> None:
+    response = _client().post(
+        "/api/v1/requests",
+        json={"title": "芙莉莲", "storage_dir": 123},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert payload["error_data"]["errors"][0]["field"] == "storage_dir"
+
+
+def test_create_request_returns_unified_error_for_save_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fail_save(*args: object, **kwargs: object) -> dict[str, Any]:
+        return {
+            "success": False,
+            "request": None,
+            "error": Stage1Error(
+                "storage_error",
+                "保存 Request JSON 失败",
+                "save_request_snapshot",
+                {
+                    "reason": f"cannot write {tmp_path}/private-token at https://example.test/api",
+                    "directory": "requests",
+                },
+            ).as_dict(),
+        }
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.apply_request_save_action",
+        fail_save,
+    )
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "storage_dir": str(tmp_path / "storage"),
+            "save_request": True,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "storage_error"
+    assert payload["error_message"] == "保存 Request JSON 失败"
+    assert payload["error_data"]["failed_step"] == "save_request_snapshot"
+    assert payload["error_data"]["details"]["directory"] == "requests"
+    assert str(tmp_path) not in str(payload)
+    assert "https://example.test/api" not in str(payload)
+    assert "token" not in str(payload).lower()

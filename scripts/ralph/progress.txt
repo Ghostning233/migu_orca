@@ -23,6 +23,7 @@
 - Stage 7 is a minimum viable Web UI and should not implement confirm/cancel/modify actions unless explicitly re-scoped.
 - Stage 7 Web API may accept `storage_dir` from query/body for local validation convenience; keep errors sanitized and avoid leaking absolute paths.
 - Stage 7 Request query APIs live in `apps.migu_orca_web`; use `class_route`/`GetView`, return `{"requests": [...]}` for lists and `{"request": ...}` for detail, and keep storage access read-only through Stage 6 repositories.
+- Stage 7 Web API mutation endpoints can reuse `apps.migu_orca_entry.controllers.entry_controller` orchestration; convert returned `success=false` error dictionaries into `Stage1Error` so `extensions.flask_api` produces the unified sanitized envelope.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 7 Web UI work unless explicitly pulled into scope.
 
 ## 2026-08-06 13:34 CST - Stage 7 PRD Setup
@@ -106,4 +107,24 @@ Thread: https://codex.openai.com/threads/unavailable
   - Use Flask's `<path:request_id>` converter on the detail route so path-fragment IDs reach repository validation and return the unified API error envelope.
   - The list endpoint intentionally returns summaries only; the detail endpoint returns the complete persisted Request snapshot.
   - Query APIs can safely accept `storage_dir` through Pydantic query validation and convert it with `Path(...)` before calling `load_storage_config(...)`.
+---
+## 2026-08-06 14:19 CST - US-050
+Thread: https://codex.openai.com/threads/unavailable
+- What was implemented
+  - Added `POST /api/v1/requests` to the Stage 7 Flask API using the existing offline `generate_request(...)` controller path.
+  - Added Pydantic JSON validation for `title`, `storage_dir`, and `save_request`.
+  - Kept Web API generation fixture-backed by default and avoided any real MiKan, Auto Bangumi, or qBittorrent access.
+  - Reused `apply_request_save_action(...)` so `save_request=true` explicitly persists through the Stage 6 local JSON storage contract, while false or omitted does not create storage.
+  - Returned unified API success payloads containing the full `request`, compact `summary`, and `saved_request` metadata only when a save occurs.
+  - Converted generation/save failures into unified sanitized API errors.
+  - Added Flask test-client coverage for generation without saving, explicit save, missing title, blank title, invalid `storage_dir` type, and sanitized save failure.
+- Files changed
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Request snapshots store the submitted title under `input.raw_title`, not `entry.raw_title`.
+  - CLI orchestration helpers return stable dictionaries instead of raising; Web API views should re-raise those errors as `Stage1Error` to reuse the Flask API sanitizer.
+  - A no-save Web API generation call should not even create the provided `storage_dir`; only `save_request=true` should invoke the storage layout.
 ---
