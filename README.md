@@ -188,7 +188,7 @@ Stage 7 暂不实现认证系统、复杂配置管理、真实 MiKan 搜索优�
 - 最近完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - 后续待办：`docs/backlog.md`
 - 已归档阶段记录：`scripts/ralph/archive/`
-- Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 7`
+- Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 8`
 
 Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app factory、Blueprint registry、统一 JSON API 响应层、Pydantic 校验、Request 查询/生成 API、服务端渲染 Web UI、状态历史展示和 AB 提交结果展示，同时保持默认 CLI 流程不隐式写入磁盘。
 
