@@ -1,0 +1,4 @@
+{
+  "search_endpoint": "https://mikan.example/Home/Search",
+  "timeout_seconds": 10
+}

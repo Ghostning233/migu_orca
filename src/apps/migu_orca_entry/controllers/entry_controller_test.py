@@ -10,8 +10,9 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     generate_request,
     main,
 )
+from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.errors import Stage1Error
-from shared.models import EntryRequest
+from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
 
 
 def test_generate_request_end_to_end() -> None:
@@ -90,6 +91,119 @@ def test_main_without_submit_ab_does_not_build_real_ab_client(
     assert output["request"]["status"] == "ACCEPTED"
     assert output.get("ab_submit_result") is None
     assert output["request"]["ab_submit_result"] is None
+
+
+def test_generate_request_default_path_does_not_build_real_mikan_client(
+    monkeypatch,
+) -> None:
+    def fail_if_called(*args: object) -> None:
+        raise AssertionError("real MiKan client should not be created")
+
+    monkeypatch.setattr(
+        "mikan_engine.controllers.mikan_client.create_mikan_client",
+        fail_if_called,
+    )
+
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    assert result["success"] is True
+    assert result["request"]["source_info"]["matched_bangumi"]["title"] == "葬送的芙莉莲"
+
+
+def test_generate_request_real_mikan_mode_uses_injected_client_and_rss_transport() -> None:
+    client = _FakeMikanClient()
+    transport = _FakeRssTransport()
+
+    result = generate_request(
+        EntryRequest(raw_title="芙莉莲"),
+        source_mode="mikan_http",
+        mikan_client=client,
+        mikan_rss_transport=transport,
+    )
+
+    assert result["success"] is True
+    assert client.searches == ["芙莉莲"]
+    assert client.rss_source_matches == ["葬送的芙莉莲"]
+    assert transport.requests == [("https://mikan.example/rss/frieren.xml", 10.0)]
+    request = result["request"]
+    assert request["source_info"]["matched_bangumi"]["title"] == "葬送的芙莉莲"
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
+    assert request["confirmable_config"]["selected_rss_url"] == (
+        "https://mikan.example/rss/frieren.xml"
+    )
+
+
+def test_generate_request_real_mikan_mode_requires_explicit_config_or_client() -> None:
+    result = generate_request(
+        EntryRequest(raw_title="芙莉莲"),
+        source_mode="mikan_http",
+    )
+
+    assert result == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "config_error",
+            "error_message": "真实 MiKan 数据源必须显式提供配置文件路径",
+            "failed_step": "load_mikan_config",
+            "details": {"field": "mikan_config"},
+        },
+    }
+
+
+def test_main_real_mikan_mode_requires_config_path(capsys) -> None:
+    exit_code = main(["芙莉莲", "--source", "mikan"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert output["error"]["error_type"] == "config_error"
+    assert output["error"]["failed_step"] == "load_mikan_config"
+
+
+def test_main_real_mikan_mode_can_accept_and_submit_ab(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    mikan_config = _mikan_config(tmp_path)
+    ab_config = _ab_config(tmp_path, fallback_enabled=False)
+    mikan_client = _FakeMikanClient()
+    ab_client = FakeAutoBangumiClient()
+
+    def build_mikan_client(config):
+        assert config.search_endpoint == "https://mikan.example/Home/Search"
+        return mikan_client
+
+    monkeypatch.setattr(
+        "mikan_engine.controllers.mikan_client.create_mikan_client",
+        build_mikan_client,
+    )
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda config: ab_client,
+    )
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--source",
+            "mikan",
+            "--mikan-config",
+            str(mikan_config),
+            "--action",
+            "accept",
+            "--submit-ab",
+            "--ab-config",
+            str(ab_config),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["status"] == "ACCEPTED"
+    assert output["ab_submit_result"]["success"] is True
+    assert mikan_client.searches == ["芙莉莲"]
+    assert ab_client.calls
 
 
 def test_apply_ab_submit_action_skips_when_not_requested() -> None:
@@ -329,3 +443,69 @@ def _ab_config(tmp_path: Path, *, fallback_enabled: bool) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def _mikan_config(tmp_path: Path) -> Path:
+    path = tmp_path / "mikan-config.json"
+    path.write_text(
+        json.dumps(
+            {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 10,
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+class _FakeMikanClient:
+    def __init__(self) -> None:
+        self.config = MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=10.0,
+        )
+        self.transport = _FakeRssTransport()
+        self.searches: list[str] = []
+        self.rss_source_matches: list[str] = []
+
+    def list_bangumi_candidates(self, raw_title: str) -> list[BangumiCandidate]:
+        self.searches.append(raw_title)
+        return [
+            BangumiCandidate(
+                bangumi_id="100",
+                title="葬送的芙莉莲",
+                aliases=["芙莉莲"],
+                mikan_url="https://mikan.example/Home/Bangumi/100",
+                rss_sources=[],
+            )
+        ]
+
+    def list_rss_sources(self, matched_bangumi: MatchedBangumi) -> list[RssSource]:
+        self.rss_source_matches.append(matched_bangumi.title)
+        return [
+            RssSource(
+                subtitle_group="Loli",
+                rss_url="https://mikan.example/rss/frieren.xml",
+                source_type="mikan_http",
+                fixture_path="",
+            )
+        ]
+
+
+class _FakeRssTransport:
+    def __init__(self) -> None:
+        self.requests: list[tuple[str, float]] = []
+
+    def get_text(self, url: str, *, timeout: float) -> str:
+        self.requests.append((url, timeout))
+        return """<?xml version="1.0" encoding="utf-8"?>
+        <rss>
+          <channel>
+            <item>
+              <title>[Loli] 葬送的芙莉莲 - 01</title>
+              <link>https://mikan.example/download/frieren-01.torrent</link>
+              <guid>frieren-01</guid>
+            </item>
+          </channel>
+        </rss>"""
