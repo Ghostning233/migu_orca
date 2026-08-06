@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint
+from flask import Blueprint, redirect, render_template, url_for
 from pydantic import BaseModel, field_validator
 
 from extensions.flask_api import class_route
@@ -22,6 +22,12 @@ from storage_engine.controllers.request_repository import (
 from storage_engine.controllers.storage_config import load_storage_config
 
 api_blueprint = Blueprint("migu_orca_web_api", __name__)
+web_blueprint = Blueprint(
+    "migu_orca_web",
+    __name__,
+    static_folder="static",
+    template_folder="templates",
+)
 
 
 class RequestListQuery(BaseModel):
@@ -68,6 +74,16 @@ def _raise_result_error(result: dict[str, Any]) -> None:
         str(error.get("failed_step") or "migu_orca_web_api"),
         details if isinstance(details, dict) else None,
     )
+
+
+@web_blueprint.get("/")
+def index_redirect() -> object:
+    return redirect(url_for("migu_orca_web.index"))
+
+
+@web_blueprint.get("/index")
+def index() -> str:
+    return render_template("migu_orca_web/index.html")
 
 
 @class_route(api_blueprint, "/api/v1/requests", methods=["GET"])

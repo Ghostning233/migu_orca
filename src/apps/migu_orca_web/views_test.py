@@ -28,6 +28,36 @@ def _saved_request(tmp_path: Path, title: str, request_id: str) -> dict[str, Any
     return request
 
 
+def test_root_redirects_to_index() -> None:
+    response = _client().get("/")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/index"
+
+
+def test_index_serves_web_ui_shell() -> None:
+    response = _client().get("/index")
+
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "text/html" in response.content_type
+    assert "MiGuOrca" in html
+    assert "Stage 7 Web UI MVP" in html
+    assert "Request 生成" in html
+    assert "Request 列表" in html
+    assert "Request 详情" in html
+    assert 'id="request-generate-form"' in html
+    assert 'name="title"' in html
+    assert 'name="storage_dir"' in html
+    assert 'name="save_request"' in html
+    assert 'id="request-list-container"' in html
+    assert 'id="request-detail-container"' in html
+    assert "token" not in html.lower()
+    assert "http://" not in html
+    assert "https://" not in html
+    assert "<rss" not in html.lower()
+
+
 def test_list_requests_returns_empty_list_for_missing_storage_dir(
     tmp_path: Path,
 ) -> None:

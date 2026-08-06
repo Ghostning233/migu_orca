@@ -95,7 +95,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Use Flask server-rendered UI first. Do not introduce React/Vite unless explicitly approved later. The Web UI canonical homepage is `/index`; root `/` should redirect to `/index`."
     },
     {

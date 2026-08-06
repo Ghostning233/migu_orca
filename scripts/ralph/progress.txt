@@ -20,6 +20,7 @@
 - API error responses must pass through the extension sanitizer before exposing details; it redacts absolute paths, URLs, token-like keys/strings, and raw HTML/RSS content.
 - Keep Stage 7 as a Flask server-rendered Web UI MVP with minimal JavaScript; do not introduce React/Vite or a separate frontend build unless explicitly approved.
 - Stage 7 canonical Web UI homepage is `/index`; root `/` should redirect to `/index`.
+- Stage 7 server-rendered UI assets live with the Web module under `src/apps/migu_orca_web/templates/migu_orca_web/` and `src/apps/migu_orca_web/static/`; serve pages through the `migu_orca_web` Blueprint and keep JSON APIs on `migu_orca_web_api`.
 - Stage 7 is a minimum viable Web UI and should not implement confirm/cancel/modify actions unless explicitly re-scoped.
 - Stage 7 Web API may accept `storage_dir` from query/body for local validation convenience; keep errors sanitized and avoid leaking absolute paths.
 - Stage 7 Request query APIs live in `apps.migu_orca_web`; use `class_route`/`GetView`, return `{"requests": [...]}` for lists and `{"request": ...}` for detail, and keep storage access read-only through Stage 6 repositories.
@@ -127,4 +128,25 @@ Thread: https://codex.openai.com/threads/unavailable
   - Request snapshots store the submitted title under `input.raw_title`, not `entry.raw_title`.
   - CLI orchestration helpers return stable dictionaries instead of raising; Web API views should re-raise those errors as `Stage1Error` to reuse the Flask API sanitizer.
   - A no-save Web API generation call should not even create the provided `storage_dir`; only `save_request=true` should invoke the storage layout.
+---
+## 2026-08-06 14:23 CST - US-051
+Thread: https://codex.openai.com/threads/unavailable
+- What was implemented
+  - Added the server-rendered Stage 7 Web UI shell at `/index` and root `/` redirect behavior.
+  - Added a dedicated `migu_orca_web` Blueprint with colocated Flask template and static CSS assets.
+  - Built a lightweight HTML shell with the application title, Stage 7 MVP marker, Request generation form, Request list container, and Request detail container.
+  - Added Flask test-client coverage for the redirect, HTML response, required page text, form fields, UI containers, and sensitive-content guardrails.
+  - Browser testing tools were not available in this session; manual browser verification is still needed.
+- Files changed
+  - `src/apps/migu_orca_web/__init__.py`
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep Stage 7 server-rendered page routes on the `migu_orca_web` Blueprint and keep JSON API routes on `migu_orca_web_api`.
+  - The Web UI shell intentionally contains static containers first; later interaction stories can attach minimal JavaScript without introducing a frontend build chain.
+  - No dev-browser or Playwright MCP tool was exposed in this session, so UI stories should note manual browser verification unless a browser connector becomes available.
 ---

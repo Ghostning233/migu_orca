@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MiGuOrca Stage 7 Web UI MVP</title>
+    <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
+  </head>
+  <body>
+    <header class="app-header">
+      <div>
+        <p class="stage-label">Stage 7 Web UI MVP</p>
+        <h1>MiGuOrca</h1>
+      </div>
+      <span class="mode-badge">Local JSON</span>
+    </header>
+
+    <main class="app-layout">
+      <section class="panel generate-panel" aria-labelledby="generate-heading">
+        <h2 id="generate-heading">Request 生成</h2>
+        <form id="request-generate-form" method="post">
+          <label for="request-title">标题</label>
+          <input
+            id="request-title"
+            name="title"
+            type="text"
+            autocomplete="off"
+            required
+          >
+
+          <label for="storage-dir">Storage 目录</label>
+          <input
+            id="storage-dir"
+            name="storage_dir"
+            type="text"
+            placeholder=".migu_orca/storage"
+            autocomplete="off"
+          >
+
+          <label class="checkbox-row" for="save-request">
+            <input id="save-request" name="save_request" type="checkbox" value="true">
+            保存 Request
+          </label>
+
+          <button type="submit">生成</button>
+        </form>
+      </section>
+
+      <section class="panel request-list-panel" aria-labelledby="request-list-heading">
+        <div class="panel-heading">
+          <h2 id="request-list-heading">Request 列表</h2>
+          <button type="button">刷新</button>
+        </div>
+        <div id="request-list-container" class="empty-state">
+          暂无已加载的 Request。
+        </div>
+      </section>
+
+      <section class="panel request-detail-panel" aria-labelledby="request-detail-heading">
+        <h2 id="request-detail-heading">Request 详情</h2>
+        <div id="request-detail-container" class="empty-state">
+          选择一个 Request 后查看详情。
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
