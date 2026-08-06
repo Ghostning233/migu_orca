@@ -6,13 +6,16 @@ from datetime import UTC, datetime
 import json
 import logging
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Literal, Sequence
 
 from ab_engine.controllers import ab_http_client
 from ab_engine.controllers.ab_client import AutoBangumiClient, submit_ab_subscription
 from ab_engine.controllers.ab_config import load_ab_config
 from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
 from catalog_engine.controllers.catalog_controller import load_catalog, match_bangumi
+from mikan_engine.controllers import mikan_client as mikan_client_module
+from mikan_engine.controllers.mikan_client import MikanClient, MikanTransport
+from mikan_engine.controllers.mikan_config import load_mikan_config
 from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
@@ -35,6 +38,7 @@ from subscription_engine.controllers.subscription_controller import (
 
 
 LOGGER = logging.getLogger(__name__)
+SourceMode = Literal["static_fixture", "mikan_http"]
 
 
 def generate_request(
@@ -43,19 +47,52 @@ def generate_request(
     catalog_path: Path = DEFAULT_CATALOG_PATH,
     user_config_path: Path = DEFAULT_USER_CONFIG_PATH,
     project_root: Path = PROJECT_ROOT,
+    source_mode: SourceMode = "static_fixture",
+    mikan_config_path: Path | None = None,
+    mikan_client: MikanClient | None = None,
+    mikan_rss_transport: MikanTransport | None = None,
 ) -> dict[str, Any]:
     try:
         if not entry.raw_title.strip():
             raise Stage1Error("invalid_input", "番剧名称不能为空", "validate_input")
 
         preference = load_user_preference(user_config_path)
-        candidates = load_catalog(catalog_path)
+        real_mikan_client: MikanClient | None = None
+        rss_transport = mikan_rss_transport
+        rss_timeout = 10.0
+        if source_mode == "static_fixture":
+            candidates = load_catalog(catalog_path)
+        elif source_mode == "mikan_http":
+            real_mikan_client = _resolve_mikan_client(
+                mikan_config_path=mikan_config_path,
+                mikan_client=mikan_client,
+            )
+            candidates = real_mikan_client.list_bangumi_candidates(entry.raw_title)
+            rss_transport = rss_transport or real_mikan_client.transport
+            rss_timeout = real_mikan_client.config.timeout_seconds
+        else:
+            raise Stage1Error(
+                "invalid_input",
+                "不支持的数据源模式",
+                "generate_request",
+                {"source_mode": source_mode},
+            )
         matched, candidate = match_bangumi(entry.raw_title, candidates)
+        rss_sources = (
+            real_mikan_client.list_rss_sources(matched)
+            if real_mikan_client is not None
+            else candidate.rss_sources
+        )
         rss_results: list[FilteredRss] = []
         flow_warnings: list[str] = []
-        for source in candidate.rss_sources:
+        for source in rss_sources:
             try:
-                parsed = parse_rss(source, project_root)
+                parsed = parse_rss(
+                    source,
+                    project_root,
+                    transport=rss_transport,
+                    timeout=rss_timeout,
+                )
             except Stage1Error as exc:
                 flow_warnings.append(
                     f"字幕组 {source.subtitle_group} 的 RSS 解析失败：{exc.message}"
@@ -98,6 +135,24 @@ def generate_request(
             {"reason": str(exc)},
         )
         return {"success": False, "request": None, "error": error.as_dict()}
+
+
+def _resolve_mikan_client(
+    *,
+    mikan_config_path: Path | None,
+    mikan_client: MikanClient | None,
+) -> MikanClient:
+    if mikan_client is not None:
+        return mikan_client
+    if mikan_config_path is None:
+        raise Stage1Error(
+            "config_error",
+            "真实 MiKan 数据源必须显式提供配置文件路径",
+            "load_mikan_config",
+            {"field": "mikan_config"},
+        )
+    config = load_mikan_config(mikan_config_path)
+    return mikan_client_module.create_mikan_client(config)
 
 
 def apply_confirmation_action(
@@ -203,6 +258,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("title", help="番剧名称")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     parser.add_argument("--user-config", type=Path, default=DEFAULT_USER_CONFIG_PATH)
+    parser.add_argument(
+        "--source",
+        choices=["static-fixture", "mikan"],
+        default="static-fixture",
+        help="显式选择数据源；默认使用离线静态 fixture",
+    )
+    parser.add_argument("--mikan-config", type=Path)
     parser.add_argument("--log-file", type=Path)
     parser.add_argument("--action", choices=["accept", "cancel"])
     parser.add_argument("--cancel-reason")
@@ -219,6 +281,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         EntryRequest(raw_title=args.title),
         catalog_path=args.catalog,
         user_config_path=args.user_config,
+        source_mode="mikan_http" if args.source == "mikan" else "static_fixture",
+        mikan_config_path=args.mikan_config,
     )
     result = apply_confirmation_action(
         result,
