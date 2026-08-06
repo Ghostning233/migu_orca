@@ -1,220 +1,47 @@
 ## Codebase Patterns
-- Stage 1 through Stage 6 are complete; archived Ralph records live under `scripts/ralph/archive/`.
-- Stage 7 Ralph work uses branch `agent/stage7-flask-web-ui` and should complete one `passes=false` story per iteration.
+- Stage 1 through Stage 7 are complete; archived Ralph records live under `scripts/ralph/archive/`.
+- Stage 8 Ralph work uses branch `agent/stage8-web-ui-usability` and should complete one `passes=false` story per iteration.
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
-- Preserve the existing top-level CLI JSON result envelope and do not change the current `migu-orca` command behavior while adding Web UI support.
+- Preserve the existing top-level CLI JSON result envelope and do not change the current `migu-orca` command behavior while adding Web UI usability improvements.
 - Default CLI and Web UI Request generation must remain offline and fixture-backed unless the user explicitly opts into real external integrations.
 - Default generation must not write local storage unless the caller explicitly opts into persistence through `--save-request` or the Web API `save_request=true` contract.
 - Stage 6 storage layout is centralized in `storage_engine.controllers.storage_config`; use `load_storage_config(...)` and `ensure_storage_layout(...)` instead of duplicating path conventions.
 - Request persistence lives in `storage_engine.controllers.request_repository`; save/load complete Request dictionaries by `request_id` and keep error details to stable IDs, directory names, and filenames rather than absolute paths.
-- Status history persistence lives in `storage_engine.controllers.history_repository`; append separate per-request JSON arrays under `history/` and keep transition metadata out of the saved Request snapshot contract.
-- AB submit result persistence lives in `storage_engine.controllers.ab_result_repository`; write separate per-request JSON records under `ab_results/` only when `request.ab_submit_result` is an object from explicit AB submit behavior.
+- Status history persistence lives in `storage_engine.controllers.history_repository`; append/read separate per-request JSON arrays under `history/` and keep transition metadata out of the saved Request snapshot contract.
+- AB submit result persistence lives in `storage_engine.controllers.ab_result_repository`; write/read separate per-request JSON records under `ab_results/` only when `request.ab_submit_result` is an object from explicit AB submit behavior.
 - Existing Request summaries are produced by `request_engine.controllers.request_controller.summarize_request(...)`; API/list views should reuse that contract where possible.
 - Real external adapters should live behind engine-specific client/transport seams, with tests using injected fake transports instead of live network access.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, absolute local paths, or other sensitive config values in structured error details, logs, persisted errors, fixtures, API responses, UI text, or documentation examples.
-- Stage 7 Flask Web UI must reference `/home/ghostning/github/user_level_flask` for structure: `src/apps/base.py:create_app`, `src/apps/registry.py:ALL_BLUEPRINTS`, module Blueprints, `extensions/flask_api` style response helpers, class-based `GetView`/`PostView`, Pydantic validators, `src/wsgi.py`, and Flask test client coverage.
-- Stage 7 Flask blueprints should be exposed as per-module `blueprints` lists and registered centrally through `apps.registry.ALL_BLUEPRINTS`.
-- Health endpoints still return the target JSON envelope directly: `{ok: true, result: "ok"}`; API blueprints added after US-048 should use `extensions.flask_api`.
-- Stage 7 unified API helpers live in `extensions.flask_api`; use `ok_response(...)`, `failed_response(...)`, `route(...)`, `class_route(...)`, `GetView`, and `PostView` for JSON APIs.
+- Flask Web UI follows `/home/ghostning/github/user_level_flask` for structure: `src/apps/base.py:create_app`, `src/apps/registry.py:ALL_BLUEPRINTS`, module Blueprints, `extensions/flask_api` style response helpers, class-based `GetView`/`PostView`, Pydantic validators, `src/wsgi.py`, and Flask test client coverage.
+- Flask blueprints should be exposed as per-module `blueprints` lists and registered centrally through `apps.registry.ALL_BLUEPRINTS`.
+- Health endpoints return the target JSON envelope directly: `{ok: true, result: "ok"}`; Web JSON APIs should use `extensions.flask_api`.
+- Unified API helpers live in `extensions.flask_api`; use `ok_response(...)`, `failed_response(...)`, `route(...)`, `class_route(...)`, `GetView`, and `PostView` for JSON APIs.
 - `extensions.flask_api` converts `Stage1Error`, `APIException`, and Pydantic `ValidationError` into the shared response envelope; unexpected exceptions re-raise under testing/debug and become generic `internal_server_error` responses otherwise.
 - API error responses must pass through the extension sanitizer before exposing details; it redacts absolute paths, URLs, token-like keys/strings, and raw HTML/RSS content.
-- Keep Stage 7 as a Flask server-rendered Web UI MVP with minimal JavaScript; do not introduce React/Vite or a separate frontend build unless explicitly approved.
-- Stage 7 canonical Web UI homepage is `/index`; root `/` should redirect to `/index`.
-- Stage 7 server-rendered UI assets live with the Web module under `src/apps/migu_orca_web/templates/migu_orca_web/` and `src/apps/migu_orca_web/static/`; serve pages through the `migu_orca_web` Blueprint and keep JSON APIs on `migu_orca_web_api`.
-- Stage 7 is a minimum viable Web UI and should not implement confirm/cancel/modify actions unless explicitly re-scoped.
-- Stage 7 Web API may accept `storage_dir` from query/body for local validation convenience; keep errors sanitized and avoid leaking absolute paths.
-- Stage 7 Request query APIs live in `apps.migu_orca_web`; use `class_route`/`GetView`, return `{"requests": [...]}` for lists and `{"request": ...}` for detail, and keep storage access read-only through Stage 6 repositories.
-- Stage 7 Web API mutation endpoints can reuse `apps.migu_orca_entry.controllers.entry_controller` orchestration; convert returned `success=false` error dictionaries into `Stage1Error` so `extensions.flask_api` produces the unified sanitized envelope.
-- Use a module-specific `static_url_path` for the Stage 7 Web Blueprint; Flask's default `/static` route can mask colocated Blueprint assets.
-- Stage 7 Request detail responses include optional `history` and `ab_result` sections; missing optional records should not fail the Request detail load, and damaged optional records should return section-local error metadata.
-- Stage 7 Web UI must scrub fallback config display values before rendering so URL-like strings and credential-like keys are redacted in collapsible JSON.
-- MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 7 Web UI work unless explicitly pulled into scope.
-- Stage 7 Flask Web UI runs with `uv run flask --app wsgi:app run`; validate code with `uv run pytest` and `uv run python -m compileall -q src`.
-- README is the canonical user-facing Stage 7 Web UI runbook; keep it in sync when changing Flask routes, API envelopes, storage defaults, or MVP exclusions.
+- Keep Stage 8 as a Flask server-rendered Web UI with minimal JavaScript; do not introduce React/Vite or a separate frontend build unless explicitly approved.
+- Canonical Web UI homepage remains `/index`; root `/` should redirect to `/index`.
+- Server-rendered UI assets live with the Web module under `src/apps/migu_orca_web/templates/migu_orca_web/` and `src/apps/migu_orca_web/static/`; serve pages through the `migu_orca_web` Blueprint and keep JSON APIs on `migu_orca_web_api`.
+- Web API may accept `storage_dir` from query/body for local validation convenience; keep errors sanitized and avoid leaking absolute paths.
+- Request query APIs live in `apps.migu_orca_web`; use `class_route`/`GetView`, return `{"requests": [...]}` for lists and `{"request": ...}` for detail, and keep storage access read-only through Stage 6 repositories.
+- Web API mutation endpoints can reuse `apps.migu_orca_entry.controllers.entry_controller` orchestration; convert returned `success=false` error dictionaries into `Stage1Error` so `extensions.flask_api` produces the unified sanitized envelope.
+- Use module-specific static URL path `/migu-orca-static/`; Flask's default `/static` route can mask colocated Blueprint assets.
+- Request detail responses include optional `history` and `ab_result` sections; missing optional records should not fail the Request detail load, and damaged optional records should return section-local error metadata.
+- Web UI must scrub fallback config display values before rendering so URL-like strings and credential-like keys are redacted in collapsible JSON.
+- MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 8 Web UI usability work unless explicitly pulled into scope.
+- Flask Web UI runs with `uv run flask --app wsgi:app run`; validate code with `uv run pytest` and `uv run python -m compileall -q src`.
+- README is the canonical user-facing Web UI runbook; keep it in sync when changing Flask routes, API envelopes, storage defaults, UI workflows, MVP exclusions, or Stage 8 acceptance steps.
+- Browser automation may not be exposed in Ralph sessions. If `dev-browser` is unavailable, record manual browser verification steps and any limitation in this progress file.
 
-## 2026-08-06 13:34 CST - Stage 7 PRD Setup
+## 2026-08-06 15:02 CST - Stage 8 PRD Setup
 Thread: https://codex.openai.com/threads/unavailable
-- Confirmed Stage 6 is complete on `main`, merged as `eee9278 Stage 6 local request persistence`, and archived under `scripts/ralph/archive/2026-08-06-stage6-request-persistence/`.
-- Created the active Stage 7 PRD for a Flask backend Web UI / management interface MVP.
-- Explicitly scoped Stage 7 to reference `/home/ghostning/github/user_level_flask` for API structure and Flask app organization, including app factory, Blueprint registry, unified JSON response helpers, class-based views, Pydantic request validation, WSGI entrypoint, and Flask test client tests.
-- Split Stage 7 into US-047 through US-054: Flask app skeleton, unified API layer, saved Request query API, generate/save API, server-rendered UI shell, Request list/detail interactions, history/AB result display, and documentation.
-- Confirmed user decisions: Web UI homepage should be `/index`, `/` should redirect to `/index`, Stage 7 should stay minimum viable without confirm/cancel/modify actions, and Web API can initially accept `storage_dir` for local validation.
-- Recorded that real MiKan search/RSS parsing compatibility improvements remain in `docs/backlog.md` and are intentionally not part of Stage 7 unless later pulled into scope.
+- Confirmed Stage 7 is complete on `main`, merged as `b388256 Stage 7 Flask Web UI MVP`, and archived under `scripts/ralph/archive/2026-08-06-stage7-flask-web-ui/`.
+- Created the active Stage 8 PRD for Web UI usability improvements on top of the Stage 7 Flask Web UI MVP.
+- Split Stage 8 into US-055 through US-062: top navigation and mode hints, form guidance and client-side validation, local UI preferences, list search/filter/sort, detail layout restructuring, unified notifications and recovery, responsive/accessibility improvements, and documentation.
+- Explicitly kept Stage 8 local and lightweight: Flask server-rendered UI, existing static CSS/JS, unified JSON API, local JSON storage, and no React/Vite frontend build chain.
+- Confirmed Stage 8 excludes real MiKan search/RSS parsing optimization, authentication, complex configuration management, batch seasonal subscription workflows, and qBittorrent direct integration.
+- Real MiKan search/RSS compatibility remains tracked in `docs/backlog.md` as BL-001 and should not be marked complete during Stage 8.
+- Ralph loop command for Stage 8 should be `./scripts/ralph/ralph.sh --tool codex 8`.
 - **Learnings for future iterations:**
-  - Build Web UI on top of Stage 6 local JSON storage first; this gives the browser a stable data source without requiring live MiKan or Auto Bangumi.
-  - Keep API response shape consistent with the reference Flask project: `{ok: true, result: ...}` for success and `{ok: false, error_type, error_message, ...}` for failure.
-  - Prefer copying or adapting small reference modules only when they serve the Stage 7 API structure; remove unrelated auth, Kong, Redis, admin-log, Sentry, or deployment behavior unless explicitly required.
----
-## 2026-08-06 14:03 CST - US-047
-Thread: https://codex.openai.com/threads/unavailable
-- What was implemented
-  - Added the Flask application skeleton for Stage 7 with `create_app(config_name: str | None = None)`, centralized Blueprint registration, health/readiness endpoints, and a WSGI entrypoint.
-  - Added Flask as a Python 3.13.12-compatible runtime dependency via `uv add 'Flask>=3.1,<4'`.
-  - Added Flask test-client coverage for app creation, Blueprint registration, and `/healthz` plus `/readiness`.
-  - Verified `uv run flask --app wsgi:app routes` exposes `/healthz` and `/readiness`.
-- Files changed
-  - `pyproject.toml`
-  - `uv.lock`
-  - `src/apps/base.py`
-  - `src/apps/base_test.py`
-  - `src/apps/registry.py`
-  - `src/apps/healthz/__init__.py`
-  - `src/apps/healthz/views.py`
-  - `src/apps/healthz/views_test.py`
-  - `src/wsgi.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Stage 7 should follow the reference Flask project’s app factory plus registry pattern, but keep the MiGuOrca skeleton minimal until later stories add API helpers and UI modules.
-  - Health endpoints currently return the intended JSON response envelope directly; later unified API response work can replace that with shared decorators/helpers.
-  - `uv run flask --app wsgi:app routes` is a quick smoke check for the `src/wsgi.py` entrypoint and registered URL rules.
----
-## 2026-08-06 14:10 CST - US-048
-Thread: https://codex.openai.com/threads/unavailable
-- What was implemented
-  - Added the Stage 7 `extensions.flask_api` package with shared `ok_response(...)` and `failed_response(...)` JSON envelopes.
-  - Added `route(...)` and `class_route(...)` helpers for function views and Flask class-based views.
-  - Added `APIBaseView`, `GetView`, and `PostView` with Pydantic request validation support.
-  - Converted `Stage1Error`, `APIException`, and Pydantic validation errors into sanitized API error responses, while keeping unexpected exceptions visible in testing/debug.
-  - Added Pydantic as a runtime dependency and included `src/extensions` in the package build list.
-  - Added focused Flask test-client and app-context tests for success responses, business errors, validation errors, sanitization, and unexpected exception behavior.
-- Files changed
-  - `pyproject.toml`
-  - `uv.lock`
-  - `src/extensions/__init__.py`
-  - `src/extensions/flask_api/__init__.py`
-  - `src/extensions/flask_api/api.py`
-  - `src/extensions/flask_api/api_test.py`
-  - `src/extensions/flask_api/exceptions.py`
-  - `src/extensions/flask_api/views.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Future Stage 7 API blueprints should use `extensions.flask_api` instead of returning Flask dictionaries directly.
-  - Pydantic validation failures are returned under `error_data.errors`, so frontend code should read validation details there.
-  - The sanitizer is intentionally conservative and can replace full string values with redaction markers when raw RSS or HTML appears.
----
-## 2026-08-06 14:14 CST - US-049
-Thread: https://codex.openai.com/threads/unavailable
-- What was implemented
-  - Added the `apps.migu_orca_web` API Blueprint and registered it through `apps.registry.ALL_BLUEPRINTS`.
-  - Added read-only `GET /api/v1/requests` support for listing saved Request summaries from local JSON storage.
-  - Added read-only `GET /api/v1/requests/<request_id>` support for loading complete saved Request snapshots.
-  - Reused `load_storage_config(...)`, `list_request_snapshots(...)`, `load_request_snapshot(...)`, and `summarize_request(...)` so no real MiKan, Auto Bangumi, or qBittorrent work is triggered.
-  - Added Flask test-client coverage for empty storage, normal list output, detail reads, missing request IDs, path-fragment request IDs, and damaged JSON snapshots.
-- Files changed
-  - `src/apps/registry.py`
-  - `src/apps/migu_orca_web/__init__.py`
-  - `src/apps/migu_orca_web/views.py`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Use Flask's `<path:request_id>` converter on the detail route so path-fragment IDs reach repository validation and return the unified API error envelope.
-  - The list endpoint intentionally returns summaries only; the detail endpoint returns the complete persisted Request snapshot.
-  - Query APIs can safely accept `storage_dir` through Pydantic query validation and convert it with `Path(...)` before calling `load_storage_config(...)`.
----
-## 2026-08-06 14:19 CST - US-050
-Thread: https://codex.openai.com/threads/unavailable
-- What was implemented
-  - Added `POST /api/v1/requests` to the Stage 7 Flask API using the existing offline `generate_request(...)` controller path.
-  - Added Pydantic JSON validation for `title`, `storage_dir`, and `save_request`.
-  - Kept Web API generation fixture-backed by default and avoided any real MiKan, Auto Bangumi, or qBittorrent access.
-  - Reused `apply_request_save_action(...)` so `save_request=true` explicitly persists through the Stage 6 local JSON storage contract, while false or omitted does not create storage.
-  - Returned unified API success payloads containing the full `request`, compact `summary`, and `saved_request` metadata only when a save occurs.
-  - Converted generation/save failures into unified sanitized API errors.
-  - Added Flask test-client coverage for generation without saving, explicit save, missing title, blank title, invalid `storage_dir` type, and sanitized save failure.
-- Files changed
-  - `src/apps/migu_orca_web/views.py`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Request snapshots store the submitted title under `input.raw_title`, not `entry.raw_title`.
-  - CLI orchestration helpers return stable dictionaries instead of raising; Web API views should re-raise those errors as `Stage1Error` to reuse the Flask API sanitizer.
-  - A no-save Web API generation call should not even create the provided `storage_dir`; only `save_request=true` should invoke the storage layout.
----
-## 2026-08-06 14:23 CST - US-051
-Thread: https://codex.openai.com/threads/unavailable
-- What was implemented
-  - Added the server-rendered Stage 7 Web UI shell at `/index` and root `/` redirect behavior.
-  - Added a dedicated `migu_orca_web` Blueprint with colocated Flask template and static CSS assets.
-  - Built a lightweight HTML shell with the application title, Stage 7 MVP marker, Request generation form, Request list container, and Request detail container.
-  - Added Flask test-client coverage for the redirect, HTML response, required page text, form fields, UI containers, and sensitive-content guardrails.
-  - Browser testing tools were not available in this session; manual browser verification is still needed.
-- Files changed
-  - `src/apps/migu_orca_web/__init__.py`
-  - `src/apps/migu_orca_web/views.py`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
-  - `src/apps/migu_orca_web/static/style.css`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Keep Stage 7 server-rendered page routes on the `migu_orca_web` Blueprint and keep JSON API routes on `migu_orca_web_api`.
-  - The Web UI shell intentionally contains static containers first; later interaction stories can attach minimal JavaScript without introducing a frontend build chain.
-  - No dev-browser or Playwright MCP tool was exposed in this session, so UI stories should note manual browser verification unless a browser connector becomes available.
----
-## 2026-08-06 14:29 CST - US-052
-Thread: https://codex.openai.com/threads/unavailable
-- What was implemented
-  - Added a minimal server-served Web UI script that calls `GET /api/v1/requests` to render saved Request summaries with loading, empty, selected, and error states.
-  - Added read-only detail browsing that calls `GET /api/v1/requests/<request_id>` and renders title, request_id, status, selected source summary, filter rule fields, folder name, seed count, and valid seed titles without exposing raw RSS URLs.
-  - Wired the existing Request generation form to the Web API so generated Requests can be inspected immediately, and saved Requests refresh the list.
-  - Added Web UI styles for list/detail states and moved Blueprint static assets to `/migu-orca-static/` to avoid Flask default static route masking.
-  - Added Flask test-client coverage for the static interaction script, endpoint wiring, key detail labels, and sensitive-content guardrails.
-  - Browser testing tools were not available in this session; manual browser verification is still needed.
-- Files changed
-  - `src/apps/migu_orca_web/views.py`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
-  - `src/apps/migu_orca_web/static/style.css`
-  - `src/apps/migu_orca_web/static/app.js`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Blueprint static files need a module-specific URL path in this app because the default Flask `/static` route can otherwise return 404 for Web module assets.
-  - The UI should summarize selected RSS presence/source instead of printing `selected_rss_url`, preserving the Stage 7 sensitive-output rule.
-  - Static-file Flask tests are useful here because browser automation is not exposed in the current session.
----
-## 2026-08-06 14:35 CST - US-053
-Thread: https://codex.openai.com/threads/unavailable
-- What was implemented
-  - Added read-only status history loading through `load_status_history(...)`.
-  - Extended `GET /api/v1/requests/<request_id>` to include optional `history` and `ab_result` sections alongside the saved Request snapshot.
-  - Kept missing history and AB result records nonfatal; damaged optional records now return section-local error metadata without blocking Request detail display.
-  - Updated the Web UI detail area to render a status-history table with action, previous_status, next_status, and timestamp.
-  - Added Auto Bangumi result summary rendering for success, ab_subscription_id, and fallback_config presence, with a collapsible redacted fallback_config view.
-  - Browser testing tools were not available in this session; manual browser verification is still needed.
-- Files changed
-  - `src/storage_engine/controllers/history_repository.py`
-  - `src/storage_engine/controllers/history_repository_test.py`
-  - `src/apps/migu_orca_web/views.py`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `src/apps/migu_orca_web/static/app.js`
-  - `src/apps/migu_orca_web/static/style.css`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Treat audit data as optional detail sections so broken history or AB result JSON does not hide the primary saved Request snapshot.
-  - `Stage1Error` stores its display text on `.message`, not `.error_message`.
-  - Web UI fallback_config rendering should scrub URL-like values and credential-like keys before printing JSON.
-  - Quality checks passed with `uv run pytest` and `uv run python -m compileall -q src`.
----
-## 2026-08-06 14:37 CST - US-054
-Thread: https://codex.openai.com/threads/unavailable
-- What was implemented
-  - Updated README documentation to describe Stage 7 Flask Web UI MVP capabilities, launch command, `/` to `/index` redirect, health checks, default storage behavior, and the relationship between Web API persistence and the existing CLI.
-  - Documented the Flask API structure adapted from `/home/ghostning/github/user_level_flask`, including app factory, Blueprint registry, WSGI entrypoint, unified JSON API responses, class-based views, and Pydantic validation.
-  - Added a local acceptance flow for generating and saving a Request, starting the Web UI, opening `/index`, and validating list/detail APIs.
-  - Documented Stage 7 exclusions and kept the real MiKan search/RSS compatibility follow-up linked to `docs/backlog.md`.
-  - Marked US-054 as passing in the active PRD.
-- Files changed
-  - `README.md`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Keep README as the Stage 7 user-facing runbook when Web UI routes, API response shapes, or storage behavior change.
-  - Stage 7 Web UI documentation should continue to distinguish fixture-backed default generation from explicit real MiKan or Auto Bangumi integrations.
-  - Quality checks passed with `uv run pytest` and `uv run python -m compileall -q src`.
----
+  - Stage 8 should improve operator confidence before adding more external integrations: make modes, defaults, saving behavior, errors, and list/detail navigation explicit in the UI.
+  - Prefer static DOM tests and Flask test-client coverage for UI contract checks; use browser verification when available, otherwise document the manual browser verification gap.
+  - Keep all UI rendering paths aligned with the existing sensitive-output policy: no tokens, full endpoint URLs, raw HTML/RSS XML, cookies, or absolute local paths.
