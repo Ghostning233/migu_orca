@@ -45,7 +45,20 @@ def append_status_history(
     }
 
 
+def load_status_history(config: StorageConfig, request_id: str) -> list[dict[str, Any]]:
+    history_path = _history_path(config, request_id, "load_status_history")
+    return _load_history_file(history_path, request_id, "load_status_history")
+
+
 def _load_existing_history(history_path: Path, request_id: str) -> list[dict[str, Any]]:
+    return _load_history_file(history_path, request_id, "append_status_history")
+
+
+def _load_history_file(
+    history_path: Path,
+    request_id: str,
+    failed_step: str,
+) -> list[dict[str, Any]]:
     if not history_path.exists():
         return []
 
@@ -55,14 +68,14 @@ def _load_existing_history(history_path: Path, request_id: str) -> list[dict[str
         raise Stage1Error(
             "storage_json_error",
             "读取 Request 状态历史失败",
-            "append_status_history",
+            failed_step,
             {"request_id": request_id, "reason": exc.msg},
         ) from exc
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
             "读取 Request 状态历史失败",
-            "append_status_history",
+            failed_step,
             {"request_id": request_id, "directory": "history"},
         ) from exc
 
@@ -72,7 +85,7 @@ def _load_existing_history(history_path: Path, request_id: str) -> list[dict[str
         raise Stage1Error(
             "storage_json_error",
             "Request 状态历史 JSON 必须是对象数组",
-            "append_status_history",
+            failed_step,
             {"request_id": request_id},
         )
     return loaded
