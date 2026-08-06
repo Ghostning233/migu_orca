@@ -13,6 +13,24 @@
 - AB system config loading lives in `ab_engine.controllers.ab_config`, requires an explicit JSON path, and deliberately does not read environment overrides or include token values in errors.
 - CLI AB submission is an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; default generation and confirmation paths must not contact external systems.
 - Stage 4 should replace the current fake-only CLI submission path with a real AB HTTP adapter while keeping fake-client injection available for tests.
+- The real AB HTTP client accepts an `AutoBangumiHttpTransport` injection; use `UrlopenAutoBangumiHttpTransport` only as the default real-network transport and keep tests offline with recording/fake transports.
+
+## 2026-08-06 09:19 CST - US-028
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented injectable HTTP transport support for the real Auto Bangumi client while preserving the public `create_auto_bangumi_http_client(AutoBangumiConfig)` path.
+- Added a urllib-backed default transport that posts JSON to the explicit config endpoint, converts successful JSON objects into the existing `ab_response` dictionary, and maps HTTP failures to token-free `Stage1Error` details.
+- Added offline tests for injected transport behavior, endpoint/header/payload/timeout propagation, payload copy isolation, and non-success HTTP error redaction.
+- Ran `uv run pytest -q` and `uv run python -m compileall -q src`; both passed.
+- Files changed
+  - `src/ab_engine/controllers/ab_http_client.py`
+  - `src/ab_engine/controllers/ab_http_client_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep network-specific behavior behind `AutoBangumiHttpTransport.post_json(...)` so future network error cases can be tested without a live AB server.
+  - Do not include endpoint URLs, HTTP reason phrases, request headers, or token-bearing values in structured HTTP failure details; status codes are enough for US-028.
+  - The only existing `CODEX.md` is under `scripts/ralph`, so reusable AB implementation patterns are currently consolidated in `progress.txt`.
+---
 
 ## 2026-08-06 09:16 CST - US-027
 Thread: https://codex.openai.com/threads/unavailable

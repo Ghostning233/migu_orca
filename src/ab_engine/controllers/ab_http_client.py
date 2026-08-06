@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import json
-from typing import Any
+from typing import Any, Mapping, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -10,28 +10,40 @@ from ab_engine.controllers.ab_config import AutoBangumiConfig
 from shared.errors import Stage1Error
 
 
-class AutoBangumiHttpClient:
-    """Real Auto Bangumi HTTP adapter for creating subscriptions."""
+class AutoBangumiHttpTransport(Protocol):
+    """Transport boundary used by the real Auto Bangumi HTTP client."""
 
-    def __init__(self, config: AutoBangumiConfig) -> None:
-        self._config = config
+    def post_json(
+        self,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        """POST a JSON payload and return the decoded response object."""
 
-    def create_subscription(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Create a subscription from an already prepared AB payload."""
 
+class UrlopenAutoBangumiHttpTransport:
+    """urllib-backed HTTP transport for Auto Bangumi JSON requests."""
+
+    def post_json(
+        self,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
         request = Request(
-            self._config.endpoint,
+            endpoint,
             data=json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {self._config.token}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
+            headers=dict(headers),
             method="POST",
         )
 
         try:
-            with urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=timeout) as response:
                 response_body = response.read().decode("utf-8")
         except HTTPError as exc:
             raise Stage1Error(
@@ -66,9 +78,40 @@ class AutoBangumiHttpClient:
         return ab_response
 
 
+class AutoBangumiHttpClient:
+    """Real Auto Bangumi HTTP adapter for creating subscriptions."""
+
+    def __init__(
+        self,
+        config: AutoBangumiConfig,
+        *,
+        transport: AutoBangumiHttpTransport | None = None,
+        timeout: float = 30,
+    ) -> None:
+        self._config = config
+        self._transport = transport or UrlopenAutoBangumiHttpTransport()
+        self._timeout = timeout
+
+    def create_subscription(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create a subscription from an already prepared AB payload."""
+
+        return self._transport.post_json(
+            self._config.endpoint,
+            {
+                "Authorization": f"Bearer {self._config.token}",
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            deepcopy(payload),
+            timeout=self._timeout,
+        )
+
+
 def create_auto_bangumi_http_client(
     config: AutoBangumiConfig,
+    *,
+    transport: AutoBangumiHttpTransport | None = None,
 ) -> AutoBangumiHttpClient:
     """Build the real Auto Bangumi HTTP client from explicit AB config."""
 
-    return AutoBangumiHttpClient(config)
+    return AutoBangumiHttpClient(config, transport=transport)
