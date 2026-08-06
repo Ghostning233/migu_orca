@@ -7,6 +7,7 @@ from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.migu_orca_entry.controllers.entry_controller import (
     apply_ab_submit_action,
     apply_confirmation_action,
+    apply_request_save_action,
     generate_request,
     main,
 )
@@ -91,6 +92,132 @@ def test_main_without_submit_ab_does_not_build_real_ab_client(
     assert output["request"]["status"] == "ACCEPTED"
     assert output.get("ab_submit_result") is None
     assert output["request"]["ab_submit_result"] is None
+
+
+def test_main_without_save_request_does_not_touch_storage(
+    capsys,
+    monkeypatch,
+) -> None:
+    def fail_if_called(*args: object) -> None:
+        raise AssertionError("storage should not be loaded")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.load_storage_config",
+        fail_if_called,
+    )
+
+    exit_code = main(["芙莉莲"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["status"] == "PENDING_CONFIRM"
+    assert "saved_request" not in output
+
+
+def test_main_can_save_generated_request_to_explicit_storage_dir(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(["芙莉莲", "--save-request", "--storage-dir", str(storage_dir)])
+
+    output = json.loads(capsys.readouterr().out)
+    request = output["request"]
+    saved = output["saved_request"]
+    saved_path = storage_dir / "requests" / f"{request['request_id']}.json"
+    assert exit_code == 0
+    assert saved == {
+        "request_id": request["request_id"],
+        "storage": "local_json",
+        "directory": "requests",
+        "filename": f"{request['request_id']}.json",
+    }
+    assert json.loads(saved_path.read_text(encoding="utf-8")) == request
+    assert (storage_dir / "history").is_dir()
+    assert (storage_dir / "ab_results").is_dir()
+
+
+def test_main_can_save_accepted_request(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    saved_path = storage_dir / "requests" / output["saved_request"]["filename"]
+    assert exit_code == 0
+    assert output["request"]["status"] == "ACCEPTED"
+    assert json.loads(saved_path.read_text(encoding="utf-8"))["status"] == "ACCEPTED"
+
+
+def test_main_save_request_uses_documented_default_storage_dir(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    default_storage_dir = tmp_path / "default-storage"
+
+    monkeypatch.setattr(
+        "storage_engine.controllers.storage_config.DEFAULT_STORAGE_DIR",
+        default_storage_dir,
+    )
+
+    exit_code = main(["芙莉莲", "--save-request"])
+
+    output = json.loads(capsys.readouterr().out)
+    saved_path = default_storage_dir / "requests" / output["saved_request"]["filename"]
+    assert exit_code == 0
+    assert saved_path.exists()
+
+
+def test_apply_request_save_action_returns_stable_error(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    result = generate_request(EntryRequest(raw_title="芙莉莲"))
+
+    def fail_save(*args: object) -> None:
+        raise Stage1Error(
+            "storage_error",
+            "保存 Request JSON 失败",
+            "save_request_snapshot",
+            {"directory": "requests"},
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.save_request_snapshot",
+        fail_save,
+    )
+
+    saved = apply_request_save_action(
+        result,
+        True,
+        storage_dir=tmp_path / "migu-state",
+    )
+
+    assert saved == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "storage_error",
+            "error_message": "保存 Request JSON 失败",
+            "failed_step": "save_request_snapshot",
+            "details": {"directory": "requests"},
+        },
+    }
+    assert str(tmp_path) not in str(saved)
 
 
 def test_generate_request_default_path_does_not_build_real_mikan_client(

@@ -10,6 +10,7 @@
 - New top-level Python packages must be added to `[tool.hatch.build.targets.wheel].packages` in `pyproject.toml` so `uv run` installs them for CLI/tests.
 - Stage 6 storage layout is centralized in `storage_engine.controllers.storage_config`; use `load_storage_config(...)` and `ensure_storage_layout(...)` instead of duplicating path conventions.
 - Request persistence lives in `storage_engine.controllers.request_repository`; save/load complete Request dictionaries by `request_id` and keep error details to stable IDs, directory names, and filenames rather than absolute paths.
+- CLI Request persistence is opt-in via `--save-request`; use `--storage-dir` to override the default `.migu_orca/storage` root, and expose save metadata as top-level `saved_request`.
 - Existing Request summaries are produced by `request_engine.controllers.request_controller.summarize_request(...)`; query/list views should reuse that contract where possible.
 - CLI real MiKan mode is explicit: use `--source mikan --mikan-config <path>`; default `--source static-fixture` stays offline and catalog-backed.
 - CLI AB submission remains explicit: use `--action accept --submit-ab --ab-config <path>`; persistence must not implicitly submit to Auto Bangumi.
@@ -50,4 +51,16 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep Request repository APIs dictionary-based so persistence does not change the Request top-level contract from `request_engine`.
   - Validate `request_id` as a single filename segment before appending `.json`; `Path.resolve(...).relative_to(...)` alone still allows nested paths under `requests`.
   - Repository error details should expose stable identifiers such as `request_id`, `directory`, and `filename`, not absolute storage paths or underlying OS error strings.
+---
+## 2026-08-06 13:06 CST - US-042
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented explicit CLI Request saving with `--save-request` and optional `--storage-dir`.
+- Added a CLI save action that runs after generation, confirmation, and optional AB submission, preserving the existing success/request/error envelope and adding non-sensitive `saved_request` metadata on success.
+- Added tests proving default CLI generation does not touch storage, explicit static-fixture saves create the JSON layout and snapshot, accepted Requests are saved after confirmation, the documented default storage root works, and save failures return stable errors.
+- Files changed: `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Keep CLI persistence as a final opt-in post-processing step so generation, confirmation, and AB submission can compose without changing their existing result contracts.
+  - Save success metadata should stay at top-level `saved_request` and contain stable local JSON identifiers, not absolute paths.
+  - Tests can monkeypatch the CLI module's imported `load_storage_config` to assert the default no-save path does not initialize storage.
 ---

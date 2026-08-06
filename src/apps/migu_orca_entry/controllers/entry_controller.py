@@ -31,6 +31,8 @@ from shared.config import (
 from shared.errors import Stage1Error
 from shared.logging import configure_logging
 from shared.models import EntryRequest, FilteredRss
+from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.storage_config import load_storage_config
 from subscription_engine.controllers.subscription_controller import (
     generate_folder_name,
     select_subtitle_group,
@@ -253,6 +255,33 @@ def apply_ab_submit_action(
         }
 
 
+def apply_request_save_action(
+    result: dict[str, Any],
+    save_request: bool,
+    *,
+    storage_dir: Path | None = None,
+) -> dict[str, Any]:
+    if not save_request or not result["success"]:
+        return result
+
+    try:
+        config = load_storage_config(storage_dir)
+        saved_request = save_request_snapshot(config, result["request"])
+        return {**result, "saved_request": saved_request}
+    except Stage1Error as exc:
+        LOGGER.warning("Request 保存失败：%s", exc.message)
+        return {"success": False, "request": None, "error": exc.as_dict()}
+    except Exception as exc:  # pragma: no cover - safety boundary
+        LOGGER.exception("Request 保存发生未预期错误")
+        error = Stage1Error(
+            "unexpected_error",
+            "Request 保存发生未预期错误",
+            "save_request_snapshot",
+            {"reason": str(exc)},
+        )
+        return {"success": False, "request": None, "error": error.as_dict()}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="离线生成 MiGuOrca Request")
     parser.add_argument("title", help="番剧名称")
@@ -274,6 +303,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="显式提交已接受 Request 到 Auto Bangumi",
     )
     parser.add_argument("--ab-config", type=Path)
+    parser.add_argument(
+        "--save-request",
+        action="store_true",
+        help="显式保存生成的 Request 到本地 JSON 存储",
+    )
+    parser.add_argument(
+        "--storage-dir",
+        type=Path,
+        help="本地 JSON 存储根目录；默认使用项目下 .migu_orca/storage",
+    )
     args = parser.parse_args(argv)
 
     configure_logging(args.log_file)
@@ -293,6 +332,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         result,
         args.submit_ab,
         ab_config_path=args.ab_config,
+    )
+    result = apply_request_save_action(
+        result,
+        args.save_request,
+        storage_dir=args.storage_dir,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["success"] else 1
