@@ -7,6 +7,8 @@
 - Default CLI request generation must not write local storage unless the user explicitly opts into persistence.
 - Real external adapters should live behind engine-specific client/transport seams, with tests using injected fake transports instead of live network access.
 - Request construction and confirmation logic live in `request_engine`; Stage 6 persistence should store snapshots/history without expanding Request domain rules unnecessarily.
+- New top-level Python packages must be added to `[tool.hatch.build.targets.wheel].packages` in `pyproject.toml` so `uv run` installs them for CLI/tests.
+- Stage 6 storage layout is centralized in `storage_engine.controllers.storage_config`; use `load_storage_config(...)` and `ensure_storage_layout(...)` instead of duplicating path conventions.
 - Existing Request summaries are produced by `request_engine.controllers.request_controller.summarize_request(...)`; query/list views should reuse that contract where possible.
 - CLI real MiKan mode is explicit: use `--source mikan --mikan-config <path>`; default `--source static-fixture` stays offline and catalog-backed.
 - CLI AB submission remains explicit: use `--action accept --submit-ab --ab-config <path>`; persistence must not implicitly submit to Auto Bangumi.
@@ -23,4 +25,16 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep persistence opt-in so existing offline generation tests stay deterministic and do not write runtime files by default.
   - Prefer local JSON repository seams before introducing SQLite or any database dependency.
   - Treat saved Request snapshots, state history, and AB submit results as separate persistence concerns even if they share the same storage root.
+---
+## 2026-08-06 12:59 CST - US-040
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented a new `storage_engine` package boundary for local JSON persistence configuration.
+- Added `StorageConfig`, `load_storage_config(...)`, and `ensure_storage_layout(...)` with predictable `requests`, `history`, and `ab_results` subdirectories.
+- Added offline tests for default and caller-overridden storage paths, directory creation, stable storage errors, and the default `generate_request` path remaining non-persistent.
+- Files changed: `pyproject.toml`, `src/storage_engine/__init__.py`, `src/storage_engine/controllers/__init__.py`, `src/storage_engine/controllers/storage_config.py`, `src/storage_engine/controllers/storage_config_test.py`, `src/storage_engine/models/__init__.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Add every new top-level package to Hatch's explicit package list in `pyproject.toml`; otherwise installed CLI/test environments may not include it.
+  - Keep Stage 6 path conventions centralized in `storage_engine.controllers.storage_config` so later repositories and CLI actions share one layout.
+  - Storage initialization is explicit; importing the storage config module or generating a Request must not create runtime directories.
 ---
