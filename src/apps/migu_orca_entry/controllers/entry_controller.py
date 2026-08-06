@@ -33,6 +33,7 @@ from shared.config import (
 from shared.errors import Stage1Error
 from shared.logging import configure_logging
 from shared.models import EntryRequest, FilteredRss
+from storage_engine.controllers.ab_result_repository import save_ab_submit_result
 from storage_engine.controllers.history_repository import append_status_history
 from storage_engine.controllers.request_repository import (
     list_request_snapshots,
@@ -305,6 +306,8 @@ def apply_request_save_action(
         saved = {**result, "saved_request": saved_request}
         if saved_history:
             saved["saved_history"] = saved_history
+        if isinstance(result["request"].get("ab_submit_result"), dict):
+            saved["saved_ab_result"] = save_ab_submit_result(config, result["request"])
         return saved
     except Stage1Error as exc:
         LOGGER.warning("Request 保存失败：%s", exc.message)

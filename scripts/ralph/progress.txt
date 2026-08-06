@@ -17,6 +17,7 @@
 - CLI real MiKan mode is explicit: use `--source mikan --mikan-config <path>`; default `--source static-fixture` stays offline and catalog-backed.
 - CLI AB submission remains explicit: use `--action accept --submit-ab --ab-config <path>`; persistence must not implicitly submit to Auto Bangumi.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, persisted errors, fixtures, or documentation examples.
+- AB submit result persistence lives in `storage_engine.controllers.ab_result_repository`; write separate per-request JSON records under `ab_results/` only when `request.ab_submit_result` is an object from explicit `--submit-ab`.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 6 persistence work unless explicitly pulled into scope.
 
 ## 2026-08-06 12:55 CST - Stage 6 PRD Setup
@@ -91,4 +92,17 @@ Thread: https://codex.openai.com/threads/unavailable
   - Dispatch storage query modes before generation in `main(...)` to preserve the local-only contract.
   - Keep list output summary-based via `summarize_request(...)` and load output as the complete saved Request envelope.
   - Repository listing should reuse `load_request_snapshot(...)` so corrupted JSON and invalid request IDs produce the same stable errors as direct loads.
+---
+## 2026-08-06 13:17 CST - US-045
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented local JSON persistence for Auto Bangumi submit outcomes in saved Request workflows.
+- Added a focused `ab_result_repository` that saves and loads per-request AB result records under `ab_results/` with request ID path validation and stable storage errors.
+- Wired explicit CLI `--save-request` mode to emit `saved_ab_result` metadata only when `--submit-ab` produced a Request-level `ab_submit_result`; ordinary saved Requests do not create AB result records.
+- Added regression coverage for successful AB result persistence, fallback-enabled failure persistence and recovery through `--load-request`, no-submit save behavior, repository corruption/missing errors, and stable save failure output.
+- Files changed: `src/storage_engine/controllers/ab_result_repository.py`, `src/storage_engine/controllers/ab_result_repository_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Keep AB submit outcomes as separate `ab_results/` records while also saving the final Request snapshot with its `ab_submit_result` for load-based recovery.
+  - Gate AB result persistence on an object-valued `request.ab_submit_result`; the existence of the `ab_results/` directory alone should not imply a submission happened.
+  - Storage failure outputs should omit partial success metadata such as `saved_request` and `saved_ab_result`, even if an earlier file write already occurred.
 ---

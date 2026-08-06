@@ -803,6 +803,186 @@ def test_main_can_submit_accepted_request_to_real_ab_client_factory(
     assert client.calls
 
 
+def test_main_save_request_persists_successful_ab_submit_result(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=False)
+    storage_dir = tmp_path / "migu-state"
+    client = FakeAutoBangumiClient()
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda ab_config: client,
+    )
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--submit-ab",
+            "--ab-config",
+            str(config),
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    ab_result_path = storage_dir / "ab_results" / f"{request_id}.json"
+    request_path = storage_dir / "requests" / f"{request_id}.json"
+    saved_ab_result = json.loads(ab_result_path.read_text(encoding="utf-8"))
+    saved_request = json.loads(request_path.read_text(encoding="utf-8"))
+    assert exit_code == 0
+    assert output["saved_ab_result"] == {
+        "request_id": request_id,
+        "storage": "local_json",
+        "directory": "ab_results",
+        "filename": f"{request_id}.json",
+    }
+    assert saved_ab_result["request_id"] == request_id
+    assert saved_ab_result["ab_submit_result"] == output["ab_submit_result"]
+    assert saved_request["ab_submit_result"] == output["ab_submit_result"]
+    assert "secret-token" not in str(saved_ab_result)
+
+
+def test_main_save_request_persists_fallback_ab_submit_result(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=True)
+    storage_dir = tmp_path / "migu-state"
+    client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "离线模拟失败",
+            "create_ab_subscription",
+            {"status_code": 503},
+        )
+    )
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda ab_config: client,
+    )
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--submit-ab",
+            "--ab-config",
+            str(config),
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    request_id = output["request"]["request_id"]
+    saved_ab_result = json.loads(
+        (storage_dir / "ab_results" / f"{request_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    loaded_exit_code = main(
+        ["--load-request", request_id, "--storage-dir", str(storage_dir)]
+    )
+    loaded_output = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert output["ab_submit_result"]["success"] is False
+    assert output["ab_submit_result"]["fallback_config"]["title"] == "葬送的芙莉莲"
+    assert saved_ab_result["ab_submit_result"]["fallback_config"] == (
+        output["ab_submit_result"]["fallback_config"]
+    )
+    assert loaded_exit_code == 0
+    assert loaded_output["request"]["ab_submit_result"] == output["ab_submit_result"]
+    assert "secret-token" not in str(saved_ab_result)
+    assert "http://auto-bangumi.local" not in str(saved_ab_result)
+
+
+def test_main_save_request_without_submit_ab_does_not_create_ab_result_record(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        [
+            "芙莉莲",
+            "--action",
+            "accept",
+            "--save-request",
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["ab_submit_result"] is None
+    assert "saved_ab_result" not in output
+    assert list((storage_dir / "ab_results").glob("*.json")) == []
+
+
+def test_apply_request_save_action_returns_stable_error_for_ab_result_failure(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    config = _ab_config(tmp_path, fallback_enabled=False)
+    result = apply_confirmation_action(
+        generate_request(EntryRequest(raw_title="芙莉莲")),
+        "accept",
+    )
+    submitted = apply_ab_submit_action(
+        result,
+        True,
+        ab_config_path=config,
+        client=FakeAutoBangumiClient(),
+    )
+
+    def fail_save_ab_result(*args: object) -> None:
+        raise Stage1Error(
+            "storage_error",
+            "保存 Auto Bangumi 提交结果失败",
+            "save_ab_submit_result",
+            {"request_id": "stable-id", "directory": "ab_results"},
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.save_ab_submit_result",
+        fail_save_ab_result,
+    )
+
+    saved = apply_request_save_action(
+        submitted,
+        True,
+        storage_dir=tmp_path / "migu-state",
+    )
+
+    assert saved == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "storage_error",
+            "error_message": "保存 Auto Bangumi 提交结果失败",
+            "failed_step": "save_ab_submit_result",
+            "details": {"request_id": "stable-id", "directory": "ab_results"},
+        },
+    }
+    assert "saved_request" not in saved
+    assert "saved_ab_result" not in saved
+    assert str(tmp_path) not in str(saved)
+
+
 def test_main_returns_structured_error_for_cancel_without_reason(capsys) -> None:
     exit_code = main(["芙莉莲", "--action", "cancel"])
 
