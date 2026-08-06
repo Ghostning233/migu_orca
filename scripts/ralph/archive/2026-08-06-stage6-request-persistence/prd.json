@@ -1,0 +1,126 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage6-request-persistence",
+  "description": "MiGuOrca Stage 6：在 Stage 5 真实 MiKan 与真实 Auto Bangumi 显式集成基础上，实现本地 JSON Request 持久化、状态历史、查询恢复和结果记录，使 CLI 从一次性输出推进到可恢复、可审计的单机可用工作流。",
+  "userStories": [
+    {
+      "id": "US-040",
+      "title": "定义本地存储配置和目录约定",
+      "description": "As a CLI user, I want MiGuOrca storage paths to be explicit and predictable so that generated Requests can be saved without introducing a database.",
+      "acceptanceCriteria": [
+        "新增 storage 相关模块边界，优先使用本地 JSON 文件而非数据库",
+        "新增显式 storage config loader 或 storage_dir 参数解析能力，默认运行数据目录来自调用方可覆盖的路径",
+        "定义 requests、history、ab_results 或等价子目录的路径约定",
+        "存储目录创建逻辑可离线测试，不访问真实 MiKan、Auto Bangumi 或 qBittorrent",
+        "默认 generate_request 路径不隐式写入磁盘",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-041",
+      "title": "实现 Request JSON repository 的保存和读取",
+      "description": "As a developer, I want a focused repository for saving and loading Request snapshots so that persistence stays outside request generation rules.",
+      "acceptanceCriteria": [
+        "新增 Request repository，支持按 request_id 保存完整 Request JSON",
+        "保存文件路径必须限制在显式 storage_dir 下，避免路径穿越",
+        "读取不存在的 request_id 返回稳定 Stage1Error 或兼容 ErrorResult",
+        "写入失败和 JSON 解析失败返回稳定错误，不包含完整本地路径以外的敏感内容",
+        "保存和读取保持现有 Request 顶层字段不变",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-042",
+      "title": "将 CLI 显式保存生成的 Request 接入本地存储",
+      "description": "As a CLI user, I want to explicitly save a generated Request so that I can inspect or act on it later.",
+      "acceptanceCriteria": [
+        "CLI 新增显式保存参数，例如 --save-request 或等价参数",
+        "保存操作必须要求显式 storage_dir 或使用明确文档化的本地默认目录",
+        "未传保存参数时 CLI 仍只输出 JSON，不写入存储目录",
+        "保存成功的 CLI 输出保持现有 success/request/error envelope，并包含可定位保存结果的非敏感信息",
+        "保存逻辑可与默认 static-fixture 数据源和显式 --source mikan 模式组合",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-043",
+      "title": "记录 Request 确认、取消和修改的状态历史",
+      "description": "As an operator, I want status transitions and user actions recorded so that saved Requests are auditable.",
+      "acceptanceCriteria": [
+        "新增状态历史记录契约，至少包含 request_id、previous_status、next_status、action、timestamp",
+        "accept、cancel 和 modify 操作在显式保存模式下写入状态历史",
+        "历史记录不改变现有 Request 快照字段契约",
+        "取消原因和修改补丁可记录为结构化数据，但不得记录额外敏感配置",
+        "历史写入失败返回稳定错误，不产生部分成功的误导性输出",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-044",
+      "title": "提供已保存 Request 的查询和恢复入口",
+      "description": "As a CLI user, I want to list and load saved Requests so that I can continue work after generation.",
+      "acceptanceCriteria": [
+        "新增 CLI 查询入口，支持列出已保存 Request 的摘要",
+        "新增 CLI 读取入口，支持按 request_id 输出完整 Request JSON",
+        "Request 摘要复用现有 summarize_request 或等价稳定字段",
+        "查询不存在或损坏的 Request 返回稳定 ErrorResult",
+        "查询操作只读取本地 storage_dir，不访问真实 MiKan 或 Auto Bangumi",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-045",
+      "title": "持久化 Auto Bangumi 提交结果和降级配置",
+      "description": "As an operator, I want Auto Bangumi submission outcomes saved with the Request so that failures and fallback JSON can be recovered later.",
+      "acceptanceCriteria": [
+        "显式保存模式下，AB submit 成功结果会关联 request_id 持久化",
+        "AB submit 失败但 fallback_enabled=true 时，fallback_config 会被持久化",
+        "AB token、完整 endpoint URL 和原始 HTTP 响应敏感内容不得写入错误 details 或文档示例",
+        "持久化后的 Request 或结果可通过查询入口恢复",
+        "未传 --submit-ab 时不得创建 AB 结果记录",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-046",
+      "title": "补充 Stage 6 本地持久化文档和示例",
+      "description": "As a maintainer, I want Stage 6 storage behavior documented so that users know when MiGuOrca writes local files.",
+      "acceptanceCriteria": [
+        "README 说明 Stage 6 本地 JSON 持久化能力和默认不写入磁盘的行为",
+        "README 给出生成并保存 Request、列出 Request、读取 Request 的 CLI 示例",
+        "文档说明 storage_dir 目录结构和不应提交运行数据",
+        "文档说明真实 MiKan 搜索/RSS 解析优化仍在 docs/backlog.md 跟踪",
+        "scripts/ralph/progress.txt 记录 Stage 6 PRD setup 和可复用约定",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
