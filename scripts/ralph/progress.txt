@@ -18,6 +18,7 @@
 - CLI real MiKan mode is explicit: use `--source mikan --mikan-config <path>`; default `--source static-fixture` stays offline and catalog-backed.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, fixtures, or documentation examples.
 - Normalize real MiKan transport failures at the `MikanClient` boundary so injected transports and default HTTP reads produce the same sanitized `mikan_http_failed`, `mikan_connection_failed`, `mikan_timeout`, or `mikan_parse_failed` errors.
+- MiKan documentation and example configs should use placeholder endpoints only, with the public config shape `search_endpoint` plus `timeout_seconds`.
 
 ## 2026-08-06 09:45 CST - Stage 5 PRD Setup
 Thread: https://codex.openai.com/threads/unavailable
@@ -96,4 +97,15 @@ Thread: https://codex.openai.com/threads/unavailable
   - Route MiKan HTTP reads through the client boundary helper so fake transports cannot leak raw exception messages or details.
   - Preserve only safe structured details for MiKan network errors: `status_code` for HTTP failures and `category` for connection/timeout failures.
   - Page parser failures should remain generic and must not echo raw MiKan HTML or RSS XML.
+---
+## 2026-08-06 10:05 CST - US-039
+Thread: https://codex.openai.com/threads/unavailable
+- Documented the Stage 5 real MiKanProject source behavior in README, including the default offline source, explicit `--source mikan --mikan-config <path>` opt-in, combined MiKan plus AB submit command, parser validation caveats, and sensitive-data handling requirements.
+- Added a safe placeholder MiKan config example with `search_endpoint` and `timeout_seconds`.
+- Files changed: `README.md`, `config/user/mikan-config.example.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Keep MiKan examples token-free and endpoint-placeholder based; do not document real cookies, account details, or complete private deployment URLs.
+  - README should describe the default source as `static-fixture` and the real source as the explicit `--source mikan --mikan-config <path>` path.
+  - Real MiKan parser behavior depends on current MiKanProject page structure, so docs should call out live-site validation even when offline parser tests pass.
 ---
