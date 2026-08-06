@@ -1,0 +1,185 @@
+## Codebase Patterns
+- Stage 1 through Stage 8 are complete; archived Ralph records live under `scripts/ralph/archive/`.
+- Stage 8 Ralph work uses branch `agent/stage8-web-ui-usability`; all Stage 8 stories pass in the active PRD.
+- Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
+- Preserve the existing top-level CLI JSON result envelope and do not change the current `migu-orca` command behavior while adding Web UI usability improvements.
+- Default CLI and Web UI Request generation must remain offline and fixture-backed unless the user explicitly opts into real external integrations.
+- Default generation must not write local storage unless the caller explicitly opts into persistence through `--save-request` or the Web API `save_request=true` contract.
+- Stage 6 storage layout is centralized in `storage_engine.controllers.storage_config`; use `load_storage_config(...)` and `ensure_storage_layout(...)` instead of duplicating path conventions.
+- Request persistence lives in `storage_engine.controllers.request_repository`; save/load complete Request dictionaries by `request_id` and keep error details to stable IDs, directory names, and filenames rather than absolute paths.
+- Status history persistence lives in `storage_engine.controllers.history_repository`; append/read separate per-request JSON arrays under `history/` and keep transition metadata out of the saved Request snapshot contract.
+- AB submit result persistence lives in `storage_engine.controllers.ab_result_repository`; write/read separate per-request JSON records under `ab_results/` only when `request.ab_submit_result` is an object from explicit AB submit behavior.
+- Existing Request summaries are produced by `request_engine.controllers.request_controller.summarize_request(...)`; API/list views should reuse that contract where possible.
+- Real external adapters should live behind engine-specific client/transport seams, with tests using injected fake transports instead of live network access.
+- Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, absolute local paths, or other sensitive config values in structured error details, logs, persisted errors, fixtures, API responses, UI text, or documentation examples.
+- Flask Web UI follows `/home/ghostning/github/user_level_flask` for structure: `src/apps/base.py:create_app`, `src/apps/registry.py:ALL_BLUEPRINTS`, module Blueprints, `extensions/flask_api` style response helpers, class-based `GetView`/`PostView`, Pydantic validators, `src/wsgi.py`, and Flask test client coverage.
+- Flask blueprints should be exposed as per-module `blueprints` lists and registered centrally through `apps.registry.ALL_BLUEPRINTS`.
+- Health endpoints return the target JSON envelope directly: `{ok: true, result: "ok"}`; Web JSON APIs should use `extensions.flask_api`.
+- Unified API helpers live in `extensions.flask_api`; use `ok_response(...)`, `failed_response(...)`, `route(...)`, `class_route(...)`, `GetView`, and `PostView` for JSON APIs.
+- `extensions.flask_api` converts `Stage1Error`, `APIException`, and Pydantic `ValidationError` into the shared response envelope; unexpected exceptions re-raise under testing/debug and become generic `internal_server_error` responses otherwise.
+- API error responses must pass through the extension sanitizer before exposing details; it redacts absolute paths, URLs, token-like keys/strings, and raw HTML/RSS content.
+- Keep Stage 8 as a Flask server-rendered Web UI with minimal JavaScript; do not introduce React/Vite or a separate frontend build unless explicitly approved.
+- Canonical Web UI homepage remains `/index`; root `/` should redirect to `/index`.
+- Server-rendered UI assets live with the Web module under `src/apps/migu_orca_web/templates/migu_orca_web/` and `src/apps/migu_orca_web/static/`; serve pages through the `migu_orca_web` Blueprint and keep JSON APIs on `migu_orca_web_api`.
+- Web API may accept `storage_dir` from query/body for local validation convenience; keep errors sanitized and avoid leaking absolute paths.
+- Request query APIs live in `apps.migu_orca_web`; use `class_route`/`GetView`, return `{"requests": [...]}` for lists and `{"request": ...}` for detail, and keep storage access read-only through Stage 6 repositories.
+- Web API mutation endpoints can reuse `apps.migu_orca_entry.controllers.entry_controller` orchestration; convert returned `success=false` error dictionaries into `Stage1Error` so `extensions.flask_api` produces the unified sanitized envelope.
+- Use module-specific static URL path `/migu-orca-static/`; Flask's default `/static` route can mask colocated Blueprint assets.
+- Request detail responses include optional `history` and `ab_result` sections; missing optional records should not fail the Request detail load, and damaged optional records should return section-local error metadata.
+- Stage 8 Request detail usability changes should stay as client-side DOM projections over the existing `/api/v1/requests/<request_id>` payload; do not change the saved Request snapshot schema for layout-only work.
+- Web UI must scrub fallback config display values before rendering so URL-like strings and credential-like keys are redacted in collapsible JSON.
+- Web UI form usability contracts are pinned in `src/apps/migu_orca_web/views_test.py` through server-rendered DOM assertions plus static `app.js` and `style.css` checks.
+- Stage 8 browser-only preferences belong in `src/apps/migu_orca_web/static/app.js` with `localStorage` keys scoped to `miguOrca.web.*`; do not persist UI preferences through storage JSON or Web API payloads.
+- Stage 8 Request list usability enhancements should stay client-side over the `/api/v1/requests` summary payload; keep search/filter/sort in `src/apps/migu_orca_web/static/app.js` unless a later PRD explicitly adds backend search.
+- Stage 8 page-level success/error feedback lives in `src/apps/migu_orca_web/static/app.js`; use `showNotification(...)` for user-visible operation results and `notifyApiError(...)` for sanitized unified API envelope failures.
+- MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 8 Web UI usability work unless explicitly pulled into scope.
+- Flask Web UI runs with `uv run flask --app wsgi:app run`; validate code with `uv run pytest` and `uv run python -m compileall -q src`.
+- README is the canonical user-facing Web UI runbook; keep it in sync when changing Flask routes, API envelopes, storage defaults, UI workflows, MVP exclusions, or Stage 8 acceptance steps.
+- Browser automation may not be exposed in Ralph sessions. If `dev-browser` is unavailable, record manual browser verification steps and any limitation in this progress file.
+- Stage 8 responsive/accessibility contracts are pinned in `src/apps/migu_orca_web/views_test.py` with static assertions for viewport/live-region metadata, keyboard-friendly list buttons, focus-visible CSS, and mobile media queries.
+
+## 2026-08-06 15:02 CST - Stage 8 PRD Setup
+Thread: https://codex.openai.com/threads/unavailable
+- Confirmed Stage 7 is complete on `main`, merged as `b388256 Stage 7 Flask Web UI MVP`, and archived under `scripts/ralph/archive/2026-08-06-stage7-flask-web-ui/`.
+- Created the active Stage 8 PRD for Web UI usability improvements on top of the Stage 7 Flask Web UI MVP.
+- Split Stage 8 into US-055 through US-062: top navigation and mode hints, form guidance and client-side validation, local UI preferences, list search/filter/sort, detail layout restructuring, unified notifications and recovery, responsive/accessibility improvements, and documentation.
+- Explicitly kept Stage 8 local and lightweight: Flask server-rendered UI, existing static CSS/JS, unified JSON API, local JSON storage, and no React/Vite frontend build chain.
+- Confirmed Stage 8 excludes real MiKan search/RSS parsing optimization, authentication, complex configuration management, batch seasonal subscription workflows, and qBittorrent direct integration.
+- Real MiKan search/RSS compatibility remains tracked in `docs/backlog.md` as BL-001 and should not be marked complete during Stage 8.
+- Ralph loop command for Stage 8 should be `./scripts/ralph/ralph.sh --tool codex 8`.
+- **Learnings for future iterations:**
+  - Stage 8 should improve operator confidence before adding more external integrations: make modes, defaults, saving behavior, errors, and list/detail navigation explicit in the UI.
+  - Prefer static DOM tests and Flask test-client coverage for UI contract checks; use browser verification when available, otherwise document the manual browser verification gap.
+  - Keep all UI rendering paths aligned with the existing sensitive-output policy: no tokens, full endpoint URLs, raw HTML/RSS XML, cookies, or absolute local paths.
+---
+
+## 2026-08-06 15:14 CST - US-055
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Stage 8 Web UI shell identity on `/index`, replacing Stage 7 MVP text with Stage 8 Web UI Usability in the document title and visible header.
+- Added a top-of-page runtime mode summary stating local JSON storage, default fixture-backed generation, and no implicit access to real MiKan, Auto Bangumi, or qBittorrent.
+- Added header anchor navigation to the generation form, Request list, Request detail, and acceptance notes sections, plus matching section IDs and lightweight CSS for wrapping navigation.
+- Updated Flask test-client coverage for the Stage 8 label, offline/local mode hints, navigation links, anchor targets, and sensitive-content guards.
+- Ran `uv run pytest`: 209 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser` tool not exposed); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The Web UI shell test in `src/apps/migu_orca_web/views_test.py::test_index_serves_web_ui_shell` is the right place to pin static header/navigation copy and sensitive-content guards.
+  - `/index` page navigation can stay server-rendered with section IDs in the Jinja template; no JavaScript is needed for same-page jumps.
+  - Browser verification may be unavailable in Ralph Codex sessions, so progress entries should explicitly record the manual verification gap.
+---
+
+## 2026-08-06 15:18 CST - US-056
+Thread: https://codex.openai.com/threads/unavailable
+- Added Request generation form guidance for title examples, non-blank title requirements, default storage behavior, and save-only-when-checked persistence behavior.
+- Added browser-side blank/whitespace title validation in `app.js` that shows a nearby readable error, focuses the title input, and returns before the Request API POST.
+- Added submit busy-state handling that disables the generate button during the API request, changes the label while running, and restores it on success or failure.
+- Added CSS for form help text, validation errors, invalid title input state, and disabled buttons.
+- Added Flask/static tests covering the form copy, error DOM, validation script hooks, busy-state script hooks, and CSS selectors.
+- Ran `uv run pytest`: 211 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep Stage 8 form UX improvements in the existing server-rendered template and static `app.js`; no frontend framework is needed for validation and button state.
+  - Form UI contracts can be tested with Flask static-file responses by asserting stable IDs, help text, validation entry points, and CSS selectors.
+  - Browser verification may remain unavailable in Ralph sessions, so preserve manual verification notes in progress entries for UI stories.
+---
+
+## 2026-08-06 15:21 CST - US-057
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented browser-only Web UI preferences for the Request generation form: recent non-empty `storage_dir` and `save_request` checkbox state are restored from `localStorage` on page load.
+- Added persistence on storage directory changes, save checkbox changes, and successful submit flow entry; blank storage directory removes the saved directory preference while retaining the save checkbox preference.
+- Added a `清除本地偏好` form control that removes the Stage 8 Web UI preference keys and restores the default empty storage directory plus unchecked save state.
+- Added lightweight secondary-button styling for the clear preference control.
+- Added Flask/static tests covering the clear preference DOM, `localStorage` keys, restore/persist/clear script hooks, default reset behavior, and CSS selector.
+- Ran `uv run pytest`: 212 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed after tool search); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Stage 8 Web UI preferences should stay browser-only with scoped `miguOrca.web.*` keys and should not be added to API contracts or local JSON storage.
+  - Static script tests are useful for pinning preference behavior in this no-build frontend, especially when browser automation is unavailable.
+  - Keep preference reset behavior aligned with the documented defaults: empty `storage_dir` and unchecked `save_request`.
+---
+
+## 2026-08-06 15:25 CST - US-058
+Thread: https://codex.openai.com/threads/unavailable
+- Added Request list search, status filter, sort controls, and a visible match counter to the `/index` server-rendered UI.
+- Implemented client-side filtering by title, request_id, subtitle group, and folder_name over the already-loaded `/api/v1/requests` summaries.
+- Implemented dynamic status filter options from the current list, default order preservation, title ascending sort, request_id ascending sort, and a recoverable no-match empty state.
+- Added static Flask tests covering the new list control DOM, script hooks, browser-only filtering/sorting behavior, count text, no-match copy, and CSS selectors.
+- Ran `uv run pytest`: 214 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed; tool search only exposed GitHub tools); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep Stage 8 Request list search/filter/sort browser-only over the existing summary payload; this story intentionally adds no backend search API.
+  - `loadedRequests` should remain the source list while `renderList()` derives the visible list from current controls, so clearing filters restores the last loaded data without another request.
+  - Static UI tests can pin list behavior through stable IDs and script hooks when browser automation is unavailable.
+---
+
+## 2026-08-06 15:29 CST - US-059
+Thread: https://codex.openai.com/threads/unavailable
+- Reworked Request detail rendering into Overview, Source, Filter, Seeds, and Audit sections while keeping the Web API payload and saved Request snapshot schema unchanged.
+- Added an Overview copy button for `request_id`, RSS presence-only display in Source, filter/folder/seed-count fields in Filter, a collapsed native Seeds disclosure for the full effective seed title list, and Audit grouping for status history plus Auto Bangumi result summaries.
+- Preserved non-fatal missing/damaged optional detail behavior through the existing history and AB result renderers, including the existing no-history and no-AB-result messages.
+- Added static tests for detail section hooks, copy behavior wiring, seed disclosure, RSS URL redaction guard, and matching CSS selectors.
+- Ran `uv run pytest`: 216 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed after tool search); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Detail-page layout changes can be implemented entirely in `renderDetailPayload(...)` and helper renderers in `src/apps/migu_orca_web/static/app.js`; the API already returns the complete snapshot plus optional `history` and `ab_result` sections.
+  - Keep RSS handling in the UI presence-based (`已选择`/`未选择`) rather than rendering `selected_rss_url`, so detail usability work does not weaken the sensitive-output policy.
+  - Native `<details>` works well for Stage 8 no-build disclosure controls and can be pinned through static script/CSS assertions when browser automation is unavailable.
+---
+
+## 2026-08-06 15:33 CST - US-060
+Thread: https://codex.openai.com/threads/unavailable
+- Added a unified page notification region for Web UI operation feedback, with success/error variants, manual close, and automatic replacement on the next operation.
+- Wired generation validation failures, API failures, list load failures, detail load failures, generation success, and save success into the notification layer while keeping panel-local loading/error states.
+- Added save-success recovery actions for refreshing the Request list and viewing the generated Request detail.
+- Preserved the existing unified API envelope and server-side sanitizer; client-side error rendering only displays sanitized `error_message` and field summaries from `error_data.errors`.
+- Added static Flask tests covering the notification DOM, success/error copy, close behavior hooks, API error detail handling, sensitive-content guards, and CSS selectors.
+- Ran `uv run pytest`: 218 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed after tool search); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep user-visible Web UI operation feedback centralized through `showNotification(...)` so success, error, close, and recovery actions remain consistent.
+  - API failure notifications should consume the existing sanitized unified envelope instead of adding backend-specific display paths.
+  - Browser automation may remain unavailable in Ralph sessions, so UI stories need static DOM/script/CSS assertions plus a manual verification note.
+---
+
+## 2026-08-06 15:37 CST - US-061
+Thread: https://codex.openai.com/threads/unavailable
+- Added stronger accessibility semantics to the Stage 8 Web UI: atomic page notification live region, relevant-change hints for list/detail regions, save checkbox help association, and an explicit refresh-button label.
+- Made rendered Request list items self-describing keyboard-focusable buttons with `aria-label` and selected `aria-current` state while preserving click-to-load-detail behavior.
+- Added focus-visible styling for links, buttons, inputs, selects, and disclosure summaries; tightened panel/content overflow handling; added a narrower mobile breakpoint that keeps navigation/actions full-width on small screens.
+- Added Flask/static tests covering viewport metadata, live-region hooks, key labels, list-item keyboard semantics, focus styles, overflow safeguards, and mobile media queries.
+- Ran `uv run pytest`: 219 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed after tool search); manual browser verification is still needed for the visible responsive UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Request list rows are real `<button>` elements, so keyboard activation remains native; add ARIA metadata there instead of replacing them with custom keyboard handlers.
+  - Responsive Web UI acceptance can be pinned with static CSS assertions for focus-visible rules, overflow-wrap safeguards, and media queries when browser automation is unavailable.
+  - Keep dynamic-region accessibility in the server-rendered template where possible so `app.js` can focus on rendering data projections.
+---
+
+## 2026-08-06 15:39 CST - US-062
+Thread: https://codex.openai.com/threads/unavailable
+- Updated README to describe Stage 8 Web UI Usability as the completed current scope on top of the Stage 7 Flask Web UI MVP.
+- Added README local acceptance steps for starting the Web UI, form validation, browser-only preferences, list search/filter/sort, detail sections, notifications/recovery, narrow-screen layout, keyboard operation, API checks, and quality commands.
+- Kept Stage 8 exclusions explicit in README: no real MiKan search/RSS compatibility optimization, authentication, complex configuration management, frontend build chain, batch seasonal subscription workflow, or qBittorrent direct integration.
+- Confirmed `docs/backlog.md` still tracks BL-001 real MiKan search/RSS compatibility as unfinished and did not modify or delete it.
+- Marked US-062 `passes=true` in `scripts/ralph/prd.json`.
+- Ran `uv run pytest`: 219 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Files changed: `README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - README is the right user-facing place to consolidate Web UI acceptance steps after Stage-level implementation stories finish.
+  - Keep Stage exclusions and backlog references explicit when closing a PRD so follow-up work is not accidentally treated as complete.
+  - Ralph thread IDs may be unavailable in Codex shell environments; use the existing `unavailable` placeholder format when `CODEX_CURRENT_THREAD_ID` is unset.
+---

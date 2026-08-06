@@ -1,0 +1,159 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage8-web-ui-usability",
+  "description": "MiGuOrca Stage 8：在 Stage 7 Flask Web UI MVP 基础上补强本地 Web UI 可用性。Stage 8 聚焦浏览器端操作反馈、表单可理解性、列表检索排序、详情信息结构、错误恢复、响应式与无障碍验收，继续沿用 Flask 服务端渲染、原生 HTML/CSS/少量 JavaScript、统一 JSON API 和本地 JSON storage。Stage 8 不纳入真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。",
+  "userStories": [
+    {
+      "id": "US-055",
+      "title": "补强 Web UI 顶部导航与运行状态提示",
+      "description": "As a local operator, I want the Web UI to clearly show its current mode and available actions so that I understand what the page can and cannot do.",
+      "acceptanceCriteria": [
+        "更新 `/index` 页面标题和可见标识为 Stage 8 Web UI Usability，避免继续显示 Stage 7 MVP",
+        "页面顶部展示当前运行模式：本地 JSON、默认 fixture-backed 生成、不会隐式访问真实 MiKan/Auto Bangumi/qBittorrent",
+        "页面顶部提供可点击的锚点或导航控件，能跳转到生成表单、Request 列表、Request 详情和验收说明区域",
+        "新增或更新 Flask test client 测试，覆盖 Stage 8 标识、模式提示和导航目标存在",
+        "页面不得展示 token、完整 endpoint URL、原始 HTML、原始 RSS XML 或本地绝对路径",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "Keep the UI server-rendered and lightweight. If dev-browser is unavailable, record manual browser verification in progress.txt."
+    },
+    {
+      "id": "US-056",
+      "title": "改进 Request 生成表单的输入说明和本地校验",
+      "description": "As a Web UI user, I want clear form hints and immediate validation so that I can generate requests without guessing required fields.",
+      "acceptanceCriteria": [
+        "标题输入框展示明确示例、最小输入要求和空值错误提示",
+        "`storage_dir` 输入框展示默认值说明，空值时明确表示使用 `.migu_orca/storage`",
+        "`save_request` 选项旁展示说明：未勾选不写入本地 storage，勾选才保存 Request",
+        "提交前在浏览器端阻止空标题或纯空白标题，并在表单附近展示可读错误，不发起 API 请求",
+        "提交按钮在请求进行中禁用，并在完成或失败后恢复",
+        "新增静态脚本或 Flask test client 覆盖表单文案、校验入口、提交中状态相关 DOM/脚本约定",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Do not add a frontend framework. Keep validation in the existing static app.js."
+    },
+    {
+      "id": "US-057",
+      "title": "记住用户的 Storage 目录和保存偏好",
+      "description": "As a repeat user, I want the Web UI to remember my local storage settings so that I do not re-enter them on every page load.",
+      "acceptanceCriteria": [
+        "Web UI 使用 `localStorage` 记住最近一次非空 `storage_dir` 输入值",
+        "Web UI 使用 `localStorage` 记住最近一次 `save_request` 勾选状态",
+        "页面加载时自动恢复已保存偏好；没有偏好时保持默认空 storage_dir 和不勾选保存",
+        "提供一个清除本地偏好的按钮或链接，点击后清空已保存的 Web UI 偏好并恢复默认表单状态",
+        "本地偏好只保存在浏览器，不写入项目文件、storage JSON 或 API 响应",
+        "新增测试覆盖静态脚本中 localStorage key、恢复逻辑和清除偏好控件存在",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Do not store tokens or endpoint values. Current Stage 8 preferences only include storage_dir and save_request."
+    },
+    {
+      "id": "US-058",
+      "title": "为 Request 列表增加搜索、状态筛选和排序",
+      "description": "As a Web UI user, I want to quickly find saved Requests so that a growing local storage directory remains manageable.",
+      "acceptanceCriteria": [
+        "Request 列表区域新增文本搜索框，可按标题、request_id、字幕组或 folder_name 进行客户端过滤",
+        "Request 列表区域新增状态筛选控件，至少支持 All 和当前列表中出现的 status 值",
+        "Request 列表区域新增排序控件，至少支持默认顺序、标题升序和 request_id 升序",
+        "过滤后展示匹配数量和总数量，例如 `显示 2 / 5`",
+        "无匹配结果时展示明确空状态，不影响重新清空筛选后恢复列表",
+        "列表筛选、排序和空状态均只在浏览器端处理，不新增后端搜索 API",
+        "新增测试覆盖筛选控件、排序控件、数量提示和无匹配文案存在",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "Keep Stage 8 local and offline. Do not pull BL-001 real MiKan search work into this story."
+    },
+    {
+      "id": "US-059",
+      "title": "重组 Request 详情为可扫描的信息区块",
+      "description": "As a Web UI user, I want request details grouped by meaning so that I can quickly understand the generated subscription plan.",
+      "acceptanceCriteria": [
+        "Request 详情区域拆分为 Overview、Source、Filter、Seeds、Audit 四类或等价语义区块",
+        "Overview 至少展示 request_id、status、原始标题或匹配标题，并提供复制 request_id 的按钮",
+        "Source 区块展示字幕组、RSS 是否已选择和匹配番剧标题，但不得展示完整 RSS URL",
+        "Filter 区块展示 must_contain、must_not_contain、folder_name 和有效种子数",
+        "Seeds 区块支持折叠或限制首屏展示，仍可查看完整有效种子标题列表",
+        "Audit 区块继续展示状态历史和 Auto Bangumi 结果摘要，缺失数据保持非致命提示",
+        "新增测试覆盖各区块标题、复制按钮、RSS URL 脱敏守卫和 Audit 缺失数据文案",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Prefer DOM restructuring in app.js plus CSS improvements. Do not change saved Request snapshot schema."
+    },
+    {
+      "id": "US-060",
+      "title": "统一 Web UI 成功、错误和恢复提示",
+      "description": "As a Web UI user, I want clear success and failure messages so that I know whether an action completed and how to recover.",
+      "acceptanceCriteria": [
+        "新增统一页面通知区域，用于展示生成成功、保存成功、列表加载失败、详情加载失败和校验失败",
+        "成功保存 Request 后提示 request_id，并提供刷新列表或查看详情的明确反馈",
+        "API 错误展示 `error_message`，存在校验错误详情时展示字段级摘要，但不得展示敏感内容",
+        "列表加载失败时保留刷新按钮可用；详情加载失败时不清空当前已成功加载的列表",
+        "通知区域支持手动关闭或在下一次操作时自动替换旧消息",
+        "新增测试覆盖通知区域 DOM、成功/错误文案、敏感内容守卫和失败后刷新按钮仍存在",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Use existing unified API envelope. Do not weaken server-side sanitizer."
+    },
+    {
+      "id": "US-061",
+      "title": "补强响应式布局和基础无障碍交互",
+      "description": "As a user on different devices, I want the Web UI to remain readable and keyboard-operable so that local validation does not depend on one desktop layout.",
+      "acceptanceCriteria": [
+        "CSS 在窄屏宽度下将三栏或多栏布局调整为单列布局，表单、列表和详情不横向溢出",
+        "交互控件具备可见 focus 样式，Request 列表项可通过键盘 Tab 聚焦并触发详情加载",
+        "动态列表、详情和通知区域使用合适的 `aria-live` 或语义标记传达变化",
+        "主要表单控件都有 label 或 aria-label，按钮文本可表达动作目的",
+        "颜色、边框或状态文案不能只依赖颜色传达错误、选中或成功状态",
+        "新增测试或静态断言覆盖 viewport meta、aria-live、focus 样式、关键 label 和移动端媒体查询存在",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Keep visual language consistent with Stage 7 assets unless a small CSS improvement is needed for clarity."
+    },
+    {
+      "id": "US-062",
+      "title": "补充 Stage 8 Web UI 可用性文档和验收流程",
+      "description": "As a maintainer, I want Stage 8 documentation and acceptance steps so that usability improvements can be validated consistently.",
+      "acceptanceCriteria": [
+        "README 更新当前活跃阶段和最近完成阶段，说明 Stage 8 Web UI usability scope",
+        "README 补充 Stage 8 本地验收流程，覆盖启动 Web UI、生成表单校验、保存偏好、列表搜索筛选排序、详情区块、通知和窄屏检查",
+        "README 明确 Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连",
+        "README 保持 `/` 重定向 `/index`、统一 API envelope、默认 storage 和敏感信息脱敏规则描述准确",
+        "scripts/ralph/progress.txt 记录 Stage 8 PRD setup、范围决策、验收命令和后续 Stage 约束",
+        "docs/backlog.md 中的真实 MiKan 搜索优化待办保持未完成，不被 Stage 8 PRD 删除或误标完成",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Final Stage 8 story should keep docs aligned with implemented UI behavior and Ralph command count."
+    }
+  ]
+}
