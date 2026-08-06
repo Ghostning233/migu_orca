@@ -71,6 +71,27 @@ def test_main_can_cancel_generated_request(capsys) -> None:
     assert output["request"]["user_action"]["reason"] == "稍后再订阅"
 
 
+def test_main_without_submit_ab_does_not_build_real_ab_client(
+    capsys,
+    monkeypatch,
+) -> None:
+    def fail_if_called(*args: object) -> None:
+        raise AssertionError("real AB client should not be created")
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        fail_if_called,
+    )
+
+    exit_code = main(["芙莉莲", "--action", "accept"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["status"] == "ACCEPTED"
+    assert output.get("ab_submit_result") is None
+    assert output["request"]["ab_submit_result"] is None
+
+
 def test_apply_ab_submit_action_skips_when_not_requested() -> None:
     result = apply_confirmation_action(
         generate_request(EntryRequest(raw_title="芙莉莲")),

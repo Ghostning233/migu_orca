@@ -7,10 +7,29 @@
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
 - AB subscription payloads use the internal keys `title`, `rss_url`, `save_path`, and `filter_rule`.
 - AB clients must expose `create_subscription(payload)` and go through `submit_ab_subscription(...)` to normalize success/failure into the stable submit result envelope.
+- The real AB HTTP adapter boundary lives in `src/ab_engine/controllers/ab_http_client.py`; construct it with `create_auto_bangumi_http_client(AutoBangumiConfig)`.
+- Real AB clients receive only explicit `AutoBangumiConfig` at construction and prepared payload dictionaries at `create_subscription(...)`; do not pass Request snapshots into AB clients.
 - AB fallback JSON is opt-in via `submit_ab_subscription(..., fallback_enabled=True)` and is built from the prepared AB payload plus the structured failure reason.
 - AB system config loading lives in `ab_engine.controllers.ab_config`, requires an explicit JSON path, and deliberately does not read environment overrides or include token values in errors.
 - CLI AB submission is an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; default generation and confirmation paths must not contact external systems.
 - Stage 4 should replace the current fake-only CLI submission path with a real AB HTTP adapter while keeping fake-client injection available for tests.
+
+## 2026-08-06 09:16 CST - US-027
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the real Auto Bangumi HTTP adapter boundary with `AutoBangumiHttpClient` and public `create_auto_bangumi_http_client(AutoBangumiConfig)` construction.
+- Added offline tests proving the new adapter is protocol-compatible, posts only a prepared payload, keeps payload input isolated from mutation, and keeps non-submit CLI paths from creating the real adapter.
+- Ran `uv run pytest -q` and `uv run python -m compileall -q src`; both passed.
+- Files changed
+  - `src/ab_engine/controllers/ab_http_client.py`
+  - `src/ab_engine/controllers/ab_http_client_test.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - The real AB adapter can be introduced without changing the existing submit result envelope because `submit_ab_subscription(...)` remains the only normalizer.
+  - The CLI still deliberately avoids the real adapter unless a later story wires the explicit `--submit-ab --ab-config` path to `create_auto_bangumi_http_client(...)`.
+  - There are no nearby `CODEX.md` files for the edited `src` modules; reusable AB patterns belong in the consolidated progress log unless a module-level CODEX file is added later.
+---
 
 ## 2026-08-05 18:35 CST - Stage 4 PRD Setup
 Thread: unavailable
