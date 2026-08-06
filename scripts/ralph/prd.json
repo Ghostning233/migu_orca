@@ -151,7 +151,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Final Stage 7 story should leave docs consistent with implemented endpoints and commands."
     }
   ]

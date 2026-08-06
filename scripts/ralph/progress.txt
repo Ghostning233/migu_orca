@@ -29,6 +29,8 @@
 - Stage 7 Request detail responses include optional `history` and `ab_result` sections; missing optional records should not fail the Request detail load, and damaged optional records should return section-local error metadata.
 - Stage 7 Web UI must scrub fallback config display values before rendering so URL-like strings and credential-like keys are redacted in collapsible JSON.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 7 Web UI work unless explicitly pulled into scope.
+- Stage 7 Flask Web UI runs with `uv run flask --app wsgi:app run`; validate code with `uv run pytest` and `uv run python -m compileall -q src`.
+- README is the canonical user-facing Stage 7 Web UI runbook; keep it in sync when changing Flask routes, API envelopes, storage defaults, or MVP exclusions.
 
 ## 2026-08-06 13:34 CST - Stage 7 PRD Setup
 Thread: https://codex.openai.com/threads/unavailable
@@ -197,5 +199,22 @@ Thread: https://codex.openai.com/threads/unavailable
   - Treat audit data as optional detail sections so broken history or AB result JSON does not hide the primary saved Request snapshot.
   - `Stage1Error` stores its display text on `.message`, not `.error_message`.
   - Web UI fallback_config rendering should scrub URL-like values and credential-like keys before printing JSON.
+  - Quality checks passed with `uv run pytest` and `uv run python -m compileall -q src`.
+---
+## 2026-08-06 14:37 CST - US-054
+Thread: https://codex.openai.com/threads/unavailable
+- What was implemented
+  - Updated README documentation to describe Stage 7 Flask Web UI MVP capabilities, launch command, `/` to `/index` redirect, health checks, default storage behavior, and the relationship between Web API persistence and the existing CLI.
+  - Documented the Flask API structure adapted from `/home/ghostning/github/user_level_flask`, including app factory, Blueprint registry, WSGI entrypoint, unified JSON API responses, class-based views, and Pydantic validation.
+  - Added a local acceptance flow for generating and saving a Request, starting the Web UI, opening `/index`, and validating list/detail APIs.
+  - Documented Stage 7 exclusions and kept the real MiKan search/RSS compatibility follow-up linked to `docs/backlog.md`.
+  - Marked US-054 as passing in the active PRD.
+- Files changed
+  - `README.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep README as the Stage 7 user-facing runbook when Web UI routes, API response shapes, or storage behavior change.
+  - Stage 7 Web UI documentation should continue to distinguish fixture-backed default generation from explicit real MiKan or Auto Bangumi integrations.
   - Quality checks passed with `uv run pytest` and `uv run python -m compileall -q src`.
 ---
