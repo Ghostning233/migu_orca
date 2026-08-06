@@ -10,11 +10,16 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     apply_modify_action,
     apply_request_save_action,
     generate_request,
+    list_saved_requests,
+    load_saved_request,
     main,
 )
 from mikan_engine.controllers.mikan_config import MikanConfig
+from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
+from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.storage_config import load_storage_config
 
 
 def test_generate_request_end_to_end() -> None:
@@ -161,6 +166,121 @@ def test_main_can_save_accepted_request(
     assert exit_code == 0
     assert output["request"]["status"] == "ACCEPTED"
     assert json.loads(saved_path.read_text(encoding="utf-8"))["status"] == "ACCEPTED"
+
+
+def test_main_can_list_saved_request_summaries(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    save_request_snapshot(load_storage_config(storage_dir), request)
+
+    exit_code = main(["--list-requests", "--storage-dir", str(storage_dir)])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output == {
+        "success": True,
+        "requests": [summarize_request(request)],
+        "error": None,
+    }
+
+
+def test_main_can_load_saved_request_by_id(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    save_request_snapshot(load_storage_config(storage_dir), request)
+
+    exit_code = main(
+        [
+            "--load-request",
+            request["request_id"],
+            "--storage-dir",
+            str(storage_dir),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output == {"success": True, "request": request, "error": None}
+
+
+def test_main_load_saved_request_returns_stable_missing_error(
+    capsys,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    exit_code = main(
+        ["--load-request", "missing-request", "--storage-dir", str(storage_dir)]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 1
+    assert output == {
+        "success": False,
+        "request": None,
+        "error": {
+            "error_type": "request_not_found",
+            "error_message": "未找到已保存的 Request",
+            "failed_step": "load_request_snapshot",
+            "details": {"request_id": "missing-request"},
+        },
+    }
+    assert str(tmp_path) not in str(output)
+
+
+def test_list_saved_requests_returns_stable_error_for_corrupt_request(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+    config = load_storage_config(storage_dir)
+    config.requests_dir.mkdir(parents=True)
+    (config.requests_dir / "broken.json").write_text("{", encoding="utf-8")
+
+    result = list_saved_requests(storage_dir=storage_dir)
+
+    assert result["success"] is False
+    assert result["requests"] is None
+    assert result["error"]["error_type"] == "storage_json_error"
+    assert result["error"]["failed_step"] == "load_request_snapshot"
+    assert result["error"]["details"]["request_id"] == "broken"
+    assert str(tmp_path) not in str(result)
+
+
+def test_load_saved_request_rejects_nested_request_id(tmp_path: Path) -> None:
+    result = load_saved_request("nested/request", storage_dir=tmp_path / "migu-state")
+
+    assert result["success"] is False
+    assert result["request"] is None
+    assert result["error"]["error_type"] == "invalid_request_id"
+    assert result["error"]["failed_step"] == "load_request_snapshot"
+
+
+def test_main_storage_query_does_not_generate_request(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "migu-state"
+
+    def fail_if_called(*args: object, **kwargs: object) -> None:
+        raise AssertionError("request generation should not run")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.generate_request",
+        fail_if_called,
+    )
+
+    exit_code = main(["--list-requests", "--storage-dir", str(storage_dir)])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output == {"success": True, "requests": [], "error": None}
 
 
 def test_main_save_request_records_accept_history(

@@ -13,6 +13,7 @@
 - Status history persistence lives in `storage_engine.controllers.history_repository`; append separate per-request JSON arrays under `history/` and keep transition metadata out of the saved Request snapshot contract.
 - CLI Request persistence is opt-in via `--save-request`; use `--storage-dir` to override the default `.migu_orca/storage` root, and expose save metadata as top-level `saved_request`.
 - Existing Request summaries are produced by `request_engine.controllers.request_controller.summarize_request(...)`; query/list views should reuse that contract where possible.
+- Saved Request query paths should dispatch before generation in the CLI so list/load remains local-only and cannot touch MiKan, Auto Bangumi, or qBittorrent integrations.
 - CLI real MiKan mode is explicit: use `--source mikan --mikan-config <path>`; default `--source static-fixture` stays offline and catalog-backed.
 - CLI AB submission remains explicit: use `--action accept --submit-ab --ab-config <path>`; persistence must not implicitly submit to Auto Bangumi.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, persisted errors, fixtures, or documentation examples.
@@ -77,4 +78,17 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep status history as a separate persistence concern under `history/`; do not add transition audit fields to the saved Request snapshot contract.
   - Build history events at the CLI orchestration layer where both previous and updated Request snapshots are available.
   - User-provided modify patches should be parsed as JSON objects before request generation, then validated by `request_engine.controllers.request_controller.modify_request(...)`.
+---
+## 2026-08-06 13:14 CST - US-044
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented local-only query and recovery entries for saved Request snapshots.
+- Added `list_request_snapshots(...)` and CLI helpers for `--list-requests` summary output and `--load-request <request_id>` full JSON recovery.
+- Made the CLI title optional only for storage query actions, with early query dispatch so list/load do not generate Requests or contact external integrations.
+- Added stable error coverage for missing, nested, and corrupted saved Request reads.
+- Files changed: `src/storage_engine/controllers/request_repository.py`, `src/storage_engine/controllers/request_repository_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - Dispatch storage query modes before generation in `main(...)` to preserve the local-only contract.
+  - Keep list output summary-based via `summarize_request(...)` and load output as the complete saved Request envelope.
+  - Repository listing should reuse `load_request_snapshot(...)` so corrupted JSON and invalid request IDs produce the same stable errors as direct loads.
 ---

@@ -21,6 +21,7 @@ from request_engine.controllers.request_controller import (
     build_pending_request,
     cancel_request,
     modify_request,
+    summarize_request,
 )
 from rss_engine.controllers.rss_controller import filter_seeds, parse_rss
 from shared.config import (
@@ -33,7 +34,11 @@ from shared.errors import Stage1Error
 from shared.logging import configure_logging
 from shared.models import EntryRequest, FilteredRss
 from storage_engine.controllers.history_repository import append_status_history
-from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.request_repository import (
+    list_request_snapshots,
+    load_request_snapshot,
+    save_request_snapshot,
+)
 from storage_engine.controllers.storage_config import load_storage_config
 from subscription_engine.controllers.subscription_controller import (
     generate_folder_name,
@@ -315,9 +320,56 @@ def apply_request_save_action(
         return {"success": False, "request": None, "error": error.as_dict()}
 
 
+def list_saved_requests(
+    *,
+    storage_dir: Path | None = None,
+) -> dict[str, Any]:
+    try:
+        config = load_storage_config(storage_dir)
+        requests = [
+            summarize_request(request) for request in list_request_snapshots(config)
+        ]
+        return {"success": True, "requests": requests, "error": None}
+    except Stage1Error as exc:
+        LOGGER.warning("Request 查询失败：%s", exc.message)
+        return {"success": False, "requests": None, "error": exc.as_dict()}
+    except Exception as exc:  # pragma: no cover - safety boundary
+        LOGGER.exception("Request 查询发生未预期错误")
+        error = Stage1Error(
+            "unexpected_error",
+            "Request 查询发生未预期错误",
+            "list_request_snapshots",
+            {"reason": str(exc)},
+        )
+        return {"success": False, "requests": None, "error": error.as_dict()}
+
+
+def load_saved_request(
+    request_id: str,
+    *,
+    storage_dir: Path | None = None,
+) -> dict[str, Any]:
+    try:
+        config = load_storage_config(storage_dir)
+        request = load_request_snapshot(config, request_id)
+        return {"success": True, "request": request, "error": None}
+    except Stage1Error as exc:
+        LOGGER.warning("Request 读取失败：%s", exc.message)
+        return {"success": False, "request": None, "error": exc.as_dict()}
+    except Exception as exc:  # pragma: no cover - safety boundary
+        LOGGER.exception("Request 读取发生未预期错误")
+        error = Stage1Error(
+            "unexpected_error",
+            "Request 读取发生未预期错误",
+            "load_request_snapshot",
+            {"reason": str(exc)},
+        )
+        return {"success": False, "request": None, "error": error.as_dict()}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="离线生成 MiGuOrca Request")
-    parser.add_argument("title", help="番剧名称")
+    parser.add_argument("title", nargs="?", help="番剧名称")
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG_PATH)
     parser.add_argument("--user-config", type=Path, default=DEFAULT_USER_CONFIG_PATH)
     parser.add_argument(
@@ -350,9 +402,36 @@ def main(argv: Sequence[str] | None = None) -> int:
         type=Path,
         help="本地 JSON 存储根目录；默认使用项目下 .migu_orca/storage",
     )
+    parser.add_argument(
+        "--list-requests",
+        action="store_true",
+        help="列出本地 JSON 存储中已保存的 Request 摘要",
+    )
+    parser.add_argument(
+        "--load-request",
+        help="按 request_id 读取本地 JSON 存储中的完整 Request",
+    )
     args = parser.parse_args(argv)
 
     configure_logging(args.log_file)
+    storage_query_result = _run_storage_query_action(args)
+    if storage_query_result is not None:
+        print(json.dumps(storage_query_result, ensure_ascii=False, indent=2))
+        return 0 if storage_query_result["success"] else 1
+    if args.title is None:
+        result = {
+            "success": False,
+            "request": None,
+            "error": Stage1Error(
+                "invalid_input",
+                "番剧名称不能为空",
+                "parse_args",
+                {"field": "title"},
+            ).as_dict(),
+        }
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 1
+
     modify_patch_result = _parse_modify_patch_arg(args.modify_patch)
     if not modify_patch_result["success"]:
         print(json.dumps(modify_patch_result, ensure_ascii=False, indent=2))
@@ -406,6 +485,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["success"] else 1
+
+
+def _run_storage_query_action(args: argparse.Namespace) -> dict[str, Any] | None:
+    if args.list_requests and args.load_request:
+        error = Stage1Error(
+            "invalid_input",
+            "Request 查询参数不能同时使用",
+            "parse_args",
+            {"fields": ["list_requests", "load_request"]},
+        )
+        return {"success": False, "request": None, "error": error.as_dict()}
+    if args.list_requests:
+        return list_saved_requests(storage_dir=args.storage_dir)
+    if args.load_request is not None:
+        return load_saved_request(args.load_request, storage_dir=args.storage_dir)
+    return None
 
 
 def _parse_modify_patch_arg(value: str | None) -> dict[str, Any]:

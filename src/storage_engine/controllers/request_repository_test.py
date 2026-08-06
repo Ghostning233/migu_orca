@@ -8,6 +8,7 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import (
+    list_request_snapshots,
     load_request_snapshot,
     save_request_snapshot,
 )
@@ -32,6 +33,40 @@ def test_save_and_load_request_snapshot_preserves_request_fields(
     assert loaded == request
     assert loaded is not request
     assert set(loaded) == set(request)
+
+
+def test_list_request_snapshots_returns_saved_requests_in_filename_order(
+    tmp_path: Path,
+) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+    request_a = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-b",
+    }
+    request_b = {
+        **generate_request(EntryRequest(raw_title="咒术回战第三季"))["request"],
+        "request_id": "request-a",
+    }
+    save_request_snapshot(config, request_a)
+    save_request_snapshot(config, request_b)
+
+    snapshots = list_request_snapshots(config)
+
+    assert [request["request_id"] for request in snapshots] == [
+        "request-a",
+        "request-b",
+    ]
+    assert snapshots[0] == request_b
+    assert snapshots[1] == request_a
+    assert snapshots[0] is not request_b
+
+
+def test_list_request_snapshots_returns_empty_for_missing_storage_dir(
+    tmp_path: Path,
+) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+
+    assert list_request_snapshots(config) == []
 
 
 def test_save_request_snapshot_rejects_path_traversal_request_id(

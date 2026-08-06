@@ -82,6 +82,33 @@ def load_request_snapshot(
     return deepcopy(loaded)
 
 
+def list_request_snapshots(config: StorageConfig) -> list[dict[str, Any]]:
+    if not config.requests_dir.exists():
+        return []
+    if not config.requests_dir.is_dir():
+        raise Stage1Error(
+            "storage_error",
+            "本地 Request 存储路径不是目录",
+            "list_request_snapshots",
+            {"directory": config.requests_dir.name},
+        )
+
+    snapshots: list[dict[str, Any]] = []
+    try:
+        request_files = sorted(config.requests_dir.glob("*.json"))
+    except OSError as exc:
+        raise Stage1Error(
+            "storage_error",
+            "列出已保存 Request 失败",
+            "list_request_snapshots",
+            {"directory": config.requests_dir.name},
+        ) from exc
+
+    for request_file in request_files:
+        snapshots.append(load_request_snapshot(config, request_file.stem))
+    return snapshots
+
+
 def _extract_request_id(request: dict[str, Any], failed_step: str) -> str:
     request_id = request.get("request_id")
     if not isinstance(request_id, str) or not request_id.strip():
