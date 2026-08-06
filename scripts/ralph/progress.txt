@@ -31,6 +31,7 @@
 - Web UI form usability contracts are pinned in `src/apps/migu_orca_web/views_test.py` through server-rendered DOM assertions plus static `app.js` and `style.css` checks.
 - Stage 8 browser-only preferences belong in `src/apps/migu_orca_web/static/app.js` with `localStorage` keys scoped to `miguOrca.web.*`; do not persist UI preferences through storage JSON or Web API payloads.
 - Stage 8 Request list usability enhancements should stay client-side over the `/api/v1/requests` summary payload; keep search/filter/sort in `src/apps/migu_orca_web/static/app.js` unless a later PRD explicitly adds backend search.
+- Stage 8 page-level success/error feedback lives in `src/apps/migu_orca_web/static/app.js`; use `showNotification(...)` for user-visible operation results and `notifyApiError(...)` for sanitized unified API envelope failures.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 8 Web UI usability work unless explicitly pulled into scope.
 - Flask Web UI runs with `uv run flask --app wsgi:app run`; validate code with `uv run pytest` and `uv run python -m compileall -q src`.
 - README is the canonical user-facing Web UI runbook; keep it in sync when changing Flask routes, API envelopes, storage defaults, UI workflows, MVP exclusions, or Stage 8 acceptance steps.
@@ -131,4 +132,21 @@ Thread: https://codex.openai.com/threads/unavailable
   - Detail-page layout changes can be implemented entirely in `renderDetailPayload(...)` and helper renderers in `src/apps/migu_orca_web/static/app.js`; the API already returns the complete snapshot plus optional `history` and `ab_result` sections.
   - Keep RSS handling in the UI presence-based (`已选择`/`未选择`) rather than rendering `selected_rss_url`, so detail usability work does not weaken the sensitive-output policy.
   - Native `<details>` works well for Stage 8 no-build disclosure controls and can be pinned through static script/CSS assertions when browser automation is unavailable.
+---
+
+## 2026-08-06 15:33 CST - US-060
+Thread: https://codex.openai.com/threads/unavailable
+- Added a unified page notification region for Web UI operation feedback, with success/error variants, manual close, and automatic replacement on the next operation.
+- Wired generation validation failures, API failures, list load failures, detail load failures, generation success, and save success into the notification layer while keeping panel-local loading/error states.
+- Added save-success recovery actions for refreshing the Request list and viewing the generated Request detail.
+- Preserved the existing unified API envelope and server-side sanitizer; client-side error rendering only displays sanitized `error_message` and field summaries from `error_data.errors`.
+- Added static Flask tests covering the notification DOM, success/error copy, close behavior hooks, API error detail handling, sensitive-content guards, and CSS selectors.
+- Ran `uv run pytest`: 218 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed after tool search); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep user-visible Web UI operation feedback centralized through `showNotification(...)` so success, error, close, and recovery actions remain consistent.
+  - API failure notifications should consume the existing sanitized unified envelope instead of adding backend-specific display paths.
+  - Browser automation may remain unavailable in Ralph sessions, so UI stories need static DOM/script/CSS assertions plus a manual verification note.
 ---

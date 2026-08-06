@@ -13,6 +13,7 @@
   const listCount = document.getElementById("request-list-count");
   const listContainer = document.getElementById("request-list-container");
   const detailContainer = document.getElementById("request-detail-container");
+  const notification = document.getElementById("page-notification");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -85,6 +86,82 @@
     return path + storageQuery();
   }
 
+  function safeText(value) {
+    return displayValue(value);
+  }
+
+  function summarizeValidationErrors(errorData) {
+    const errors = errorData && Array.isArray(errorData.errors) ? errorData.errors : [];
+    if (!errors.length) {
+      return "";
+    }
+    return errors
+      .map((error) => {
+        const field = safeText(error.field || "_schema");
+        const message = safeText(error.message || "校验失败");
+        return field + ": " + message;
+      })
+      .join("；");
+  }
+
+  function hideNotification() {
+    notification.hidden = true;
+    notification.replaceChildren();
+    notification.className = "page-notification";
+    notification.setAttribute("role", "status");
+  }
+
+  function showNotification(kind, title, message, options) {
+    notification.replaceChildren();
+    notification.hidden = false;
+    notification.className = "page-notification notification-" + kind;
+    notification.setAttribute("role", kind === "error" ? "alert" : "status");
+
+    const copy = document.createElement("div");
+    copy.className = "notification-copy";
+    const heading = document.createElement("strong");
+    heading.textContent = title;
+    const body = document.createElement("p");
+    body.textContent = safeText(message);
+    copy.append(heading, body);
+
+    if (options && options.detail) {
+      const detail = document.createElement("p");
+      detail.className = "notification-detail";
+      detail.textContent = safeText(options.detail);
+      copy.appendChild(detail);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "notification-actions";
+    if (options && Array.isArray(options.actions)) {
+      for (const action of options.actions) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = action.className || "secondary-button";
+        button.textContent = action.label;
+        button.addEventListener("click", action.handler);
+        actions.appendChild(button);
+      }
+    }
+
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "secondary-button notification-close";
+    closeButton.textContent = "关闭";
+    closeButton.addEventListener("click", hideNotification);
+    actions.appendChild(closeButton);
+
+    notification.append(copy, actions);
+  }
+
+  function notifyApiError(title, error) {
+    const validationSummary = summarizeValidationErrors(error.errorData);
+    showNotification("error", title, error.message || "请求失败", {
+      detail: validationSummary,
+    });
+  }
+
   function setState(container, message, className) {
     container.className = className || "empty-state";
     container.textContent = message;
@@ -152,7 +229,10 @@
     const response = await fetch(path, options);
     const payload = await response.json();
     if (!payload.ok) {
-      throw new Error(payload.error_message || "请求失败");
+      const error = new Error(payload.error_message || "请求失败");
+      error.errorType = payload.error_type || "request_error";
+      error.errorData = payload.error_data || null;
+      throw error;
     }
     return payload.result;
   }
@@ -274,6 +354,7 @@
   }
 
   async function loadList() {
+    hideNotification();
     setState(listContainer, "正在加载 Request 列表...", "loading-state");
     try {
       const result = await fetchJson(apiPath("/api/v1/requests"));
@@ -282,6 +363,7 @@
       renderList();
     } catch (error) {
       setState(listContainer, error.message, "error-state");
+      notifyApiError("Request 列表加载失败", error);
     }
   }
 
@@ -503,9 +585,11 @@
   async function loadDetail(requestId) {
     if (!requestId) {
       setState(detailContainer, "Request ID 无效。", "error-state");
+      showNotification("error", "详情加载失败", "Request ID 无效。");
       return;
     }
 
+    hideNotification();
     setState(detailContainer, "正在加载 Request 详情...", "loading-state");
     try {
       const result = await fetchJson(
@@ -514,6 +598,7 @@
       renderDetailPayload(result);
     } catch (error) {
       setState(detailContainer, error.message, "error-state");
+      notifyApiError("Request 详情加载失败", error);
     }
   }
 
@@ -523,10 +608,12 @@
     const title = titleInput.value.trim();
     if (!title) {
       setFormError("请输入标题，至少包含 1 个非空白字符。");
+      showNotification("error", "校验失败", "请输入标题，至少包含 1 个非空白字符。");
       titleInput.focus();
       return;
     }
 
+    hideNotification();
     setSubmitInFlight(true);
     persistWebPreferences();
     setState(detailContainer, "正在生成 Request...", "loading-state");
@@ -543,8 +630,25 @@
       selectedRequestId = result.request && result.request.request_id;
       renderDetailPayload(result);
       await loadList();
+      if (result.saved_request) {
+        showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+          actions: [
+            {
+              label: "刷新列表",
+              handler: loadList,
+            },
+            {
+              label: "查看详情",
+              handler: () => loadDetail(selectedRequestId),
+            },
+          ],
+        });
+      } else {
+        showNotification("success", "生成成功", "已生成 Request " + selectedRequestId);
+      }
     } catch (error) {
       setState(detailContainer, error.message, "error-state");
+      notifyApiError("生成失败", error);
     } finally {
       setSubmitInFlight(false);
     }

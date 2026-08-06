@@ -90,6 +90,9 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="request-list-count"' in html
     assert "显示 0 / 0" in html
     assert 'id="request-detail-container"' in html
+    assert 'id="page-notification"' in html
+    assert 'aria-live="polite"' in html
+    assert 'role="status"' in html
     assert "/migu-orca-static/app.js" in html
     assert "token" not in html.lower()
     assert "http://" not in html
@@ -158,6 +161,38 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert "renderAbResultSection(auditSection, payload.ab_result)" in script
     assert "selected_rss_url" in script
     assert "addDetailRow(fields, \"selected_rss_url\"" not in script
+
+
+def test_static_app_script_wires_page_notifications() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "page-notification" in script
+    assert "showNotification" in script
+    assert "hideNotification" in script
+    assert "notifyApiError" in script
+    assert "notification.hidden = false" in script
+    assert "notification.replaceChildren()" in script
+    assert "notification.setAttribute(\"role\", kind === \"error\" ? \"alert\" : \"status\")" in script
+    assert "notification-close" in script
+    assert "关闭" in script
+    assert "生成成功" in script
+    assert "保存成功" in script
+    assert "已保存 Request " in script
+    assert "刷新列表" in script
+    assert "查看详情" in script
+    assert "Request 列表加载失败" in script
+    assert "Request 详情加载失败" in script
+    assert "校验失败" in script
+    assert "error.errorData = payload.error_data || null" in script
+    assert "summarizeValidationErrors" in script
+    assert "field + \": \" + message" in script
+    assert "safeText" in script
+    assert "displayValue(value)" in script
+    assert "http://" not in script
+    assert "https://" not in script
+    assert "<rss" not in script.lower()
 
 
 def test_static_app_script_wires_request_list_filter_sort_controls() -> None:
@@ -276,6 +311,20 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".seed-details summary" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css
+
+
+def test_static_style_defines_page_notifications() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ".page-notification" in css
+    assert ".page-notification[hidden]" in css
+    assert ".notification-success" in css
+    assert ".notification-error" in css
+    assert ".notification-detail" in css
+    assert ".notification-actions" in css
+    assert ".notification-close" in css
 
 
 def test_list_requests_returns_empty_list_for_missing_storage_dir(
