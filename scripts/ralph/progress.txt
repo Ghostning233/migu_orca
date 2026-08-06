@@ -15,6 +15,24 @@
 - Stage 4 should replace the current fake-only CLI submission path with a real AB HTTP adapter while keeping fake-client injection available for tests.
 - The real AB HTTP client accepts an `AutoBangumiHttpTransport` injection; use `UrlopenAutoBangumiHttpTransport` only as the default real-network transport and keep tests offline with recording/fake transports.
 - Validate real AB payloads inside `AutoBangumiHttpClient.create_subscription(...)` before reading config or calling transport; invalid payloads use `invalid_ab_payload` at `validate_ab_subscription_payload`.
+- In CLI AB submission, `apply_ab_submit_action(...)` loads explicit AB config, builds the prepared payload, then uses an injected test client or `ab_http_client.create_auto_bangumi_http_client(ab_config)` for real submission.
+
+## 2026-08-06 09:25 CST - US-030
+Thread: https://codex.openai.com/threads/unavailable
+- Switched the explicit CLI Auto Bangumi submit path from the fake default client to the real HTTP client factory after loading `--ab-config`.
+- Preserved fake-client injection for `apply_ab_submit_action(...)` tests and kept default non-submit CLI paths from constructing the real client.
+- Updated CLI submit tests to monkeypatch the real factory and assert the stable top-level and request-level `ab_submit_result` envelope remains intact.
+- Ran `uv run pytest -q`, `uv run python -m compileall -q src`, and `git diff --check`; all passed.
+- Files changed
+  - `src/apps/migu_orca_entry/controllers/entry_controller.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep real AB client creation in the CLI submit branch only, after explicit config loading and prepared payload construction.
+  - Tests that exercise real CLI wiring should monkeypatch `ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client(...)` and return a fake client, leaving network behavior to `ab_http_client` tests.
+  - There are no nearby `src` CODEX.md files; the reusable CLI submit pattern is consolidated in this progress log.
+---
 
 ## 2026-08-06 09:22 CST - US-029
 Thread: https://codex.openai.com/threads/unavailable
