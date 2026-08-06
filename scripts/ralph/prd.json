@@ -76,7 +76,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Keep Stage 8 local and offline. Do not pull BL-001 real MiKan search work into this story."
     },
     {

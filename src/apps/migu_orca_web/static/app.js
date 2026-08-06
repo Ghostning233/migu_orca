@@ -7,6 +7,10 @@
   const submitButton = document.getElementById("request-generate-submit");
   const clearPreferencesButton = document.getElementById("clear-web-preferences");
   const refreshButton = document.getElementById("request-list-refresh");
+  const listSearchInput = document.getElementById("request-list-search");
+  const listStatusFilter = document.getElementById("request-list-status-filter");
+  const listSortSelect = document.getElementById("request-list-sort");
+  const listCount = document.getElementById("request-list-count");
   const listContainer = document.getElementById("request-list-container");
   const detailContainer = document.getElementById("request-detail-container");
   const preferenceKeys = {
@@ -15,6 +19,7 @@
   };
 
   let selectedRequestId = null;
+  let loadedRequests = [];
 
   function readPreference(key) {
     try {
@@ -161,11 +166,81 @@
     );
   }
 
-  function renderList(requests) {
+  function searchableText(summary) {
+    return [
+      summary.bangumi_title,
+      summary.request_id,
+      summary.selected_subtitle_group,
+      summary.expected_folder_name,
+      summary.folder_name,
+    ]
+      .map((value) => fieldValue(value).toLowerCase())
+      .join(" ");
+  }
+
+  function summaryStatus(summary) {
+    return fieldValue(summary.status);
+  }
+
+  function syncStatusFilterOptions(requests) {
+    const selectedStatus = listStatusFilter.value;
+    const statuses = Array.from(new Set(requests.map(summaryStatus))).sort((a, b) =>
+      a.localeCompare(b, "zh-CN"),
+    );
+    listStatusFilter.replaceChildren();
+
+    const allOption = document.createElement("option");
+    allOption.value = "";
+    allOption.textContent = "All";
+    listStatusFilter.appendChild(allOption);
+
+    for (const status of statuses) {
+      const option = document.createElement("option");
+      option.value = status;
+      option.textContent = status;
+      listStatusFilter.appendChild(option);
+    }
+
+    if (statuses.includes(selectedStatus)) {
+      listStatusFilter.value = selectedStatus;
+    }
+  }
+
+  function filteredAndSortedRequests() {
+    const searchTerm = listSearchInput.value.trim().toLowerCase();
+    const selectedStatus = listStatusFilter.value;
+    let requests = loadedRequests.filter((summary) => {
+      const matchesSearch = !searchTerm || searchableText(summary).includes(searchTerm);
+      const matchesStatus =
+        !selectedStatus || summaryStatus(summary) === selectedStatus;
+      return matchesSearch && matchesStatus;
+    });
+
+    if (listSortSelect.value === "title_asc") {
+      requests = requests.slice().sort((a, b) =>
+        requestLabel(a).localeCompare(requestLabel(b), "zh-CN"),
+      );
+    } else if (listSortSelect.value === "request_id_asc") {
+      requests = requests.slice().sort((a, b) =>
+        fieldValue(a.request_id).localeCompare(fieldValue(b.request_id), "zh-CN"),
+      );
+    }
+
+    return requests;
+  }
+
+  function renderList() {
+    const requests = filteredAndSortedRequests();
+    listCount.textContent = "显示 " + requests.length + " / " + loadedRequests.length;
+
     listContainer.className = "request-list";
     listContainer.replaceChildren();
-    if (!requests.length) {
+    if (!loadedRequests.length) {
       setState(listContainer, "暂无已保存的 Request。", "empty-state");
+      return;
+    }
+    if (!requests.length) {
+      setState(listContainer, "没有匹配的 Request。清空搜索或筛选后可恢复列表。", "empty-state");
       return;
     }
 
@@ -192,7 +267,7 @@
       item.addEventListener("click", () => {
         selectedRequestId = summary.request_id;
         loadDetail(summary.request_id);
-        renderList(requests);
+        renderList();
       });
       listContainer.appendChild(item);
     }
@@ -202,7 +277,9 @@
     setState(listContainer, "正在加载 Request 列表...", "loading-state");
     try {
       const result = await fetchJson(apiPath("/api/v1/requests"));
-      renderList(result.requests || []);
+      loadedRequests = result.requests || [];
+      syncStatusFilterOptions(loadedRequests);
+      renderList();
     } catch (error) {
       setState(listContainer, error.message, "error-state");
     }
@@ -419,6 +496,9 @@
   saveInput.addEventListener("change", persistWebPreferences);
   clearPreferencesButton.addEventListener("click", clearWebPreferences);
   refreshButton.addEventListener("click", loadList);
+  listSearchInput.addEventListener("input", renderList);
+  listStatusFilter.addEventListener("change", renderList);
+  listSortSelect.addEventListener("change", renderList);
   form.addEventListener("submit", generateRequest);
   loadList();
 })();

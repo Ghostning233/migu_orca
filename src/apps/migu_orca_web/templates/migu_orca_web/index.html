@@ -80,6 +80,30 @@
           <h2 id="request-list-heading">Request 列表</h2>
           <button id="request-list-refresh" type="button">刷新</button>
         </div>
+        <div class="request-list-controls" aria-label="Request 列表筛选和排序">
+          <label for="request-list-search">搜索</label>
+          <input
+            id="request-list-search"
+            type="text"
+            autocomplete="off"
+            placeholder="标题、request_id、字幕组或 folder_name"
+          >
+
+          <label for="request-list-status-filter">状态</label>
+          <select id="request-list-status-filter">
+            <option value="">All</option>
+          </select>
+
+          <label for="request-list-sort">排序</label>
+          <select id="request-list-sort">
+            <option value="default">默认顺序</option>
+            <option value="title_asc">标题升序</option>
+            <option value="request_id_asc">request_id 升序</option>
+          </select>
+        </div>
+        <p id="request-list-count" class="request-list-count" aria-live="polite">
+          显示 0 / 0
+        </p>
         <div id="request-list-container" class="empty-state" aria-live="polite">
           暂无已加载的 Request。
         </div>

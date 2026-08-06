@@ -79,6 +79,16 @@ def test_index_serves_web_ui_shell() -> None:
     assert "清除本地偏好" in html
     assert 'id="request-list-container"' in html
     assert 'id="request-list-refresh"' in html
+    assert 'id="request-list-search"' in html
+    assert "标题、request_id、字幕组或 folder_name" in html
+    assert 'id="request-list-status-filter"' in html
+    assert "<option value=\"\">All</option>" in html
+    assert 'id="request-list-sort"' in html
+    assert '<option value="default">默认顺序</option>' in html
+    assert '<option value="title_asc">标题升序</option>' in html
+    assert '<option value="request_id_asc">request_id 升序</option>' in html
+    assert 'id="request-list-count"' in html
+    assert "显示 0 / 0" in html
     assert 'id="request-detail-container"' in html
     assert "/migu-orca-static/app.js" in html
     assert "token" not in html.lower()
@@ -107,6 +117,37 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_wires_request_list_filter_sort_controls() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "request-list-search" in script
+    assert "request-list-status-filter" in script
+    assert "request-list-sort" in script
+    assert "request-list-count" in script
+    assert "loadedRequests" in script
+    assert "searchableText" in script
+    assert "syncStatusFilterOptions" in script
+    assert "filteredAndSortedRequests" in script
+    assert "summary.bangumi_title" in script
+    assert "summary.request_id" in script
+    assert "summary.selected_subtitle_group" in script
+    assert "summary.expected_folder_name" in script
+    assert "summary.folder_name" in script
+    assert "summary.status" in script
+    assert "listCount.textContent = \"显示 \"" in script
+    assert "没有匹配的 Request。清空搜索或筛选后可恢复列表。" in script
+    assert "listSearchInput.addEventListener(\"input\", renderList)" in script
+    assert "listStatusFilter.addEventListener(\"change\", renderList)" in script
+    assert "listSortSelect.addEventListener(\"change\", renderList)" in script
+    assert "fetchJson(apiPath(\"/api/v1/requests\"))" in script
+    assert "fetchJson(apiPath(\"/api/v1/requests?search" not in script
+    assert "title_asc" in script
+    assert "request_id_asc" in script
+    assert "localeCompare" in script
 
 
 def test_static_app_script_wires_generation_form_validation_and_busy_state() -> None:
@@ -169,6 +210,18 @@ def test_static_style_defines_generation_form_validation_states() -> None:
     assert 'input[aria-invalid="true"]' in css
     assert "button:disabled" in css
     assert ".secondary-button" in css
+
+
+def test_static_style_defines_request_list_filter_controls() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ".request-list-controls" in css
+    assert ".request-list-count" in css
+    assert "select" in css
+    assert "grid-template-columns: minmax(180px, 1fr)" in css
+    assert "grid-template-columns: 1fr" in css
 
 
 def test_list_requests_returns_empty_list_for_missing_storage_dir(

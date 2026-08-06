@@ -148,6 +148,17 @@ input[type="text"] {
   width: 100%;
 }
 
+select {
+  background: #ffffff;
+  border: 1px solid #bcc4d0;
+  border-radius: 6px;
+  color: #20242a;
+  font: inherit;
+  min-height: 40px;
+  padding: 8px 10px;
+  width: 100%;
+}
+
 input[aria-invalid="true"] {
   border-color: #b83b2e;
   box-shadow: 0 0 0 2px #f8d8d3;
@@ -239,6 +250,30 @@ button:disabled {
 .request-list {
   display: grid;
   gap: 10px;
+}
+
+.request-list-controls {
+  align-items: end;
+  display: grid;
+  gap: 8px 10px;
+  grid-template-columns: minmax(180px, 1fr) minmax(120px, 160px) minmax(140px, 180px);
+  margin: 16px 0 10px;
+}
+
+.request-list-controls label {
+  margin-bottom: -2px;
+}
+
+.request-list-controls input,
+.request-list-controls select {
+  grid-row: 2;
+}
+
+.request-list-count {
+  color: #586273;
+  font-size: 0.88rem;
+  font-weight: 700;
+  margin-bottom: 10px;
 }
 
 .request-list-item {
@@ -376,6 +411,15 @@ button:disabled {
   .panel-heading {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .request-list-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .request-list-controls input,
+  .request-list-controls select {
+    grid-row: auto;
   }
 
   .detail-grid {
