@@ -22,6 +22,7 @@
 - Stage 7 canonical Web UI homepage is `/index`; root `/` should redirect to `/index`.
 - Stage 7 is a minimum viable Web UI and should not implement confirm/cancel/modify actions unless explicitly re-scoped.
 - Stage 7 Web API may accept `storage_dir` from query/body for local validation convenience; keep errors sanitized and avoid leaking absolute paths.
+- Stage 7 Request query APIs live in `apps.migu_orca_web`; use `class_route`/`GetView`, return `{"requests": [...]}` for lists and `{"request": ...}` for detail, and keep storage access read-only through Stage 6 repositories.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 7 Web UI work unless explicitly pulled into scope.
 
 ## 2026-08-06 13:34 CST - Stage 7 PRD Setup
@@ -85,4 +86,24 @@ Thread: https://codex.openai.com/threads/unavailable
   - Future Stage 7 API blueprints should use `extensions.flask_api` instead of returning Flask dictionaries directly.
   - Pydantic validation failures are returned under `error_data.errors`, so frontend code should read validation details there.
   - The sanitizer is intentionally conservative and can replace full string values with redaction markers when raw RSS or HTML appears.
+---
+## 2026-08-06 14:14 CST - US-049
+Thread: https://codex.openai.com/threads/unavailable
+- What was implemented
+  - Added the `apps.migu_orca_web` API Blueprint and registered it through `apps.registry.ALL_BLUEPRINTS`.
+  - Added read-only `GET /api/v1/requests` support for listing saved Request summaries from local JSON storage.
+  - Added read-only `GET /api/v1/requests/<request_id>` support for loading complete saved Request snapshots.
+  - Reused `load_storage_config(...)`, `list_request_snapshots(...)`, `load_request_snapshot(...)`, and `summarize_request(...)` so no real MiKan, Auto Bangumi, or qBittorrent work is triggered.
+  - Added Flask test-client coverage for empty storage, normal list output, detail reads, missing request IDs, path-fragment request IDs, and damaged JSON snapshots.
+- Files changed
+  - `src/apps/registry.py`
+  - `src/apps/migu_orca_web/__init__.py`
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Use Flask's `<path:request_id>` converter on the detail route so path-fragment IDs reach repository validation and return the unified API error envelope.
+  - The list endpoint intentionally returns summaries only; the detail endpoint returns the complete persisted Request snapshot.
+  - Query APIs can safely accept `storage_dir` through Pydantic query validation and convert it with `Path(...)` before calling `load_storage_config(...)`.
 ---

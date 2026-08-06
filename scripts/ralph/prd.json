@@ -57,7 +57,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Keep URL/API naming close to the reference project's Blueprint + class_route style, but domain path should be MiGuOrca-specific."
     },
     {
