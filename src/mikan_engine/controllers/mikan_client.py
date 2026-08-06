@@ -113,17 +113,18 @@ class MikanClient:
         return _parse_search_candidates(html, self._config.search_endpoint)
 
     def list_rss_sources(self, matched_bangumi: MatchedBangumi) -> list[RssSource]:
-        if not matched_bangumi.mikan_url.strip():
+        mikan_url = matched_bangumi.mikan_url.strip()
+        if not mikan_url:
             raise Stage1Error(
                 "invalid_input",
                 "MiKan 番剧页 URL 不能为空",
                 "mikan_list_rss_sources",
             )
-        raise Stage1Error(
-            "mikan_not_implemented",
-            "真实 MiKan RSS 源发现尚未实现",
-            "mikan_list_rss_sources",
+        html = self._transport.get_text(
+            mikan_url,
+            timeout=self._config.timeout_seconds,
         )
+        return _parse_bangumi_rss_sources(html, mikan_url)
 
 
 def create_mikan_client(
@@ -162,6 +163,27 @@ def _parse_search_candidates(html: str, search_endpoint: str) -> list[BangumiCan
             "mikan_search",
         )
     return candidates
+
+
+def _parse_bangumi_rss_sources(html: str, bangumi_url: str) -> list[RssSource]:
+    parser = _MikanBangumiPageParser(bangumi_url)
+    try:
+        parser.feed(html)
+    except Exception as exc:
+        raise Stage1Error(
+            "mikan_parse_failed",
+            "MiKan 番剧页解析失败",
+            "mikan_list_rss_sources",
+        ) from exc
+
+    sources = parser.rss_sources()
+    if not sources:
+        raise Stage1Error(
+            "mikan_parse_failed",
+            "MiKan 番剧页未找到 RSS 源",
+            "mikan_list_rss_sources",
+        )
+    return sources
 
 
 class _MikanSearchParser(HTMLParser):
@@ -225,6 +247,98 @@ class _MikanSearchParser(HTMLParser):
         return candidates
 
 
+class _MikanBangumiPageParser(HTMLParser):
+    def __init__(self, bangumi_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self._base_url = bangumi_url
+        self._row_depth = 0
+        self._current_row: _MikanPageRow | None = None
+        self._completed_rows: list[_MikanPageRow] = []
+        self._active_anchor: _MikanPageAnchor | None = None
+        self._standalone_anchors: list[_MikanPageAnchor] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_name = tag.lower()
+        if tag_name == "tr":
+            self._row_depth += 1
+            if self._current_row is None:
+                self._current_row = _MikanPageRow()
+
+        attr_map = {name.lower(): value for name, value in attrs if value is not None}
+        if tag_name == "a":
+            self._active_anchor = _MikanPageAnchor(attr_map, [])
+
+    def handle_data(self, data: str) -> None:
+        if self._active_anchor is not None:
+            self._active_anchor.text_parts.append(data)
+        if self._current_row is not None:
+            self._current_row.text_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_name = tag.lower()
+        if tag_name == "a" and self._active_anchor is not None:
+            if self._current_row is not None:
+                self._current_row.anchors.append(self._active_anchor)
+            else:
+                self._standalone_anchors.append(self._active_anchor)
+            self._active_anchor = None
+            return
+
+        if tag_name == "tr" and self._row_depth:
+            self._row_depth -= 1
+            if self._row_depth == 0 and self._current_row is not None:
+                self._completed_rows.append(self._current_row)
+                self._current_row = None
+
+    def rss_sources(self) -> list[RssSource]:
+        rows = self._rows_with_sources()
+        sources: list[RssSource] = []
+        seen_urls: set[str] = set()
+        for row in rows:
+            row_text = _clean_title(" ".join(row.text_parts))
+            for anchor in row.anchors:
+                rss_url = _rss_url_from_href(anchor.attrs.get("href", ""), self._base_url)
+                if rss_url is None or rss_url in seen_urls:
+                    continue
+                subtitle_group = _subtitle_group_from_anchor(anchor, row_text)
+                if subtitle_group is None:
+                    continue
+                sources.append(
+                    RssSource(
+                        subtitle_group=subtitle_group,
+                        rss_url=rss_url,
+                        source_type="mikan_http",
+                        fixture_path="",
+                    )
+                )
+                seen_urls.add(rss_url)
+        return sources
+
+    def _rows_with_sources(self) -> list["_MikanPageRow"]:
+        rows = list(self._completed_rows)
+        if self._current_row is not None:
+            rows.append(self._current_row)
+        for anchor in self._standalone_anchors:
+            rows.append(_MikanPageRow(text_parts=anchor.text_parts, anchors=[anchor]))
+        return rows
+
+
+class _MikanPageAnchor:
+    def __init__(self, attrs: dict[str, str], text_parts: list[str]) -> None:
+        self.attrs = attrs
+        self.text_parts = text_parts
+
+
+class _MikanPageRow:
+    def __init__(
+        self,
+        text_parts: list[str] | None = None,
+        anchors: list[_MikanPageAnchor] | None = None,
+    ) -> None:
+        self.text_parts = text_parts or []
+        self.anchors = anchors or []
+
+
 def _extract_bangumi_id(href: str) -> str | None:
     marker = "/Home/Bangumi/"
     if marker not in href:
@@ -234,6 +348,50 @@ def _extract_bangumi_id(href: str) -> str | None:
     if not bangumi_id:
         return None
     return bangumi_id
+
+
+def _rss_url_from_href(href: str, base_url: str) -> str | None:
+    if not href.strip():
+        return None
+    absolute_url = urljoin(base_url, href.strip())
+    parsed = urlparse(absolute_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    path = parsed.path.casefold()
+    if "/rss/" not in path and not path.endswith((".rss", ".xml")):
+        return None
+    return urlunparse(parsed)
+
+
+def _subtitle_group_from_anchor(
+    anchor: _MikanPageAnchor,
+    row_text: str,
+) -> str | None:
+    for key in (
+        "data-subtitle-group",
+        "data-subtitle-group-name",
+        "data-group",
+        "data-group-name",
+        "title",
+    ):
+        value = _clean_title(anchor.attrs.get(key, ""))
+        if value and not _is_rss_label(value):
+            return value
+
+    anchor_text = _clean_title(" ".join(anchor.text_parts))
+    if anchor_text and not _is_rss_label(anchor_text):
+        return anchor_text
+
+    cleaned_row = row_text
+    for noise in ("RSS", "rss", "订阅", "复制", "复制链接"):
+        cleaned_row = cleaned_row.replace(noise, " ")
+    cleaned_row = _clean_title(cleaned_row)
+    return cleaned_row or None
+
+
+def _is_rss_label(value: str) -> bool:
+    normalized = value.strip().casefold()
+    return normalized in {"rss", "rss订阅", "订阅", "订阅rss", "复制", "复制链接"}
 
 
 def _clean_title(value: str) -> str:

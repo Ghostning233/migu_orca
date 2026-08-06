@@ -11,6 +11,7 @@
 - Real MiKan source boundaries live under `src/mikan_engine`; construct clients only from explicit `MikanConfig` loaded by `load_mikan_config(path)`.
 - MiKan HTTP reads use the injectable `MikanTransport.get_text(url, *, timeout)` seam; tests should pass fake transports and must not require live MiKanProject access.
 - MiKan search URLs are built from explicit `MikanConfig.search_endpoint` by appending a URL-encoded `searchstr` query parameter.
+- MiKan Bangumi page RSS discovery emits real sources as `RssSource(source_type="mikan_http", fixture_path="")`, using injected `MikanTransport` and offline HTML parser tests.
 - RSS parsing and filtering live in `rss_engine.controllers.rss_controller`; real RSS HTTP reads should reuse the existing `ParsedRss`, `RssSeed`, and `FilteredRss` contracts.
 - CLI AB submission remains an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; real MiKan opt-in must not implicitly submit to Auto Bangumi.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, fixtures, or documentation examples.
@@ -46,4 +47,15 @@ Thread: https://codex.openai.com/threads/unavailable
   - `MikanTransport.get_text(url, *, timeout)` is the reusable seam for Stage 5 MiKan HTTP reads; keep future RSS/page tests on fake transports.
   - Search parsing currently recognizes Bangumi candidates from anchors whose `href` contains `/Home/Bangumi/`, using anchor text as the canonical title and the anchor `title` attribute as an alias when present.
   - US-035 can reuse the default `UrlopenMikanTransport` but should keep `list_rss_sources(...)` page parsing and RSS URL validation separate from search parsing.
+---
+## 2026-08-06 09:53 CST - US-035
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented transport-backed MiKan Bangumi page RSS discovery in `MikanClient.list_rss_sources(...)`.
+- Added offline parser coverage for table-row RSS links, relative URL normalization, `http`/`https` absolute URL validation, duplicate RSS URL suppression, metadata-based subtitle group names, empty URL validation, and stable parse failures when no RSS sources are found.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - `list_rss_sources(...)` now reads `matched_bangumi.mikan_url` through the injected `MikanTransport` and forwards `MikanConfig.timeout_seconds`.
+  - Real MiKan RSS sources use `source_type="mikan_http"` with an empty `fixture_path`; keep `static_fixture` behavior isolated in catalog/RSS fixture loading.
+  - The Bangumi page parser recognizes RSS links from table rows or anchor metadata and drops non-HTTP(S), non-RSS, and duplicate URLs.
 ---

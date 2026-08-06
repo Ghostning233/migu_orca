@@ -113,11 +113,134 @@ def test_mikan_client_rejects_empty_search_title_before_transport() -> None:
 
 
 def test_mikan_client_exposes_rss_source_listing_boundary() -> None:
+    transport = FakeTransport(
+        """
+        <html>
+          <body>
+            <table>
+              <tr>
+                <td>喵萌奶茶屋</td>
+                <td>
+                  <a href="/RSS/Bangumi?bangumiId=1&subtitleGroupId=10">
+                    RSS
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td>桜都字幕组</td>
+                <td>
+                  <a href="https://mikan.example/RSS/Bangumi?bangumiId=1&subtitleGroupId=11">
+                    订阅
+                  </a>
+                  <a href="https://mikan.example/RSS/Bangumi?bangumiId=1&subtitleGroupId=11">
+                    RSS
+                  </a>
+                </td>
+              </tr>
+              <tr>
+                <td>无效链接</td>
+                <td><a href="ftp://mikan.example/RSS/Bangumi?bad=1">RSS</a></td>
+              </tr>
+            </table>
+          </body>
+        </html>
+        """
+    )
     client = create_mikan_client(
         MikanConfig(
             search_endpoint="https://mikan.example/search",
             timeout_seconds=5,
-        )
+        ),
+        transport=transport,
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1",
+        match_score=1,
+    )
+
+    sources = client.list_rss_sources(matched)
+
+    assert transport.requests == [("https://mikan.example/Home/Bangumi/1", 5)]
+    assert sources[0].subtitle_group == "喵萌奶茶屋"
+    assert (
+        sources[0].rss_url
+        == "https://mikan.example/RSS/Bangumi?bangumiId=1&subtitleGroupId=10"
+    )
+    assert sources[0].source_type == "mikan_http"
+    assert sources[0].fixture_path == ""
+    assert sources[1].subtitle_group == "桜都字幕组"
+    assert (
+        sources[1].rss_url
+        == "https://mikan.example/RSS/Bangumi?bangumiId=1&subtitleGroupId=11"
+    )
+    assert len(sources) == 2
+
+
+def test_mikan_client_uses_anchor_metadata_for_rss_source_group() -> None:
+    transport = FakeTransport(
+        """
+        <a
+          data-subtitle-group="Lilith-Raws"
+          href="https://mikan.example/feed/frieren.xml"
+        >
+          RSS
+        </a>
+        """
+    )
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1",
+        match_score=1,
+    )
+
+    sources = client.list_rss_sources(matched)
+
+    assert len(sources) == 1
+    assert sources[0].subtitle_group == "Lilith-Raws"
+    assert sources[0].rss_url == "https://mikan.example/feed/frieren.xml"
+
+
+def test_mikan_client_rejects_empty_bangumi_url_before_transport() -> None:
+    transport = FakeTransport()
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="  ",
+        match_score=1,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.list_rss_sources(matched)
+
+    assert error.value.error_type == "invalid_input"
+    assert error.value.failed_step == "mikan_list_rss_sources"
+    assert transport.requests == []
+
+
+def test_mikan_client_raises_parse_error_when_bangumi_page_has_no_rss_sources() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport("<a href='/Home/Bangumi/2'>not rss</a>"),
     )
     matched = MatchedBangumi(
         title="芙莉莲",
@@ -129,5 +252,5 @@ def test_mikan_client_exposes_rss_source_listing_boundary() -> None:
     with pytest.raises(Stage1Error) as error:
         client.list_rss_sources(matched)
 
-    assert error.value.error_type == "mikan_not_implemented"
+    assert error.value.error_type == "mikan_parse_failed"
     assert error.value.failed_step == "mikan_list_rss_sources"
