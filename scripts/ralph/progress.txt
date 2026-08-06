@@ -106,3 +106,13 @@ Thread: https://codex.openai.com/threads/unavailable
   - Gate AB result persistence on an object-valued `request.ab_submit_result`; the existence of the `ab_results/` directory alone should not imply a submission happened.
   - Storage failure outputs should omit partial success metadata such as `saved_request` and `saved_ab_result`, even if an earlier file write already occurred.
 ---
+## 2026-08-06 13:22 CST - US-046
+Thread: https://codex.openai.com/threads/unavailable
+- Documented Stage 6 local JSON persistence behavior in README, including the default no-write contract, explicit save/query CLI examples, storage directory layout, runtime data guidance, and the MiKan compatibility backlog pointer.
+- Marked the final Stage 6 PRD story as passing.
+- Files changed: `README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep README CLI examples aligned with `entry_controller.main(...)` argument names because Stage 6 user-facing behavior is entirely CLI-driven.
+  - Documentation should state both sides of opt-in behavior: default commands do not write storage, while `--save-request` writes JSON records under the configured storage root.
+  - Runtime storage under `.migu_orca/storage` should be treated as generated local data and kept out of Git.
+---

@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向动画订阅场景的 RSS 编排工具，目标是在 MiKanProject 与 Auto Bangumi 之间提供一层自动化协作能力。
 
-当前已完成 Stage 5：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。用户也可以通过显式参数启用真实 MiKanProject 数据源；默认生成和确认流程仍不会隐式访问外部系统。
+当前已完成 Stage 6：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。用户也可以通过显式参数启用真实 MiKanProject 数据源；默认生成和确认流程仍不会隐式访问外部系统，也不会隐式写入本地存储。只有显式传入持久化参数时，CLI 才会在本地 JSON 存储目录写入 Request、状态历史或 Auto Bangumi 提交结果。
 
 ## 项目目标
 
@@ -20,7 +20,7 @@ MVP 聚焦单番剧的订阅闭环：
 - 已支持 Request 确认、取消和受限修改；确认后的 Request 可以进入显式 AB 提交流程。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
 - 已建立真实 MiKanProject 数据源 adapter、可注入 HTTP transport、搜索页解析、番剧页 RSS 源发现、真实 RSS XML 读取和安全错误归一化。
-- 当前 CLI 只有在显式传入 `--source mikan` 和 `--mikan-config` 时才会构造真实 MiKan client；只有在显式传入 `--submit-ab` 和 `--ab-config` 时才会构造真实 Auto Bangumi HTTP client。持久化和 Web UI 尚未实现。
+- 当前 CLI 只有在显式传入 `--source mikan` 和 `--mikan-config` 时才会构造真实 MiKan client；只有在显式传入 `--submit-ab` 和 `--ab-config` 时才会构造真实 Auto Bangumi HTTP client；只有在显式传入 `--save-request` 时才会写入本地 JSON 存储。Web UI 尚未实现。
 
 ## 关键约定
 
@@ -37,9 +37,13 @@ MVP 聚焦单番剧的订阅闭环：
 - 运行测试：`uv run pytest`
 - 运行入口命令：`uv run migu-orca "咒术回战第三季"`
 - 接受 Request：`uv run migu-orca "咒术回战第三季" --action accept`
+- 生成并保存 Request：`uv run migu-orca "咒术回战第三季" --save-request --storage-dir .migu_orca/storage`
+- 列出已保存 Request：`uv run migu-orca --list-requests --storage-dir .migu_orca/storage`
+- 读取完整 Request：`uv run migu-orca --load-request <request_id> --storage-dir .migu_orca/storage`
 - 显式使用真实 MiKan 数据源：`uv run migu-orca "咒术回战第三季" --source mikan --mikan-config config/user/mikan-config.example.json`
 - 显式执行真实 AB 提交：`uv run migu-orca "咒术回战第三季" --action accept --submit-ab --ab-config config/user/ab-config.example.json`
 - 显式组合真实 MiKan 和真实 AB 提交：`uv run migu-orca "咒术回战第三季" --source mikan --mikan-config config/user/mikan-config.example.json --action accept --submit-ab --ab-config config/user/ab-config.example.json`
+- 显式保存真实 AB 提交结果：`uv run migu-orca "咒术回战第三季" --action accept --submit-ab --ab-config config/user/ab-config.example.json --save-request --storage-dir .migu_orca/storage`
 
 说明：
 
@@ -47,6 +51,13 @@ MVP 聚焦单番剧的订阅闭环：
 - 需要新增依赖时，优先通过 `uv add` 或编辑 `pyproject.toml` 后再执行 `uv sync`。
 - 所有后续自动化、验证和测试步骤都应默认通过 `uv` 完成。
 - `--source` 默认为 `static-fixture`，会继续读取仓库内静态 catalog 和 RSS fixture；只有 `--source mikan --mikan-config <path>` 会访问真实 MiKanProject 页面和 RSS URL。
+- `--save-request` 默认为关闭；未传该参数时，CLI 只输出 JSON，不会创建或写入本地存储目录。
+- `--storage-dir <path>` 用于覆盖本地 JSON 存储根目录；未传时，显式保存或查询命令使用项目下 `.migu_orca/storage`。
+- 本地 JSON 存储目录结构：
+  - `requests/`：按 `request_id` 保存完整 Request snapshot。
+  - `history/`：按 `request_id` 保存确认、取消和修改等状态历史。
+  - `ab_results/`：仅在显式 `--submit-ab` 产生 `ab_submit_result` 且同时 `--save-request` 时保存 AB 提交结果。
+- `.migu_orca/storage` 是运行数据目录，不应提交到 Git；如需长期保留，请由部署方在仓库外指定 `--storage-dir`。
 - MiKan config JSON 字段为 `search_endpoint`、`timeout_seconds`：
   - `search_endpoint`：MiKanProject 搜索页 endpoint，由调用方显式提供；程序会追加 URL 编码后的 `searchstr` 查询参数。
   - `timeout_seconds`：真实 MiKan 搜索页、番剧页和 RSS XML 读取的超时时间，必须为正数。
@@ -58,6 +69,7 @@ MVP 聚焦单番剧的订阅闭环：
   - `token`：用于 `Authorization: Bearer <token>` 请求头。不要提交真实 token，错误 details、日志和测试快照也不得包含 token 明文。
   - `fallback_enabled`：提交失败时是否在 `ab_submit_result.fallback_config` 中输出可人工处理的降级 JSON。
 - 真实 AB client 当前发送的创建订阅 payload 字段为 `title`、`rss_url`、`save_path`、`filter_rule`，并要求响应中包含 `id`、`subscription_id` 或 `ab_subscription_id` 之一。真实 Auto Bangumi API 的 endpoint、请求字段和响应字段仍需要按实际部署版本验证。
+- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不阻塞 Stage 6 本地持久化能力。
 
 示例 AB 配置：
 
@@ -82,12 +94,12 @@ MVP 聚焦单番剧的订阅闭环：
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
 - 当前活跃阶段：Stage 6，本地 JSON Request 持久化 PRD
-- 最近完成阶段：Stage 5，真实 MiKanProject 数据源 adapter PRD
+- 最近完成阶段：Stage 6，本地 JSON Request 持久化 PRD
 - 后续待办：`docs/backlog.md`
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 6`
 
-Stage 6 的目标是在 Stage 5 真实 MiKan 与真实 AB 显式集成基础上，增加本地 JSON Request 持久化、状态历史、查询恢复和 AB 结果记录，同时保持默认 CLI 流程不隐式写入磁盘。
+Stage 6 已在 Stage 5 真实 MiKan 与真实 AB 显式集成基础上，增加本地 JSON Request 持久化、状态历史、查询恢复和 AB 结果记录，同时保持默认 CLI 流程不隐式写入磁盘。
 
 ## 参考文档
 
