@@ -75,6 +75,8 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'role="alert"' in html
     assert 'id="request-generate-submit"' in html
     assert 'data-default-label="生成"' in html
+    assert 'id="clear-web-preferences"' in html
+    assert "清除本地偏好" in html
     assert 'id="request-list-container"' in html
     assert 'id="request-list-refresh"' in html
     assert 'id="request-detail-container"' in html
@@ -131,6 +133,32 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     )
 
 
+def test_static_app_script_wires_local_web_preferences() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "miguOrca.web.storageDir" in script
+    assert "miguOrca.web.saveRequest" in script
+    assert "window.localStorage.getItem" in script
+    assert "window.localStorage.setItem" in script
+    assert "window.localStorage.removeItem" in script
+    assert "restoreWebPreferences" in script
+    assert "persistWebPreferences" in script
+    assert "clearWebPreferences" in script
+    assert "savedStorageDir" in script
+    assert "saveInput.checked = savedSaveRequest === \"true\"" in script
+    assert "storageInput.value = \"\"" in script
+    assert "saveInput.checked = false" in script
+    assert "clear-web-preferences" in script
+    assert "storageInput.addEventListener(\"change\", persistWebPreferences)" in script
+    assert "saveInput.addEventListener(\"change\", persistWebPreferences)" in script
+    assert script.index("restoreWebPreferences()") < script.index("loadList()")
+    assert script.index("persistWebPreferences()") < script.index(
+        'fetchJson("/api/v1/requests"',
+    )
+
+
 def test_static_style_defines_generation_form_validation_states() -> None:
     response = _client().get("/migu-orca-static/style.css")
 
@@ -140,6 +168,7 @@ def test_static_style_defines_generation_form_validation_states() -> None:
     assert ".field-error" in css
     assert 'input[aria-invalid="true"]' in css
     assert "button:disabled" in css
+    assert ".secondary-button" in css
 
 
 def test_list_requests_returns_empty_list_for_missing_storage_dir(

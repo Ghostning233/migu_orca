@@ -194,6 +194,20 @@ button:disabled {
   opacity: 0.68;
 }
 
+.secondary-button {
+  background: #ffffff;
+  border-color: #9aa6b5;
+  color: #22577a;
+  justify-self: start;
+}
+
+.secondary-button:hover,
+.secondary-button:focus {
+  border-color: #22577a;
+  box-shadow: 0 0 0 2px #d7e9f2;
+  outline: none;
+}
+
 .empty-state {
   background: #f6f7f9;
   border: 1px dashed #bcc4d0;

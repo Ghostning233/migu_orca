@@ -56,7 +56,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Do not store tokens or endpoint values. Current Stage 8 preferences only include storage_dir and save_request."
     },
     {

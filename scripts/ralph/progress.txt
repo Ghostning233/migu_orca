@@ -28,6 +28,7 @@
 - Request detail responses include optional `history` and `ab_result` sections; missing optional records should not fail the Request detail load, and damaged optional records should return section-local error metadata.
 - Web UI must scrub fallback config display values before rendering so URL-like strings and credential-like keys are redacted in collapsible JSON.
 - Web UI form usability contracts are pinned in `src/apps/migu_orca_web/views_test.py` through server-rendered DOM assertions plus static `app.js` and `style.css` checks.
+- Stage 8 browser-only preferences belong in `src/apps/migu_orca_web/static/app.js` with `localStorage` keys scoped to `miguOrca.web.*`; do not persist UI preferences through storage JSON or Web API payloads.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 8 Web UI usability work unless explicitly pulled into scope.
 - Flask Web UI runs with `uv run flask --app wsgi:app run`; validate code with `uv run pytest` and `uv run python -m compileall -q src`.
 - README is the canonical user-facing Web UI runbook; keep it in sync when changing Flask routes, API envelopes, storage defaults, UI workflows, MVP exclusions, or Stage 8 acceptance steps.
@@ -79,4 +80,21 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep Stage 8 form UX improvements in the existing server-rendered template and static `app.js`; no frontend framework is needed for validation and button state.
   - Form UI contracts can be tested with Flask static-file responses by asserting stable IDs, help text, validation entry points, and CSS selectors.
   - Browser verification may remain unavailable in Ralph sessions, so preserve manual verification notes in progress entries for UI stories.
+---
+
+## 2026-08-06 15:21 CST - US-057
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented browser-only Web UI preferences for the Request generation form: recent non-empty `storage_dir` and `save_request` checkbox state are restored from `localStorage` on page load.
+- Added persistence on storage directory changes, save checkbox changes, and successful submit flow entry; blank storage directory removes the saved directory preference while retaining the save checkbox preference.
+- Added a `清除本地偏好` form control that removes the Stage 8 Web UI preference keys and restores the default empty storage directory plus unchecked save state.
+- Added lightweight secondary-button styling for the clear preference control.
+- Added Flask/static tests covering the clear preference DOM, `localStorage` keys, restore/persist/clear script hooks, default reset behavior, and CSS selector.
+- Ran `uv run pytest`: 212 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed after tool search); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Stage 8 Web UI preferences should stay browser-only with scoped `miguOrca.web.*` keys and should not be added to API contracts or local JSON storage.
+  - Static script tests are useful for pinning preference behavior in this no-build frontend, especially when browser automation is unavailable.
+  - Keep preference reset behavior aligned with the documented defaults: empty `storage_dir` and unchecked `save_request`.
 ---

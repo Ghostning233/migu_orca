@@ -5,11 +5,68 @@
   const saveInput = document.getElementById("save-request");
   const formError = document.getElementById("request-form-error");
   const submitButton = document.getElementById("request-generate-submit");
+  const clearPreferencesButton = document.getElementById("clear-web-preferences");
   const refreshButton = document.getElementById("request-list-refresh");
   const listContainer = document.getElementById("request-list-container");
   const detailContainer = document.getElementById("request-detail-container");
+  const preferenceKeys = {
+    storageDir: "miguOrca.web.storageDir",
+    saveRequest: "miguOrca.web.saveRequest",
+  };
 
   let selectedRequestId = null;
+
+  function readPreference(key) {
+    try {
+      return window.localStorage.getItem(key);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function writePreference(key, value) {
+    try {
+      window.localStorage.setItem(key, value);
+    } catch (error) {
+      return;
+    }
+  }
+
+  function removePreference(key) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch (error) {
+      return;
+    }
+  }
+
+  function restoreWebPreferences() {
+    const savedStorageDir = readPreference(preferenceKeys.storageDir);
+    const savedSaveRequest = readPreference(preferenceKeys.saveRequest);
+    if (savedStorageDir) {
+      storageInput.value = savedStorageDir;
+    }
+    if (savedSaveRequest !== null) {
+      saveInput.checked = savedSaveRequest === "true";
+    }
+  }
+
+  function persistWebPreferences() {
+    const storageDir = storageInput.value.trim();
+    if (storageDir) {
+      writePreference(preferenceKeys.storageDir, storageDir);
+    } else {
+      removePreference(preferenceKeys.storageDir);
+    }
+    writePreference(preferenceKeys.saveRequest, String(saveInput.checked));
+  }
+
+  function clearWebPreferences() {
+    removePreference(preferenceKeys.storageDir);
+    removePreference(preferenceKeys.saveRequest);
+    storageInput.value = "";
+    saveInput.checked = false;
+  }
 
   function storageQuery() {
     const storageDir = storageInput.value.trim();
@@ -335,6 +392,7 @@
     }
 
     setSubmitInFlight(true);
+    persistWebPreferences();
     setState(detailContainer, "正在生成 Request...", "loading-state");
     try {
       const result = await fetchJson("/api/v1/requests", {
@@ -356,6 +414,10 @@
     }
   }
 
+  restoreWebPreferences();
+  storageInput.addEventListener("change", persistWebPreferences);
+  saveInput.addEventListener("change", persistWebPreferences);
+  clearPreferencesButton.addEventListener("click", clearWebPreferences);
   refreshButton.addEventListener("click", loadList);
   form.addEventListener("submit", generateRequest);
   loadList();
