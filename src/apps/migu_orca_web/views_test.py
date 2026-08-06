@@ -46,6 +46,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert "MiGuOrca" in html
     assert "Stage 8 Web UI Usability" in html
     assert "Stage 7 Web UI MVP" not in html
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert "运行模式：本地 JSON storage" in html
     assert "fixture-backed" in html
     assert "不会隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent" in html
@@ -92,7 +93,11 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="request-detail-container"' in html
     assert 'id="page-notification"' in html
     assert 'aria-live="polite"' in html
+    assert 'aria-atomic="true"' in html
     assert 'role="status"' in html
+    assert 'aria-describedby="save-request-help"' in html
+    assert 'aria-label="刷新 Request 列表"' in html
+    assert 'aria-relevant="additions text"' in html
     assert "/migu-orca-static/app.js" in html
     assert "token" not in html.lower()
     assert "http://" not in html
@@ -219,6 +224,10 @@ def test_static_app_script_wires_request_list_filter_sort_controls() -> None:
     assert "listSearchInput.addEventListener(\"input\", renderList)" in script
     assert "listStatusFilter.addEventListener(\"change\", renderList)" in script
     assert "listSortSelect.addEventListener(\"change\", renderList)" in script
+    assert "document.createElement(\"button\")" in script
+    assert "item.type = \"button\"" in script
+    assert 'item.setAttribute("aria-label", "查看 Request 详情：" + requestLabel(summary))' in script
+    assert 'item.setAttribute("aria-current", "true")' in script
     assert "fetchJson(apiPath(\"/api/v1/requests\"))" in script
     assert "fetchJson(apiPath(\"/api/v1/requests?search" not in script
     assert "title_asc" in script
@@ -325,6 +334,27 @@ def test_static_style_defines_page_notifications() -> None:
     assert ".notification-detail" in css
     assert ".notification-actions" in css
     assert ".notification-close" in css
+
+
+def test_static_style_defines_responsive_accessibility_contracts() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ":where(a, button, input, select, summary):focus-visible" in css
+    assert "outline: 3px solid #22577a" in css
+    assert "outline-offset: 2px" in css
+    assert ".panel" in css
+    assert "min-width: 0" in css
+    assert "max-width: 100%" in css
+    assert ".request-list-item strong" in css
+    assert "overflow-wrap: anywhere" in css
+    assert "@media (max-width: 760px)" in css
+    assert "@media (max-width: 520px)" in css
+    assert ".app-layout" in css
+    assert "grid-template-columns: 1fr" in css
+    assert ".top-nav a,\n  button" in css
+    assert "width: 100%" in css
 
 
 def test_list_requests_returns_empty_list_for_missing_storage_dir(

@@ -28,6 +28,7 @@
       id="page-notification"
       class="page-notification"
       aria-live="polite"
+      aria-atomic="true"
       role="status"
       hidden
     ></div>
@@ -64,7 +65,13 @@
           </p>
 
           <label class="checkbox-row" for="save-request">
-            <input id="save-request" name="save_request" type="checkbox" value="true">
+            <input
+              id="save-request"
+              name="save_request"
+              type="checkbox"
+              value="true"
+              aria-describedby="save-request-help"
+            >
             保存 Request
           </label>
           <p id="save-request-help" class="field-help">
@@ -86,7 +93,7 @@
       <section id="request-list-panel" class="panel request-list-panel" aria-labelledby="request-list-heading">
         <div class="panel-heading">
           <h2 id="request-list-heading">Request 列表</h2>
-          <button id="request-list-refresh" type="button">刷新</button>
+          <button id="request-list-refresh" type="button" aria-label="刷新 Request 列表">刷新</button>
         </div>
         <div class="request-list-controls" aria-label="Request 列表筛选和排序">
           <label for="request-list-search">搜索</label>
@@ -112,14 +119,24 @@
         <p id="request-list-count" class="request-list-count" aria-live="polite">
           显示 0 / 0
         </p>
-        <div id="request-list-container" class="empty-state" aria-live="polite">
+        <div
+          id="request-list-container"
+          class="empty-state"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
           暂无已加载的 Request。
         </div>
       </section>
 
       <section id="request-detail-panel" class="panel request-detail-panel" aria-labelledby="request-detail-heading">
         <h2 id="request-detail-heading">Request 详情</h2>
-        <div id="request-detail-container" class="empty-state" aria-live="polite">
+        <div
+          id="request-detail-container"
+          class="empty-state"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
           选择一个 Request 后查看详情。
         </div>
       </section>

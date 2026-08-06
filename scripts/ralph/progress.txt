@@ -36,6 +36,7 @@
 - Flask Web UI runs with `uv run flask --app wsgi:app run`; validate code with `uv run pytest` and `uv run python -m compileall -q src`.
 - README is the canonical user-facing Web UI runbook; keep it in sync when changing Flask routes, API envelopes, storage defaults, UI workflows, MVP exclusions, or Stage 8 acceptance steps.
 - Browser automation may not be exposed in Ralph sessions. If `dev-browser` is unavailable, record manual browser verification steps and any limitation in this progress file.
+- Stage 8 responsive/accessibility contracts are pinned in `src/apps/migu_orca_web/views_test.py` with static assertions for viewport/live-region metadata, keyboard-friendly list buttons, focus-visible CSS, and mobile media queries.
 
 ## 2026-08-06 15:02 CST - Stage 8 PRD Setup
 Thread: https://codex.openai.com/threads/unavailable
@@ -149,4 +150,20 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep user-visible Web UI operation feedback centralized through `showNotification(...)` so success, error, close, and recovery actions remain consistent.
   - API failure notifications should consume the existing sanitized unified envelope instead of adding backend-specific display paths.
   - Browser automation may remain unavailable in Ralph sessions, so UI stories need static DOM/script/CSS assertions plus a manual verification note.
+---
+
+## 2026-08-06 15:37 CST - US-061
+Thread: https://codex.openai.com/threads/unavailable
+- Added stronger accessibility semantics to the Stage 8 Web UI: atomic page notification live region, relevant-change hints for list/detail regions, save checkbox help association, and an explicit refresh-button label.
+- Made rendered Request list items self-describing keyboard-focusable buttons with `aria-label` and selected `aria-current` state while preserving click-to-load-detail behavior.
+- Added focus-visible styling for links, buttons, inputs, selects, and disclosure summaries; tightened panel/content overflow handling; added a narrower mobile breakpoint that keeps navigation/actions full-width on small screens.
+- Added Flask/static tests covering viewport metadata, live-region hooks, key labels, list-item keyboard semantics, focus styles, overflow safeguards, and mobile media queries.
+- Ran `uv run pytest`: 219 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed after tool search); manual browser verification is still needed for the visible responsive UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Request list rows are real `<button>` elements, so keyboard activation remains native; add ARIA metadata there instead of replacing them with custom keyboard handlers.
+  - Responsive Web UI acceptance can be pinned with static CSS assertions for focus-visible rules, overflow-wrap safeguards, and media queries when browser automation is unavailable.
+  - Keep dynamic-region accessibility in the server-rendered template where possible so `app.js` can focus on rendering data projections.
 ---

@@ -329,8 +329,10 @@
       item.type = "button";
       item.className = "request-list-item";
       item.dataset.requestId = summary.request_id || "";
+      item.setAttribute("aria-label", "查看 Request 详情：" + requestLabel(summary));
       if (summary.request_id === selectedRequestId) {
         item.classList.add("is-selected");
+        item.setAttribute("aria-current", "true");
       }
 
       const title = document.createElement("strong");
