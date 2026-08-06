@@ -1,0 +1,126 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage5-real-mikan-source",
+  "description": "MiGuOrca Stage 5：在 Stage 4 真实 Auto Bangumi HTTP adapter 基础上，引入显式启用、可注入 transport、离线可测的真实 MiKanProject 数据源适配器；默认 CLI 仍使用静态 fixture，不得隐式访问外部系统。",
+  "userStories": [
+    {
+      "id": "US-033",
+      "title": "定义真实 MiKan 数据源配置和 client 边界",
+      "description": "As an integration developer, I want the real MiKan source adapter boundary to be explicit so that network access does not leak into matching, RSS parsing, or CLI default behavior.",
+      "acceptanceCriteria": [
+        "新增真实 MiKan 数据源 adapter 的模块边界和公开构造入口",
+        "新增显式 MiKan config loader，配置必须来自调用方传入的 JSON 路径",
+        "真实 MiKan client 暴露 list_bangumi_candidates(raw_title) 和 list_rss_sources(matched_bangumi) 能力",
+        "真实 MiKan client 只接收显式配置和领域输入，不直接读取 Request 快照",
+        "默认 CLI 和默认 generate_request 路径不实例化真实 MiKan client",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-034",
+      "title": "实现可注入 HTTP transport 的 MiKan 搜索 client",
+      "description": "As a developer, I want the MiKan search client to use an injectable HTTP transport so that search behavior can be tested without live MiKanProject access.",
+      "acceptanceCriteria": [
+        "HTTP transport 可在测试中替换，不要求真实网络可用",
+        "搜索 endpoint 和 timeout 来自显式 MiKan config",
+        "搜索请求按 raw_title 构造 URL 或 query 参数，并对用户输入做 URL 编码",
+        "成功搜索响应可从离线 HTML fixture 解析为 BangumiCandidate 列表",
+        "解析结果包含 bangumi_id、title、aliases、mikan_url 和空 rss_sources",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-035",
+      "title": "解析真实 MiKan 番剧页的候选 RSS 源",
+      "description": "As a caller, I want the real MiKan client to discover RSS sources for a matched bangumi so that the existing Request generation flow can evaluate subtitle groups from real MiKan data.",
+      "acceptanceCriteria": [
+        "真实 MiKan client 通过 transport 读取 matched_bangumi.mikan_url 对应页面",
+        "番剧页解析可从离线 HTML fixture 提取字幕组名称和 RSS URL",
+        "解析出的 RssSource 使用 source_type=mikan_http 或等价真实来源标识",
+        "RSS URL 需要校验为 http/https 绝对 URL，并对重复 RSS 源去重",
+        "静态 fixture catalog 的 load_catalog 行为不回归",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-036",
+      "title": "支持真实 MiKan RSS XML 的 HTTP 读取",
+      "description": "As a user, I want RSS sources discovered from MiKan to be parsed through the existing RSS pipeline so that real MiKan data can produce the same FilteredRss contract as static fixtures.",
+      "acceptanceCriteria": [
+        "rss_engine 支持对 source_type=mikan_http 的 RssSource 通过可注入 transport 读取 RSS XML",
+        "静态 source_type=static_fixture 继续按 fixture_path 离线读取",
+        "真实 RSS XML 解析结果复用现有 ParsedRss、RssSeed 和 filter_seeds 契约",
+        "RSS 读取失败返回稳定 Stage1Error 或兼容 ErrorResult，不包含原始 RSS 内容",
+        "默认 generate_request 路径不访问真实 RSS URL",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-037",
+      "title": "将 CLI 显式 MiKan 模式接入真实数据源",
+      "description": "As a CLI user, I want to opt into the real MiKan data source with an explicit config so that the default offline fixture workflow remains safe and repeatable.",
+      "acceptanceCriteria": [
+        "CLI 新增显式启用真实 MiKan 数据源的参数，不传该参数时继续使用静态 catalog",
+        "CLI 真实 MiKan 模式必须要求 --mikan-config <path> 或等价显式配置路径",
+        "generate_request 支持测试注入 fake MiKan client 和 fake RSS transport，测试不访问网络",
+        "真实 MiKan 模式生成的成功结果保持现有 success/request/error 顶层 envelope",
+        "真实 MiKan 模式可与 --action accept 和 --submit-ab 后续步骤组合，但默认不触发 AB 提交",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-038",
+      "title": "标准化 MiKan 网络和页面解析错误",
+      "description": "As an operator, I want MiKan network and parser failures to produce stable token-free and content-free errors so that CLI output is safe to log and automate.",
+      "acceptanceCriteria": [
+        "HTTP 非成功响应映射为稳定 mikan_http_failed 或等价错误类型",
+        "连接失败映射为稳定 mikan_connection_failed 或等价错误类型",
+        "超时映射为稳定 mikan_timeout 或等价错误类型",
+        "搜索页或番剧页结构无法解析映射为稳定 mikan_parse_failed 或等价错误类型",
+        "错误 details 不包含原始 HTML、原始 RSS XML、完整 endpoint URL 或用户配置敏感值",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-039",
+      "title": "补充真实 MiKan 数据源使用文档和示例配置",
+      "description": "As a maintainer, I want the README and example config to document the Stage 5 MiKan opt-in path so that users know when the tool will contact MiKanProject.",
+      "acceptanceCriteria": [
+        "README 说明当前 Stage 5 的真实 MiKan 数据源能力和默认离线行为",
+        "README 给出显式真实 MiKan CLI 示例命令",
+        "新增或更新 MiKan config 示例，示例不得包含真实账号、cookie 或 token",
+        "文档说明真实 MiKan 页面结构和 RSS URL 解析仍需要按实际站点版本验证",
+        "scripts/ralph/progress.txt 记录 Stage 5 PRD setup 和可复用约定",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}
