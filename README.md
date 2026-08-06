@@ -81,12 +81,13 @@ MVP 聚焦单番剧的订阅闭环：
 ## Ralph 开发流
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
+- 当前活跃阶段：Stage 6，本地 JSON Request 持久化 PRD
 - 最近完成阶段：Stage 5，真实 MiKanProject 数据源 adapter PRD
 - 后续待办：`docs/backlog.md`
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 6`
 
-Stage 5 的目标是在 Stage 4 真实 AB 提交链路基础上，增加显式启用、可注入 transport、离线可测的真实 MiKanProject 数据源 adapter，同时保持默认 CLI 流程继续使用静态 fixture。
+Stage 6 的目标是在 Stage 5 真实 MiKan 与真实 AB 显式集成基础上，增加本地 JSON Request 持久化、状态历史、查询恢复和 AB 结果记录，同时保持默认 CLI 流程不隐式写入磁盘。
 
 ## 参考文档
 
