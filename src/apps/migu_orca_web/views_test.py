@@ -44,17 +44,60 @@ def test_index_serves_web_ui_shell() -> None:
     assert response.status_code == 200
     assert "text/html" in response.content_type
     assert "MiGuOrca" in html
-    assert "Stage 7 Web UI MVP" in html
+    assert "Stage 8 Web UI Usability" in html
+    assert "Stage 7 Web UI MVP" not in html
+    assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
+    assert "运行模式：本地 JSON storage" in html
+    assert "fixture-backed" in html
+    assert "不会隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent" in html
     assert "Request 生成" in html
     assert "Request 列表" in html
     assert "Request 详情" in html
+    assert "验收说明" in html
+    assert 'href="#generate-panel"' in html
+    assert 'href="#request-list-panel"' in html
+    assert 'href="#request-detail-panel"' in html
+    assert 'href="#acceptance-panel"' in html
+    assert 'id="generate-panel"' in html
+    assert 'id="request-list-panel"' in html
+    assert 'id="request-detail-panel"' in html
+    assert 'id="acceptance-panel"' in html
     assert 'id="request-generate-form"' in html
     assert 'name="title"' in html
+    assert "例如：葬送的芙莉莲" in html
+    assert "至少输入 1 个非空白字符" in html
+    assert 'aria-describedby="request-title-help request-form-error"' in html
     assert 'name="storage_dir"' in html
+    assert "留空时使用默认 `.migu_orca/storage`" in html
     assert 'name="save_request"' in html
+    assert "未勾选时只生成预览，不写入本地 storage" in html
+    assert "勾选后才保存 Request JSON" in html
+    assert 'id="request-form-error"' in html
+    assert 'role="alert"' in html
+    assert 'id="request-generate-submit"' in html
+    assert 'data-default-label="生成"' in html
+    assert 'id="clear-web-preferences"' in html
+    assert "清除本地偏好" in html
     assert 'id="request-list-container"' in html
     assert 'id="request-list-refresh"' in html
+    assert 'id="request-list-search"' in html
+    assert "标题、request_id、字幕组或 folder_name" in html
+    assert 'id="request-list-status-filter"' in html
+    assert "<option value=\"\">All</option>" in html
+    assert 'id="request-list-sort"' in html
+    assert '<option value="default">默认顺序</option>' in html
+    assert '<option value="title_asc">标题升序</option>' in html
+    assert '<option value="request_id_asc">request_id 升序</option>' in html
+    assert 'id="request-list-count"' in html
+    assert "显示 0 / 0" in html
     assert 'id="request-detail-container"' in html
+    assert 'id="page-notification"' in html
+    assert 'aria-live="polite"' in html
+    assert 'aria-atomic="true"' in html
+    assert 'role="status"' in html
+    assert 'aria-describedby="save-request-help"' in html
+    assert 'aria-label="刷新 Request 列表"' in html
+    assert 'aria-relevant="additions text"' in html
     assert "/migu-orca-static/app.js" in html
     assert "token" not in html.lower()
     assert "http://" not in html
@@ -78,10 +121,240 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "fallback_config" in script
     assert "folder_name" in script
     assert "filter_rule" in script
+    assert "Overview" in script
+    assert "Source" in script
+    assert "Filter" in script
+    assert "Seeds" in script
+    assert "Audit" in script
+    assert "复制 request_id" in script
+    assert "copyTextToClipboard" in script
+    assert "navigator.clipboard.writeText" in script
+    assert "查看完整有效种子标题列表" in script
+    assert "seed-details" in script
+    assert "暂无状态历史。" in script
+    assert "暂无 Auto Bangumi 提交结果。" in script
     assert "token" not in script.lower()
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'createDetailSection("Overview", "overview-section")' in script
+    assert 'createDetailSection("Source", "source-section")' in script
+    assert 'createDetailSection("Filter", "filter-section")' in script
+    assert 'createDetailSection("Seeds", "seeds-section")' in script
+    assert 'createDetailSection("Audit", "audit-group-section")' in script
+    assert '["request_id", request.request_id]' in script
+    assert '["status", request.status]' in script
+    assert '["原始标题", input.raw_title]' in script
+    assert '["匹配标题", matched.title]' in script
+    assert "copyButton.className = \"secondary-button copy-request-id\"" in script
+    assert "copyTextToClipboard(request.request_id)" in script
+    assert '["RSS 来源", config.selected_rss_url ? "已选择" : "未选择"]' in script
+    assert '["must_contain", filterRule.must_contain]' in script
+    assert '["must_not_contain", filterRule.must_not_contain]' in script
+    assert '["folder_name", config.expected_folder_name]' in script
+    assert '["有效种子数", effectiveSeeds.length]' in script
+    assert "document.createElement(\"details\")" in script
+    assert "seedSummary.textContent" in script
+    assert "renderHistorySection(auditSection, payload.history)" in script
+    assert "renderAbResultSection(auditSection, payload.ab_result)" in script
+    assert "selected_rss_url" in script
+    assert "addDetailRow(fields, \"selected_rss_url\"" not in script
+
+
+def test_static_app_script_wires_page_notifications() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "page-notification" in script
+    assert "showNotification" in script
+    assert "hideNotification" in script
+    assert "notifyApiError" in script
+    assert "notification.hidden = false" in script
+    assert "notification.replaceChildren()" in script
+    assert "notification.setAttribute(\"role\", kind === \"error\" ? \"alert\" : \"status\")" in script
+    assert "notification-close" in script
+    assert "关闭" in script
+    assert "生成成功" in script
+    assert "保存成功" in script
+    assert "已保存 Request " in script
+    assert "刷新列表" in script
+    assert "查看详情" in script
+    assert "Request 列表加载失败" in script
+    assert "Request 详情加载失败" in script
+    assert "校验失败" in script
+    assert "error.errorData = payload.error_data || null" in script
+    assert "summarizeValidationErrors" in script
+    assert "field + \": \" + message" in script
+    assert "safeText" in script
+    assert "displayValue(value)" in script
+    assert "http://" not in script
+    assert "https://" not in script
+    assert "<rss" not in script.lower()
+
+
+def test_static_app_script_wires_request_list_filter_sort_controls() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "request-list-search" in script
+    assert "request-list-status-filter" in script
+    assert "request-list-sort" in script
+    assert "request-list-count" in script
+    assert "loadedRequests" in script
+    assert "searchableText" in script
+    assert "syncStatusFilterOptions" in script
+    assert "filteredAndSortedRequests" in script
+    assert "summary.bangumi_title" in script
+    assert "summary.request_id" in script
+    assert "summary.selected_subtitle_group" in script
+    assert "summary.expected_folder_name" in script
+    assert "summary.folder_name" in script
+    assert "summary.status" in script
+    assert "listCount.textContent = \"显示 \"" in script
+    assert "没有匹配的 Request。清空搜索或筛选后可恢复列表。" in script
+    assert "listSearchInput.addEventListener(\"input\", renderList)" in script
+    assert "listStatusFilter.addEventListener(\"change\", renderList)" in script
+    assert "listSortSelect.addEventListener(\"change\", renderList)" in script
+    assert "document.createElement(\"button\")" in script
+    assert "item.type = \"button\"" in script
+    assert 'item.setAttribute("aria-label", "查看 Request 详情：" + requestLabel(summary))' in script
+    assert 'item.setAttribute("aria-current", "true")' in script
+    assert "fetchJson(apiPath(\"/api/v1/requests\"))" in script
+    assert "fetchJson(apiPath(\"/api/v1/requests?search" not in script
+    assert "title_asc" in script
+    assert "request_id_asc" in script
+    assert "localeCompare" in script
+
+
+def test_static_app_script_wires_generation_form_validation_and_busy_state() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "request-form-error" in script
+    assert "request-generate-submit" in script
+    assert "setFormError" in script
+    assert "clearFormError" in script
+    assert "setSubmitInFlight" in script
+    assert "titleInput.value.trim()" in script
+    assert "请输入标题，至少包含 1 个非空白字符。" in script
+    assert "titleInput.focus()" in script
+    assert "setSubmitInFlight(true)" in script
+    assert "setSubmitInFlight(false)" in script
+    assert "正在生成..." in script
+    assert '"title: title"' not in script
+    assert "title: title" in script
+    assert script.index("if (!title)") < script.index('fetchJson("/api/v1/requests"')
+    assert script.index("setSubmitInFlight(true)") < script.index(
+        'fetchJson("/api/v1/requests"',
+    )
+
+
+def test_static_app_script_wires_local_web_preferences() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "miguOrca.web.storageDir" in script
+    assert "miguOrca.web.saveRequest" in script
+    assert "window.localStorage.getItem" in script
+    assert "window.localStorage.setItem" in script
+    assert "window.localStorage.removeItem" in script
+    assert "restoreWebPreferences" in script
+    assert "persistWebPreferences" in script
+    assert "clearWebPreferences" in script
+    assert "savedStorageDir" in script
+    assert "saveInput.checked = savedSaveRequest === \"true\"" in script
+    assert "storageInput.value = \"\"" in script
+    assert "saveInput.checked = false" in script
+    assert "clear-web-preferences" in script
+    assert "storageInput.addEventListener(\"change\", persistWebPreferences)" in script
+    assert "saveInput.addEventListener(\"change\", persistWebPreferences)" in script
+    assert script.index("restoreWebPreferences()") < script.index("loadList()")
+    assert script.index("persistWebPreferences()") < script.index(
+        'fetchJson("/api/v1/requests"',
+    )
+
+
+def test_static_style_defines_generation_form_validation_states() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ".field-help" in css
+    assert ".field-error" in css
+    assert 'input[aria-invalid="true"]' in css
+    assert "button:disabled" in css
+    assert ".secondary-button" in css
+
+
+def test_static_style_defines_request_list_filter_controls() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ".request-list-controls" in css
+    assert ".request-list-count" in css
+    assert "select" in css
+    assert "grid-template-columns: minmax(180px, 1fr)" in css
+    assert "grid-template-columns: 1fr" in css
+
+
+def test_static_style_defines_request_detail_sections() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ".detail-section" in css
+    assert ".overview-actions" in css
+    assert ".copy-request-id" in css
+    assert ".seed-details summary" in css
+    assert ".audit-section" in css
+    assert ".fallback-config" in css
+
+
+def test_static_style_defines_page_notifications() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ".page-notification" in css
+    assert ".page-notification[hidden]" in css
+    assert ".notification-success" in css
+    assert ".notification-error" in css
+    assert ".notification-detail" in css
+    assert ".notification-actions" in css
+    assert ".notification-close" in css
+
+
+def test_static_style_defines_responsive_accessibility_contracts() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ":where(a, button, input, select, summary):focus-visible" in css
+    assert "outline: 3px solid #22577a" in css
+    assert "outline-offset: 2px" in css
+    assert ".panel" in css
+    assert "min-width: 0" in css
+    assert "max-width: 100%" in css
+    assert ".request-list-item strong" in css
+    assert "overflow-wrap: anywhere" in css
+    assert "@media (max-width: 760px)" in css
+    assert "@media (max-width: 520px)" in css
+    assert ".app-layout" in css
+    assert "grid-template-columns: 1fr" in css
+    assert ".top-nav a,\n  button" in css
+    assert "width: 100%" in css
 
 
 def test_list_requests_returns_empty_list_for_missing_storage_dir(

@@ -3,21 +3,38 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MiGuOrca Stage 7 Web UI MVP</title>
+    <title>MiGuOrca Stage 8 Web UI Usability</title>
     <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
     <script defer src="{{ url_for('migu_orca_web.static', filename='app.js') }}"></script>
   </head>
   <body>
     <header class="app-header">
-      <div>
-        <p class="stage-label">Stage 7 Web UI MVP</p>
+      <div class="header-copy">
+        <p class="stage-label">Stage 8 Web UI Usability</p>
         <h1>MiGuOrca</h1>
+        <p class="mode-summary">
+          运行模式：本地 JSON storage；默认使用仓库 fixture-backed 生成；不会隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent。
+        </p>
       </div>
-      <span class="mode-badge">Local JSON</span>
+      <nav class="top-nav" aria-label="页面导航">
+        <a href="#generate-panel">生成表单</a>
+        <a href="#request-list-panel">Request 列表</a>
+        <a href="#request-detail-panel">Request 详情</a>
+        <a href="#acceptance-panel">验收说明</a>
+      </nav>
     </header>
 
+    <div
+      id="page-notification"
+      class="page-notification"
+      aria-live="polite"
+      aria-atomic="true"
+      role="status"
+      hidden
+    ></div>
+
     <main class="app-layout">
-      <section class="panel generate-panel" aria-labelledby="generate-heading">
+      <section id="generate-panel" class="panel generate-panel" aria-labelledby="generate-heading">
         <h2 id="generate-heading">Request 生成</h2>
         <form id="request-generate-form" method="post">
           <label for="request-title">标题</label>
@@ -26,8 +43,13 @@
             name="title"
             type="text"
             autocomplete="off"
+            placeholder="例如：葬送的芙莉莲"
+            aria-describedby="request-title-help request-form-error"
             required
           >
+          <p id="request-title-help" class="field-help">
+            至少输入 1 个非空白字符；提交前会在浏览器中拦截空标题。
+          </p>
 
           <label for="storage-dir">Storage 目录</label>
           <input
@@ -35,33 +57,96 @@
             name="storage_dir"
             type="text"
             placeholder=".migu_orca/storage"
+            aria-describedby="storage-dir-help"
             autocomplete="off"
           >
+          <p id="storage-dir-help" class="field-help">
+            留空时使用默认 `.migu_orca/storage`；仅在勾选保存时写入本地 storage。
+          </p>
 
           <label class="checkbox-row" for="save-request">
-            <input id="save-request" name="save_request" type="checkbox" value="true">
+            <input
+              id="save-request"
+              name="save_request"
+              type="checkbox"
+              value="true"
+              aria-describedby="save-request-help"
+            >
             保存 Request
           </label>
+          <p id="save-request-help" class="field-help">
+            未勾选时只生成预览，不写入本地 storage；勾选后才保存 Request JSON。
+          </p>
 
-          <button type="submit">生成</button>
+          <button id="clear-web-preferences" class="secondary-button" type="button">
+            清除本地偏好
+          </button>
+
+          <p id="request-form-error" class="field-error" role="alert" hidden></p>
+
+          <button id="request-generate-submit" type="submit" data-default-label="生成">
+            生成
+          </button>
         </form>
       </section>
 
-      <section class="panel request-list-panel" aria-labelledby="request-list-heading">
+      <section id="request-list-panel" class="panel request-list-panel" aria-labelledby="request-list-heading">
         <div class="panel-heading">
           <h2 id="request-list-heading">Request 列表</h2>
-          <button id="request-list-refresh" type="button">刷新</button>
+          <button id="request-list-refresh" type="button" aria-label="刷新 Request 列表">刷新</button>
         </div>
-        <div id="request-list-container" class="empty-state" aria-live="polite">
+        <div class="request-list-controls" aria-label="Request 列表筛选和排序">
+          <label for="request-list-search">搜索</label>
+          <input
+            id="request-list-search"
+            type="text"
+            autocomplete="off"
+            placeholder="标题、request_id、字幕组或 folder_name"
+          >
+
+          <label for="request-list-status-filter">状态</label>
+          <select id="request-list-status-filter">
+            <option value="">All</option>
+          </select>
+
+          <label for="request-list-sort">排序</label>
+          <select id="request-list-sort">
+            <option value="default">默认顺序</option>
+            <option value="title_asc">标题升序</option>
+            <option value="request_id_asc">request_id 升序</option>
+          </select>
+        </div>
+        <p id="request-list-count" class="request-list-count" aria-live="polite">
+          显示 0 / 0
+        </p>
+        <div
+          id="request-list-container"
+          class="empty-state"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
           暂无已加载的 Request。
         </div>
       </section>
 
-      <section class="panel request-detail-panel" aria-labelledby="request-detail-heading">
+      <section id="request-detail-panel" class="panel request-detail-panel" aria-labelledby="request-detail-heading">
         <h2 id="request-detail-heading">Request 详情</h2>
-        <div id="request-detail-container" class="empty-state" aria-live="polite">
+        <div
+          id="request-detail-container"
+          class="empty-state"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
           选择一个 Request 后查看详情。
         </div>
+      </section>
+
+      <section id="acceptance-panel" class="panel acceptance-panel" aria-labelledby="acceptance-heading">
+        <h2 id="acceptance-heading">验收说明</h2>
+        <p>
+          使用 `uv run flask --app wsgi:app run` 启动本地 Web UI，并以 `uv run pytest` 和
+          `uv run python -m compileall -q src` 作为 Stage 8 质量检查。
+        </p>
       </section>
     </main>
   </body>

@@ -18,7 +18,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Keep the UI server-rendered and lightweight. If dev-browser is unavailable, record manual browser verification in progress.txt."
     },
     {
@@ -37,7 +37,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Do not add a frontend framework. Keep validation in the existing static app.js."
     },
     {
@@ -56,7 +56,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Do not store tokens or endpoint values. Current Stage 8 preferences only include storage_dir and save_request."
     },
     {
@@ -76,7 +76,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Keep Stage 8 local and offline. Do not pull BL-001 real MiKan search work into this story."
     },
     {
@@ -96,7 +96,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Prefer DOM restructuring in app.js plus CSS improvements. Do not change saved Request snapshot schema."
     },
     {
@@ -115,7 +115,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Use existing unified API envelope. Do not weaken server-side sanitizer."
     },
     {
@@ -134,7 +134,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Keep visual language consistent with Stage 7 assets unless a small CSS improvement is needed for clarity."
     },
     {
@@ -152,7 +152,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Final Stage 8 story should keep docs aligned with implemented UI behavior and Ralph command count."
     }
   ]
