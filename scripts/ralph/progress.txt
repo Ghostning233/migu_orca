@@ -9,6 +9,8 @@
 - Catalog matching currently accepts a list of `BangumiCandidate` values and returns both `MatchedBangumi` plus the selected candidate; real MiKan source work should preserve that matching contract.
 - Existing `RssSource` values carry `subtitle_group`, `rss_url`, `source_type`, and `fixture_path`; Stage 5 should add real MiKan handling without regressing `source_type=static_fixture`.
 - Real MiKan source boundaries live under `src/mikan_engine`; construct clients only from explicit `MikanConfig` loaded by `load_mikan_config(path)`.
+- MiKan HTTP reads use the injectable `MikanTransport.get_text(url, *, timeout)` seam; tests should pass fake transports and must not require live MiKanProject access.
+- MiKan search URLs are built from explicit `MikanConfig.search_endpoint` by appending a URL-encoded `searchstr` query parameter.
 - RSS parsing and filtering live in `rss_engine.controllers.rss_controller`; real RSS HTTP reads should reuse the existing `ParsedRss`, `RssSeed`, and `FilteredRss` contracts.
 - CLI AB submission remains an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; real MiKan opt-in must not implicitly submit to Auto Bangumi.
 - Do not include raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, or other sensitive config values in structured error details, logs, fixtures, or documentation examples.
@@ -33,4 +35,15 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep Stage 5 MiKan client construction in `mikan_engine`; CLI integration should depend on this explicit boundary rather than importing transport behavior into request matching.
   - The initial US-033 client methods are boundary placeholders; US-034 and US-035 should replace the stable `mikan_not_implemented` errors with injectable transport-backed behavior.
   - Default `generate_request` is now guarded by a regression test that fails if the real MiKan client factory is invoked without an explicit opt-in path.
+---
+## 2026-08-06 09:49 CST - US-034
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented transport-backed real MiKan search in `MikanClient.list_bangumi_candidates(...)`, including URL construction from explicit config, timeout forwarding, default urllib transport, and offline HTML parsing into `BangumiCandidate` values.
+- Added focused fake-transport tests for encoded `searchstr` requests, timeout/config use, search fixture parsing, duplicate Bangumi result suppression, empty-input validation, aliases, `mikan_url`, and empty `rss_sources`.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks passed: `uv run pytest`; `uv run python -m compileall -q src`.
+- **Learnings for future iterations:**
+  - `MikanTransport.get_text(url, *, timeout)` is the reusable seam for Stage 5 MiKan HTTP reads; keep future RSS/page tests on fake transports.
+  - Search parsing currently recognizes Bangumi candidates from anchors whose `href` contains `/Home/Bangumi/`, using anchor text as the canonical title and the anchor `title` attribute as an alias when present.
+  - US-035 can reuse the default `UrlopenMikanTransport` but should keep `list_rss_sources(...)` page parsing and RSS URL validation separate from search parsing.
 ---
