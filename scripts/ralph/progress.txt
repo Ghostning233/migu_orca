@@ -1,6 +1,6 @@
 ## Codebase Patterns
-- Stage 1 through Stage 7 are complete; archived Ralph records live under `scripts/ralph/archive/`.
-- Stage 8 Ralph work uses branch `agent/stage8-web-ui-usability` and should complete one `passes=false` story per iteration.
+- Stage 1 through Stage 8 are complete; archived Ralph records live under `scripts/ralph/archive/`.
+- Stage 8 Ralph work uses branch `agent/stage8-web-ui-usability`; all Stage 8 stories pass in the active PRD.
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
 - Preserve the existing top-level CLI JSON result envelope and do not change the current `migu-orca` command behavior while adding Web UI usability improvements.
 - Default CLI and Web UI Request generation must remain offline and fixture-backed unless the user explicitly opts into real external integrations.
@@ -166,4 +166,20 @@ Thread: https://codex.openai.com/threads/unavailable
   - Request list rows are real `<button>` elements, so keyboard activation remains native; add ARIA metadata there instead of replacing them with custom keyboard handlers.
   - Responsive Web UI acceptance can be pinned with static CSS assertions for focus-visible rules, overflow-wrap safeguards, and media queries when browser automation is unavailable.
   - Keep dynamic-region accessibility in the server-rendered template where possible so `app.js` can focus on rendering data projections.
+---
+
+## 2026-08-06 15:39 CST - US-062
+Thread: https://codex.openai.com/threads/unavailable
+- Updated README to describe Stage 8 Web UI Usability as the completed current scope on top of the Stage 7 Flask Web UI MVP.
+- Added README local acceptance steps for starting the Web UI, form validation, browser-only preferences, list search/filter/sort, detail sections, notifications/recovery, narrow-screen layout, keyboard operation, API checks, and quality commands.
+- Kept Stage 8 exclusions explicit in README: no real MiKan search/RSS compatibility optimization, authentication, complex configuration management, frontend build chain, batch seasonal subscription workflow, or qBittorrent direct integration.
+- Confirmed `docs/backlog.md` still tracks BL-001 real MiKan search/RSS compatibility as unfinished and did not modify or delete it.
+- Marked US-062 `passes=true` in `scripts/ralph/prd.json`.
+- Ran `uv run pytest`: 219 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Files changed: `README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - README is the right user-facing place to consolidate Web UI acceptance steps after Stage-level implementation stories finish.
+  - Keep Stage exclusions and backlog references explicit when closing a PRD so follow-up work is not accidentally treated as complete.
+  - Ralph thread IDs may be unavailable in Codex shell environments; use the existing `unavailable` placeholder format when `CODEX_CURRENT_THREAD_ID` is unset.
 ---

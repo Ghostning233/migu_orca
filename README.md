@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向动画订阅场景的 RSS 编排工具，目标是在 MiKanProject 与 Auto Bangumi 之间提供一层自动化协作能力。
 
-当前已完成 Stage 7：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。用户也可以通过显式参数启用真实 MiKanProject 数据源；默认生成和确认流程仍不会隐式访问外部系统，也不会隐式写入本地存储。只有显式传入持久化参数时，CLI 或 Web API 才会在本地 JSON 存储目录写入 Request、状态历史或 Auto Bangumi 提交结果。
+当前已完成 Stage 8：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。用户也可以通过显式参数启用真实 MiKanProject 数据源；默认生成和确认流程仍不会隐式访问外部系统，也不会隐式写入本地存储。只有显式传入持久化参数时，CLI 或 Web API 才会在本地 JSON 存储目录写入 Request、状态历史或 Auto Bangumi 提交结果。Stage 8 在 Stage 7 Flask Web UI MVP 基础上补强本地 Web UI 可用性，包括运行模式提示、表单校验、浏览器偏好、列表检索、详情分组、通知恢复和响应式/无障碍验收。
 
 ## 项目目标
 
@@ -21,7 +21,7 @@ MVP 聚焦单番剧的订阅闭环：
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
 - 已建立真实 MiKanProject 数据源 adapter、可注入 HTTP transport、搜索页解析、番剧页 RSS 源发现、真实 RSS XML 读取和安全错误归一化。
 - 当前 CLI 只有在显式传入 `--source mikan` 和 `--mikan-config` 时才会构造真实 MiKan client；只有在显式传入 `--submit-ab` 和 `--ab-config` 时才会构造真实 Auto Bangumi HTTP client；只有在显式传入 `--save-request` 时才会写入本地 JSON 存储。
-- 已提供 Stage 7 Flask Web UI MVP：`/` 重定向到 `/index`，页面可以生成 Request、保存 Request、列出本地 Request、读取详情，并展示已保存的状态历史和 Auto Bangumi 提交结果摘要。
+- 已提供 Stage 8 Flask Web UI：`/` 重定向到 `/index`，页面可以生成 Request、显式保存 Request、记住浏览器端本地偏好、搜索/筛选/排序本地 Request、读取分组详情，并展示已保存的状态历史和 Auto Bangumi 提交结果摘要。
 
 ## 关键约定
 
@@ -72,11 +72,11 @@ MVP 聚焦单番剧的订阅闭环：
   - `token`：用于 `Authorization: Bearer <token>` 请求头。不要提交真实 token，错误 details、日志和测试快照也不得包含 token 明文。
   - `fallback_enabled`：提交失败时是否在 `ab_submit_result.fallback_config` 中输出可人工处理的降级 JSON。
 - 真实 AB client 当前发送的创建订阅 payload 字段为 `title`、`rss_url`、`save_path`、`filter_rule`，并要求响应中包含 `id`、`subscription_id` 或 `ab_subscription_id` 之一。真实 Auto Bangumi API 的 endpoint、请求字段和响应字段仍需要按实际部署版本验证。
-- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不阻塞 Stage 7 Web UI MVP。
+- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不属于 Stage 8 Web UI 可用性范围。
 
-## Stage 7 Flask Web UI
+## Stage 8 Flask Web UI
 
-Stage 7 引入一个本地可用的 Flask Web UI / 管理界面 MVP。它复用现有 CLI 编排与 Stage 6 本地 JSON 存储能力，不改变 `migu-orca` CLI 默认行为。
+Stage 8 继续使用 Stage 7 引入的本地 Flask Web UI / 管理界面 MVP，并补强可用性。它复用现有 CLI 编排与 Stage 6 本地 JSON 存储能力，不改变 `migu-orca` CLI 默认行为，也不引入 React/Vite 等前端构建链。
 
 启动方式：
 
@@ -90,17 +90,17 @@ uv run flask --app wsgi:app run
 - `GET /index`：服务端渲染 Web UI 页面。
 - `GET /healthz`、`GET /readiness`：健康检查。
 
-Web UI 页面包含 Request 生成表单、本地 Request 列表、详情区域、状态历史和 AB 提交结果摘要。页面和 API 都不应展示 token、完整 endpoint URL、原始 HTML、原始 RSS XML 或本地绝对路径。
+Web UI 页面包含 Request 生成表单、本地 Request 列表、详情区域、状态历史和 AB 提交结果摘要。Stage 8 额外提供顶部导航与运行模式提示、非空标题浏览器校验、提交中按钮状态、浏览器端 `localStorage` 偏好、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、窄屏单列布局和基础无障碍标记。页面和 API 都不应展示 token、完整 endpoint URL、原始 HTML、原始 RSS XML 或本地绝对路径。
 
 ### Web API
 
-Stage 7 API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只保留 MiGuOrca MVP 需要的部分：
+Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只保留 MiGuOrca MVP 需要的部分：
 
 - `src/apps/base.py` 提供 `create_app(config_name: str | None = None)`。
 - `src/apps/registry.py` 通过 `ALL_BLUEPRINTS` 集中注册 Blueprint。
 - `src/wsgi.py` 暴露 `app = create_app(...)`，用于 Flask CLI。
 - JSON API 使用 `src/extensions/flask_api/` 的统一响应、异常处理、class-based view 和 Pydantic 校验约定。
-- Stage 7 Web 模块位于 `src/apps/migu_orca_web/`，HTML 模板和静态资源与模块同目录管理。
+- Web 模块位于 `src/apps/migu_orca_web/`，HTML 模板和静态资源与模块同目录管理。
 
 成功响应形态：
 
@@ -139,28 +139,40 @@ Stage 7 API 的应用结构参考 `/home/ghostning/github/user_level_flask`，�
 
 ### 本地验收流程
 
-1. 生成并保存一个 Request：
+1. 运行质量检查：
+
+   ```bash
+   uv run pytest
+   uv run python -m compileall -q src
+   ```
+
+2. 生成并保存一个 Request，供 Web UI 列表和详情读取：
 
    ```bash
    uv run migu-orca "咒术回战第三季" --save-request --storage-dir .migu_orca/storage
    ```
 
-2. 启动 Web UI：
+3. 启动 Web UI：
 
    ```bash
    uv run flask --app wsgi:app run
    ```
 
-3. 打开 `http://127.0.0.1:5000/index`，确认页面展示 Stage 7 Web UI MVP、生成表单、Request 列表和详情区域。
-4. 在页面中填写标题并选择是否保存，确认默认生成仍使用 `static-fixture`，不会访问真实 MiKan、Auto Bangumi 或 qBittorrent。
-5. 通过 API 验证本地列表和详情：
+4. 打开本地 `/index` 页面；`GET /` 应重定向到 `/index`。确认页面展示 Stage 8 Web UI Usability、顶部锚点导航、运行模式提示、生成表单、Request 列表、Request 详情和验收说明。
+5. 在生成表单中提交空白标题，确认页面在浏览器端提示错误且不会发起生成；再填写标题，确认提交按钮在请求中禁用，完成后通过统一通知展示生成或保存结果。
+6. 验证保存偏好：修改 Storage 目录和保存勾选状态后刷新页面，确认浏览器恢复最近偏好；点击 `清除本地偏好` 后恢复空 `storage_dir` 和未勾选保存。该偏好只应存在于浏览器 `localStorage`，不写入 storage JSON 或 API 响应。
+7. 验证 Request 列表：刷新列表后使用文本搜索、status 筛选和默认/标题升序/request_id 升序排序，确认匹配计数形如 `显示 2 / 5`，无匹配时显示空状态，清空筛选后列表恢复。
+8. 验证 Request 详情：打开列表项后确认详情按 Overview、Source、Filter、Seeds、Audit 分组；request_id 可复制；RSS 只显示是否已选择，不显示完整 RSS URL；Seeds 可展开查看完整有效种子标题；缺失 history 或 AB result 时保持非致命提示。
+9. 验证通知和恢复：列表加载失败时刷新按钮仍可用；详情加载失败时不清空已加载列表；通知可手动关闭，并会在下一次操作时替换旧消息。
+10. 验证窄屏和键盘操作：在移动宽度下表单、列表和详情为单列且不横向溢出；Tab 能聚焦主要控件和 Request 列表按钮；焦点样式可见，动态通知/列表/详情区域具备合适的语义标记。
+11. 通过 API 验证本地列表和详情：
 
    ```bash
    curl 'http://127.0.0.1:5000/api/v1/requests?storage_dir=.migu_orca/storage'
    curl 'http://127.0.0.1:5000/api/v1/requests/<request_id>?storage_dir=.migu_orca/storage'
    ```
 
-Stage 7 暂不实现认证系统、复杂配置管理、真实 MiKan 搜索优化、批量季度订阅或 qBittorrent 直连。真实 MiKan 搜索/RSS 解析优化继续在 [backlog](docs/backlog.md) 跟踪。
+Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。真实 MiKan 搜索/RSS 解析优化继续在 [backlog](docs/backlog.md) 跟踪，当前状态保持未完成。
 
 示例 AB 配置：
 
@@ -185,14 +197,15 @@ Stage 7 暂不实现认证系统、复杂配置管理、真实 MiKan 搜索优�
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
 - 当前活跃阶段：Stage 8，Web UI 可用性补强 PRD
-- 最近完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
+- 最近完成阶段：Stage 8，Web UI 可用性补强 PRD
+- 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - 后续待办：`docs/backlog.md`
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 8`
 
 Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app factory、Blueprint registry、统一 JSON API 响应层、Pydantic 校验、Request 查询/生成 API、服务端渲染 Web UI、状态历史展示和 AB 提交结果展示，同时保持默认 CLI 流程不隐式写入磁盘。
 
-Stage 8 将围绕 Web UI 可用性补强：顶部导航与运行模式提示、生成表单说明和本地校验、Storage 偏好记忆、Request 列表搜索/筛选/排序、详情区块重组、统一通知与错误恢复、响应式布局和基础无障碍验收。Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。
+Stage 8 已围绕 Web UI 可用性补强：顶部导航与运行模式提示、生成表单说明和本地校验、Storage 偏好记忆、Request 列表搜索/筛选/排序、详情区块重组、统一通知与错误恢复、响应式布局和基础无障碍验收。Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。
 
 ## 参考文档
 

@@ -152,7 +152,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Final Stage 8 story should keep docs aligned with implemented UI behavior and Ralph command count."
     }
   ]
