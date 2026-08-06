@@ -5,7 +5,10 @@ from pathlib import Path
 import pytest
 
 from shared.errors import Stage1Error
-from storage_engine.controllers.history_repository import append_status_history
+from storage_engine.controllers.history_repository import (
+    append_status_history,
+    load_status_history,
+)
 from storage_engine.controllers.storage_config import load_storage_config
 
 
@@ -55,6 +58,29 @@ def test_append_status_history_appends_to_existing_history(tmp_path: Path) -> No
     assert saved["event_count"] == 2
 
 
+def test_load_status_history_returns_saved_events(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+    event = {
+        "request_id": "request-1",
+        "previous_status": "PENDING_CONFIRM",
+        "next_status": "ACCEPTED",
+        "action": "ACCEPT",
+        "timestamp": "2026-08-06T12:00:00+00:00",
+    }
+
+    append_status_history(config, event)
+
+    assert load_status_history(config, "request-1") == [event]
+
+
+def test_load_status_history_returns_empty_list_for_missing_file(
+    tmp_path: Path,
+) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+
+    assert load_status_history(config, "missing-request") == []
+
+
 def test_append_status_history_rejects_path_traversal_request_id(
     tmp_path: Path,
 ) -> None:
@@ -98,5 +124,22 @@ def test_append_status_history_returns_stable_error_for_invalid_json(
     error_dict = error.value.as_dict()
     assert error_dict["error_type"] == "storage_json_error"
     assert error_dict["failed_step"] == "append_status_history"
+    assert error_dict["details"]["request_id"] == "broken"
+    assert str(tmp_path) not in str(error_dict)
+
+
+def test_load_status_history_returns_stable_error_for_invalid_json(
+    tmp_path: Path,
+) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+    config.history_dir.mkdir(parents=True)
+    (config.history_dir / "broken.json").write_text("{", encoding="utf-8")
+
+    with pytest.raises(Stage1Error) as error:
+        load_status_history(config, "broken")
+
+    error_dict = error.value.as_dict()
+    assert error_dict["error_type"] == "storage_json_error"
+    assert error_dict["failed_step"] == "load_status_history"
     assert error_dict["details"]["request_id"] == "broken"
     assert str(tmp_path) not in str(error_dict)

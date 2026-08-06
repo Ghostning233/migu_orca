@@ -11,6 +11,8 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
+from storage_engine.controllers.ab_result_repository import save_ab_submit_result
+from storage_engine.controllers.history_repository import append_status_history
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
 
@@ -71,6 +73,9 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "request-list-refresh" in script
     assert "selected_rss_url ? \"已选择\" : \"未选择\"" in script
     assert "有效种子标题" in script
+    assert "状态历史" in script
+    assert "Auto Bangumi 结果" in script
+    assert "fallback_config" in script
     assert "folder_name" in script
     assert "filter_rule" in script
     assert "token" not in script.lower()
@@ -123,8 +128,105 @@ def test_get_request_detail_returns_complete_saved_snapshot(tmp_path: Path) -> N
     assert response.status_code == 200
     assert response.get_json() == {
         "ok": True,
-        "result": {"request": request},
+        "result": {
+            "request": request,
+            "history": {"available": True, "events": [], "error": None},
+            "ab_result": {"available": False, "record": None, "error": None},
+        },
     }
+
+
+def test_get_request_detail_returns_saved_history_and_ab_result(
+    tmp_path: Path,
+) -> None:
+    request = _saved_request(tmp_path, "芙莉莲", "request-1")
+    config = load_storage_config(tmp_path / "storage")
+    event = {
+        "request_id": "request-1",
+        "previous_status": "PENDING_CONFIRM",
+        "next_status": "ACCEPTED",
+        "action": "ACCEPT",
+        "timestamp": "2026-08-06T12:00:00+00:00",
+    }
+    append_status_history(config, event)
+    request["ab_submit_result"] = {
+        "success": False,
+        "ab_subscription_id": None,
+        "ab_response": None,
+        "fallback_config": {
+            "title": "芙莉莲",
+            "rss_url": "https://example.invalid/rss.xml",
+            "save_path": "芙莉莲",
+        },
+        "error": None,
+    }
+    save_ab_submit_result(config, request)
+
+    response = _client().get(
+        "/api/v1/requests/request-1",
+        query_string={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["history"] == {
+        "available": True,
+        "events": [event],
+        "error": None,
+    }
+    assert payload["result"]["ab_result"]["available"] is True
+    assert payload["result"]["ab_result"]["record"]["request_id"] == "request-1"
+    assert (
+        payload["result"]["ab_result"]["record"]["ab_submit_result"]
+        == request["ab_submit_result"]
+    )
+
+
+def test_get_request_detail_treats_damaged_history_as_nonfatal(
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-1")
+    config = load_storage_config(tmp_path / "storage")
+    config.history_dir.mkdir(parents=True, exist_ok=True)
+    (config.history_dir / "request-1.json").write_text("{", encoding="utf-8")
+
+    response = _client().get(
+        "/api/v1/requests/request-1",
+        query_string={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["request_id"] == "request-1"
+    assert payload["result"]["history"]["available"] is False
+    assert payload["result"]["history"]["events"] == []
+    assert payload["result"]["history"]["error"]["error_type"] == "storage_json_error"
+    assert str(tmp_path) not in str(payload)
+
+
+def test_get_request_detail_treats_damaged_ab_result_as_nonfatal(
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-1")
+    config = load_storage_config(tmp_path / "storage")
+    config.ab_results_dir.mkdir(parents=True, exist_ok=True)
+    (config.ab_results_dir / "request-1.json").write_text("[", encoding="utf-8")
+
+    response = _client().get(
+        "/api/v1/requests/request-1",
+        query_string={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["request_id"] == "request-1"
+    assert payload["result"]["ab_result"]["available"] is False
+    assert payload["result"]["ab_result"]["record"] is None
+    assert payload["result"]["ab_result"]["error"]["error_type"] == "storage_json_error"
+    assert str(tmp_path) not in str(payload)
 
 
 def test_get_request_detail_returns_unified_error_for_missing_request(

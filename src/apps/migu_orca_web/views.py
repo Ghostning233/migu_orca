@@ -19,7 +19,9 @@ from storage_engine.controllers.request_repository import (
     list_request_snapshots,
     load_request_snapshot,
 )
-from storage_engine.controllers.storage_config import load_storage_config
+from storage_engine.controllers.ab_result_repository import load_ab_submit_result
+from storage_engine.controllers.history_repository import load_status_history
+from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
 
 api_blueprint = Blueprint("migu_orca_web_api", __name__)
 web_blueprint = Blueprint(
@@ -77,6 +79,39 @@ def _raise_result_error(result: dict[str, Any]) -> None:
     )
 
 
+def _optional_error(error: Stage1Error) -> dict[str, object]:
+    return {
+        "error_type": error.error_type,
+        "error_message": error.message,
+        "failed_step": error.failed_step,
+        "details": error.details or {},
+    }
+
+
+def _load_history_section(config: StorageConfig, request_id: str) -> dict[str, object]:
+    try:
+        return {
+            "available": True,
+            "events": load_status_history(config, request_id),
+            "error": None,
+        }
+    except Stage1Error as exc:
+        return {"available": False, "events": [], "error": _optional_error(exc)}
+
+
+def _load_ab_result_section(config: StorageConfig, request_id: str) -> dict[str, object]:
+    try:
+        return {
+            "available": True,
+            "record": load_ab_submit_result(config, request_id),
+            "error": None,
+        }
+    except Stage1Error as exc:
+        if exc.error_type == "ab_result_not_found":
+            return {"available": False, "record": None, "error": None}
+        return {"available": False, "record": None, "error": _optional_error(exc)}
+
+
 @web_blueprint.get("/")
 def index_redirect() -> object:
     return redirect(url_for("migu_orca_web.index"))
@@ -104,11 +139,16 @@ class RequestListView(GetView):
 class RequestDetailView(GetView):
     request_validator_model = RequestDetailQuery
 
-    def get_object(self) -> dict[str, dict[str, object]]:
+    def get_object(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestDetailQuery)
         config = load_storage_config(_storage_dir(self.request_validator_model.storage_dir))
-        request = load_request_snapshot(config, self.request_validator_model.request_id)
-        return {"request": request}
+        request_id = self.request_validator_model.request_id
+        request = load_request_snapshot(config, request_id)
+        return {
+            "request": request,
+            "history": _load_history_section(config, request_id),
+            "ab_result": _load_ab_result_section(config, request_id),
+        }
 
 
 @class_route(api_blueprint, "/api/v1/requests", methods=["POST"])

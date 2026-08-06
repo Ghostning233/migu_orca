@@ -26,6 +26,8 @@
 - Stage 7 Request query APIs live in `apps.migu_orca_web`; use `class_route`/`GetView`, return `{"requests": [...]}` for lists and `{"request": ...}` for detail, and keep storage access read-only through Stage 6 repositories.
 - Stage 7 Web API mutation endpoints can reuse `apps.migu_orca_entry.controllers.entry_controller` orchestration; convert returned `success=false` error dictionaries into `Stage1Error` so `extensions.flask_api` produces the unified sanitized envelope.
 - Use a module-specific `static_url_path` for the Stage 7 Web Blueprint; Flask's default `/static` route can mask colocated Blueprint assets.
+- Stage 7 Request detail responses include optional `history` and `ab_result` sections; missing optional records should not fail the Request detail load, and damaged optional records should return section-local error metadata.
+- Stage 7 Web UI must scrub fallback config display values before rendering so URL-like strings and credential-like keys are redacted in collapsible JSON.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 7 Web UI work unless explicitly pulled into scope.
 
 ## 2026-08-06 13:34 CST - Stage 7 PRD Setup
@@ -172,4 +174,28 @@ Thread: https://codex.openai.com/threads/unavailable
   - Blueprint static files need a module-specific URL path in this app because the default Flask `/static` route can otherwise return 404 for Web module assets.
   - The UI should summarize selected RSS presence/source instead of printing `selected_rss_url`, preserving the Stage 7 sensitive-output rule.
   - Static-file Flask tests are useful here because browser automation is not exposed in the current session.
+---
+## 2026-08-06 14:35 CST - US-053
+Thread: https://codex.openai.com/threads/unavailable
+- What was implemented
+  - Added read-only status history loading through `load_status_history(...)`.
+  - Extended `GET /api/v1/requests/<request_id>` to include optional `history` and `ab_result` sections alongside the saved Request snapshot.
+  - Kept missing history and AB result records nonfatal; damaged optional records now return section-local error metadata without blocking Request detail display.
+  - Updated the Web UI detail area to render a status-history table with action, previous_status, next_status, and timestamp.
+  - Added Auto Bangumi result summary rendering for success, ab_subscription_id, and fallback_config presence, with a collapsible redacted fallback_config view.
+  - Browser testing tools were not available in this session; manual browser verification is still needed.
+- Files changed
+  - `src/storage_engine/controllers/history_repository.py`
+  - `src/storage_engine/controllers/history_repository_test.py`
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Treat audit data as optional detail sections so broken history or AB result JSON does not hide the primary saved Request snapshot.
+  - `Stage1Error` stores its display text on `.message`, not `.error_message`.
+  - Web UI fallback_config rendering should scrub URL-like values and credential-like keys before printing JSON.
+  - Quality checks passed with `uv run pytest` and `uv run python -m compileall -q src`.
 ---

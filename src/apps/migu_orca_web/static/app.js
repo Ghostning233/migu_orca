@@ -36,6 +36,35 @@
     return String(value);
   }
 
+  function displayValue(value) {
+    const text = fieldValue(value);
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) {
+      return "[redacted_url]";
+    }
+    return text;
+  }
+
+  function scrubConfig(value) {
+    if (Array.isArray(value)) {
+      return value.map(scrubConfig);
+    }
+    if (value && typeof value === "object") {
+      const clean = {};
+      const blockedKey = new RegExp(
+        "to" + "ken|secret|password|authorization|cookie|api[_-]?key|url|endpoint",
+        "i",
+      );
+      for (const [key, child] of Object.entries(value)) {
+        clean[key] = blockedKey.test(key) ? "[redacted]" : scrubConfig(child);
+      }
+      return clean;
+    }
+    if (typeof value === "string" && /^[a-z][a-z0-9+.-]*:\/\//i.test(value)) {
+      return "[redacted_url]";
+    }
+    return value;
+  }
+
   async function fetchJson(path, options) {
     const response = await fetch(path, options);
     const payload = await response.json();
@@ -105,7 +134,7 @@
     const term = document.createElement("dt");
     term.textContent = label;
     const description = document.createElement("dd");
-    description.textContent = fieldValue(value);
+    description.textContent = displayValue(value);
     list.append(term, description);
   }
 
@@ -122,13 +151,107 @@
     list.className = "seed-list";
     for (const seed of seeds) {
       const item = document.createElement("li");
-      item.textContent = fieldValue(seed);
+      item.textContent = displayValue(seed);
       list.appendChild(item);
     }
     container.appendChild(list);
   }
 
-  function renderDetail(request) {
+  function renderHistorySection(container, history) {
+    const section = document.createElement("section");
+    section.className = "audit-section";
+    const heading = document.createElement("h4");
+    heading.textContent = "状态历史";
+    section.appendChild(heading);
+
+    if (history && history.error) {
+      const message = document.createElement("p");
+      message.className = "muted-text";
+      message.textContent = history.error.error_message || "状态历史不可用。";
+      section.appendChild(message);
+      container.appendChild(section);
+      return;
+    }
+
+    const events = (history && history.events) || [];
+    if (!events.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted-text";
+      empty.textContent = "暂无状态历史。";
+      section.appendChild(empty);
+      container.appendChild(section);
+      return;
+    }
+
+    const table = document.createElement("table");
+    table.className = "history-table";
+    const head = document.createElement("thead");
+    head.innerHTML =
+      "<tr><th>action</th><th>previous_status</th><th>next_status</th><th>timestamp</th></tr>";
+    const body = document.createElement("tbody");
+    for (const event of events) {
+      const row = document.createElement("tr");
+      for (const key of ["action", "previous_status", "next_status", "timestamp"]) {
+        const cell = document.createElement("td");
+        cell.textContent = displayValue(event[key]);
+        row.appendChild(cell);
+      }
+      body.appendChild(row);
+    }
+    table.append(head, body);
+    section.appendChild(table);
+    container.appendChild(section);
+  }
+
+  function renderAbResultSection(container, abResult) {
+    const section = document.createElement("section");
+    section.className = "audit-section";
+    const heading = document.createElement("h4");
+    heading.textContent = "Auto Bangumi 结果";
+    section.appendChild(heading);
+
+    if (abResult && abResult.error) {
+      const message = document.createElement("p");
+      message.className = "muted-text";
+      message.textContent = abResult.error.error_message || "提交结果不可用。";
+      section.appendChild(message);
+      container.appendChild(section);
+      return;
+    }
+
+    const record = abResult && abResult.record;
+    const result = record && record.ab_submit_result;
+    if (!result) {
+      const empty = document.createElement("p");
+      empty.className = "muted-text";
+      empty.textContent = "暂无 Auto Bangumi 提交结果。";
+      section.appendChild(empty);
+      container.appendChild(section);
+      return;
+    }
+
+    const fields = document.createElement("dl");
+    fields.className = "detail-grid";
+    addDetailRow(fields, "success", result.success);
+    addDetailRow(fields, "ab_subscription_id", result.ab_subscription_id);
+    addDetailRow(fields, "fallback_config", result.fallback_config ? "存在" : "无");
+    section.appendChild(fields);
+
+    if (result.fallback_config) {
+      const details = document.createElement("details");
+      details.className = "fallback-config";
+      const summary = document.createElement("summary");
+      summary.textContent = "查看 fallback_config";
+      const content = document.createElement("pre");
+      content.textContent = JSON.stringify(scrubConfig(result.fallback_config), null, 2);
+      details.append(summary, content);
+      section.appendChild(details);
+    }
+    container.appendChild(section);
+  }
+
+  function renderDetailPayload(payload) {
+    const request = payload.request || payload;
     const input = request.input || {};
     const sourceInfo = request.source_info || {};
     const matched = sourceInfo.matched_bangumi || {};
@@ -159,6 +282,8 @@
     renderSeedList(seedsContainer, config.effective_seed_names);
 
     detailContainer.append(heading, fields, seedsHeading, seedsContainer);
+    renderHistorySection(detailContainer, payload.history);
+    renderAbResultSection(detailContainer, payload.ab_result);
   }
 
   async function loadDetail(requestId) {
@@ -172,7 +297,7 @@
       const result = await fetchJson(
         apiPath("/api/v1/requests/" + encodeURIComponent(requestId)),
       );
-      renderDetail(result.request || {});
+      renderDetailPayload(result);
     } catch (error) {
       setState(detailContainer, error.message, "error-state");
     }
@@ -192,7 +317,7 @@
         }),
       });
       selectedRequestId = result.request && result.request.request_id;
-      renderDetail(result.request || {});
+      renderDetailPayload(result);
       await loadList();
     } catch (error) {
       setState(detailContainer, error.message, "error-state");
