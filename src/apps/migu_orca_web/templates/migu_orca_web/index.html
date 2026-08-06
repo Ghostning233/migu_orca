@@ -34,8 +34,13 @@
             name="title"
             type="text"
             autocomplete="off"
+            placeholder="例如：葬送的芙莉莲"
+            aria-describedby="request-title-help request-form-error"
             required
           >
+          <p id="request-title-help" class="field-help">
+            至少输入 1 个非空白字符；提交前会在浏览器中拦截空标题。
+          </p>
 
           <label for="storage-dir">Storage 目录</label>
           <input
@@ -43,15 +48,26 @@
             name="storage_dir"
             type="text"
             placeholder=".migu_orca/storage"
+            aria-describedby="storage-dir-help"
             autocomplete="off"
           >
+          <p id="storage-dir-help" class="field-help">
+            留空时使用默认 `.migu_orca/storage`；仅在勾选保存时写入本地 storage。
+          </p>
 
           <label class="checkbox-row" for="save-request">
             <input id="save-request" name="save_request" type="checkbox" value="true">
             保存 Request
           </label>
+          <p id="save-request-help" class="field-help">
+            未勾选时只生成预览，不写入本地 storage；勾选后才保存 Request JSON。
+          </p>
 
-          <button type="submit">生成</button>
+          <p id="request-form-error" class="field-error" role="alert" hidden></p>
+
+          <button id="request-generate-submit" type="submit" data-default-label="生成">
+            生成
+          </button>
         </form>
       </section>
 

@@ -63,8 +63,18 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="acceptance-panel"' in html
     assert 'id="request-generate-form"' in html
     assert 'name="title"' in html
+    assert "例如：葬送的芙莉莲" in html
+    assert "至少输入 1 个非空白字符" in html
+    assert 'aria-describedby="request-title-help request-form-error"' in html
     assert 'name="storage_dir"' in html
+    assert "留空时使用默认 `.migu_orca/storage`" in html
     assert 'name="save_request"' in html
+    assert "未勾选时只生成预览，不写入本地 storage" in html
+    assert "勾选后才保存 Request JSON" in html
+    assert 'id="request-form-error"' in html
+    assert 'role="alert"' in html
+    assert 'id="request-generate-submit"' in html
+    assert 'data-default-label="生成"' in html
     assert 'id="request-list-container"' in html
     assert 'id="request-list-refresh"' in html
     assert 'id="request-detail-container"' in html
@@ -95,6 +105,41 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_wires_generation_form_validation_and_busy_state() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "request-form-error" in script
+    assert "request-generate-submit" in script
+    assert "setFormError" in script
+    assert "clearFormError" in script
+    assert "setSubmitInFlight" in script
+    assert "titleInput.value.trim()" in script
+    assert "请输入标题，至少包含 1 个非空白字符。" in script
+    assert "titleInput.focus()" in script
+    assert "setSubmitInFlight(true)" in script
+    assert "setSubmitInFlight(false)" in script
+    assert "正在生成..." in script
+    assert '"title: title"' not in script
+    assert "title: title" in script
+    assert script.index("if (!title)") < script.index('fetchJson("/api/v1/requests"')
+    assert script.index("setSubmitInFlight(true)") < script.index(
+        'fetchJson("/api/v1/requests"',
+    )
+
+
+def test_static_style_defines_generation_form_validation_states() -> None:
+    response = _client().get("/migu-orca-static/style.css")
+
+    css = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert ".field-help" in css
+    assert ".field-error" in css
+    assert 'input[aria-invalid="true"]' in css
+    assert "button:disabled" in css
 
 
 def test_list_requests_returns_empty_list_for_missing_storage_dir(

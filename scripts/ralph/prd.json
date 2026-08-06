@@ -37,7 +37,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Do not add a frontend framework. Keep validation in the existing static app.js."
     },
     {

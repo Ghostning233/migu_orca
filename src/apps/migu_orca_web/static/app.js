@@ -3,6 +3,8 @@
   const titleInput = document.getElementById("request-title");
   const storageInput = document.getElementById("storage-dir");
   const saveInput = document.getElementById("save-request");
+  const formError = document.getElementById("request-form-error");
+  const submitButton = document.getElementById("request-generate-submit");
   const refreshButton = document.getElementById("request-list-refresh");
   const listContainer = document.getElementById("request-list-container");
   const detailContainer = document.getElementById("request-detail-container");
@@ -24,6 +26,25 @@
   function setState(container, message, className) {
     container.className = className || "empty-state";
     container.textContent = message;
+  }
+
+  function setFormError(message) {
+    formError.textContent = message;
+    formError.hidden = false;
+    titleInput.setAttribute("aria-invalid", "true");
+  }
+
+  function clearFormError() {
+    formError.textContent = "";
+    formError.hidden = true;
+    titleInput.removeAttribute("aria-invalid");
+  }
+
+  function setSubmitInFlight(isInFlight) {
+    submitButton.disabled = isInFlight;
+    submitButton.textContent = isInFlight
+      ? "正在生成..."
+      : submitButton.dataset.defaultLabel || "生成";
   }
 
   function fieldValue(value) {
@@ -305,13 +326,22 @@
 
   async function generateRequest(event) {
     event.preventDefault();
+    clearFormError();
+    const title = titleInput.value.trim();
+    if (!title) {
+      setFormError("请输入标题，至少包含 1 个非空白字符。");
+      titleInput.focus();
+      return;
+    }
+
+    setSubmitInFlight(true);
     setState(detailContainer, "正在生成 Request...", "loading-state");
     try {
       const result = await fetchJson("/api/v1/requests", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
-          title: titleInput.value,
+          title: title,
           storage_dir: storageInput.value.trim() || null,
           save_request: saveInput.checked,
         }),
@@ -321,6 +351,8 @@
       await loadList();
     } catch (error) {
       setState(detailContainer, error.message, "error-state");
+    } finally {
+      setSubmitInFlight(false);
     }
   }
 

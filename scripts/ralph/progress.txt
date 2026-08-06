@@ -27,6 +27,7 @@
 - Use module-specific static URL path `/migu-orca-static/`; Flask's default `/static` route can mask colocated Blueprint assets.
 - Request detail responses include optional `history` and `ab_result` sections; missing optional records should not fail the Request detail load, and damaged optional records should return section-local error metadata.
 - Web UI must scrub fallback config display values before rendering so URL-like strings and credential-like keys are redacted in collapsible JSON.
+- Web UI form usability contracts are pinned in `src/apps/migu_orca_web/views_test.py` through server-rendered DOM assertions plus static `app.js` and `style.css` checks.
 - MiKan search and real-page RSS compatibility follow-up is tracked in `docs/backlog.md` and should not block Stage 8 Web UI usability work unless explicitly pulled into scope.
 - Flask Web UI runs with `uv run flask --app wsgi:app run`; validate code with `uv run pytest` and `uv run python -m compileall -q src`.
 - README is the canonical user-facing Web UI runbook; keep it in sync when changing Flask routes, API envelopes, storage defaults, UI workflows, MVP exclusions, or Stage 8 acceptance steps.
@@ -61,4 +62,21 @@ Thread: https://codex.openai.com/threads/unavailable
   - The Web UI shell test in `src/apps/migu_orca_web/views_test.py::test_index_serves_web_ui_shell` is the right place to pin static header/navigation copy and sensitive-content guards.
   - `/index` page navigation can stay server-rendered with section IDs in the Jinja template; no JavaScript is needed for same-page jumps.
   - Browser verification may be unavailable in Ralph Codex sessions, so progress entries should explicitly record the manual verification gap.
+---
+
+## 2026-08-06 15:18 CST - US-056
+Thread: https://codex.openai.com/threads/unavailable
+- Added Request generation form guidance for title examples, non-blank title requirements, default storage behavior, and save-only-when-checked persistence behavior.
+- Added browser-side blank/whitespace title validation in `app.js` that shows a nearby readable error, focuses the title input, and returns before the Request API POST.
+- Added submit busy-state handling that disables the generate button during the API request, changes the label while running, and restores it on success or failure.
+- Added CSS for form help text, validation errors, invalid title input state, and disabled buttons.
+- Added Flask/static tests covering the form copy, error DOM, validation script hooks, busy-state script hooks, and CSS selectors.
+- Ran `uv run pytest`: 211 passed.
+- Ran `uv run python -m compileall -q src`: passed.
+- Browser automation was unavailable in this session (`dev-browser`/browser tools not exposed); manual browser verification is still needed for the visible UI.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep Stage 8 form UX improvements in the existing server-rendered template and static `app.js`; no frontend framework is needed for validation and button state.
+  - Form UI contracts can be tested with Flask static-file responses by asserting stable IDs, help text, validation entry points, and CSS selectors.
+  - Browser verification may remain unavailable in Ralph sessions, so preserve manual verification notes in progress entries for UI stories.
 ---
