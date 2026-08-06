@@ -7,10 +7,120 @@
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
 - AB subscription payloads use the internal keys `title`, `rss_url`, `save_path`, and `filter_rule`.
 - AB clients must expose `create_subscription(payload)` and go through `submit_ab_subscription(...)` to normalize success/failure into the stable submit result envelope.
+- The real AB HTTP adapter boundary lives in `src/ab_engine/controllers/ab_http_client.py`; construct it with `create_auto_bangumi_http_client(AutoBangumiConfig)`.
+- Real AB clients receive only explicit `AutoBangumiConfig` at construction and prepared payload dictionaries at `create_subscription(...)`; do not pass Request snapshots into AB clients.
 - AB fallback JSON is opt-in via `submit_ab_subscription(..., fallback_enabled=True)` and is built from the prepared AB payload plus the structured failure reason.
 - AB system config loading lives in `ab_engine.controllers.ab_config`, requires an explicit JSON path, and deliberately does not read environment overrides or include token values in errors.
 - CLI AB submission is an explicit post-confirmation step: use `--action accept --submit-ab --ab-config <path>`; default generation and confirmation paths must not contact external systems.
 - Stage 4 should replace the current fake-only CLI submission path with a real AB HTTP adapter while keeping fake-client injection available for tests.
+- The real AB HTTP client accepts an `AutoBangumiHttpTransport` injection; use `UrlopenAutoBangumiHttpTransport` only as the default real-network transport and keep tests offline with recording/fake transports.
+- Validate real AB payloads inside `AutoBangumiHttpClient.create_subscription(...)` before reading config or calling transport; invalid payloads use `invalid_ab_payload` at `validate_ab_subscription_payload`.
+- In CLI AB submission, `apply_ab_submit_action(...)` loads explicit AB config, builds the prepared payload, then uses an injected test client or `ab_http_client.create_auto_bangumi_http_client(ab_config)` for real submission.
+- Standardize real AB network failures inside `ab_http_client.py`: auth uses `ab_auth_failed`, timeouts use `ab_timeout`, connection failures use `ab_connection_failed`, and details must stay token-free.
+- The real AB HTTP client validates response objects include `id`, `subscription_id`, or `ab_subscription_id` before returning; missing IDs use `invalid_ab_response` at `create_ab_subscription`.
+- Public docs should state that Stage 4's real AB API endpoint, request fields, and response fields still require validation against the operator's deployed Auto Bangumi version.
+
+## 2026-08-06 09:30 CST - US-032
+Thread: https://codex.openai.com/threads/unavailable
+- Updated README usage documentation for the Stage 4 real Auto Bangumi HTTP submit path.
+- Documented the AB config JSON fields, explicit CLI submit command, fallback behavior, token handling, default non-network behavior, and deployment-validation caveat for real AB API fields.
+- Confirmed the existing example config uses a placeholder token and does not contain a real secret.
+- Ran `uv run pytest -q`, `uv run python -m compileall -q src`, and `git diff --check`; all passed.
+- Files changed
+  - `README.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep public docs explicit that `--submit-ab --ab-config <path>` is the only CLI path that contacts Auto Bangumi.
+  - Document real AB integration fields as deployment-sensitive until the project validates them against a live Auto Bangumi version.
+  - No nearby module `CODEX.md` update was needed for this docs-only story; reusable documentation guidance is consolidated in this progress log.
+---
+
+## 2026-08-06 09:28 CST - US-031
+Thread: https://codex.openai.com/threads/unavailable
+- Standardized real Auto Bangumi HTTP error mapping for auth failures, connection failures, timeouts, invalid JSON/text responses, non-object responses, and missing subscription IDs.
+- Kept token-bearing values out of structured error details while preserving expected `Stage1Error.failed_step` values from injected/business failures.
+- Added offline tests covering urlopen failures, injected transport timeout normalization, invalid responses, missing subscription ID fallback JSON serialization, and failed-step preservation.
+- Ran `uv run pytest -q` and `uv run python -m compileall -q src`; both passed.
+- Files changed
+  - `src/ab_engine/controllers/ab_http_client.py`
+  - `src/ab_engine/controllers/ab_http_client_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Normalize real AB network and response errors at the adapter boundary so `submit_ab_subscription(...)` can keep building the stable submit envelope and fallback config.
+  - Do not expose raw urllib reasons, HTTP reason phrases, endpoints, headers, or tokens in AB error details; stable categories and status codes are enough.
+  - Missing real AB subscription IDs should fail at `create_ab_subscription`, before the response is treated as a successful submit.
+  - There are no nearby `src` CODEX.md files; reusable AB network patterns are consolidated in this progress log.
+---
+
+## 2026-08-06 09:25 CST - US-030
+Thread: https://codex.openai.com/threads/unavailable
+- Switched the explicit CLI Auto Bangumi submit path from the fake default client to the real HTTP client factory after loading `--ab-config`.
+- Preserved fake-client injection for `apply_ab_submit_action(...)` tests and kept default non-submit CLI paths from constructing the real client.
+- Updated CLI submit tests to monkeypatch the real factory and assert the stable top-level and request-level `ab_submit_result` envelope remains intact.
+- Ran `uv run pytest -q`, `uv run python -m compileall -q src`, and `git diff --check`; all passed.
+- Files changed
+  - `src/apps/migu_orca_entry/controllers/entry_controller.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep real AB client creation in the CLI submit branch only, after explicit config loading and prepared payload construction.
+  - Tests that exercise real CLI wiring should monkeypatch `ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client(...)` and return a fake client, leaving network behavior to `ab_http_client` tests.
+  - There are no nearby `src` CODEX.md files; the reusable CLI submit pattern is consolidated in this progress log.
+---
+
+## 2026-08-06 09:22 CST - US-029
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented real Auto Bangumi subscription payload validation for `title`, `rss_url`, `save_path`, and `filter_rule` before HTTP submission.
+- Added stable structured `Stage1Error` failures for missing/non-string core fields and non-object `filter_rule`, without reading AB config or calling the transport on invalid payloads.
+- Added offline tests for validation failure isolation, Stage 3 mapper compatibility, string trimming, and filter rule copy isolation.
+- Ran `uv run pytest -q`, `uv run python -m compileall -q src`, and `git diff --check`; all passed.
+- Files changed
+  - `src/ab_engine/controllers/ab_http_client.py`
+  - `src/ab_engine/controllers/ab_http_client_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep real AB payload validation at the HTTP adapter boundary so invalid caller input fails before endpoint/token access and before any transport call.
+  - Stage 3 mapper output remains the compatibility contract for valid AB payloads; tests can build an accepted request and pass `build_ab_subscription_payload(...)` into the real client.
+  - There are no nearby `src` CODEX.md files yet; reusable AB patterns continue to be consolidated in `scripts/ralph/progress.txt`.
+---
+
+## 2026-08-06 09:19 CST - US-028
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented injectable HTTP transport support for the real Auto Bangumi client while preserving the public `create_auto_bangumi_http_client(AutoBangumiConfig)` path.
+- Added a urllib-backed default transport that posts JSON to the explicit config endpoint, converts successful JSON objects into the existing `ab_response` dictionary, and maps HTTP failures to token-free `Stage1Error` details.
+- Added offline tests for injected transport behavior, endpoint/header/payload/timeout propagation, payload copy isolation, and non-success HTTP error redaction.
+- Ran `uv run pytest -q` and `uv run python -m compileall -q src`; both passed.
+- Files changed
+  - `src/ab_engine/controllers/ab_http_client.py`
+  - `src/ab_engine/controllers/ab_http_client_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Keep network-specific behavior behind `AutoBangumiHttpTransport.post_json(...)` so future network error cases can be tested without a live AB server.
+  - Do not include endpoint URLs, HTTP reason phrases, request headers, or token-bearing values in structured HTTP failure details; status codes are enough for US-028.
+  - The only existing `CODEX.md` is under `scripts/ralph`, so reusable AB implementation patterns are currently consolidated in `progress.txt`.
+---
+
+## 2026-08-06 09:16 CST - US-027
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the real Auto Bangumi HTTP adapter boundary with `AutoBangumiHttpClient` and public `create_auto_bangumi_http_client(AutoBangumiConfig)` construction.
+- Added offline tests proving the new adapter is protocol-compatible, posts only a prepared payload, keeps payload input isolated from mutation, and keeps non-submit CLI paths from creating the real adapter.
+- Ran `uv run pytest -q` and `uv run python -m compileall -q src`; both passed.
+- Files changed
+  - `src/ab_engine/controllers/ab_http_client.py`
+  - `src/ab_engine/controllers/ab_http_client_test.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - The real AB adapter can be introduced without changing the existing submit result envelope because `submit_ab_subscription(...)` remains the only normalizer.
+  - The CLI still deliberately avoids the real adapter unless a later story wires the explicit `--submit-ab --ab-config` path to `create_auto_bangumi_http_client(...)`.
+  - There are no nearby `CODEX.md` files for the edited `src` modules; reusable AB patterns belong in the consolidated progress log unless a module-level CODEX file is added later.
+---
 
 ## 2026-08-05 18:35 CST - Stage 4 PRD Setup
 Thread: unavailable

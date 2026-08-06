@@ -71,6 +71,27 @@ def test_main_can_cancel_generated_request(capsys) -> None:
     assert output["request"]["user_action"]["reason"] == "稍后再订阅"
 
 
+def test_main_without_submit_ab_does_not_build_real_ab_client(
+    capsys,
+    monkeypatch,
+) -> None:
+    def fail_if_called(*args: object) -> None:
+        raise AssertionError("real AB client should not be created")
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        fail_if_called,
+    )
+
+    exit_code = main(["芙莉莲", "--action", "accept"])
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["status"] == "ACCEPTED"
+    assert output.get("ab_submit_result") is None
+    assert output["request"]["ab_submit_result"] is None
+
+
 def test_apply_ab_submit_action_skips_when_not_requested() -> None:
     result = apply_confirmation_action(
         generate_request(EntryRequest(raw_title="芙莉莲")),
@@ -87,12 +108,18 @@ def test_apply_ab_submit_action_attaches_success_result_to_accepted_request(
     tmp_path: Path,
 ) -> None:
     config = _ab_config(tmp_path, fallback_enabled=False)
+    client = FakeAutoBangumiClient()
     result = apply_confirmation_action(
         generate_request(EntryRequest(raw_title="芙莉莲")),
         "accept",
     )
 
-    submitted = apply_ab_submit_action(result, True, ab_config_path=config)
+    submitted = apply_ab_submit_action(
+        result,
+        True,
+        ab_config_path=config,
+        client=client,
+    )
 
     assert submitted["success"] is True
     assert submitted["error"] is None
@@ -103,6 +130,7 @@ def test_apply_ab_submit_action_attaches_success_result_to_accepted_request(
         "fallback_config": None,
         "error": None,
     }
+    assert client.calls
     assert submitted["request"]["ab_submit_result"] == submitted["ab_submit_result"]
     assert result["request"]["ab_submit_result"] is None
 
@@ -205,11 +233,23 @@ def test_apply_ab_submit_action_rejects_non_accepted_request(tmp_path: Path) -> 
     assert submitted["error"]["failed_step"] == "build_ab_subscription_payload"
 
 
-def test_main_can_submit_accepted_request_to_fake_ab(
+def test_main_can_submit_accepted_request_to_real_ab_client_factory(
     capsys,
+    monkeypatch,
     tmp_path: Path,
 ) -> None:
     config = _ab_config(tmp_path, fallback_enabled=False)
+    client = FakeAutoBangumiClient()
+    factory_configs = []
+
+    def build_client(ab_config):
+        factory_configs.append(ab_config)
+        return client
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        build_client,
+    )
 
     exit_code = main(
         [
@@ -227,6 +267,9 @@ def test_main_can_submit_accepted_request_to_fake_ab(
     assert output["request"]["status"] == "ACCEPTED"
     assert output["ab_submit_result"]["success"] is True
     assert output["request"]["ab_submit_result"] == output["ab_submit_result"]
+    assert len(factory_configs) == 1
+    assert factory_configs[0].endpoint == "http://auto-bangumi.local"
+    assert client.calls
 
 
 def test_main_returns_structured_error_for_cancel_without_reason(capsys) -> None:
