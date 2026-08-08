@@ -12,10 +12,18 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=9.0.0",
+    "pytest-playwright>=0.8.0",
 ]
 
 [project.scripts]
 migu-orca = "apps.migu_orca_entry.controllers.entry_controller:main"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["src", "tests"]
+markers = [
+    "browser: browser automation tests that require a browser binary",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -196,8 +196,9 @@ Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复
 ## Ralph 开发流
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
-- 当前活跃阶段：Stage 9，浏览器自动化测试 PRD
-- 最近完成阶段：Stage 8，Web UI 可用性补强 PRD
+- 当前活跃阶段：Stage 9（已完成），浏览器自动化测试
+- 最近完成阶段：Stage 9，浏览器自动化测试 PRD
+- 前一完成阶段：Stage 8，Web UI 可用性补强 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - 后续待办：`docs/backlog.md`
 - 已归档阶段记录：`scripts/ralph/archive/`
@@ -207,7 +208,55 @@ Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app
 
 Stage 8 已围绕 Web UI 可用性补强：顶部导航与运行模式提示、生成表单说明和本地校验、Storage 偏好记忆、Request 列表搜索/筛选/排序、详情区块重组、统一通知与错误恢复、响应式布局和基础无障碍验收。Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。
 
-Stage 9 计划引入 Playwright 或等价浏览器自动化测试，覆盖 `/` 到 `/index` 路由、页面基础加载、生成表单校验、显式保存、浏览器偏好、列表搜索/筛选/排序、详情分组、通知恢复、响应式布局和键盘可访问性。Stage 9 测试默认使用本地 fixture 和临时 storage，不访问真实 MiKan、Auto Bangumi 或 qBittorrent；BL-002 只有在浏览器自动化测试真正落地后才能标记完成。
+Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。75 个浏览器测试全部通过，测试默认使用本地 fixture 和临时 storage，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
+
+## Stage 9 浏览器自动化测试
+
+Stage 9 使用 Playwright + Chromium 为 Stage 8 Web UI 提供浏览器级回归保障。测试代码位于 `tests/browser/`，与现有单元测试分层清晰。
+
+### 依赖安装
+
+Playwright Python 包已纳入 `dev` 依赖组，通过 `uv sync` 即可安装。浏览器二进制和系统库需要额外设置：
+
+```bash
+# 方式 1：自动设置脚本（推荐，不需要 root）
+./script/setup-browser-deps.sh
+
+# 方式 2：手动安装系统依赖（需要 sudo）
+sudo apt-get install libnspr4 libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+  libcups2 libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 \
+  libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 \
+  libatspi2.0-0
+
+# 方式 3：使用 Playwright 内置依赖安装（需要 sudo）
+uv run playwright install-deps chromium
+
+# 安装 Chromium 浏览器二进制
+uv run playwright install chromium
+```
+
+### 运行浏览器测试
+
+```bash
+# 运行所有测试（包括浏览器测试）
+uv run pytest
+
+# 只运行浏览器测试
+uv run pytest tests/browser/ -v
+
+# 只运行非浏览器测试（跳过浏览器测试）
+uv run pytest -m "not browser"
+```
+
+### 浏览器不可用时的回退
+
+当浏览器二进制或系统库不可用时，conftest 会自动跳过标记了 `@pytest.mark.browser` 的测试，
+并打印跳过原因。所有非浏览器测试正常执行不受影响。
+
+### 测试输出脱敏
+
+浏览器测试的输出、截图、trace 和失败日志不会包含 token、完整 endpoint URL、
+原始 HTML、原始 RSS XML 或本地绝对路径。
 
 ## 参考文档
 
