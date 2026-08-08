@@ -1,6 +1,6 @@
 ## Codebase Patterns
 - Stage 1 through Stage 8 are complete; archived Ralph records live under `scripts/ralph/archive/`.
-- Stage 9 Ralph work uses branch `agent/stage9-browser-automation`; all Stage 9 stories currently start with `passes=false`.
+- Stage 9 Ralph work uses branch `agent/stage9-browser-automation`; US-063 complete, US-064–US-069 pending.
 - Use `uv run pytest` and `uv run python -m compileall -q src` for project quality checks; bare `pytest`/`python` may not be on PATH.
 - Preserve the existing top-level CLI JSON result envelope and do not change the current `migu-orca` command behavior while adding browser automation.
 - Default CLI and Web UI Request generation must remain offline and fixture-backed unless the user explicitly opts into real external integrations.
@@ -41,4 +41,30 @@ Thread: https://codex.openai.com/threads/unavailable
   - Stage 9 should improve regression confidence for Stage 8 Web UI before adding new Web UI mutation or external integration features.
   - Browser tests should prefer role, label, text, temporary storage, and stable user-visible behavior over fragile pixel snapshots.
   - Any browser automation artifacts must follow the same sensitive-output policy as logs, API responses, fixtures, and documentation.
+---
+
+## 2026-08-08 19:25 CST - US-063
+Thread: https://codex.openai.com/threads/unavailable
+- Added `pytest-playwright` to dev dependencies via `uv add --group dev pytest-playwright`.
+- Created `tests/browser/` directory with conftest and `test_infrastructure.py` smoke tests (9 tests).
+- Conftest provides: `live_server_url` (session-scoped Flask thread), `storage_dir` (tmp_path-based), `create_saved_request` helper, auto-skip when browser unavailable (`pytest_collection_modifyitems`).
+- Pulled down Chromium via Playwright mirror; extracted system libraries (.deb) to `/tmp/chromium-libs/` for non-sudo Chromium execution.
+- Created `script/setup-browser-deps.sh` for dependency setup with three fallback strategies.
+- Updated `README.md` with Stage 9 browser automation section: dependency setup, run commands, and browser-unavailable fallback.
+- Files changed:
+  - `pyproject.toml` — added `pytest-playwright` dev dependency, pytest config with `browser` marker and `testpaths`.
+  - `tests/__init__.py`, `tests/browser/__init__.py` — new packages.
+  - `tests/browser/conftest.py` — fixtures, browser detection, auto-skip.
+  - `tests/browser/test_infrastructure.py` — 9 smoke tests covering server health, root redirect, Stage 8 shell, static assets, empty list, temp storage, generation form, notifications, accessibility landmarks.
+  - `script/setup-browser-deps.sh` — dependency setup script.
+  - `bin/chromium-wrapper.sh` — Chromium launch wrapper (LD_LIBRARY_PATH).
+  - `scripts/ralph/prd.json` — US-063 passes=true.
+  - `README.md` — Stage 9 browser automation documentation.
+- **Learnings for future iterations:**
+  - Browser tests live in `tests/browser/` (separate from `src/` unit tests); they use `@pytest.mark.browser` marker for auto-skip when no browser.
+  - The `live_server_url` fixture starts Flask in a daemon thread; conftest sets `LD_LIBRARY_PATH` at module level so Playwright subprocess inherits it.
+  - System libraries for Chromium can be extracted from .deb packages to `/tmp/chromium-libs/` when sudo is unavailable.
+  - Use `page.locator()` with CSS selectors and text matching; prefer role/label assertions over pixel snapshots.
+  - Tests must validate no sensitive content (tokens, URLs, RSS XML) in rendered pages.
+  - Playwright mirror `https://npmmirror.com/mirrors/playwright` works for Chromium download when the default CDN is unreachable.
 ---
