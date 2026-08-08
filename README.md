@@ -196,16 +196,18 @@ Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复
 ## Ralph 开发流
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
-- 当前活跃阶段：Stage 8，Web UI 可用性补强 PRD
+- 当前活跃阶段：Stage 9，浏览器自动化测试 PRD
 - 最近完成阶段：Stage 8，Web UI 可用性补强 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - 后续待办：`docs/backlog.md`
 - 已归档阶段记录：`scripts/ralph/archive/`
-- Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 8`
+- Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 7`
 
 Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app factory、Blueprint registry、统一 JSON API 响应层、Pydantic 校验、Request 查询/生成 API、服务端渲染 Web UI、状态历史展示和 AB 提交结果展示，同时保持默认 CLI 流程不隐式写入磁盘。
 
 Stage 8 已围绕 Web UI 可用性补强：顶部导航与运行模式提示、生成表单说明和本地校验、Storage 偏好记忆、Request 列表搜索/筛选/排序、详情区块重组、统一通知与错误恢复、响应式布局和基础无障碍验收。Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。
+
+Stage 9 计划引入 Playwright 或等价浏览器自动化测试，覆盖 `/` 到 `/index` 路由、页面基础加载、生成表单校验、显式保存、浏览器偏好、列表搜索/筛选/排序、详情分组、通知恢复、响应式布局和键盘可访问性。Stage 9 测试默认使用本地 fixture 和临时 storage，不访问真实 MiKan、Auto Bangumi 或 qBittorrent；BL-002 只有在浏览器自动化测试真正落地后才能标记完成。
 
 ## 参考文档
 
