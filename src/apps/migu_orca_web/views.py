@@ -9,8 +9,12 @@ from pydantic import BaseModel, field_validator
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from apps.migu_orca_entry.controllers.entry_controller import (
+    apply_confirmation_action,
+    apply_modify_action,
     apply_request_save_action,
     generate_request,
+    _build_history_event,
+    _confirmation_history_details,
 )
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
@@ -54,6 +58,21 @@ class RequestCreatePayload(BaseModel):
         if not title:
             raise ValueError("title cannot be empty")
         return title
+
+
+class RequestActionPayload(BaseModel):
+    """Base payload for confirm/cancel/modify operations. `request_id` comes from URL path."""
+
+    request_id: str
+    storage_dir: str | None = None
+
+
+class RequestCancelPayload(RequestActionPayload):
+    cancel_reason: str | None = None
+
+
+class RequestModifyPayload(RequestActionPayload):
+    patch: dict[str, Any]
 
 
 def _storage_dir(value: str | None) -> Path | None:
@@ -174,6 +193,129 @@ class RequestCreateView(PostView):
         response: dict[str, object] = {
             "request": request,
             "summary": summarize_request(request),
+        }
+        if "saved_request" in result:
+            response["saved_request"] = result["saved_request"]
+        return response
+
+
+@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/accept", methods=["POST"])
+class RequestAcceptView(PostView):
+    request_validator_model = RequestActionPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestActionPayload)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        request = load_request_snapshot(config, payload.request_id)
+
+        result = apply_confirmation_action(
+            {"success": True, "request": request, "error": None},
+            "accept",
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+
+        history_event = _build_history_event(
+            request, result["request"], action="ACCEPT",
+        )
+        result = apply_request_save_action(
+            result,
+            True,
+            storage_dir=_storage_dir(payload.storage_dir),
+            history_events=[history_event],
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+
+        req = result["request"]
+        response: dict[str, object] = {
+            "request": req,
+            "summary": summarize_request(req),
+        }
+        if "saved_request" in result:
+            response["saved_request"] = result["saved_request"]
+        return response
+
+
+@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/cancel", methods=["POST"])
+class RequestCancelView(PostView):
+    request_validator_model = RequestCancelPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestCancelPayload)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        request = load_request_snapshot(config, payload.request_id)
+
+        cancel_reason = payload.cancel_reason or "用户取消"
+        result = apply_confirmation_action(
+            {"success": True, "request": request, "error": None},
+            "cancel",
+            cancel_reason=cancel_reason,
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+
+        history_event = _build_history_event(
+            request, result["request"],
+            action="CANCEL",
+            details=_confirmation_history_details("cancel", cancel_reason),
+        )
+        result = apply_request_save_action(
+            result,
+            True,
+            storage_dir=_storage_dir(payload.storage_dir),
+            history_events=[history_event],
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+
+        req = result["request"]
+        response: dict[str, object] = {
+            "request": req,
+            "summary": summarize_request(req),
+        }
+        if "saved_request" in result:
+            response["saved_request"] = result["saved_request"]
+        return response
+
+
+@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/modify", methods=["POST"])
+class RequestModifyView(PostView):
+    request_validator_model = RequestModifyPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestModifyPayload)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        request = load_request_snapshot(config, payload.request_id)
+
+        result = apply_modify_action(
+            {"success": True, "request": request, "error": None},
+            payload.patch,
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+
+        history_event = _build_history_event(
+            request, result["request"],
+            action="MODIFY",
+            details={"patch": payload.patch},
+        )
+        result = apply_request_save_action(
+            result,
+            True,
+            storage_dir=_storage_dir(payload.storage_dir),
+            history_events=[history_event],
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+
+        req = result["request"]
+        response: dict[str, object] = {
+            "request": req,
+            "summary": summarize_request(req),
         }
         if "saved_request" in result:
             response["saved_request"] = result["saved_request"]

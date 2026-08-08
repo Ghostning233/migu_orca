@@ -137,6 +137,28 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 }
 ```
 
+Stage 10 新增 Request 操作端点（仅 PENDING_CONFIRM 状态可操作）：
+
+- `POST /api/v1/requests/<request_id>/accept?storage_dir=.migu_orca/storage`：确认 Request，状态变更为 ACCEPTED。
+- `POST /api/v1/requests/<request_id>/cancel?storage_dir=.migu_orca/storage`：取消 Request，请求体可含 `cancel_reason` 字段。
+- `POST /api/v1/requests/<request_id>/modify?storage_dir=.migu_orca/storage`：修改 Request，请求体含 `patch` 对象（允许字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`）。
+
+取消示例：
+
+```bash
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/cancel?storage_dir=.migu_orca/storage' \
+  -H 'Content-Type: application/json' \
+  -d '{"cancel_reason": "不想追了"}'
+```
+
+修改示例：
+
+```bash
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify?storage_dir=.migu_orca/storage' \
+  -H 'Content-Type: application/json' \
+  -d '{"patch": {"expected_folder_name": "自定义目录"}}'
+```
+
 ### 本地验收流程
 
 1. 运行质量检查：
@@ -165,7 +187,8 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 8. 验证 Request 详情：打开列表项后确认详情按 Overview、Source、Filter、Seeds、Audit 分组；request_id 可复制；RSS 只显示是否已选择，不显示完整 RSS URL；Seeds 可展开查看完整有效种子标题；缺失 history 或 AB result 时保持非致命提示。
 9. 验证通知和恢复：列表加载失败时刷新按钮仍可用；详情加载失败时不清空已加载列表；通知可手动关闭，并会在下一次操作时替换旧消息。
 10. 验证窄屏和键盘操作：在移动宽度下表单、列表和详情为单列且不横向溢出；Tab 能聚焦主要控件和 Request 列表按钮；焦点样式可见，动态通知/列表/详情区域具备合适的语义标记。
-11. 通过 API 验证本地列表和详情：
+11. 验证 Request 操作（Stage 10）：打开 PENDING_CONFIRM 状态的 Request 详情，确认出现确认/取消/修改按钮；点击确认后确认浏览器弹出确认框，确认后状态变为 ACCEPTED 且按钮消失；点击取消后弹出原因输入框，确认后状态变为 CANCELLED 且 Audit 历史更新；点击修改后展示内联表单（字幕组下拉、filter_rule 输入、folder_name 输入），提交修改后通知展示成功且状态保持 PENDING_CONFIRM。
+12. 通过 API 验证本地列表和详情：
 
    ```bash
    curl 'http://127.0.0.1:5000/api/v1/requests?storage_dir=.migu_orca/storage'
@@ -196,9 +219,9 @@ Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复
 ## Ralph 开发流
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
-- 当前活跃阶段：Stage 9（已完成），浏览器自动化测试
-- 最近完成阶段：Stage 9，浏览器自动化测试 PRD
-- 前一完成阶段：Stage 8，Web UI 可用性补强 PRD
+- 当前活跃阶段：Stage 10（已完成），Web UI Request 操作
+- 最近完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
+- 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - 后续待办：`docs/backlog.md`
 - 已归档阶段记录：`scripts/ralph/archive/`

@@ -396,6 +396,38 @@ button:disabled {
   padding-top: 0;
 }
 
+.detail-actions {
+  margin-bottom: 14px;
+}
+
+.detail-modify-form {
+  background: #f8fafc;
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  padding: 14px;
+}
+
+.detail-modify-form label {
+  display: block;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.detail-modify-form label:first-child,
+.detail-modify-form h4 + label {
+  margin-top: 0;
+}
+
+.detail-modify-form select,
+.detail-modify-form input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.detail-modify-form .notification-actions {
+  margin-top: 14px;
+}
+
 .overview-actions {
   align-items: start;
   display: grid;

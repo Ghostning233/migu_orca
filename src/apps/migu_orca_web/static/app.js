@@ -506,41 +506,232 @@
     container.appendChild(section);
   }
 
+  function setActionInFlight(isInFlight) {
+    const buttons = detailContainer.querySelectorAll(".detail-action");
+    for (var i = 0; i < buttons.length; i++) {
+      buttons[i].disabled = isInFlight;
+    }
+  }
+
+  async function performAction(requestId, actionType, body) {
+    if (!requestId) return;
+    hideNotification();
+    setActionInFlight(true);
+    try {
+      await fetchJson(
+        apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/" + actionType),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body || {}),
+        }
+      );
+      var titles = { accept: "确认成功", cancel: "取消成功", modify: "修改成功" };
+      showNotification("success", titles[actionType] || "操作成功",
+        "Request " + requestId, {
+          actions: [
+            { label: "刷新列表", handler: loadList },
+          ],
+        });
+      await loadDetail(requestId);
+      await loadList();
+    } catch (error) {
+      notifyApiError("操作失败", error);
+    } finally {
+      setActionInFlight(false);
+    }
+  }
+
+  function buildModifyForm(request) {
+    var config = request.confirmable_config || {};
+    var sourceInfo = request.source_info || {};
+    var rssSources = sourceInfo.rss_sources || [];
+    var filterRule = config.filter_rule || {};
+
+    var container = document.createElement("div");
+    container.id = "detail-modify-form";
+    container.className = "detail-section detail-modify-form";
+    container.hidden = true;
+
+    var heading = document.createElement("h4");
+    heading.textContent = "修改 Request";
+    container.appendChild(heading);
+
+    var groupLabel = document.createElement("label");
+    groupLabel.textContent = "字幕组";
+    groupLabel.htmlFor = "modify-subtitle-group";
+    var groupSelect = document.createElement("select");
+    groupSelect.id = "modify-subtitle-group";
+    var emptyOpt = document.createElement("option");
+    emptyOpt.value = "";
+    emptyOpt.textContent = "不修改";
+    groupSelect.appendChild(emptyOpt);
+    for (var i = 0; i < rssSources.length; i++) {
+      var src = rssSources[i];
+      var opt = document.createElement("option");
+      opt.value = src.subtitle_group || "";
+      opt.textContent = src.subtitle_group || "未知字幕组";
+      groupSelect.appendChild(opt);
+    }
+    container.appendChild(groupLabel);
+    container.appendChild(groupSelect);
+
+    var mcLabel = document.createElement("label");
+    mcLabel.textContent = "must_contain";
+    mcLabel.htmlFor = "modify-must-contain";
+    var mcInput = document.createElement("input");
+    mcInput.id = "modify-must-contain";
+    mcInput.type = "text";
+    mcInput.value = filterRule.must_contain || "";
+    mcInput.placeholder = "正则筛选规则（包含）";
+    container.appendChild(mcLabel);
+    container.appendChild(mcInput);
+
+    var mncLabel = document.createElement("label");
+    mncLabel.textContent = "must_not_contain";
+    mncLabel.htmlFor = "modify-must-not-contain";
+    var mncInput = document.createElement("input");
+    mncInput.id = "modify-must-not-contain";
+    mncInput.type = "text";
+    mncInput.value = filterRule.must_not_contain || "";
+    mncInput.placeholder = "正则筛选规则（排除）";
+    container.appendChild(mncLabel);
+    container.appendChild(mncInput);
+
+    var fnLabel = document.createElement("label");
+    fnLabel.textContent = "folder_name";
+    fnLabel.htmlFor = "modify-folder-name";
+    var fnInput = document.createElement("input");
+    fnInput.id = "modify-folder-name";
+    fnInput.type = "text";
+    fnInput.value = config.expected_folder_name || "";
+    fnInput.placeholder = "期望存储目录名";
+    container.appendChild(fnLabel);
+    container.appendChild(fnInput);
+
+    var btnRow = document.createElement("div");
+    btnRow.className = "notification-actions";
+
+    var submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "detail-action";
+    submitBtn.textContent = "提交修改";
+    submitBtn.addEventListener("click", function () {
+      var patch = {};
+      if (groupSelect.value) {
+        patch.selected_subtitle_group = groupSelect.value;
+      }
+      var mcVal = mcInput.value.trim();
+      var mncVal = mncInput.value.trim();
+      if (mcVal || mncVal) {
+        patch.filter_rule = {};
+        if (mcVal) patch.filter_rule.must_contain = mcVal;
+        if (mncVal) patch.filter_rule.must_not_contain = mncVal;
+      }
+      var fnVal = fnInput.value.trim();
+      if (fnVal) {
+        patch.expected_folder_name = fnVal;
+      }
+      performAction(request.request_id, "modify", { patch: patch });
+    });
+    btnRow.appendChild(submitBtn);
+
+    var cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "secondary-button";
+    cancelBtn.textContent = "取消";
+    cancelBtn.addEventListener("click", function () {
+      container.hidden = true;
+    });
+    btnRow.appendChild(cancelBtn);
+
+    container.appendChild(btnRow);
+    return container;
+  }
+
   function renderDetailPayload(payload) {
-    const request = payload.request || payload;
-    const input = request.input || {};
-    const sourceInfo = request.source_info || {};
-    const matched = sourceInfo.matched_bangumi || {};
-    const config = request.confirmable_config || {};
-    const filterRule = config.filter_rule || {};
-    const effectiveSeeds = config.effective_seed_names || [];
+    var request = payload.request || payload;
+    var input = request.input || {};
+    var sourceInfo = request.source_info || {};
+    var matched = sourceInfo.matched_bangumi || {};
+    var config = request.confirmable_config || {};
+    var filterRule = config.filter_rule || {};
+    var effectiveSeeds = config.effective_seed_names || [];
 
     detailContainer.className = "request-detail";
     detailContainer.replaceChildren();
 
-    const heading = document.createElement("h3");
+    var heading = document.createElement("h3");
     heading.textContent = input.raw_title || matched.title || "Request";
 
-    const overviewSection = createDetailSection("Overview", "overview-section");
-    const overviewHeader = document.createElement("div");
+    var overviewSection = createDetailSection("Overview", "overview-section");
+    var overviewHeader = document.createElement("div");
     overviewHeader.className = "overview-actions";
-    const overviewFields = detailList([
+    var overviewFields = detailList([
       ["request_id", request.request_id],
       ["status", request.status],
       ["原始标题", input.raw_title],
       ["匹配标题", matched.title],
     ]);
-    const copyButton = document.createElement("button");
+    var copyButton = document.createElement("button");
     copyButton.type = "button";
     copyButton.className = "secondary-button copy-request-id";
     copyButton.textContent = "复制 request_id";
-    copyButton.addEventListener("click", () => {
+    copyButton.addEventListener("click", function () {
       copyTextToClipboard(request.request_id);
     });
     overviewHeader.append(overviewFields, copyButton);
     overviewSection.appendChild(overviewHeader);
 
-    const sourceSection = createDetailSection("Source", "source-section");
+    var isPending = request.status === "PENDING_CONFIRM";
+    var actionsContainer = document.createElement("div");
+    actionsContainer.className = "detail-actions notification-actions";
+
+    if (isPending) {
+      var acceptBtn = document.createElement("button");
+      acceptBtn.type = "button";
+      acceptBtn.className = "detail-action";
+      acceptBtn.textContent = "确认";
+      acceptBtn.addEventListener("click", function () {
+        if (window.confirm("确认接受此 Request？")) {
+          performAction(request.request_id, "accept", {});
+        }
+      });
+      actionsContainer.appendChild(acceptBtn);
+
+      var cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "secondary-button detail-action";
+      cancelBtn.textContent = "取消";
+      cancelBtn.addEventListener("click", function () {
+        var reason = window.prompt("请输入取消原因（可选）：") || "";
+        performAction(request.request_id, "cancel", {
+          cancel_reason: reason || undefined,
+        });
+      });
+      actionsContainer.appendChild(cancelBtn);
+
+      var modifyBtn = document.createElement("button");
+      modifyBtn.type = "button";
+      modifyBtn.className = "secondary-button detail-action";
+      modifyBtn.textContent = "修改";
+      modifyBtn.addEventListener("click", function () {
+        var form = document.getElementById("detail-modify-form");
+        if (form) {
+          form.hidden = !form.hidden;
+        }
+      });
+      actionsContainer.appendChild(modifyBtn);
+    } else {
+      var statusNote = document.createElement("p");
+      statusNote.className = "field-help";
+      statusNote.textContent = "此 Request 已" + fieldValue(request.status) + "，不可操作。";
+      actionsContainer.appendChild(statusNote);
+    }
+
+    var modifyForm = buildModifyForm(request);
+
+    var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
       detailList([
         ["字幕组", config.selected_subtitle_group],
@@ -549,7 +740,7 @@
       ]),
     );
 
-    const filterSection = createDetailSection("Filter", "filter-section");
+    var filterSection = createDetailSection("Filter", "filter-section");
     filterSection.appendChild(
       detailList([
         ["must_contain", filterRule.must_contain],
@@ -559,23 +750,25 @@
       ]),
     );
 
-    const seedsSection = createDetailSection("Seeds", "seeds-section");
-    const seedDetails = document.createElement("details");
+    var seedsSection = createDetailSection("Seeds", "seeds-section");
+    var seedDetails = document.createElement("details");
     seedDetails.className = "seed-details";
-    const seedSummary = document.createElement("summary");
+    var seedSummary = document.createElement("summary");
     seedSummary.textContent =
       "查看完整有效种子标题列表 (" + effectiveSeeds.length + ")";
-    const seedsContainer = document.createElement("div");
+    var seedsContainer = document.createElement("div");
     renderSeedList(seedsContainer, effectiveSeeds);
     seedDetails.append(seedSummary, seedsContainer);
     seedsSection.appendChild(seedDetails);
 
-    const auditSection = createDetailSection("Audit", "audit-group-section");
+    var auditSection = createDetailSection("Audit", "audit-group-section");
     renderHistorySection(auditSection, payload.history);
     renderAbResultSection(auditSection, payload.ab_result);
 
     detailContainer.append(
       heading,
+      actionsContainer,
+      modifyForm,
       overviewSection,
       sourceSection,
       filterSection,

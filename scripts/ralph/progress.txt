@@ -175,3 +175,38 @@ Thread: https://codex.openai.com/threads/unavailable
   - `scripts/ralph/progress.txt` — US-065 ~ US-069 records appended
 - **Stage 9 complete**: 75 browser tests across 6 test files covering routes, shell, generation, list, detail, and a11y.
 ---
+
+## 2026-08-08 20:45 CST - US-070
+Thread: https://codex.openai.com/threads/unavailable
+- Added 3 Web API mutation endpoints in `views.py`: accept, cancel, modify.
+- Each endpoint follows the existing `PostView` pattern with Pydantic payload validation.
+- Reuses `apply_confirmation_action`, `apply_modify_action`, `apply_request_save_action` from entry_controller.
+- Auto-generates status history events via `_build_history_event` + `_confirmation_history_details`.
+- `cancel` provides default reason "用户取消" when none given (cancel_request requires non-empty reason).
+- Files changed:
+  - `src/apps/migu_orca_web/views.py` — +142 lines: 3 new PostView classes + 3 Pydantic models
+---
+
+## 2026-08-08 20:45 CST - US-071 + US-072
+Thread: https://codex.openai.com/threads/unavailable
+- Added action buttons (confirm/cancel/modify) in `renderDetailPayload()` via `app.js`.
+- Buttons only appear for `PENDING_CONFIRM` status; non-pending shows "不可操作" note.
+- Inline modify form (`#detail-modify-form`): subtitle group select, must_contain, must_not_contain, folder_name.
+- `performAction()` generic function: POST to API → refresh detail → refresh list → show notification.
+- Critical fix: `showNotification` called AFTER `loadDetail`/`loadList` (both call `hideNotification` internally).
+- CSS: `.detail-actions`, `.detail-modify-form` styles added.
+- Files changed:
+  - `src/apps/migu_orca_web/static/app.js` — +177 lines (performAction, buildModifyForm, setActionInFlight, modified renderDetailPayload)
+  - `src/apps/migu_orca_web/static/style.css` — +38 lines (detail-actions, detail-modify-form)
+- **Key bug**: `showNotification` before `loadDetail` causes notification to be immediately hidden — always show after refreshes.
+---
+
+## 2026-08-08 20:45 CST - US-073
+Thread: https://codex.openai.com/threads/unavailable
+- Created `tests/browser/test_actions.py` with 13 browser tests.
+- Test classes: TestActionButtons (3), TestConfirmFlow (3), TestCancelFlow (2), TestModifyFlow (3), TestErrorRecovery (2).
+- Key selector fix: Use `.detail-actions button:has-text('...')` scoping to avoid strict-mode clash with modify form buttons.
+- All 13 action-flow tests pass; total browser tests now 88.
+- Files changed:
+  - `tests/browser/test_actions.py` — new, 248 lines, 13 tests
+---

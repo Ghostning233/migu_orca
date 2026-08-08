@@ -1,135 +1,107 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage9-browser-automation",
-  "description": "MiGuOrca Stage 9：在 Stage 8 Flask Web UI Usability 完成后，引入 Playwright 或等价浏览器自动化验收，覆盖本地 Web UI 的关键用户路径。Stage 9 聚焦真实浏览器级回归保障：路由与页面加载、表单校验、Request 生成与显式保存、列表搜索筛选排序、详情分组、通知与错误恢复、响应式布局和键盘可访问性。测试默认使用本地 fixture 和临时 storage，不访问真实 MiKan、Auto Bangumi 或 qBittorrent，不保存 token、完整 endpoint URL、原始 HTML/RSS XML 或本地绝对路径。",
+  "branchName": "agent/stage10-webui-confirm-modify",
+  "description": "MiGuOrca Stage 10：在 Stage 9 浏览器自动化测试基础设施就绪后，为 Web UI 补强 Request 确认、取消和修改操作入口。Stage 8 Web UI 详情面板已展示 Overview/Source/Filter/Seeds/Audit 分组，Stage 6 CLI 已支持 accept/cancel/modify 三种操作，但 Web UI 和 Web API 尚未暴露这些能力。Stage 10 将复用现有 entry_controller 编排层和 request_controller 业务规则，新增 Web API 端点并在 Request 详情页渲染可操作按钮，包含确认/取消/受限制修改的完整流程、状态历史刷新和统一通知反馈。测试默认使用本地 fixture 和临时 storage，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。",
   "userStories": [
     {
-      "id": "US-063",
-      "title": "建立浏览器自动化测试基础设施",
-      "description": "As a maintainer, I want a repeatable browser automation test setup so that Web UI regressions can be caught without manual clicking.",
+      "id": "US-070",
+      "title": "新增 Web API 确认、取消和修改端点",
+      "description": "As a Web UI user, I want API endpoints for confirming, cancelling, and modifying a saved Request so that I can drive these operations from a browser.",
       "acceptanceCriteria": [
-        "通过 `uv` 管理 Playwright 或等价浏览器自动化依赖，并记录依赖安装方式",
-        "新增浏览器测试目录或模块，和现有 Flask/static 测试保持清晰分层",
-        "浏览器测试可以启动或连接本地 Flask app，并使用临时 storage 目录，不污染 `.migu_orca/storage`",
-        "浏览器测试默认使用 `static-fixture` 数据源，不访问真实 MiKan、Auto Bangumi 或 qBittorrent",
-        "新增测试命令文档或脚本入口，说明如何运行浏览器自动化测试",
-        "测试输出、截图、trace 或失败日志不得包含 token、完整 endpoint URL、原始 HTML、原始 RSS XML 或本地绝对路径",
-        "Tests pass",
+        "新增 `POST /api/v1/requests/<request_id>/accept`：调用 entry_controller.apply_confirmation_action 执行确认，成功后保存 Request snapshot 和状态历史",
+        "新增 `POST /api/v1/requests/<request_id>/cancel`：接受可选 cancel_reason，调用 apply_confirmation_action 执行取消，成功后保存 Request snapshot 和状态历史",
+        "新增 `POST /api/v1/requests/<request_id>/modify`：接受受限 modify_patch JSON body（allowed: filter_rule、selected_subtitle_group、expected_folder_name），调用 apply_modify_action 执行修改，成功后保存 Request snapshot 和状态历史",
+        "每个端点复用现有 storage repository 进行快照保存和历史追加，保持与 CLI 行为一致",
+        "端点遵循统一 API envelope（ok/error_type/error_message），错误通过 extensions.flask_api 脱敏输出",
+        "修改端点校验 patch 字段白名单：只允许 filter_rule、selected_subtitle_group、expected_folder_name",
+        "非 PENDING_CONFIRM 状态的 Request 在确认/取消/修改时返回明确错误",
+        "元数据：`storage_dir` 或请求体提供 storage 路径，端点将 store_result 返回给客户端",
+        "Tests pass including browser tests",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Keep browser tests optional only if the runtime browser binary cannot be installed automatically; document the fallback clearly."
+      "notes": "Reuse entry_controller functions directly; do not duplicate business logic. All endpoints are POST (mutations)."
     },
     {
-      "id": "US-064",
-      "title": "覆盖 Web UI 路由和页面基础加载",
-      "description": "As a maintainer, I want browser tests for the Web UI shell so that route regressions and missing assets are caught early.",
+      "id": "US-071",
+      "title": "Web UI Request 详情面板渲染确认、取消和修改操作按钮",
+      "description": "As a Web UI user, I want to see action buttons in the Request detail panel so that I can confirm, cancel, or modify a PENDING_CONFIRM Request directly from the browser.",
       "acceptanceCriteria": [
-        "浏览器测试验证 `GET /` 会跳转或最终到达 `/index`",
-        "浏览器测试验证 `/index` 页面可加载 Stage 8 Web UI Usability 标识、顶部导航和运行模式提示",
-        "浏览器测试验证页面静态 CSS 与 JavaScript 资源成功加载，且不会出现关键控制台错误",
-        "浏览器测试验证页面初始状态不展示 token、完整 endpoint URL、原始 HTML、原始 RSS XML 或本地绝对路径",
-        "测试使用临时 storage，缺少已保存 Request 时页面展示可恢复的空列表状态",
-        "Tests pass",
+        "Request 详情面板 header 区域渲染「确认」「取消」「修改」三个操作按钮",
+        "按钮仅对 status 为 PENDING_CONFIRM 的 Request 可见和可交互",
+        "对于已确认/已取消等非 PENDING_CONFIRM 状态，按钮隐藏或显示为禁用并给出状态说明文本",
+        "「确认」按钮点击后弹出浏览器原生确认对话框或内联确认提示，防止误操作",
+        "「取消」按钮点击后弹出输入框收集取消原因（可为空），提交 cancel_reason",
+        "「修改」按钮点击后展开内联修改表单：字幕组下拉选择、filter_rule 输入、expected_folder_name 输入，提交 patch",
+        "操作提交期间对应按钮禁用，完成后恢复",
+        "操作使用统一 showNotification 展示成功/失败结果",
+        "操作成功后自动重新加载 Request 详情和状态历史 Audit 区块",
+        "Tests pass including browser tests",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "This story should validate the existing Stage 8 shell behavior without changing the saved Request schema."
+      "notes": "Keep JavaScript minimal and server-rendered; modify form stays inline in the existing detail panel. Reuse detail rendering patterns in app.js."
     },
     {
-      "id": "US-065",
-      "title": "覆盖 Request 生成表单校验和显式保存流程",
-      "description": "As a maintainer, I want browser tests for Request generation so that the main Web UI workflow remains reliable.",
+      "id": "US-072",
+      "title": "操作成功后的通知和列表刷新",
+      "description": "As a Web UI user, I want the Request list and detail to refresh after confirm/cancel/modify so that I see the latest state without manual reload.",
       "acceptanceCriteria": [
-        "浏览器测试提交空白或纯空白标题时，验证表单附近出现可读错误且不会发起 Request 创建 API 调用",
-        "浏览器测试填写有效标题并保持 `save_request` 未勾选时，验证生成成功通知出现且临时 storage 不新增 Request 文件",
-        "浏览器测试填写有效标题并勾选 `save_request` 时，验证保存成功通知包含 request_id 摘要并且临时 storage 可读取保存结果",
-        "浏览器测试验证提交期间生成按钮会禁用，并在请求完成后恢复可用",
-        "浏览器测试验证 storage_dir 和 save_request 浏览器偏好可保存、刷新后恢复，并可通过清除偏好控件重置",
-        "Tests pass",
+        "确认/取消/修改操作成功后，detail 面板自动重新加载最新 Request 数据",
+        "Request 列表自动刷新，列表项状态标签更新为 ACCEPTED / CANCELLED / PENDING_CONFIRM",
+        "状态变更后，列表筛选和搜索仍正常工作",
+        "操作失败时不清空现有列表或详情，仅展示错误通知",
+        "连续操作之间不互相覆盖：前一个操作完成前，后续操作按钮保持禁用",
+        "通知消息包含操作摘要：确认成功/取消成功/修改成功 + request_id",
+        "操作成功后 Audit 区块的状态历史列表反映最新 action 记录",
+        "Tests pass including browser tests",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "Use fixture-backed titles from the existing README examples; do not use real external integrations."
+      "notes": "This story ties US-070 and US-071 together end-to-end. Tests should verify the full click-to-refresh cycle."
     },
     {
-      "id": "US-066",
-      "title": "覆盖 Request 列表搜索筛选排序",
-      "description": "As a maintainer, I want browser tests for Request list operations so that local storage remains navigable as data grows.",
+      "id": "US-073",
+      "title": "浏览器自动化测试覆盖 Web UI 确认取消修改流程",
+      "description": "As a maintainer, I want browser tests for the confirm/cancel/modify workflow so that the Web UI action path remains regression-safe.",
       "acceptanceCriteria": [
-        "浏览器测试预置至少两个已保存 Request 到临时 storage，并验证列表加载数量提示形如 `显示 2 / 2`",
-        "浏览器测试验证文本搜索可按标题、request_id、字幕组或 folder_name 过滤列表",
-        "浏览器测试验证 status 筛选至少支持 All 和当前列表中出现的 status 值",
-        "浏览器测试验证排序控件支持默认顺序、标题升序和 request_id 升序，并改变可见列表顺序",
-        "浏览器测试验证无匹配时显示明确空状态，清空筛选后列表恢复",
-        "列表测试不新增后端搜索 API，继续验证浏览器端筛选排序行为",
-        "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 4,
-      "passes": true,
-      "notes": "Prefer creating fixtures through existing controllers or CLI helpers rather than hand-writing incompatible Request JSON."
-    },
-    {
-      "id": "US-067",
-      "title": "覆盖 Request 详情分组和通知恢复",
-      "description": "As a maintainer, I want browser tests for detail and notification behavior so that users can inspect saved Requests and recover from failures.",
-      "acceptanceCriteria": [
-        "浏览器测试打开一个已保存 Request 后，验证详情包含 Overview、Source、Filter、Seeds、Audit 分组或等价语义区块",
-        "浏览器测试验证 request_id 复制按钮存在并可触发复制反馈，RSS 只展示是否已选择，不展示完整 RSS URL",
-        "浏览器测试验证 Seeds 区块可展开查看完整有效种子标题列表",
-        "浏览器测试验证缺失 history 或 AB result 时，Audit 区块显示非致命提示且详情仍可读取",
-        "浏览器测试验证列表加载失败时刷新按钮仍可用，详情加载失败时不清空已成功加载的列表",
-        "浏览器测试验证通知区域支持成功、错误、手动关闭和下一次操作替换旧消息",
-        "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 5,
-      "passes": true,
-      "notes": "Failure-path tests may mock or monkeypatch Web API handlers if that is more stable than corrupting storage files."
-    },
-    {
-      "id": "US-068",
-      "title": "覆盖响应式布局和键盘可访问性",
-      "description": "As a maintainer, I want browser-level responsive and accessibility checks so that the Web UI remains usable outside one desktop viewport.",
-      "acceptanceCriteria": [
-        "浏览器测试在移动宽度下验证生成表单、Request 列表和详情区域为单列或不横向溢出",
-        "浏览器测试使用键盘 Tab 聚焦主要表单控件、刷新按钮、Request 列表项和详情操作按钮",
-        "浏览器测试验证 Request 列表项可通过键盘触发详情加载",
-        "浏览器测试验证焦点样式可见，动态通知、列表和详情区域具备可检查的语义标记或 `aria-live` 属性",
-        "浏览器测试验证错误、成功或选中状态不只依赖颜色表达，存在可读文本或语义属性",
-        "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 6,
-      "passes": true,
-      "notes": "Keep assertions robust: prefer role, label, text and layout overflow checks over fragile pixel snapshots."
-    },
-    {
-      "id": "US-069",
-      "title": "补充 Stage 9 浏览器自动化文档和验收记录",
-      "description": "As a maintainer, I want Stage 9 documentation and progress notes so that future Ralph runs know how to maintain browser tests.",
-      "acceptanceCriteria": [
-        "README 更新当前活跃阶段和最近完成阶段，说明 Stage 9 browser automation scope",
-        "README 补充浏览器自动化测试运行命令、依赖安装说明、临时 storage 行为和无法运行浏览器时的手动 fallback",
-        "README 保持默认离线 fixture、显式保存、统一 API envelope 和敏感信息脱敏规则描述准确",
-        "scripts/ralph/progress.txt 记录 Stage 9 PRD setup、范围决策、验收命令和后续 Stage 约束",
-        "docs/backlog.md 中 BL-002 仅在浏览器自动化测试真正落地后才能标记完成；本 PRD 编写阶段不得提前改为完成",
-        "后续待办 BL-003、BL-004、BL-005、BL-001 保持未完成并继续作为 Stage 9 之后候选范围",
+        "浏览器测试：打开 PENDING_CONFIRM Request 详情，验证确认/取消/修改按钮存在且可交互",
+        "浏览器测试：点击确认按钮 → 验证通知显示「确认成功」、详情状态变为 ACCEPTED、列表状态更新",
+        "浏览器测试：点击取消按钮并输入原因 → 验证通知显示、详情状态变为 CANCELLED、Audit 显示取消记录",
+        "浏览器测试：修改字幕组选择并提交 → 验证通知显示「修改成功」、详情字幕组字段更新、列表刷新",
+        "浏览器测试：对非 PENDING_CONFIRM Request 验证按钮隐藏或禁用",
+        "浏览器测试：验证操作失败时（如无效 patch 字段）通知展示错误消息且不丢失数据",
+        "浏览器测试不访问真实 MiKan、Auto Bangumi 或 qBittorrent；使用临时 storage 和 create_saved_request fixture",
+        "浏览器测试输出不包含 token、完整 endpoint URL、原始 HTML、原始 RSS XML 或本地绝对路径",
         "Tests pass",
         "Typecheck passes"
       ],
-      "priority": 7,
+      "priority": 4,
       "passes": true,
-      "notes": "This story closes documentation only after Stage 9 implementation stories pass."
+      "notes": "Use existing conftest fixtures from Stage 9. Fixtures should create PENDING_CONFIRM status requests via create_saved_request."
+    },
+    {
+      "id": "US-074",
+      "title": "补充 Stage 10 文档和验收记录",
+      "description": "As a maintainer, I want Stage 10 documentation and progress notes so that future Ralph runs know how to maintain the confirm/cancel/modify workflow.",
+      "acceptanceCriteria": [
+        "README 更新 Stage 10 为当前活跃阶段，概述 Web UI Request 操作范围",
+        "README Web API 章节新增确认/取消/修改端点文档和 curl 示例",
+        "README Web UI 验收流程更新操作验收步骤",
+        "scripts/ralph/progress.txt 记录 Stage 10 实现、关键决策和后续约束",
+        "docs/backlog.md 中 BL-003 仅在 Stage 10 实现验收通过后标记为完成",
+        "后续待办 BL-004、BL-005、BL-001 保持未完成",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "This story closes documentation only after Stage 10 implementation stories pass."
     }
   ]
 }
