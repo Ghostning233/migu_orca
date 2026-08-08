@@ -9,7 +9,7 @@
 | 优先级 | Backlog ID | 事项 | 状态 |
 | --- | --- | --- | --- |
 | 0 | BL-002 | Playwright / 浏览器自动化测试 | 完成 |
-| 1 | BL-003 | Web UI 确认 / 取消 / 修改 Request 的操作入口 | 待办 |
+| 1 | BL-003 | Web UI 确认 / 取消 / 修改 Request 的操作入口 | 完成 |
 | 2 | BL-004 | Web UI 真实 MiKan / Auto Bangumi 配置入口 | 待办 |
 | 3 | BL-005 | qBittorrent 直连 | 待办 |
 | 4 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 待办 |
