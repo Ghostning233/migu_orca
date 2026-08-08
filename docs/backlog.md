@@ -8,7 +8,7 @@
 
 | 优先级 | Backlog ID | 事项 | 状态 |
 | --- | --- | --- | --- |
-| 0 | BL-002 | Playwright / 浏览器自动化测试 | 待办 |
+| 0 | BL-002 | Playwright / 浏览器自动化测试 | 完成 |
 | 1 | BL-003 | Web UI 确认 / 取消 / 修改 Request 的操作入口 | 待办 |
 | 2 | BL-004 | Web UI 真实 MiKan / Auto Bangumi 配置入口 | 待办 |
 | 3 | BL-005 | qBittorrent 直连 | 待办 |
@@ -20,7 +20,7 @@
 
 ### BL-002: Playwright / 浏览器自动化测试
 
-- 状态：待办
+- 状态：完成 (Stage 9, 2026-08-08)
 - 来源：Stage 8 Web UI 人工验收
 - 优先级：0
 - 不阻塞：Stage 8 验收通过

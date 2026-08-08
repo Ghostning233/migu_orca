@@ -54,7 +54,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Use fixture-backed titles from the existing README examples; do not use real external integrations."
     },
     {
@@ -73,7 +73,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Prefer creating fixtures through existing controllers or CLI helpers rather than hand-writing incompatible Request JSON."
     },
     {
@@ -92,7 +92,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Failure-path tests may mock or monkeypatch Web API handlers if that is more stable than corrupting storage files."
     },
     {
@@ -110,7 +110,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Keep assertions robust: prefer role, label, text and layout overflow checks over fragile pixel snapshots."
     },
     {
@@ -128,7 +128,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "This story closes documentation only after Stage 9 implementation stories pass."
     }
   ]
