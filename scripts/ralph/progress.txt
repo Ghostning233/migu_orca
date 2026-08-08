@@ -68,3 +68,22 @@ Thread: https://codex.openai.com/threads/unavailable
   - Tests must validate no sensitive content (tokens, URLs, RSS XML) in rendered pages.
   - Playwright mirror `https://npmmirror.com/mirrors/playwright` works for Chromium download when the default CDN is unreachable.
 ---
+
+## 2026-08-08 19:45 CST - US-064
+Thread: https://codex.openai.com/threads/unavailable
+- Created `tests/browser/test_shell.py` with 19 browser tests covering US-064 acceptance criteria.
+- Test classes organized by criterion:
+  - `TestRootRedirect` — / redirects to /index (2 tests)
+  - `TestIndexStage8Shell` — Stage 8 branding, top nav, mode hint, panels, headings (5 tests)
+  - `TestStaticAssets` — CSS/JS loaded, console errors, viewport meta (4 tests)
+  - `TestNoSensitiveContent` — no URLs, RSS XML, tokens; form help text safe (4 tests)
+  - `TestEmptyListState` — list count 0/0, refresh button, container, search/filter/sort controls (4 tests)
+- All 247 tests pass (219 existing + 9 US-063 + 19 US-064).
+- Files changed:
+  - `tests/browser/test_shell.py` — new, 19 tests
+  - `scripts/ralph/prd.json` — US-064 passes=true
+- **Learnings for future iterations:**
+  - Pytest class names must start with `Test` (not `Describe`) to be collected.
+  - The `pytestmark = pytest.mark.browser` module-level marker auto-applies to all tests in the file.
+  - Browser page content includes the page's own HTML tag — `<html` check for "raw HTML in page" is a false positive; check `<rss`, URLs, and token instead.
+---
