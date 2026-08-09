@@ -225,7 +225,34 @@ Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - 后续待办：`docs/backlog.md`
 - 已归档阶段记录：`scripts/ralph/archive/`
-- Ralph 循环命令：`./scripts/ralph/ralph.sh --tool codex 7`
+- Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
+- Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`
+
+### 使用 Claude 运行 Ralph
+
+当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex` 选择执行工具。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
+
+Claude 模型可以通过命令行参数显式指定：
+
+```bash
+./scripts/ralph/ralph.sh --tool claude --model Hiku 7
+```
+
+也可以通过环境变量指定：
+
+```bash
+RALPH_MODEL=Hiku ./scripts/ralph/ralph.sh --tool claude 7
+```
+
+`--claude-model Hiku` 是 `--model Hiku` 的等价写法：
+
+```bash
+./scripts/ralph/ralph.sh --tool claude --claude-model Hiku 7
+```
+
+本地已通过 CCSwitch 将 Claude 的 `Hiku` 模型映射到实际提供方模型 `deepseek-v4-flash`。因此在本机运行上述命令时，Ralph 会向 Claude CLI 传入 `--model Hiku`，实际模型路由由 CCSwitch 配置决定。
+
+`--model` 目前只会传递给 Claude 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
 
 Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app factory、Blueprint registry、统一 JSON API 响应层、Pydantic 校验、Request 查询/生成 API、服务端渲染 Web UI、状态历史展示和 AB 提交结果展示，同时保持默认 CLI 流程不隐式写入磁盘。
 

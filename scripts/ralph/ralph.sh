@@ -1,12 +1,13 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh [--tool amp|claude|codex] [max_iterations]
+# Usage: ./ralph.sh [--tool amp|claude|codex] [--model MODEL] [max_iterations]
 
 set -e
 
 # Parse arguments
 TOOL="codex" # Default to the available local Codex CLI for this project.
 MAX_ITERATIONS=10
+MODEL="${RALPH_MODEL:-}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -16,6 +17,22 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tool=*)
       TOOL="${1#*=}"
+      shift
+      ;;
+    --model)
+      MODEL="$2"
+      shift 2
+      ;;
+    --model=*)
+      MODEL="${1#*=}"
+      shift
+      ;;
+    --claude-model)
+      MODEL="$2"
+      shift 2
+      ;;
+    --claude-model=*)
+      MODEL="${1#*=}"
       shift
       ;;
     *)
@@ -80,7 +97,12 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
-echo "Starting Ralph - Tool: $TOOL - Max iterations: $MAX_ITERATIONS"
+if [[ -n "$MODEL" && "$TOOL" != "claude" ]]; then
+  echo "Warning: --model is currently only passed to Claude; ignoring model '$MODEL' for tool '$TOOL'."
+fi
+
+MODEL_LABEL="${MODEL:-default}"
+echo "Starting Ralph - Tool: $TOOL - Model: $MODEL_LABEL - Max iterations: $MAX_ITERATIONS"
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
   echo "==============================================================="
@@ -98,7 +120,11 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     rm -f "$LAST_MESSAGE_FILE"
   else
     # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
-    OUTPUT=$(claude --dangerously-skip-permissions --print < "$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
+    CLAUDE_ARGS=(--dangerously-skip-permissions --print)
+    if [[ -n "$MODEL" ]]; then
+      CLAUDE_ARGS+=(--model "$MODEL")
+    fi
+    OUTPUT=$(claude "${CLAUDE_ARGS[@]}" < "$SCRIPT_DIR/CLAUDE.md" 2>&1 | tee /dev/stderr) || true
     COMPLETION_OUTPUT="$OUTPUT"
   fi
 
