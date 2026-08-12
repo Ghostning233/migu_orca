@@ -6,6 +6,9 @@ import pytest
 from playwright.sync_api import Page
 
 from tests.browser.conftest import create_saved_request
+from request_engine.controllers.request_controller import accept_request
+from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.storage_config import load_storage_config
 
 
 pytestmark = pytest.mark.browser
@@ -41,6 +44,18 @@ def _click_modify(page: Page) -> None:
     page.locator(".detail-actions button:has-text('修改')").click()
 
 
+def _click_ab_submit_entry(page: Page) -> None:
+    page.locator(".detail-actions button:has-text('提交 Auto Bangumi')").click()
+
+
+def create_saved_accepted_request(
+    storage_root: Path, title: str, request_id: str
+) -> dict:
+    request = accept_request(create_saved_request(storage_root, title, request_id))
+    save_request_snapshot(load_storage_config(storage_root), request)
+    return request
+
+
 class TestActionButtons:
     """AC: PENDING_CONFIRM Request 详情展示确认/取消/修改按钮，非 PENDING 状态隐藏."""
 
@@ -69,7 +84,7 @@ class TestActionButtons:
         _open_request_detail(page, live_server_url, storage_dir, "req-act-2")
         container = page.locator("#request-detail-container")
         assert container.locator("button:has-text('确认')").count() == 0
-        assert "不可操作" in container.inner_text()
+        assert container.locator("button:has-text('提交 Auto Bangumi')").count() >= 1
 
     def test_modify_button_toggles_form(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -85,6 +100,97 @@ class TestActionButtons:
         page.locator("#detail-modify-form button:has-text('取消')").click()
         page.wait_for_timeout(300)
         assert page.locator("#detail-modify-form").is_hidden()
+
+    def test_ab_submit_button_hidden_for_pending_request(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-act-ab-hidden")
+        _open_request_detail(page, live_server_url, storage_dir, "req-act-ab-hidden")
+
+        container = page.locator("#request-detail-container")
+        assert (
+            container.locator(".detail-actions button:has-text('提交 Auto Bangumi')").count()
+            == 0
+        )
+
+
+class TestAutoBangumiSubmitFlow:
+    """AC: ACCEPTED Request 可显式填写临时 AB 配置并确认提交."""
+
+    def test_ab_submit_form_has_temporary_config_fields(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-ab-form")
+        _open_request_detail(page, live_server_url, storage_dir, "req-ab-form")
+
+        assert page.locator("#detail-ab-submit-form").is_hidden()
+        _click_ab_submit_entry(page)
+
+        form = page.locator("#detail-ab-submit-form")
+        assert form.is_visible()
+        assert page.locator("#ab-submit-endpoint").count() >= 1
+        assert page.locator("#ab-submit-token").get_attribute("type") == "password"
+        assert page.locator("#ab-submit-fallback-enabled").get_attribute("type") == "checkbox"
+
+    def test_ab_submit_requires_confirmation_and_sends_request_scoped_config(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-ab-submit")
+        captured = {}
+
+        def handle_submit(route):
+            if route.request.method == "POST":
+                captured["url"] = route.request.url
+                captured["payload"] = route.request.post_data_json
+                route.fulfill(
+                    json={
+                        "ok": True,
+                        "result": {
+                            "request": {"request_id": "req-ab-submit", "status": "ACCEPTED"},
+                            "ab_submit_result": {
+                                "success": True,
+                                "ab_subscription_id": "sub-browser",
+                                "ab_response": {"id": "sub-browser"},
+                                "fallback_config": None,
+                                "error": None,
+                            },
+                        },
+                    }
+                )
+            else:
+                route.continue_()
+
+        page.route("**/api/v1/requests/req-ab-submit/submit-ab**", handle_submit)
+        _open_request_detail(page, live_server_url, storage_dir, "req-ab-submit")
+        _click_ab_submit_entry(page)
+        page.locator("#ab-submit-endpoint").fill("ab-endpoint-value")
+        page.locator("#ab-submit-token").fill("browser-secret-token")
+        page.locator("#ab-submit-fallback-enabled").check()
+
+        seen_dialogs = []
+        page.on(
+            "dialog",
+            lambda dialog: (seen_dialogs.append(dialog.message), dialog.accept()),
+        )
+        page.locator("#detail-ab-submit-form button:has-text('提交')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert seen_dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
+        assert "/api/v1/requests/req-ab-submit/submit-ab" in captured["url"]
+        assert "browser-secret-token" not in captured["url"]
+        assert "ab-endpoint-value" not in captured["url"]
+        assert captured["payload"] == {
+            "storage_dir": str(storage_dir),
+            "ab_config": {
+                "endpoint": "ab-endpoint-value",
+                "token": "browser-secret-token",
+                "fallback_enabled": True,
+            },
+        }
+        storage_keys = page.evaluate("Object.keys(window.localStorage)")
+        session_keys = page.evaluate("Object.keys(window.sessionStorage)")
+        assert all("ab" not in key.lower() for key in storage_keys)
+        assert session_keys == []
 
 
 class TestConfirmFlow:

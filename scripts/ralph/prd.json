@@ -77,7 +77,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Do not couple AB submit to accept. The user must explicitly trigger submit after accept."
     },
     {

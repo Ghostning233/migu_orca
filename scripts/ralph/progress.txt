@@ -15,6 +15,8 @@
 - Browser tests live in `tests/browser/`, use `pytestmark = pytest.mark.browser`, temporary storage, and local fake seams; they must not access real MiKan, Auto Bangumi, or qBittorrent by default.
 - Web UI browser preferences intentionally persist only `storage_dir` and `save_request`; do not add request-scoped MiKan or Auto Bangumi config to `preferenceKeys`, localStorage, sessionStorage, URLs, or storage JSON.
 - Browser tests that route `**/api/v1/requests` must distinguish POST generation from the initial GET list load and continue non-target requests.
+- Web UI detail action tests should scope action-entry locators to `.detail-actions`; hidden inline forms can contain submit buttons with overlapping text.
+- Web UI explicit AB submit sends request-scoped config in the POST body and may include `storage_dir` in both the query string and body for compatibility; tokens/endpoints must not appear in URLs or browser storage.
 - Browser environment uses Chromium / Google Chrome for Testing through Playwright; run `./script/setup-browser-deps.sh` if browser dependencies are missing.
 - Validate with `uv run pytest`, `uv run pytest tests/browser -v`, and `uv run python -m compileall -q src`.
 
@@ -94,4 +96,26 @@ Thread: https://codex.openai.com/threads/unavailable
   - Web UI request-scoped integration config should be built at submit time and omitted from fixture-mode payloads.
   - Keep integration config out of `preferenceKeys`; only `storage_dir` and `save_request` are persisted as browser preferences.
   - Browser route fakes for `**/api/v1/requests` must continue the initial GET list request when they only intend to capture POST generation.
+---
+
+## 2026-08-12 17:10 CST - US-078
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web UI Request detail explicit Auto Bangumi submit entry for `ACCEPTED` requests.
+- Added a hidden inline AB config form with endpoint, password token, fallback checkbox, local validation, explicit confirmation, submit busy state, success detail refresh, and non-destructive sanitized failure notification.
+- Kept AB endpoint/token request-scoped: no localStorage/sessionStorage persistence and no URL query exposure for sensitive values.
+- Added static UI contract coverage and Playwright coverage for accepted-only entry visibility, form fields, confirmation, payload shape, success refresh, failure recovery, and non-persistence.
+- Browser verification: `uv run pytest tests/browser -v` ran locally against the Flask test server and passed.
+- Quality checks passed: `uv run pytest -q` (336 passed), `uv run pytest tests/browser -v` (101 passed), and `uv run python -m compileall -q src`.
+- Files changed:
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_actions.py`
+  - `tests/browser/test_detail.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Scope browser assertions for detail action entries to `.detail-actions` because hidden inline forms may contain overlapping action labels.
+  - Playwright route handlers in this suite should read `route.request`; route patterns that need to match query strings should include a trailing `**`.
+  - The Web UI `submit-ab` action refreshes the detail panel from the API result and preserves the existing detail/list on failures.
 ---

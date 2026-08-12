@@ -206,10 +206,37 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "seed-details" in script
     assert "暂无状态历史。" in script
     assert "暂无 Auto Bangumi 提交结果。" in script
-    assert "token" not in script.lower()
+    assert "提交 Auto Bangumi" in script
+    assert "detail-ab-submit-form" in script
+    assert "ab-submit-endpoint" in script
+    assert "ab-submit-token" in script
+    assert "ab-submit-fallback-enabled" in script
+    assert "Auto Bangumi 提交" in script
+    assert "fallback_enabled" in script
+    assert "window.confirm(\"确认提交此 Request 到 Auto Bangumi？\")" in script
+    assert "storage_dir: storageInput.value.trim() || null" in script
+    assert "secret-token" not in script
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "currentDetailPayload" in script
+    assert "status === \"ACCEPTED\"" in script
+    assert "可提交到 Auto Bangumi" in script
+    assert "setAbSubmitInFlight(true)" in script
+    assert "setAbSubmitInFlight(false)" in script
+    assert "renderDetailPayload(nextPayload)" in script
+    assert "ab_submit_result" in script
+    assert "提交成功" in script
+    assert "提交失败" in script
+    assert "notifyApiError" in script
+    assert "提交失败" in script
 
 
 def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> None:
@@ -268,6 +295,7 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "field + \": \" + message" in script
     assert "safeText" in script
     assert "displayValue(value)" in script
+    assert "secret-token" not in script
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
@@ -372,6 +400,8 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert "miguOrca.web.saveRequest" in script
     assert "miguOrca.web.mikan" not in script
     assert "miguOrca.web.source" not in script
+    assert "miguOrca.web.ab" not in script
+    assert "sessionStorage" not in script
     assert "window.localStorage.getItem" in script
     assert "window.localStorage.setItem" in script
     assert "window.localStorage.removeItem" in script
@@ -391,6 +421,51 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     )
 
 
+def test_static_app_script_wires_explicit_ab_submit_form() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "buildAbSubmitForm" in script
+    assert "detail-ab-submit-form" in script
+    assert "ab-submit-endpoint" in script
+    assert "ab-submit-token" in script
+    assert "ab-submit-fallback-enabled" in script
+    assert "tokenInput.type = \"password\"" in script
+    assert "fallbackInput.type = \"checkbox\"" in script
+    assert "配置仅用于本次提交，不写入浏览器存储、URL 或 storage JSON。" in script
+    assert "提交 Auto Bangumi 前必须填写 endpoint。" in script
+    assert "提交 Auto Bangumi 前必须填写 token。" in script
+    assert "确认提交此 Request 到 Auto Bangumi？" in script
+    assert 'performAction(request.request_id, "submit-ab"' in script
+    assert "storage_dir: storageInput.value.trim() || null" in script
+    assert "ab_config" in script
+    assert "fallback_enabled: fallbackInput.checked" in script
+    assert "Auto Bangumi 提交成功" in script
+    assert "secret-token" not in script
+    assert "Authorization" not in script
+    assert "http://" not in script
+    assert "https://" not in script
+
+
+def test_static_app_script_shows_ab_submit_only_for_accepted_requests() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'var isAccepted = request.status === "ACCEPTED";' in script
+    assert "else if (isAccepted)" in script
+    assert 'abSubmitBtn.textContent = "提交 Auto Bangumi"' in script
+    assert "detail-ab-submit-form" in script
+    assert "form.hidden = !form.hidden" in script
+    assert script.index("else if (isAccepted)") > script.index(
+        'var isPending = request.status === "PENDING_CONFIRM";'
+    )
+    assert script.index('abSubmitBtn.textContent = "提交 Auto Bangumi"') < script.index(
+        "actionsContainer.appendChild(abSubmitBtn)"
+    )
+
+
 def test_static_style_defines_generation_form_validation_states() -> None:
     response = _client().get("/migu-orca-static/style.css")
 
@@ -402,6 +477,7 @@ def test_static_style_defines_generation_form_validation_states() -> None:
     assert ".inline-config-fields[hidden]" in css
     assert 'input[aria-invalid="true"]' in css
     assert 'input[type="number"]' in css
+    assert 'input[type="password"]' in css
     assert "button:disabled" in css
     assert ".secondary-button" in css
 
@@ -424,6 +500,7 @@ def test_static_style_defines_request_detail_sections() -> None:
     css = response.get_data(as_text=True)
     assert response.status_code == 200
     assert ".detail-section" in css
+    assert ".detail-inline-form" in css
     assert ".overview-actions" in css
     assert ".copy-request-id" in css
     assert ".seed-details summary" in css
