@@ -96,7 +96,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Prefer deterministic fake transports or API seams over live network calls. Browser tests must remain local and offline by default."
     },
     {

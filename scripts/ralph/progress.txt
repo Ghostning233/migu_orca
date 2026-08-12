@@ -17,6 +17,8 @@
 - Browser tests that route `**/api/v1/requests` must distinguish POST generation from the initial GET list load and continue non-target requests.
 - Web UI detail action tests should scope action-entry locators to `.detail-actions`; hidden inline forms can contain submit buttons with overlapping text.
 - Web UI explicit AB submit sends request-scoped config in the POST body and may include `storage_dir` in both the query string and body for compatibility; tokens/endpoints must not appear in URLs or browser storage.
+- Browser tests that create saved Requests must use titles the static fixture catalog can actually generate; otherwise `tests/browser/conftest.create_saved_request` returns `None`.
+- Playwright route globs for detail-submit endpoints should use request-ID-specific patterns with a trailing `**` when query strings are present.
 - Browser environment uses Chromium / Google Chrome for Testing through Playwright; run `./script/setup-browser-deps.sh` if browser dependencies are missing.
 - Validate with `uv run pytest`, `uv run pytest tests/browser -v`, and `uv run python -m compileall -q src`.
 
@@ -116,6 +118,22 @@ Thread: https://codex.openai.com/threads/unavailable
   - AB submit should reuse the current detail payload locally after success so the result block can refresh without reintroducing hidden persistence.
   - Browser route interception works best with request-ID-specific `**/api/v1/requests/<id>/submit-ab**` globs.
   - Hidden forms can still leave DOM text matchers visible; browser assertions should scope to `:visible` when checking user-facing entry points.
+---
+
+## 2026-08-12 17:20 CST - US-079
+Thread: https://codex.openai.com/threads/unavailable
+- Added a dedicated browser regression file for Stage 11 real-config entry coverage.
+- Covered the offline/default MiKan path, explicit `mikan` field visibility and browser-side validation, accepted-only AB entry visibility, password token input, confirmation, non-persistent AB config, and non-destructive AB failure handling.
+- Kept the tests offline and deterministic by using static fixtures and Playwright route handlers instead of live MiKan or Auto Bangumi calls.
+- Quality checks passed: `uv run pytest tests/browser -v` (105 passed), `uv run pytest -q` (340 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `tests/browser/test_stage11_real_config_entry.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `tests/browser/conftest.create_saved_request` only works with fixture-backed titles that the local static catalog can actually generate.
+  - Playwright route globs that need to match query strings or post-action endpoints should include a trailing `**`, for example `**/api/v1/requests/<id>/submit-ab**`.
+  - For accepted-only detail actions, browser assertions should scope to `.detail-actions` and use `:visible` so hidden inline forms do not create false positives.
 ---
 
 ## 2026-08-12 17:10 CST - US-078
