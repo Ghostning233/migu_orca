@@ -285,6 +285,27 @@ uv run playwright install-deps chromium
 uv run playwright install chromium
 ```
 
+当前项目浏览器测试优先使用 Chromium / Google Chrome for Testing。`./script/setup-browser-deps.sh` 会执行两类配置：
+
+1. 通过 `uv run playwright install chromium` 安装 Playwright 管理的 Chromium 二进制。
+2. 在无 sudo 环境下，从 Ubuntu 包源下载 Chromium 所需系统库 `.deb`，并解包到 `/tmp/chromium-libs`。
+
+本地无 root 回退依赖路径：
+
+```text
+/tmp/chromium-libs/usr/lib/x86_64-linux-gnu
+/tmp/chromium-libs/lib/x86_64-linux-gnu
+```
+
+浏览器测试的 `tests/browser/conftest.py` 会自动把上述路径加入 `LD_LIBRARY_PATH`，并从 `~/.cache/ms-playwright/` 查找可用的 Chromium 或 headless shell。若 `/tmp` 被系统清理，重新执行 `./script/setup-browser-deps.sh` 即可恢复浏览器测试环境。
+
+快速验证：
+
+```bash
+uv run pytest tests/browser/ -v
+uv run pytest
+```
+
 ### 运行浏览器测试
 
 ```bash

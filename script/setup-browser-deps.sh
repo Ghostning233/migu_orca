@@ -14,6 +14,9 @@ set -euo pipefail
 
 echo "=== MiGuOrca Stage 9: Browser Dependency Setup ==="
 
+echo "=> Ensuring Playwright Chromium browser binary is installed..."
+uv run playwright install chromium
+
 # --- Strategy 1: apt with sudo ------------------------------------------------
 if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
     echo "=> Trying apt install (sudo available)..."
@@ -29,6 +32,8 @@ fi
 
 # --- Strategy 2: local .deb extraction ---------------------------------------
 LIBS_DIR="/tmp/chromium-libs"
+DEBS_DIR="$(mktemp -d /tmp/chromium-debs.XXXXXX)"
+trap 'rm -rf "${DEBS_DIR}"' EXIT
 echo "=> Downloading and extracting .deb packages to ${LIBS_DIR}..."
 
 mkdir -p "${LIBS_DIR}"
@@ -43,8 +48,8 @@ PACKAGES=(
 
 DOWNLOADED=0
 for pkg in "${PACKAGES[@]}"; do
-    if apt download "$pkg" -o Dir::Cache=/tmp/chromium-debs 2>/dev/null; then
-        for deb in /tmp/chromium-debs/archives/"${pkg}"*.deb; do
+    if (cd "${DEBS_DIR}" && apt download "$pkg" 2>/dev/null); then
+        for deb in "${DEBS_DIR}"/"${pkg}"*.deb; do
             [ -f "$deb" ] && dpkg -x "$deb" "${LIBS_DIR}" 2>/dev/null
         done
         DOWNLOADED=$((DOWNLOADED + 1))
@@ -54,6 +59,9 @@ done
 if [ "$DOWNLOADED" -gt 0 ]; then
     echo "=> Extracted ${DOWNLOADED} packages to ${LIBS_DIR}."
     echo "=> LD_LIBRARY_PATH will be set automatically by browser test conftest."
+    echo "=> Extracted library paths:"
+    echo "   ${LIBS_DIR}/usr/lib/x86_64-linux-gnu"
+    echo "   ${LIBS_DIR}/lib/x86_64-linux-gnu"
 else
     echo "=> No .deb packages could be downloaded."
 fi
