@@ -38,6 +38,7 @@ packages = [
     "src/rss_engine",
     "src/subscription_engine",
     "src/ab_engine",
+    "src/qbittorrent_engine",
     "src/storage_engine",
     "src/request_engine",
     "src/shared",

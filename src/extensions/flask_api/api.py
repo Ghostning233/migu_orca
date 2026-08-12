@@ -14,7 +14,9 @@ from shared.errors import Stage1Error
 
 _ABSOLUTE_PATH_RE = re.compile(r"(?<!\w)(?:/[^\s<>'\"]+)+")
 _URL_RE = re.compile(r"https?://[^\s<>'\"]+")
-_TOKEN_RE = re.compile(r"(?i)(token|secret|cookie|authorization|password|passwd|bearer)")
+_TOKEN_RE = re.compile(
+    r"(?i)(token|secret|cookie|authorization|password|passwd|bearer|username|sid|session)"
+)
 
 
 def ok_response(result: Any) -> Response:

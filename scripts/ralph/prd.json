@@ -1,121 +1,132 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage11-webui-real-config-entry",
-  "description": "MiGuOrca Stage 11：为本地 Flask Web UI 增加显式真实 MiKan / Auto Bangumi 配置入口。Stage 10 已具备 Web UI Request 生成、保存、确认、取消和受限修改能力；CLI 已具备显式真实 MiKan 数据源和显式 Auto Bangumi HTTP 提交能力，但 Web UI 仍只能使用默认 static-fixture 生成，且没有暴露 AB 配置和提交入口。Stage 11 将在不改变默认离线行为、不落盘敏感配置、不隐式访问外部系统的前提下，为 Web API 和 Web UI 增加临时配置输入、显式真实 MiKan 生成、显式 AB 提交、脱敏错误展示和浏览器自动化覆盖。",
+  "branchName": "agent/stage12-qbittorrent-direct",
+  "description": "MiGuOrca Stage 12：实现 qBittorrent 直连能力。Stage 11 已完成 Web UI 显式真实 MiKan / Auto Bangumi 配置入口；Stage 12 聚焦 BL-005，在不改变默认离线行为、不隐式连接 qBittorrent、不持久化敏感认证信息的前提下，建立 qBittorrent 配置契约、HTTP client seam、连接测试 API、Web UI 显式配置入口、失败降级和浏览器自动化覆盖，为后续订阅或下载链路打通提供安全基础。",
   "userStories": [
     {
-      "id": "US-075",
-      "title": "扩展 Web API Request 生成契约以支持显式真实 MiKan 配置",
-      "description": "As a Web UI user, I want to explicitly choose real MiKan as the Request source so that I can generate Requests from live MiKan data when I provide the required config.",
+      "id": "US-081",
+      "title": "新增 qBittorrent 配置模型与脱敏边界",
+      "description": "As a maintainer, I want a typed qBittorrent configuration contract so that later client, API, and UI work share one safe validation boundary.",
       "acceptanceCriteria": [
-        "`POST /api/v1/requests` payload 新增 `source` 字段，允许值为 `static-fixture` 和 `mikan`，默认值保持 `static-fixture`",
-        "`POST /api/v1/requests` payload 新增可选 `mikan_config` 对象，字段为 `search_endpoint` 和 `timeout_seconds`",
-        "当 `source` 为 `static-fixture` 时，未传 `mikan_config` 也能保持现有 fixture-backed 生成行为",
-        "当 `source` 为 `mikan` 时，必须显式传入合法 `mikan_config`，并通过现有 MikanClient / MikanConfig 边界构造真实数据源",
-        "真实 MiKan 生成失败时继续返回统一 API error envelope，错误输出不得包含完整 endpoint URL、原始 HTML、原始 RSS XML、cookie 或 token",
-        "Web API 单元测试覆盖默认 fixture 行为、缺失 mikan_config、非法 timeout、真实 MiKan fake transport 成功和脱敏失败场景",
+        "新增 qBittorrent 配置模型，字段至少包含 `endpoint`、`username`、`password`、`timeout_seconds` 和 `verify_tls`",
+        "`endpoint`、`username` 和 `password` 必须显式提供；`timeout_seconds` 必须为正数；`verify_tls` 必须有安全默认值",
+        "配置加载或校验错误使用既有安全错误策略，不输出完整 endpoint URL、用户名、密码、cookie、SID、完整本地路径或原始 HTML",
+        "新增 qBittorrent 示例配置文件，示例值必须使用占位符，不包含真实地址、账号或密码",
+        "单元测试覆盖合法配置、缺失必填字段、非法 timeout 和错误脱敏",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Do not write MiKan config to storage JSON. Use inline request config only for the current API call."
+      "notes": "优先放在独立模块边界，例如 `qbittorrent_engine`。不要在本 story 中接入 Web UI。"
     },
     {
-      "id": "US-076",
-      "title": "新增 Web API Auto Bangumi 显式提交端点",
-      "description": "As a Web UI user, I want to submit an accepted Request to Auto Bangumi from the browser only after I provide explicit AB config.",
+      "id": "US-082",
+      "title": "实现 qBittorrent HTTP client 与 fake transport seam",
+      "description": "As a maintainer, I want a qBittorrent client adapter with injectable transport so that real integration can be tested offline and deterministically.",
       "acceptanceCriteria": [
-        "新增 `POST /api/v1/requests/<request_id>/submit-ab` 端点",
-        "端点只允许对 `ACCEPTED` 状态 Request 执行 AB 提交，非 ACCEPTED 状态返回统一 API error envelope",
-        "请求体必须包含 `ab_config` 对象，字段为 `endpoint`、`token`、`fallback_enabled`",
-        "端点复用现有 AB config 校验、AB payload 映射、真实 Auto Bangumi HTTP client adapter、submit result normalizer 和 fallback_config 逻辑",
-        "提交结果写回 Request snapshot，并保存到 `ab_results/`，详情 API 能读取最新 `ab_result`",
-        "所有错误、日志和 API 响应不得泄露 token、完整 endpoint URL、Authorization header 或 fallback 中的敏感字段",
-        "Web API 单元测试覆盖成功提交、fallback-enabled 失败、缺失 token、非 ACCEPTED 状态和脱敏错误输出",
+        "新增 qBittorrent client adapter，支持登录并通过 Web API 获取应用版本或等价轻量连接状态",
+        "client 必须支持可注入 HTTP transport，单元测试默认使用 fake transport，不访问真实 qBittorrent",
+        "登录成功后仅在内存中携带会话 cookie 或 SID，不写入 storage JSON、日志、fixture、浏览器 storage 或 URL",
+        "连接失败、认证失败、超时和非 JSON/异常响应必须归一化为安全错误，错误内容不得泄露完整 endpoint、用户名、密码、cookie、SID 或原始响应体",
+        "单元测试覆盖登录成功、认证失败、超时、异常响应和敏感信息脱敏",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Keep the endpoint explicit and POST-only. Do not auto-submit during accept."
+      "passes": false,
+      "notes": "只实现连接测试需要的最小 qBittorrent Web API 调用，不扩展下载或订阅动作。"
     },
     {
-      "id": "US-077",
-      "title": "在 Web UI 生成表单增加真实 MiKan 显式配置入口",
-      "description": "As a Web UI user, I want a clear source selector and MiKan config fields so that I can opt into real MiKan generation deliberately.",
+      "id": "US-083",
+      "title": "新增 qBittorrent 显式连接测试控制器",
+      "description": "As a CLI and Web API caller, I want a shared qBittorrent connection-test action so that external connectivity can be verified without triggering downloads.",
       "acceptanceCriteria": [
-        "Request 生成表单新增数据源选择控件，选项为 `static-fixture` 和 `mikan`，默认选中 `static-fixture`",
-        "仅当选择 `mikan` 时展示 MiKan 配置字段：`search_endpoint` 和 `timeout_seconds`",
-        "选择 `mikan` 时浏览器端校验要求 search_endpoint 非空、timeout_seconds 为正数；校验失败不发起 API 请求",
-        "提交真实 MiKan 生成时，请求体包含 `source: \"mikan\"` 和 `mikan_config`，fixture 模式请求体不包含敏感配置",
-        "页面运行模式提示明确说明默认离线、真实 MiKan 必须显式选择、配置只用于当前请求且不写入 storage JSON",
-        "页面和通知不得展示完整 endpoint URL、原始 HTML、原始 RSS XML、cookie 或 token",
-        "Web UI 静态测试覆盖表单结构、默认模式、校验文案和敏感内容不泄露",
-        "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 3,
-      "passes": true,
-      "notes": "Keep the UI server-rendered with minimal JavaScript. Do not introduce React/Vite."
-    },
-    {
-      "id": "US-078",
-      "title": "在 Web UI Request 详情中增加显式 Auto Bangumi 提交入口",
-      "description": "As a Web UI user, I want to submit an accepted Request to Auto Bangumi from the detail panel after entering temporary AB config.",
-      "acceptanceCriteria": [
-        "Request 详情页仅对 `ACCEPTED` 状态 Request 展示 `提交 Auto Bangumi` 操作入口",
-        "点击提交入口后展示内联 AB 配置表单，字段为 endpoint、token、fallback_enabled",
-        "AB token 输入框使用 password 类型；endpoint 和 token 不写入 localStorage、sessionStorage、storage JSON 或 URL query",
-        "提交前必须出现明确确认提示，确认后才调用 `POST /api/v1/requests/<request_id>/submit-ab`",
-        "提交期间按钮禁用，成功后刷新 Request 详情和 Auto Bangumi 结果区块",
-        "提交失败时不清空现有详情或列表，仅展示统一错误通知且错误内容已脱敏",
-        "Web UI 静态测试覆盖按钮可见性、表单字段、password token 输入和不持久化敏感配置",
-        "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 4,
-      "passes": true,
-      "notes": "Do not couple AB submit to accept. The user must explicitly trigger submit after accept."
-    },
-    {
-      "id": "US-079",
-      "title": "补充浏览器自动化覆盖真实配置入口关键流程",
-      "description": "As a maintainer, I want browser tests for the real MiKan and Auto Bangumi configuration entry points so that explicit integration behavior remains regression-safe.",
-      "acceptanceCriteria": [
-        "浏览器测试覆盖默认 fixture 模式下 MiKan 配置字段隐藏，生成流程仍成功且不访问真实外部系统",
-        "浏览器测试覆盖选择 `mikan` 后 MiKan 配置字段显示，缺失或非法配置触发浏览器端校验",
-        "浏览器测试覆盖 ACCEPTED Request 详情展示 AB 提交入口，非 ACCEPTED Request 不展示该入口",
-        "浏览器测试覆盖 AB 配置表单 token 字段为 password，提交前出现确认提示",
-        "浏览器测试覆盖 AB 提交失败时详情和列表不丢失，通知展示脱敏错误",
-        "浏览器测试断言页面内容、通知和 DOM 不包含 token、完整 endpoint URL、原始 HTML、原始 RSS XML、cookie 或 Authorization header",
-        "浏览器测试默认使用 fake transport / fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent",
+        "新增共享控制器函数，用于接收 inline qBittorrent 配置或配置文件路径并执行连接测试",
+        "连接测试只允许显式调用，不得在 Request 生成、确认、修改、取消或 Auto Bangumi 提交流程中自动触发",
+        "成功结果只返回脱敏摘要，例如 `status`、`version` 或 `reachable`，不得包含完整 endpoint、账号、密码、cookie、SID 或本地绝对路径",
+        "失败结果沿用安全错误策略，并支持可人工处理的降级摘要或明确的失败原因分类",
+        "单元测试覆盖 inline 配置、配置文件路径、成功摘要、失败分类和不隐式触发",
         "Tests pass",
         "Typecheck passes"
       ],
-      "priority": 5,
-      "passes": true,
-      "notes": "Prefer deterministic fake transports or API seams over live network calls. Browser tests must remain local and offline by default."
+      "priority": 3,
+      "passes": false,
+      "notes": "复用 US-081/US-082 的配置和 client seam。"
     },
     {
-      "id": "US-080",
-      "title": "补充 Stage 11 文档和验收记录",
-      "description": "As a maintainer, I want Stage 11 documentation and backlog updates so that future Ralph runs know the explicit real integration configuration rules.",
+      "id": "US-084",
+      "title": "新增 Web API qBittorrent 显式连接测试端点",
+      "description": "As a Web UI user, I want an explicit API endpoint for qBittorrent connection testing so that the browser can verify configuration without storing credentials.",
       "acceptanceCriteria": [
-        "README 更新 Stage 11 当前能力说明，明确 Web UI 支持显式真实 MiKan 配置入口和显式 AB 提交入口",
-        "README Web API 章节新增 `source` / `mikan_config` 生成 payload 示例和 `submit-ab` endpoint 示例",
-        "README Web UI 验收流程新增真实 MiKan 配置入口、AB 提交入口、脱敏展示和不落盘敏感配置检查",
-        "`docs/backlog.md` 中 BL-004 仅在 Stage 11 实现验收通过后标记为完成",
-        "`scripts/ralph/progress.txt` 记录 Stage 11 实现、关键安全约束、测试结果和后续 BL-005 / BL-001 状态",
-        "后续待办 BL-005、BL-001 保持未完成",
+        "新增 `POST /api/v1/qbittorrent/test-connection` 端点",
+        "请求体必须包含 `qbittorrent_config` 对象，字段与 Stage 12 配置模型一致",
+        "端点必须复用共享连接测试控制器和 qBittorrent client seam，不复制认证或 HTTP 业务规则",
+        "API 成功响应使用统一 `{ok: true, result: ...}` envelope，结果只包含脱敏连接摘要",
+        "API 失败响应使用统一 `{ok: false, error_type, error_message}` envelope，错误不得泄露 endpoint、账号、密码、cookie、SID、完整路径或原始响应体",
+        "Web API 单元测试覆盖成功连接、缺失密码、认证失败、超时、非法 endpoint 和错误脱敏",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "端点只做连接测试，不启动下载，不改写 Request snapshot。"
+    },
+    {
+      "id": "US-085",
+      "title": "在 Web UI 增加 qBittorrent 显式配置与连接测试入口",
+      "description": "As a Web UI user, I want a temporary qBittorrent connection-test form so that I can verify connectivity only when I deliberately provide configuration.",
+      "acceptanceCriteria": [
+        "Web UI 新增 qBittorrent 连接测试区域或详情入口，默认不自动展开敏感配置字段，不自动发起连接请求",
+        "表单字段至少包含 endpoint、username、password、timeout_seconds 和 verify_tls；password 输入框必须使用 `type=\"password\"`",
+        "提交前必须出现明确确认提示，确认后才调用 `POST /api/v1/qbittorrent/test-connection`",
+        "浏览器端校验 endpoint、username、password 非空，timeout_seconds 为正数；校验失败不发起 API 请求",
+        "成功时只显示脱敏连接摘要；失败时保留当前页面状态并展示统一脱敏错误通知",
+        "qBittorrent 配置不得写入 storage JSON、状态历史、浏览器 localStorage/sessionStorage、URL query、日志、截图或测试 trace",
+        "Web UI 静态测试覆盖表单结构、默认非自动连接、password 字段、确认提示文案和敏感信息不持久化",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "保持服务端渲染页面和最小 JavaScript，不引入前端构建链。"
+    },
+    {
+      "id": "US-086",
+      "title": "补充 qBittorrent 浏览器自动化回归覆盖",
+      "description": "As a maintainer, I want browser tests for qBittorrent connection testing so that explicit connection and credential-safety rules remain regression-safe.",
+      "acceptanceCriteria": [
+        "浏览器测试覆盖页面默认加载时不调用 qBittorrent 连接测试 API",
+        "浏览器测试覆盖 qBittorrent 配置字段展示、password 输入、非空校验和非法 timeout 校验",
+        "浏览器测试覆盖提交前确认提示，以及确认后发送 request-scoped `qbittorrent_config` POST body",
+        "浏览器测试覆盖连接成功时只展示脱敏摘要，不展示完整 endpoint、用户名、密码、cookie、SID 或本地路径",
+        "浏览器测试覆盖连接失败时列表、详情和表单不丢失，只展示脱敏错误通知",
+        "浏览器测试默认使用 Playwright route fake，不访问真实 qBittorrent",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "Close documentation only after implementation and browser coverage stories pass."
+      "passes": false,
+      "notes": "使用 Chromium / Google Chrome for Testing；如浏览器依赖缺失，先运行 `./script/setup-browser-deps.sh`。"
+    },
+    {
+      "id": "US-087",
+      "title": "补充 Stage 12 文档、backlog 和验收记录",
+      "description": "As a maintainer, I want Stage 12 documentation and backlog updates so that qBittorrent direct integration status is clear for future Ralph runs.",
+      "acceptanceCriteria": [
+        "README 更新 Stage 12 当前能力说明，明确 qBittorrent 直连只支持显式连接测试，不隐式连接或下载",
+        "README Web API 章节新增 qBittorrent 连接测试 endpoint、payload 示例和脱敏响应说明",
+        "README 本地验收流程新增 qBittorrent 配置入口、连接成功、连接失败、确认提示和不落盘敏感配置检查",
+        "`docs/backlog.md` 中 BL-005 仅在 Stage 12 实现验收通过后标记为完成",
+        "`scripts/ralph/progress.txt` 记录 Stage 12 实现、关键安全约束、测试结果和后续 BL-001 状态",
+        "后续待办 BL-001 保持未完成",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "文档收尾必须在实现和浏览器覆盖通过后完成。"
     }
   ]
 }

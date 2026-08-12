@@ -1,0 +1,215 @@
+## Codebase Patterns
+- Active Stage 12 PRD lives in `scripts/ralph/prd.json`.
+- Stage 12 scope is BL-005: qBittorrent direct integration, limited to explicit connection testing and safety boundaries.
+- Stage 11 has been completed and archived at `scripts/ralph/archive/2026-08-12-stage11-webui-real-config-entry/`.
+- Default CLI and Web UI generation must remain offline and fixture-backed unless the user explicitly opts into real integrations.
+- Default generation must not write local storage unless the caller explicitly opts into persistence through `--save-request` or Web API `save_request=true`.
+- Real MiKan configuration in Stage 11 is request-scoped: do not write `search_endpoint` or related config into storage JSON, status history, browser localStorage, or URLs.
+- Auto Bangumi configuration in Stage 11 is request-scoped: never persist token, endpoint, Authorization header, cookies, or complete URLs into storage JSON, localStorage, sessionStorage, logs, API responses, screenshots, traces, or docs examples.
+- qBittorrent configuration in Stage 12 is request-scoped: never persist endpoint, username, password, cookies, SID, sensitive paths, or raw response bodies into storage JSON, localStorage, sessionStorage, logs, API responses, screenshots, traces, or docs examples.
+- Stage 12 must not auto-connect qBittorrent from Request generation, accept, cancel, modify, or Auto Bangumi submit flows; qBittorrent access must require an explicit user-triggered connection-test action.
+- Stage 12 must not start downloads or batch subscription flows. Download/subscription execution is out of scope until a later stage explicitly defines it.
+- Web API must continue returning the unified envelope: success `{ok: true, result: ...}` and failure `{ok: false, error_type, error_message}` through `extensions.flask_api`.
+- API and UI errors must remain sanitized: do not expose raw HTML, raw RSS XML, complete endpoint URLs, cookies, tokens, Authorization headers, local absolute paths, or sensitive fallback fields.
+- Keep the Web UI Flask server-rendered with minimal JavaScript; do not introduce React/Vite or a frontend build chain.
+- Web UI assets live under `src/apps/migu_orca_web/templates/migu_orca_web/` and `src/apps/migu_orca_web/static/`; static URL path remains `/migu-orca-static/`.
+- Web API endpoints live in `src/apps/migu_orca_web/views.py` and should reuse existing entry/controller helpers instead of duplicating business rules.
+- Existing helpers to reuse where possible: `generate_request`, `apply_ab_submit_action`, `apply_request_save_action`, `load_mikan_config`, `create_mikan_client`, `load_ab_config`, `create_auto_bangumi_http_client`, storage repositories, and request summary/detail helpers.
+- Stage 12 should add qBittorrent-specific config, client, and connection-test helpers instead of mixing qBittorrent authentication into MiKan, Auto Bangumi, or Request controllers.
+- Web API Auto Bangumi submit should use request-scoped inline `AutoBangumiConfig`, run through `apply_ab_submit_action`, sanitize `ab_submit_result`, then persist via `apply_request_save_action` so request snapshots and `ab_results/` stay in sync.
+- Browser tests live in `tests/browser/`, use `pytestmark = pytest.mark.browser`, temporary storage, and local fake seams; they must not access real MiKan, Auto Bangumi, or qBittorrent by default.
+- Web UI browser preferences intentionally persist only `storage_dir` and `save_request`; do not add request-scoped MiKan or Auto Bangumi config to `preferenceKeys`, localStorage, sessionStorage, URLs, or storage JSON.
+- Do not add qBittorrent config to Web UI browser `preferenceKeys`; qBittorrent endpoint, username, password, cookie, SID, and connection summaries must remain current-request-only.
+- Browser tests that route `**/api/v1/requests` must distinguish POST generation from the initial GET list load and continue non-target requests.
+- Web UI detail action tests should scope action-entry locators to `.detail-actions`; hidden inline forms can contain submit buttons with overlapping text.
+- Web UI explicit AB submit sends request-scoped config in the POST body and may include `storage_dir` in both the query string and body for compatibility; tokens/endpoints must not appear in URLs or browser storage.
+- Browser tests that create saved Requests must use titles the static fixture catalog can actually generate; otherwise `tests/browser/conftest.create_saved_request` returns `None`.
+- Playwright route globs for detail-submit endpoints should use request-ID-specific patterns with a trailing `**` when query strings are present.
+- Stage 12 browser tests for `POST /api/v1/qbittorrent/test-connection` should use Playwright route fakes and assert no call occurs before explicit user confirmation.
+- Browser environment uses Chromium / Google Chrome for Testing through Playwright; run `./script/setup-browser-deps.sh` if browser dependencies are missing.
+- Validate with `uv run pytest`, `uv run pytest tests/browser -v`, and `uv run python -m compileall -q src`.
+
+## 2026-08-12 CST - Stage 12 PRD Setup
+Thread: unavailable
+- Confirmed Stage 11 is merged into `main`, archived, and fully passing before switching active Ralph context.
+- Created Stage 12 PRD for BL-005: qBittorrent direct integration.
+- Split Stage 12 into US-081 through US-087: qBittorrent config model and redaction boundary, HTTP client with fake transport seam, shared connection-test controller, Web API endpoint, Web UI explicit config entry, browser automation coverage, and documentation/backlog closure.
+- Stage 12 is intentionally limited to explicit qBittorrent connection testing. It must not trigger downloads, subscriptions, or background connections.
+- qBittorrent config is current-request-only. Endpoint, username, password, cookies, SID, sensitive paths, raw response bodies, and full local paths must not appear in storage JSON, browser storage, URLs, logs, screenshots, traces, docs examples, or API responses.
+- Ralph must be run for the whole Stage with `./scripts/ralph/ralph.sh --tool codex 7` or `./scripts/ralph/ralph.sh --tool claude --model Hiku 7`; the seven Stage 12 stories are acceptance and progress units, not a one-story execution limit.
+- All commit messages, PR titles, PR descriptions, and progress records must be written in Chinese.
+- BL-001 real MiKan search/RSS compatibility remains out of Stage 12 scope.
+---
+
+## 2026-08-12 CST - Stage 11 PRD Setup
+Thread: unavailable
+- Archived the previous Stage 10 Ralph files to `scripts/ralph/archive/2026-08-12-stage10-webui-confirm-modify/`.
+- Created Stage 11 PRD for BL-004: Web UI real MiKan / Auto Bangumi explicit configuration entry.
+- Split Stage 11 into US-075 through US-080: Web API real MiKan generation contract, Web API AB submit endpoint, Web UI MiKan config form, Web UI AB submit form, browser automation coverage, and documentation/backlog closure.
+- Explicitly kept default behavior local and offline: no real MiKan, Auto Bangumi, or qBittorrent access unless the user selects/provides configuration and triggers the action.
+- Chose request-scoped temporary config for Stage 11. Sensitive config must not be persisted into storage JSON, browser storage, URLs, logs, screenshots, traces, or docs examples.
+- BL-005 qBittorrent direct integration and BL-001 real MiKan parser/search compatibility remain out of Stage 11 scope.
+---
+
+## 2026-08-12 16:00 CST - US-075
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web API Request generation contract for explicit real MiKan configuration.
+- Added `source` support on `POST /api/v1/requests` with `static-fixture` as the default and `mikan` as the explicit live-source mode.
+- Added request-scoped `mikan_config` validation for `search_endpoint` and positive `timeout_seconds`; invalid or missing real MiKan config fails before generation.
+- Wired Web API real MiKan generation through existing `MikanConfig`, `create_mikan_client`, and `generate_request` boundaries without persisting MiKan config.
+- Covered default fixture behavior, missing config, invalid timeout, unsupported source, fake real MiKan success, and sanitized MiKan failure.
+- Quality checks passed: `uv run pytest -q` (315 passed) and `uv run python -m compileall -q src`.
+- Files changed:
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Web API payload validation uses Pydantic request models in `views.py`; invalid requests are converted to the unified `{ok: false, error_type, error_message}` envelope by `extensions.flask_api`.
+  - `generate_request(..., source_mode="mikan_http")` needs either an explicit `mikan_client`, inline `mikan_config`, or `mikan_config_path`; Stage 11 Web API should use inline config only.
+  - Fake MiKan success tests must provide RSS XML for the selected `RssSource`, because `generate_request` parses the RSS after candidate and source discovery.
+---
+
+## 2026-08-12 16:37 CST - US-076
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web API Auto Bangumi explicit submit endpoint at `POST /api/v1/requests/<request_id>/submit-ab`.
+- Added request-scoped `ab_config` validation for `endpoint`, `token`, and `fallback_enabled`, then reused `AutoBangumiConfig`, `apply_ab_submit_action`, the real AB HTTP client factory, submit result normalization, fallback handling, and storage save flow.
+- Enforced ACCEPTED-only submission through the existing AB payload mapper and returned the unified Web API error envelope for invalid states or validation failures.
+- Persisted sanitized AB submit results back into the Request snapshot and `ab_results/`, with detail API compatibility through the existing AB result loader.
+- Added Web API unit coverage for successful submit, fallback-enabled failure, missing token validation, non-ACCEPTED rejection, and sanitized echoed AB response.
+- Quality checks passed: `uv run pytest -q` (320 passed) and `uv run python -m compileall -q src`.
+- Files changed:
+  - `src/ab_engine/controllers/ab_config.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller.py`
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `apply_ab_submit_action` now supports either the legacy `ab_config_path` or an inline `AutoBangumiConfig`; Web API code should use the inline form and avoid temporary config files.
+  - AB submit results can include echoed fields from remote responses, so Web API persistence must sanitize result objects before writing snapshots or `ab_results/`.
+  - Missing sensitive payload fields may be redacted in validation error field paths by the shared API sanitizer, for example `ab_config.[redacted]`.
+---
+
+## 2026-08-12 16:52 CST - US-077
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web UI real MiKan generation entry in the server-rendered Request form.
+- Added a `source` selector with `static-fixture` as the default and a hidden MiKan config fieldset that appears only for `mikan`.
+- Added browser-side validation for required `search_endpoint` and positive `timeout_seconds`, blocking API submission when invalid.
+- Updated generation payload construction so fixture mode sends no `mikan_config`, while MiKan mode sends request-scoped inline config.
+- Updated the mode hint to state default offline behavior and that real MiKan config is current-request-only and not written to storage JSON.
+- Added static and browser coverage for form structure, default hidden fields, MiKan field visibility, validation copy, payload shape, and non-persistence in browser preferences.
+- Browser verification: Playwright browser tests ran locally against the Flask test server; no separate dev-browser MCP skill was available in this session.
+- Quality checks passed: `uv run pytest -q` (326 passed) and `uv run python -m compileall -q src`.
+- Files changed:
+  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_generation.py`
+  - `tests/browser/test_infrastructure.py`
+  - `tests/browser/test_shell.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Web UI request-scoped integration config should be built at submit time and omitted from fixture-mode payloads.
+  - Keep integration config out of `preferenceKeys`; only `storage_dir` and `save_request` are persisted as browser preferences.
+  - Browser route fakes for `**/api/v1/requests` must continue the initial GET list request when they only intend to capture POST generation.
+
+## 2026-08-12 18:10 CST - US-078
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web UI Request detail Auto Bangumi submit entry for ACCEPTED requests.
+- Added a detail-panel `提交 Auto Bangumi` action that reveals an inline request-scoped AB form with `endpoint`, `token`, and `fallback_enabled`.
+- Kept AB config strictly temporary: token uses password input, and endpoint/token are not written to localStorage, sessionStorage, storage JSON, or URL query.
+- Added explicit confirmation before POSTing to `POST /api/v1/requests/<request_id>/submit-ab`, then refreshed the detail payload with the saved AB result on success.
+- Kept failure handling non-destructive: the existing detail view stays visible, and the notification surfaces a sanitized error message.
+- Added static and browser coverage for ACCEPTED-only visibility, inline form fields, password token input, confirmation, success refresh, and failure recovery.
+- Quality checks passed: `uv run pytest -q` (336 passed), `uv run pytest tests/browser -v` (101 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_detail.py`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - AB submit should reuse the current detail payload locally after success so the result block can refresh without reintroducing hidden persistence.
+  - Browser route interception works best with request-ID-specific `**/api/v1/requests/<id>/submit-ab**` globs.
+  - Hidden forms can still leave DOM text matchers visible; browser assertions should scope to `:visible` when checking user-facing entry points.
+---
+
+## 2026-08-12 17:20 CST - US-079
+Thread: https://codex.openai.com/threads/unavailable
+- Added a dedicated browser regression file for Stage 11 real-config entry coverage.
+- Covered the offline/default MiKan path, explicit `mikan` field visibility and browser-side validation, accepted-only AB entry visibility, password token input, confirmation, non-persistent AB config, and non-destructive AB failure handling.
+- Kept the tests offline and deterministic by using static fixtures and Playwright route handlers instead of live MiKan or Auto Bangumi calls.
+- Quality checks passed: `uv run pytest tests/browser -v` (105 passed), `uv run pytest -q` (340 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `tests/browser/test_stage11_real_config_entry.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `tests/browser/conftest.create_saved_request` only works with fixture-backed titles that the local static catalog can actually generate.
+  - Playwright route globs that need to match query strings or post-action endpoints should include a trailing `**`, for example `**/api/v1/requests/<id>/submit-ab**`.
+  - For accepted-only detail actions, browser assertions should scope to `.detail-actions` and use `:visible` so hidden inline forms do not create false positives.
+---
+
+## 2026-08-12 17:28 CST - US-080
+Thread: https://codex.openai.com/threads/unavailable
+- Updated Stage 11 documentation and acceptance records to reflect the completed real-config entry scope.
+- Marked BL-004 complete in `docs/backlog.md`, refreshed the Stage 11 summary and API / browser acceptance notes in `README.md`, and set US-080 to passing in `scripts/ralph/prd.json`.
+- Preserved the offline default story: real MiKan and Auto Bangumi configuration remain request-scoped, temporary inputs only, with no persistence into storage JSON, browser storage, URLs, logs, screenshots, or traces.
+- Quality checks passed: `uv run pytest -q` (340 passed), `uv run pytest tests/browser -v` (105 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `README.md`
+  - `docs/backlog.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Stage 11 documentation should keep the offline fixture-backed default and the request-scoped real-config exception explicit in both README and backlog notes.
+  - The browser suite now covers the Stage 11 MiKan config form and Auto Bangumi submit flow, so later docs changes should keep those acceptance notes aligned with the tests.
+  - When Stage 11 closes, the remaining work is repository hygiene and archiving rather than new user-facing behavior.
+---
+
+## 2026-08-12 17:10 CST - US-078
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web UI Request detail explicit Auto Bangumi submit entry for `ACCEPTED` requests.
+- Added a hidden inline AB config form with endpoint, password token, fallback checkbox, local validation, explicit confirmation, submit busy state, success detail refresh, and non-destructive sanitized failure notification.
+- Kept AB endpoint/token request-scoped: no localStorage/sessionStorage persistence and no URL query exposure for sensitive values.
+- Added static UI contract coverage and Playwright coverage for accepted-only entry visibility, form fields, confirmation, payload shape, success refresh, failure recovery, and non-persistence.
+- Browser verification: `uv run pytest tests/browser -v` ran locally against the Flask test server and passed.
+- Quality checks passed: `uv run pytest -q` (336 passed), `uv run pytest tests/browser -v` (101 passed), and `uv run python -m compileall -q src`.
+- Files changed:
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_actions.py`
+  - `tests/browser/test_detail.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Scope browser assertions for detail action entries to `.detail-actions` because hidden inline forms may contain overlapping action labels.
+  - Playwright route handlers in this suite should read `route.request`; route patterns that need to match query strings should include a trailing `**`.
+  - The Web UI `submit-ab` action refreshes the detail panel from the API result and preserves the existing detail/list on failures.
+---
+
+## 2026-08-12 17:24 CST - US-080
+Thread: https://codex.openai.com/threads/unavailable
+- Completed Stage 11 documentation and backlog closure for BL-004.
+- Updated README current-state text to Stage 11, including Web UI explicit real MiKan generation and explicit Auto Bangumi submit entry.
+- Added Web API documentation for `source` / `mikan_config` generation payloads and `POST /api/v1/requests/<request_id>/submit-ab`.
+- Expanded local Web UI acceptance steps to cover real MiKan config entry, accepted-only AB submit, sanitized errors, and non-persistence of request-scoped integration config.
+- Marked BL-004 complete in `docs/backlog.md` while leaving BL-005 qBittorrent direct integration and BL-001 real MiKan parser/search compatibility as待办.
+- Marked US-080 `passes: true` in the active PRD.
+- Quality checks passed: `uv run pytest -q` (340 passed), `uv run pytest tests/browser -v` (105 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `README.md`
+  - `docs/backlog.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Stage closure docs should update both the top-level current-state summary and the Web API / local acceptance sections, not only the backlog status.
+  - `CODEX_CURRENT_THREAD_ID` may be unset in this environment; use the existing `unavailable` thread placeholder when no thread id is provided.
+  - BL-004 is now complete; the next unfinished backlog items remain BL-005 qBittorrent direct integration and BL-001 real MiKan search/RSS compatibility.
+---

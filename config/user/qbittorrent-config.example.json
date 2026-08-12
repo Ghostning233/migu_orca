@@ -1,0 +1,7 @@
+{
+  "endpoint": "https://qbittorrent.example.invalid",
+  "username": "your-qbittorrent-username",
+  "password": "your-qbittorrent-password",
+  "timeout_seconds": 5,
+  "verify_tls": true
+}

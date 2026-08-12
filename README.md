@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向动画订阅场景的 RSS 编排工具，目标是在 MiKanProject 与 Auto Bangumi 之间提供一层自动化协作能力。
 
-当前已完成 Stage 11：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持 CLI 与 Web UI 中确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。CLI 和 Web UI 都可以通过显式配置启用真实 MiKanProject 数据源；Web UI 详情页也提供仅对 `ACCEPTED` Request 可见的显式 Auto Bangumi 提交入口。默认生成、确认和 Web UI 浏览流程仍不会隐式访问真实 MiKanProject、Auto Bangumi 或 qBittorrent，也不会隐式写入本地存储。只有显式传入持久化参数时，CLI 或 Web API 才会在本地 JSON 存储目录写入 Request、状态历史或 Auto Bangumi 提交结果；真实 MiKan 与 Auto Bangumi 配置在 Web UI 中只用于当前请求，不写入 storage JSON、浏览器存储、URL、日志或 API 响应。
+当前已完成 Stage 11，并已进入 Stage 12 PRD 准备：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持 CLI 与 Web UI 中确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。CLI 和 Web UI 都可以通过显式配置启用真实 MiKanProject 数据源；Web UI 详情页也提供仅对 `ACCEPTED` Request 可见的显式 Auto Bangumi 提交入口。Stage 12 聚焦 qBittorrent 直连的显式连接测试能力，默认生成、确认和 Web UI 浏览流程仍不会隐式访问真实 MiKanProject、Auto Bangumi 或 qBittorrent，也不会隐式写入本地存储。只有显式传入持久化参数时，CLI 或 Web API 才会在本地 JSON 存储目录写入 Request、状态历史或 Auto Bangumi 提交结果；真实 MiKan、Auto Bangumi 与 qBittorrent 配置在 Web UI 中只用于当前请求，不写入 storage JSON、浏览器存储、URL、日志或 API 响应。
 
 ## 项目目标
 
@@ -22,6 +22,7 @@ MVP 聚焦单番剧的订阅闭环：
 - 已建立真实 MiKanProject 数据源 adapter、可注入 HTTP transport、搜索页解析、番剧页 RSS 源发现、真实 RSS XML 读取和安全错误归一化。
 - 当前 CLI 只有在显式传入 `--source mikan` 和 `--mikan-config` 时才会构造真实 MiKan client；只有在显式传入 `--submit-ab` 和 `--ab-config` 时才会构造真实 Auto Bangumi HTTP client；只有在显式传入 `--save-request` 时才会写入本地 JSON 存储。
 - 已提供 Stage 11 Flask Web UI：`/` 重定向到 `/index`，页面可以生成 Request、显式保存 Request、记住浏览器端本地偏好、搜索/筛选/排序本地 Request、读取分组详情，执行确认/取消/受限修改，并通过临时配置显式启用真实 MiKan 生成或显式提交 Auto Bangumi。
+- 当前活跃 PRD 为 Stage 12：qBittorrent 直连。Stage 12 仅规划显式连接测试和安全配置边界，不默认连接 qBittorrent，不启动下载，不改变现有 Request 生成或 AB 提交流程。
 
 ## 关键约定
 
@@ -73,7 +74,8 @@ MVP 聚焦单番剧的订阅闭环：
   - `fallback_enabled`：提交失败时是否在 `ab_submit_result.fallback_config` 中输出可人工处理的降级 JSON。
 - 真实 AB client 当前发送的创建订阅 payload 字段为 `title`、`rss_url`、`save_path`、`filter_rule`，并要求响应中包含 `id`、`subscription_id` 或 `ab_subscription_id` 之一。真实 Auto Bangumi API 的 endpoint、请求字段和响应字段仍需要按实际部署版本验证。
 - Web UI 真实 MiKan / Auto Bangumi 配置只在当前请求或当前提交中使用，不能写入 storage JSON、状态历史、浏览器 `localStorage` / `sessionStorage`、URL query、日志、截图或测试 trace。
-- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不属于 Stage 11 Web UI 配置入口范围。
+- Stage 12 qBittorrent 配置同样必须保持 request-scoped：endpoint、username、password、cookie、SID、敏感路径和原始响应体不能写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图、测试 trace 或 API 响应。
+- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不属于 Stage 12 qBittorrent 直连范围。
 
 ## Stage 11 Flask Web UI
 
@@ -226,7 +228,7 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/submit-ab?storage_dir=.
    curl 'http://127.0.0.1:5000/api/v1/requests/<request_id>?storage_dir=.migu_orca/storage'
    ```
 
-Stage 11 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。真实 MiKan 搜索/RSS 解析优化、qBittorrent 直连继续在 [backlog](docs/backlog.md) 跟踪，当前状态保持未完成。
+Stage 11 不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。Stage 12 已将 qBittorrent 直连纳入活动 PRD，但本阶段目标限定为显式连接测试和安全边界建设；真实 MiKan 搜索/RSS 解析优化继续在 [backlog](docs/backlog.md) 跟踪，当前状态保持未完成。
 
 示例 AB 配置：
 
@@ -250,7 +252,7 @@ Stage 11 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、�
 ## Ralph 开发流
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
-- 当前活跃阶段：Stage 11，Web UI 显式真实 MiKan / Auto Bangumi 配置入口
+- 当前活跃阶段：Stage 12，qBittorrent 直连显式连接测试 PRD
 - 最近完成阶段：Stage 11，Web UI 显式真实 MiKan / Auto Bangumi 配置入口 PRD
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
@@ -264,18 +266,18 @@ Stage 11 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、�
 
 Stage 开发必须通过 Ralph 循环完成，不应绕过 `scripts/ralph/prd.json` 手工挑 story 开发。每次启动一个 Stage 前，应先确认 `scripts/ralph/prd.json` 是当前 Stage 的 PRD，`scripts/ralph/progress.txt` 已记录本 Stage 的约束和进度。
 
-Stage 开发期间，Ralph 每轮只处理一个可验收的 user story。每轮完成后应更新对应 story 的 `passes` 状态和 `scripts/ralph/progress.txt`，并运行该 story 要求的验证命令；涉及 Web UI 的 story 必须运行浏览器测试或记录无法运行的明确原因。
+Stage 开发期间，Ralph 每轮应以完成当前 Stage 的全部 user story 为目标运行。`scripts/ralph/prd.json` 中的 user story 拆分用于明确验收粒度、依赖顺序和进度记录，不表示开发 Agent 只能处理一个 story。每轮完成后应更新全部已完成 story 的 `passes` 状态和 `scripts/ralph/progress.txt`，并运行当前 Stage 要求的验证命令；涉及 Web UI 的 Stage 必须运行浏览器测试或记录无法运行的明确原因。
 
 一个 Stage 全部 story 完成后，必须执行收尾流程：
 
 1. 将已完成 Stage 的 `scripts/ralph/prd.json` 和 `scripts/ralph/progress.txt` 归档到 `scripts/ralph/archive/<date>-<stage-name>/`。
 2. 更新 README、`docs/backlog.md` 和必要模块文档，使当前状态、已完成事项和后续待办保持一致。
 3. 运行 `uv run pytest`、`uv run pytest tests/browser -v` 和 `uv run python -m compileall -q src`；如果某项无法运行，必须在提交说明或 PR 描述中写明原因。
-4. 使用中文提交信息提交本 Stage 全部变更。
+4. 整理本 Stage 的最终提交和 PR 描述。
 5. 推送到 GitHub，创建 PR，确认可合并后合并进 `main`。
 6. 合并后确认本地 `main` 与 `origin/main` 对齐，且工作区干净。
 
-所有 Git commit message、PR 标题和阶段性开发记录都必须使用中文描述，避免混用英文短句作为主要说明。
+Ralph 运行过程中由下属 Agent 产生的本地中间提交不强制使用中文，不应仅因中间提交信息为英文而消耗 token 重写提交历史。最终对外可见的 PR 标题、PR 描述、合并提交信息、Stage 收尾提交信息和归档/验收说明必须使用中文描述。
 
 ### 使用 Claude 运行 Ralph
 
@@ -307,7 +309,7 @@ Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app
 
 Stage 8 已围绕 Web UI 可用性补强：顶部导航与运行模式提示、生成表单说明和本地校验、Storage 偏好记忆、Request 列表搜索/筛选/排序、详情区块重组、统一通知与错误恢复、响应式布局和基础无障碍验收。Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。
 
-Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。Stage 10 将浏览器测试扩展到 Web UI 确认、取消和修改流程。Stage 11 将浏览器测试扩展到显式真实 MiKan 配置入口和显式 Auto Bangumi 提交入口，目前共有 105 个浏览器测试。测试默认使用本地 fixture、临时 storage 和 fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
+Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。Stage 10 将浏览器测试扩展到 Web UI 确认、取消和修改流程。Stage 11 将浏览器测试扩展到显式真实 MiKan 配置入口和显式 Auto Bangumi 提交入口，目前共有 105 个浏览器测试。Stage 12 的 Web UI story 必须继续补充浏览器覆盖，并默认通过 Playwright route fake 验证 qBittorrent 连接测试，不访问真实 qBittorrent。测试默认使用本地 fixture、临时 storage 和 fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
 
 ## Stage 9 浏览器自动化测试
 

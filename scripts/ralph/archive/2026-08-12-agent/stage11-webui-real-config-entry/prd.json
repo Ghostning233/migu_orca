@@ -1,0 +1,132 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage12-qbittorrent-direct",
+  "description": "MiGuOrca Stage 12：实现 qBittorrent 直连能力。Stage 11 已完成 Web UI 显式真实 MiKan / Auto Bangumi 配置入口；Stage 12 聚焦 BL-005，在不改变默认离线行为、不隐式连接 qBittorrent、不持久化敏感认证信息的前提下，建立 qBittorrent 配置契约、HTTP client seam、连接测试 API、Web UI 显式配置入口、失败降级和浏览器自动化覆盖，为后续订阅或下载链路打通提供安全基础。",
+  "userStories": [
+    {
+      "id": "US-081",
+      "title": "新增 qBittorrent 配置模型与脱敏边界",
+      "description": "As a maintainer, I want a typed qBittorrent configuration contract so that later client, API, and UI work share one safe validation boundary.",
+      "acceptanceCriteria": [
+        "新增 qBittorrent 配置模型，字段至少包含 `endpoint`、`username`、`password`、`timeout_seconds` 和 `verify_tls`",
+        "`endpoint`、`username` 和 `password` 必须显式提供；`timeout_seconds` 必须为正数；`verify_tls` 必须有安全默认值",
+        "配置加载或校验错误使用既有安全错误策略，不输出完整 endpoint URL、用户名、密码、cookie、SID、完整本地路径或原始 HTML",
+        "新增 qBittorrent 示例配置文件，示例值必须使用占位符，不包含真实地址、账号或密码",
+        "单元测试覆盖合法配置、缺失必填字段、非法 timeout 和错误脱敏",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "优先放在独立模块边界，例如 `qbittorrent_engine`。不要在本 story 中接入 Web UI。"
+    },
+    {
+      "id": "US-082",
+      "title": "实现 qBittorrent HTTP client 与 fake transport seam",
+      "description": "As a maintainer, I want a qBittorrent client adapter with injectable transport so that real integration can be tested offline and deterministically.",
+      "acceptanceCriteria": [
+        "新增 qBittorrent client adapter，支持登录并通过 Web API 获取应用版本或等价轻量连接状态",
+        "client 必须支持可注入 HTTP transport，单元测试默认使用 fake transport，不访问真实 qBittorrent",
+        "登录成功后仅在内存中携带会话 cookie 或 SID，不写入 storage JSON、日志、fixture、浏览器 storage 或 URL",
+        "连接失败、认证失败、超时和非 JSON/异常响应必须归一化为安全错误，错误内容不得泄露完整 endpoint、用户名、密码、cookie、SID 或原始响应体",
+        "单元测试覆盖登录成功、认证失败、超时、异常响应和敏感信息脱敏",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "只实现连接测试需要的最小 qBittorrent Web API 调用，不扩展下载或订阅动作。"
+    },
+    {
+      "id": "US-083",
+      "title": "新增 qBittorrent 显式连接测试控制器",
+      "description": "As a CLI and Web API caller, I want a shared qBittorrent connection-test action so that external connectivity can be verified without triggering downloads.",
+      "acceptanceCriteria": [
+        "新增共享控制器函数，用于接收 inline qBittorrent 配置或配置文件路径并执行连接测试",
+        "连接测试只允许显式调用，不得在 Request 生成、确认、修改、取消或 Auto Bangumi 提交流程中自动触发",
+        "成功结果只返回脱敏摘要，例如 `status`、`version` 或 `reachable`，不得包含完整 endpoint、账号、密码、cookie、SID 或本地绝对路径",
+        "失败结果沿用安全错误策略，并支持可人工处理的降级摘要或明确的失败原因分类",
+        "单元测试覆盖 inline 配置、配置文件路径、成功摘要、失败分类和不隐式触发",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "复用 US-081/US-082 的配置和 client seam。"
+    },
+    {
+      "id": "US-084",
+      "title": "新增 Web API qBittorrent 显式连接测试端点",
+      "description": "As a Web UI user, I want an explicit API endpoint for qBittorrent connection testing so that the browser can verify configuration without storing credentials.",
+      "acceptanceCriteria": [
+        "新增 `POST /api/v1/qbittorrent/test-connection` 端点",
+        "请求体必须包含 `qbittorrent_config` 对象，字段与 Stage 12 配置模型一致",
+        "端点必须复用共享连接测试控制器和 qBittorrent client seam，不复制认证或 HTTP 业务规则",
+        "API 成功响应使用统一 `{ok: true, result: ...}` envelope，结果只包含脱敏连接摘要",
+        "API 失败响应使用统一 `{ok: false, error_type, error_message}` envelope，错误不得泄露 endpoint、账号、密码、cookie、SID、完整路径或原始响应体",
+        "Web API 单元测试覆盖成功连接、缺失密码、认证失败、超时、非法 endpoint 和错误脱敏",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "端点只做连接测试，不启动下载，不改写 Request snapshot。"
+    },
+    {
+      "id": "US-085",
+      "title": "在 Web UI 增加 qBittorrent 显式配置与连接测试入口",
+      "description": "As a Web UI user, I want a temporary qBittorrent connection-test form so that I can verify connectivity only when I deliberately provide configuration.",
+      "acceptanceCriteria": [
+        "Web UI 新增 qBittorrent 连接测试区域或详情入口，默认不自动展开敏感配置字段，不自动发起连接请求",
+        "表单字段至少包含 endpoint、username、password、timeout_seconds 和 verify_tls；password 输入框必须使用 `type=\"password\"`",
+        "提交前必须出现明确确认提示，确认后才调用 `POST /api/v1/qbittorrent/test-connection`",
+        "浏览器端校验 endpoint、username、password 非空，timeout_seconds 为正数；校验失败不发起 API 请求",
+        "成功时只显示脱敏连接摘要；失败时保留当前页面状态并展示统一脱敏错误通知",
+        "qBittorrent 配置不得写入 storage JSON、状态历史、浏览器 localStorage/sessionStorage、URL query、日志、截图或测试 trace",
+        "Web UI 静态测试覆盖表单结构、默认非自动连接、password 字段、确认提示文案和敏感信息不持久化",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "保持服务端渲染页面和最小 JavaScript，不引入前端构建链。"
+    },
+    {
+      "id": "US-086",
+      "title": "补充 qBittorrent 浏览器自动化回归覆盖",
+      "description": "As a maintainer, I want browser tests for qBittorrent connection testing so that explicit connection and credential-safety rules remain regression-safe.",
+      "acceptanceCriteria": [
+        "浏览器测试覆盖页面默认加载时不调用 qBittorrent 连接测试 API",
+        "浏览器测试覆盖 qBittorrent 配置字段展示、password 输入、非空校验和非法 timeout 校验",
+        "浏览器测试覆盖提交前确认提示，以及确认后发送 request-scoped `qbittorrent_config` POST body",
+        "浏览器测试覆盖连接成功时只展示脱敏摘要，不展示完整 endpoint、用户名、密码、cookie、SID 或本地路径",
+        "浏览器测试覆盖连接失败时列表、详情和表单不丢失，只展示脱敏错误通知",
+        "浏览器测试默认使用 Playwright route fake，不访问真实 qBittorrent",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "使用 Chromium / Google Chrome for Testing；如浏览器依赖缺失，先运行 `./script/setup-browser-deps.sh`。"
+    },
+    {
+      "id": "US-087",
+      "title": "补充 Stage 12 文档、backlog 和验收记录",
+      "description": "As a maintainer, I want Stage 12 documentation and backlog updates so that qBittorrent direct integration status is clear for future Ralph runs.",
+      "acceptanceCriteria": [
+        "README 更新 Stage 12 当前能力说明，明确 qBittorrent 直连只支持显式连接测试，不隐式连接或下载",
+        "README Web API 章节新增 qBittorrent 连接测试 endpoint、payload 示例和脱敏响应说明",
+        "README 本地验收流程新增 qBittorrent 配置入口、连接成功、连接失败、确认提示和不落盘敏感配置检查",
+        "`docs/backlog.md` 中 BL-005 仅在 Stage 12 实现验收通过后标记为完成",
+        "`scripts/ralph/progress.txt` 记录 Stage 12 实现、关键安全约束、测试结果和后续 BL-001 状态",
+        "后续待办 BL-001 保持未完成",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "文档收尾必须在实现和浏览器覆盖通过后完成。"
+    }
+  ]
+}
