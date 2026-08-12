@@ -15,16 +15,8 @@ class AutoBangumiConfig:
     fallback_enabled: bool
 
 
-def load_ab_config(path: Path) -> AutoBangumiConfig:
-    """Load the minimal Auto Bangumi system config from an explicit JSON path."""
-
-    data = _read_json(path)
-    if not isinstance(data, dict):
-        raise Stage1Error(
-            "config_error",
-            "Auto Bangumi 配置必须是 JSON 对象",
-            "load_ab_config",
-        )
+def build_ab_config(data: dict[str, Any]) -> AutoBangumiConfig:
+    """Build Auto Bangumi config from an explicit object."""
 
     endpoint = data.get("endpoint")
     token = data.get("token")
@@ -57,6 +49,20 @@ def load_ab_config(path: Path) -> AutoBangumiConfig:
         token=token.strip(),
         fallback_enabled=fallback_enabled,
     )
+
+
+def load_ab_config(path: Path) -> AutoBangumiConfig:
+    """Load the minimal Auto Bangumi system config from an explicit JSON path."""
+
+    data = _read_json(path)
+    if not isinstance(data, dict):
+        raise Stage1Error(
+            "config_error",
+            "Auto Bangumi 配置必须是 JSON 对象",
+            "load_ab_config",
+        )
+
+    return build_ab_config(data)
 
 
 def _read_json(path: Path) -> Any:

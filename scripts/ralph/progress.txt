@@ -11,6 +11,7 @@
 - Web UI assets live under `src/apps/migu_orca_web/templates/migu_orca_web/` and `src/apps/migu_orca_web/static/`; static URL path remains `/migu-orca-static/`.
 - Web API endpoints live in `src/apps/migu_orca_web/views.py` and should reuse existing entry/controller helpers instead of duplicating business rules.
 - Existing helpers to reuse where possible: `generate_request`, `apply_ab_submit_action`, `apply_request_save_action`, `load_mikan_config`, `create_mikan_client`, `load_ab_config`, `create_auto_bangumi_http_client`, storage repositories, and request summary/detail helpers.
+- Web API Auto Bangumi submit should use request-scoped inline `AutoBangumiConfig`, run through `apply_ab_submit_action`, sanitize `ab_submit_result`, then persist via `apply_request_save_action` so request snapshots and `ab_results/` stay in sync.
 - Browser tests live in `tests/browser/`, use `pytestmark = pytest.mark.browser`, temporary storage, and local fake seams; they must not access real MiKan, Auto Bangumi, or qBittorrent by default.
 - Browser environment uses Chromium / Google Chrome for Testing through Playwright; run `./script/setup-browser-deps.sh` if browser dependencies are missing.
 - Validate with `uv run pytest`, `uv run pytest tests/browser -v`, and `uv run python -m compileall -q src`.
@@ -44,4 +45,25 @@ Thread: https://codex.openai.com/threads/unavailable
   - Web API payload validation uses Pydantic request models in `views.py`; invalid requests are converted to the unified `{ok: false, error_type, error_message}` envelope by `extensions.flask_api`.
   - `generate_request(..., source_mode="mikan_http")` needs either an explicit `mikan_client`, inline `mikan_config`, or `mikan_config_path`; Stage 11 Web API should use inline config only.
   - Fake MiKan success tests must provide RSS XML for the selected `RssSource`, because `generate_request` parses the RSS after candidate and source discovery.
+---
+
+## 2026-08-12 16:37 CST - US-076
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web API Auto Bangumi explicit submit endpoint at `POST /api/v1/requests/<request_id>/submit-ab`.
+- Added request-scoped `ab_config` validation for `endpoint`, `token`, and `fallback_enabled`, then reused `AutoBangumiConfig`, `apply_ab_submit_action`, the real AB HTTP client factory, submit result normalization, fallback handling, and storage save flow.
+- Enforced ACCEPTED-only submission through the existing AB payload mapper and returned the unified Web API error envelope for invalid states or validation failures.
+- Persisted sanitized AB submit results back into the Request snapshot and `ab_results/`, with detail API compatibility through the existing AB result loader.
+- Added Web API unit coverage for successful submit, fallback-enabled failure, missing token validation, non-ACCEPTED rejection, and sanitized echoed AB response.
+- Quality checks passed: `uv run pytest -q` (320 passed) and `uv run python -m compileall -q src`.
+- Files changed:
+  - `src/ab_engine/controllers/ab_config.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller.py`
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - `apply_ab_submit_action` now supports either the legacy `ab_config_path` or an inline `AutoBangumiConfig`; Web API code should use the inline form and avoid temporary config files.
+  - AB submit results can include echoed fields from remote responses, so Web API persistence must sanitize result objects before writing snapshots or `ab_results/`.
+  - Missing sensitive payload fields may be redacted in validation error field paths by the shared API sanitizer, for example `ab_config.[redacted]`.
 ---

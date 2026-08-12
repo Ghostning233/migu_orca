@@ -6,11 +6,12 @@ from typing import Any
 from flask.testing import FlaskClient
 import pytest
 
+from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
-from request_engine.controllers.request_controller import summarize_request
+from request_engine.controllers.request_controller import accept_request, summarize_request
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
@@ -28,6 +29,21 @@ def _saved_request(tmp_path: Path, title: str, request_id: str) -> dict[str, Any
         **generate_request(EntryRequest(raw_title=title))["request"],
         "request_id": request_id,
     }
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+    return request
+
+
+def _saved_accepted_request(
+    tmp_path: Path,
+    title: str = "芙莉莲",
+    request_id: str = "request-1",
+) -> dict[str, Any]:
+    request = accept_request(
+        {
+            **generate_request(EntryRequest(raw_title=title))["request"],
+            "request_id": request_id,
+        }
+    )
     save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
     return request
 
@@ -938,3 +954,227 @@ def test_create_request_returns_unified_error_for_save_failure(
     assert str(tmp_path) not in str(payload)
     assert "https://example.test/api" not in str(payload)
     assert "token" not in str(payload).lower()
+
+
+def test_submit_ab_accepts_request_scoped_config_and_persists_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path)
+    storage_dir = tmp_path / "storage"
+    client = FakeAutoBangumiClient()
+    factory_configs = []
+
+    def build_client(ab_config):
+        factory_configs.append(ab_config)
+        return client
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
+        build_client,
+    )
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(storage_dir),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api/subscriptions",
+                "token": "secret-token",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    saved_request = load_storage_config(storage_dir).requests_dir / (
+        f"{request['request_id']}.json"
+    )
+    saved_ab_result = load_storage_config(storage_dir).ab_results_dir / (
+        f"{request['request_id']}.json"
+    )
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["request"]["status"] == "ACCEPTED"
+    assert result["ab_submit_result"] == {
+        "success": True,
+        "ab_subscription_id": "fake-ab-subscription",
+        "ab_response": {"id": "fake-ab-subscription", "status": "created"},
+        "fallback_config": None,
+        "error": None,
+    }
+    assert result["request"]["ab_submit_result"] == result["ab_submit_result"]
+    assert result["saved_request"]["request_id"] == request["request_id"]
+    assert result["saved_ab_result"]["request_id"] == request["request_id"]
+    assert saved_request.exists()
+    assert saved_ab_result.exists()
+    assert factory_configs[0].endpoint == "http://auto-bangumi.local/api/subscriptions"
+    assert factory_configs[0].token == "secret-token"
+    assert client.calls
+    assert "secret-token" not in saved_request.read_text(encoding="utf-8")
+    assert "auto-bangumi.local" not in saved_request.read_text(encoding="utf-8")
+    assert "secret-token" not in saved_ab_result.read_text(encoding="utf-8")
+    assert "auto-bangumi.local" not in saved_ab_result.read_text(encoding="utf-8")
+
+
+def test_submit_ab_persists_sanitized_fallback_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path)
+    storage_dir = tmp_path / "storage"
+    client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "Auto Bangumi rejected http://auto-bangumi.local/api secret-token",
+            "create_ab_subscription",
+            {
+                "Authorization": "Bearer secret-token",
+                "endpoint": "http://auto-bangumi.local/api",
+            },
+        )
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: client,
+    )
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(storage_dir),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "token": "secret-token",
+                "fallback_enabled": True,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    serialized = str(payload)
+    saved_ab_result = (
+        load_storage_config(storage_dir).ab_results_dir / f"{request['request_id']}.json"
+    ).read_text(encoding="utf-8")
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["ab_submit_result"]["success"] is False
+    assert payload["result"]["ab_submit_result"]["fallback_config"]["title"]
+    assert "secret-token" not in serialized
+    assert "auto-bangumi.local" not in serialized
+    assert "Authorization" not in serialized
+    assert "secret-token" not in saved_ab_result
+    assert "auto-bangumi.local" not in saved_ab_result
+
+
+def test_submit_ab_rejects_missing_token_without_calling_ab(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path)
+    called = False
+
+    def fail_if_called(*args: object, **kwargs: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("AB client should not be created for invalid payload")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
+        fail_if_called,
+    )
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(tmp_path / "storage"),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"] == "ab_config.[redacted]"
+        for error in payload["error_data"]["errors"]
+    )
+    assert called is False
+    assert "auto-bangumi.local" not in str(payload)
+
+
+def test_submit_ab_rejects_non_accepted_request(tmp_path: Path) -> None:
+    request = _saved_request(tmp_path, "芙莉莲", "request-1")
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(tmp_path / "storage"),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "token": "secret-token",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_request_status"
+    assert payload["error_message"] == "只有 ACCEPTED Request 可以提交到 Auto Bangumi"
+    assert payload["error_data"]["failed_step"] == "build_ab_subscription_payload"
+    assert "secret-token" not in str(payload)
+    assert "auto-bangumi.local" not in str(payload)
+
+
+def test_submit_ab_sanitizes_echoed_ab_response(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path)
+    storage_dir = tmp_path / "storage"
+    client = FakeAutoBangumiClient(
+        response={
+            "id": "sub-123",
+            "endpoint": "http://auto-bangumi.local/api",
+            "Authorization": "Bearer secret-token",
+        }
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: client,
+    )
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(storage_dir),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "token": "secret-token",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    saved_ab_result = (
+        load_storage_config(storage_dir).ab_results_dir / f"{request['request_id']}.json"
+    ).read_text(encoding="utf-8")
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["ab_submit_result"]["ab_response"] == {
+        "id": "sub-123",
+        "endpoint": "[redacted-url]",
+        "[redacted]": "[redacted]",
+    }
+    assert "secret-token" not in str(payload)
+    assert "auto-bangumi.local" not in str(payload)
+    assert "secret-token" not in saved_ab_result
+    assert "auto-bangumi.local" not in saved_ab_result
