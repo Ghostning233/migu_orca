@@ -18,7 +18,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "Do not write MiKan config to storage JSON. Use inline request config only for the current API call."
     },
     {

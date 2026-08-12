@@ -15,7 +15,7 @@ from ab_engine.controllers.subscription_payload import build_ab_subscription_pay
 from catalog_engine.controllers.catalog_controller import load_catalog, match_bangumi
 from mikan_engine.controllers import mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import MikanClient, MikanTransport
-from mikan_engine.controllers.mikan_config import load_mikan_config
+from mikan_engine.controllers.mikan_config import MikanConfig, load_mikan_config
 from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
@@ -59,6 +59,7 @@ def generate_request(
     project_root: Path = PROJECT_ROOT,
     source_mode: SourceMode = "static_fixture",
     mikan_config_path: Path | None = None,
+    mikan_config: MikanConfig | None = None,
     mikan_client: MikanClient | None = None,
     mikan_rss_transport: MikanTransport | None = None,
 ) -> dict[str, Any]:
@@ -75,6 +76,7 @@ def generate_request(
         elif source_mode == "mikan_http":
             real_mikan_client = _resolve_mikan_client(
                 mikan_config_path=mikan_config_path,
+                mikan_config=mikan_config,
                 mikan_client=mikan_client,
             )
             candidates = real_mikan_client.list_bangumi_candidates(entry.raw_title)
@@ -150,10 +152,13 @@ def generate_request(
 def _resolve_mikan_client(
     *,
     mikan_config_path: Path | None,
+    mikan_config: MikanConfig | None,
     mikan_client: MikanClient | None,
 ) -> MikanClient:
     if mikan_client is not None:
         return mikan_client
+    if mikan_config is not None:
+        return mikan_client_module.create_mikan_client(mikan_config)
     if mikan_config_path is None:
         raise Stage1Error(
             "config_error",

@@ -14,12 +14,18 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     load_saved_request,
     main,
 )
+from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
+
+_FAKE_RSS_XML = (
+    "<rss><channel><item><title>芙莉莲 - 01</title>"
+    "<link>https://example.invalid/1</link></item></channel></rss>"
+)
 
 
 def test_generate_request_end_to_end() -> None:
@@ -34,6 +40,90 @@ def test_generate_request_end_to_end() -> None:
     assert request["ab_submit_result"] is None
     assert "CREATED" not in json.dumps(request)
     assert "SEARCHING" not in json.dumps(request)
+
+
+class _FakeMikanTransport:
+    def __init__(self, responses: dict[str, str] | None = None, error: Stage1Error | None = None) -> None:
+        self.responses = responses or {}
+        self.error = error
+        self.requests: list[tuple[str, float]] = []
+
+    def get_text(self, url: str, *, timeout: float) -> str:
+        self.requests.append((url, timeout))
+        if self.error is not None:
+            raise self.error
+        return self.responses[url]
+
+
+def test_generate_request_supports_inline_mikan_config_with_fake_transport_success() -> None:
+    config = MikanConfig(
+        search_endpoint="https://mikan.example/Home/Search",
+        timeout_seconds=3,
+    )
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                '<a href="/Home/Bangumi/123" title="芙莉莲">芙莉莲</a>'
+            ),
+            "https://mikan.example/Home/Bangumi/123": (
+                '<tr><td><a data-subtitle-group="Loli" '
+                'href="/RSS/Bangumi?bangumiId=123">RSS</a></td></tr>'
+            ),
+            "https://mikan.example/RSS/Bangumi?bangumiId=123": _FAKE_RSS_XML,
+        }
+    )
+    client = create_mikan_client(config, transport=transport)
+
+    result = generate_request(
+        EntryRequest(raw_title="芙莉莲"),
+        source_mode="mikan_http",
+        mikan_config=config,
+        mikan_client=client,
+    )
+
+    request = result["request"]
+    assert result["success"] is True
+    assert transport.requests == [
+        ("https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2", 3.0),
+        ("https://mikan.example/Home/Bangumi/123", 3.0),
+        ("https://mikan.example/RSS/Bangumi?bangumiId=123", 3.0),
+    ]
+    assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
+    assert request["confirmable_config"]["selected_rss_url"] == "https://mikan.example/RSS/Bangumi?bangumiId=123"
+
+
+def test_generate_request_redacts_sensitive_real_mikan_failure() -> None:
+    config = MikanConfig(
+        search_endpoint="https://mikan.example/Home/Search",
+        timeout_seconds=3,
+    )
+    transport = _FakeMikanTransport(
+        error=Stage1Error(
+            "mikan_http_failed",
+            "MiKan HTTP 请求失败 from https://mikan.example/private?token=secret",
+            "mikan_search",
+            {
+                "raw_html": "<html>secret</html>",
+                "rss_xml": "<rss>secret</rss>",
+                "token": "secret-token",
+            },
+        )
+    )
+    client = create_mikan_client(config, transport=transport)
+
+    result = generate_request(
+        EntryRequest(raw_title="芙莉莲"),
+        source_mode="mikan_http",
+        mikan_config=config,
+        mikan_client=client,
+    )
+
+    assert result["success"] is False
+    assert result["error"]["error_message"] == "MiKan HTTP 请求失败"
+    assert "token" not in json.dumps(result["error"]).lower()
+    assert "http://" not in json.dumps(result["error"])
+    assert "<rss" not in json.dumps(result["error"]).lower()
 
 
 def test_generate_request_rejects_empty_title() -> None:

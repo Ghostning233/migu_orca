@@ -23,3 +23,25 @@ Thread: unavailable
 - Explicitly kept default behavior local and offline: no real MiKan, Auto Bangumi, or qBittorrent access unless the user selects/provides configuration and triggers the action.
 - Chose request-scoped temporary config for Stage 11. Sensitive config must not be persisted into storage JSON, browser storage, URLs, logs, screenshots, traces, or docs examples.
 - BL-005 qBittorrent direct integration and BL-001 real MiKan parser/search compatibility remain out of Stage 11 scope.
+---
+
+## 2026-08-12 16:00 CST - US-075
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web API Request generation contract for explicit real MiKan configuration.
+- Added `source` support on `POST /api/v1/requests` with `static-fixture` as the default and `mikan` as the explicit live-source mode.
+- Added request-scoped `mikan_config` validation for `search_endpoint` and positive `timeout_seconds`; invalid or missing real MiKan config fails before generation.
+- Wired Web API real MiKan generation through existing `MikanConfig`, `create_mikan_client`, and `generate_request` boundaries without persisting MiKan config.
+- Covered default fixture behavior, missing config, invalid timeout, unsupported source, fake real MiKan success, and sanitized MiKan failure.
+- Quality checks passed: `uv run pytest -q` (315 passed) and `uv run python -m compileall -q src`.
+- Files changed:
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Web API payload validation uses Pydantic request models in `views.py`; invalid requests are converted to the unified `{ok: false, error_type, error_message}` envelope by `extensions.flask_api`.
+  - `generate_request(..., source_mode="mikan_http")` needs either an explicit `mikan_client`, inline `mikan_config`, or `mikan_config_path`; Stage 11 Web API should use inline config only.
+  - Fake MiKan success tests must provide RSS XML for the selected `RssSource`, because `generate_request` parses the RSS after candidate and source discovery.
+---

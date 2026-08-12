@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, redirect, render_template, url_for
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
@@ -16,6 +16,7 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     _build_history_event,
     _confirmation_history_details,
 )
+from mikan_engine.controllers.mikan_config import MikanConfig
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -46,8 +47,26 @@ class RequestDetailQuery(BaseModel):
     storage_dir: str | None = None
 
 
+class RequestMikanConfigPayload(BaseModel):
+    search_endpoint: str
+    timeout_seconds: float = Field(gt=0)
+
+    @field_validator("search_endpoint")
+    @classmethod
+    def validate_search_endpoint(cls, value: str) -> str:
+        endpoint = value.strip()
+        if not endpoint:
+            raise ValueError("search_endpoint cannot be empty")
+        return endpoint
+
+
 class RequestCreatePayload(BaseModel):
     title: str
+    source: str = "static-fixture"
+    mikan_config: RequestMikanConfigPayload | None = Field(
+        default=None,
+        validate_default=True,
+    )
     storage_dir: str | None = None
     save_request: bool = False
 
@@ -58,6 +77,26 @@ class RequestCreatePayload(BaseModel):
         if not title:
             raise ValueError("title cannot be empty")
         return title
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        source = value.strip()
+        if source not in {"static-fixture", "mikan"}:
+            raise ValueError("source must be static-fixture or mikan")
+        return source
+
+    @field_validator("mikan_config")
+    @classmethod
+    def validate_mikan_config(
+        cls,
+        value: RequestMikanConfigPayload | None,
+        info: ValidationInfo,
+    ) -> RequestMikanConfigPayload | None:
+        source = info.data.get("source") if info.data is not None else None
+        if source == "mikan" and value is None:
+            raise ValueError("mikan_config is required when source is mikan")
+        return value
 
 
 class RequestActionPayload(BaseModel):
@@ -177,7 +216,17 @@ class RequestCreateView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestCreatePayload)
         payload = self.request_validator_model
-        result = generate_request(EntryRequest(raw_title=payload.title))
+        mikan_config = None
+        if payload.source == "mikan" and payload.mikan_config is not None:
+            mikan_config = MikanConfig(
+                search_endpoint=payload.mikan_config.search_endpoint,
+                timeout_seconds=payload.mikan_config.timeout_seconds,
+            )
+        result = generate_request(
+            EntryRequest(raw_title=payload.title),
+            source_mode="mikan_http" if payload.source == "mikan" else "static_fixture",
+            mikan_config=mikan_config,
+        )
         if not result["success"]:
             _raise_result_error(result)
 

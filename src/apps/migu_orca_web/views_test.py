@@ -8,9 +8,11 @@ import pytest
 
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from mikan_engine.controllers.mikan_client import create_mikan_client
+from mikan_engine.controllers.mikan_config import MikanConfig
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
-from shared.models import EntryRequest
+from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
 from storage_engine.controllers.history_repository import append_status_history
 from storage_engine.controllers.request_repository import save_request_snapshot
@@ -28,6 +30,48 @@ def _saved_request(tmp_path: Path, title: str, request_id: str) -> dict[str, Any
     }
     save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
     return request
+
+
+class _FakeMikanTransport:
+    def __init__(self, responses: dict[str, str] | None = None, error: Stage1Error | None = None) -> None:
+        self.responses = responses or {}
+        self.error = error
+        self.requests: list[tuple[str, float]] = []
+
+    def get_text(self, url: str, *, timeout: float) -> str:
+        self.requests.append((url, timeout))
+        if self.error is not None:
+            raise self.error
+        return self.responses[url]
+
+
+class _FakeMikanClient:
+    def __init__(self, config: MikanConfig, transport: _FakeMikanTransport) -> None:
+        self.config = config
+        self.transport = transport
+
+    def list_bangumi_candidates(self, raw_title: str) -> list[BangumiCandidate]:
+        assert raw_title == "芙莉莲"
+        return [
+            BangumiCandidate(
+                bangumi_id="123",
+                title="芙莉莲",
+                aliases=["葬送的芙莉莲"],
+                mikan_url="https://mikan.example/Home/Bangumi/123",
+                rss_sources=[],
+            )
+        ]
+
+    def list_rss_sources(self, matched_bangumi: MatchedBangumi) -> list[RssSource]:
+        assert matched_bangumi.title == "芙莉莲"
+        return [
+            RssSource(
+                subtitle_group="Loli",
+                rss_url="https://mikan.example/RSS/Bangumi?bangumiId=123",
+                source_type="mikan_http",
+                fixture_path="",
+            )
+        ]
 
 
 def test_root_redirects_to_index() -> None:
@@ -603,6 +647,187 @@ def test_create_request_generates_without_writing_storage(tmp_path: Path) -> Non
     assert payload["result"]["summary"] == summarize_request(request)
     assert "saved_request" not in payload["result"]
     assert not storage_dir.exists()
+
+
+def test_create_request_defaults_to_static_fixture_without_mikan_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        captured["source_mode"] = kwargs.get("source_mode")
+        captured["mikan_config"] = kwargs.get("mikan_config")
+        return generate_request(*args, **kwargs)
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert captured["source_mode"] == "static_fixture"
+    assert captured["mikan_config"] is None
+    assert payload["result"]["request"]["input"]["raw_title"] == "芙莉莲"
+
+
+def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    factory_configs: list[MikanConfig] = []
+
+    def fake_create_mikan_client(config: MikanConfig) -> _FakeMikanClient:
+        factory_configs.append(config)
+        transport = _FakeMikanTransport(
+            {
+                "https://mikan.example/RSS/Bangumi?bangumiId=123": (
+                    "<rss><channel><item><title>芙莉莲 - 01</title>"
+                    "<link>https://example.invalid/1</link></item></channel></rss>"
+                )
+            }
+        )
+        return _FakeMikanClient(config, transport)
+
+    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        captured["source_mode"] = kwargs.get("source_mode")
+        captured["mikan_config"] = kwargs.get("mikan_config")
+        return generate_request(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "mikan",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    request = payload["result"]["request"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert captured["source_mode"] == "mikan_http"
+    assert isinstance(captured["mikan_config"], MikanConfig)
+    assert captured["mikan_config"].search_endpoint == "https://mikan.example/Home/Search"
+    assert captured["mikan_config"].timeout_seconds == 5.0
+    assert factory_configs == [captured["mikan_config"]]
+    assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
+    assert request["confirmable_config"]["selected_rss_url"] == "https://mikan.example/RSS/Bangumi?bangumiId=123"
+
+
+def test_create_request_rejects_missing_mikan_config_when_source_is_mikan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("generate_request should not be called for invalid payload")
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "mikan",
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"] == "mikan_config"
+        for error in payload["error_data"]["errors"]
+    )
+    assert called is False
+
+
+def test_create_request_rejects_unsupported_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("generate_request should not be called for invalid payload")
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "real-live-mikan",
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert payload["error_data"]["errors"][0]["field"] == "source"
+    assert called is False
+
+
+def test_create_request_rejects_invalid_mikan_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("generate_request should not be called for invalid payload")
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "mikan",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 0,
+            },
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"].startswith("mikan_config.timeout_seconds")
+        for error in payload["error_data"]["errors"]
+    )
+    assert called is False
 
 
 def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
