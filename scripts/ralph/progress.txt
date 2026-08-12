@@ -3,6 +3,7 @@
 - Stage 12 qBittorrent code starts in `src/qbittorrent_engine/`; keep config validation in small dataclass builders/loaders that raise `Stage1Error` with `failed_step="load_qbittorrent_config"`.
 - qBittorrent Web API calls use `QBittorrentTransport` and `QBittorrentResponse` in `src/qbittorrent_engine/controllers/qbittorrent_client.py`; unit tests should inject fake transports and never call a real qBittorrent server.
 - Shared API redaction in `extensions.flask_api.api` must cover qBittorrent username and SID/session identifiers in addition to URLs, absolute paths, password/token/cookie fields, and raw HTML/RSS content.
+- Shared qBittorrent connection tests use `test_qbittorrent_connection()` from `src/qbittorrent_engine/controllers/qbittorrent_controller.py`; keep it explicit, request-scoped, fakeable via `qbittorrent_client`/`client_factory`, and limited to the `success`/`summary`/`error` result envelope.
 - Ralph sub-agent local intermediate commit messages may be English or tool-generated. Do not spend tokens rewriting intermediate commits only for language style; final PR title, PR description, merge commit, Stage closure commit, archive notes, and acceptance summary must be written in Chinese.
 
 Started: Wed Aug 12 19:02:14 CST 2026
@@ -46,4 +47,22 @@ Thread: https://codex.openai.com/threads/unavailable
   - Reuse `create_qbittorrent_client(config, transport=...)` for later controller/API work so browser and API tests can inject deterministic fakes.
   - `QBittorrentClient.test_connection()` returns only `status`, `reachable`, and `version`; later endpoints should not expose endpoint, credentials, cookie/SID, or local paths in success results.
   - The real transport is intentionally minimal and only covers Stage 12 connection testing; do not add download or subscription actions in this client story boundary.
+---
+## 2026-08-12 19:20 CST - US-083
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the shared explicit qBittorrent connection-test controller, accepting inline qBittorrent config, a config file path, an injected fake client, or an injected client factory.
+- Kept connection testing isolated from Request generation/confirm/modify/cancel flows and added regression coverage that qBittorrent testing remains explicit.
+- Filtered successful connection summaries to safe fields only and normalized controlled/unexpected failures into sanitized, classified result envelopes without endpoint, username, password, SID/cookie, local path, or raw response leaks.
+- Quality checks passed: `uv run pytest -q` (372 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `src/qbittorrent_engine/controllers/qbittorrent_controller.py`
+  - `src/qbittorrent_engine/controllers/qbittorrent_controller_test.py`
+  - `src/qbittorrent_engine/controllers/__init__.py`
+  - `src/apps/migu_orca_entry/controllers/entry_controller_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - API and Web UI stories should call `test_qbittorrent_connection()` instead of creating qBittorrent clients directly.
+  - Use the controller's `qbittorrent_client` or `client_factory` injection points for offline tests; do not contact a real qBittorrent instance in unit or browser tests.
+  - The controller intentionally returns only a sanitized result envelope and does not persist credentials or attach qBittorrent data to Request snapshots.
 ---

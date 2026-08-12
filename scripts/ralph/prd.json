@@ -51,7 +51,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "复用 US-081/US-082 的配置和 client seam。"
     },
     {
