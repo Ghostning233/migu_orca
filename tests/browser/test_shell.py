@@ -23,14 +23,14 @@ class TestRootRedirect:
         assert page.locator(".top-nav").count() >= 1
 
 
-class TestIndexStage11Shell:
-    """AC: /index 可加载 Stage 11 Web UI Real Config Entry 标识、顶部导航和运行模式提示."""
+class TestIndexStage12Shell:
+    """AC: /index 可加载 Stage 12 qBittorrent Direct 标识、顶部导航和运行模式提示."""
 
-    def test_stage11_branding_visible(self, page: Page, live_server_url: str) -> None:
+    def test_stage12_branding_visible(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
 
         assert page.locator("text=MiGuOrca").count() >= 1
-        assert page.locator("text=Stage 11 Web UI Real Config Entry").count() >= 1
+        assert page.locator("text=Stage 12 qBittorrent Direct").count() >= 1
         # Must NOT mention Stage 7
         assert page.locator("text=Stage 7 Web UI MVP").count() == 0
 
@@ -41,6 +41,7 @@ class TestIndexStage11Shell:
         assert nav.count() >= 1
         for href in (
             "#generate-panel",
+            "#qbittorrent-panel",
             "#request-list-panel",
             "#request-detail-panel",
             "#acceptance-panel",
@@ -57,7 +58,7 @@ class TestIndexStage11Shell:
         # Mode hint should mention offline/fixture behavior
         body = page.locator("body").inner_text()
         assert "fixture-backed" in body
-        assert "真实 MiKan 必须显式选择" in body
+        assert "真实 MiKan 与 qBittorrent 连接测试必须显式选择" in body
         assert "配置只用于当前请求且不写入 storage JSON" in body
 
     def test_main_panels_present(self, page: Page, live_server_url: str) -> None:
@@ -65,6 +66,7 @@ class TestIndexStage11Shell:
 
         for panel_id in (
             "generate-panel",
+            "qbittorrent-panel",
             "request-list-panel",
             "request-detail-panel",
             "acceptance-panel",
@@ -76,7 +78,13 @@ class TestIndexStage11Shell:
     def test_all_section_headings_present(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
 
-        for heading in ("Request 生成", "Request 列表", "Request 详情", "验收说明"):
+        for heading in (
+            "Request 生成",
+            "qBittorrent 连接测试",
+            "Request 列表",
+            "Request 详情",
+            "验收说明",
+        ):
             assert page.locator(f"text={heading}").count() >= 1, (
                 f"Missing heading: {heading}"
             )

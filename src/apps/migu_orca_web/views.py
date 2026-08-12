@@ -20,6 +20,10 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     _confirmation_history_details,
 )
 from mikan_engine.controllers.mikan_config import MikanConfig
+from qbittorrent_engine.controllers.qbittorrent_controller import (
+    test_qbittorrent_connection,
+)
+from qbittorrent_engine.controllers.qbittorrent_config import build_qbittorrent_config
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -143,6 +147,42 @@ class RequestAbSubmitPayload(RequestActionPayload):
     ab_config: RequestAbConfigPayload
 
 
+class QbittorrentConfigPayload(BaseModel):
+    endpoint: str
+    username: str
+    password: str
+    timeout_seconds: float = Field(gt=0)
+    verify_tls: bool = True
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, value: str) -> str:
+        endpoint = value.strip()
+        if not endpoint:
+            raise ValueError("endpoint cannot be empty")
+        return endpoint
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str) -> str:
+        username = value.strip()
+        if not username:
+            raise ValueError("username cannot be empty")
+        return username
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        password = value.strip()
+        if not password:
+            raise ValueError("password cannot be empty")
+        return password
+
+
+class QbittorrentTestConnectionPayload(BaseModel):
+    qbittorrent_config: QbittorrentConfigPayload
+
+
 def _storage_dir(value: str | None) -> Path | None:
     if value is None or not value.strip():
         return None
@@ -179,6 +219,60 @@ def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
     sanitized = _strip_sensitive_result_fields(sanitize_error_data(result))
     assert isinstance(sanitized, dict)
     return sanitized
+
+
+def _sanitize_qbittorrent_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = {"status", "reachable", "version"}
+    sanitized = sanitize_error_data(
+        {
+            key: value
+            for key, value in summary.items()
+            if key in allowed_fields
+        }
+    )
+    assert isinstance(sanitized, dict)
+    return sanitized
+
+
+def _raise_qbittorrent_result_error(result: dict[str, Any]) -> None:
+    error = result.get("error")
+    if not isinstance(error, dict):
+        raise Stage1Error(
+            "qbittorrent_unexpected_response",
+            "qBittorrent 响应无法识别",
+            "test_qbittorrent_connection",
+        )
+
+    error_type = str(error.get("error_type") or "qbittorrent_unexpected_response")
+    failed_step = str(error.get("failed_step") or "test_qbittorrent_connection")
+    details = error.get("details")
+    safe_details = (
+        {
+            key: value
+            for key, value in details.items()
+            if key in {"category", "field", "status_code"}
+        }
+        if isinstance(details, dict)
+        else None
+    )
+    raise Stage1Error(
+        error_type,
+        _qbittorrent_error_message(error_type, str(error.get("error_message") or "")),
+        failed_step,
+        safe_details,
+    )
+
+
+def _qbittorrent_error_message(error_type: str, fallback: str) -> str:
+    messages = {
+        "config_error": fallback or "qBittorrent 配置无效",
+        "qbittorrent_auth_failed": "qBittorrent 认证失败",
+        "qbittorrent_timeout": "qBittorrent HTTP 请求超时",
+        "qbittorrent_connection_failed": "qBittorrent HTTP 连接失败",
+        "qbittorrent_http_failed": "qBittorrent HTTP 请求失败",
+        "qbittorrent_unexpected_response": "qBittorrent 响应无法识别",
+    }
+    return messages.get(error_type, "qBittorrent 连接测试失败")
 
 
 def _strip_sensitive_result_fields(value: Any) -> Any:
@@ -465,3 +559,23 @@ class RequestAbSubmitView(PostView):
         if "saved_ab_result" in result:
             response["saved_ab_result"] = result["saved_ab_result"]
         return response
+
+
+@class_route(api_blueprint, "/api/v1/qbittorrent/test-connection", methods=["POST"])
+class QbittorrentTestConnectionView(PostView):
+    request_validator_model = QbittorrentTestConnectionPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(
+            self.request_validator_model,
+            QbittorrentTestConnectionPayload,
+        )
+        qbittorrent_config = build_qbittorrent_config(
+            self.request_validator_model.qbittorrent_config.model_dump()
+        )
+        result = test_qbittorrent_connection(qbittorrent_config=qbittorrent_config)
+        if not result["success"]:
+            _raise_qbittorrent_result_error(result)
+        summary = result["summary"]
+        assert isinstance(summary, dict)
+        return _sanitize_qbittorrent_connection_summary(summary)

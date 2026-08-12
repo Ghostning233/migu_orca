@@ -33,18 +33,19 @@ def test_root_redirects_to_index(page: Page, live_server_url: str) -> None:
     assert page.title().startswith("MiGuOrca")
 
 
-def test_index_loads_stage11_shell(page: Page, live_server_url: str) -> None:
-    """The /index page loads the Stage 11 Web UI Real Config Entry shell."""
+def test_index_loads_stage12_shell(page: Page, live_server_url: str) -> None:
+    """The /index page loads the Stage 12 qBittorrent Direct shell."""
     page.goto(f"{live_server_url}/index")
 
     assert page.title().startswith("MiGuOrca")
     assert page.locator("text=MiGuOrca").count() >= 1
-    assert page.locator("text=Stage 11 Web UI Real Config Entry").count() >= 1
+    assert page.locator("text=Stage 12 qBittorrent Direct").count() >= 1
 
     # Top navigation anchors
     nav = page.locator(".top-nav")
     assert nav.count() >= 1
     assert nav.locator("a[href='#generate-panel']").count() >= 1
+    assert nav.locator("a[href='#qbittorrent-panel']").count() >= 1
     assert nav.locator("a[href='#request-list-panel']").count() >= 1
     assert nav.locator("a[href='#request-detail-panel']").count() >= 1
     assert nav.locator("a[href='#acceptance-panel']").count() >= 1
@@ -56,6 +57,7 @@ def test_index_loads_stage11_shell(page: Page, live_server_url: str) -> None:
     # Main panels are present
     for panel_id in (
         "generate-panel",
+        "qbittorrent-panel",
         "request-list-panel",
         "request-detail-panel",
         "acceptance-panel",

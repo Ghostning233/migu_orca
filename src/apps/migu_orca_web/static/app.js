@@ -18,6 +18,16 @@
   const listContainer = document.getElementById("request-list-container");
   const detailContainer = document.getElementById("request-detail-container");
   const notification = document.getElementById("page-notification");
+  const qbittorrentToggle = document.getElementById("qbittorrent-config-toggle");
+  const qbittorrentForm = document.getElementById("qbittorrent-test-form");
+  const qbittorrentEndpointInput = document.getElementById("qbittorrent-endpoint");
+  const qbittorrentUsernameInput = document.getElementById("qbittorrent-username");
+  const qbittorrentPasswordInput = document.getElementById("qbittorrent-password");
+  const qbittorrentTimeoutInput = document.getElementById("qbittorrent-timeout-seconds");
+  const qbittorrentVerifyTlsInput = document.getElementById("qbittorrent-verify-tls");
+  const qbittorrentFormError = document.getElementById("qbittorrent-form-error");
+  const qbittorrentSubmitButton = document.getElementById("qbittorrent-test-submit");
+  const qbittorrentResult = document.getElementById("qbittorrent-test-result");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -188,11 +198,45 @@
     mikanTimeoutInput.removeAttribute("aria-invalid");
   }
 
+  function setQbittorrentFormError(message, field) {
+    qbittorrentFormError.textContent = message;
+    qbittorrentFormError.hidden = false;
+    clearQbittorrentInvalidFields();
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearQbittorrentInvalidFields() {
+    qbittorrentEndpointInput.removeAttribute("aria-invalid");
+    qbittorrentUsernameInput.removeAttribute("aria-invalid");
+    qbittorrentPasswordInput.removeAttribute("aria-invalid");
+    qbittorrentTimeoutInput.removeAttribute("aria-invalid");
+  }
+
+  function clearQbittorrentFormError() {
+    qbittorrentFormError.textContent = "";
+    qbittorrentFormError.hidden = true;
+    clearQbittorrentInvalidFields();
+  }
+
   function setSubmitInFlight(isInFlight) {
     submitButton.disabled = isInFlight;
     submitButton.textContent = isInFlight
       ? "正在生成..."
       : submitButton.dataset.defaultLabel || "生成";
+  }
+
+  function setQbittorrentInFlight(isInFlight) {
+    var controls = qbittorrentForm.querySelectorAll("button, input");
+    for (var i = 0; i < controls.length; i++) {
+      controls[i].disabled = isInFlight;
+    }
+    qbittorrentToggle.disabled = isInFlight;
+    qbittorrentSubmitButton.textContent = isInFlight
+      ? "正在测试..."
+      : qbittorrentSubmitButton.dataset.defaultLabel || "测试连接";
   }
 
   function fieldValue(value) {
@@ -220,7 +264,7 @@
     if (value && typeof value === "object") {
       const clean = {};
       const blockedKey = new RegExp(
-        "to" + "ken|secret|password|authorization|cookie|api[_-]?key|url|endpoint",
+        "to" + "ken|secret|password|authorization|cookie|sid|session|api[_-]?key|url|endpoint",
         "i",
       );
       for (const [key, child] of Object.entries(value)) {
@@ -248,6 +292,115 @@
 
   function syncMikanConfigVisibility() {
     mikanConfigFields.hidden = sourceSelect.value !== "mikan";
+  }
+
+  function buildQbittorrentConnectionPayload() {
+    const endpoint = qbittorrentEndpointInput.value.trim();
+    if (!endpoint) {
+      throw {
+        message: "测试 qBittorrent 前必须填写 endpoint。",
+        field: qbittorrentEndpointInput,
+      };
+    }
+
+    const username = qbittorrentUsernameInput.value.trim();
+    if (!username) {
+      throw {
+        message: "测试 qBittorrent 前必须填写 username。",
+        field: qbittorrentUsernameInput,
+      };
+    }
+
+    const password = qbittorrentPasswordInput.value.trim();
+    if (!password) {
+      throw {
+        message: "测试 qBittorrent 前必须填写 password。",
+        field: qbittorrentPasswordInput,
+      };
+    }
+
+    const timeoutSeconds = Number(qbittorrentTimeoutInput.value);
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+      throw {
+        message: "测试 qBittorrent 时 timeout_seconds 必须为正数。",
+        field: qbittorrentTimeoutInput,
+      };
+    }
+
+    return {
+      qbittorrent_config: {
+        endpoint: endpoint,
+        username: username,
+        password: password,
+        timeout_seconds: timeoutSeconds,
+        verify_tls: qbittorrentVerifyTlsInput.checked,
+      },
+    };
+  }
+
+  function renderQbittorrentResult(summary) {
+    qbittorrentResult.className = "qbittorrent-result qbittorrent-result-success";
+    qbittorrentResult.replaceChildren();
+    const fields = detailList([
+      ["status", summary.status],
+      ["reachable", summary.reachable],
+      ["version", summary.version],
+    ]);
+    qbittorrentResult.appendChild(fields);
+  }
+
+  function clearQbittorrentSensitiveFields() {
+    qbittorrentEndpointInput.value = "";
+    qbittorrentUsernameInput.value = "";
+    qbittorrentPasswordInput.value = "";
+  }
+
+  async function testQbittorrentConnection(event) {
+    event.preventDefault();
+    clearQbittorrentFormError();
+
+    let payload;
+    try {
+      payload = buildQbittorrentConnectionPayload();
+    } catch (validationError) {
+      setQbittorrentFormError(
+        validationError.message || "qBittorrent 配置校验失败。",
+        validationError.field,
+      );
+      showNotification(
+        "error",
+        "校验失败",
+        validationError.message || "qBittorrent 配置校验失败。",
+      );
+      return;
+    }
+
+    if (!window.confirm("确认使用当前 qBittorrent 配置测试连接？")) {
+      return;
+    }
+
+    hideNotification();
+    setQbittorrentInFlight(true);
+    qbittorrentResult.className = "qbittorrent-result loading-state";
+    qbittorrentResult.textContent = "正在测试 qBittorrent 连接...";
+    try {
+      const result = await fetchJson("/api/v1/qbittorrent/test-connection", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      renderQbittorrentResult(result);
+      clearQbittorrentSensitiveFields();
+      qbittorrentForm.hidden = true;
+      qbittorrentToggle.setAttribute("aria-expanded", "false");
+      showNotification("success", "qBittorrent 连接成功", "连接测试完成。");
+    } catch (error) {
+      qbittorrentResult.className = "qbittorrent-result muted-text";
+      qbittorrentResult.textContent = "qBittorrent 连接测试未通过。";
+      notifyApiError("qBittorrent 连接失败", error);
+    } finally {
+      setQbittorrentInFlight(false);
+    }
   }
 
   function buildCreateRequestPayload(title) {
@@ -1106,6 +1259,14 @@
     clearFormError();
     syncMikanConfigVisibility();
   });
+  qbittorrentToggle.addEventListener("click", function () {
+    qbittorrentForm.hidden = !qbittorrentForm.hidden;
+    qbittorrentToggle.setAttribute("aria-expanded", String(!qbittorrentForm.hidden));
+    if (!qbittorrentForm.hidden) {
+      qbittorrentEndpointInput.focus();
+    }
+  });
+  qbittorrentForm.addEventListener("submit", testQbittorrentConnection);
   storageInput.addEventListener("change", persistWebPreferences);
   saveInput.addEventListener("change", persistWebPreferences);
   clearPreferencesButton.addEventListener("click", clearWebPreferences);

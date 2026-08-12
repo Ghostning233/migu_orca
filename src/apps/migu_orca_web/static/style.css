@@ -165,6 +165,10 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.qbittorrent-panel {
+  grid-column: 1 / -1;
+}
+
 .acceptance-panel p {
   color: #3d4654;
   line-height: 1.55;
@@ -498,6 +502,18 @@ button:disabled {
 .muted-text {
   color: #586273;
   margin-bottom: 0;
+}
+
+.qbittorrent-result {
+  margin-top: 14px;
+}
+
+.qbittorrent-result-success {
+  background: #edf8f0;
+  border: 1px solid #abd3b6;
+  border-radius: 6px;
+  color: #1f5f34;
+  padding: 14px;
 }
 
 .audit-section {

@@ -1,0 +1,1 @@
+"""qBittorrent direct integration boundaries."""
