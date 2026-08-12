@@ -5,6 +5,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .migu_orca/
+scripts/ralph/.last-branch
 
 logs/*
 !logs/.gitkeep

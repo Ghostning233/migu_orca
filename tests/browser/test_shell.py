@@ -23,14 +23,14 @@ class TestRootRedirect:
         assert page.locator(".top-nav").count() >= 1
 
 
-class TestIndexStage8Shell:
-    """AC: /index 可加载 Stage 8 Web UI Usability 标识、顶部导航和运行模式提示."""
+class TestIndexStage11Shell:
+    """AC: /index 可加载 Stage 11 Web UI Real Config Entry 标识、顶部导航和运行模式提示."""
 
-    def test_stage8_branding_visible(self, page: Page, live_server_url: str) -> None:
+    def test_stage11_branding_visible(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
 
         assert page.locator("text=MiGuOrca").count() >= 1
-        assert page.locator("text=Stage 8 Web UI Usability").count() >= 1
+        assert page.locator("text=Stage 11 Web UI Real Config Entry").count() >= 1
         # Must NOT mention Stage 7
         assert page.locator("text=Stage 7 Web UI MVP").count() == 0
 
@@ -57,7 +57,8 @@ class TestIndexStage8Shell:
         # Mode hint should mention offline/fixture behavior
         body = page.locator("body").inner_text()
         assert "fixture-backed" in body
-        assert "不会隐式访问真实 MiKan" in body
+        assert "真实 MiKan 必须显式选择" in body
+        assert "配置只用于当前请求且不写入 storage JSON" in body
 
     def test_main_panels_present(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")

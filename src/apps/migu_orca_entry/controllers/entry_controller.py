@@ -10,12 +10,12 @@ from typing import Any, Literal, Sequence
 
 from ab_engine.controllers import ab_http_client
 from ab_engine.controllers.ab_client import AutoBangumiClient, submit_ab_subscription
-from ab_engine.controllers.ab_config import load_ab_config
+from ab_engine.controllers.ab_config import AutoBangumiConfig, load_ab_config
 from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
 from catalog_engine.controllers.catalog_controller import load_catalog, match_bangumi
 from mikan_engine.controllers import mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import MikanClient, MikanTransport
-from mikan_engine.controllers.mikan_config import load_mikan_config
+from mikan_engine.controllers.mikan_config import MikanConfig, load_mikan_config
 from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
@@ -59,6 +59,7 @@ def generate_request(
     project_root: Path = PROJECT_ROOT,
     source_mode: SourceMode = "static_fixture",
     mikan_config_path: Path | None = None,
+    mikan_config: MikanConfig | None = None,
     mikan_client: MikanClient | None = None,
     mikan_rss_transport: MikanTransport | None = None,
 ) -> dict[str, Any]:
@@ -75,6 +76,7 @@ def generate_request(
         elif source_mode == "mikan_http":
             real_mikan_client = _resolve_mikan_client(
                 mikan_config_path=mikan_config_path,
+                mikan_config=mikan_config,
                 mikan_client=mikan_client,
             )
             candidates = real_mikan_client.list_bangumi_candidates(entry.raw_title)
@@ -150,10 +152,13 @@ def generate_request(
 def _resolve_mikan_client(
     *,
     mikan_config_path: Path | None,
+    mikan_config: MikanConfig | None,
     mikan_client: MikanClient | None,
 ) -> MikanClient:
     if mikan_client is not None:
         return mikan_client
+    if mikan_config is not None:
+        return mikan_client_module.create_mikan_client(mikan_config)
     if mikan_config_path is None:
         raise Stage1Error(
             "config_error",
@@ -231,13 +236,14 @@ def apply_ab_submit_action(
     submit_ab: bool,
     *,
     ab_config_path: Path | None = None,
+    ab_config: AutoBangumiConfig | None = None,
     client: AutoBangumiClient | None = None,
 ) -> dict[str, Any]:
     if not submit_ab or not result["success"]:
         return result
 
     try:
-        if ab_config_path is None:
+        if ab_config is None and ab_config_path is None:
             raise Stage1Error(
                 "config_error",
                 "提交 Auto Bangumi 必须显式提供配置文件路径",
@@ -245,14 +251,16 @@ def apply_ab_submit_action(
                 {"field": "ab_config"},
             )
 
-        ab_config = load_ab_config(ab_config_path)
+        resolved_ab_config = ab_config or load_ab_config(ab_config_path)
         request = result["request"]
         payload = build_ab_subscription_payload(request)
-        ab_client = client or ab_http_client.create_auto_bangumi_http_client(ab_config)
+        ab_client = client or ab_http_client.create_auto_bangumi_http_client(
+            resolved_ab_config
+        )
         ab_submit_result = submit_ab_subscription(
             ab_client,
             payload,
-            fallback_enabled=ab_config.fallback_enabled,
+            fallback_enabled=resolved_ab_config.fallback_enabled,
         )
         updated_request = deepcopy(request)
         updated_request["ab_submit_result"] = ab_submit_result

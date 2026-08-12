@@ -193,13 +193,35 @@ label {
   font-weight: 700;
 }
 
-input[type="text"] {
+input[type="text"],
+input[type="number"],
+input[type="password"] {
   border: 1px solid #bcc4d0;
   border-radius: 6px;
   font: inherit;
   min-height: 40px;
   padding: 8px 10px;
   width: 100%;
+}
+
+.inline-config-fields {
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+}
+
+.inline-config-fields[hidden] {
+  display: none;
+}
+
+.inline-config-fields legend {
+  color: #3d4654;
+  font-size: 0.92rem;
+  font-weight: 700;
+  padding: 0 4px;
 }
 
 select {
@@ -400,31 +422,31 @@ button:disabled {
   margin-bottom: 14px;
 }
 
-.detail-modify-form {
+.detail-inline-form {
   background: #f8fafc;
   border: 1px solid #d8dde5;
   border-radius: 6px;
   padding: 14px;
 }
 
-.detail-modify-form label {
+.detail-inline-form label {
   display: block;
   margin-top: 10px;
   margin-bottom: 4px;
 }
 
-.detail-modify-form label:first-child,
-.detail-modify-form h4 + label {
+.detail-inline-form label:first-child,
+.detail-inline-form h4 + label {
   margin-top: 0;
 }
 
-.detail-modify-form select,
-.detail-modify-form input {
+.detail-inline-form select,
+.detail-inline-form input {
   width: 100%;
   box-sizing: border-box;
 }
 
-.detail-modify-form .notification-actions {
+.detail-inline-form .notification-actions {
   margin-top: 14px;
 }
 

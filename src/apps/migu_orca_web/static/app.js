@@ -1,6 +1,10 @@
 (function () {
   const form = document.getElementById("request-generate-form");
   const titleInput = document.getElementById("request-title");
+  const sourceSelect = document.getElementById("request-source");
+  const mikanConfigFields = document.getElementById("mikan-config-fields");
+  const mikanSearchEndpointInput = document.getElementById("mikan-search-endpoint");
+  const mikanTimeoutInput = document.getElementById("mikan-timeout-seconds");
   const storageInput = document.getElementById("storage-dir");
   const saveInput = document.getElementById("save-request");
   const formError = document.getElementById("request-form-error");
@@ -21,6 +25,7 @@
 
   let selectedRequestId = null;
   let loadedRequests = [];
+  let currentDetailPayload = null;
 
   function readPreference(key) {
     try {
@@ -167,16 +172,20 @@
     container.textContent = message;
   }
 
-  function setFormError(message) {
+  function setFormError(message, field) {
     formError.textContent = message;
     formError.hidden = false;
-    titleInput.setAttribute("aria-invalid", "true");
+    const invalidField = field || titleInput;
+    invalidField.setAttribute("aria-invalid", "true");
   }
 
   function clearFormError() {
     formError.textContent = "";
     formError.hidden = true;
     titleInput.removeAttribute("aria-invalid");
+    sourceSelect.removeAttribute("aria-invalid");
+    mikanSearchEndpointInput.removeAttribute("aria-invalid");
+    mikanTimeoutInput.removeAttribute("aria-invalid");
   }
 
   function setSubmitInFlight(isInFlight) {
@@ -235,6 +244,46 @@
       throw error;
     }
     return payload.result;
+  }
+
+  function syncMikanConfigVisibility() {
+    mikanConfigFields.hidden = sourceSelect.value !== "mikan";
+  }
+
+  function buildCreateRequestPayload(title) {
+    const payload = {
+      title: title,
+      storage_dir: storageInput.value.trim() || null,
+      save_request: saveInput.checked,
+    };
+
+    if (sourceSelect.value !== "mikan") {
+      payload.source = "static-fixture";
+      return payload;
+    }
+
+    const searchEndpoint = mikanSearchEndpointInput.value.trim();
+    if (!searchEndpoint) {
+      throw {
+        message: "选择 mikan 时必须填写 search_endpoint。",
+        field: mikanSearchEndpointInput,
+      };
+    }
+
+    const timeoutSeconds = Number(mikanTimeoutInput.value);
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+      throw {
+        message: "选择 mikan 时 timeout_seconds 必须为正数。",
+        field: mikanTimeoutInput,
+      };
+    }
+
+    payload.source = "mikan";
+    payload.mikan_config = {
+      search_endpoint: searchEndpoint,
+      timeout_seconds: timeoutSeconds,
+    };
+    return payload;
   }
 
   function requestLabel(summary) {
@@ -513,12 +562,30 @@
     }
   }
 
+  function setAbSubmitInFlight(isInFlight) {
+    var form = document.getElementById("detail-ab-submit-form");
+    if (!form) {
+      return;
+    }
+    var controls = form.querySelectorAll("button, input");
+    for (var i = 0; i < controls.length; i++) {
+      var control = controls[i];
+      if (control.tagName === "INPUT" && control.type === "hidden") {
+        continue;
+      }
+      control.disabled = isInFlight;
+    }
+  }
+
   async function performAction(requestId, actionType, body) {
     if (!requestId) return;
     hideNotification();
     setActionInFlight(true);
+    if (actionType === "submit-ab") {
+      setAbSubmitInFlight(true);
+    }
     try {
-      await fetchJson(
+      const result = await fetchJson(
         apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/" + actionType),
         {
           method: "POST",
@@ -526,8 +593,29 @@
           body: JSON.stringify(body || {}),
         }
       );
-      var titles = { accept: "确认成功", cancel: "取消成功", modify: "修改成功" };
-      await loadDetail(requestId);
+      var titles = {
+        accept: "确认成功",
+        cancel: "取消成功",
+        modify: "修改成功",
+        "submit-ab": "Auto Bangumi 提交成功",
+      };
+      if (actionType === "submit-ab") {
+        const nextPayload = {
+          ...(currentDetailPayload || {}),
+          request: result.request,
+          ab_result: {
+            available: true,
+            record: {
+              request_id: requestId,
+              ab_submit_result: result.ab_submit_result,
+            },
+            error: null,
+          },
+        };
+        renderDetailPayload(nextPayload);
+      } else {
+        await loadDetail(requestId);
+      }
       await loadList();
       showNotification("success", titles[actionType] || "操作成功",
         "Request " + requestId, {
@@ -536,10 +624,136 @@
           ],
         });
     } catch (error) {
-      notifyApiError("操作失败", error);
+      notifyApiError(actionType === "submit-ab" ? "提交失败" : "操作失败", error);
     } finally {
+      if (actionType === "submit-ab") {
+        setAbSubmitInFlight(false);
+      }
       setActionInFlight(false);
     }
+  }
+
+  function buildAbSubmitForm(request) {
+    var container = document.createElement("div");
+    container.id = "detail-ab-submit-form";
+    container.className = "detail-section detail-inline-form";
+    container.hidden = true;
+
+    var heading = document.createElement("h4");
+    heading.textContent = "Auto Bangumi 提交";
+    container.appendChild(heading);
+
+    var endpointLabel = document.createElement("label");
+    endpointLabel.textContent = "endpoint";
+    endpointLabel.htmlFor = "ab-submit-endpoint";
+    var endpointInput = document.createElement("input");
+    endpointInput.id = "ab-submit-endpoint";
+    endpointInput.name = "ab_submit_endpoint";
+    endpointInput.type = "text";
+    endpointInput.autocomplete = "off";
+    endpointInput.placeholder = "Auto Bangumi API 地址";
+    container.append(endpointLabel, endpointInput);
+
+    var tokenLabel = document.createElement("label");
+    tokenLabel.textContent = "token";
+    tokenLabel.htmlFor = "ab-submit-token";
+    var tokenInput = document.createElement("input");
+    tokenInput.id = "ab-submit-token";
+    tokenInput.name = "ab_submit_token";
+    tokenInput.type = "password";
+    tokenInput.autocomplete = "off";
+    tokenInput.placeholder = "Auto Bangumi Token";
+    container.append(tokenLabel, tokenInput);
+
+    var fallbackLabel = document.createElement("label");
+    fallbackLabel.className = "checkbox-row";
+    fallbackLabel.htmlFor = "ab-submit-fallback-enabled";
+    var fallbackInput = document.createElement("input");
+    fallbackInput.id = "ab-submit-fallback-enabled";
+    fallbackInput.name = "ab_submit_fallback_enabled";
+    fallbackInput.type = "checkbox";
+    fallbackInput.value = "true";
+    fallbackLabel.append(
+      fallbackInput,
+      document.createTextNode("fallback_enabled"),
+    );
+    container.appendChild(fallbackLabel);
+
+    var help = document.createElement("p");
+    help.className = "field-help";
+    help.textContent = "配置仅用于本次提交，不写入浏览器存储、URL 或 storage JSON。";
+    container.appendChild(help);
+
+    var error = document.createElement("p");
+    error.id = "ab-submit-form-error";
+    error.className = "field-error";
+    error.setAttribute("role", "alert");
+    error.hidden = true;
+    container.appendChild(error);
+
+    function setAbFormError(message, field) {
+      error.textContent = message;
+      error.hidden = false;
+      endpointInput.removeAttribute("aria-invalid");
+      tokenInput.removeAttribute("aria-invalid");
+      if (field) {
+        field.setAttribute("aria-invalid", "true");
+        field.focus();
+      }
+    }
+
+    function clearAbFormError() {
+      error.textContent = "";
+      error.hidden = true;
+      endpointInput.removeAttribute("aria-invalid");
+      tokenInput.removeAttribute("aria-invalid");
+    }
+
+    var btnRow = document.createElement("div");
+    btnRow.className = "notification-actions";
+
+    var submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "detail-action";
+    submitBtn.textContent = "提交 Auto Bangumi";
+    submitBtn.addEventListener("click", function () {
+      clearAbFormError();
+      var endpoint = endpointInput.value.trim();
+      if (!endpoint) {
+        setAbFormError("提交 Auto Bangumi 前必须填写 endpoint。", endpointInput);
+        return;
+      }
+      var token = tokenInput.value.trim();
+      if (!token) {
+        setAbFormError("提交 Auto Bangumi 前必须填写 token。", tokenInput);
+        return;
+      }
+      if (!window.confirm("确认提交此 Request 到 Auto Bangumi？")) {
+        return;
+      }
+      performAction(request.request_id, "submit-ab", {
+        storage_dir: storageInput.value.trim() || null,
+        ab_config: {
+          endpoint: endpoint,
+          token: token,
+          fallback_enabled: fallbackInput.checked,
+        },
+      });
+    });
+    btnRow.appendChild(submitBtn);
+
+    var cancelBtn = document.createElement("button");
+    cancelBtn.type = "button";
+    cancelBtn.className = "secondary-button detail-action";
+    cancelBtn.textContent = "取消";
+    cancelBtn.addEventListener("click", function () {
+      clearAbFormError();
+      container.hidden = true;
+    });
+    btnRow.appendChild(cancelBtn);
+
+    container.appendChild(btnRow);
+    return container;
   }
 
   function buildModifyForm(request) {
@@ -550,7 +764,7 @@
 
     var container = document.createElement("div");
     container.id = "detail-modify-form";
-    container.className = "detail-section detail-modify-form";
+    container.className = "detail-section detail-inline-form detail-modify-form";
     container.hidden = true;
 
     var heading = document.createElement("h4");
@@ -650,6 +864,7 @@
   }
 
   function renderDetailPayload(payload) {
+    currentDetailPayload = payload;
     var request = payload.request || payload;
     var input = request.input || {};
     var sourceInfo = request.source_info || {};
@@ -684,6 +899,7 @@
     overviewSection.appendChild(overviewHeader);
 
     var isPending = request.status === "PENDING_CONFIRM";
+    var isAccepted = request.status === "ACCEPTED";
     var actionsContainer = document.createElement("div");
     actionsContainer.className = "detail-actions notification-actions";
 
@@ -722,6 +938,29 @@
         }
       });
       actionsContainer.appendChild(modifyBtn);
+    } else if (isAccepted) {
+      var statusNote = document.createElement("p");
+      statusNote.className = "field-help";
+      statusNote.textContent = "此 Request 已" + fieldValue(request.status) + "，可提交到 Auto Bangumi。";
+      actionsContainer.appendChild(statusNote);
+
+      var abSubmitBtn = document.createElement("button");
+      abSubmitBtn.type = "button";
+      abSubmitBtn.className = "secondary-button detail-action";
+      abSubmitBtn.textContent = "提交 Auto Bangumi";
+      abSubmitBtn.addEventListener("click", function () {
+        var form = document.getElementById("detail-ab-submit-form");
+        if (form) {
+          form.hidden = !form.hidden;
+          if (!form.hidden) {
+            var endpoint = document.getElementById("ab-submit-endpoint");
+            if (endpoint) {
+              endpoint.focus();
+            }
+          }
+        }
+      });
+      actionsContainer.appendChild(abSubmitBtn);
     } else {
       var statusNote = document.createElement("p");
       statusNote.className = "field-help";
@@ -730,6 +969,7 @@
     }
 
     var modifyForm = buildModifyForm(request);
+    var abSubmitForm = buildAbSubmitForm(request);
 
     var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
@@ -769,6 +1009,7 @@
       heading,
       actionsContainer,
       modifyForm,
+      abSubmitForm,
       overviewSection,
       sourceSection,
       filterSection,
@@ -808,6 +1049,18 @@
       return;
     }
 
+    let payload;
+    try {
+      payload = buildCreateRequestPayload(title);
+    } catch (validationError) {
+      setFormError(validationError.message || "MiKan 配置校验失败。", validationError.field);
+      showNotification("error", "校验失败", validationError.message || "MiKan 配置校验失败。");
+      if (validationError.field && validationError.field.focus) {
+        validationError.field.focus();
+      }
+      return;
+    }
+
     hideNotification();
     setSubmitInFlight(true);
     persistWebPreferences();
@@ -817,9 +1070,7 @@
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
-          title: title,
-          storage_dir: storageInput.value.trim() || null,
-          save_request: saveInput.checked,
+          ...payload,
         }),
       });
       selectedRequestId = result.request && result.request.request_id;
@@ -850,6 +1101,11 @@
   }
 
   restoreWebPreferences();
+  syncMikanConfigVisibility();
+  sourceSelect.addEventListener("change", function () {
+    clearFormError();
+    syncMikanConfigVisibility();
+  });
   storageInput.addEventListener("change", persistWebPreferences);
   saveInput.addEventListener("change", persistWebPreferences);
   clearPreferencesButton.addEventListener("click", clearWebPreferences);

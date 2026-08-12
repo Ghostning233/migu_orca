@@ -4,11 +4,14 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, redirect, render_template, url_for
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 from extensions.flask_api import class_route
+from extensions.flask_api.api import sanitize_error_data
 from extensions.flask_api.views import GetView, PostView
+from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_entry.controllers.entry_controller import (
+    apply_ab_submit_action,
     apply_confirmation_action,
     apply_modify_action,
     apply_request_save_action,
@@ -16,6 +19,7 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     _build_history_event,
     _confirmation_history_details,
 )
+from mikan_engine.controllers.mikan_config import MikanConfig
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
@@ -46,8 +50,26 @@ class RequestDetailQuery(BaseModel):
     storage_dir: str | None = None
 
 
+class RequestMikanConfigPayload(BaseModel):
+    search_endpoint: str
+    timeout_seconds: float = Field(gt=0)
+
+    @field_validator("search_endpoint")
+    @classmethod
+    def validate_search_endpoint(cls, value: str) -> str:
+        endpoint = value.strip()
+        if not endpoint:
+            raise ValueError("search_endpoint cannot be empty")
+        return endpoint
+
+
 class RequestCreatePayload(BaseModel):
     title: str
+    source: str = "static-fixture"
+    mikan_config: RequestMikanConfigPayload | None = Field(
+        default=None,
+        validate_default=True,
+    )
     storage_dir: str | None = None
     save_request: bool = False
 
@@ -58,6 +80,26 @@ class RequestCreatePayload(BaseModel):
         if not title:
             raise ValueError("title cannot be empty")
         return title
+
+    @field_validator("source")
+    @classmethod
+    def validate_source(cls, value: str) -> str:
+        source = value.strip()
+        if source not in {"static-fixture", "mikan"}:
+            raise ValueError("source must be static-fixture or mikan")
+        return source
+
+    @field_validator("mikan_config")
+    @classmethod
+    def validate_mikan_config(
+        cls,
+        value: RequestMikanConfigPayload | None,
+        info: ValidationInfo,
+    ) -> RequestMikanConfigPayload | None:
+        source = info.data.get("source") if info.data is not None else None
+        if source == "mikan" and value is None:
+            raise ValueError("mikan_config is required when source is mikan")
+        return value
 
 
 class RequestActionPayload(BaseModel):
@@ -73,6 +115,32 @@ class RequestCancelPayload(RequestActionPayload):
 
 class RequestModifyPayload(RequestActionPayload):
     patch: dict[str, Any]
+
+
+class RequestAbConfigPayload(BaseModel):
+    endpoint: str
+    token: str
+    fallback_enabled: bool
+
+    @field_validator("endpoint")
+    @classmethod
+    def validate_endpoint(cls, value: str) -> str:
+        endpoint = value.strip()
+        if not endpoint:
+            raise ValueError("endpoint cannot be empty")
+        return endpoint
+
+    @field_validator("token")
+    @classmethod
+    def validate_token(cls, value: str) -> str:
+        token = value.strip()
+        if not token:
+            raise ValueError("token cannot be empty")
+        return token
+
+
+class RequestAbSubmitPayload(RequestActionPayload):
+    ab_config: RequestAbConfigPayload
 
 
 def _storage_dir(value: str | None) -> Path | None:
@@ -105,6 +173,28 @@ def _optional_error(error: Stage1Error) -> dict[str, object]:
         "failed_step": error.failed_step,
         "details": error.details or {},
     }
+
+
+def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
+    sanitized = _strip_sensitive_result_fields(sanitize_error_data(result))
+    assert isinstance(sanitized, dict)
+    return sanitized
+
+
+def _strip_sensitive_result_fields(value: Any) -> Any:
+    blocked = ("token", "secret", "cookie", "authorization", "password", "passwd", "bearer")
+    if isinstance(value, dict):
+        sanitized: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            if any(term in key_text.lower() for term in blocked):
+                sanitized["[redacted]"] = "[redacted]"
+            else:
+                sanitized[key_text] = _strip_sensitive_result_fields(item)
+        return sanitized
+    if isinstance(value, list):
+        return [_strip_sensitive_result_fields(item) for item in value]
+    return value
 
 
 def _load_history_section(config: StorageConfig, request_id: str) -> dict[str, object]:
@@ -177,7 +267,17 @@ class RequestCreateView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestCreatePayload)
         payload = self.request_validator_model
-        result = generate_request(EntryRequest(raw_title=payload.title))
+        mikan_config = None
+        if payload.source == "mikan" and payload.mikan_config is not None:
+            mikan_config = MikanConfig(
+                search_endpoint=payload.mikan_config.search_endpoint,
+                timeout_seconds=payload.mikan_config.timeout_seconds,
+            )
+        result = generate_request(
+            EntryRequest(raw_title=payload.title),
+            source_mode="mikan_http" if payload.source == "mikan" else "static_fixture",
+            mikan_config=mikan_config,
+        )
         if not result["success"]:
             _raise_result_error(result)
 
@@ -319,4 +419,49 @@ class RequestModifyView(PostView):
         }
         if "saved_request" in result:
             response["saved_request"] = result["saved_request"]
+        return response
+
+
+@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/submit-ab", methods=["POST"])
+class RequestAbSubmitView(PostView):
+    request_validator_model = RequestAbSubmitPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestAbSubmitPayload)
+        payload = self.request_validator_model
+        storage_dir = _storage_dir(payload.storage_dir)
+        config = load_storage_config(storage_dir)
+        request = load_request_snapshot(config, payload.request_id)
+        ab_config = build_ab_config(payload.ab_config.model_dump())
+
+        result = apply_ab_submit_action(
+            {"success": True, "request": request, "error": None},
+            True,
+            ab_config=ab_config,
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+
+        result["ab_submit_result"] = _sanitize_ab_submit_result(
+            result["ab_submit_result"]
+        )
+        result["request"]["ab_submit_result"] = result["ab_submit_result"]
+        result = apply_request_save_action(
+            result,
+            True,
+            storage_dir=storage_dir,
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+
+        req = result["request"]
+        response: dict[str, object] = {
+            "request": req,
+            "summary": summarize_request(req),
+            "ab_submit_result": result["ab_submit_result"],
+        }
+        if "saved_request" in result:
+            response["saved_request"] = result["saved_request"]
+        if "saved_ab_result" in result:
+            response["saved_ab_result"] = result["saved_ab_result"]
         return response

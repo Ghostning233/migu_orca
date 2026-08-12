@@ -1,107 +1,121 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage10-webui-confirm-modify",
-  "description": "MiGuOrca Stage 10：在 Stage 9 浏览器自动化测试基础设施就绪后，为 Web UI 补强 Request 确认、取消和修改操作入口。Stage 8 Web UI 详情面板已展示 Overview/Source/Filter/Seeds/Audit 分组，Stage 6 CLI 已支持 accept/cancel/modify 三种操作，但 Web UI 和 Web API 尚未暴露这些能力。Stage 10 将复用现有 entry_controller 编排层和 request_controller 业务规则，新增 Web API 端点并在 Request 详情页渲染可操作按钮，包含确认/取消/受限制修改的完整流程、状态历史刷新和统一通知反馈。测试默认使用本地 fixture 和临时 storage，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。",
+  "branchName": "agent/stage11-webui-real-config-entry",
+  "description": "MiGuOrca Stage 11：为本地 Flask Web UI 增加显式真实 MiKan / Auto Bangumi 配置入口。Stage 10 已具备 Web UI Request 生成、保存、确认、取消和受限修改能力；CLI 已具备显式真实 MiKan 数据源和显式 Auto Bangumi HTTP 提交能力，但 Web UI 仍只能使用默认 static-fixture 生成，且没有暴露 AB 配置和提交入口。Stage 11 将在不改变默认离线行为、不落盘敏感配置、不隐式访问外部系统的前提下，为 Web API 和 Web UI 增加临时配置输入、显式真实 MiKan 生成、显式 AB 提交、脱敏错误展示和浏览器自动化覆盖。",
   "userStories": [
     {
-      "id": "US-070",
-      "title": "新增 Web API 确认、取消和修改端点",
-      "description": "As a Web UI user, I want API endpoints for confirming, cancelling, and modifying a saved Request so that I can drive these operations from a browser.",
+      "id": "US-075",
+      "title": "扩展 Web API Request 生成契约以支持显式真实 MiKan 配置",
+      "description": "As a Web UI user, I want to explicitly choose real MiKan as the Request source so that I can generate Requests from live MiKan data when I provide the required config.",
       "acceptanceCriteria": [
-        "新增 `POST /api/v1/requests/<request_id>/accept`：调用 entry_controller.apply_confirmation_action 执行确认，成功后保存 Request snapshot 和状态历史",
-        "新增 `POST /api/v1/requests/<request_id>/cancel`：接受可选 cancel_reason，调用 apply_confirmation_action 执行取消，成功后保存 Request snapshot 和状态历史",
-        "新增 `POST /api/v1/requests/<request_id>/modify`：接受受限 modify_patch JSON body（allowed: filter_rule、selected_subtitle_group、expected_folder_name），调用 apply_modify_action 执行修改，成功后保存 Request snapshot 和状态历史",
-        "每个端点复用现有 storage repository 进行快照保存和历史追加，保持与 CLI 行为一致",
-        "端点遵循统一 API envelope（ok/error_type/error_message），错误通过 extensions.flask_api 脱敏输出",
-        "修改端点校验 patch 字段白名单：只允许 filter_rule、selected_subtitle_group、expected_folder_name",
-        "非 PENDING_CONFIRM 状态的 Request 在确认/取消/修改时返回明确错误",
-        "元数据：`storage_dir` 或请求体提供 storage 路径，端点将 store_result 返回给客户端",
-        "Tests pass including browser tests",
+        "`POST /api/v1/requests` payload 新增 `source` 字段，允许值为 `static-fixture` 和 `mikan`，默认值保持 `static-fixture`",
+        "`POST /api/v1/requests` payload 新增可选 `mikan_config` 对象，字段为 `search_endpoint` 和 `timeout_seconds`",
+        "当 `source` 为 `static-fixture` 时，未传 `mikan_config` 也能保持现有 fixture-backed 生成行为",
+        "当 `source` 为 `mikan` 时，必须显式传入合法 `mikan_config`，并通过现有 MikanClient / MikanConfig 边界构造真实数据源",
+        "真实 MiKan 生成失败时继续返回统一 API error envelope，错误输出不得包含完整 endpoint URL、原始 HTML、原始 RSS XML、cookie 或 token",
+        "Web API 单元测试覆盖默认 fixture 行为、缺失 mikan_config、非法 timeout、真实 MiKan fake transport 成功和脱敏失败场景",
+        "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Reuse entry_controller functions directly; do not duplicate business logic. All endpoints are POST (mutations)."
+      "notes": "Do not write MiKan config to storage JSON. Use inline request config only for the current API call."
     },
     {
-      "id": "US-071",
-      "title": "Web UI Request 详情面板渲染确认、取消和修改操作按钮",
-      "description": "As a Web UI user, I want to see action buttons in the Request detail panel so that I can confirm, cancel, or modify a PENDING_CONFIRM Request directly from the browser.",
+      "id": "US-076",
+      "title": "新增 Web API Auto Bangumi 显式提交端点",
+      "description": "As a Web UI user, I want to submit an accepted Request to Auto Bangumi from the browser only after I provide explicit AB config.",
       "acceptanceCriteria": [
-        "Request 详情面板 header 区域渲染「确认」「取消」「修改」三个操作按钮",
-        "按钮仅对 status 为 PENDING_CONFIRM 的 Request 可见和可交互",
-        "对于已确认/已取消等非 PENDING_CONFIRM 状态，按钮隐藏或显示为禁用并给出状态说明文本",
-        "「确认」按钮点击后弹出浏览器原生确认对话框或内联确认提示，防止误操作",
-        "「取消」按钮点击后弹出输入框收集取消原因（可为空），提交 cancel_reason",
-        "「修改」按钮点击后展开内联修改表单：字幕组下拉选择、filter_rule 输入、expected_folder_name 输入，提交 patch",
-        "操作提交期间对应按钮禁用，完成后恢复",
-        "操作使用统一 showNotification 展示成功/失败结果",
-        "操作成功后自动重新加载 Request 详情和状态历史 Audit 区块",
-        "Tests pass including browser tests",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "新增 `POST /api/v1/requests/<request_id>/submit-ab` 端点",
+        "端点只允许对 `ACCEPTED` 状态 Request 执行 AB 提交，非 ACCEPTED 状态返回统一 API error envelope",
+        "请求体必须包含 `ab_config` 对象，字段为 `endpoint`、`token`、`fallback_enabled`",
+        "端点复用现有 AB config 校验、AB payload 映射、真实 Auto Bangumi HTTP client adapter、submit result normalizer 和 fallback_config 逻辑",
+        "提交结果写回 Request snapshot，并保存到 `ab_results/`，详情 API 能读取最新 `ab_result`",
+        "所有错误、日志和 API 响应不得泄露 token、完整 endpoint URL、Authorization header 或 fallback 中的敏感字段",
+        "Web API 单元测试覆盖成功提交、fallback-enabled 失败、缺失 token、非 ACCEPTED 状态和脱敏错误输出",
+        "Tests pass",
+        "Typecheck passes"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "Keep JavaScript minimal and server-rendered; modify form stays inline in the existing detail panel. Reuse detail rendering patterns in app.js."
+      "notes": "Keep the endpoint explicit and POST-only. Do not auto-submit during accept."
     },
     {
-      "id": "US-072",
-      "title": "操作成功后的通知和列表刷新",
-      "description": "As a Web UI user, I want the Request list and detail to refresh after confirm/cancel/modify so that I see the latest state without manual reload.",
+      "id": "US-077",
+      "title": "在 Web UI 生成表单增加真实 MiKan 显式配置入口",
+      "description": "As a Web UI user, I want a clear source selector and MiKan config fields so that I can opt into real MiKan generation deliberately.",
       "acceptanceCriteria": [
-        "确认/取消/修改操作成功后，detail 面板自动重新加载最新 Request 数据",
-        "Request 列表自动刷新，列表项状态标签更新为 ACCEPTED / CANCELLED / PENDING_CONFIRM",
-        "状态变更后，列表筛选和搜索仍正常工作",
-        "操作失败时不清空现有列表或详情，仅展示错误通知",
-        "连续操作之间不互相覆盖：前一个操作完成前，后续操作按钮保持禁用",
-        "通知消息包含操作摘要：确认成功/取消成功/修改成功 + request_id",
-        "操作成功后 Audit 区块的状态历史列表反映最新 action 记录",
-        "Tests pass including browser tests",
+        "Request 生成表单新增数据源选择控件，选项为 `static-fixture` 和 `mikan`，默认选中 `static-fixture`",
+        "仅当选择 `mikan` 时展示 MiKan 配置字段：`search_endpoint` 和 `timeout_seconds`",
+        "选择 `mikan` 时浏览器端校验要求 search_endpoint 非空、timeout_seconds 为正数；校验失败不发起 API 请求",
+        "提交真实 MiKan 生成时，请求体包含 `source: \"mikan\"` 和 `mikan_config`，fixture 模式请求体不包含敏感配置",
+        "页面运行模式提示明确说明默认离线、真实 MiKan 必须显式选择、配置只用于当前请求且不写入 storage JSON",
+        "页面和通知不得展示完整 endpoint URL、原始 HTML、原始 RSS XML、cookie 或 token",
+        "Web UI 静态测试覆盖表单结构、默认模式、校验文案和敏感内容不泄露",
+        "Tests pass",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "This story ties US-070 and US-071 together end-to-end. Tests should verify the full click-to-refresh cycle."
+      "notes": "Keep the UI server-rendered with minimal JavaScript. Do not introduce React/Vite."
     },
     {
-      "id": "US-073",
-      "title": "浏览器自动化测试覆盖 Web UI 确认取消修改流程",
-      "description": "As a maintainer, I want browser tests for the confirm/cancel/modify workflow so that the Web UI action path remains regression-safe.",
+      "id": "US-078",
+      "title": "在 Web UI Request 详情中增加显式 Auto Bangumi 提交入口",
+      "description": "As a Web UI user, I want to submit an accepted Request to Auto Bangumi from the detail panel after entering temporary AB config.",
       "acceptanceCriteria": [
-        "浏览器测试：打开 PENDING_CONFIRM Request 详情，验证确认/取消/修改按钮存在且可交互",
-        "浏览器测试：点击确认按钮 → 验证通知显示「确认成功」、详情状态变为 ACCEPTED、列表状态更新",
-        "浏览器测试：点击取消按钮并输入原因 → 验证通知显示、详情状态变为 CANCELLED、Audit 显示取消记录",
-        "浏览器测试：修改字幕组选择并提交 → 验证通知显示「修改成功」、详情字幕组字段更新、列表刷新",
-        "浏览器测试：对非 PENDING_CONFIRM Request 验证按钮隐藏或禁用",
-        "浏览器测试：验证操作失败时（如无效 patch 字段）通知展示错误消息且不丢失数据",
-        "浏览器测试不访问真实 MiKan、Auto Bangumi 或 qBittorrent；使用临时 storage 和 create_saved_request fixture",
-        "浏览器测试输出不包含 token、完整 endpoint URL、原始 HTML、原始 RSS XML 或本地绝对路径",
+        "Request 详情页仅对 `ACCEPTED` 状态 Request 展示 `提交 Auto Bangumi` 操作入口",
+        "点击提交入口后展示内联 AB 配置表单，字段为 endpoint、token、fallback_enabled",
+        "AB token 输入框使用 password 类型；endpoint 和 token 不写入 localStorage、sessionStorage、storage JSON 或 URL query",
+        "提交前必须出现明确确认提示，确认后才调用 `POST /api/v1/requests/<request_id>/submit-ab`",
+        "提交期间按钮禁用，成功后刷新 Request 详情和 Auto Bangumi 结果区块",
+        "提交失败时不清空现有详情或列表，仅展示统一错误通知且错误内容已脱敏",
+        "Web UI 静态测试覆盖按钮可见性、表单字段、password token 输入和不持久化敏感配置",
         "Tests pass",
-        "Typecheck passes"
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "Use existing conftest fixtures from Stage 9. Fixtures should create PENDING_CONFIRM status requests via create_saved_request."
+      "notes": "Do not couple AB submit to accept. The user must explicitly trigger submit after accept."
     },
     {
-      "id": "US-074",
-      "title": "补充 Stage 10 文档和验收记录",
-      "description": "As a maintainer, I want Stage 10 documentation and progress notes so that future Ralph runs know how to maintain the confirm/cancel/modify workflow.",
+      "id": "US-079",
+      "title": "补充浏览器自动化覆盖真实配置入口关键流程",
+      "description": "As a maintainer, I want browser tests for the real MiKan and Auto Bangumi configuration entry points so that explicit integration behavior remains regression-safe.",
       "acceptanceCriteria": [
-        "README 更新 Stage 10 为当前活跃阶段，概述 Web UI Request 操作范围",
-        "README Web API 章节新增确认/取消/修改端点文档和 curl 示例",
-        "README Web UI 验收流程更新操作验收步骤",
-        "scripts/ralph/progress.txt 记录 Stage 10 实现、关键决策和后续约束",
-        "docs/backlog.md 中 BL-003 仅在 Stage 10 实现验收通过后标记为完成",
-        "后续待办 BL-004、BL-005、BL-001 保持未完成",
+        "浏览器测试覆盖默认 fixture 模式下 MiKan 配置字段隐藏，生成流程仍成功且不访问真实外部系统",
+        "浏览器测试覆盖选择 `mikan` 后 MiKan 配置字段显示，缺失或非法配置触发浏览器端校验",
+        "浏览器测试覆盖 ACCEPTED Request 详情展示 AB 提交入口，非 ACCEPTED Request 不展示该入口",
+        "浏览器测试覆盖 AB 配置表单 token 字段为 password，提交前出现确认提示",
+        "浏览器测试覆盖 AB 提交失败时详情和列表不丢失，通知展示脱敏错误",
+        "浏览器测试断言页面内容、通知和 DOM 不包含 token、完整 endpoint URL、原始 HTML、原始 RSS XML、cookie 或 Authorization header",
+        "浏览器测试默认使用 fake transport / fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "This story closes documentation only after Stage 10 implementation stories pass."
+      "notes": "Prefer deterministic fake transports or API seams over live network calls. Browser tests must remain local and offline by default."
+    },
+    {
+      "id": "US-080",
+      "title": "补充 Stage 11 文档和验收记录",
+      "description": "As a maintainer, I want Stage 11 documentation and backlog updates so that future Ralph runs know the explicit real integration configuration rules.",
+      "acceptanceCriteria": [
+        "README 更新 Stage 11 当前能力说明，明确 Web UI 支持显式真实 MiKan 配置入口和显式 AB 提交入口",
+        "README Web API 章节新增 `source` / `mikan_config` 生成 payload 示例和 `submit-ab` endpoint 示例",
+        "README Web UI 验收流程新增真实 MiKan 配置入口、AB 提交入口、脱敏展示和不落盘敏感配置检查",
+        "`docs/backlog.md` 中 BL-004 仅在 Stage 11 实现验收通过后标记为完成",
+        "`scripts/ralph/progress.txt` 记录 Stage 11 实现、关键安全约束、测试结果和后续 BL-005 / BL-001 状态",
+        "后续待办 BL-005、BL-001 保持未完成",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Close documentation only after implementation and browser coverage stories pass."
     }
   ]
 }

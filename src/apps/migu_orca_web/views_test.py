@@ -6,11 +6,14 @@ from typing import Any
 from flask.testing import FlaskClient
 import pytest
 
+from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
-from request_engine.controllers.request_controller import summarize_request
+from mikan_engine.controllers.mikan_client import create_mikan_client
+from mikan_engine.controllers.mikan_config import MikanConfig
+from request_engine.controllers.request_controller import accept_request, summarize_request
 from shared.errors import Stage1Error
-from shared.models import EntryRequest
+from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
 from storage_engine.controllers.history_repository import append_status_history
 from storage_engine.controllers.request_repository import save_request_snapshot
@@ -30,6 +33,63 @@ def _saved_request(tmp_path: Path, title: str, request_id: str) -> dict[str, Any
     return request
 
 
+def _saved_accepted_request(
+    tmp_path: Path,
+    title: str = "芙莉莲",
+    request_id: str = "request-1",
+) -> dict[str, Any]:
+    request = accept_request(
+        {
+            **generate_request(EntryRequest(raw_title=title))["request"],
+            "request_id": request_id,
+        }
+    )
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+    return request
+
+
+class _FakeMikanTransport:
+    def __init__(self, responses: dict[str, str] | None = None, error: Stage1Error | None = None) -> None:
+        self.responses = responses or {}
+        self.error = error
+        self.requests: list[tuple[str, float]] = []
+
+    def get_text(self, url: str, *, timeout: float) -> str:
+        self.requests.append((url, timeout))
+        if self.error is not None:
+            raise self.error
+        return self.responses[url]
+
+
+class _FakeMikanClient:
+    def __init__(self, config: MikanConfig, transport: _FakeMikanTransport) -> None:
+        self.config = config
+        self.transport = transport
+
+    def list_bangumi_candidates(self, raw_title: str) -> list[BangumiCandidate]:
+        assert raw_title == "芙莉莲"
+        return [
+            BangumiCandidate(
+                bangumi_id="123",
+                title="芙莉莲",
+                aliases=["葬送的芙莉莲"],
+                mikan_url="https://mikan.example/Home/Bangumi/123",
+                rss_sources=[],
+            )
+        ]
+
+    def list_rss_sources(self, matched_bangumi: MatchedBangumi) -> list[RssSource]:
+        assert matched_bangumi.title == "芙莉莲"
+        return [
+            RssSource(
+                subtitle_group="Loli",
+                rss_url="https://mikan.example/RSS/Bangumi?bangumiId=123",
+                source_type="mikan_http",
+                fixture_path="",
+            )
+        ]
+
+
 def test_root_redirects_to_index() -> None:
     response = _client().get("/")
 
@@ -44,12 +104,13 @@ def test_index_serves_web_ui_shell() -> None:
     assert response.status_code == 200
     assert "text/html" in response.content_type
     assert "MiGuOrca" in html
-    assert "Stage 8 Web UI Usability" in html
+    assert "Stage 11 Web UI Real Config Entry" in html
     assert "Stage 7 Web UI MVP" not in html
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert "运行模式：本地 JSON storage" in html
-    assert "fixture-backed" in html
-    assert "不会隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent" in html
+    assert "默认离线使用仓库 fixture-backed 生成" in html
+    assert "真实 MiKan 必须显式选择" in html
+    assert "配置只用于当前请求且不写入 storage JSON" in html
     assert "Request 生成" in html
     assert "Request 列表" in html
     assert "Request 详情" in html
@@ -67,6 +128,18 @@ def test_index_serves_web_ui_shell() -> None:
     assert "例如：葬送的芙莉莲" in html
     assert "至少输入 1 个非空白字符" in html
     assert 'aria-describedby="request-title-help request-form-error"' in html
+    assert 'id="request-source"' in html
+    assert 'name="source"' in html
+    assert '<option value="static-fixture" selected>static-fixture</option>' in html
+    assert '<option value="mikan">mikan</option>' in html
+    assert "默认离线生成" in html
+    assert 'id="mikan-config-fields"' in html
+    assert "hidden" in html
+    assert 'name="mikan_search_endpoint"' in html
+    assert 'name="mikan_timeout_seconds"' in html
+    assert "search_endpoint" in html
+    assert "timeout_seconds" in html
+    assert "仅用于当前生成请求，不保存到 storage JSON、浏览器存储或 URL" in html
     assert 'name="storage_dir"' in html
     assert "留空时使用默认 `.migu_orca/storage`" in html
     assert 'name="save_request"' in html
@@ -133,10 +206,37 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "seed-details" in script
     assert "暂无状态历史。" in script
     assert "暂无 Auto Bangumi 提交结果。" in script
-    assert "token" not in script.lower()
+    assert "提交 Auto Bangumi" in script
+    assert "detail-ab-submit-form" in script
+    assert "ab-submit-endpoint" in script
+    assert "ab-submit-token" in script
+    assert "ab-submit-fallback-enabled" in script
+    assert "Auto Bangumi 提交" in script
+    assert "fallback_enabled" in script
+    assert "window.confirm(\"确认提交此 Request 到 Auto Bangumi？\")" in script
+    assert "storage_dir: storageInput.value.trim() || null" in script
+    assert "secret-token" not in script
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "currentDetailPayload" in script
+    assert "status === \"ACCEPTED\"" in script
+    assert "可提交到 Auto Bangumi" in script
+    assert "setAbSubmitInFlight(true)" in script
+    assert "setAbSubmitInFlight(false)" in script
+    assert "renderDetailPayload(nextPayload)" in script
+    assert "ab_submit_result" in script
+    assert "提交成功" in script
+    assert "提交失败" in script
+    assert "notifyApiError" in script
+    assert "提交失败" in script
 
 
 def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> None:
@@ -195,6 +295,7 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "field + \": \" + message" in script
     assert "safeText" in script
     assert "displayValue(value)" in script
+    assert "secret-token" not in script
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
@@ -258,18 +359,33 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert response.status_code == 200
     assert "request-form-error" in script
     assert "request-generate-submit" in script
+    assert "request-source" in script
+    assert "mikan-config-fields" in script
+    assert "mikan-search-endpoint" in script
+    assert "mikan-timeout-seconds" in script
     assert "setFormError" in script
     assert "clearFormError" in script
     assert "setSubmitInFlight" in script
+    assert "syncMikanConfigVisibility" in script
+    assert "buildCreateRequestPayload" in script
     assert "titleInput.value.trim()" in script
     assert "请输入标题，至少包含 1 个非空白字符。" in script
+    assert "选择 mikan 时必须填写 search_endpoint。" in script
+    assert "选择 mikan 时 timeout_seconds 必须为正数。" in script
     assert "titleInput.focus()" in script
+    assert "validationError.field.focus()" in script
     assert "setSubmitInFlight(true)" in script
     assert "setSubmitInFlight(false)" in script
     assert "正在生成..." in script
     assert '"title: title"' not in script
     assert "title: title" in script
+    assert "payload.source = \"static-fixture\"" in script
+    assert "payload.source = \"mikan\"" in script
+    assert "payload.mikan_config" in script
     assert script.index("if (!title)") < script.index('fetchJson("/api/v1/requests"')
+    assert script.index("buildCreateRequestPayload(title)") < script.index(
+        'fetchJson("/api/v1/requests"',
+    )
     assert script.index("setSubmitInFlight(true)") < script.index(
         'fetchJson("/api/v1/requests"',
     )
@@ -282,6 +398,10 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert response.status_code == 200
     assert "miguOrca.web.storageDir" in script
     assert "miguOrca.web.saveRequest" in script
+    assert "miguOrca.web.mikan" not in script
+    assert "miguOrca.web.source" not in script
+    assert "miguOrca.web.ab" not in script
+    assert "sessionStorage" not in script
     assert "window.localStorage.getItem" in script
     assert "window.localStorage.setItem" in script
     assert "window.localStorage.removeItem" in script
@@ -301,6 +421,51 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     )
 
 
+def test_static_app_script_wires_explicit_ab_submit_form() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "buildAbSubmitForm" in script
+    assert "detail-ab-submit-form" in script
+    assert "ab-submit-endpoint" in script
+    assert "ab-submit-token" in script
+    assert "ab-submit-fallback-enabled" in script
+    assert "tokenInput.type = \"password\"" in script
+    assert "fallbackInput.type = \"checkbox\"" in script
+    assert "配置仅用于本次提交，不写入浏览器存储、URL 或 storage JSON。" in script
+    assert "提交 Auto Bangumi 前必须填写 endpoint。" in script
+    assert "提交 Auto Bangumi 前必须填写 token。" in script
+    assert "确认提交此 Request 到 Auto Bangumi？" in script
+    assert 'performAction(request.request_id, "submit-ab"' in script
+    assert "storage_dir: storageInput.value.trim() || null" in script
+    assert "ab_config" in script
+    assert "fallback_enabled: fallbackInput.checked" in script
+    assert "Auto Bangumi 提交成功" in script
+    assert "secret-token" not in script
+    assert "Authorization" not in script
+    assert "http://" not in script
+    assert "https://" not in script
+
+
+def test_static_app_script_shows_ab_submit_only_for_accepted_requests() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'var isAccepted = request.status === "ACCEPTED";' in script
+    assert "else if (isAccepted)" in script
+    assert 'abSubmitBtn.textContent = "提交 Auto Bangumi"' in script
+    assert "detail-ab-submit-form" in script
+    assert "form.hidden = !form.hidden" in script
+    assert script.index("else if (isAccepted)") > script.index(
+        'var isPending = request.status === "PENDING_CONFIRM";'
+    )
+    assert script.index('abSubmitBtn.textContent = "提交 Auto Bangumi"') < script.index(
+        "actionsContainer.appendChild(abSubmitBtn)"
+    )
+
+
 def test_static_style_defines_generation_form_validation_states() -> None:
     response = _client().get("/migu-orca-static/style.css")
 
@@ -308,7 +473,11 @@ def test_static_style_defines_generation_form_validation_states() -> None:
     assert response.status_code == 200
     assert ".field-help" in css
     assert ".field-error" in css
+    assert ".inline-config-fields" in css
+    assert ".inline-config-fields[hidden]" in css
     assert 'input[aria-invalid="true"]' in css
+    assert 'input[type="number"]' in css
+    assert 'input[type="password"]' in css
     assert "button:disabled" in css
     assert ".secondary-button" in css
 
@@ -331,6 +500,7 @@ def test_static_style_defines_request_detail_sections() -> None:
     css = response.get_data(as_text=True)
     assert response.status_code == 200
     assert ".detail-section" in css
+    assert ".detail-inline-form" in css
     assert ".overview-actions" in css
     assert ".copy-request-id" in css
     assert ".seed-details summary" in css
@@ -605,6 +775,187 @@ def test_create_request_generates_without_writing_storage(tmp_path: Path) -> Non
     assert not storage_dir.exists()
 
 
+def test_create_request_defaults_to_static_fixture_without_mikan_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        captured["source_mode"] = kwargs.get("source_mode")
+        captured["mikan_config"] = kwargs.get("mikan_config")
+        return generate_request(*args, **kwargs)
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert captured["source_mode"] == "static_fixture"
+    assert captured["mikan_config"] is None
+    assert payload["result"]["request"]["input"]["raw_title"] == "芙莉莲"
+
+
+def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    factory_configs: list[MikanConfig] = []
+
+    def fake_create_mikan_client(config: MikanConfig) -> _FakeMikanClient:
+        factory_configs.append(config)
+        transport = _FakeMikanTransport(
+            {
+                "https://mikan.example/RSS/Bangumi?bangumiId=123": (
+                    "<rss><channel><item><title>芙莉莲 - 01</title>"
+                    "<link>https://example.invalid/1</link></item></channel></rss>"
+                )
+            }
+        )
+        return _FakeMikanClient(config, transport)
+
+    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        captured["source_mode"] = kwargs.get("source_mode")
+        captured["mikan_config"] = kwargs.get("mikan_config")
+        return generate_request(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "mikan",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    request = payload["result"]["request"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert captured["source_mode"] == "mikan_http"
+    assert isinstance(captured["mikan_config"], MikanConfig)
+    assert captured["mikan_config"].search_endpoint == "https://mikan.example/Home/Search"
+    assert captured["mikan_config"].timeout_seconds == 5.0
+    assert factory_configs == [captured["mikan_config"]]
+    assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
+    assert request["confirmable_config"]["selected_rss_url"] == "https://mikan.example/RSS/Bangumi?bangumiId=123"
+
+
+def test_create_request_rejects_missing_mikan_config_when_source_is_mikan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("generate_request should not be called for invalid payload")
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "mikan",
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"] == "mikan_config"
+        for error in payload["error_data"]["errors"]
+    )
+    assert called is False
+
+
+def test_create_request_rejects_unsupported_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("generate_request should not be called for invalid payload")
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "real-live-mikan",
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert payload["error_data"]["errors"][0]["field"] == "source"
+    assert called is False
+
+
+def test_create_request_rejects_invalid_mikan_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("generate_request should not be called for invalid payload")
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "mikan",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 0,
+            },
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"].startswith("mikan_config.timeout_seconds")
+        for error in payload["error_data"]["errors"]
+    )
+    assert called is False
+
+
 def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
     storage_dir = tmp_path / "storage"
 
@@ -713,3 +1064,227 @@ def test_create_request_returns_unified_error_for_save_failure(
     assert str(tmp_path) not in str(payload)
     assert "https://example.test/api" not in str(payload)
     assert "token" not in str(payload).lower()
+
+
+def test_submit_ab_accepts_request_scoped_config_and_persists_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path)
+    storage_dir = tmp_path / "storage"
+    client = FakeAutoBangumiClient()
+    factory_configs = []
+
+    def build_client(ab_config):
+        factory_configs.append(ab_config)
+        return client
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
+        build_client,
+    )
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(storage_dir),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api/subscriptions",
+                "token": "secret-token",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    saved_request = load_storage_config(storage_dir).requests_dir / (
+        f"{request['request_id']}.json"
+    )
+    saved_ab_result = load_storage_config(storage_dir).ab_results_dir / (
+        f"{request['request_id']}.json"
+    )
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["request"]["status"] == "ACCEPTED"
+    assert result["ab_submit_result"] == {
+        "success": True,
+        "ab_subscription_id": "fake-ab-subscription",
+        "ab_response": {"id": "fake-ab-subscription", "status": "created"},
+        "fallback_config": None,
+        "error": None,
+    }
+    assert result["request"]["ab_submit_result"] == result["ab_submit_result"]
+    assert result["saved_request"]["request_id"] == request["request_id"]
+    assert result["saved_ab_result"]["request_id"] == request["request_id"]
+    assert saved_request.exists()
+    assert saved_ab_result.exists()
+    assert factory_configs[0].endpoint == "http://auto-bangumi.local/api/subscriptions"
+    assert factory_configs[0].token == "secret-token"
+    assert client.calls
+    assert "secret-token" not in saved_request.read_text(encoding="utf-8")
+    assert "auto-bangumi.local" not in saved_request.read_text(encoding="utf-8")
+    assert "secret-token" not in saved_ab_result.read_text(encoding="utf-8")
+    assert "auto-bangumi.local" not in saved_ab_result.read_text(encoding="utf-8")
+
+
+def test_submit_ab_persists_sanitized_fallback_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path)
+    storage_dir = tmp_path / "storage"
+    client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "Auto Bangumi rejected http://auto-bangumi.local/api secret-token",
+            "create_ab_subscription",
+            {
+                "Authorization": "Bearer secret-token",
+                "endpoint": "http://auto-bangumi.local/api",
+            },
+        )
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: client,
+    )
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(storage_dir),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "token": "secret-token",
+                "fallback_enabled": True,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    serialized = str(payload)
+    saved_ab_result = (
+        load_storage_config(storage_dir).ab_results_dir / f"{request['request_id']}.json"
+    ).read_text(encoding="utf-8")
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["ab_submit_result"]["success"] is False
+    assert payload["result"]["ab_submit_result"]["fallback_config"]["title"]
+    assert "secret-token" not in serialized
+    assert "auto-bangumi.local" not in serialized
+    assert "Authorization" not in serialized
+    assert "secret-token" not in saved_ab_result
+    assert "auto-bangumi.local" not in saved_ab_result
+
+
+def test_submit_ab_rejects_missing_token_without_calling_ab(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path)
+    called = False
+
+    def fail_if_called(*args: object, **kwargs: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("AB client should not be created for invalid payload")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
+        fail_if_called,
+    )
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(tmp_path / "storage"),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"] == "ab_config.[redacted]"
+        for error in payload["error_data"]["errors"]
+    )
+    assert called is False
+    assert "auto-bangumi.local" not in str(payload)
+
+
+def test_submit_ab_rejects_non_accepted_request(tmp_path: Path) -> None:
+    request = _saved_request(tmp_path, "芙莉莲", "request-1")
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(tmp_path / "storage"),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "token": "secret-token",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_request_status"
+    assert payload["error_message"] == "只有 ACCEPTED Request 可以提交到 Auto Bangumi"
+    assert payload["error_data"]["failed_step"] == "build_ab_subscription_payload"
+    assert "secret-token" not in str(payload)
+    assert "auto-bangumi.local" not in str(payload)
+
+
+def test_submit_ab_sanitizes_echoed_ab_response(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path)
+    storage_dir = tmp_path / "storage"
+    client = FakeAutoBangumiClient(
+        response={
+            "id": "sub-123",
+            "endpoint": "http://auto-bangumi.local/api",
+            "Authorization": "Bearer secret-token",
+        }
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: client,
+    )
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/submit-ab",
+        json={
+            "storage_dir": str(storage_dir),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "token": "secret-token",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    saved_ab_result = (
+        load_storage_config(storage_dir).ab_results_dir / f"{request['request_id']}.json"
+    ).read_text(encoding="utf-8")
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["ab_submit_result"]["ab_response"] == {
+        "id": "sub-123",
+        "endpoint": "[redacted-url]",
+        "[redacted]": "[redacted]",
+    }
+    assert "secret-token" not in str(payload)
+    assert "auto-bangumi.local" not in str(payload)
+    assert "secret-token" not in saved_ab_result
+    assert "auto-bangumi.local" not in saved_ab_result
