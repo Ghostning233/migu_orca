@@ -4,9 +4,9 @@
 
 管理真正需要变化的系统运行配置，避免把代码常量过早建设成配置系统。
 
-## 2. Stage 1 边界
+## 2. 当前边界
 
-Stage 1 不建立独立 system config engine。
+当前不建立独立 system config engine。Stage 1 提供默认规则读取；Stage 3 增加显式 Auto Bangumi JSON 配置读取；Stage 5 增加显式 MiKan JSON 配置读取。
 
 代码内固定默认路径：
 
@@ -31,7 +31,7 @@ config/user/default_rules.json
 
 - 环境变量覆盖；
 - 多 profile 和配置合并；
-- Auto Bangumi、qBittorrent 配置；
+- qBittorrent 配置；
 - 配置管理 UI；
 - 独立 M14 engine。
 

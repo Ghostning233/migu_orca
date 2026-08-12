@@ -4,7 +4,7 @@
 
 M10 负责后续阶段的 Auto Bangumi 集成能力。用户接受 Request 后，系统通过本模块调用 AB 创建订阅；如果调用失败，则生成可人工处理的降级 JSON 配置。
 
-Stage 3 已完成本模块的离线可测契约：AB 提交结果 envelope、Request 到 AB payload 映射、fake client、失败降级 JSON、显式 AB 配置读取和 CLI 显式提交流程。Stage 4 将在这些契约上实现真实 Auto Bangumi HTTP client adapter。
+Stage 3 已完成本模块的离线可测契约：AB 提交结果 envelope、Request 到 AB payload 映射、fake client、失败降级 JSON、显式 AB 配置读取和 CLI 显式提交流程。Stage 4 已在这些契约上实现真实 Auto Bangumi HTTP client adapter。
 
 ## 2. 模块边界
 

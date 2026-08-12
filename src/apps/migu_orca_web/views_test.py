@@ -200,6 +200,22 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "<rss" not in script.lower()
 
 
+def test_static_app_script_shows_action_success_after_refresh() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    action_start = script.index("async function performAction")
+    action_end = script.index("function buildModifyForm")
+    action_script = script[action_start:action_end]
+    assert action_script.index("await loadDetail(requestId);") < action_script.index(
+        "showNotification(\"success\""
+    )
+    assert action_script.index("await loadList();") < action_script.index(
+        "showNotification(\"success\""
+    )
+
+
 def test_static_app_script_wires_request_list_filter_sort_controls() -> None:
     response = _client().get("/migu-orca-static/app.js")
 
