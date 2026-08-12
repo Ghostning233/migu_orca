@@ -34,7 +34,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "只实现连接测试需要的最小 qBittorrent Web API 调用，不扩展下载或订阅动作。"
     },
     {

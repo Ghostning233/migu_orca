@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - Stage 12 qBittorrent code starts in `src/qbittorrent_engine/`; keep config validation in small dataclass builders/loaders that raise `Stage1Error` with `failed_step="load_qbittorrent_config"`.
+- qBittorrent Web API calls use `QBittorrentTransport` and `QBittorrentResponse` in `src/qbittorrent_engine/controllers/qbittorrent_client.py`; unit tests should inject fake transports and never call a real qBittorrent server.
 - Shared API redaction in `extensions.flask_api.api` must cover qBittorrent username and SID/session identifiers in addition to URLs, absolute paths, password/token/cookie fields, and raw HTML/RSS content.
 - Ralph sub-agent local intermediate commit messages may be English or tool-generated. Do not spend tokens rewriting intermediate commits only for language style; final PR title, PR description, merge commit, Stage closure commit, archive notes, and acceptance summary must be written in Chinese.
 
@@ -27,4 +28,22 @@ Thread: https://codex.openai.com/threads/unavailable
   - Add qBittorrent client and controller work under `src/qbittorrent_engine/` and reuse `build_qbittorrent_config` for inline API payloads instead of temporary config files.
   - qBittorrent config loaders intentionally avoid echoing local config paths in direct `Stage1Error` messages; API responses still go through the shared sanitizer.
   - `verify_tls` defaults to `true`; tests that need insecure local qBittorrent endpoints should set it explicitly in request-scoped config.
+---
+## 2026-08-12 19:12 CST - US-082
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the qBittorrent Web API client adapter with injectable `QBittorrentTransport`, urllib-backed real transport, login via `/api/v2/auth/login`, version probe via `/api/v2/app/version`, and request-scoped connection summary.
+- Kept qBittorrent SID/session state in memory on the client instance only; no storage, fixture, URL, or log persistence was added.
+- Normalized auth failure, timeout, connection failure, HTTP failure, invalid endpoint, and unexpected response cases into safe `Stage1Error` values without echoing endpoint, username, password, cookie/SID, or raw response bodies.
+- Added fake-transport unit tests for successful login/version probe, auth failure, timeout, unexpected response handling, injected Stage1Error sanitization, and invalid endpoint preflight.
+- Quality checks passed: `uv run pytest -q` (363 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `src/qbittorrent_engine/controllers/qbittorrent_client.py`
+  - `src/qbittorrent_engine/controllers/qbittorrent_client_test.py`
+  - `src/qbittorrent_engine/controllers/__init__.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Reuse `create_qbittorrent_client(config, transport=...)` for later controller/API work so browser and API tests can inject deterministic fakes.
+  - `QBittorrentClient.test_connection()` returns only `status`, `reachable`, and `version`; later endpoints should not expose endpoint, credentials, cookie/SID, or local paths in success results.
+  - The real transport is intentionally minimal and only covers Stage 12 connection testing; do not add download or subscription actions in this client story boundary.
 ---
