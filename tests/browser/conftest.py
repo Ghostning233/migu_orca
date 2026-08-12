@@ -18,14 +18,21 @@ from storage_engine.controllers.storage_config import load_storage_config
 from shared.models import EntryRequest
 
 
-CHROMIUM_LIBS_DIR = Path("/tmp/chromium-libs/usr/lib/x86_64-linux-gnu")
-HEADLESS_SHELL_BIN = Path.home() / ".cache/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-linux64/chrome-headless-shell"
-CHROMIUM_BIN = Path.home() / ".cache/ms-playwright/chromium-1234/chrome-linux64/chrome"
+CHROMIUM_LIB_DIRS = (
+    Path("/tmp/chromium-libs/usr/lib/x86_64-linux-gnu"),
+    Path("/tmp/chromium-libs/lib/x86_64-linux-gnu"),
+)
+PLAYWRIGHT_CACHE_DIR = Path.home() / ".cache/ms-playwright"
+
+
+def _chromium_lib_path_prefix() -> str:
+    return ":".join(str(path) for path in CHROMIUM_LIB_DIRS if path.is_dir())
+
 
 # Ensure Playwright-launched Chromium can find extracted system libraries.
-if CHROMIUM_LIBS_DIR.is_dir():
+if _chromium_lib_path_prefix():
     _existing_ld = os.environ.get("LD_LIBRARY_PATH", "")
-    _prefix = str(CHROMIUM_LIBS_DIR)
+    _prefix = _chromium_lib_path_prefix()
     os.environ["LD_LIBRARY_PATH"] = (
         f"{_prefix}:{_existing_ld}" if _existing_ld else _prefix
     )
@@ -44,10 +51,15 @@ def _find_free_port() -> int:
 
 def _browser_executable() -> str | None:
     """Return the best available Chromium executable path."""
-    if HEADLESS_SHELL_BIN.is_file() and CHROMIUM_LIBS_DIR.is_dir():
-        return str(HEADLESS_SHELL_BIN)
-    if CHROMIUM_BIN.is_file():
-        return str(CHROMIUM_BIN)
+    candidates = [
+        *PLAYWRIGHT_CACHE_DIR.glob(
+            "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"
+        ),
+        *PLAYWRIGHT_CACHE_DIR.glob("chromium-*/chrome-linux64/chrome"),
+    ]
+    for candidate in sorted(candidates, reverse=True):
+        if candidate.is_file():
+            return str(candidate)
     return None
 
 
@@ -58,9 +70,9 @@ def _browser_env() -> dict[str, str]:
     we prepend extracted .deb libraries to LD_LIBRARY_PATH.
     """
     env = os.environ.copy()
-    if CHROMIUM_LIBS_DIR.is_dir():
+    if _chromium_lib_path_prefix():
         existing = env.get("LD_LIBRARY_PATH", "")
-        prefix = str(CHROMIUM_LIBS_DIR)
+        prefix = _chromium_lib_path_prefix()
         env["LD_LIBRARY_PATH"] = f"{prefix}:{existing}" if existing else prefix
     return env
 
