@@ -136,6 +136,23 @@ Thread: https://codex.openai.com/threads/unavailable
   - For accepted-only detail actions, browser assertions should scope to `.detail-actions` and use `:visible` so hidden inline forms do not create false positives.
 ---
 
+## 2026-08-12 17:28 CST - US-080
+Thread: https://codex.openai.com/threads/unavailable
+- Updated Stage 11 documentation and acceptance records to reflect the completed real-config entry scope.
+- Marked BL-004 complete in `docs/backlog.md`, refreshed the Stage 11 summary and API / browser acceptance notes in `README.md`, and set US-080 to passing in `scripts/ralph/prd.json`.
+- Preserved the offline default story: real MiKan and Auto Bangumi configuration remain request-scoped, temporary inputs only, with no persistence into storage JSON, browser storage, URLs, logs, screenshots, or traces.
+- Quality checks passed: `uv run pytest -q` (340 passed), `uv run pytest tests/browser -v` (105 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `README.md`
+  - `docs/backlog.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Stage 11 documentation should keep the offline fixture-backed default and the request-scoped real-config exception explicit in both README and backlog notes.
+  - The browser suite now covers the Stage 11 MiKan config form and Auto Bangumi submit flow, so later docs changes should keep those acceptance notes aligned with the tests.
+  - When Stage 11 closes, the remaining work is repository hygiene and archiving rather than new user-facing behavior.
+---
+
 ## 2026-08-12 17:10 CST - US-078
 Thread: https://codex.openai.com/threads/unavailable
 - Implemented the Web UI Request detail explicit Auto Bangumi submit entry for `ACCEPTED` requests.
