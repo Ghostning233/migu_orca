@@ -69,7 +69,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "端点只做连接测试，不启动下载，不改写 Request snapshot。"
     },
     {

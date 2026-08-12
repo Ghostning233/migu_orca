@@ -11,6 +11,7 @@ from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
+from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
 from request_engine.controllers.request_controller import accept_request, summarize_request
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
@@ -1288,3 +1289,222 @@ def test_submit_ab_sanitizes_echoed_ab_response(
     assert "auto-bangumi.local" not in str(payload)
     assert "secret-token" not in saved_ab_result
     assert "auto-bangumi.local" not in saved_ab_result
+
+
+def test_qbittorrent_test_connection_returns_safe_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_test_qbittorrent_connection(
+        *,
+        qbittorrent_config: QBittorrentConfig,
+    ) -> dict[str, Any]:
+        captured["config"] = qbittorrent_config
+        return {
+            "success": True,
+            "summary": {
+                "status": "connected",
+                "reachable": True,
+                "version": "v4.6.7",
+                "endpoint": "http://qbittorrent.local:8080",
+                "username": "private-user",
+                "password": "private-password",
+                "cookie": "SID=secret-session",
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.test_qbittorrent_connection",
+        fake_test_qbittorrent_connection,
+    )
+
+    response = _client().post(
+        "/api/v1/qbittorrent/test-connection",
+        json={
+            "qbittorrent_config": {
+                "endpoint": "http://qbittorrent.local:8080",
+                "username": "private-user",
+                "password": "private-password",
+                "timeout_seconds": 7,
+                "verify_tls": False,
+            }
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": True,
+        "result": {
+            "status": "connected",
+            "reachable": True,
+            "version": "v4.6.7",
+        },
+    }
+    assert "private-user" not in str(payload)
+    assert "private-password" not in str(payload)
+    assert "SID=secret-session" not in str(payload)
+    assert "qbittorrent.local" not in str(payload)
+    assert captured["config"] == QBittorrentConfig(
+        endpoint="http://qbittorrent.local:8080",
+        username="private-user",
+        password="private-password",
+        timeout_seconds=7.0,
+        verify_tls=False,
+    )
+
+
+def test_qbittorrent_test_connection_requires_password_without_calling_controller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: object, **kwargs: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("qBittorrent controller should not be called")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.test_qbittorrent_connection",
+        fail_if_called,
+    )
+
+    response = _client().post(
+        "/api/v1/qbittorrent/test-connection",
+        json={
+            "qbittorrent_config": {
+                "endpoint": "http://qbittorrent.local:8080",
+                "username": "private-user",
+                "timeout_seconds": 7,
+                "verify_tls": True,
+            }
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"] == "qbittorrent_config.[redacted]"
+        for error in payload["error_data"]["errors"]
+    )
+    assert called is False
+    assert "private-user" not in str(payload)
+    assert "qbittorrent.local" not in str(payload)
+
+
+@pytest.mark.parametrize(
+    ("controller_result", "expected_error_type"),
+    [
+        (
+            {
+                "success": False,
+                "summary": None,
+                "error": {
+                    "error_type": "qbittorrent_auth_failed",
+                    "error_message": (
+                        "qBittorrent 认证失败 http://qbittorrent.local:8080 "
+                        "private-user private-password SID=secret-session"
+                    ),
+                    "failed_step": "qbittorrent_login",
+                    "details": {
+                        "category": "auth",
+                        "endpoint": "http://qbittorrent.local:8080",
+                        "username": "private-user",
+                        "password": "private-password",
+                        "cookie": "SID=secret-session",
+                    },
+                },
+            },
+            "qbittorrent_auth_failed",
+        ),
+        (
+            {
+                "success": False,
+                "summary": None,
+                "error": {
+                    "error_type": "qbittorrent_timeout",
+                    "error_message": "qBittorrent HTTP 请求超时",
+                    "failed_step": "qbittorrent_login",
+                    "details": {"category": "timeout"},
+                },
+            },
+            "qbittorrent_timeout",
+        ),
+    ],
+)
+def test_qbittorrent_test_connection_returns_sanitized_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    controller_result: dict[str, Any],
+    expected_error_type: str,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.test_qbittorrent_connection",
+        lambda *, qbittorrent_config: controller_result,
+    )
+
+    response = _client().post(
+        "/api/v1/qbittorrent/test-connection",
+        json={
+            "qbittorrent_config": {
+                "endpoint": "http://qbittorrent.local:8080",
+                "username": "private-user",
+                "password": "private-password",
+                "timeout_seconds": 7,
+                "verify_tls": True,
+            }
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == expected_error_type
+    assert payload["error_data"]["failed_step"] == controller_result["error"][
+        "failed_step"
+    ]
+    assert "private-user" not in str(payload)
+    assert "private-password" not in str(payload)
+    assert "SID=secret-session" not in str(payload)
+    assert "qbittorrent.local" not in str(payload)
+
+
+def test_qbittorrent_test_connection_rejects_invalid_endpoint() -> None:
+    response = _client().post(
+        "/api/v1/qbittorrent/test-connection",
+        json={
+            "qbittorrent_config": {
+                "endpoint": "qbittorrent.local:8080",
+                "username": "private-user",
+                "password": "private-password",
+                "timeout_seconds": 7,
+                "verify_tls": True,
+            }
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "config_error"
+    assert payload["error_message"] == "qBittorrent endpoint 必须是 http(s) URL"
+    assert payload["error_data"]["failed_step"] == "load_qbittorrent_config"
+    assert "private-user" not in str(payload)
+    assert "private-password" not in str(payload)
+    assert "qbittorrent.local" not in str(payload)
+
+
+def test_qbittorrent_test_connection_rejects_missing_config_object() -> None:
+    response = _client().post(
+        "/api/v1/qbittorrent/test-connection",
+        json={},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert payload["error_data"]["errors"][0]["field"] == "qbittorrent_config"

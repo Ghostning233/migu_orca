@@ -4,6 +4,7 @@
 - qBittorrent Web API calls use `QBittorrentTransport` and `QBittorrentResponse` in `src/qbittorrent_engine/controllers/qbittorrent_client.py`; unit tests should inject fake transports and never call a real qBittorrent server.
 - Shared API redaction in `extensions.flask_api.api` must cover qBittorrent username and SID/session identifiers in addition to URLs, absolute paths, password/token/cookie fields, and raw HTML/RSS content.
 - Shared qBittorrent connection tests use `test_qbittorrent_connection()` from `src/qbittorrent_engine/controllers/qbittorrent_controller.py`; keep it explicit, request-scoped, fakeable via `qbittorrent_client`/`client_factory`, and limited to the `success`/`summary`/`error` result envelope.
+- qBittorrent Web API routes should call the shared controller, then re-allowlist response fields/details at the API edge (`status`/`reachable`/`version`, plus classified error metadata) before returning the unified Flask envelope.
 - Ralph sub-agent local intermediate commit messages may be English or tool-generated. Do not spend tokens rewriting intermediate commits only for language style; final PR title, PR description, merge commit, Stage closure commit, archive notes, and acceptance summary must be written in Chinese.
 
 Started: Wed Aug 12 19:02:14 CST 2026
@@ -65,4 +66,21 @@ Thread: https://codex.openai.com/threads/unavailable
   - API and Web UI stories should call `test_qbittorrent_connection()` instead of creating qBittorrent clients directly.
   - Use the controller's `qbittorrent_client` or `client_factory` injection points for offline tests; do not contact a real qBittorrent instance in unit or browser tests.
   - The controller intentionally returns only a sanitized result envelope and does not persist credentials or attach qBittorrent data to Request snapshots.
+---
+## 2026-08-12 19:28 CST - US-084
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented `POST /api/v1/qbittorrent/test-connection` in the Flask Web API with a typed `qbittorrent_config` request body covering endpoint, username, password, timeout_seconds, and verify_tls.
+- Reused the shared qBittorrent connection-test controller and config builder; the endpoint only performs an explicit connection test and does not modify Request snapshots or start downloads.
+- Added API-edge allowlisting for success summaries and classified qBittorrent failures so endpoint, username, password, cookie/SID, raw response content, and local paths are not returned even if a lower layer echoes them.
+- Added Web API tests for successful connection, missing password validation, auth failure, timeout, invalid endpoint, missing config object, and error redaction.
+- Quality checks passed: `uv run pytest -q src/apps/migu_orca_web/views_test.py` (48 passed), `uv run pytest -q` (378 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Patch `apps.migu_orca_web.views.test_qbittorrent_connection` in Web API tests to keep qBittorrent connection cases offline and deterministic.
+  - Treat controller responses as an internal envelope at the Flask boundary: raise classified API errors for `success: false`, and return only the summary object for `success: true`.
+  - qBittorrent API failure details should stay on a small allowlist such as `category`, `field`, and `status_code`; do not pass endpoint, username, password, cookie, or SID details through.
 ---
