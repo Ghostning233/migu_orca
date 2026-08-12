@@ -96,6 +96,26 @@ Thread: https://codex.openai.com/threads/unavailable
   - Web UI request-scoped integration config should be built at submit time and omitted from fixture-mode payloads.
   - Keep integration config out of `preferenceKeys`; only `storage_dir` and `save_request` are persisted as browser preferences.
   - Browser route fakes for `**/api/v1/requests` must continue the initial GET list request when they only intend to capture POST generation.
+
+## 2026-08-12 18:10 CST - US-078
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web UI Request detail Auto Bangumi submit entry for ACCEPTED requests.
+- Added a detail-panel `提交 Auto Bangumi` action that reveals an inline request-scoped AB form with `endpoint`, `token`, and `fallback_enabled`.
+- Kept AB config strictly temporary: token uses password input, and endpoint/token are not written to localStorage, sessionStorage, storage JSON, or URL query.
+- Added explicit confirmation before POSTing to `POST /api/v1/requests/<request_id>/submit-ab`, then refreshed the detail payload with the saved AB result on success.
+- Kept failure handling non-destructive: the existing detail view stays visible, and the notification surfaces a sanitized error message.
+- Added static and browser coverage for ACCEPTED-only visibility, inline form fields, password token input, confirmation, success refresh, and failure recovery.
+- Quality checks passed: `uv run pytest -q` (336 passed), `uv run pytest tests/browser -v` (101 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_detail.py`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - AB submit should reuse the current detail payload locally after success so the result block can refresh without reintroducing hidden persistence.
+  - Browser route interception works best with request-ID-specific `**/api/v1/requests/<id>/submit-ab**` globs.
+  - Hidden forms can still leave DOM text matchers visible; browser assertions should scope to `:visible` when checking user-facing entry points.
 ---
 
 ## 2026-08-12 17:10 CST - US-078
