@@ -107,7 +107,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "使用 Chromium / Google Chrome for Testing；如浏览器依赖缺失，先运行 `./script/setup-browser-deps.sh`。"
     },
     {
@@ -125,7 +125,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "文档收尾必须在实现和浏览器覆盖通过后完成。"
     }
   ]

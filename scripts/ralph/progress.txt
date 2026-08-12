@@ -7,6 +7,7 @@
 - qBittorrent Web API routes should call the shared controller, then re-allowlist response fields/details at the API edge (`status`/`reachable`/`version`, plus classified error metadata) before returning the unified Flask envelope.
 - Server-rendered Web UI shell changes span `templates/migu_orca_web/index.html`, `static/app.js`, `static/style.css`, `src/apps/migu_orca_web/views_test.py`, and browser shell tests under `tests/browser/`; keep credential forms explicit, confirm-gated, request-scoped, and out of local/session storage.
 - Ralph sub-agent local intermediate commit messages may be English or tool-generated. Do not spend tokens rewriting intermediate commits only for language style; final PR title, PR description, merge commit, Stage closure commit, archive notes, and acceptance summary must be written in Chinese.
+- Stage closeout documentation should keep `README.md`, `docs/backlog.md`, `scripts/ralph/prd.json`, and `scripts/ralph/progress.txt` synchronized, especially completed backlog IDs and follow-up backlog items that must remain open.
 
 Started: Wed Aug 12 19:02:14 CST 2026
 ---
@@ -105,4 +106,37 @@ Thread: https://codex.openai.com/threads/unavailable
   - qBittorrent Web UI behavior is intentionally plain server-rendered HTML plus `static/app.js`; do not introduce a frontend build chain for these Stage 12 controls.
   - The qBittorrent test API call should remain outside `apiPath()` so storage directory preferences are not attached to credential-bearing connection-test requests.
   - Stage label/nav changes need updates in both Flask static tests and browser shell tests, even when browser execution tooling is unavailable.
+---
+## 2026-08-12 19:40 CST - US-086
+Thread: https://codex.openai.com/threads/unavailable
+- Added Playwright browser regression coverage for the qBittorrent connection-test panel: default page load does not call the qBittorrent API, the default form stays collapsed, fields/password masking render correctly, client-side endpoint and timeout validation prevents API calls, and confirmation is required before submit.
+- Covered request-scoped POST behavior with a Playwright route fake for `/api/v1/qbittorrent/test-connection`, including endpoint/username/password/timeout_seconds/verify_tls payload verification and no credential leakage through the URL.
+- Covered success and failure rendering safety: success displays only `status`, `reachable`, and `version`; failure preserves list/detail/form state and shows a sanitized error notification without exposing endpoint, username, password, cookie/SID, or local paths.
+- Quality checks passed: `uv run pytest -q tests/browser/test_qbittorrent_connection.py` (3 passed), `uv run pytest -q` (385 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `tests/browser/test_qbittorrent_connection.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Browser qBittorrent tests can route `**/api/v1/qbittorrent/test-connection` directly with Playwright and assert the request body without contacting any real qBittorrent service.
+  - On qBittorrent test success the UI clears sensitive inputs and collapses the form, so sensitive-value assertions should inspect rendered text and storage keys after submission rather than expecting fields to retain credentials.
+  - Failure-path browser tests should select any existing list/detail state before opening the qBittorrent form to verify the connection-test panel does not disrupt unrelated Web UI state.
+---
+## 2026-08-12 19:42 CST - US-087
+Thread: https://codex.openai.com/threads/unavailable
+- Updated README Stage 12 status to describe completed qBittorrent explicit connection testing, including the no implicit connection/download/subscription boundary.
+- Documented the `POST /api/v1/qbittorrent/test-connection` Web API endpoint, request payload, sanitized success envelope, and sanitized failure envelope.
+- Added local acceptance checks for the qBittorrent Web UI entry, confirmation prompt, success/failure behavior, and sensitive configuration not being persisted or rendered.
+- Marked BL-005 complete in `docs/backlog.md` while keeping BL-001 as pending follow-up work.
+- Marked US-087 passing in `scripts/ralph/prd.json`.
+- Quality checks passed: `uv run pytest -q` (385 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `README.md`
+  - `docs/backlog.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Stage closeout docs should update status in both the README top-level overview and the Ralph development section.
+  - Backlog closeout should mark the completed backlog item only; follow-up BL-001 remains open for real MiKan search/RSS parsing.
+  - qBittorrent Stage 12 remains connection-test only; later stories must add separate acceptance criteria before enabling downloads or subscriptions.
 ---
