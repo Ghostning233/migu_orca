@@ -219,7 +219,7 @@ Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复
 ## Ralph 开发流
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
-- 当前活跃阶段：Stage 10（已完成），Web UI Request 操作
+- 当前活跃阶段：Stage 11，Web UI 显式真实 MiKan / Auto Bangumi 配置入口
 - 最近完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
@@ -227,6 +227,23 @@ Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
 - Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`
+
+### Ralph 阶段开发规范
+
+Stage 开发必须通过 Ralph 循环完成，不应绕过 `scripts/ralph/prd.json` 手工挑 story 开发。每次启动一个 Stage 前，应先确认 `scripts/ralph/prd.json` 是当前 Stage 的 PRD，`scripts/ralph/progress.txt` 已记录本 Stage 的约束和进度。
+
+Stage 开发期间，Ralph 每轮只处理一个可验收的 user story。每轮完成后应更新对应 story 的 `passes` 状态和 `scripts/ralph/progress.txt`，并运行该 story 要求的验证命令；涉及 Web UI 的 story 必须运行浏览器测试或记录无法运行的明确原因。
+
+一个 Stage 全部 story 完成后，必须执行收尾流程：
+
+1. 将已完成 Stage 的 `scripts/ralph/prd.json` 和 `scripts/ralph/progress.txt` 归档到 `scripts/ralph/archive/<date>-<stage-name>/`。
+2. 更新 README、`docs/backlog.md` 和必要模块文档，使当前状态、已完成事项和后续待办保持一致。
+3. 运行 `uv run pytest`、`uv run pytest tests/browser -v` 和 `uv run python -m compileall -q src`；如果某项无法运行，必须在提交说明或 PR 描述中写明原因。
+4. 使用中文提交信息提交本 Stage 全部变更。
+5. 推送到 GitHub，创建 PR，确认可合并后合并进 `main`。
+6. 合并后确认本地 `main` 与 `origin/main` 对齐，且工作区干净。
+
+所有 Git commit message、PR 标题和阶段性开发记录都必须使用中文描述，避免混用英文短句作为主要说明。
 
 ### 使用 Claude 运行 Ralph
 
