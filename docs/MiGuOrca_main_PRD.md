@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.4 |
-| 文档状态 | Stage 3 已完成，Stage 4 待开发 |
+| 当前版本 | v0.5 |
+| 文档状态 | Stage 10 已完成，后续待办见 `docs/backlog.md` |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -62,7 +62,7 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 3. 系统根据规则和偏好生成可确认 Request。
 4. 用户确认后，系统调用 Auto Bangumi 或生成降级配置。
 
-当前已完成前三个阶段：离线 Request 生成、Request 确认交互、Auto Bangumi 离线提交契约与 CLI 显式提交路径。真实 Auto Bangumi HTTP adapter、持久化、Web UI 和真实 MiKan 访问仍属于后续阶段。
+当前已完成 Stage 10：离线 Request 生成、Request 确认/取消/受限修改、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试，以及 Web UI 中确认/取消/修改 Request 的操作入口。默认流程仍使用本地 fixture，不隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent，也不隐式写入本地存储。
 
 ## 4. 第一阶段范围
 
@@ -138,21 +138,21 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 
 | 模块编号 | 模块名称 | 当前状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
-| M00 | 入口与流程编排模块 | Stage 3 已实现 CLI 显式 AB 提交流程 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
-| M01 | 用户输入与 Request 管理模块 | Stage 2 已实现确认、取消和受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
+| M00 | 入口与流程编排模块 | Stage 10 已实现 CLI 与 Web API 编排 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
+| M01 | 用户输入与 Request 管理模块 | Stage 10 已实现 CLI/Web 确认、取消和受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
 | M02 | 番剧搜索与匹配模块 | Stage 1 已确认 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
-| M03 | MiKan 数据源模块 | Stage 1 已确认 | P0 | docs/modules/M03-mikan-source-PRD.md |
+| M03 | MiKan 数据源模块 | Stage 5 已实现显式真实 MiKan adapter；实站兼容性仍待优化 | P0 | docs/modules/M03-mikan-source-PRD.md |
 | M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
 | M05 | 字幕组评估模块 | Stage 1 已确认 | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
 | M06 | 种子筛选规则模块 | Stage 1 已确认 | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
 | M07 | 文件夹命名模块 | Stage 1 已确认 | P1 | docs/modules/M07-folder-naming-PRD.md |
 | M08 | 用户偏好与规则配置模块 | Stage 1 已确认 | P1 | docs/modules/M08-user-preference-rule-PRD.md |
 | M09 | Request 确认交互模块 | Stage 2 已实现 | P2 | docs/modules/M09-request-confirmation-PRD.md |
-| M10 | Auto Bangumi 集成模块 | Stage 3 已实现离线契约；Stage 4 待实现真实 HTTP adapter | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
-| M11 | 存储与状态管理模块 | 暂缓 | P2 | docs/modules/M11-storage-state-PRD.md |
+| M10 | Auto Bangumi 集成模块 | Stage 4 已实现真实 HTTP adapter 与显式 CLI 提交路径 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
+| M11 | 存储与状态管理模块 | Stage 6 已实现本地 JSON Request、历史和 AB 结果存储 | P2 | docs/modules/M11-storage-state-PRD.md |
 | M12 | 日志与错误处理模块 | Stage 1 最小化 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | 暂缓 | P2 | docs/modules/M13-web-ui-PRD.md |
-| M14 | 系统配置模块 | Stage 3 已支持显式 AB JSON 配置读取 | P1 | docs/modules/M14-system-config-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 10 已实现本地 Web UI、浏览器测试和 Request 操作入口 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M14 | 系统配置模块 | Stage 5 已支持显式 AB 与 MiKan JSON 配置读取 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
 
@@ -190,8 +190,12 @@ M00 CLI 与流程编排
 | 第二阶段 | 支持 Request 确认、修改、取消 | M09、M01、M06、M07 |
 | 第三阶段 | 建立 Auto Bangumi 离线提交契约、fake client、失败降级 JSON 和显式 CLI 提交路径 | M10、M14、M12 |
 | 第四阶段 | 实现真实 Auto Bangumi HTTP client adapter、网络错误标准化和 CLI 真实 client 注入 | M10、M14、M12 |
-| 第五阶段 | 持久化 Request、状态、历史和结果 | M11、M01、M12 |
-| 第六阶段 | 扩展真实 MiKan 访问、Web UI、批量订阅和历史偏好 | M03、M13、M08 |
+| 第五阶段 | 扩展真实 MiKan 访问和 RSS 读取 | M03、M04、M12、M14 |
+| 第六阶段 | 持久化 Request、状态历史和结果 | M11、M01、M12 |
+| 第七阶段 | Flask Web UI / 管理界面 MVP | M13、M11 |
+| 第八阶段 | Web UI 可用性增强 | M13 |
+| 第九阶段 | 浏览器自动化测试 | M13、测试基础设施 |
+| 第十阶段 | Web UI Request 确认、取消和修改操作入口 | M13、M01、M11 |
 
 ## 10. 主 PRD 已确认事项
 
@@ -235,6 +239,6 @@ M00 CLI 与流程编排
 
 ## 13. 下一步工作
 
-1. 按 `scripts/ralph/prd.json` 启动 Stage 4，优先实现真实 Auto Bangumi HTTP client adapter 边界。
-2. 保持 `--submit-ab` 为显式动作，默认生成、确认、修改、取消路径不得访问外部系统。
-3. 使用 `uv run pytest` 和 `uv run python -m compileall -q src` 验证每个 Ralph story。
+1. 优先处理 `docs/backlog.md` 中的 BL-004：为 Web UI 增加显式真实 MiKan / Auto Bangumi 配置入口。
+2. 继续保持真实 MiKan、Auto Bangumi 和后续 qBittorrent 集成都必须由用户显式配置和触发，默认流程不得访问外部系统。
+3. 每次阶段推进继续使用 `uv run pytest` 和 `uv run python -m compileall -q src` 验证；具备浏览器环境时额外执行 `uv run pytest tests/browser`。

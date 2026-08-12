@@ -69,7 +69,7 @@ src/
 | `shared/config.py` | M08、M14 的最小子集 | 用户 JSON 与默认路径 |
 | `shared/logging.py` | M12 的最小子集 | 标准库日志初始化 |
 
-M11、M13 仍未实现，不提前创建空实现目录。真实 Auto Bangumi HTTP adapter 属于 Stage 4，应在 `ab_engine` 的现有 client 协议边界内演进，不反向污染 Request 生成和确认逻辑。
+M11 已作为 `storage_engine` 实现本地 JSON 存储，M13 已作为 Flask Web UI 实现本地管理界面。真实 Auto Bangumi HTTP adapter 已在 `ab_engine` 的 client 协议边界内实现，不反向污染 Request 生成和确认逻辑。
 
 ## 4. 拆分规则
 

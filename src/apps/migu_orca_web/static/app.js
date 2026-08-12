@@ -527,14 +527,14 @@
         }
       );
       var titles = { accept: "确认成功", cancel: "取消成功", modify: "修改成功" };
+      await loadDetail(requestId);
+      await loadList();
       showNotification("success", titles[actionType] || "操作成功",
         "Request " + requestId, {
           actions: [
             { label: "刷新列表", handler: loadList },
           ],
         });
-      await loadDetail(requestId);
-      await loadList();
     } catch (error) {
       notifyApiError("操作失败", error);
     } finally {
