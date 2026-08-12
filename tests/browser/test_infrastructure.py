@@ -33,13 +33,13 @@ def test_root_redirects_to_index(page: Page, live_server_url: str) -> None:
     assert page.title().startswith("MiGuOrca")
 
 
-def test_index_loads_stage8_shell(page: Page, live_server_url: str) -> None:
-    """The /index page loads the Stage 8 Web UI Usability shell."""
+def test_index_loads_stage11_shell(page: Page, live_server_url: str) -> None:
+    """The /index page loads the Stage 11 Web UI Real Config Entry shell."""
     page.goto(f"{live_server_url}/index")
 
     assert page.title().startswith("MiGuOrca")
     assert page.locator("text=MiGuOrca").count() >= 1
-    assert page.locator("text=Stage 8 Web UI Usability").count() >= 1
+    assert page.locator("text=Stage 11 Web UI Real Config Entry").count() >= 1
 
     # Top navigation anchors
     nav = page.locator(".top-nav")
@@ -113,6 +113,9 @@ def test_generation_form_present(page: Page, live_server_url: str) -> None:
 
     assert page.locator("#request-generate-form").count() >= 1
     assert page.locator('input[name="title"]').count() >= 1
+    assert page.locator('select[name="source"]').count() >= 1
+    assert page.locator('input[name="mikan_search_endpoint"]').count() >= 1
+    assert page.locator('input[name="mikan_timeout_seconds"]').count() >= 1
     assert page.locator('input[name="storage_dir"]').count() >= 1
     assert page.locator('input[name="save_request"]').count() >= 1
     assert page.locator("#request-generate-submit").count() >= 1

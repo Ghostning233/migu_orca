@@ -13,6 +13,8 @@
 - Existing helpers to reuse where possible: `generate_request`, `apply_ab_submit_action`, `apply_request_save_action`, `load_mikan_config`, `create_mikan_client`, `load_ab_config`, `create_auto_bangumi_http_client`, storage repositories, and request summary/detail helpers.
 - Web API Auto Bangumi submit should use request-scoped inline `AutoBangumiConfig`, run through `apply_ab_submit_action`, sanitize `ab_submit_result`, then persist via `apply_request_save_action` so request snapshots and `ab_results/` stay in sync.
 - Browser tests live in `tests/browser/`, use `pytestmark = pytest.mark.browser`, temporary storage, and local fake seams; they must not access real MiKan, Auto Bangumi, or qBittorrent by default.
+- Web UI browser preferences intentionally persist only `storage_dir` and `save_request`; do not add request-scoped MiKan or Auto Bangumi config to `preferenceKeys`, localStorage, sessionStorage, URLs, or storage JSON.
+- Browser tests that route `**/api/v1/requests` must distinguish POST generation from the initial GET list load and continue non-target requests.
 - Browser environment uses Chromium / Google Chrome for Testing through Playwright; run `./script/setup-browser-deps.sh` if browser dependencies are missing.
 - Validate with `uv run pytest`, `uv run pytest tests/browser -v`, and `uv run python -m compileall -q src`.
 
@@ -66,4 +68,30 @@ Thread: https://codex.openai.com/threads/unavailable
   - `apply_ab_submit_action` now supports either the legacy `ab_config_path` or an inline `AutoBangumiConfig`; Web API code should use the inline form and avoid temporary config files.
   - AB submit results can include echoed fields from remote responses, so Web API persistence must sanitize result objects before writing snapshots or `ab_results/`.
   - Missing sensitive payload fields may be redacted in validation error field paths by the shared API sanitizer, for example `ab_config.[redacted]`.
+---
+
+## 2026-08-12 16:52 CST - US-077
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented the Web UI real MiKan generation entry in the server-rendered Request form.
+- Added a `source` selector with `static-fixture` as the default and a hidden MiKan config fieldset that appears only for `mikan`.
+- Added browser-side validation for required `search_endpoint` and positive `timeout_seconds`, blocking API submission when invalid.
+- Updated generation payload construction so fixture mode sends no `mikan_config`, while MiKan mode sends request-scoped inline config.
+- Updated the mode hint to state default offline behavior and that real MiKan config is current-request-only and not written to storage JSON.
+- Added static and browser coverage for form structure, default hidden fields, MiKan field visibility, validation copy, payload shape, and non-persistence in browser preferences.
+- Browser verification: Playwright browser tests ran locally against the Flask test server; no separate dev-browser MCP skill was available in this session.
+- Quality checks passed: `uv run pytest -q` (326 passed) and `uv run python -m compileall -q src`.
+- Files changed:
+  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_generation.py`
+  - `tests/browser/test_infrastructure.py`
+  - `tests/browser/test_shell.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Web UI request-scoped integration config should be built at submit time and omitted from fixture-mode payloads.
+  - Keep integration config out of `preferenceKeys`; only `storage_dir` and `save_request` are persisted as browser preferences.
+  - Browser route fakes for `**/api/v1/requests` must continue the initial GET list request when they only intend to capture POST generation.
 ---

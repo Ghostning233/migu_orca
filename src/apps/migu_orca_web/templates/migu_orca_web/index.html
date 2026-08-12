@@ -10,10 +10,10 @@
   <body>
     <header class="app-header">
       <div class="header-copy">
-        <p class="stage-label">Stage 8 Web UI Usability</p>
+        <p class="stage-label">Stage 11 Web UI Real Config Entry</p>
         <h1>MiGuOrca</h1>
         <p class="mode-summary">
-          运行模式：本地 JSON storage；默认使用仓库 fixture-backed 生成；不会隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent。
+          运行模式：本地 JSON storage；默认离线使用仓库 fixture-backed 生成；真实 MiKan 必须显式选择，配置只用于当前请求且不写入 storage JSON。
         </p>
       </div>
       <nav class="top-nav" aria-label="页面导航">
@@ -50,6 +50,46 @@
           <p id="request-title-help" class="field-help">
             至少输入 1 个非空白字符；提交前会在浏览器中拦截空标题。
           </p>
+
+          <label for="request-source">数据源</label>
+          <select
+            id="request-source"
+            name="source"
+            aria-describedby="request-source-help request-form-error"
+          >
+            <option value="static-fixture" selected>static-fixture</option>
+            <option value="mikan">mikan</option>
+          </select>
+          <p id="request-source-help" class="field-help">
+            默认离线生成；选择 mikan 后才会使用本次填写的真实 MiKan 配置。
+          </p>
+
+          <fieldset id="mikan-config-fields" class="inline-config-fields" hidden>
+            <legend>MiKan 配置</legend>
+            <label for="mikan-search-endpoint">search_endpoint</label>
+            <input
+              id="mikan-search-endpoint"
+              name="mikan_search_endpoint"
+              type="text"
+              autocomplete="off"
+              placeholder="MiKan 搜索入口"
+              aria-describedby="mikan-config-help request-form-error"
+            >
+
+            <label for="mikan-timeout-seconds">timeout_seconds</label>
+            <input
+              id="mikan-timeout-seconds"
+              name="mikan_timeout_seconds"
+              type="number"
+              inputmode="decimal"
+              step="0.1"
+              value="10"
+              aria-describedby="mikan-config-help request-form-error"
+            >
+            <p id="mikan-config-help" class="field-help">
+              仅用于当前生成请求，不保存到 storage JSON、浏览器存储或 URL。
+            </p>
+          </fieldset>
 
           <label for="storage-dir">Storage 目录</label>
           <input

@@ -104,12 +104,13 @@ def test_index_serves_web_ui_shell() -> None:
     assert response.status_code == 200
     assert "text/html" in response.content_type
     assert "MiGuOrca" in html
-    assert "Stage 8 Web UI Usability" in html
+    assert "Stage 11 Web UI Real Config Entry" in html
     assert "Stage 7 Web UI MVP" not in html
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert "运行模式：本地 JSON storage" in html
-    assert "fixture-backed" in html
-    assert "不会隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent" in html
+    assert "默认离线使用仓库 fixture-backed 生成" in html
+    assert "真实 MiKan 必须显式选择" in html
+    assert "配置只用于当前请求且不写入 storage JSON" in html
     assert "Request 生成" in html
     assert "Request 列表" in html
     assert "Request 详情" in html
@@ -127,6 +128,18 @@ def test_index_serves_web_ui_shell() -> None:
     assert "例如：葬送的芙莉莲" in html
     assert "至少输入 1 个非空白字符" in html
     assert 'aria-describedby="request-title-help request-form-error"' in html
+    assert 'id="request-source"' in html
+    assert 'name="source"' in html
+    assert '<option value="static-fixture" selected>static-fixture</option>' in html
+    assert '<option value="mikan">mikan</option>' in html
+    assert "默认离线生成" in html
+    assert 'id="mikan-config-fields"' in html
+    assert "hidden" in html
+    assert 'name="mikan_search_endpoint"' in html
+    assert 'name="mikan_timeout_seconds"' in html
+    assert "search_endpoint" in html
+    assert "timeout_seconds" in html
+    assert "仅用于当前生成请求，不保存到 storage JSON、浏览器存储或 URL" in html
     assert 'name="storage_dir"' in html
     assert "留空时使用默认 `.migu_orca/storage`" in html
     assert 'name="save_request"' in html
@@ -318,18 +331,33 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert response.status_code == 200
     assert "request-form-error" in script
     assert "request-generate-submit" in script
+    assert "request-source" in script
+    assert "mikan-config-fields" in script
+    assert "mikan-search-endpoint" in script
+    assert "mikan-timeout-seconds" in script
     assert "setFormError" in script
     assert "clearFormError" in script
     assert "setSubmitInFlight" in script
+    assert "syncMikanConfigVisibility" in script
+    assert "buildCreateRequestPayload" in script
     assert "titleInput.value.trim()" in script
     assert "请输入标题，至少包含 1 个非空白字符。" in script
+    assert "选择 mikan 时必须填写 search_endpoint。" in script
+    assert "选择 mikan 时 timeout_seconds 必须为正数。" in script
     assert "titleInput.focus()" in script
+    assert "validationError.field.focus()" in script
     assert "setSubmitInFlight(true)" in script
     assert "setSubmitInFlight(false)" in script
     assert "正在生成..." in script
     assert '"title: title"' not in script
     assert "title: title" in script
+    assert "payload.source = \"static-fixture\"" in script
+    assert "payload.source = \"mikan\"" in script
+    assert "payload.mikan_config" in script
     assert script.index("if (!title)") < script.index('fetchJson("/api/v1/requests"')
+    assert script.index("buildCreateRequestPayload(title)") < script.index(
+        'fetchJson("/api/v1/requests"',
+    )
     assert script.index("setSubmitInFlight(true)") < script.index(
         'fetchJson("/api/v1/requests"',
     )
@@ -342,6 +370,8 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert response.status_code == 200
     assert "miguOrca.web.storageDir" in script
     assert "miguOrca.web.saveRequest" in script
+    assert "miguOrca.web.mikan" not in script
+    assert "miguOrca.web.source" not in script
     assert "window.localStorage.getItem" in script
     assert "window.localStorage.setItem" in script
     assert "window.localStorage.removeItem" in script
@@ -368,7 +398,10 @@ def test_static_style_defines_generation_form_validation_states() -> None:
     assert response.status_code == 200
     assert ".field-help" in css
     assert ".field-error" in css
+    assert ".inline-config-fields" in css
+    assert ".inline-config-fields[hidden]" in css
     assert 'input[aria-invalid="true"]' in css
+    assert 'input[type="number"]' in css
     assert "button:disabled" in css
     assert ".secondary-button" in css
 
