@@ -10,7 +10,7 @@
 | --- | --- | --- | --- |
 | 0 | BL-002 | Playwright / 浏览器自动化测试 | 完成 |
 | 1 | BL-003 | Web UI 确认 / 取消 / 修改 Request 的操作入口 | 完成 |
-| 2 | BL-004 | Web UI 真实 MiKan / Auto Bangumi 配置入口 | 待办 |
+| 2 | BL-004 | Web UI 真实 MiKan / Auto Bangumi 配置入口 | 完成 |
 | 3 | BL-005 | qBittorrent 直连 | 待办 |
 | 4 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 待办 |
 
@@ -49,7 +49,7 @@
 
 ### BL-004: Web UI 真实 MiKan / Auto Bangumi 配置入口
 
-- 状态：待办
+- 状态：完成 (Stage 11, 2026-08-12)
 - 来源：Stage 8 Web UI 人工验收
 - 优先级：2
 - 不阻塞：Stage 8 验收通过
@@ -60,7 +60,7 @@
 - 真实 MiKan 入口应要求用户明确选择，不改变默认 `static-fixture` 行为。
 - Auto Bangumi 提交入口应继续要求显式确认，不能隐式提交。
 - 配置输入和错误展示不得泄露 token、完整 endpoint URL、cookie、原始 HTML 或 RSS XML。
-- 需要明确配置保存策略：优先考虑浏览器会话/本地临时输入，是否落盘需另行确认。
+- 配置保存策略已在 Stage 11 明确为 request-scoped：真实 MiKan 与 Auto Bangumi 配置只用于当前生成或提交，不写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。
 
 ### BL-005: qBittorrent 直连
 

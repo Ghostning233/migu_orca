@@ -114,7 +114,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Close documentation only after implementation and browser coverage stories pass."
     }
   ]

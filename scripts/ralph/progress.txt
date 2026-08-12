@@ -157,3 +157,23 @@ Thread: https://codex.openai.com/threads/unavailable
   - Playwright route handlers in this suite should read `route.request`; route patterns that need to match query strings should include a trailing `**`.
   - The Web UI `submit-ab` action refreshes the detail panel from the API result and preserves the existing detail/list on failures.
 ---
+
+## 2026-08-12 17:24 CST - US-080
+Thread: https://codex.openai.com/threads/unavailable
+- Completed Stage 11 documentation and backlog closure for BL-004.
+- Updated README current-state text to Stage 11, including Web UI explicit real MiKan generation and explicit Auto Bangumi submit entry.
+- Added Web API documentation for `source` / `mikan_config` generation payloads and `POST /api/v1/requests/<request_id>/submit-ab`.
+- Expanded local Web UI acceptance steps to cover real MiKan config entry, accepted-only AB submit, sanitized errors, and non-persistence of request-scoped integration config.
+- Marked BL-004 complete in `docs/backlog.md` while leaving BL-005 qBittorrent direct integration and BL-001 real MiKan parser/search compatibility as待办.
+- Marked US-080 `passes: true` in the active PRD.
+- Quality checks passed: `uv run pytest -q` (340 passed), `uv run pytest tests/browser -v` (105 passed), `uv run python -m compileall -q src`, and `git diff --check`.
+- Files changed:
+  - `README.md`
+  - `docs/backlog.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Stage closure docs should update both the top-level current-state summary and the Web API / local acceptance sections, not only the backlog status.
+  - `CODEX_CURRENT_THREAD_ID` may be unset in this environment; use the existing `unavailable` thread placeholder when no thread id is provided.
+  - BL-004 is now complete; the next unfinished backlog items remain BL-005 qBittorrent direct integration and BL-001 real MiKan search/RSS compatibility.
+---

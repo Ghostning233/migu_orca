@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向动画订阅场景的 RSS 编排工具，目标是在 MiKanProject 与 Auto Bangumi 之间提供一层自动化协作能力。
 
-当前已完成 Stage 10：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持 CLI 与 Web UI 中确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。用户也可以通过显式参数启用真实 MiKanProject 数据源；默认生成和确认流程仍不会隐式访问外部系统，也不会隐式写入本地存储。只有显式传入持久化参数时，CLI 或 Web API 才会在本地 JSON 存储目录写入 Request、状态历史或 Auto Bangumi 提交结果。Stage 10 在 Stage 9 浏览器自动化测试基础上补强 Web UI Request 操作入口，包括确认、取消、受限修改、状态历史刷新和统一通知反馈。
+当前已完成 Stage 11：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持 CLI 与 Web UI 中确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。CLI 和 Web UI 都可以通过显式配置启用真实 MiKanProject 数据源；Web UI 详情页也提供仅对 `ACCEPTED` Request 可见的显式 Auto Bangumi 提交入口。默认生成、确认和 Web UI 浏览流程仍不会隐式访问真实 MiKanProject、Auto Bangumi 或 qBittorrent，也不会隐式写入本地存储。只有显式传入持久化参数时，CLI 或 Web API 才会在本地 JSON 存储目录写入 Request、状态历史或 Auto Bangumi 提交结果；真实 MiKan 与 Auto Bangumi 配置在 Web UI 中只用于当前请求，不写入 storage JSON、浏览器存储、URL、日志或 API 响应。
 
 ## 项目目标
 
@@ -21,7 +21,7 @@ MVP 聚焦单番剧的订阅闭环：
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
 - 已建立真实 MiKanProject 数据源 adapter、可注入 HTTP transport、搜索页解析、番剧页 RSS 源发现、真实 RSS XML 读取和安全错误归一化。
 - 当前 CLI 只有在显式传入 `--source mikan` 和 `--mikan-config` 时才会构造真实 MiKan client；只有在显式传入 `--submit-ab` 和 `--ab-config` 时才会构造真实 Auto Bangumi HTTP client；只有在显式传入 `--save-request` 时才会写入本地 JSON 存储。
-- 已提供 Stage 8 Flask Web UI：`/` 重定向到 `/index`，页面可以生成 Request、显式保存 Request、记住浏览器端本地偏好、搜索/筛选/排序本地 Request、读取分组详情，并展示已保存的状态历史和 Auto Bangumi 提交结果摘要。
+- 已提供 Stage 11 Flask Web UI：`/` 重定向到 `/index`，页面可以生成 Request、显式保存 Request、记住浏览器端本地偏好、搜索/筛选/排序本地 Request、读取分组详情，执行确认/取消/受限修改，并通过临时配置显式启用真实 MiKan 生成或显式提交 Auto Bangumi。
 
 ## 关键约定
 
@@ -72,11 +72,12 @@ MVP 聚焦单番剧的订阅闭环：
   - `token`：用于 `Authorization: Bearer <token>` 请求头。不要提交真实 token，错误 details、日志和测试快照也不得包含 token 明文。
   - `fallback_enabled`：提交失败时是否在 `ab_submit_result.fallback_config` 中输出可人工处理的降级 JSON。
 - 真实 AB client 当前发送的创建订阅 payload 字段为 `title`、`rss_url`、`save_path`、`filter_rule`，并要求响应中包含 `id`、`subscription_id` 或 `ab_subscription_id` 之一。真实 Auto Bangumi API 的 endpoint、请求字段和响应字段仍需要按实际部署版本验证。
-- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不属于 Stage 8 Web UI 可用性范围。
+- Web UI 真实 MiKan / Auto Bangumi 配置只在当前请求或当前提交中使用，不能写入 storage JSON、状态历史、浏览器 `localStorage` / `sessionStorage`、URL query、日志、截图或测试 trace。
+- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不属于 Stage 11 Web UI 配置入口范围。
 
-## Stage 8 Flask Web UI
+## Stage 11 Flask Web UI
 
-Stage 8 继续使用 Stage 7 引入的本地 Flask Web UI / 管理界面 MVP，并补强可用性。它复用现有 CLI 编排与 Stage 6 本地 JSON 存储能力，不改变 `migu-orca` CLI 默认行为，也不引入 React/Vite 等前端构建链。
+Stage 11 继续使用 Stage 7 引入的本地 Flask Web UI / 管理界面 MVP，并在 Stage 8 可用性、Stage 9 浏览器自动化、Stage 10 Request 操作入口基础上，增加显式真实 MiKan 配置入口和显式 Auto Bangumi 提交入口。它复用现有 CLI 编排、真实 MiKan adapter、真实 Auto Bangumi HTTP client adapter 与 Stage 6 本地 JSON 存储能力，不改变 `migu-orca` CLI 默认行为，也不引入 React/Vite 等前端构建链。
 
 启动方式：
 
@@ -90,7 +91,7 @@ uv run flask --app wsgi:app run
 - `GET /index`：服务端渲染 Web UI 页面。
 - `GET /healthz`、`GET /readiness`：健康检查。
 
-Web UI 页面包含 Request 生成表单、本地 Request 列表、详情区域、状态历史和 AB 提交结果摘要。Stage 8 额外提供顶部导航与运行模式提示、非空标题浏览器校验、提交中按钮状态、浏览器端 `localStorage` 偏好、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、窄屏单列布局和基础无障碍标记。页面和 API 都不应展示 token、完整 endpoint URL、原始 HTML、原始 RSS XML 或本地绝对路径。
+Web UI 页面包含 Request 生成表单、本地 Request 列表、详情区域、状态历史和 AB 提交结果摘要。页面提供顶部导航与运行模式提示、非空标题浏览器校验、提交中按钮状态、浏览器端 `localStorage` 偏好、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、窄屏单列布局和基础无障碍标记。Stage 11 生成表单新增数据源选择，默认 `static-fixture`，仅选择 `mikan` 时展示 `search_endpoint` 和 `timeout_seconds`；详情页仅对 `ACCEPTED` Request 展示 `提交 Auto Bangumi`，用户输入 endpoint、password token 和 fallback 选项并确认后才会提交。页面和 API 都不应展示 token、完整 endpoint URL、Authorization header、cookie、原始 HTML、原始 RSS XML 或本地绝对路径。
 
 ### Web API
 
@@ -125,7 +126,7 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 
 - `GET /api/v1/requests?storage_dir=.migu_orca/storage`：列出已保存 Request 摘要。未传 `storage_dir` 时使用默认 `.migu_orca/storage`。
 - `GET /api/v1/requests/<request_id>?storage_dir=.migu_orca/storage`：读取完整 Request snapshot，并附带可用的 `history` 与 `ab_result` 只读数据。
-- `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`。`save_request` 未传或为 `false` 时不写入本地 storage；为 `true` 时复用 Stage 6 storage repository 保存 Request。
+- `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source` 和 `mikan_config`。`source` 默认为 `static-fixture`；只有显式传入 `source: "mikan"` 和合法 `mikan_config` 时才会构造真实 MiKan client。`save_request` 未传或为 `false` 时不写入本地 storage；为 `true` 时复用 Stage 6 storage repository 保存 Request，但不会保存 MiKan 配置。
 
 `POST /api/v1/requests` 示例：
 
@@ -137,11 +138,30 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 }
 ```
 
+显式真实 MiKan 生成示例：
+
+```json
+{
+  "title": "咒术回战第三季",
+  "source": "mikan",
+  "mikan_config": {
+    "search_endpoint": "https://mikan.example/Home/Search",
+    "timeout_seconds": 10
+  },
+  "storage_dir": ".migu_orca/storage",
+  "save_request": true
+}
+```
+
 Stage 10 新增 Request 操作端点（仅 PENDING_CONFIRM 状态可操作）：
 
 - `POST /api/v1/requests/<request_id>/accept?storage_dir=.migu_orca/storage`：确认 Request，状态变更为 ACCEPTED。
 - `POST /api/v1/requests/<request_id>/cancel?storage_dir=.migu_orca/storage`：取消 Request，请求体可含 `cancel_reason` 字段。
 - `POST /api/v1/requests/<request_id>/modify?storage_dir=.migu_orca/storage`：修改 Request，请求体含 `patch` 对象（允许字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`）。
+
+Stage 11 新增真实配置入口端点：
+
+- `POST /api/v1/requests/<request_id>/submit-ab?storage_dir=.migu_orca/storage`：对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交。请求体必须包含 `ab_config` 对象，字段为 `endpoint`、`token`、`fallback_enabled`。提交结果会以脱敏形式写回 Request snapshot 和 `ab_results/`；endpoint、token、Authorization header、cookie 和完整 URL 不应出现在 API 响应、日志或本地存储中。
 
 取消示例：
 
@@ -157,6 +177,14 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/cancel?storage_dir=.mig
 curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify?storage_dir=.migu_orca/storage' \
   -H 'Content-Type: application/json' \
   -d '{"patch": {"expected_folder_name": "自定义目录"}}'
+```
+
+显式 Auto Bangumi 提交示例：
+
+```bash
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/submit-ab?storage_dir=.migu_orca/storage' \
+  -H 'Content-Type: application/json' \
+  -d '{"ab_config": {"endpoint": "http://auto-bangumi.local", "token": "replace-with-token", "fallback_enabled": true}}'
 ```
 
 ### 本地验收流程
@@ -180,7 +208,7 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify?storage_dir=.mig
    uv run flask --app wsgi:app run
    ```
 
-4. 打开本地 `/index` 页面；`GET /` 应重定向到 `/index`。确认页面展示 Stage 8 Web UI Usability、顶部锚点导航、运行模式提示、生成表单、Request 列表、Request 详情和验收说明。
+4. 打开本地 `/index` 页面；`GET /` 应重定向到 `/index`。确认页面展示 Stage 11 Web UI、顶部锚点导航、运行模式提示、生成表单、Request 列表、Request 详情和验收说明。
 5. 在生成表单中提交空白标题，确认页面在浏览器端提示错误且不会发起生成；再填写标题，确认提交按钮在请求中禁用，完成后通过统一通知展示生成或保存结果。
 6. 验证保存偏好：修改 Storage 目录和保存勾选状态后刷新页面，确认浏览器恢复最近偏好；点击 `清除本地偏好` 后恢复空 `storage_dir` 和未勾选保存。该偏好只应存在于浏览器 `localStorage`，不写入 storage JSON 或 API 响应。
 7. 验证 Request 列表：刷新列表后使用文本搜索、status 筛选和默认/标题升序/request_id 升序排序，确认匹配计数形如 `显示 2 / 5`，无匹配时显示空状态，清空筛选后列表恢复。
@@ -188,14 +216,17 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify?storage_dir=.mig
 9. 验证通知和恢复：列表加载失败时刷新按钮仍可用；详情加载失败时不清空已加载列表；通知可手动关闭，并会在下一次操作时替换旧消息。
 10. 验证窄屏和键盘操作：在移动宽度下表单、列表和详情为单列且不横向溢出；Tab 能聚焦主要控件和 Request 列表按钮；焦点样式可见，动态通知/列表/详情区域具备合适的语义标记。
 11. 验证 Request 操作（Stage 10）：打开 PENDING_CONFIRM 状态的 Request 详情，确认出现确认/取消/修改按钮；点击确认后确认浏览器弹出确认框，确认后状态变为 ACCEPTED 且按钮消失；点击取消后弹出原因输入框，确认后状态变为 CANCELLED 且 Audit 历史更新；点击修改后展示内联表单（字幕组下拉、filter_rule 输入、folder_name 输入），提交修改后通知展示成功且状态保持 PENDING_CONFIRM。
-12. 通过 API 验证本地列表和详情：
+12. 验证真实 MiKan 配置入口（Stage 11）：生成表单默认选择 `static-fixture`，MiKan 配置字段隐藏且提交 payload 不包含 `mikan_config`；切换为 `mikan` 后显示 `search_endpoint` 与 `timeout_seconds`，空 endpoint 或非正数 timeout 应在浏览器端阻止提交；成功提交时配置只出现在当前 POST body 中，不写入 storage JSON、浏览器存储或 URL。
+13. 验证 Auto Bangumi 提交入口（Stage 11）：打开 `ACCEPTED` Request 详情，确认出现 `提交 Auto Bangumi`；非 `ACCEPTED` Request 不显示该入口。点击后内联表单包含 endpoint、password token 和 fallback 选项，提交前必须出现确认提示；失败时列表和详情不应被清空，只显示脱敏通知；成功后详情和 AB 结果区块刷新。
+14. 验证脱敏和不落盘：页面、通知、API 响应、本地 storage JSON、浏览器 `localStorage` / `sessionStorage`、URL query、测试截图和 trace 不应包含 token、完整 endpoint URL、Authorization header、cookie、原始 HTML 或原始 RSS XML。
+15. 通过 API 验证本地列表和详情：
 
    ```bash
    curl 'http://127.0.0.1:5000/api/v1/requests?storage_dir=.migu_orca/storage'
    curl 'http://127.0.0.1:5000/api/v1/requests/<request_id>?storage_dir=.migu_orca/storage'
    ```
 
-Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。真实 MiKan 搜索/RSS 解析优化继续在 [backlog](docs/backlog.md) 跟踪，当前状态保持未完成。
+Stage 11 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。真实 MiKan 搜索/RSS 解析优化、qBittorrent 直连继续在 [backlog](docs/backlog.md) 跟踪，当前状态保持未完成。
 
 示例 AB 配置：
 
@@ -220,7 +251,8 @@ Stage 8 仍不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复
 
 - 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
 - 当前活跃阶段：Stage 11，Web UI 显式真实 MiKan / Auto Bangumi 配置入口
-- 最近完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
+- 最近完成阶段：Stage 11，Web UI 显式真实 MiKan / Auto Bangumi 配置入口 PRD
+- 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - 后续待办：`docs/backlog.md`
@@ -275,7 +307,7 @@ Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app
 
 Stage 8 已围绕 Web UI 可用性补强：顶部导航与运行模式提示、生成表单说明和本地校验、Storage 偏好记忆、Request 列表搜索/筛选/排序、详情区块重组、统一通知与错误恢复、响应式布局和基础无障碍验收。Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。
 
-Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。Stage 10 将浏览器测试扩展到 Web UI 确认、取消和修改流程，目前共有 88 个浏览器测试。测试默认使用本地 fixture 和临时 storage，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
+Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。Stage 10 将浏览器测试扩展到 Web UI 确认、取消和修改流程。Stage 11 将浏览器测试扩展到显式真实 MiKan 配置入口和显式 Auto Bangumi 提交入口，目前共有 105 个浏览器测试。测试默认使用本地 fixture、临时 storage 和 fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
 
 ## Stage 9 浏览器自动化测试
 
