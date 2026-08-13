@@ -6,7 +6,7 @@
 
 ## 2. 当前边界
 
-当前不建立独立 system config engine。Stage 1 提供默认规则读取；Stage 3 增加显式 Auto Bangumi JSON 配置读取；Stage 5 增加显式 MiKan JSON 配置读取。
+当前不建立独立 system config engine。Stage 1 提供默认规则读取；Stage 3 增加显式 Auto Bangumi JSON 配置读取；Stage 5 增加显式 MiKan JSON 配置读取；Stage 12 增加 qBittorrent 显式连接测试配置边界。
 
 代码内固定默认路径：
 
@@ -31,11 +31,11 @@ config/user/default_rules.json
 
 - 环境变量覆盖；
 - 多 profile 和配置合并；
-- qBittorrent 配置；
+- qBittorrent 全局持久化配置；
 - 配置管理 UI；
 - 独立 M14 engine。
 
-测试和库调用可以显式传入其他 fixture 路径，这属于依赖注入，不属于配置合并系统。
+测试、库调用和 Web API 可以显式传入其他 fixture 路径或 request-scoped 外部系统配置，这属于依赖注入或当前请求配置，不属于配置合并系统。真实 MiKan、Auto Bangumi 与 qBittorrent 的 endpoint、token、username、password、cookie 或 SID 不应写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。
 
 ## 4. 错误处理
 

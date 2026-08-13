@@ -22,7 +22,7 @@ Stage 3 已完成本模块的离线可测契约：AB 提交结果 envelope、Req
 2. RSS 解析。
 3. 种子筛选。
 4. 用户确认交互。
-5. qBittorrent 直接调用。
+5. qBittorrent 直接调用或连接测试。
 
 ## 3. 输入数据
 
@@ -113,6 +113,8 @@ uv run migu-orca "番剧名" --action accept --submit-ab --ab-config config/user
 
 ## 8. qBittorrent 边界
 
-本项目后续阶段原则上不直接调用 qBittorrent。qBittorrent 由 AB 间接管理。
+M10 不直接调用 qBittorrent。Auto Bangumi 创建订阅后的下载行为仍由 AB 间接管理，不在本模块内实现。
 
-如后续需要绕过 AB 直接调用 qBittorrent，应新增独立集成模块或扩展本模块边界。
+Stage 12 已在独立 qBittorrent 边界中实现显式连接测试，用于验证用户临时提供的 qBittorrent Web API 配置。该能力不属于 M10，不创建下载任务，不创建订阅，也不改变 AB 提交流程。
+
+如后续需要绕过 AB 直接调用 qBittorrent 启动下载或创建任务，应新增独立 Stage、独立验收标准和对应 Web UI 操作边界。
