@@ -292,13 +292,13 @@ Stage 12 不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复�
 
 ## Ralph 开发流
 
-- 当前活跃 Ralph PRD：`scripts/ralph/prd.json`
-- 最近完成阶段：Stage 12，qBittorrent 直连显式连接测试 PRD
+- 当前活跃 Ralph PRD：暂无新阶段；`scripts/ralph/prd.json` 保留最近完成的 Stage 12 PRD，全部 story 已通过
+- 最近完成并归档阶段：Stage 12，qBittorrent 直连显式连接测试 PRD
 - 前一完成阶段：Stage 11，Web UI 显式真实 MiKan / Auto Bangumi 配置入口 PRD
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- 后续待办：`docs/backlog.md`
+- 后续待办：`docs/backlog.md`，当前优先项为 BL-001 真实 MiKan 搜索和 RSS 源解析兼容性优化
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
 - Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`
@@ -350,7 +350,7 @@ Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app
 
 Stage 8 已围绕 Web UI 可用性补强：顶部导航与运行模式提示、生成表单说明和本地校验、Storage 偏好记忆、Request 列表搜索/筛选/排序、详情区块重组、统一通知与错误恢复、响应式布局和基础无障碍验收。Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。
 
-Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。Stage 10 将浏览器测试扩展到 Web UI 确认、取消和修改流程。Stage 11 将浏览器测试扩展到显式真实 MiKan 配置入口和显式 Auto Bangumi 提交入口，目前共有 105 个浏览器测试。Stage 12 的 Web UI story 必须继续补充浏览器覆盖，并默认通过 Playwright route fake 验证 qBittorrent 连接测试，不访问真实 qBittorrent。测试默认使用本地 fixture、临时 storage 和 fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
+Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。Stage 10 将 Web UI 扩展到确认、取消和修改流程。Stage 11 将 Web UI 扩展到显式真实 MiKan 配置入口和显式 Auto Bangumi 提交入口。Stage 12 将 Web UI 扩展到 qBittorrent 显式连接测试入口，并通过 Playwright route fake 验证连接测试，不访问真实 qBittorrent。测试默认使用本地 fixture、临时 storage 和 fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
 
 ## Stage 9 浏览器自动化测试
 
