@@ -1,6 +1,7 @@
 # Ralph Progress Log
 ## Codebase Patterns
 - Browser tests that trigger Request generation should seed `miguOrca.web.storageDir` to a temporary fixture path before visiting `/index`; otherwise default `.migu_orca/storage` can be polluted and empty-list tests become order-dependent.
+- Explicit `miguOrca.web.saveRequest = "false"` is preview-only on `/index`; preview details must stay read-only, avoid URL `request_id` sync, and offer a save action before saved Request APIs are available.
 
 Started: Fri Aug 14 16:04:26 CST 2026
 ---
@@ -16,4 +17,17 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: absent `miguOrca.web.saveRequest` is now the saved-by-default path; explicit localStorage value `"false"` remains preview mode for later read-only preview work.
   - Gotcha encountered: calling Settings preference persistence from `/index` can overwrite save behavior because Settings form inputs are absent there.
   - Useful context: Browser tests that generate Requests must seed temporary storage or explicitly preview to avoid leaking saved JSON into default `.migu_orca/storage`.
+---
+## 2026-08-14 16:25:11 CST - US-098
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented explicit read-only rendering for unsaved preview Requests on `/index`, including a `预览（未保存）` saved-state row, preview-mode guidance, and only a `保存此 Request` action.
+- Added a save-from-preview path that regenerates the same title with `save_request: true`, then refreshes detail, Request list, and URL `request_id` state so normal confirm/cancel/modify actions return only after persistence.
+- Prevented preview generation from selecting or syncing temporary request IDs and updated preview notifications to make the unsaved mode explicit.
+- Added browser coverage for preview read-only controls, no calls to accept/cancel/modify/submit-ab while previewing, clean preview URL state, and saving preview into an operable saved Request.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_generation.py`, `tests/browser/test_stage11_real_config_entry.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 414 tests; `uv run pytest tests/browser/ -v` passed with 134 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: explicit `save_request=false` should be treated as a read-only preview contract until the user saves.
+  - Gotcha encountered: static script tests can accidentally match the save-preview POST before the normal generate POST; scope ordering checks to the intended function body.
+  - Useful context: older browser regressions that exercise `save_request=false` need preview wording assertions, not generic generation-success wording.
 ---

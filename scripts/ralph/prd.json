@@ -41,7 +41,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "本 story 可以与 US-097 同步实现，但验收时必须单独验证未保存预览不会触发持久化动作。"
     },
     {

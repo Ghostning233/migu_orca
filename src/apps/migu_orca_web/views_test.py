@@ -361,7 +361,7 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "notification.setAttribute(\"role\", kind === \"error\" ? \"alert\" : \"status\")" in script
     assert "notification-close" in script
     assert "关闭" in script
-    assert "生成成功" in script
+    assert "预览已生成" in script
     assert "保存成功" in script
     assert "已保存 Request " in script
     assert "刷新列表" in script
@@ -378,6 +378,25 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_renders_unsaved_preview_as_read_only() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "预览（未保存）" in script
+    assert "预览模式：此 Request 尚未保存，只能查看" in script
+    assert "保存此 Request" in script
+    assert "async function savePreviewRequest" in script
+    assert "buildCreateRequestPayload(title, {saveRequest: true})" in script
+    assert "renderDetailPayload(result, {preview: !result.saved_request})" in script
+    assert "selectedRequestId = result.saved_request ? generatedRequestId : null" in script
+    assert "syncRequestIdToUrl(null, {replace: true})" in script
+    assert script.index("if (isPreview)") < script.index("} else if (isPending)")
+    assert script.index("if (isPreview)") < script.index(
+        'performAction(request.request_id, "accept", {})'
+    )
 
 
 def test_static_app_script_shows_action_success_after_refresh() -> None:
@@ -463,11 +482,16 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert "source: \"static-fixture\"" in script
     assert "payload.source = \"mikan\"" not in script
     assert "payload.mikan_config" not in script
-    assert script.index("if (!title)") < script.index('fetchJson("/api/v1/requests"')
-    assert script.index("buildCreateRequestPayload(title)") < script.index(
+    generate_start = script.index("async function generateRequest")
+    generate_end = script.index('refreshButton.addEventListener("click", loadList)')
+    generate_script = script[generate_start:generate_end]
+    assert generate_script.index("if (!title)") < generate_script.index(
         'fetchJson("/api/v1/requests"',
     )
-    assert script.index("setSubmitInFlight(true)") < script.index(
+    assert generate_script.index("buildCreateRequestPayload(title)") < generate_script.index(
+        'fetchJson("/api/v1/requests"',
+    )
+    assert generate_script.index("setSubmitInFlight(true)") < generate_script.index(
         'fetchJson("/api/v1/requests"',
     )
 

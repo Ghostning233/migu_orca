@@ -697,12 +697,16 @@
     return;
   }
 
-  function buildCreateRequestPayload(title) {
+  function buildCreateRequestPayload(title, options) {
+    const saveRequest =
+      options && Object.prototype.hasOwnProperty.call(options, "saveRequest")
+        ? Boolean(options.saveRequest)
+        : currentSaveRequest();
     return {
       title: title,
       source: "static-fixture",
       storage_dir: currentStorageDir() || null,
-      save_request: currentSaveRequest(),
+      save_request: saveRequest,
     };
   }
 
@@ -1225,9 +1229,49 @@
     return container;
   }
 
-  function renderDetailPayload(payload) {
+  async function savePreviewRequest(request) {
+    const title = request && request.input && request.input.raw_title
+      ? request.input.raw_title
+      : "";
+    if (!title) {
+      showNotification("error", "保存失败", "预览 Request 缺少标题，无法保存。");
+      return;
+    }
+
+    hideNotification();
+    setSubmitInFlight(true);
+    setState(detailContainer, "正在保存预览 Request...", "loading-state");
+    try {
+      const result = await fetchJson("/api/v1/requests", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(buildCreateRequestPayload(title, {saveRequest: true})),
+      });
+      selectedRequestId = result.request && result.request.request_id;
+      renderDetailPayload(result);
+      await loadList({loadSelectedDetail: false});
+      syncRequestIdToUrl(selectedRequestId);
+      showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+        actions: [
+          { label: "刷新列表", handler: loadList },
+          { label: "查看详情", handler: () => loadDetail(selectedRequestId) },
+        ],
+      });
+    } catch (error) {
+      setState(detailContainer, "预览 Request 保存失败。请稍后重试。", "error-state");
+      notifyApiError("保存失败", error);
+    } finally {
+      setSubmitInFlight(false);
+    }
+  }
+
+  function renderDetailPayload(payload, options) {
     currentDetailPayload = payload;
     var request = payload.request || payload;
+    var isPreview = Boolean(
+      (options && options.preview) ||
+      (Object.prototype.hasOwnProperty.call(payload, "saved_request") && !payload.saved_request)
+    );
     var input = request.input || {};
     var sourceInfo = request.source_info || {};
     var matched = sourceInfo.matched_bangumi || {};
@@ -1247,6 +1291,7 @@
     var overviewFields = detailList([
       ["request_id", request.request_id],
       ["status", request.status],
+      ["保存状态", isPreview ? "预览（未保存）" : "已保存"],
       ["原始标题", input.raw_title],
       ["匹配标题", matched.title],
     ]);
@@ -1265,7 +1310,22 @@
     var actionsContainer = document.createElement("div");
     actionsContainer.className = "detail-actions notification-actions";
 
-    if (isPending) {
+    if (isPreview) {
+      var previewNote = document.createElement("p");
+      previewNote.className = "field-help preview-mode-note";
+      previewNote.textContent =
+        "预览模式：此 Request 尚未保存，只能查看，保存后才可确认、取消、修改或提交 Auto Bangumi。";
+      actionsContainer.appendChild(previewNote);
+
+      var savePreviewBtn = document.createElement("button");
+      savePreviewBtn.type = "button";
+      savePreviewBtn.className = "primary-button detail-action";
+      savePreviewBtn.textContent = "保存此 Request";
+      savePreviewBtn.addEventListener("click", function () {
+        savePreviewRequest(request);
+      });
+      actionsContainer.appendChild(savePreviewBtn);
+    } else if (isPending) {
       var acceptBtn = document.createElement("button");
       acceptBtn.type = "button";
       acceptBtn.className = "primary-button detail-action";
@@ -1319,8 +1379,8 @@
       actionsContainer.appendChild(statusNote);
     }
 
-    var cancelForm = buildCancelForm(request);
-    var modifyForm = buildModifyForm(request);
+    var cancelForm = isPreview ? document.createDocumentFragment() : buildCancelForm(request);
+    var modifyForm = isPreview ? document.createDocumentFragment() : buildModifyForm(request);
     var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
       detailList([
@@ -1431,10 +1491,12 @@
           ...payload,
         }),
       });
-      selectedRequestId = result.request && result.request.request_id;
-      renderDetailPayload(result);
+      var generatedRequestId = result.request && result.request.request_id;
+      selectedRequestId = result.saved_request ? generatedRequestId : null;
+      renderDetailPayload(result, {preview: !result.saved_request});
       await loadList({loadSelectedDetail: false});
       if (result.saved_request) {
+        selectedRequestId = generatedRequestId;
         syncRequestIdToUrl(selectedRequestId);
         showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
           actions: [
@@ -1449,7 +1511,20 @@
           ],
         });
       } else {
-        showNotification("success", "生成成功", "已生成 Request " + selectedRequestId);
+        syncRequestIdToUrl(null, {replace: true});
+        showNotification("success", "预览已生成", "这是未保存预览；保存后才可操作。", {
+          actions: [
+            {
+              label: "保存此 Request",
+              className: "primary-button",
+              handler: () => {
+                if (result.request) {
+                  savePreviewRequest(result.request);
+                }
+              },
+            },
+          ],
+        });
       }
     } catch (error) {
       setState(detailContainer, error.message, "error-state");
