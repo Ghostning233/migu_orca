@@ -276,8 +276,10 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "复制 request_id" in script
     assert "copyTextToClipboard" in script
     assert "navigator.clipboard.writeText" in script
-    assert "查看完整有效种子标题列表" in script
+    assert "查看筛选种子列表" in script
     assert "seed-details" in script
+    assert "literalExcludePattern" in script
+    assert "modify-must-not-contain-literal" in script
     assert "暂无状态历史。" in script
     assert "暂无 Auto Bangumi 提交结果。" in script
     assert "提交 Auto Bangumi" in script
@@ -339,6 +341,8 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert '["must_not_contain", filterRule.must_not_contain]' in script
     assert '["folder_name", config.expected_folder_name]' in script
     assert '["有效种子数", effectiveSeeds.length]' in script
+    assert '["排除种子数", excludedSeeds.length]' in script
+    assert "renderExcludedSeedList" in script
     assert "document.createElement(\"details\")" in script
     assert "seedSummary.textContent" in script
     assert "renderHistorySection(auditSection, payload.history)" in script
@@ -680,6 +684,8 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".overview-actions" in css
     assert ".copy-request-id" in css
     assert ".seed-details summary" in css
+    assert ".seed-groups" in css
+    assert ".seed-exclude-reason" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css
 

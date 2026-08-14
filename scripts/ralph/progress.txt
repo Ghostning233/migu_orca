@@ -2,6 +2,7 @@
 ## Codebase Patterns
 - Browser tests that trigger Request generation should seed `miguOrca.web.storageDir` to a temporary fixture path before visiting `/index`; otherwise default `.migu_orca/storage` can be polluted and empty-list tests become order-dependent.
 - Explicit `miguOrca.web.saveRequest = "false"` is preview-only on `/index`; preview details must stay read-only, avoid URL `request_id` sync, and offer a save action before saved Request APIs are available.
+- Request detail seed feedback should derive valid/excluded lists from the selected `source_info.rss_sources` entry; `confirmable_config.effective_seed_names` is only the selected valid list and does not include exclusion reasons.
 
 Started: Fri Aug 14 16:04:26 CST 2026
 ---
@@ -30,4 +31,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: explicit `save_request=false` should be treated as a read-only preview contract until the user saves.
   - Gotcha encountered: static script tests can accidentally match the save-preview POST before the normal generate POST; scope ordering checks to the intended function body.
   - Useful context: older browser regressions that exercise `save_request=false` need preview wording assertions, not generic generation-success wording.
+---
+## 2026-08-14 16:34:41 CST - US-099
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented visible modify-filter feedback for Request details: the Filter section now shows excluded seed counts, and the Seeds section expands into complete, valid, and excluded groups with excluded reasons.
+- Added a `must_not_contain` literal-mode helper so users can enter `[v2]` and have the UI send a safe case-insensitive regex that matches `v2` or bracketed `[v2]`, while preserving default regex semantics.
+- Added browser coverage for `[v2]` literal exclusion, stable `V2` regex exclusion, seed list/count refresh after successful modify, and preserving form input after modify failures.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_actions.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 416 tests; `uv run pytest tests/browser/ -v` passed with 136 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: Request detail seed comparisons should use the selected RSS source’s `valid_seed_names` and `excluded_seed_names` because excluded entries carry the reason/rule metadata needed for UI feedback.
+  - Gotcha encountered: the qBittorrent browser tests still assert a collapsed Settings form; do not change those until US-101.
+  - Useful context: the Jujutsu fixture has two valid Loli seeds including `V2`, making it a stable browser fixture for modify-filter exclusion assertions.
 ---

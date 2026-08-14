@@ -61,7 +61,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "后端 `modify_request` 已会重算 source 的 `valid_seed_names` 与 `excluded_seed_names`，Stage 14 重点是 UI 输入语义与重新渲染可见性。"
     },
     {

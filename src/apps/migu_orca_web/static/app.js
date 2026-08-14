@@ -877,11 +877,11 @@
     navigator.clipboard.writeText(String(value)).catch(() => {});
   }
 
-  function renderSeedList(container, seeds) {
+  function renderSeedList(container, seeds, emptyText) {
     if (!Array.isArray(seeds) || !seeds.length) {
       const empty = document.createElement("p");
       empty.className = "muted-text";
-      empty.textContent = "无有效种子标题。";
+      empty.textContent = emptyText || "无有效种子标题。";
       container.appendChild(empty);
       return;
     }
@@ -894,6 +894,74 @@
       list.appendChild(item);
     }
     container.appendChild(list);
+  }
+
+  function renderExcludedSeedList(container, seeds) {
+    if (!Array.isArray(seeds) || !seeds.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted-text";
+      empty.textContent = "无排除种子标题。";
+      container.appendChild(empty);
+      return;
+    }
+
+    const list = document.createElement("ul");
+    list.className = "seed-list excluded-seed-list";
+    for (const seed of seeds) {
+      const item = document.createElement("li");
+      const name = seed && seed.name ? seed.name : seed;
+      const reason = seed && seed.reason ? seed.reason : "";
+      item.textContent = displayValue(name);
+      if (reason) {
+        const reasonText = document.createElement("span");
+        reasonText.className = "seed-exclude-reason";
+        reasonText.textContent = " - " + reason;
+        item.appendChild(reasonText);
+      }
+      list.appendChild(item);
+    }
+    container.appendChild(list);
+  }
+
+  function selectedRssSource(sourceInfo, config) {
+    const rssSources = (sourceInfo && sourceInfo.rss_sources) || [];
+    const selectedGroup = config && config.selected_subtitle_group;
+    for (const source of rssSources) {
+      if (source.subtitle_group === selectedGroup) {
+        return source;
+      }
+    }
+    return rssSources.length ? rssSources[0] : {};
+  }
+
+  function combinedSeedNames(validSeeds, excludedSeeds) {
+    const names = [];
+    function addName(value) {
+      const name = value && value.name ? value.name : value;
+      if (name && names.indexOf(name) === -1) {
+        names.push(name);
+      }
+    }
+    if (Array.isArray(validSeeds)) {
+      validSeeds.forEach(addName);
+    }
+    if (Array.isArray(excludedSeeds)) {
+      excludedSeeds.forEach(addName);
+    }
+    return names;
+  }
+
+  function escapeRegexLiteral(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function literalExcludePattern(value) {
+    const trimmed = String(value || "").trim();
+    const bracketMatch = trimmed.match(/^\[([^\]]+)\]$/);
+    if (bracketMatch) {
+      return "(?i:\\[?" + escapeRegexLiteral(bracketMatch[1]) + "\\]?)";
+    }
+    return "(?i:" + escapeRegexLiteral(trimmed) + ")";
   }
 
   function renderHistorySection(container, history) {
@@ -1101,6 +1169,20 @@
     var mncClear = appendClearControl("modify-clear-must-not-contain", "清空 must_not_contain", mncInput);
     container.appendChild(mncLabel);
     container.appendChild(mncInput);
+    var mncHelp = document.createElement("p");
+    mncHelp.id = "modify-must-not-contain-help";
+    mncHelp.className = "field-help";
+    mncHelp.textContent =
+      "默认按正则匹配；要按字面文本排除 [v2] 或 v2，请勾选字面文本模式后输入 [v2]。";
+    container.appendChild(mncHelp);
+    var mncLiteralWrapper = document.createElement("label");
+    mncLiteralWrapper.className = "inline-check literal-mode-check";
+    mncLiteralWrapper.htmlFor = "modify-must-not-contain-literal";
+    var mncLiteralInput = document.createElement("input");
+    mncLiteralInput.id = "modify-must-not-contain-literal";
+    mncLiteralInput.type = "checkbox";
+    mncLiteralWrapper.append(mncLiteralInput, document.createTextNode("字面文本模式"));
+    container.appendChild(mncLiteralWrapper);
     container.appendChild(mncClear.wrapper);
 
     var fnLabel = document.createElement("label");
@@ -1139,18 +1221,19 @@
       }
       var mcVal = mcInput.value.trim();
       var mncVal = mncInput.value.trim();
+      var nextMncVal = mncLiteralInput.checked && mncVal ? literalExcludePattern(mncVal) : mncVal;
       if (
         mcClear.checkbox.checked ||
         mncClear.checkbox.checked ||
         mcVal !== originalMustContain ||
-        mncVal !== originalMustNotContain
+        nextMncVal !== originalMustNotContain
       ) {
         patch.filter_rule = {};
         if (mcClear.checkbox.checked || mcVal !== originalMustContain) {
           patch.filter_rule.must_contain = mcClear.checkbox.checked ? "" : mcVal;
         }
-        if (mncClear.checkbox.checked || mncVal !== originalMustNotContain) {
-          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : mncVal;
+        if (mncClear.checkbox.checked || nextMncVal !== originalMustNotContain) {
+          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : nextMncVal;
         }
       }
       var fnVal = fnInput.value.trim();
@@ -1277,7 +1360,11 @@
     var matched = sourceInfo.matched_bangumi || {};
     var config = request.confirmable_config || {};
     var filterRule = config.filter_rule || {};
-    var effectiveSeeds = config.effective_seed_names || [];
+    var source = selectedRssSource(sourceInfo, config);
+    var validSeeds = source.valid_seed_names || config.effective_seed_names || [];
+    var excludedSeeds = source.excluded_seed_names || [];
+    var allSeeds = combinedSeedNames(validSeeds, excludedSeeds);
+    var effectiveSeeds = config.effective_seed_names || validSeeds;
 
     detailContainer.className = "request-detail";
     detailContainer.replaceChildren();
@@ -1397,6 +1484,7 @@
         ["must_not_contain", filterRule.must_not_contain],
         ["folder_name", config.expected_folder_name],
         ["有效种子数", effectiveSeeds.length],
+        ["排除种子数", excludedSeeds.length],
       ]),
     );
 
@@ -1405,9 +1493,29 @@
     seedDetails.className = "seed-details";
     var seedSummary = document.createElement("summary");
     seedSummary.textContent =
-      "查看完整有效种子标题列表 (" + effectiveSeeds.length + ")";
+      "查看筛选种子列表 (全部 " + allSeeds.length + " / 有效 " +
+      effectiveSeeds.length + " / 排除 " + excludedSeeds.length + ")";
     var seedsContainer = document.createElement("div");
-    renderSeedList(seedsContainer, effectiveSeeds);
+    seedsContainer.className = "seed-groups";
+    var allGroup = document.createElement("div");
+    allGroup.className = "seed-group";
+    var allHeading = document.createElement("h5");
+    allHeading.textContent = "全部种子 (" + allSeeds.length + ")";
+    allGroup.appendChild(allHeading);
+    renderSeedList(allGroup, allSeeds, "无种子标题。");
+    var validGroup = document.createElement("div");
+    validGroup.className = "seed-group";
+    var validHeading = document.createElement("h5");
+    validHeading.textContent = "有效种子 (" + effectiveSeeds.length + ")";
+    validGroup.appendChild(validHeading);
+    renderSeedList(validGroup, effectiveSeeds, "无有效种子标题。");
+    var excludedGroup = document.createElement("div");
+    excludedGroup.className = "seed-group";
+    var excludedHeading = document.createElement("h5");
+    excludedHeading.textContent = "排除种子 (" + excludedSeeds.length + ")";
+    excludedGroup.appendChild(excludedHeading);
+    renderExcludedSeedList(excludedGroup, excludedSeeds);
+    seedsContainer.append(allGroup, validGroup, excludedGroup);
     seedDetails.append(seedSummary, seedsContainer);
     seedsSection.appendChild(seedDetails);
 
