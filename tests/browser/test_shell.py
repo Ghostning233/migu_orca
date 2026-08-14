@@ -39,16 +39,12 @@ class TestIndexStage12Shell:
 
         nav = page.locator(".top-nav")
         assert nav.count() >= 1
-        for href in (
-            "#generate-panel",
-            "#qbittorrent-panel",
-            "#request-list-panel",
-            "#request-detail-panel",
-            "#acceptance-panel",
-        ):
+        for href in ("/index", "/settings"):
             assert nav.locator(f"a[href='{href}']").count() >= 1, (
                 f"Missing nav anchor: {href}"
             )
+        assert nav.locator("text=Request 工作台").count() >= 1
+        assert nav.locator("text=Settings").count() >= 1
 
     def test_mode_hint_describes_local_storage(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
@@ -88,6 +84,38 @@ class TestIndexStage12Shell:
             assert page.locator(f"text={heading}").count() >= 1, (
                 f"Missing heading: {heading}"
             )
+
+
+class TestSettingsShell:
+    """AC: /settings provides a dedicated Settings page with shared navigation."""
+
+    def test_settings_case_redirects(self, page: Page, live_server_url: str) -> None:
+        page.goto(f"{live_server_url}/Settings")
+        page.wait_for_url("**/settings")
+        assert page.title() == "MiGuOrca Settings"
+
+    def test_settings_page_shell_and_placeholders(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        page.goto(f"{live_server_url}/settings")
+
+        assert page.title() == "MiGuOrca Settings"
+        assert page.locator("text=Stage 13 Settings").count() >= 1
+        nav = page.locator(".top-nav")
+        assert nav.locator("a[href='/index']").count() >= 1
+        assert nav.locator("a[href='/settings']").count() >= 1
+        assert nav.locator("a[aria-current='page'][href='/settings']").count() >= 1
+        for panel_id in (
+            "storage-settings-panel",
+            "data-source-settings-panel",
+            "qbittorrent-settings-panel",
+            "auto-bangumi-settings-panel",
+        ):
+            assert page.locator(f"#{panel_id}.panel").count() >= 1
+            assert page.locator(f"#{panel_id} .empty-state").count() >= 1
+
+        for heading in ("Storage 偏好", "数据源", "qBittorrent", "Auto Bangumi"):
+            assert page.locator(f"text={heading}").count() >= 1
 
 
 class TestStaticAssets:

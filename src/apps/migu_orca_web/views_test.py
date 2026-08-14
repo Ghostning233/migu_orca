@@ -119,11 +119,11 @@ def test_index_serves_web_ui_shell() -> None:
     assert "Request 列表" in html
     assert "Request 详情" in html
     assert "验收说明" in html
-    assert 'href="#generate-panel"' in html
-    assert 'href="#qbittorrent-panel"' in html
-    assert 'href="#request-list-panel"' in html
-    assert 'href="#request-detail-panel"' in html
-    assert 'href="#acceptance-panel"' in html
+    assert 'href="/index"' in html
+    assert 'href="/settings"' in html
+    assert 'aria-current="page"' in html
+    assert "Request 工作台" in html
+    assert "Settings" in html
     assert 'id="generate-panel"' in html
     assert 'id="qbittorrent-panel"' in html
     assert 'id="request-list-panel"' in html
@@ -205,6 +205,41 @@ def test_index_serves_web_ui_shell() -> None:
     assert "http://" not in html
     assert "https://" not in html
     assert "<rss" not in html.lower()
+
+
+def test_settings_case_redirects_to_settings() -> None:
+    response = _client().get("/Settings")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/settings"
+
+
+def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
+    response = _client().get("/settings")
+
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "text/html" in response.content_type
+    assert "<title>MiGuOrca Settings</title>" in html
+    assert "MiGuOrca Settings" in html
+    assert "Stage 13 Settings" in html
+    assert 'href="/index"' in html
+    assert 'href="/settings"' in html
+    assert 'aria-current="page"' in html
+    assert "Request 工作台" in html
+    assert "Settings" in html
+    assert 'id="storage-settings-panel"' in html
+    assert 'id="data-source-settings-panel"' in html
+    assert 'id="qbittorrent-settings-panel"' in html
+    assert 'id="auto-bangumi-settings-panel"' in html
+    assert "Storage 偏好" in html
+    assert "数据源" in html
+    assert "qBittorrent" in html
+    assert "Auto Bangumi" in html
+    assert html.count('class="panel settings-panel"') == 4
+    assert "empty-state" in html
+    assert "/migu-orca-static/style.css" in html
+    assert "/migu-orca-static/app.js" not in html
 
 
 def test_static_app_script_wires_request_list_and_detail_interactions() -> None:

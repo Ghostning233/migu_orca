@@ -1,0 +1,195 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage13-web-ui-settings",
+  "description": "MiGuOrca Stage 13：优化 Flask Web UI 信息架构，将配置相关能力迁移到独立 Settings 页面，收敛 /index 为 Request 工作台，并修复当前主页面中配置过载、URL 状态不可恢复、取消/修改交互不足等问题。Stage 13 不新增外部下载或订阅能力，不放宽真实 MiKan、Auto Bangumi 或 qBittorrent 的敏感配置安全边界。",
+  "userStories": [
+    {
+      "id": "US-088",
+      "title": "新增 Settings 页面路由与共享导航骨架",
+      "description": "As a Web UI user, I want a dedicated Settings page so that configuration and connection-test tasks are separated from the Request workbench.",
+      "acceptanceCriteria": [
+        "新增 `GET /settings` 页面路由并渲染独立 Settings 模板",
+        "`GET /Settings` 必须 301 或 302 重定向到 `/settings`",
+        "`GET /` 继续重定向到 `/index`，现有 `/index` 路由保持可访问",
+        "`/index` 和 `/settings` 都展示一致的顶部导航，至少包含 `Request 工作台` 与 `Settings` 两个链接",
+        "Settings 页面包含空状态或占位分区：Storage 偏好、数据源、qBittorrent、Auto Bangumi",
+        "Settings 各分区必须有统一卡片/面板边界，并为后续折叠或渐进展开保留结构",
+        "新增 Flask view 测试覆盖 `/settings`、`/Settings` 和共享导航",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": "保持服务端渲染和现有 static asset 方案，不引入前端构建链。"
+    },
+    {
+      "id": "US-089",
+      "title": "收敛主页面为 Request 工作台",
+      "description": "As a Web UI user, I want the main page to focus on Request generation and management so that configuration panels do not distract from the normal workflow.",
+      "acceptanceCriteria": [
+        "`/index` 不再渲染 qBittorrent endpoint、username、password、timeout_seconds 或 verify_tls 字段",
+        "`/index` 不再渲染 MiKan search_endpoint 和 timeout_seconds 字段",
+        "`/index` 不再渲染验收说明面板或 `acceptance-panel`",
+        "`/index` 仍保留标题输入、生成按钮、保存 Request 开关、Request 列表和 Request 详情",
+        "`/index` 的标题、运行模式摘要、主操作区、列表区和详情区必须形成清晰视觉层级",
+        "`/index` 顶部导航不再包含页面内 qBittorrent 或验收说明锚点，改为 Settings 页面入口",
+        "更新受影响的 Flask 静态测试和浏览器 shell 测试",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": "本 story 只做主页面精简；被移除的配置能力在后续 stories 放入 Settings。"
+    },
+    {
+      "id": "US-090",
+      "title": "将 Storage 偏好迁移到 Settings",
+      "description": "As a Web UI user, I want storage preferences managed in Settings so that the Request generation form only asks for workflow inputs.",
+      "acceptanceCriteria": [
+        "Settings 页面提供默认 `storage_dir` 输入、默认 `save_request` 开关和清除偏好按钮",
+        "Storage 偏好分区必须明确标识为非敏感浏览器偏好，并使用与其他 Settings 分区一致的空/保存/错误状态样式",
+        "Storage 偏好继续只写入浏览器 `localStorage`，键名沿用或安全迁移现有 `miguOrca.web.storageDir` 与 `miguOrca.web.saveRequest`",
+        "`/index` 不再展示 `storage_dir` 输入框，但生成、列表、详情、确认、取消、修改和 AB 提交 API 调用仍使用 Settings 中保存的 storage_dir 偏好",
+        "`/index` 展示只读 Settings 摘要，说明当前 storage_dir 使用默认值还是自定义值，并提供跳转 Settings 的链接",
+        "清除 Settings 偏好后，`/index` 恢复使用默认 `.migu_orca/storage` 行为",
+        "浏览器测试覆盖 Settings 保存偏好、刷新恢复、清除偏好和 `/index` 读取偏好",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "只允许保存 storage 相关非敏感 UI 偏好，不保存真实外部系统 endpoint/token/username/password。"
+    },
+    {
+      "id": "US-091",
+      "title": "将 qBittorrent 连接测试迁移到 Settings",
+      "description": "As a Web UI user, I want qBittorrent connection testing in Settings so that the Request workbench remains focused and credentials stay request-scoped.",
+      "acceptanceCriteria": [
+        "Settings 页面提供 qBittorrent 连接测试表单，字段包含 endpoint、username、password、timeout_seconds 和 verify_tls",
+        "qBittorrent 分区默认采用折叠或渐进展开结构，未展开时不暴露敏感输入字段",
+        "password 字段必须使用 `type=\"password\"`",
+        "提交前继续要求明确确认，确认后调用现有 `POST /api/v1/qbittorrent/test-connection`",
+        "成功结果只展示 `status`、`reachable` 和 `version`",
+        "提交成功后清空 endpoint、username 和 password 字段",
+        "失败时展示统一脱敏错误，不泄露 endpoint、username、password、cookie、SID、本地绝对路径或原始响应体",
+        "`/index` 页面加载和主流程不调用 qBittorrent API",
+        "浏览器测试覆盖 Settings qBittorrent 成功、失败、校验、确认和不持久化敏感字段",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": "复用 Stage 12 API 和 controller，不新增下载或订阅动作。"
+    },
+    {
+      "id": "US-092",
+      "title": "为 Request 详情增加 URL 状态恢复",
+      "description": "As a Web UI user, I want selected Request detail state reflected in the URL so that refreshes and Settings round trips preserve context.",
+      "acceptanceCriteria": [
+        "`/index?request_id=<id>` 加载后自动读取并展示对应 Request 详情",
+        "点击 Request 列表项后，浏览器 URL 使用 `history.pushState` 或等价方式同步 `request_id` query",
+        "刷新带 request_id 的 `/index` 页面后仍展示同一 Request 详情",
+        "当 request_id 不存在或加载失败时，详情区展示脱敏错误且列表仍可加载",
+        "生成并保存新 Request 后，URL 同步为该 Request 的 request_id",
+        "只生成预览且未保存时，不把临时 request_id 写入 URL",
+        "浏览器测试覆盖直接打开、点击列表、刷新恢复、缺失 Request 和生成保存后的 URL 行为",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": "URL query 只能携带 request_id 等非敏感上下文，不能携带 storage_dir 或外部系统配置。"
+    },
+    {
+      "id": "US-093",
+      "title": "将 Auto Bangumi 提交配置迁移到 Settings",
+      "description": "As a Web UI user, I want Auto Bangumi submission configuration handled in Settings so that Request detail stays readable and submission remains explicit.",
+      "acceptanceCriteria": [
+        "ACCEPTED Request 详情页不再内联渲染 Auto Bangumi endpoint/token/fallback 表单",
+        "ACCEPTED Request 详情页展示 `去 Settings 提交 Auto Bangumi` 或等价按钮，链接到 `/settings?request_id=<id>#auto-bangumi`",
+        "PENDING_CONFIRM、CANCELLED 或其他非 ACCEPTED Request 不展示 Auto Bangumi 提交入口",
+        "Settings 页面在存在 request_id query 时展示 Auto Bangumi 提交表单，字段包含 endpoint、token 和 fallback_enabled",
+        "Auto Bangumi 分区必须清楚展示当前 request_id 上下文、提交前置条件和返回 Request 详情入口",
+        "token 字段必须使用 `type=\"password\"`",
+        "提交前继续要求明确确认，确认后调用现有 `POST /api/v1/requests/<request_id>/submit-ab`",
+        "提交成功后清空 endpoint 和 token 字段，展示脱敏提交摘要，并提供返回 `/index?request_id=<id>` 的链接",
+        "失败时保留页面状态并展示统一脱敏错误，不泄露 endpoint、token、Authorization header、cookie、完整 URL 或原始响应体",
+        "浏览器测试覆盖 accepted-only 入口、Settings 提交成功、失败脱敏和返回详情链接",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "继续使用 request-scoped 配置，不将 AB endpoint/token 写入 localStorage、sessionStorage、URL、storage JSON 或日志。"
+    },
+    {
+      "id": "US-094",
+      "title": "修复取消与修改交互",
+      "description": "As a Web UI user, I want cancel and modify actions to use visible forms with clear validation so that Request edits are predictable and accessible.",
+      "acceptanceCriteria": [
+        "取消 Request 不再使用 `window.prompt`，改为详情区内可见取消表单或对话区域",
+        "取消表单支持可选原因、提交、收起，并在提交前要求明确确认",
+        "修改表单提交空 patch 时必须在浏览器端阻止并展示错误，不调用 modify API",
+        "修改表单必须支持明确清空 `must_contain`、`must_not_contain` 和 `expected_folder_name` 的操作",
+        "修改表单提交后仍只允许后端已支持的受限字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`",
+        "取消或修改失败时保留详情、列表和当前表单状态，并展示统一脱敏错误",
+        "浏览器测试覆盖取消表单、取消确认、空 patch 阻止、字段清空和失败恢复",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": "如后端当前不支持清空字段，需要在 request controller 中补齐受限清空语义并添加单元测试。"
+    },
+    {
+      "id": "US-095",
+      "title": "统一 Stage 13 视觉层级与状态反馈",
+      "description": "As a Web UI user, I want a cleaner and more consistent interface so that Request workbench and Settings tasks are easy to scan on desktop and mobile.",
+      "acceptanceCriteria": [
+        "`/index` 标题、运行模式摘要、主操作区、Request 列表和 Request 详情具有清晰阅读顺序，首屏不展示配置表单或开发验收说明",
+        "统一按钮样式并区分动作语义：生成、确认、提交使用主按钮；刷新、修改、返回 Settings 使用次按钮；取消、清空或撤销类操作使用清晰的危险/警示样式",
+        "Request 列表、Request 详情、Settings 各分区都有一致的空状态、加载状态和错误状态容器",
+        "Settings 页面 Storage、数据源、qBittorrent、Auto Bangumi 分区边界清晰，敏感或低频配置支持折叠或渐进展开",
+        "中屏和窄屏下 `/index` 与 `/settings` 保持单列或低密度布局，不出现过密并排表单、横向拥挤导航或不可读详情表格",
+        "通知与错误展示使用统一样式，只展示用户可操作信息，不展示调试噪音、完整 endpoint、token、username、password、cookie、SID、原始 HTML/RSS/XML 或原始响应体",
+        "Request 详情的 Overview、Source、Filter、Seeds、Audit 分组有明确视觉边界，常用操作靠近详情标题",
+        "不引入 React、Vite、复杂动效或新的前端构建链",
+        "更新或新增浏览器测试覆盖主页面层级、Settings 分区、状态反馈、响应式和敏感信息不泄露",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "本 story 是 Stage 13 的 UI 质量门槛，不是可选美化；优先通过 CSS、模板结构、间距、层级和少量原生 JS 完成。"
+    },
+    {
+      "id": "US-096",
+      "title": "补齐 Stage 13 文档与浏览器回归收尾",
+      "description": "As a maintainer, I want Stage 13 documentation and regression coverage synchronized so that future development starts from the new Web UI structure.",
+      "acceptanceCriteria": [
+        "README 更新当前 Web UI 状态，说明 `/index` 是 Request 工作台、`/settings` 是配置与连接测试页面",
+        "README 更新本地验收流程，包含 `/settings`、Settings 偏好、qBittorrent 测试和 Auto Bangumi Settings 提交流程",
+        "README 或 Stage 13 PRD 记录 Stage 13 UI 质量验收要求：视觉层级、按钮体系、状态反馈、Settings 分区、响应式和 Request 详情可扫读性",
+        "`docs/modules/M13-web-ui-PRD.md` 更新 Stage 13 状态和后续边界",
+        "`docs/backlog.md` 增加或更新 Web UI 信息架构优化项并标记 Stage 13 完成情况",
+        "`scripts/ralph/progress.txt` 记录 Stage 13 完成摘要、安全边界、测试结果和后续未完成事项",
+        "所有旧的 Stage 12 单页结构测试已经更新为 Stage 13 结构测试，不再要求主页面存在 qBittorrent 或验收说明面板",
+        "`uv run pytest -q` 通过",
+        "`uv run pytest tests/browser/ -v` 通过",
+        "`uv run python -m compileall -q src` 通过",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "收尾 story 完成后再将 Stage 13 PRD 和 progress 归档。"
+    }
+  ]
+}

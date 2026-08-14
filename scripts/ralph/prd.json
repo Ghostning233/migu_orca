@@ -20,7 +20,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "保持服务端渲染和现有 static asset 方案，不引入前端构建链。"
     },
     {

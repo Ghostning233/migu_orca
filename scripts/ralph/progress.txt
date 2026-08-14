@@ -8,6 +8,7 @@
 - Auto Bangumi submission must remain accepted-only and use `POST /api/v1/requests/<request_id>/submit-ab`; endpoint/token are temporary inputs and must be redacted from UI errors and persisted results.
 - Stage 13 UI work is not only route migration: `/index` and `/settings` must have clear visual hierarchy, consistent primary/secondary/danger button semantics, unified empty/loading/error states, readable medium/narrow layouts, and scannable Request detail sections.
 - Stage closeout documentation should keep `README.md`, `docs/backlog.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, and `scripts/ralph/progress.txt` synchronized.
+- Use shared Jinja includes for navigation shared across `/index` and `/settings`; pass `active_page` from Flask views for `aria-current` state.
 
 Started: Fri Aug 14 12:46 CST 2026
 ---
@@ -39,4 +40,27 @@ Thread: https://codex.openai.com/threads/unavailable
 - **Learnings for future iterations:**
   - Treat Stage 13 visual cleanup as a product requirement with tests, not as post-implementation polish.
   - Settings migration should be paired with consistent state containers and button semantics, otherwise the UI remains fragmented even after route separation.
+---
+## 2026-08-14 13:08 CST - US-088
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented dedicated Settings shell with `GET /settings`, `GET /Settings` redirect, shared top navigation, and placeholder panels for Storage 偏好、数据源、qBittorrent、Auto Bangumi.
+- Files changed:
+  - `src/apps/migu_orca_web/views.py`
+  - `src/apps/migu_orca_web/templates/migu_orca_web/_top_nav.html`
+  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
+  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_shell.py`
+  - `tests/browser/test_infrastructure.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest -q` passed: 390 tests.
+  - `uv run python -m compileall -q src` passed.
+  - Browser coverage was verified through the Playwright browser test suite; no separate dev-browser MCP skill/tool was available in this session.
+- **Learnings for future iterations:**
+  - Settings shell currently does not load `app.js`; future Settings stories should add page-specific wiring deliberately if they need interactivity.
+  - Existing Stage 12 tests still expect the old qBittorrent and acceptance panels on `/index`; later Stage 13 stories must update those tests when moving each feature.
+  - Keep the Settings placeholders as panels with `empty-state` containers so later migrations can preserve consistent section boundaries.
 ---

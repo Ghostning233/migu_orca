@@ -81,7 +81,8 @@ h2 {
 }
 
 .top-nav a:hover,
-.top-nav a:focus {
+.top-nav a:focus,
+.top-nav a[aria-current="page"] {
   border-color: #22577a;
   box-shadow: 0 0 0 2px #d7e9f2;
   outline: none;
@@ -167,6 +168,15 @@ h2 {
 
 .qbittorrent-panel {
   grid-column: 1 / -1;
+}
+
+.settings-layout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-panel {
+  display: grid;
+  gap: 14px;
 }
 
 .acceptance-panel p {

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MiGuOrca Settings</title>
+    <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-copy">
+        <p class="stage-label">Stage 13 Settings</p>
+        <h1>MiGuOrca Settings</h1>
+        <p class="mode-summary">
+          配置与连接测试集中在 Settings；敏感外部系统配置保持显式输入，不写入浏览器存储、URL 或本地 Request JSON。
+        </p>
+      </div>
+      {% include "migu_orca_web/_top_nav.html" %}
+    </header>
+
+    <main class="app-layout settings-layout">
+      <section id="storage-settings-panel" class="panel settings-panel" aria-labelledby="storage-settings-heading">
+        <div class="panel-heading">
+          <h2 id="storage-settings-heading">Storage 偏好</h2>
+        </div>
+        <div class="empty-state">
+          Storage 偏好将在此处管理；当前继续使用 Request 工作台中的默认行为。
+        </div>
+      </section>
+
+      <section id="data-source-settings-panel" class="panel settings-panel" aria-labelledby="data-source-settings-heading">
+        <div class="panel-heading">
+          <h2 id="data-source-settings-heading">数据源</h2>
+        </div>
+        <div class="empty-state">
+          数据源设置将在此处逐步展开；真实 MiKan 配置仍保持显式请求级输入。
+        </div>
+      </section>
+
+      <section id="qbittorrent-settings-panel" class="panel settings-panel" aria-labelledby="qbittorrent-settings-heading">
+        <div class="panel-heading">
+          <h2 id="qbittorrent-settings-heading">qBittorrent</h2>
+        </div>
+        <div class="empty-state">
+          qBittorrent 连接测试将在此处迁移；凭据不会持久化。
+        </div>
+      </section>
+
+      <section id="auto-bangumi-settings-panel" class="panel settings-panel" aria-labelledby="auto-bangumi-settings-heading">
+        <div class="panel-heading">
+          <h2 id="auto-bangumi-settings-heading">Auto Bangumi</h2>
+        </div>
+        <div class="empty-state">
+          Auto Bangumi 提交配置将在此处按 Request 上下文显示；token 不会持久化。
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

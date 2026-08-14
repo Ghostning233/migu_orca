@@ -44,11 +44,10 @@ def test_index_loads_stage12_shell(page: Page, live_server_url: str) -> None:
     # Top navigation anchors
     nav = page.locator(".top-nav")
     assert nav.count() >= 1
-    assert nav.locator("a[href='#generate-panel']").count() >= 1
-    assert nav.locator("a[href='#qbittorrent-panel']").count() >= 1
-    assert nav.locator("a[href='#request-list-panel']").count() >= 1
-    assert nav.locator("a[href='#request-detail-panel']").count() >= 1
-    assert nav.locator("a[href='#acceptance-panel']").count() >= 1
+    assert nav.locator("a[href='/index']").count() >= 1
+    assert nav.locator("a[href='/settings']").count() >= 1
+    assert nav.locator("text=Request 工作台").count() >= 1
+    assert nav.locator("text=Settings").count() >= 1
 
     # Mode hint
     hint = page.locator("text=运行模式：本地 JSON storage").first
@@ -65,6 +64,23 @@ def test_index_loads_stage12_shell(page: Page, live_server_url: str) -> None:
         assert page.locator(f"#{panel_id}").count() >= 1, f"Missing panel: #{panel_id}"
 
     _check_no_sensitive_content(page.content())
+
+
+def test_settings_loads_placeholder_shell(page: Page, live_server_url: str) -> None:
+    """The /settings page loads the Stage 13 Settings shell."""
+    page.goto(f"{live_server_url}/settings")
+
+    assert page.title() == "MiGuOrca Settings"
+    assert page.locator("text=MiGuOrca Settings").count() >= 1
+    assert page.locator(".top-nav a[href='/index']").count() >= 1
+    assert page.locator(".top-nav a[href='/settings']").count() >= 1
+    for panel_id in (
+        "storage-settings-panel",
+        "data-source-settings-panel",
+        "qbittorrent-settings-panel",
+        "auto-bangumi-settings-panel",
+    ):
+        assert page.locator(f"#{panel_id}.panel").count() >= 1
 
 
 def test_static_assets_load_without_critical_errors(
