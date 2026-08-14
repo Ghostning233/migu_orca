@@ -102,7 +102,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Stage14 的 `字面文本模式` 只覆盖排除规则；Stage15 应用更统一的 `使用正则` 和 `大小写敏感` 控件替代它。"
     },
     {

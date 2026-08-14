@@ -951,19 +951,6 @@
     return names;
   }
 
-  function escapeRegexLiteral(value) {
-    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  function literalExcludePattern(value) {
-    const trimmed = String(value || "").trim();
-    const bracketMatch = trimmed.match(/^\[([^\]]+)\]$/);
-    if (bracketMatch) {
-      return "(?i:\\[?" + escapeRegexLiteral(bracketMatch[1]) + "\\]?)";
-    }
-    return "(?i:" + escapeRegexLiteral(trimmed) + ")";
-  }
-
   function renderHistorySection(container, history) {
     const section = createDetailSection("状态历史", "audit-section");
 
@@ -1133,6 +1120,8 @@
     var originalGroup = config.selected_subtitle_group || "";
     var originalMustContain = filterRule.must_contain || "";
     var originalMustNotContain = filterRule.must_not_contain || "";
+    var originalUseRegex = filterRule.use_regex === true;
+    var originalCaseSensitive = filterRule.case_sensitive === true;
     var originalFolderName = config.expected_folder_name || "";
 
     var container = document.createElement("div");
@@ -1181,44 +1170,62 @@
     }
 
     var mcLabel = document.createElement("label");
-    mcLabel.textContent = "must_contain";
+    mcLabel.textContent = "包含规则";
     mcLabel.htmlFor = "modify-must-contain";
     var mcInput = document.createElement("input");
     mcInput.id = "modify-must-contain";
     mcInput.type = "text";
     mcInput.value = originalMustContain;
-    mcInput.placeholder = "正则筛选规则（包含）";
-    var mcClear = appendClearControl("modify-clear-must-contain", "清空 must_contain", mcInput);
+    mcInput.placeholder = "如 1080p（默认按字面匹配）";
+    var mcClear = appendClearControl("modify-clear-must-contain", "清空包含规则", mcInput);
     container.appendChild(mcLabel);
     container.appendChild(mcInput);
     container.appendChild(mcClear.wrapper);
 
     var mncLabel = document.createElement("label");
-    mncLabel.textContent = "must_not_contain";
+    mncLabel.textContent = "排除规则";
     mncLabel.htmlFor = "modify-must-not-contain";
     var mncInput = document.createElement("input");
     mncInput.id = "modify-must-not-contain";
     mncInput.type = "text";
     mncInput.value = originalMustNotContain;
-    mncInput.placeholder = "正则筛选规则（排除）";
-    var mncClear = appendClearControl("modify-clear-must-not-contain", "清空 must_not_contain", mncInput);
+    mncInput.placeholder = "如 [v2]（默认按字面匹配）";
+    var mncClear = appendClearControl("modify-clear-must-not-contain", "清空排除规则", mncInput);
     container.appendChild(mncLabel);
     container.appendChild(mncInput);
-    var mncHelp = document.createElement("p");
-    mncHelp.id = "modify-must-not-contain-help";
-    mncHelp.className = "field-help";
-    mncHelp.textContent =
-      "默认按字面文本匹配且不区分大小写；输入 [v2] 将按字面字符 [v2] 匹配。";
-    container.appendChild(mncHelp);
-    var mncLiteralWrapper = document.createElement("label");
-    mncLiteralWrapper.className = "inline-check literal-mode-check";
-    mncLiteralWrapper.htmlFor = "modify-must-not-contain-literal";
-    var mncLiteralInput = document.createElement("input");
-    mncLiteralInput.id = "modify-must-not-contain-literal";
-    mncLiteralInput.type = "checkbox";
-    mncLiteralWrapper.append(mncLiteralInput, document.createTextNode("字面文本模式"));
-    container.appendChild(mncLiteralWrapper);
     container.appendChild(mncClear.wrapper);
+
+    var filterOptions = document.createElement("div");
+    filterOptions.className = "filter-options";
+
+    var regexWrapper = document.createElement("label");
+    regexWrapper.className = "inline-check filter-option";
+    regexWrapper.htmlFor = "modify-filter-use-regex";
+    var regexInput = document.createElement("input");
+    regexInput.id = "modify-filter-use-regex";
+    regexInput.type = "checkbox";
+    regexInput.checked = originalUseRegex;
+    regexWrapper.append(regexInput, document.createTextNode("使用正则"));
+    filterOptions.appendChild(regexWrapper);
+
+    var caseWrapper = document.createElement("label");
+    caseWrapper.className = "inline-check filter-option";
+    caseWrapper.htmlFor = "modify-filter-case-sensitive";
+    var caseInput = document.createElement("input");
+    caseInput.id = "modify-filter-case-sensitive";
+    caseInput.type = "checkbox";
+    caseInput.checked = originalCaseSensitive;
+    caseWrapper.append(caseInput, document.createTextNode("大小写敏感"));
+    filterOptions.appendChild(caseWrapper);
+
+    container.appendChild(filterOptions);
+
+    var filterHelp = document.createElement("p");
+    filterHelp.id = "modify-filter-help";
+    filterHelp.className = "field-help";
+    filterHelp.textContent =
+      "默认按字面文本匹配且不区分大小写；勾选「使用正则」后按正则匹配，勾选「大小写敏感」后区分大小写。";
+    container.appendChild(filterHelp);
 
     var fnLabel = document.createElement("label");
     fnLabel.textContent = "folder_name";
@@ -1256,22 +1263,25 @@
       }
       var mcVal = mcInput.value.trim();
       var mncVal = mncInput.value.trim();
-      // Stage 15 default is literal substring matching (use_regex=false), so
-      // the literal-mode checkbox is now a no-op: raw text is sent as-is.
-      var nextMncVal = mncVal;
+      var useRegex = regexInput.checked;
+      var caseSensitive = caseInput.checked;
+      var mcChanged = mcClear.checkbox.checked || mcVal !== originalMustContain;
+      var mncChanged = mncClear.checkbox.checked || mncVal !== originalMustNotContain;
       if (
-        mcClear.checkbox.checked ||
-        mncClear.checkbox.checked ||
-        mcVal !== originalMustContain ||
-        nextMncVal !== originalMustNotContain
+        mcChanged ||
+        mncChanged ||
+        useRegex !== originalUseRegex ||
+        caseSensitive !== originalCaseSensitive
       ) {
         patch.filter_rule = {};
-        if (mcClear.checkbox.checked || mcVal !== originalMustContain) {
+        if (mcChanged) {
           patch.filter_rule.must_contain = mcClear.checkbox.checked ? "" : mcVal;
         }
-        if (mncClear.checkbox.checked || nextMncVal !== originalMustNotContain) {
-          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : nextMncVal;
+        if (mncChanged) {
+          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : mncVal;
         }
+        patch.filter_rule.use_regex = useRegex;
+        patch.filter_rule.case_sensitive = caseSensitive;
       }
       var fnVal = fnInput.value.trim();
       if (fnClear.checkbox.checked || fnVal !== originalFolderName) {

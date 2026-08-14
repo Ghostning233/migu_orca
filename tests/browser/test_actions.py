@@ -325,7 +325,14 @@ class TestModifyFlow:
         assert page.locator("#modify-subtitle-group").count() >= 1
         assert page.locator("#modify-must-contain").count() >= 1
         assert page.locator("#modify-must-not-contain").count() >= 1
-        assert page.locator("#modify-must-not-contain-literal").count() >= 1
+        assert "包含规则" in form.inner_text()
+        assert "排除规则" in form.inner_text()
+        regex_box = page.locator("#modify-filter-use-regex")
+        case_box = page.locator("#modify-filter-case-sensitive")
+        assert regex_box.count() >= 1
+        assert case_box.count() >= 1
+        assert regex_box.is_checked() is False
+        assert case_box.is_checked() is False
         assert "默认按字面文本匹配" in form.inner_text()
         assert page.locator("#modify-folder-name").count() >= 1
         assert page.locator("#modify-clear-must-contain").count() >= 1
@@ -360,7 +367,6 @@ class TestModifyFlow:
 
         _click_modify(page)
         page.locator("#modify-must-not-contain").fill("V2")
-        page.locator("#modify-must-not-contain-literal").check()
         page.locator("#detail-modify-form button:has-text('提交修改')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
@@ -387,6 +393,7 @@ class TestModifyFlow:
 
         _click_modify(page)
         page.locator("#modify-must-not-contain").fill("V2")
+        page.locator("#modify-filter-use-regex").check()
         page.locator("#detail-modify-form button:has-text('提交修改')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
@@ -464,7 +471,12 @@ class TestModifyFlow:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert captured["payload"]["patch"] == {
-            "filter_rule": {"must_contain": "", "must_not_contain": ""},
+            "filter_rule": {
+                "must_contain": "",
+                "must_not_contain": "",
+                "use_regex": False,
+                "case_sensitive": False,
+            },
             "expected_folder_name": "",
         }
 
@@ -496,6 +508,125 @@ class TestModifyFlow:
         assert page.locator("#modify-must-not-contain").input_value() == "V2"
         assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
         assert "PENDING_CONFIRM" in page.locator("#request-detail-container").inner_text()
+
+
+class TestModifyFilterOptions:
+    """US-107: 修改表单默认字面匹配，勾选使用正则/大小写敏感时 payload 携带对应布尔值."""
+
+    def _capture_modify(
+        self, page: Page, request_id: str
+    ) -> dict:
+        captured: dict = {}
+
+        def handle_modify(route: object) -> None:
+            if getattr(route, "request").method == "POST":
+                captured["payload"] = getattr(route, "request").post_data_json
+                getattr(route, "fulfill")(
+                    json={
+                        "ok": True,
+                        "result": {
+                            "request": {
+                                "request_id": request_id,
+                                "status": "PENDING_CONFIRM",
+                            },
+                            "summary": {
+                                "request_id": request_id,
+                                "status": "PENDING_CONFIRM",
+                            },
+                        },
+                    }
+                )
+            else:
+                getattr(route, "continue_")()
+
+        page.route(f"**/api/v1/requests/{request_id}/modify**", handle_modify)
+        return captured
+
+    def test_default_filter_submit_sends_false_flags(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-filter-default")
+        captured = self._capture_modify(page, "req-filter-default")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-default")
+
+        _click_modify(page)
+        assert page.locator("#modify-filter-use-regex").is_checked() is False
+        assert page.locator("#modify-filter-case-sensitive").is_checked() is False
+        page.locator("#modify-must-contain").fill("1080p")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        filter_rule = captured["payload"]["patch"]["filter_rule"]
+        assert filter_rule["must_contain"] == "1080p"
+        assert filter_rule["use_regex"] is False
+        assert filter_rule["case_sensitive"] is False
+
+    def test_regex_checked_payload_sends_use_regex_true(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-filter-regex")
+        captured = self._capture_modify(page, "req-filter-regex")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-regex")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("^01")
+        page.locator("#modify-filter-use-regex").check()
+        assert page.locator("#modify-filter-use-regex").is_checked() is True
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        filter_rule = captured["payload"]["patch"]["filter_rule"]
+        assert filter_rule["must_not_contain"] == "^01"
+        assert filter_rule["use_regex"] is True
+        assert filter_rule["case_sensitive"] is False
+
+    def test_case_sensitive_checked_payload_sends_case_sensitive_true(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-filter-case")
+        captured = self._capture_modify(page, "req-filter-case")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-case")
+
+        _click_modify(page)
+        page.locator("#modify-must-contain").fill("V2")
+        page.locator("#modify-filter-case-sensitive").check()
+        assert page.locator("#modify-filter-case-sensitive").is_checked() is True
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        filter_rule = captured["payload"]["patch"]["filter_rule"]
+        assert filter_rule["must_contain"] == "V2"
+        assert filter_rule["use_regex"] is False
+        assert filter_rule["case_sensitive"] is True
+
+    def test_invalid_regex_error_recovery_preserves_form(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-regex-fail")
+
+        def handle_modify(route: object) -> None:
+            getattr(route, "fulfill")(
+                status=500,
+                json={
+                    "ok": False,
+                    "error_type": "invalid_modify_patch",
+                    "error_message": "filter_rule.must_not_contain 不是合法正则",
+                },
+            )
+
+        page.route("**/api/v1/requests/req-filter-regex-fail/modify**", handle_modify)
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-regex-fail")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("[")
+        page.locator("#modify-filter-use-regex").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "不是合法正则" in page.locator("#page-notification").inner_text()
+        assert page.locator("#detail-modify-form").is_visible()
+        assert page.locator("#modify-must-not-contain").input_value() == "["
+        assert page.locator("#modify-filter-use-regex").is_checked() is True
 
 
 class TestErrorRecovery:

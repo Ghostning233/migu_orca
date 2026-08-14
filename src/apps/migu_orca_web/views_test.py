@@ -304,8 +304,14 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "navigator.clipboard.writeText" in script
     assert "查看筛选种子列表" in script
     assert "seed-details" in script
-    assert "literalExcludePattern" in script
-    assert "modify-must-not-contain-literal" in script
+    assert "modify-filter-use-regex" in script
+    assert "modify-filter-case-sensitive" in script
+    assert "使用正则" in script
+    assert "大小写敏感" in script
+    assert "包含规则" in script
+    assert "排除规则" in script
+    assert "literalExcludePattern" not in script
+    assert "modify-must-not-contain-literal" not in script
     assert "暂无状态历史。" in script
     assert "暂无 Auto Bangumi 提交结果。" in script
     assert "提交 Auto Bangumi" in script
@@ -377,6 +383,22 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert "renderAbResultSection(auditSection, payload.ab_result)" in script
     assert "selected_rss_url" in script
     assert "addDetailRow(fields, \"selected_rss_url\"" not in script
+
+
+def test_static_app_script_sends_regex_and_case_sensitive_filter_options() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "patch.filter_rule.use_regex = useRegex" in script
+    assert "patch.filter_rule.case_sensitive = caseSensitive" in script
+    assert "useRegex !== originalUseRegex" in script
+    assert "caseSensitive !== originalCaseSensitive" in script
+    assert "regexInput.checked = originalUseRegex" in script
+    assert "caseInput.checked = originalCaseSensitive" in script
+    # Stage 14 literal helper must not auto-transform raw filter text anymore.
+    assert "escapeRegexLiteral" not in script
+    assert "(?i:" not in script
 
 
 def test_static_app_script_wires_page_notifications() -> None:
