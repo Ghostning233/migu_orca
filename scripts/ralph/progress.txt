@@ -1,277 +1,41 @@
-# Ralph Progress Log
-## Codebase Patterns
-- Web UI is server-rendered Flask under `src/apps/migu_orca_web/`; templates live in `templates/migu_orca_web/`, browser logic in `static/app.js`, and shared styling in `static/style.css`.
-- Web API routes use `extensions.flask_api` class-based views and return the unified `{ok, result}` / `{ok, error_type, error_message}` envelope.
-- Browser tests live under `tests/browser/` and use Flask live-server fixtures plus Playwright; run `./script/setup-browser-deps.sh` if Chromium or system libraries are missing.
-- Real MiKan, Auto Bangumi, and qBittorrent configuration must remain explicit and request-scoped; do not write endpoint, token, username, password, cookie, SID, raw HTML/RSS, raw response bodies, or sensitive local paths to storage JSON, browser storage, URL, logs, screenshots, or traces.
-- qBittorrent connection tests must call `POST /api/v1/qbittorrent/test-connection` and only render `status`, `reachable`, and `version` on success.
-- Auto Bangumi submission must remain accepted-only and use `POST /api/v1/requests/<request_id>/submit-ab`; endpoint/token are temporary inputs and must be redacted from UI errors and persisted results.
-- Stage 13 Auto Bangumi UI lives in Settings: accepted Request details link to `/settings?request_id=<id>#auto-bangumi`, and Settings owns endpoint/token/fallback inputs plus the return link to `/index?request_id=<id>`.
-- Stage 13 UI work is not only route migration: `/index` and `/settings` must have clear visual hierarchy, consistent primary/secondary/danger button semantics, unified empty/loading/error states, readable medium/narrow layouts, and scannable Request detail sections.
-- Stage closeout documentation should keep `README.md`, `docs/backlog.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, and `scripts/ralph/progress.txt` synchronized.
-- Use shared Jinja includes for navigation shared across `/index` and `/settings`; pass `active_page` from Flask views for `aria-current` state.
-- `/index` is the Request workbench: keep generation/list/detail there and move external data source, qBittorrent, Auto Bangumi submission, and other configuration tasks to `/settings` stories.
-- Settings-owned non-sensitive browser preferences use `miguOrca.web.storageDir` and `miguOrca.web.saveRequest` in `localStorage`; `/index` should read those keys through shared JS helpers and must not render editable storage preference controls.
-- Sensitive Settings forms should use collapsed `<details>` sections, guard JS initialization by element presence, require explicit `window.confirm`, and avoid localStorage/sessionStorage/URL persistence for endpoint, username, password, token, cookie, or SID values.
-- `/index` URL state may use only `request_id`; after a flow renders a fresh detail payload, call `loadList({loadSelectedDetail: false})` so list refreshes do not overwrite that detail with stale or missing storage data.
-- Request detail actions should use visible inline forms for extra input; modify clear operations use explicit empty strings in the existing restricted `filter_rule` / `expected_folder_name` patch fields, and browser tests should scope selectors to avoid action/form button label clashes.
-- Stage 13 UI quality regressions live in `tests/browser/test_ui_quality.py`; use them to lock button semantics, Settings disclosure boundaries, Request detail grouping, responsive readability, and sensitive notification redaction.
+Stage 14 Progress - Web UI Request Operability
 
-Started: Fri Aug 14 12:46 CST 2026
----
-## 2026-08-14 12:46 CST - Stage 13 Planning
-Thread: https://codex.openai.com/threads/unavailable
-- Inspected the current Stage 12 Web UI templates, JavaScript, Flask routes, tests, README, PRD, backlog, and Ralph state.
-- Identified that `/index` currently mixes Request workbench concerns with MiKan configuration, qBittorrent connection testing, Auto Bangumi submission configuration, storage preferences, and development acceptance notes.
-- Created Stage 13 scope: split configuration-related features into `/settings`, keep `/index` focused on Request generation/list/detail/actions, add URL-restorable Request detail state, and fix cancel/modify usability gaps.
-- Replaced active `scripts/ralph/prd.json` with Stage 13 user stories US-088 through US-096, all initialized with `passes: false`.
-- Files changed:
-  - `docs/MiGuOrca_stage13_web_ui_settings_PRD.md`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Current browser tests intentionally lock in the Stage 12 single-page shell and must be updated as part of Stage 13.
-  - `/settings` should be a separate server-rendered page, not a hash-only section inside `/index`.
-  - URL query state may carry `request_id`; it must not carry `storage_dir` or external service configuration.
----
-## 2026-08-14 13:10 CST - Stage 13 Planning Update
-Thread: https://codex.openai.com/threads/unavailable
-- Promoted Stage 13 UI quality work from optional backlog-style notes to mandatory acceptance requirements.
-- Added Ralph story US-095 for visual hierarchy, button semantics, empty/loading/error states, Settings section structure, responsive readability, notification/error consistency, and Request detail scanability.
-- Renumbered the Stage 13 documentation closeout story to US-096 and added documentation criteria for the UI quality requirements.
-- Preserved the Flask server-rendered + native JS architecture and Stage 12 sensitive configuration safety boundary.
-- Files changed:
-  - `docs/MiGuOrca_stage13_web_ui_settings_PRD.md`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- **Learnings for future iterations:**
-  - Treat Stage 13 visual cleanup as a product requirement with tests, not as post-implementation polish.
-  - Settings migration should be paired with consistent state containers and button semantics, otherwise the UI remains fragmented even after route separation.
----
-## 2026-08-14 13:08 CST - US-088
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented dedicated Settings shell with `GET /settings`, `GET /Settings` redirect, shared top navigation, and placeholder panels for Storage 偏好、数据源、qBittorrent、Auto Bangumi.
-- Files changed:
-  - `src/apps/migu_orca_web/views.py`
-  - `src/apps/migu_orca_web/templates/migu_orca_web/_top_nav.html`
-  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
-  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
-  - `src/apps/migu_orca_web/static/style.css`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `tests/browser/test_shell.py`
-  - `tests/browser/test_infrastructure.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest -q` passed: 390 tests.
-  - `uv run python -m compileall -q src` passed.
-  - Browser coverage was verified through the Playwright browser test suite; no separate dev-browser MCP skill/tool was available in this session.
-- **Learnings for future iterations:**
-  - Settings shell currently does not load `app.js`; future Settings stories should add page-specific wiring deliberately if they need interactivity.
-  - Existing Stage 12 tests still expect the old qBittorrent and acceptance panels on `/index`; later Stage 13 stories must update those tests when moving each feature.
-  - Keep the Settings placeholders as panels with `empty-state` containers so later migrations can preserve consistent section boundaries.
----
-## 2026-08-14 13:24 CST - US-089
-Thread: https://codex.openai.com/threads/unavailable
-- Refocused `/index` as the Request workbench by removing inline MiKan source configuration, the qBittorrent connection-test panel, and the acceptance notes panel.
-- Simplified `app.js` so the workbench no longer queries removed controls, always submits fixture-mode generation, and does not call or wire qBittorrent connection testing from `/index`.
-- Updated Flask static/shell assertions and browser regressions to verify the retained Request generation, save switch, list, detail, and shared Settings navigation while asserting removed configuration controls are absent.
-- Files changed:
-  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
-  - `src/apps/migu_orca_web/static/app.js`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `tests/browser/test_generation.py`
-  - `tests/browser/test_infrastructure.py`
-  - `tests/browser/test_qbittorrent_connection.py`
-  - `tests/browser/test_shell.py`
-  - `tests/browser/test_stage11_real_config_entry.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed: 54 tests.
-  - `uv run python -m compileall -q src` passed.
-  - `uv run pytest tests/browser/test_shell.py tests/browser/test_infrastructure.py tests/browser/test_generation.py tests/browser/test_qbittorrent_connection.py tests/browser/test_stage11_real_config_entry.py -q` passed: 51 tests.
-  - `uv run pytest -q` passed: 386 tests.
-  - `uv run pytest tests/browser/ -v` passed: 107 tests.
-- **Learnings for future iterations:**
-  - `/index` should not initialize static JS for controls that only future Settings stories will own; absent controls should be removed from both template and initialization code together.
-  - Browser tests that previously verified inline MiKan/qBittorrent forms should become boundary tests for `/index` until the corresponding Settings stories add new controls.
-  - Storage directory and save-request controls intentionally remain on `/index` until US-090 migrates those preferences.
----
-## 2026-08-14 13:39 CST - US-090
-Thread: https://codex.openai.com/threads/unavailable
-- Migrated non-sensitive Storage preferences to `/settings`, including default `storage_dir`, default `save_request`, save and clear actions, and unified state feedback.
-- Replaced `/index` storage preference inputs with a read-only Settings summary and link while preserving generation, list, detail, confirm, cancel, modify, and Auto Bangumi API calls through the saved Settings preferences.
-- Updated browser helpers and regressions to seed/read storage preferences through `localStorage` instead of the old `/index` input controls.
-- Files changed:
-  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
-  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
-  - `src/apps/migu_orca_web/static/app.js`
-  - `src/apps/migu_orca_web/static/style.css`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `tests/browser/conftest.py`
-  - `tests/browser/test_a11y.py`
-  - `tests/browser/test_actions.py`
-  - `tests/browser/test_detail.py`
-  - `tests/browser/test_generation.py`
-  - `tests/browser/test_infrastructure.py`
-  - `tests/browser/test_list.py`
-  - `tests/browser/test_shell.py`
-  - `tests/browser/test_stage11_real_config_entry.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed: 54 tests.
-  - `uv run pytest tests/browser/test_generation.py tests/browser/test_infrastructure.py tests/browser/test_a11y.py tests/browser/test_list.py tests/browser/test_detail.py tests/browser/test_actions.py tests/browser/test_stage11_real_config_entry.py -q` passed: 85 tests.
-  - `uv run python -m compileall -q src` passed.
-  - `uv run pytest -q` passed: 388 tests.
-  - `uv run pytest tests/browser/ -v` passed: 109 tests.
-  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
-- **Learnings for future iterations:**
-  - Keep Settings preference controls and `/index` summary in sync through `restoreWebPreferences`, `currentStorageDir`, and `currentSaveRequest`; avoid reintroducing direct `/index` storage inputs.
-  - Browser tests that need non-default storage should call `set_storage_preferences(page, storage_dir, save_request=...)` before navigating to `/index`.
-  - The Settings page now intentionally loads `app.js`; page-specific initialization must guard missing controls so future Settings sections can share helpers without breaking `/index`.
----
-## 2026-08-14 13:45 CST - US-091
-Thread: https://codex.openai.com/threads/unavailable
-- Migrated qBittorrent connection testing into `/settings` with a collapsed Settings section, endpoint/username/password/timeout/verify_tls fields, password masking, explicit confirmation, safe success summary rendering, and sensitive-field clearing on success.
-- Kept `/index` free of qBittorrent controls and API calls while sharing guarded `app.js` helpers across Request workbench and Settings.
-- Added Flask shell assertions and Playwright coverage for Settings qBittorrent success, failure redaction, validation, confirmation cancellation, and non-persistence of qBittorrent values.
-- Files changed:
-  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
-  - `src/apps/migu_orca_web/static/app.js`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `tests/browser/test_qbittorrent_connection.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest src/apps/migu_orca_web/views_test.py tests/browser/test_qbittorrent_connection.py -q` passed: 62 tests.
-  - `uv run pytest -q` passed: 393 tests.
-  - `uv run pytest tests/browser/ -v` passed: 114 tests.
-  - `uv run python -m compileall -q src` passed.
-  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
-- **Learnings for future iterations:**
-  - Settings page code must stay element-guarded because `app.js` is shared with `/index`.
-  - For sensitive Settings test forms, intercept API calls in browser tests and assert both request payload shape and browser-storage non-persistence.
-  - qBittorrent failure UI should ignore server-provided detail text and show a generic actionable message, while success rendering should only use the API's safe `status`, `reachable`, and `version` fields.
----
-## 2026-08-14 13:54 CST - US-092
-Thread: https://codex.openai.com/threads/unavailable
-- Implemented Request detail URL state on `/index`: direct `?request_id=<id>` loads restore details, list item clicks push `request_id`, refresh preserves the selected detail, and browser back/forward rehydrates the detail panel.
-- Kept URL state limited to non-sensitive `request_id`, showed a generic safe detail-load error for missing IDs, and avoided writing preview-only generated Request IDs to the URL.
-- Added browser regressions for direct open, click URL sync, refresh restore, missing Request recovery, saved generation URL sync, and preview generation URL non-persistence.
-- Files changed:
-  - `src/apps/migu_orca_web/static/app.js`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `tests/browser/test_detail.py`
-  - `tests/browser/test_generation.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed: 54 tests.
-  - `uv run pytest tests/browser/test_detail.py tests/browser/test_generation.py -q` passed: 37 tests.
-  - `uv run pytest -q` passed: 399 tests.
-  - `uv run pytest tests/browser/ -v` passed: 120 tests.
-  - `uv run python -m compileall -q src` passed.
-  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
-- **Learnings for future iterations:**
-  - URL query state must stay non-sensitive; keep storage_dir and external service config in Settings preferences or request-scoped POST bodies, not in the URL.
-  - List refresh can race with generation/action rendering, so suppress selected-detail auto-load when the caller already rendered the intended detail state.
-  - Missing detail loads should use a generic actionable error and keep the Request list usable.
----
-## 2026-08-14 14:05 CST - US-093
-Thread: https://codex.openai.com/threads/unavailable
-- Migrated Auto Bangumi submission configuration from ACCEPTED Request detail into `/settings?request_id=<id>#auto-bangumi`.
-- Request detail now shows an accepted-only Settings link and no longer renders endpoint/token/fallback inputs inline.
-- Settings now shows request_id context, endpoint/token/fallback inputs, explicit confirmation, safe success/failure feedback, sensitive-field clearing on success, and a return link to `/index?request_id=<id>`.
-- Files changed:
-  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
-  - `src/apps/migu_orca_web/static/app.js`
-  - `src/apps/migu_orca_web/views_test.py`
-  - `tests/browser/test_actions.py`
-  - `tests/browser/test_detail.py`
-  - `tests/browser/test_stage11_real_config_entry.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed: 54 tests.
-  - `uv run pytest tests/browser/test_actions.py tests/browser/test_detail.py tests/browser/test_stage11_real_config_entry.py tests/browser/test_shell.py -q` passed: 61 tests.
-  - `uv run pytest -q` passed from repo root: 399 tests.
-  - `uv run pytest tests/browser/ -v` passed: 120 tests.
-  - `uv run python -m compileall -q src` passed.
-  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
-- **Learnings for future iterations:**
-  - Accepted Request detail should link to Settings for Auto Bangumi submission instead of rendering sensitive inputs inline.
-  - Settings forms can share `app.js` with `/index`, but all initialization must be guarded by element presence because each page owns different controls.
-  - Capture Settings notification text before navigating back to `/index` in browser tests, because page navigation clears the Settings DOM state.
----
-## 2026-08-14 14:13 CST - US-094
-Thread: https://codex.openai.com/threads/unavailable
-- Replaced prompt-based Request cancellation with a visible detail-panel cancel form, optional reason field, collapse action, danger styling, and explicit confirmation before the existing cancel API call.
-- Tightened modify behavior so unchanged submissions are blocked in the browser, clear operations for `must_contain`, `must_not_contain`, and `expected_folder_name` are explicit, and failed modify calls preserve the current detail/form state.
-- Added backend support and unit coverage for clearing `expected_folder_name` through the existing restricted modify patch field.
-- Files changed:
-  - `src/apps/migu_orca_web/static/app.js`
-  - `src/apps/migu_orca_web/static/style.css`
-  - `src/request_engine/controllers/request_controller.py`
-  - `src/request_engine/controllers/request_controller_test.py`
-  - `tests/browser/test_actions.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest ../../src/request_engine/controllers/request_controller_test.py ../../tests/browser/test_actions.py -q` passed: 45 tests.
-  - `uv run pytest -q` passed from repo root: 403 tests.
-  - `uv run pytest tests/browser/ -v` passed: 124 tests.
-  - `uv run python -m compileall -q src` passed.
-  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
-- **Learnings for future iterations:**
-  - Request detail action forms are built dynamically in shared `static/app.js`; keep selectors scoped because visible action buttons and hidden inline forms can share button labels.
-  - Modify clear semantics should be represented by explicit empty strings in the existing restricted `filter_rule` / `expected_folder_name` patch fields, not by adding new backend patch fields.
-  - Browser tests for action failures can intercept the request API and assert the existing detail DOM remains visible because `performAction` only reloads detail/list after success.
----
-## 2026-08-14 14:19 CST - US-095
-Thread: https://codex.openai.com/threads/unavailable
-- Unified Stage 13 UI semantics by making primary, secondary, and danger actions explicit across `/index`, `/settings`, and dynamic Request detail controls.
-- Strengthened shared state feedback with reusable success-state styling, kept loading/error/empty containers consistent, and moved completed Settings/qBittorrent/Auto Bangumi feedback out of loading styling.
-- Improved Request detail scanability by giving Overview, Source, Filter, Seeds, and Audit groups visible section boundaries and placing action controls directly below the detail heading.
-- Added browser regressions for workbench hierarchy, Settings disclosure boundaries, detail grouping/action placement, narrow viewport readability, and notification redaction.
-- Files changed:
-  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
-  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
-  - `src/apps/migu_orca_web/static/app.js`
-  - `src/apps/migu_orca_web/static/style.css`
-  - `tests/browser/test_ui_quality.py`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest src/apps/migu_orca_web/views_test.py tests/browser/test_ui_quality.py -q` passed: 59 tests.
-  - `uv run python -m compileall -q src` passed.
-  - `uv run pytest -q` passed: 408 tests.
-  - `uv run pytest tests/browser/ -v` passed: 129 tests.
-  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
-- **Learnings for future iterations:**
-  - Use explicit `primary-button`, `secondary-button`, and `danger-button` classes when adding new Web UI actions so visual semantics remain testable.
-  - Completed async Settings results should use `success-state`; reserve `loading-state` for in-flight work.
-  - Keep Stage 13 visual regressions in `tests/browser/test_ui_quality.py` so UI hierarchy requirements remain separate from behavior-specific browser tests.
----
-## 2026-08-14 14:29 CST - US-096
-Thread: https://codex.openai.com/threads/unavailable
-- Completed Stage 13 documentation closeout: README now describes `/index` as the Request workbench and `/settings` as the configuration and connection-test page, with updated local acceptance steps for Settings preferences, qBittorrent testing, Auto Bangumi Settings submission, URL detail recovery, UI quality gates, and security boundaries.
-- Updated the M13 Web UI module PRD to mark Stage 13 as connected, record Settings ownership and UI quality requirements, and clarify remaining boundaries.
-- Updated backlog with completed BL-006 for Web UI Settings information architecture and Stage 13 regression coverage.
-- Verified old Stage 12 single-page structure expectations are replaced by Stage 13 browser regressions covering Settings, removed workbench configuration controls, UI quality, and sensitive information redaction.
-- Files changed:
-  - `README.md`
-  - `docs/modules/M13-web-ui-PRD.md`
-  - `docs/backlog.md`
-  - `scripts/ralph/prd.json`
-  - `scripts/ralph/progress.txt`
-- Quality checks:
-  - `uv run pytest -q` passed: 408 tests.
-  - `uv run pytest tests/browser/ -v` passed: 129 tests.
-  - `uv run python -m compileall -q src` passed.
-- **Learnings for future iterations:**
-  - Stage closeout docs need to update both the user-facing README flow and module/backlog state; otherwise the repo can still describe removed single-page UI behavior even when tests pass.
-  - Treat `tests/browser/test_ui_quality.py`, `tests/browser/test_shell.py`, and the Settings-specific browser tests as the canonical Stage 13 regression set for future UI structure changes.
-  - No separate dev-browser MCP skill/tool was available in this session; Playwright browser tests provided browser verification.
----
+Current Status:
+- Stage 13 has been completed and merged into main.
+- Stage 14 PRD has been created to address Web UI request operability bugs reported after Stage 13.
+- No Stage 14 implementation has started in this planning commit.
+
+Observed Stage 14 Bugs:
+- `/index` can render Request detail after generating `咒术回战`, but confirm, cancel, and modify fail with `未找到已保存的 Request`.
+- The default generate flow can create an unsaved preview while still exposing actions that require a persisted Request.
+- Request list validation is blocked because the normal generate flow does not reliably save a Request.
+- Modify exclude rule input `[v2]` does not give visible filtering feedback; Seeds still appear to include v2 titles from the user's perspective.
+- Request detail Seeds currently only shows an effective seed list, not complete source seeds and excluded seeds.
+- `/settings` qBittorrent connection test is wrapped in a disclosure/dropdown; user expects the configuration/test form to be shown directly.
+
+Codebase Patterns:
+- Flask routes and API handlers live under `src/apps/migu_orca_web/`.
+- Server-rendered templates live under `src/apps/migu_orca_web/templates/migu_orca_web/`.
+- Web UI JavaScript lives in `src/apps/migu_orca_web/static/app.js`.
+- The Request workbench is `/index`; Settings is `/settings`.
+- API responses use `{"data": ...}` for success and `{"error": {"code", "message", "details"}}` for failures.
+- Request action APIs load saved snapshots from storage; unsaved preview request IDs cannot be accepted, cancelled, modified, or submitted to Auto Bangumi.
+- `request_controller.modify_request` recomputes source `valid_seed_names` and `excluded_seed_names` when `filter_rule` changes.
+- Current detail rendering primarily uses `confirmable_config.effective_seed_names` for Seeds, which is insufficient for filter inspection.
+- Browser tests live under `tests/browser/` and use Playwright-style page checks.
+- Safety tests must continue to prevent real endpoint, token, username, password, cookie, SID, raw HTML, raw RSS XML, and raw response bodies from appearing in storage, browser storage, URL, logs, screenshots, or traces.
+
+Stage 14 Implementation Guidance:
+- First fix the persisted-vs-preview contract before improving visual details; otherwise action tests will keep failing for the wrong reason.
+- Prefer making the default `/index` generate flow save an operable Request, while keeping preview mode clearly read-only if it remains available.
+- Do not hide backend errors with generic UI state; surface sanitized, user-actionable messages.
+- Add UI support for inspecting complete, effective, and excluded seed lists after modifications.
+- Remove the qBittorrent Settings disclosure and update tests that previously opened it.
+- Keep the Flask SSR plus vanilla JS architecture; do not add React, Vite, or a build pipeline.
+
+Validation Required Before Stage 14 Completion:
+- `uv run pytest -q`
+- `uv run pytest tests/browser/ -v`
+- `uv run python -m compileall -q src`
+- Browser verification for the `咒术回战` generate -> list -> detail -> confirm/cancel/modify flows.
+- Browser verification for `[v2]` or equivalent literal/regex exclude behavior and Seeds list updates.

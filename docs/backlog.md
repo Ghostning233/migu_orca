@@ -94,6 +94,30 @@
 - 已通过 Playwright 浏览器回归覆盖 Settings 保存/清除偏好、qBittorrent 成功/失败/确认、Auto Bangumi accepted-only 入口、URL 状态恢复、取消/修改交互和敏感信息脱敏。
 - 信息架构拆分不改变安全边界：真实外部系统 endpoint、token、username、password、cookie、SID、原始响应体和敏感路径仍不得持久化或泄露。
 
+### BL-007: Web UI Request 可操作性与筛选可视化修复
+
+- 状态：计划中 (Stage 14)
+- 来源：Stage 13 后人工验收
+- 优先级：1
+- 不阻塞：Stage 13 已合并，但阻塞后续 Web UI 用户验收
+
+观察结果：
+
+- `/index` 输入 `咒术回战` 并生成后可以展示 Request 详情，但确认、取消、修改会失败并提示 `未找到已保存的 Request`。
+- 默认生成流程可能创建未保存预览，但详情仍展示依赖已保存 Request 的持久化动作。
+- Request 列表无法通过默认生成流程稳定验证，因为生成结果未可靠保存。
+- 修改排除规则输入 `[v2]` 后，用户无法从详情中直观看到 Seeds 被排除的效果。
+- Seeds 区当前只展示有效种子列表，缺少完整种子列表和排除种子列表。
+- Settings 中 qBittorrent 的 `测试 qBittorrent 连接` 仍是展开控件，交互无意义，应直接展示配置和测试表单。
+
+目标：
+
+- 明确默认生成、保存 Request 和未保存预览的 UI 契约，避免对未保存 Request 调用确认、取消、修改或 Auto Bangumi 提交 API。
+- 默认工作台流程应能生成已保存 Request，并支持列表、详情、确认、取消和修改的浏览器回归。
+- 修改筛选规则后，详情应同步展示 Filter、完整 Seeds、有效 Seeds 和排除 Seeds，方便观察 `[v2]` 等规则效果。
+- qBittorrent Settings 分区应去掉 dropdown/disclosure 逻辑，直接显示 endpoint、username、password、timeout、verify_tls 和测试按钮。
+- 继续保持安全边界：真实 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体不得进入 storage JSON、browser storage、URL、日志、截图或 trace。
+
 ## 搜索与真实 MiKan 兼容性
 
 ### BL-001: 优化真实 MiKan 番剧搜索和 RSS 源解析
