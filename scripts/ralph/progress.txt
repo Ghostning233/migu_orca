@@ -5,6 +5,8 @@
 - Request detail seed feedback should derive valid/excluded lists from the selected `source_info.rss_sources` entry; `confirmable_config.effective_seed_names` is only the selected valid list and does not include exclusion reasons.
 - Selected RSS source summaries should carry safe title-only `seed_names` for the complete pre-filter Seeds list; use valid/excluded title fallback only for older saved Requests.
 - qBittorrent Settings connection testing is direct-rendered in `#settings-qbittorrent-test-form`; do not wrap it in `<details>`/`<summary>` or require tests to open a disclosure before filling fields.
+- Stage closeout docs should update README, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, the stage PRD, and affected module PRDs together so the current-stage baseline stays consistent.
+- Sensitive Web UI regressions should check URL state, `localStorage`, `sessionStorage`, visible body text, and saved Request JSON; qBittorrent and Auto Bangumi secrets are allowed only in explicit request bodies.
 
 Started: Fri Aug 14 16:04:26 CST 2026
 ---
@@ -69,4 +71,17 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: qBittorrent Settings connection testing should remain a direct form with stable `settings-qbittorrent-*` IDs and no disclosure-opening prerequisite.
   - Gotcha encountered: several browser tests still encoded the old collapsed Settings contract through `#qbittorrent-settings-details`; update both behavior and UI-quality tests when changing panel structure.
   - Useful context: qBittorrent sensitive values remain transient form inputs only; success clears endpoint, username, and password, while failures preserve them for correction but render only redacted generic output.
+---
+## 2026-08-14 17:01:17 CST - US-102
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Completed Stage 14 documentation and regression closeout: README now documents default saved generation, explicit preview mode, Seeds complete/valid/excluded lists, and direct-rendered qBittorrent Settings behavior.
+- Updated Stage status and completed BL-007 across `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage14_web_ui_request_operability_PRD.md`, and `docs/modules/M13-web-ui-PRD.md`.
+- Added a Stage 14 browser security regression asserting sensitive qBittorrent values do not appear in URL state, browser storage, visible body text, or saved Request JSON after Settings interaction and default saved generation.
+- Files changed: `README.md`, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage14_web_ui_request_operability_PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 421 tests; `uv run pytest tests/browser/ -v` passed with 140 browser tests.
+- **Learnings for future iterations:**
+  - Patterns discovered: Stage closeout docs need synchronized updates in README, backlog, main PRD, stage PRD, and affected module PRDs to avoid stale current-stage claims.
+  - Patterns discovered: Web UI secret regressions should validate URL, browser storage, rendered text, and saved storage JSON, not just notifications.
+  - Gotcha encountered: `CODEX_CURRENT_THREAD_ID` was unset in this environment, so the progress URL keeps the same placeholder format used by earlier entries.
+  - Useful context: after US-102 all Stage 14 stories in `scripts/ralph/prd.json` are marked passing.
 ---

@@ -7,6 +7,7 @@
 - Architecture: Flask server-side rendering with existing static CSS and vanilla JavaScript
 - Owner: Ralph autonomous development agent
 - Date: 2026-08-14
+- Completion: Completed on 2026-08-14
 
 ## Background
 
@@ -79,3 +80,12 @@ Update docs and tests affected by the Stage 14 UI contract changes. Browser test
 - `uv run python -m compileall -q src` passes.
 - Stage 14 browser regression verifies the normal `/index` request generation flow end-to-end.
 - Stage 14 does not introduce any new sensitive-data persistence or display path.
+
+## Implementation Decisions
+
+- `/index` defaults to saved generation when `miguOrca.web.saveRequest` is absent or true. The generated Request is loaded as a saved detail, the list refreshes, and the URL syncs to `/index?request_id=<id>`.
+- Explicit `miguOrca.web.saveRequest = "false"` remains preview mode. Preview details are marked `预览（未保存）`, do not sync a temporary request ID into the URL, and hide confirm, cancel, modify, and Auto Bangumi submit actions until the user saves.
+- The modify form keeps regex semantics by default and adds a literal helper for `must_not_contain`; using the helper with `[v2]` sends a safe regex that matches `v2` or `[v2]` and makes excluded seeds visible.
+- Request detail Seeds uses the selected source summary for complete seed titles and the selected source `valid_seed_names` / `excluded_seed_names` for post-filter lists.
+- `/settings` renders the qBittorrent connection test form directly in the qBittorrent section. It does not use `<details>`, `<summary>`, or an equivalent disclosure wrapper for the test form.
+- Security regression covers browser-visible state, browser storage, URL state, API responses, and saved Request JSON for endpoint, token, username, password, cookie, SID, raw HTML, raw RSS XML, and raw response body boundaries.

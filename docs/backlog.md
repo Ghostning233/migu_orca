@@ -13,7 +13,8 @@
 | 2 | BL-004 | Web UI 真实 MiKan / Auto Bangumi 配置入口 | 完成 |
 | 3 | BL-005 | qBittorrent 直连 | 完成 |
 | 4 | BL-006 | Web UI Settings 信息架构优化 | 完成 |
-| 5 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 待办 |
+| 5 | BL-007 | Web UI Request 可操作性与筛选可视化修复 | 完成 |
+| 6 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 待办 |
 
 认证、权限模块当前优先级最低，现阶段无明确需求，默认不纳入后续开发计划。除非之后出现部署暴露、多人使用或远程访问场景，否则不为其单独规划 Stage。
 
@@ -96,27 +97,27 @@
 
 ### BL-007: Web UI Request 可操作性与筛选可视化修复
 
-- 状态：计划中 (Stage 14)
+- 状态：完成 (Stage 14, 2026-08-14)
 - 来源：Stage 13 后人工验收
-- 优先级：1
-- 不阻塞：Stage 13 已合并，但阻塞后续 Web UI 用户验收
+- 优先级：5
+- 不阻塞：Stage 14 验收通过
 
 观察结果：
 
-- `/index` 输入 `咒术回战` 并生成后可以展示 Request 详情，但确认、取消、修改会失败并提示 `未找到已保存的 Request`。
-- 默认生成流程可能创建未保存预览，但详情仍展示依赖已保存 Request 的持久化动作。
-- Request 列表无法通过默认生成流程稳定验证，因为生成结果未可靠保存。
-- 修改排除规则输入 `[v2]` 后，用户无法从详情中直观看到 Seeds 被排除的效果。
-- Seeds 区当前只展示有效种子列表，缺少完整种子列表和排除种子列表。
-- Settings 中 qBittorrent 的 `测试 qBittorrent 连接` 仍是展开控件，交互无意义，应直接展示配置和测试表单。
+- 已修复 `/index` 输入 `咒术回战` 并生成后详情可见但确认、取消、修改失败并提示 `未找到已保存的 Request` 的问题。
+- 已明确默认生成流程为生成并保存；显式 `save_request=false` 只进入只读预览，且不展示依赖已保存 Request 的动作。
+- 已通过默认生成流程刷新 Request 列表并同步详情 URL，支持稳定浏览器回归。
+- 已为修改排除规则输入 `[v2]` 提供 literal helper，并在详情中展示 Seeds 被排除的效果。
+- Seeds 区已展示完整、有效和排除三个种子列表及数量。
+- Settings 中 qBittorrent 的 `测试 qBittorrent 连接` 已改为直接显示的按钮和表单，不再作为展开控件。
 
 目标：
 
-- 明确默认生成、保存 Request 和未保存预览的 UI 契约，避免对未保存 Request 调用确认、取消、修改或 Auto Bangumi 提交 API。
-- 默认工作台流程应能生成已保存 Request，并支持列表、详情、确认、取消和修改的浏览器回归。
-- 修改筛选规则后，详情应同步展示 Filter、完整 Seeds、有效 Seeds 和排除 Seeds，方便观察 `[v2]` 等规则效果。
-- qBittorrent Settings 分区应去掉 dropdown/disclosure 逻辑，直接显示 endpoint、username、password、timeout、verify_tls 和测试按钮。
-- 继续保持安全边界：真实 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体不得进入 storage JSON、browser storage、URL、日志、截图或 trace。
+- 默认工作台流程已能生成已保存 Request，并支持列表、详情、确认、取消和修改的浏览器回归。
+- 未保存预览已具备清晰状态标识、只读动作契约和保存入口，前端不对预览调用确认、取消、修改或 Auto Bangumi 提交 API。
+- 修改筛选规则后，详情同步展示 Filter、完整 Seeds、有效 Seeds 和排除 Seeds，方便观察 `[v2]` 等规则效果。
+- qBittorrent Settings 分区已去掉 dropdown/disclosure 逻辑，直接显示 endpoint、username、password、timeout、verify_tls 和测试按钮。
+- 已保持安全边界：真实 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体不得进入 storage JSON、browser storage、URL、日志、截图或 trace。
 
 ## 搜索与真实 MiKan 兼容性
 

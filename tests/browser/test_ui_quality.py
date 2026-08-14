@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page, expect
+from playwright.sync_api import Page, Request, expect
 
 from tests.browser.conftest import create_saved_request, set_storage_preferences
 
@@ -20,7 +21,7 @@ def _open_detail(
     page.wait_for_selector("#request-detail-container .overview-section", timeout=5000)
 
 
-def test_index_uses_stage13_visual_hierarchy_and_button_semantics(
+def test_index_uses_stage14_visual_hierarchy_and_button_semantics(
     page: Page, live_server_url: str
 ) -> None:
     page.goto(f"{live_server_url}/index")
@@ -87,7 +88,7 @@ def test_request_detail_sections_are_grouped_and_actions_are_near_heading(
     assert actions_box["y"] - heading_box["y"] < 80
 
 
-def test_stage13_pages_remain_readable_on_narrow_viewports(
+def test_stage14_pages_remain_readable_on_narrow_viewports(
     page: Page, live_server_url: str, storage_dir: Path
 ) -> None:
     page.set_viewport_size({"width": 390, "height": 844})
@@ -124,3 +125,86 @@ def test_notifications_and_state_feedback_do_not_expose_sensitive_values(
         "<rss",
     ):
         assert forbidden not in text
+
+
+def test_stage14_sensitive_settings_values_do_not_persist_or_leak(
+    page: Page, live_server_url: str, storage_dir: Path
+) -> None:
+    sensitive_values = (
+        "http://private-qbt.stage14.local:8080",
+        "stage14-qbt-user",
+        "stage14-qbt-password",
+        "stage14-cookie",
+        "stage14-SID",
+        "<rss version='2.0'>stage14 raw rss</rss>",
+        "stage14 raw response body",
+    )
+
+    def _fulfill_qbittorrent(route, request: Request) -> None:
+        route.fulfill(
+            status=200,
+            json={
+                "ok": True,
+                "result": {
+                    "status": "ok",
+                    "reachable": True,
+                    "version": "4.6.5",
+                    "endpoint": sensitive_values[0],
+                    "username": sensitive_values[1],
+                    "cookie": sensitive_values[3],
+                    "SID": sensitive_values[4],
+                    "raw_rss_xml": sensitive_values[5],
+                    "raw_response_body": sensitive_values[6],
+                },
+            },
+        )
+
+    page.route("**/api/v1/qbittorrent/test-connection", _fulfill_qbittorrent)
+    page.add_init_script("window.confirm = () => true")
+    page.goto(f"{live_server_url}/settings")
+    page.fill("#settings-qbittorrent-endpoint", sensitive_values[0])
+    page.fill("#settings-qbittorrent-username", sensitive_values[1])
+    page.fill("#settings-qbittorrent-password", sensitive_values[2])
+    page.click("#settings-qbittorrent-test-submit")
+    expect(page.locator("#settings-qbittorrent-result")).to_contain_text("status: ok")
+
+    set_storage_preferences(page, storage_dir, save_request=True)
+    page.goto(f"{live_server_url}/index")
+    page.fill("#request-title", "咒术回战")
+    page.click("#request-generate-submit")
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+    browser_state = page.evaluate(
+        """() => ({
+            url: window.location.href,
+            localStorage: JSON.stringify(window.localStorage),
+            sessionStorage: JSON.stringify(window.sessionStorage),
+            bodyText: document.body.innerText,
+        })"""
+    )
+    storage_json = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (storage_dir / "requests").glob("*.json")
+    )
+
+    assert "request_id=" in browser_state["url"]
+    for value in sensitive_values:
+        assert value not in browser_state["url"]
+        assert value not in browser_state["localStorage"]
+        assert value not in browser_state["sessionStorage"]
+        assert value not in browser_state["bodyText"]
+        assert value not in storage_json
+
+    local_storage = page.evaluate(
+        """() => Object.fromEntries(
+            Array.from({ length: window.localStorage.length }, (_, index) => {
+                const key = window.localStorage.key(index);
+                return [key, window.localStorage.getItem(key)];
+            })
+        )"""
+    )
+    assert local_storage == {
+        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.saveRequest": "true",
+    }
+    assert json.loads(storage_json)["source_info"]
