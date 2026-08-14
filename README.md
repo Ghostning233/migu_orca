@@ -342,25 +342,25 @@ Ralph 运行过程中由下属 Agent 产生的本地中间提交不强制使用�
 
 当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex` 选择执行工具。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
 
-Claude 模型可以通过命令行参数显式指定：
+Claude 模型可以通过命令行参数显式指定。当前仓库里可直接运行的示例是：
 
 ```bash
-./scripts/ralph/ralph.sh --tool claude --model Hiku 7
+./scripts/ralph/ralph.sh --tool claude --model deepseek-v4-flash 7
 ```
 
 也可以通过环境变量指定：
 
 ```bash
-RALPH_MODEL=Hiku ./scripts/ralph/ralph.sh --tool claude 7
+RALPH_MODEL=deepseek-v4-flash ./scripts/ralph/ralph.sh --tool claude 7
 ```
 
-`--claude-model Hiku` 是 `--model Hiku` 的等价写法：
+`--claude-model` 是 `--model` 的等价写法：
 
 ```bash
-./scripts/ralph/ralph.sh --tool claude --claude-model Hiku 7
+./scripts/ralph/ralph.sh --tool claude --claude-model deepseek-v4-flash 7
 ```
 
-本地已通过 CCSwitch 将 Claude 的 `Hiku` 模型映射到实际提供方模型 `deepseek-v4-flash`。因此在本机运行上述命令时，Ralph 会向 Claude CLI 传入 `--model Hiku`，实际模型路由由 CCSwitch 配置决定。
+如果你的 Claude 环境已经为别名做了额外映射，也可以换成对应别名；但在本仓库当前环境中，`deepseek-v4-flash` 是可直接运行的模型名。
 
 `--model` 目前只会传递给 Claude 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
 
