@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.6 |
-| 文档状态 | Stage 12 已完成，后续待办见 `docs/backlog.md` |
+| 当前版本 | v0.7 |
+| 文档状态 | Stage 13 已完成，后续待办见 `docs/backlog.md` |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -62,7 +62,7 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 3. 系统根据规则和偏好生成可确认 Request。
 4. 用户确认后，系统调用 Auto Bangumi 或生成降级配置。
 
-当前已完成 Stage 12：离线 Request 生成、Request 确认/取消/受限修改、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、Web UI 显式真实 MiKan / Auto Bangumi 配置入口，以及 qBittorrent 显式连接测试入口。默认流程仍使用本地 fixture，不隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent，也不隐式写入本地存储；真实外部系统能力必须由用户显式配置和触发。
+当前已完成 Stage 13：离线 Request 生成、Request 确认/取消/受限修改、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、Web UI 显式真实配置入口、qBittorrent 显式连接测试入口，以及 Web UI Settings 信息架构拆分。`/index` 当前是 Request 工作台，`/settings` 当前承载非敏感 Storage 浏览器偏好、qBittorrent 显式连接测试和 request-scoped Auto Bangumi 提交配置。默认流程仍使用本地 fixture，不隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent，也不隐式写入本地存储；真实外部系统能力必须由用户显式配置和触发。
 
 ## 4. 第一阶段范围
 
@@ -151,7 +151,7 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 | M10 | Auto Bangumi 集成模块 | Stage 4 已实现真实 HTTP adapter 与显式 CLI 提交路径 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | Stage 6 已实现本地 JSON Request、历史和 AB 结果存储 | P2 | docs/modules/M11-storage-state-PRD.md |
 | M12 | 日志与错误处理模块 | Stage 1 最小化 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 12 已实现本地 Web UI、浏览器测试、Request 操作、真实配置入口和 qBittorrent 连接测试入口 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 13 已实现 `/index` Request 工作台、`/settings` 配置页、浏览器测试、Request 操作、真实配置入口和 qBittorrent 连接测试入口 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 12 已支持显式 AB、MiKan 与 qBittorrent 配置边界 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
@@ -198,6 +198,7 @@ M00 CLI 与流程编排
 | 第十阶段 | Web UI Request 确认、取消和修改操作入口 | M13、M01、M11 |
 | 第十一阶段 | Web UI 显式真实 MiKan / Auto Bangumi 配置入口 | M13、M03、M10、M14 |
 | 第十二阶段 | qBittorrent 显式连接测试与安全边界 | qBittorrent 集成边界、M13、M14、M12 |
+| 第十三阶段 | Web UI Settings 信息架构拆分与界面质量收敛 | M13、M11、M10、qBittorrent 集成边界 |
 
 ## 10. 主 PRD 已确认事项
 
@@ -244,4 +245,5 @@ M00 CLI 与流程编排
 1. 优先处理 `docs/backlog.md` 中的 BL-001：优化真实 MiKan 番剧搜索和 RSS 源解析兼容性。
 2. 保持真实 MiKan、Auto Bangumi 和 qBittorrent 能力都必须由用户显式配置和触发，默认流程不得访问外部系统。
 3. 后续若要让 qBittorrent 启动下载、创建任务或绕过 Auto Bangumi 建立订阅，必须先新增独立 Stage 和验收标准；Stage 12 仅完成连接测试。
-4. 每次阶段推进继续使用 `uv run pytest` 和 `uv run python -m compileall -q src` 验证；具备浏览器环境时额外执行 `uv run pytest tests/browser`。
+4. 后续 Web UI 工作应保持 Stage 13 的信息架构边界：`/index` 聚焦 Request 工作台，`/settings` 承载配置、偏好和连接测试。
+5. 每次阶段推进继续使用 `uv run pytest` 和 `uv run python -m compileall -q src` 验证；具备浏览器环境时额外执行 `uv run pytest tests/browser`。

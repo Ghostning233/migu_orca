@@ -171,7 +171,7 @@ Stage 11 新增真实配置入口端点：
 
 - `POST /api/v1/requests/<request_id>/submit-ab?storage_dir=.migu_orca/storage`：对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交。请求体必须包含 `ab_config` 对象，字段为 `endpoint`、`token`、`fallback_enabled`。提交结果会以脱敏形式写回 Request snapshot 和 `ab_results/`；endpoint、token、Authorization header、cookie 和完整 URL 不应出现在 API 响应、日志或本地存储中。
 
-Stage 12 新增 qBittorrent 显式连接测试端点：
+Stage 12 引入、Stage 13 迁移到 Settings 使用的 qBittorrent 显式连接测试端点：
 
 - `POST /api/v1/qbittorrent/test-connection`：执行一次用户显式触发的 qBittorrent Web API 连接测试。请求体必须包含 `qbittorrent_config` 对象，字段为 `endpoint`、`username`、`password`、`timeout_seconds` 和 `verify_tls`。端点只测试认证和轻量状态读取，不启动下载，不创建订阅，不改写 Request snapshot，也不将 qBittorrent 配置写入 storage JSON、状态历史、浏览器 storage 或 URL。
 
