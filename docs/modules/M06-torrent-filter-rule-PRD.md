@@ -42,7 +42,7 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
   "excluded_seed_names": [
     {
       "name": "[Loli] 咒术回战 第三季 - 04 V2 [1080p][CHS].mkv",
-      "reason": "命中必须不含规则：V2|V3|1-|2-|3-|Fin|合集",
+      "reason": "命中排除规则：V2",
       "rule": "must_not_contain"
     }
   ]
@@ -58,8 +58,7 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
 
 ## 6. 规则定义
 
-第一阶段借用 qBittorrent 的“必须包含”和“必须不含”概念，但明确采用 Python
-`re.search` 语义，不声明与 qBittorrent 完全兼容。
+M06 借用 qBittorrent 的“必须包含”和“必须不含”概念。Stage 15 起默认语义为**普通字符（字面文本）匹配且大小写不敏感**；正则匹配改为 `use_regex=true` 时的显式选项，不声明与 qBittorrent 完全兼容。
 
 项目本身不内置默认筛选规则。筛选规则需要用户自行配置和管理。
 
@@ -67,21 +66,25 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
 
 ```json
 {
-  "must_contain": "",
-  "must_not_contain": "V2|V3|1-|2-|3-|Fin|合集"
+  "must_contain": "1080p",
+  "must_not_contain": "[v2]",
+  "use_regex": false,
+  "case_sensitive": false
 }
 ```
 
-第一阶段规则约束：
+规则约束：
 
 1. `must_contain` 为空时，不启用必须包含限制。
 2. `must_not_contain` 为空时，不启用必须不含限制。
-3. `must_contain` 和 `must_not_contain` 使用 Python `re.search`。
-4. 非法正则返回配置错误。
-5. 先应用 `must_not_contain`，再应用 `must_contain`。
-6. 项目不根据分辨率、字幕语言、集数、v2/v3、合集等内置默认筛选规则。
-7. 如用户希望排除 V2、V3、合集等内容，应写入 `must_not_contain`。
-8. 每个被排除种子必须输出可读 reason。
+3. `use_regex=false`（默认）时，`must_contain` 和 `must_not_contain` 按字面子串匹配，不编译为正则；输入 `[`、`[v2]` 等字符不得触发正则错误。
+4. `use_regex=true` 时，`must_contain` 和 `must_not_contain` 使用 Python `re.search`；非法正则返回统一校验错误。
+5. `case_sensitive=false`（默认）时，字面匹配和正则匹配都大小写不敏感；`case_sensitive=true` 时区分大小写。
+6. 先应用 `must_not_contain`，再应用 `must_contain`。
+7. 项目不根据分辨率、字幕语言、集数、v2/v3、合集等内置默认筛选规则。
+8. 如用户希望排除 V2、V3、合集等内容，应写入 `must_not_contain`。
+9. 每个被排除种子必须输出可读 reason：命中排除规则为 `命中排除规则：<rule>`，未命中包含规则为 `未命中包含规则：<rule>`。
+10. 旧配置或旧保存 Request 缺少 `use_regex` / `case_sensitive` 时，按默认 `false` 兼容加载。
 
 ## 7. 异常场景
 
@@ -89,10 +92,12 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
 | --- | --- |
 | seeds 为空 | 返回 total_seed_count 为 0 |
 | 种子名称为空 | 排除并标记名称缺失 |
-| must_contain 不匹配 | 排除并标记必须包含规则未命中 |
-| must_not_contain 命中 | 排除并标记必须不含规则命中 |
+| must_contain 不匹配 | 排除并标记 `未命中包含规则：<rule>` |
+| must_not_contain 命中 | 排除并标记 `命中排除规则：<rule>` |
 | 所有种子被排除 | 返回空 valid_seed_names 和排除原因 |
 | filter_rule 缺字段 | 返回配置错误 |
+| use_regex=true 且规则为非法正则 | 返回统一校验错误 |
+| use_regex=false 且输入含 `[` 等字符 | 按字面匹配处理，不触发正则错误 |
 
 ## 8. 数据结构
 
@@ -100,8 +105,10 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
 
 ```json
 {
-  "must_contain": "",
-  "must_not_contain": "V2|V3|1-|2-|3-|Fin|合集"
+  "must_contain": "1080p",
+  "must_not_contain": "[v2]",
+  "use_regex": false,
+  "case_sensitive": false
 }
 ```
 
@@ -110,7 +117,7 @@ M06 负责根据用户配置的筛选规则从 RSS 种子列表中计算有效�
 ```json
 {
   "name": "[字幕组] 番名 - 04 V2.mkv",
-  "reason": "命中必须不含规则：V2|V3|1-|2-|3-|Fin|合集",
+  "reason": "命中排除规则：V2",
   "rule": "must_not_contain"
 }
 ```
@@ -136,12 +143,12 @@ filter_seeds(seeds, filter_rule) -> filtered_seed_result
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
-| D-M06-01 | 第一阶段筛选逻辑 | 照搬 qBittorrent 的“必须包含”和“必须不含”逻辑 |
+| D-M06-01 | 筛选逻辑 | 默认按普通字符（字面文本）子串匹配且大小写不敏感；`use_regex=true` 时使用 Python `re.search` |
 | D-M06-02 | 项目默认筛选规则 | 项目不内置默认筛选规则，规则由用户自行配置和管理 |
-| D-M06-03 | 用户规则示例 | `must_not_contain = "V2|V3|1-|2-|3-|Fin|合集"` |
+| D-M06-03 | 用户规则示例 | `must_contain = "1080p"`、`must_not_contain = "[v2]"`、`use_regex=false`、`case_sensitive=false` |
 
 ### 11.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
-| Q-M06-04 | qBittorrent 规则语义在代码中采用正则还是完全兼容 qBittorrent 实现？ | 否 | 已确认：Python re.search，不声明完全兼容 |
+| Q-M06-04 | qBittorrent 规则语义在代码中采用正则还是完全兼容 qBittorrent 实现？ | 否 | 已确认：默认字面匹配，正则由 `use_regex` 显式启用，不声明与 qBittorrent 完全兼容 |

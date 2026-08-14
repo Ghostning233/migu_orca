@@ -127,6 +127,12 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 7. ab_submit_result 在第一阶段固定为 null。
 8. request_id 需要全局唯一，具体生成规则由 Stage 1 短规格确认。
 
+后续阶段扩展（Stage 10 起）：
+
+- M09/M10 引入确认流程：`accept_request` 将 `PENDING_CONFIRM` 变更为 `ACCEPTED`，`cancel_request` 变更为 `CANCELLED`。
+- 受限修改（`modify_request`）自 Stage 15 起同时接受 `PENDING_CONFIRM` 与 `ACCEPTED`，修改后保持原状态不变（`ACCEPTED` 不会回落为 `PENDING_CONFIRM`），只允许修改 `selected_subtitle_group`、`filter_rule`、`expected_folder_name`，并记录 `MODIFY` history 事件；`CANCELLED` 与未知状态继续拒绝修改。
+- `ACCEPTED` Request 仍需要用户显式执行 `submit-ab` 才会提交到 Auto Bangumi，修改本身不会隐式触发提交。
+
 ## 7. 异常场景
 
 | 场景 | 处理方式 |

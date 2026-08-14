@@ -143,7 +143,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "完成后再归档 Stage15 Ralph 任务并准备提交/合并。"
     }
   ]

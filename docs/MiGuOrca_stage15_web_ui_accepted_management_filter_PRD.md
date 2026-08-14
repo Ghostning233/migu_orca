@@ -7,6 +7,7 @@
 - Architecture: Flask server-side rendering with existing static CSS and vanilla JavaScript
 - Owner: Ralph autonomous development agent
 - Date: 2026-08-14
+- Completion: Completed on 2026-08-14
 
 ## Current State
 
@@ -90,3 +91,13 @@ Update README, backlog, module docs, browser tests, and safety regressions for t
 - Browser regression verifies ACCEPTED modify/delete.
 - Browser regression verifies default literal, case-insensitive filtering.
 - Browser regression verifies opt-in regex and case-sensitive filtering.
+
+## Implementation Decisions
+
+- Deletion is a path-safe repository operation: `delete_request_snapshot` in `src/storage_engine/controllers/request_repository.py` validates `request_id` through the shared `_request_path` guard (rejects empty, path fragments, and traversal), returns a stable `request_not_found` error for missing Requests without leaking absolute paths, maps unlink errors to a sanitized `storage_error`, and returns only a safe summary `{request_id, storage, directory, filename, deleted}`.
+- The Web delete API is `POST /api/v1/requests/<path:request_id>/delete` reusing the existing `RequestActionPayload` (request_id comes from the URL path; payload only carries `storage_dir`). The response never contains the deleted snapshot body; the delete flow also removes the request from the Web list and drops `request_id` from the URL.
+- `modify_request` accepts both `PENDING_CONFIRM` and `ACCEPTED` Requests via `_copy_modifiable_request` and preserves the original status — an ACCEPTED Request stays ACCEPTED after modification and records a `MODIFY` history event. `CANCELLED` and unknown statuses are still rejected with the stable `invalid_request_status` error, and the restricted patch fields remain `selected_subtitle_group`, `filter_rule`, and `expected_folder_name`. Auto Bangumi submission still requires explicit `POST /submit-ab` and remains ACCEPTED-only.
+- `FilterRule` carries `use_regex` and `case_sensitive` (default `false`). Old configs and old saved Requests missing the fields load with defaults via `.get("use_regex", False)` / `.get("case_sensitive", False)`. Default matching is case-insensitive literal substring matching; regex compilation only happens when `use_regex=true`, so literal inputs like `[` or `[v2]` no longer raise regex validation errors. Exclusion reasons are `命中排除规则：<rule>` / `未命中包含规则：<rule>`.
+- The modify form uses 包含规则/排除规则 labels plus 使用正则/大小写敏感 checkboxes; a `filter_rule` patch always carries explicit `use_regex`/`case_sensitive` booleans reflecting checkbox state, so default submits send `false` and clearing fields keeps the regex/case option state. The Stage 14 literal helper and literal checkbox were removed.
+- The detail Filter section renders 包含规则/排除规则 labels, 匹配模式 (正则 vs 普通字符), and 大小写 (区分大小写 vs 不区分大小写) from the saved `filter_rule`, always showing the raw rule text the user typed — never an auto-generated regex.
+- Security boundary preserved: real MiKan, Auto Bangumi, and qBittorrent endpoint/token/username/password/cookie/SID/raw HTML/raw RSS XML/raw response body must not be written to storage JSON, browser storage, URL, logs, screenshots, or traces. Browser regression checks these surfaces after ACCEPTED modify/delete and filter flows.
