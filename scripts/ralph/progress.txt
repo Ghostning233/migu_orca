@@ -6,6 +6,7 @@
 - Real MiKan, Auto Bangumi, and qBittorrent configuration must remain explicit and request-scoped; do not write endpoint, token, username, password, cookie, SID, raw HTML/RSS, raw response bodies, or sensitive local paths to storage JSON, browser storage, URL, logs, screenshots, or traces.
 - qBittorrent connection tests must call `POST /api/v1/qbittorrent/test-connection` and only render `status`, `reachable`, and `version` on success.
 - Auto Bangumi submission must remain accepted-only and use `POST /api/v1/requests/<request_id>/submit-ab`; endpoint/token are temporary inputs and must be redacted from UI errors and persisted results.
+- Stage 13 UI work is not only route migration: `/index` and `/settings` must have clear visual hierarchy, consistent primary/secondary/danger button semantics, unified empty/loading/error states, readable medium/narrow layouts, and scannable Request detail sections.
 - Stage closeout documentation should keep `README.md`, `docs/backlog.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, and `scripts/ralph/progress.txt` synchronized.
 
 Started: Fri Aug 14 12:46 CST 2026
@@ -15,7 +16,7 @@ Thread: https://codex.openai.com/threads/unavailable
 - Inspected the current Stage 12 Web UI templates, JavaScript, Flask routes, tests, README, PRD, backlog, and Ralph state.
 - Identified that `/index` currently mixes Request workbench concerns with MiKan configuration, qBittorrent connection testing, Auto Bangumi submission configuration, storage preferences, and development acceptance notes.
 - Created Stage 13 scope: split configuration-related features into `/settings`, keep `/index` focused on Request generation/list/detail/actions, add URL-restorable Request detail state, and fix cancel/modify usability gaps.
-- Replaced active `scripts/ralph/prd.json` with Stage 13 user stories US-088 through US-095, all initialized with `passes: false`.
+- Replaced active `scripts/ralph/prd.json` with Stage 13 user stories US-088 through US-096, all initialized with `passes: false`.
 - Files changed:
   - `docs/MiGuOrca_stage13_web_ui_settings_PRD.md`
   - `scripts/ralph/prd.json`
@@ -24,4 +25,18 @@ Thread: https://codex.openai.com/threads/unavailable
   - Current browser tests intentionally lock in the Stage 12 single-page shell and must be updated as part of Stage 13.
   - `/settings` should be a separate server-rendered page, not a hash-only section inside `/index`.
   - URL query state may carry `request_id`; it must not carry `storage_dir` or external service configuration.
+---
+## 2026-08-14 13:10 CST - Stage 13 Planning Update
+Thread: https://codex.openai.com/threads/unavailable
+- Promoted Stage 13 UI quality work from optional backlog-style notes to mandatory acceptance requirements.
+- Added Ralph story US-095 for visual hierarchy, button semantics, empty/loading/error states, Settings section structure, responsive readability, notification/error consistency, and Request detail scanability.
+- Renumbered the Stage 13 documentation closeout story to US-096 and added documentation criteria for the UI quality requirements.
+- Preserved the Flask server-rendered + native JS architecture and Stage 12 sensitive configuration safety boundary.
+- Files changed:
+  - `docs/MiGuOrca_stage13_web_ui_settings_PRD.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Treat Stage 13 visual cleanup as a product requirement with tests, not as post-implementation polish.
+  - Settings migration should be paired with consistent state containers and button semantics, otherwise the UI remains fragmented even after route separation.
 ---

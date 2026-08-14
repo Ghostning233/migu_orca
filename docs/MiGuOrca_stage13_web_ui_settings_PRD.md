@@ -31,7 +31,8 @@ Stage 13 的目标是优化 Web UI 功能组织，把配置相关功能迁移到
 2. `/index` 收敛为 Request 工作台，只保留 Request 生成、列表、详情和核心操作。
 3. Settings 页面承载配置、连接测试和外部系统操作入口，包括 Storage 偏好、真实 MiKan 配置说明、qBittorrent 连接测试，以及从 Request 详情跳转来的 Auto Bangumi 提交配置。
 4. 保持 Stage 12 的安全边界：真实 MiKan、Auto Bangumi、qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体不得写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。
-5. 补强浏览器测试，覆盖 `/settings` 路由、主页面精简、配置迁移、Request URL 状态和关键交互修复。
+5. 强化 `/index` 与 `/settings` 的视觉层级、按钮体系、空/加载/错误状态、窄屏/中屏可读性和 Request 详情可扫读性。
+6. 补强浏览器测试，覆盖 `/settings` 路由、主页面精简、配置迁移、Request URL 状态、关键交互修复和 Stage 13 UI 质量要求。
 
 ## 4. 非目标
 
@@ -71,6 +72,7 @@ Stage 13 的目标是优化 Web UI 功能组织，把配置相关功能迁移到
 3. qBittorrent 连接测试表单：endpoint、username、password、timeout_seconds、verify_tls，复用 Stage 12 API。
 4. Auto Bangumi 提交表单：当从 Request 详情携带 request_id 进入 Settings 时展示，要求 endpoint、token、fallback_enabled，并调用既有 submit API。
 5. 返回主页面的导航。若存在 request_id 上下文，返回链接应能回到该 Request 的详情。
+6. Storage、数据源、qBittorrent、Auto Bangumi 分区必须有清晰边界；敏感或低频配置应支持折叠或渐进展开。
 
 ## 6. 关键行为要求
 
@@ -96,7 +98,8 @@ Stage 13 的开发由 Ralph / 开发 agent 执行。每个 story 应独立可验
 5. US-092: 为主页面增加 request_id URL 状态恢复。
 6. US-093: 将 Auto Bangumi 提交配置迁移到 Settings 页面。
 7. US-094: 修复取消和修改交互。
-8. US-095: 补齐 Stage 13 浏览器回归测试与文档收尾。
+8. US-095: 统一 Stage 13 视觉层级、状态反馈和响应式体验。
+9. US-096: 补齐 Stage 13 浏览器回归测试与文档收尾。
 
 ## 8. 验收命令
 
@@ -127,3 +130,34 @@ Stage 13 不放宽任何 Stage 12 安全边界。尤其注意：
 2. URL query 只能携带 `request_id` 等非敏感上下文，不能携带 endpoint、token、username、password、cookie、SID 或完整外部 URL。
 3. 浏览器 `localStorage` 只允许保存非敏感 UI 偏好，例如 storage_dir 和 save_request 默认值。
 4. 测试 fixture、截图、trace 和日志不得包含真实外部系统凭据。
+
+## 10. UI 质量验收要求
+
+以下项属于 Stage 13 的必做 UI 质量要求。开发 agent 不能只完成路由迁移后停止，必须在 Stage 13 内完成这些体验收敛，并用浏览器测试或静态测试覆盖关键行为。
+
+1. 强化 `/index` 的视觉层级。
+   - 标题、运行模式摘要、主操作区、Request 列表和详情区必须形成清晰阅读顺序。
+   - 首屏只保留主任务必要信息，减少次级说明密度，避免信息噪音压过生成与管理 Request 的主流程。
+2. 统一主按钮与次按钮样式。
+   - 生成、保存、确认、提交应使用明确主按钮样式。
+   - 返回 Settings、修改、刷新、展开/收起等操作应使用次按钮样式。
+   - 取消、清空、失败恢复等潜在破坏或撤销动作应在视觉上与普通跳转动作分离。
+3. 优化空状态与加载状态。
+   - Request 列表、详情、Settings 各分区在无数据、加载中、失败时都应给出一致反馈。
+   - 空状态文案必须简短、可操作，不展示开发验收说明。
+4. 收敛 Settings 页的信息结构。
+   - Storage、数据源、qBittorrent、Auto Bangumi 应保持分区清楚，必要时支持折叠或渐进展开。
+   - 每个分区都应说明“这是临时输入、偏好，还是显式连接/提交动作”。
+5. 增强窄屏与中屏布局可读性。
+   - 在移动端或窄窗口下，列表、详情、Settings 表单应保持单列可读，不出现过密并排布局。
+   - 顶部导航、操作区和状态提示在窄屏下要避免横向拥挤。
+6. 统一通知与错误展示样式。
+   - 成功、失败、校验错误、脱敏提示应使用一致的消息容器和间距规则。
+   - 错误信息只保留用户可操作信息，不显示调试噪音。
+7. 提升 Request 详情的可扫读性。
+   - Overview、Source、Filter、Seeds、Audit 等分组需要更明确的视觉边界。
+   - 常用动作应更靠近详情标题，减少来回滚动成本。
+8. 保持视觉风格克制但一致。
+   - 整体风格应继续偏服务端渲染、轻量、无构建链。
+   - 可以通过间距、分隔、色块、标题层级和响应式排版提升“整理感”，不需要引入复杂动效或前端框架。
+   - 不引入 React、Vite、复杂动效或新前端构建链。
