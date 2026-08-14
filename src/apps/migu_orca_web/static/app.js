@@ -147,7 +147,7 @@
       removePreference(preferenceKeys.storageDir);
     }
     writePreference(preferenceKeys.saveRequest, String(saveRequestPreference));
-    updateStoragePreferencesStatus("偏好已保存。", "loading-state compact-state");
+    updateStoragePreferencesStatus("偏好已保存。", "success-state compact-state");
   }
 
   function clearWebPreferences() {
@@ -479,7 +479,7 @@
     const version = safeText(summary && summary.version);
     setQbittorrentResult(
       "status: " + status + "；reachable: " + reachable + "；version: " + version,
-      "qbittorrent-result qbittorrent-result-success compact-state",
+      "qbittorrent-result qbittorrent-result-success success-state compact-state",
     );
   }
 
@@ -661,7 +661,7 @@
       clearSettingsAbSensitiveFields();
       setSettingsAbResult(
         "Auto Bangumi 提交成功；request_id: " + safeText(requestId) + subscriptionId,
-        "loading-state compact-state",
+        "success-state compact-state",
       );
       showNotification("success", "Auto Bangumi 提交成功", "Request " + requestId, {
         actions: settingsAbReturnLink
@@ -1123,7 +1123,7 @@
 
     var submitBtn = document.createElement("button");
     submitBtn.type = "button";
-    submitBtn.className = "detail-action";
+    submitBtn.className = "primary-button detail-action";
     submitBtn.textContent = "提交修改";
     submitBtn.addEventListener("click", function () {
       formError.hidden = true;
@@ -1267,7 +1267,7 @@
     if (isPending) {
       var acceptBtn = document.createElement("button");
       acceptBtn.type = "button";
-      acceptBtn.className = "detail-action";
+      acceptBtn.className = "primary-button detail-action";
       acceptBtn.textContent = "确认";
       acceptBtn.addEventListener("click", function () {
         if (window.confirm("确认接受此 Request？")) {

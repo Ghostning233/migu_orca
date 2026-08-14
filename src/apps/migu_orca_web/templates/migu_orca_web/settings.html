@@ -74,8 +74,10 @@
           </div>
 
           <div class="notification-actions">
-            <button id="storage-preferences-save" type="submit">保存偏好</button>
-            <button id="storage-preferences-clear" class="secondary-button" type="button">
+            <button id="storage-preferences-save" class="primary-button" type="submit">
+              保存偏好
+            </button>
+            <button id="storage-preferences-clear" class="danger-button" type="button">
               清除偏好
             </button>
           </div>
@@ -165,7 +167,11 @@
             </div>
 
             <div class="notification-actions">
-              <button id="settings-qbittorrent-test-submit" type="submit">
+              <button
+                id="settings-qbittorrent-test-submit"
+                class="primary-button"
+                type="submit"
+              >
                 测试连接
               </button>
             </div>
@@ -232,7 +238,9 @@
           </div>
 
           <div class="notification-actions">
-            <button id="settings-ab-submit" type="submit">提交 Auto Bangumi</button>
+            <button id="settings-ab-submit" class="primary-button" type="submit">
+              提交 Auto Bangumi
+            </button>
             <a id="settings-ab-return-link" class="secondary-button" href="{{ url_for('migu_orca_web.index') }}">
               返回 Request 详情
             </a>

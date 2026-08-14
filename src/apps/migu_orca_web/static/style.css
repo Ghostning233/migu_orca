@@ -179,6 +179,22 @@ h2 {
   gap: 14px;
 }
 
+.settings-disclosure {
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.settings-disclosure summary {
+  color: #22577a;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.settings-disclosure[open] summary {
+  margin-bottom: 12px;
+}
+
 .acceptance-panel p {
   color: #3d4654;
   line-height: 1.55;
@@ -319,6 +335,15 @@ input[aria-invalid="true"] {
   gap: 8px;
 }
 
+button,
+.secondary-button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  text-align: center;
+  text-decoration: none;
+}
+
 button {
   background: #22577a;
   border: 1px solid #1d4a67;
@@ -343,10 +368,21 @@ button:disabled {
   opacity: 0.68;
 }
 
+.primary-button {
+  background: #22577a;
+  border-color: #1d4a67;
+  color: #ffffff;
+}
+
 .secondary-button {
   background: #ffffff;
+  border-radius: 6px;
   border-color: #9aa6b5;
   color: #22577a;
+  font: inherit;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 8px 14px;
   justify-self: start;
 }
 
@@ -360,7 +396,12 @@ button:disabled {
 .danger-button {
   background: #b42318;
   border-color: #8f1d14;
+  border-radius: 6px;
   color: #ffffff;
+  font: inherit;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 8px 14px;
 }
 
 .danger-button:hover,
@@ -379,6 +420,7 @@ button:disabled {
 }
 
 .loading-state,
+.success-state,
 .error-state {
   border-radius: 6px;
   min-height: 120px;
@@ -389,6 +431,12 @@ button:disabled {
   background: #f1f5f8;
   border: 1px solid #c8d5df;
   color: #41505f;
+}
+
+.success-state {
+  background: #edf8f0;
+  border: 1px solid #abd3b6;
+  color: #1f5f34;
 }
 
 .error-state {
@@ -466,6 +514,7 @@ button:disabled {
 .request-detail h3 {
   font-size: 1.2rem;
   margin: 0 0 16px;
+  overflow-wrap: anywhere;
 }
 
 .request-detail h4 {
@@ -474,19 +523,24 @@ button:disabled {
 }
 
 .detail-section {
-  border-top: 1px solid #d8dde5;
+  background: #ffffff;
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
   margin-top: 18px;
-  padding-top: 18px;
+  padding: 16px;
 }
 
 .detail-section:first-of-type {
-  border-top: 0;
   margin-top: 0;
-  padding-top: 0;
 }
 
 .detail-actions {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
   margin-bottom: 14px;
+  padding: 12px;
 }
 
 .detail-inline-form {
@@ -589,11 +643,7 @@ button:disabled {
 }
 
 .qbittorrent-result-success {
-  background: #edf8f0;
-  border: 1px solid #abd3b6;
-  border-radius: 6px;
-  color: #1f5f34;
-  padding: 14px;
+  padding: 16px;
 }
 
 .audit-section {

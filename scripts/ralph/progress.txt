@@ -15,6 +15,7 @@
 - Sensitive Settings forms should use collapsed `<details>` sections, guard JS initialization by element presence, require explicit `window.confirm`, and avoid localStorage/sessionStorage/URL persistence for endpoint, username, password, token, cookie, or SID values.
 - `/index` URL state may use only `request_id`; after a flow renders a fresh detail payload, call `loadList({loadSelectedDetail: false})` so list refreshes do not overwrite that detail with stale or missing storage data.
 - Request detail actions should use visible inline forms for extra input; modify clear operations use explicit empty strings in the existing restricted `filter_rule` / `expected_folder_name` patch fields, and browser tests should scope selectors to avoid action/form button label clashes.
+- Stage 13 UI quality regressions live in `tests/browser/test_ui_quality.py`; use them to lock button semantics, Settings disclosure boundaries, Request detail grouping, responsive readability, and sensitive notification redaction.
 
 Started: Fri Aug 14 12:46 CST 2026
 ---
@@ -227,4 +228,29 @@ Thread: https://codex.openai.com/threads/unavailable
   - Request detail action forms are built dynamically in shared `static/app.js`; keep selectors scoped because visible action buttons and hidden inline forms can share button labels.
   - Modify clear semantics should be represented by explicit empty strings in the existing restricted `filter_rule` / `expected_folder_name` patch fields, not by adding new backend patch fields.
   - Browser tests for action failures can intercept the request API and assert the existing detail DOM remains visible because `performAction` only reloads detail/list after success.
+---
+## 2026-08-14 14:19 CST - US-095
+Thread: https://codex.openai.com/threads/unavailable
+- Unified Stage 13 UI semantics by making primary, secondary, and danger actions explicit across `/index`, `/settings`, and dynamic Request detail controls.
+- Strengthened shared state feedback with reusable success-state styling, kept loading/error/empty containers consistent, and moved completed Settings/qBittorrent/Auto Bangumi feedback out of loading styling.
+- Improved Request detail scanability by giving Overview, Source, Filter, Seeds, and Audit groups visible section boundaries and placing action controls directly below the detail heading.
+- Added browser regressions for workbench hierarchy, Settings disclosure boundaries, detail grouping/action placement, narrow viewport readability, and notification redaction.
+- Files changed:
+  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
+  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `tests/browser/test_ui_quality.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest src/apps/migu_orca_web/views_test.py tests/browser/test_ui_quality.py -q` passed: 59 tests.
+  - `uv run python -m compileall -q src` passed.
+  - `uv run pytest -q` passed: 408 tests.
+  - `uv run pytest tests/browser/ -v` passed: 129 tests.
+  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
+- **Learnings for future iterations:**
+  - Use explicit `primary-button`, `secondary-button`, and `danger-button` classes when adding new Web UI actions so visual semantics remain testable.
+  - Completed async Settings results should use `success-state`; reserve `loading-state` for in-flight work.
+  - Keep Stage 13 visual regressions in `tests/browser/test_ui_quality.py` so UI hierarchy requirements remain separate from behavior-specific browser tests.
 ---

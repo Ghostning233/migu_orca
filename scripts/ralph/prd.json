@@ -167,7 +167,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "本 story 是 Stage 13 的 UI 质量门槛，不是可选美化；优先通过 CSS、模板结构、间距、层级和少量原生 JS 完成。"
     },
     {
