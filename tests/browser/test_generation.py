@@ -51,84 +51,18 @@ class TestFormValidation:
         assert len(error_text) > 0
 
 
-class TestMikanSourceControls:
-    """AC: 真实 MiKan 入口默认隐藏，选择 mikan 后显示并执行浏览器端校验."""
+class TestWorkbenchSourceControls:
+    """AC: /index 不再展示真实 MiKan 配置字段，生成默认使用 fixture 数据源."""
 
-    def test_default_source_hides_mikan_config(self, page: Page, live_server_url: str) -> None:
+    def test_index_does_not_render_mikan_config(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
 
-        assert page.locator('select[name="source"]').input_value() == "static-fixture"
-        assert page.locator("#mikan-config-fields").is_hidden()
+        assert page.locator('select[name="source"]').count() == 0
+        assert page.locator("#mikan-config-fields").count() == 0
+        assert page.locator('input[name="mikan_search_endpoint"]').count() == 0
+        assert page.locator('input[name="mikan_timeout_seconds"]').count() == 0
 
-    def test_selecting_mikan_shows_config_fields(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        page.goto(f"{live_server_url}/index")
-
-        page.select_option('select[name="source"]', "mikan")
-
-        assert page.locator("#mikan-config-fields").is_visible()
-        assert page.locator('input[name="mikan_search_endpoint"]').count() == 1
-        assert page.locator('input[name="mikan_timeout_seconds"]').count() == 1
-
-    def test_missing_mikan_endpoint_blocks_api_request(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        calls: list[Request] = []
-
-        def _capture_generation(route: Any, request: Request) -> None:
-            if request.method != "POST":
-                route.continue_()
-                return
-            calls.append(request)
-            route.fulfill(
-                status=500,
-                content_type="application/json",
-                body='{"ok": false, "error_type": "unexpected", "error_message": "should not call"}',
-            )
-
-        page.route("**/api/v1/requests", _capture_generation)
-        page.goto(f"{live_server_url}/index")
-        page.fill('input[name="title"]', "葬送的芙莉莲")
-        page.select_option('select[name="source"]', "mikan")
-        page.fill('input[name="mikan_search_endpoint"]', "")
-
-        page.click("#request-generate-submit")
-        page.wait_for_timeout(500)
-
-        assert not calls
-        assert "必须填写 search_endpoint" in page.locator("#request-form-error").inner_text()
-
-    def test_invalid_mikan_timeout_blocks_api_request(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        calls: list[Request] = []
-
-        def _capture_generation(route: Any, request: Request) -> None:
-            if request.method != "POST":
-                route.continue_()
-                return
-            calls.append(request)
-            route.fulfill(
-                status=500,
-                content_type="application/json",
-                body='{"ok": false, "error_type": "unexpected", "error_message": "should not call"}',
-            )
-
-        page.route("**/api/v1/requests", _capture_generation)
-        page.goto(f"{live_server_url}/index")
-        page.fill('input[name="title"]', "葬送的芙莉莲")
-        page.select_option('select[name="source"]', "mikan")
-        page.fill('input[name="mikan_search_endpoint"]', "redacted-search-entry")
-        page.fill('input[name="mikan_timeout_seconds"]', "0")
-
-        page.click("#request-generate-submit")
-        page.wait_for_timeout(500)
-
-        assert not calls
-        assert "timeout_seconds 必须为正数" in page.locator("#request-form-error").inner_text()
-
-    def test_fixture_payload_excludes_mikan_config(
+    def test_workbench_payload_uses_fixture_source_and_excludes_mikan_config(
         self, page: Page, live_server_url: str
     ) -> None:
         bodies: list[dict[str, object]] = []
@@ -158,45 +92,6 @@ class TestMikanSourceControls:
         assert bodies
         assert bodies[0]["source"] == "static-fixture"
         assert "mikan_config" not in bodies[0]
-
-    def test_mikan_payload_includes_request_scoped_config(
-        self, page: Page, live_server_url: str
-    ) -> None:
-        bodies: list[dict[str, object]] = []
-
-        def _capture(route: Any, request: Request) -> None:
-            if request.method != "POST":
-                route.continue_()
-                return
-            bodies.append(request.post_data_json)
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=(
-                    '{"ok": true, "result": {"request": {"request_id": "browser-mikan", '
-                    '"status": "PENDING_CONFIRM", "input": {"raw_title": "葬送的芙莉莲"}, '
-                    '"source_info": {}, "confirmable_config": {}}}}'
-                ),
-            )
-
-        page.route("**/api/v1/requests", _capture)
-        page.goto(f"{live_server_url}/index")
-        page.fill('input[name="title"]', "葬送的芙莉莲")
-        page.select_option('select[name="source"]', "mikan")
-        page.fill('input[name="mikan_search_endpoint"]', "redacted-search-entry")
-        page.fill('input[name="mikan_timeout_seconds"]', "5")
-
-        page.click("#request-generate-submit")
-        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
-
-        assert bodies
-        assert bodies[0]["source"] == "mikan"
-        assert bodies[0]["mikan_config"] == {
-            "search_endpoint": "redacted-search-entry",
-            "timeout_seconds": 5,
-        }
-        storage_keys = page.evaluate("Object.keys(window.localStorage)")
-        assert all("mikan" not in key.lower() for key in storage_keys)
 
 
 class TestGenerateWithoutSave:

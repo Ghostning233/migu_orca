@@ -40,7 +40,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "本 story 只做主页面精简；被移除的配置能力在后续 stories 放入 Settings。"
     },
     {

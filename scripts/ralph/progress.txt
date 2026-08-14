@@ -9,6 +9,7 @@
 - Stage 13 UI work is not only route migration: `/index` and `/settings` must have clear visual hierarchy, consistent primary/secondary/danger button semantics, unified empty/loading/error states, readable medium/narrow layouts, and scannable Request detail sections.
 - Stage closeout documentation should keep `README.md`, `docs/backlog.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, and `scripts/ralph/progress.txt` synchronized.
 - Use shared Jinja includes for navigation shared across `/index` and `/settings`; pass `active_page` from Flask views for `aria-current` state.
+- `/index` is the Request workbench: keep generation/list/detail there and move external data source, qBittorrent, Auto Bangumi submission, and other configuration tasks to `/settings` stories.
 
 Started: Fri Aug 14 12:46 CST 2026
 ---
@@ -63,4 +64,31 @@ Thread: https://codex.openai.com/threads/unavailable
   - Settings shell currently does not load `app.js`; future Settings stories should add page-specific wiring deliberately if they need interactivity.
   - Existing Stage 12 tests still expect the old qBittorrent and acceptance panels on `/index`; later Stage 13 stories must update those tests when moving each feature.
   - Keep the Settings placeholders as panels with `empty-state` containers so later migrations can preserve consistent section boundaries.
+---
+## 2026-08-14 13:24 CST - US-089
+Thread: https://codex.openai.com/threads/unavailable
+- Refocused `/index` as the Request workbench by removing inline MiKan source configuration, the qBittorrent connection-test panel, and the acceptance notes panel.
+- Simplified `app.js` so the workbench no longer queries removed controls, always submits fixture-mode generation, and does not call or wire qBittorrent connection testing from `/index`.
+- Updated Flask static/shell assertions and browser regressions to verify the retained Request generation, save switch, list, detail, and shared Settings navigation while asserting removed configuration controls are absent.
+- Files changed:
+  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_generation.py`
+  - `tests/browser/test_infrastructure.py`
+  - `tests/browser/test_qbittorrent_connection.py`
+  - `tests/browser/test_shell.py`
+  - `tests/browser/test_stage11_real_config_entry.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed: 54 tests.
+  - `uv run python -m compileall -q src` passed.
+  - `uv run pytest tests/browser/test_shell.py tests/browser/test_infrastructure.py tests/browser/test_generation.py tests/browser/test_qbittorrent_connection.py tests/browser/test_stage11_real_config_entry.py -q` passed: 51 tests.
+  - `uv run pytest -q` passed: 386 tests.
+  - `uv run pytest tests/browser/ -v` passed: 107 tests.
+- **Learnings for future iterations:**
+  - `/index` should not initialize static JS for controls that only future Settings stories will own; absent controls should be removed from both template and initialization code together.
+  - Browser tests that previously verified inline MiKan/qBittorrent forms should become boundary tests for `/index` until the corresponding Settings stories add new controls.
+  - Storage directory and save-request controls intentionally remain on `/index` until US-090 migrates those preferences.
 ---

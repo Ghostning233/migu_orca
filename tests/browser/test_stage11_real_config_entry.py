@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.sync_api import Page, Request
+from playwright.sync_api import Page
 
 from request_engine.controllers.request_controller import accept_request
 from storage_engine.controllers.request_repository import save_request_snapshot
@@ -57,7 +57,7 @@ def _assert_sensitive_values_not_rendered(page: Page) -> None:
 
 
 class TestStage11MikanBrowserRegressions:
-    """AC: MiKan entry points remain explicit, validated, and offline by default."""
+    """AC: /index remains offline by default and no longer exposes MiKan config."""
 
     def test_default_fixture_mode_hides_mikan_config_and_generates_locally(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -69,8 +69,8 @@ class TestStage11MikanBrowserRegressions:
         if save_checkbox.is_checked():
             save_checkbox.uncheck()
 
-        assert page.locator('select[name="source"]').input_value() == "static-fixture"
-        assert page.locator("#mikan-config-fields").is_hidden()
+        assert page.locator('select[name="source"]').count() == 0
+        assert page.locator("#mikan-config-fields").count() == 0
 
         page.click("#request-generate-submit")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -79,46 +79,14 @@ class TestStage11MikanBrowserRegressions:
         assert not storage_dir.exists() or not any(storage_dir.iterdir())
         _assert_sensitive_values_not_rendered(page)
 
-    def test_mikan_selection_displays_fields_and_blocks_invalid_config(
+    def test_index_does_not_render_mikan_sensitive_fields(
         self, page: Page, live_server_url: str
     ) -> None:
-        calls: list[Request] = []
-
-        def _capture_generation(route: Any, request: Request) -> None:
-            if request.method == "POST":
-                calls.append(request)
-                route.fulfill(
-                    status=500,
-                    content_type="application/json",
-                    body=json.dumps(
-                        {
-                            "ok": False,
-                            "error_type": "unexpected",
-                            "error_message": "validation should block this request",
-                        }
-                    ),
-                )
-                return
-            route.continue_()
-
-        page.route("**/api/v1/requests", _capture_generation)
         page.goto(f"{live_server_url}/index")
-        page.fill('input[name="title"]', "葬送的芙莉莲")
-        page.select_option('select[name="source"]', "mikan")
-
-        assert page.locator("#mikan-config-fields").is_visible()
-
-        page.click("#request-generate-submit")
-        page.wait_for_timeout(300)
-        assert not calls
-        assert "必须填写 search_endpoint" in page.locator("#request-form-error").inner_text()
-
-        page.fill('input[name="mikan_search_endpoint"]', "redacted-search-entry")
-        page.fill('input[name="mikan_timeout_seconds"]', "-1")
-        page.click("#request-generate-submit")
-        page.wait_for_timeout(300)
-        assert not calls
-        assert "timeout_seconds 必须为正数" in page.locator("#request-form-error").inner_text()
+        assert page.locator('input[name="mikan_search_endpoint"]').count() == 0
+        assert page.locator('input[name="mikan_timeout_seconds"]').count() == 0
+        assert "search_endpoint" not in _visible_text(page)
+        assert "timeout_seconds" not in _visible_text(page)
 
 
 class TestStage11AutoBangumiBrowserRegressions:
