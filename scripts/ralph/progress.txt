@@ -4,6 +4,7 @@
 - Explicit `miguOrca.web.saveRequest = "false"` is preview-only on `/index`; preview details must stay read-only, avoid URL `request_id` sync, and offer a save action before saved Request APIs are available.
 - Request detail seed feedback should derive valid/excluded lists from the selected `source_info.rss_sources` entry; `confirmable_config.effective_seed_names` is only the selected valid list and does not include exclusion reasons.
 - Selected RSS source summaries should carry safe title-only `seed_names` for the complete pre-filter Seeds list; use valid/excluded title fallback only for older saved Requests.
+- qBittorrent Settings connection testing is direct-rendered in `#settings-qbittorrent-test-form`; do not wrap it in `<details>`/`<summary>` or require tests to open a disclosure before filling fields.
 
 Started: Fri Aug 14 16:04:26 CST 2026
 ---
@@ -56,4 +57,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Patterns discovered: use selected source `seed_names` for complete Seeds display and `valid_seed_names` / `excluded_seed_names` for post-filter groups; keep raw RSS and response bodies out of source summaries and detail rendering.
   - Gotchas encountered: Playwright `inner_text()` on collapsed `<details>` only includes visible summary text, so tests that inspect group contents must open `.seed-details` first.
   - Useful context: `咒术回战第三季` remains a stable fixture for Seeds count changes because the selected Loli source has two titles and the `V2` rule excludes one.
+---
+## 2026-08-14 16:50:53 CST - US-101
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Removed the `/settings` qBittorrent connection form disclosure wrapper so endpoint, username, password, timeout_seconds, verify_tls, result, and test button are directly visible in the qBittorrent section.
+- Kept the password field masked, retained confirmation before testing, preserved success clearing of endpoint/username/password, and kept failure output redacted while preserving failed inputs.
+- Updated static and browser tests to assert the direct-rendered form contract and to stop opening `qbittorrent-settings-details`.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_qbittorrent_connection.py`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed with 55 tests; `uv run pytest tests/browser/test_qbittorrent_connection.py tests/browser/test_ui_quality.py -q` passed with 13 browser tests; `uv run pytest -q` passed with 420 tests; `uv run pytest tests/browser/ -v` passed with 139 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: qBittorrent Settings connection testing should remain a direct form with stable `settings-qbittorrent-*` IDs and no disclosure-opening prerequisite.
+  - Gotcha encountered: several browser tests still encoded the old collapsed Settings contract through `#qbittorrent-settings-details`; update both behavior and UI-quality tests when changing panel structure.
+  - Useful context: qBittorrent sensitive values remain transient form inputs only; success clears endpoint, username, and password, while failures preserve them for correction but render only redacted generic output.
 ---

@@ -103,7 +103,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Stage 13 曾要求敏感或低频配置支持折叠，但用户反馈该下拉无意义；Stage 14 对 qBittorrent 分区改为直接显示。"
     },
     {

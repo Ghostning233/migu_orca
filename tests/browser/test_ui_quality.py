@@ -48,11 +48,16 @@ def test_settings_sections_use_boundaries_disclosure_and_button_semantics(
     ):
         expect(page.locator(f"#{panel_id}.settings-panel")).to_be_visible()
 
-    expect(page.locator("#qbittorrent-settings-details.settings-disclosure")).to_be_visible()
-    expect(page.locator("#settings-qbittorrent-endpoint")).to_be_hidden()
+    expect(page.locator("#qbittorrent-settings-details")).to_have_count(0)
+    expect(page.locator("#qbittorrent-settings-panel details")).to_have_count(0)
+    expect(page.locator("#qbittorrent-settings-panel summary")).to_have_count(0)
+    expect(page.locator("#settings-qbittorrent-endpoint")).to_be_visible()
     expect(page.locator("#storage-preferences-save.primary-button")).to_be_visible()
     expect(page.locator("#storage-preferences-clear.danger-button")).to_be_visible()
-    expect(page.locator("#settings-qbittorrent-test-submit.primary-button")).to_be_hidden()
+    expect(page.locator("#settings-qbittorrent-test-submit.primary-button")).to_be_visible()
+    expect(page.locator("#settings-qbittorrent-test-submit")).to_contain_text(
+        "测试 qBittorrent 连接"
+    )
 
 
 def test_request_detail_sections_are_grouped_and_actions_are_near_heading(

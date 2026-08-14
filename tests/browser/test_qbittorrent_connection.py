@@ -71,15 +71,24 @@ class TestQbittorrentNotOnWorkbench:
 class TestQbittorrentSettingsConnection:
     """AC: Settings owns explicit qBittorrent connection testing."""
 
-    def test_settings_renders_collapsed_qbittorrent_form(
+    def test_settings_renders_direct_qbittorrent_form(
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/settings")
 
-        details = page.locator("#qbittorrent-settings-details")
-        assert details.count() == 1
-        assert not details.evaluate("element => element.open")
+        assert page.locator("#qbittorrent-settings-details").count() == 0
+        assert page.locator("#qbittorrent-settings-panel details").count() == 0
+        assert page.locator("#qbittorrent-settings-panel summary").count() == 0
         assert page.locator("#settings-qbittorrent-test-form").count() == 1
+        expect(page.locator("#settings-qbittorrent-endpoint")).to_be_visible()
+        expect(page.locator("#settings-qbittorrent-username")).to_be_visible()
+        expect(page.locator("#settings-qbittorrent-password")).to_be_visible()
+        expect(page.locator("#settings-qbittorrent-timeout-seconds")).to_be_visible()
+        expect(page.locator("#settings-qbittorrent-verify-tls")).to_be_visible()
+        expect(page.locator("#settings-qbittorrent-test-submit")).to_be_visible()
+        expect(page.locator("#settings-qbittorrent-test-submit")).to_contain_text(
+            "测试 qBittorrent 连接"
+        )
         assert page.locator("#settings-qbittorrent-password").get_attribute("type") == "password"
 
     def test_settings_qbittorrent_validation_blocks_api_call(
@@ -93,7 +102,6 @@ class TestQbittorrentSettingsConnection:
 
         page.route("**/api/v1/qbittorrent/test-connection**", _capture)
         page.goto(f"{live_server_url}/settings")
-        page.locator("#qbittorrent-settings-details").evaluate("element => element.open = true")
         page.click("#settings-qbittorrent-test-submit")
 
         assert calls == []
@@ -111,7 +119,6 @@ class TestQbittorrentSettingsConnection:
         page.route("**/api/v1/qbittorrent/test-connection**", _capture)
         page.add_init_script("window.confirm = () => false")
         page.goto(f"{live_server_url}/settings")
-        page.locator("#qbittorrent-settings-details").evaluate("element => element.open = true")
         page.fill("#settings-qbittorrent-endpoint", "http://private-qbt.local")
         page.fill("#settings-qbittorrent-username", "private-user")
         page.fill("#settings-qbittorrent-password", "private-password")
@@ -141,7 +148,6 @@ class TestQbittorrentSettingsConnection:
         page.route("**/api/v1/qbittorrent/test-connection", _fulfill_success)
         page.add_init_script("window.confirm = () => true")
         page.goto(f"{live_server_url}/settings")
-        page.locator("#qbittorrent-settings-details").evaluate("element => element.open = true")
         page.fill("#settings-qbittorrent-endpoint", "http://private-qbt.local")
         page.fill("#settings-qbittorrent-username", "private-user")
         page.fill("#settings-qbittorrent-password", "private-password")
@@ -191,7 +197,6 @@ class TestQbittorrentSettingsConnection:
         page.route("**/api/v1/qbittorrent/test-connection", _fulfill_failure)
         page.add_init_script("window.confirm = () => true")
         page.goto(f"{live_server_url}/settings")
-        page.locator("#qbittorrent-settings-details").evaluate("element => element.open = true")
         page.fill("#settings-qbittorrent-endpoint", "http://private-qbt.local")
         page.fill("#settings-qbittorrent-username", "private-user")
         page.fill("#settings-qbittorrent-password", "private-password")

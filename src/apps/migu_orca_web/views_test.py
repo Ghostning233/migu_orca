@@ -224,7 +224,12 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'id="storage-preferences-clear"' in html
     assert "非敏感浏览器偏好" in html
     assert "localStorage" in html
-    assert 'id="qbittorrent-settings-details"' in html
+    qbittorrent_panel_html = html[
+        html.index('id="qbittorrent-settings-panel"') : html.index('id="auto-bangumi-settings-panel"')
+    ]
+    assert 'id="qbittorrent-settings-details"' not in html
+    assert "<details" not in qbittorrent_panel_html
+    assert "<summary" not in qbittorrent_panel_html
     assert 'id="settings-qbittorrent-test-form"' in html
     assert 'name="qbittorrent_endpoint"' in html
     assert 'name="qbittorrent_username"' in html
@@ -234,6 +239,7 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'name="qbittorrent_verify_tls"' in html
     assert 'id="settings-qbittorrent-result"' in html
     assert "尚未测试 qBittorrent 连接" in html
+    assert "测试 qBittorrent 连接" in html
     assert "status、reachable 和 version" in html
     assert "qBittorrent 连接测试将在此处迁移" not in html
     assert 'id="settings-ab-submit-form"' in html

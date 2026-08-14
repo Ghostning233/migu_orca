@@ -421,7 +421,7 @@
       control.disabled = isInFlight;
     }
     if (qbittorrentSubmitButton) {
-      qbittorrentSubmitButton.textContent = isInFlight ? "正在测试..." : "测试连接";
+      qbittorrentSubmitButton.textContent = isInFlight ? "正在测试..." : "测试 qBittorrent 连接";
     }
   }
 
