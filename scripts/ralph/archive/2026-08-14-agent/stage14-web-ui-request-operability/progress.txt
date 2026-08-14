@@ -1,0 +1,87 @@
+# Ralph Progress Log
+## Codebase Patterns
+- Browser tests that trigger Request generation should seed `miguOrca.web.storageDir` to a temporary fixture path before visiting `/index`; otherwise default `.migu_orca/storage` can be polluted and empty-list tests become order-dependent.
+- Explicit `miguOrca.web.saveRequest = "false"` is preview-only on `/index`; preview details must stay read-only, avoid URL `request_id` sync, and offer a save action before saved Request APIs are available.
+- Request detail seed feedback should derive valid/excluded lists from the selected `source_info.rss_sources` entry; `confirmable_config.effective_seed_names` is only the selected valid list and does not include exclusion reasons.
+- Selected RSS source summaries should carry safe title-only `seed_names` for the complete pre-filter Seeds list; use valid/excluded title fallback only for older saved Requests.
+- qBittorrent Settings connection testing is direct-rendered in `#settings-qbittorrent-test-form`; do not wrap it in `<details>`/`<summary>` or require tests to open a disclosure before filling fields.
+- Stage closeout docs should update README, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, the stage PRD, and affected module PRDs together so the current-stage baseline stays consistent.
+- Sensitive Web UI regressions should check URL state, `localStorage`, `sessionStorage`, visible body text, and saved Request JSON; qBittorrent and Auto Bangumi secrets are allowed only in explicit request bodies.
+
+Started: Fri Aug 14 16:04:26 CST 2026
+---
+## 2026-08-14 16:16:31 CST - US-097
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented default saved Request generation for `/index`: missing `miguOrca.web.saveRequest` now defaults to saving, clear preferences restores saved generation, and generation no longer persists Settings-only form values from the workbench.
+- Updated the workbench storage summary and preference/browser expectations to match the saved-by-default contract while preserving explicit `save_request=false` preview behavior.
+- Added browser coverage for `咒术回战` default generate -> saved list item -> URL request_id sync -> confirm, cancel, and modify success paths with no `未找到已保存的 Request` state.
+- Isolated a qBittorrent browser generation regression test with temporary storage so it does not write default `.migu_orca/storage`.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_generation.py`, `tests/browser/test_shell.py`, `tests/browser/test_qbittorrent_connection.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 411 tests; `uv run pytest tests/browser/ -v` passed with 132 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: absent `miguOrca.web.saveRequest` is now the saved-by-default path; explicit localStorage value `"false"` remains preview mode for later read-only preview work.
+  - Gotcha encountered: calling Settings preference persistence from `/index` can overwrite save behavior because Settings form inputs are absent there.
+  - Useful context: Browser tests that generate Requests must seed temporary storage or explicitly preview to avoid leaking saved JSON into default `.migu_orca/storage`.
+---
+## 2026-08-14 16:25:11 CST - US-098
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented explicit read-only rendering for unsaved preview Requests on `/index`, including a `预览（未保存）` saved-state row, preview-mode guidance, and only a `保存此 Request` action.
+- Added a save-from-preview path that regenerates the same title with `save_request: true`, then refreshes detail, Request list, and URL `request_id` state so normal confirm/cancel/modify actions return only after persistence.
+- Prevented preview generation from selecting or syncing temporary request IDs and updated preview notifications to make the unsaved mode explicit.
+- Added browser coverage for preview read-only controls, no calls to accept/cancel/modify/submit-ab while previewing, clean preview URL state, and saving preview into an operable saved Request.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_generation.py`, `tests/browser/test_stage11_real_config_entry.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 414 tests; `uv run pytest tests/browser/ -v` passed with 134 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: explicit `save_request=false` should be treated as a read-only preview contract until the user saves.
+  - Gotcha encountered: static script tests can accidentally match the save-preview POST before the normal generate POST; scope ordering checks to the intended function body.
+  - Useful context: older browser regressions that exercise `save_request=false` need preview wording assertions, not generic generation-success wording.
+---
+## 2026-08-14 16:34:41 CST - US-099
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented visible modify-filter feedback for Request details: the Filter section now shows excluded seed counts, and the Seeds section expands into complete, valid, and excluded groups with excluded reasons.
+- Added a `must_not_contain` literal-mode helper so users can enter `[v2]` and have the UI send a safe case-insensitive regex that matches `v2` or bracketed `[v2]`, while preserving default regex semantics.
+- Added browser coverage for `[v2]` literal exclusion, stable `V2` regex exclusion, seed list/count refresh after successful modify, and preserving form input after modify failures.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_actions.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 416 tests; `uv run pytest tests/browser/ -v` passed with 136 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: Request detail seed comparisons should use the selected RSS source’s `valid_seed_names` and `excluded_seed_names` because excluded entries carry the reason/rule metadata needed for UI feedback.
+  - Gotcha encountered: the qBittorrent browser tests still assert a collapsed Settings form; do not change those until US-101.
+  - Useful context: the Jujutsu fixture has two valid Loli seeds including `V2`, making it a stable browser fixture for modify-filter exclusion assertions.
+---
+## 2026-08-14 16:44:26 CST - US-100
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented the complete/effective/excluded Seeds contract for Request details by adding safe `seed_names` title summaries to RSS source snapshots and preferring them in the Web UI.
+- Updated the Seeds UI labels and summary counts to show `完整`, `有效`, and `排除` groups with consistent empty states and excluded seed reasons.
+- Added backend/static/browser coverage for safe complete seed names, three visible Seeds lists, empty states, modify refresh counts, and no raw RSS/source value leakage in Request detail.
+- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_detail.py`, `tests/browser/test_actions.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 420 tests; `uv run pytest tests/browser/ -v` passed with 139 browser tests.
+- **Learnings for future iterations:**
+  - Patterns discovered: use selected source `seed_names` for complete Seeds display and `valid_seed_names` / `excluded_seed_names` for post-filter groups; keep raw RSS and response bodies out of source summaries and detail rendering.
+  - Gotchas encountered: Playwright `inner_text()` on collapsed `<details>` only includes visible summary text, so tests that inspect group contents must open `.seed-details` first.
+  - Useful context: `咒术回战第三季` remains a stable fixture for Seeds count changes because the selected Loli source has two titles and the `V2` rule excludes one.
+---
+## 2026-08-14 16:50:53 CST - US-101
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Removed the `/settings` qBittorrent connection form disclosure wrapper so endpoint, username, password, timeout_seconds, verify_tls, result, and test button are directly visible in the qBittorrent section.
+- Kept the password field masked, retained confirmation before testing, preserved success clearing of endpoint/username/password, and kept failure output redacted while preserving failed inputs.
+- Updated static and browser tests to assert the direct-rendered form contract and to stop opening `qbittorrent-settings-details`.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_qbittorrent_connection.py`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed with 55 tests; `uv run pytest tests/browser/test_qbittorrent_connection.py tests/browser/test_ui_quality.py -q` passed with 13 browser tests; `uv run pytest -q` passed with 420 tests; `uv run pytest tests/browser/ -v` passed with 139 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: qBittorrent Settings connection testing should remain a direct form with stable `settings-qbittorrent-*` IDs and no disclosure-opening prerequisite.
+  - Gotcha encountered: several browser tests still encoded the old collapsed Settings contract through `#qbittorrent-settings-details`; update both behavior and UI-quality tests when changing panel structure.
+  - Useful context: qBittorrent sensitive values remain transient form inputs only; success clears endpoint, username, and password, while failures preserve them for correction but render only redacted generic output.
+---
+## 2026-08-14 17:01:17 CST - US-102
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Completed Stage 14 documentation and regression closeout: README now documents default saved generation, explicit preview mode, Seeds complete/valid/excluded lists, and direct-rendered qBittorrent Settings behavior.
+- Updated Stage status and completed BL-007 across `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage14_web_ui_request_operability_PRD.md`, and `docs/modules/M13-web-ui-PRD.md`.
+- Added a Stage 14 browser security regression asserting sensitive qBittorrent values do not appear in URL state, browser storage, visible body text, or saved Request JSON after Settings interaction and default saved generation.
+- Files changed: `README.md`, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage14_web_ui_request_operability_PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 421 tests; `uv run pytest tests/browser/ -v` passed with 140 browser tests.
+- **Learnings for future iterations:**
+  - Patterns discovered: Stage closeout docs need synchronized updates in README, backlog, main PRD, stage PRD, and affected module PRDs to avoid stale current-stage claims.
+  - Patterns discovered: Web UI secret regressions should validate URL, browser storage, rendered text, and saved storage JSON, not just notifications.
+  - Gotcha encountered: `CODEX_CURRENT_THREAD_ID` was unset in this environment, so the progress URL keeps the same placeholder format used by earlier entries.
+  - Useful context: after US-102 all Stage 14 stories in `scripts/ralph/prd.json` are marked passing.
+---

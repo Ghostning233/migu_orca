@@ -14,7 +14,8 @@
 | 3 | BL-005 | qBittorrent 直连 | 完成 |
 | 4 | BL-006 | Web UI Settings 信息架构优化 | 完成 |
 | 5 | BL-007 | Web UI Request 可操作性与筛选可视化修复 | 完成 |
-| 6 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 待办 |
+| 6 | BL-008 | Web UI ACCEPTED 管理与筛选语义优化 | 计划中 |
+| 7 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 待办 |
 
 认证、权限模块当前优先级最低，现阶段无明确需求，默认不纳入后续开发计划。除非之后出现部署暴露、多人使用或远程访问场景，否则不为其单独规划 Stage。
 
@@ -118,6 +119,30 @@
 - 修改筛选规则后，详情同步展示 Filter、完整 Seeds、有效 Seeds 和排除 Seeds，方便观察 `[v2]` 等规则效果。
 - qBittorrent Settings 分区已去掉 dropdown/disclosure 逻辑，直接显示 endpoint、username、password、timeout、verify_tls 和测试按钮。
 - 已保持安全边界：真实 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体不得进入 storage JSON、browser storage、URL、日志、截图或 trace。
+
+### BL-008: Web UI ACCEPTED 管理与筛选语义优化
+
+- 状态：计划中 (Stage 15)
+- 来源：Stage 14 后人工验收
+- 优先级：6
+- 不阻塞：Stage 14 已合并，但阻塞后续 Web UI 用户验收
+
+观察结果：
+
+- Request 确认后进入 `ACCEPTED` 状态，此时 Web UI 只展示 Auto Bangumi 提交入口，不能删除或修改该 Request。
+- 后端 `modify_request` 当前只接受 `PENDING_CONFIRM`，会拒绝 `ACCEPTED` 修改。
+- 本地 Request storage 当前支持保存、加载和列表，但缺少删除能力。
+- 筛选规则仍以正则为主要语义，普通用户输入 `[v2]`、`v2` 等字符时需要理解正则或额外 helper。
+- 筛选缺少大小写敏感选项；当前正则匹配默认大小写敏感，不符合默认不敏感的目标。
+
+目标：
+
+- 为已保存 Request 增加显式删除能力，至少覆盖 `ACCEPTED` Request，并在删除后刷新列表、详情和 URL 状态。
+- 允许 `ACCEPTED` Request 执行与 `PENDING_CONFIRM` 相同范围的受限修改，修改后保持 `ACCEPTED` 状态并记录 Audit。
+- 筛选规则默认改为普通字符包含/排除，大小写默认不敏感。
+- 在筛选表单旁增加 `大小写敏感` 和 `使用正则` 复选框；两者默认未选中。
+- `使用正则` 未选中时，输入 `[`、`[v2]` 等字符不得触发正则错误；选中后才启用正则校验。
+- 继续保持安全边界：真实 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体不得进入 storage JSON、browser storage、URL、日志、截图或 trace。
 
 ## 搜索与真实 MiKan 兼容性
 

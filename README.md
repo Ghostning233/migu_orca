@@ -299,7 +299,7 @@ Stage 14 不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复�
 
 ## Ralph 开发流
 
-- 当前活跃 Ralph PRD：Stage 14 Web UI Request 可操作性修复 PRD
+- 当前活跃 Ralph PRD：Stage 15 Web UI ACCEPTED 管理与筛选语义优化 PRD
 - 最近完成阶段：Stage 14，Web UI Request 可操作性修复 PRD
 - 前一完成阶段：Stage 13，Web UI Settings 信息架构优化 PRD
 - 前一完成阶段：Stage 12，qBittorrent 直连显式连接测试 PRD
@@ -307,7 +307,7 @@ Stage 14 不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复�
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- 后续待办：`docs/backlog.md`，当前优先项为 BL-001 真实 MiKan 搜索和 RSS 源解析兼容性优化
+- 后续待办：`docs/backlog.md`，当前优先项为 BL-008 Web UI ACCEPTED 管理与筛选语义优化
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
 - Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`
