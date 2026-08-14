@@ -3,6 +3,7 @@
 - Browser tests that trigger Request generation should seed `miguOrca.web.storageDir` to a temporary fixture path before visiting `/index`; otherwise default `.migu_orca/storage` can be polluted and empty-list tests become order-dependent.
 - Explicit `miguOrca.web.saveRequest = "false"` is preview-only on `/index`; preview details must stay read-only, avoid URL `request_id` sync, and offer a save action before saved Request APIs are available.
 - Request detail seed feedback should derive valid/excluded lists from the selected `source_info.rss_sources` entry; `confirmable_config.effective_seed_names` is only the selected valid list and does not include exclusion reasons.
+- Selected RSS source summaries should carry safe title-only `seed_names` for the complete pre-filter Seeds list; use valid/excluded title fallback only for older saved Requests.
 
 Started: Fri Aug 14 16:04:26 CST 2026
 ---
@@ -43,4 +44,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: Request detail seed comparisons should use the selected RSS source’s `valid_seed_names` and `excluded_seed_names` because excluded entries carry the reason/rule metadata needed for UI feedback.
   - Gotcha encountered: the qBittorrent browser tests still assert a collapsed Settings form; do not change those until US-101.
   - Useful context: the Jujutsu fixture has two valid Loli seeds including `V2`, making it a stable browser fixture for modify-filter exclusion assertions.
+---
+## 2026-08-14 16:44:26 CST - US-100
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented the complete/effective/excluded Seeds contract for Request details by adding safe `seed_names` title summaries to RSS source snapshots and preferring them in the Web UI.
+- Updated the Seeds UI labels and summary counts to show `完整`, `有效`, and `排除` groups with consistent empty states and excluded seed reasons.
+- Added backend/static/browser coverage for safe complete seed names, three visible Seeds lists, empty states, modify refresh counts, and no raw RSS/source value leakage in Request detail.
+- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_detail.py`, `tests/browser/test_actions.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 420 tests; `uv run pytest tests/browser/ -v` passed with 139 browser tests.
+- **Learnings for future iterations:**
+  - Patterns discovered: use selected source `seed_names` for complete Seeds display and `valid_seed_names` / `excluded_seed_names` for post-filter groups; keep raw RSS and response bodies out of source summaries and detail rendering.
+  - Gotchas encountered: Playwright `inner_text()` on collapsed `<details>` only includes visible summary text, so tests that inspect group contents must open `.seed-details` first.
+  - Useful context: `咒术回战第三季` remains a stable fixture for Seeds count changes because the selected Loli source has two titles and the `V2` rule excludes one.
 ---

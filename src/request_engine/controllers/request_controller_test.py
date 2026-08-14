@@ -175,6 +175,20 @@ def test_summarize_request_does_not_mutate_or_replace_original_json_contract() -
     assert "source_info" not in summary
 
 
+def test_pending_request_source_summary_keeps_safe_complete_seed_names() -> None:
+    request = _pending_request_with_sources()
+
+    loli_source = request["source_info"]["rss_sources"][0]
+
+    assert loli_source["seed_names"] == [
+        "[Loli] 番剧 - 01",
+        "[Loli] 番剧 - 02",
+        "[Loli] 番剧 - SP",
+    ]
+    assert "rss_xml" not in loli_source
+    assert "response_body" not in loli_source
+
+
 def test_validate_modify_patch_allows_only_confirmable_fields() -> None:
     patch = {
         "selected_subtitle_group": "NC",
@@ -277,6 +291,11 @@ def test_modify_request_recomputes_filter_rule_from_existing_source_info() -> No
     assert loli_source["valid_seed_count"] == 1
     assert loli_source["invalid_seed_count"] == 2
     assert loli_source["valid_seed_names"] == ["[Loli] 番剧 - 02"]
+    assert loli_source["seed_names"] == [
+        "[Loli] 番剧 - 01",
+        "[Loli] 番剧 - 02",
+        "[Loli] 番剧 - SP",
+    ]
     assert loli_source["excluded_seed_names"] == [
         {
             "name": "[Loli] 番剧 - 01",

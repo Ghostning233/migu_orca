@@ -1363,7 +1363,7 @@
     var source = selectedRssSource(sourceInfo, config);
     var validSeeds = source.valid_seed_names || config.effective_seed_names || [];
     var excludedSeeds = source.excluded_seed_names || [];
-    var allSeeds = combinedSeedNames(validSeeds, excludedSeeds);
+    var allSeeds = source.seed_names || combinedSeedNames(validSeeds, excludedSeeds);
     var effectiveSeeds = config.effective_seed_names || validSeeds;
 
     detailContainer.className = "request-detail";
@@ -1493,14 +1493,14 @@
     seedDetails.className = "seed-details";
     var seedSummary = document.createElement("summary");
     seedSummary.textContent =
-      "查看筛选种子列表 (全部 " + allSeeds.length + " / 有效 " +
+      "查看筛选种子列表 (完整 " + allSeeds.length + " / 有效 " +
       effectiveSeeds.length + " / 排除 " + excludedSeeds.length + ")";
     var seedsContainer = document.createElement("div");
     seedsContainer.className = "seed-groups";
     var allGroup = document.createElement("div");
     allGroup.className = "seed-group";
     var allHeading = document.createElement("h5");
-    allHeading.textContent = "全部种子 (" + allSeeds.length + ")";
+    allHeading.textContent = "完整种子 (" + allSeeds.length + ")";
     allGroup.appendChild(allHeading);
     renderSeedList(allGroup, allSeeds, "无种子标题。");
     var validGroup = document.createElement("div");

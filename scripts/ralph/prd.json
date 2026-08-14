@@ -83,7 +83,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "当前前端只从 `confirmable_config.effective_seed_names` 渲染一个有效种子列表，无法对比筛选前后。"
     },
     {

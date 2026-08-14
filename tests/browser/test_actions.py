@@ -395,7 +395,7 @@ class TestModifyFlow:
         detail_text = detail.inner_text()
         assert "V2" in detail.locator(".seed-group:has-text('排除种子')").inner_text()
         assert "V2" not in detail.locator(".seed-group:has-text('有效种子')").inner_text()
-        assert "查看筛选种子列表 (全部 2 / 有效 1 / 排除 1)" in detail_text
+        assert "查看筛选种子列表 (完整 2 / 有效 1 / 排除 1)" in detail_text
 
     def test_modify_form_hidden_initially(
         self, page: Page, live_server_url: str, storage_dir: Path

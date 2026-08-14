@@ -342,6 +342,8 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert '["folder_name", config.expected_folder_name]' in script
     assert '["有效种子数", effectiveSeeds.length]' in script
     assert '["排除种子数", excludedSeeds.length]' in script
+    assert "source.seed_names || combinedSeedNames(validSeeds, excludedSeeds)" in script
+    assert "完整种子" in script
     assert "renderExcludedSeedList" in script
     assert "document.createElement(\"details\")" in script
     assert "seedSummary.textContent" in script
@@ -686,6 +688,7 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".seed-details summary" in css
     assert ".seed-groups" in css
     assert ".seed-exclude-reason" in css
+    assert "overflow-wrap" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css
 

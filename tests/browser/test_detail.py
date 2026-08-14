@@ -310,7 +310,7 @@ class TestAutoBangumiSubmitEntry:
 
 
 class TestSeedsExpandable:
-    """AC: Seeds 区块可展开查看完整有效种子标题列表."""
+    """AC: Seeds 区块可展开查看完整、有效、排除种子标题列表."""
 
     def test_seeds_section_has_details_element(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -327,8 +327,67 @@ class TestSeedsExpandable:
         create_saved_request(storage_dir, "葬送的芙莉莲", "req-detail-5")
         _open_request_detail(page, live_server_url, storage_dir, "req-detail-5")
 
-        text = page.locator("#request-detail-container").inner_text()
+        detail = page.locator("#request-detail-container")
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        text = detail.inner_text()
+        assert "完整种子" in text
         assert "有效种子" in text
+        assert "排除种子" in text
+
+    def test_seeds_section_shows_three_title_lists_and_counts(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-detail-seeds")
+        _open_request_detail(page, live_server_url, storage_dir, "req-detail-seeds")
+
+        detail = page.locator("#request-detail-container")
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+
+        assert "查看筛选种子列表 (完整 2 / 有效 2 / 排除 0)" in detail.inner_text()
+        assert "完整种子 (2)" in detail.locator(".seed-group:has-text('完整种子')").inner_text()
+        assert "有效种子 (2)" in detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        assert "排除种子 (0)" in detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        assert "无排除种子标题。" in detail.locator(".seed-group:has-text('排除种子')").inner_text()
+
+    def test_seeds_section_empty_states_are_consistent(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        request = create_saved_request(storage_dir, "葬送的芙莉莲", "req-detail-empty-seeds")
+        source = request["source_info"]["rss_sources"][0]
+        source["seed_names"] = []
+        source["total_seed_count"] = 0
+        source["valid_seed_names"] = []
+        source["valid_seed_count"] = 0
+        source["excluded_seed_names"] = []
+        source["invalid_seed_count"] = 0
+        request["confirmable_config"]["effective_seed_names"] = []
+        save_request_snapshot(load_storage_config(storage_dir), request)
+
+        _open_request_detail(page, live_server_url, storage_dir, "req-detail-empty-seeds")
+
+        detail = page.locator("#request-detail-container")
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        detail_text = detail.inner_text()
+        assert "查看筛选种子列表 (完整 0 / 有效 0 / 排除 0)" in detail_text
+        assert "无种子标题。" in detail_text
+        assert "无有效种子标题。" in detail_text
+        assert "无排除种子标题。" in detail_text
+
+    def test_seeds_section_does_not_expose_raw_source_values(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        request = create_saved_request(storage_dir, "葬送的芙莉莲", "req-detail-seed-safe")
+        selected_source = request["source_info"]["rss_sources"][0]
+        selected_source["rss_url"] = "https://secret.example.invalid/rss.xml?token=hidden-token"
+        selected_source["raw_response_body"] = "<rss><channel>hidden-token</channel></rss>"
+        save_request_snapshot(load_storage_config(storage_dir), request)
+
+        _open_request_detail(page, live_server_url, storage_dir, "req-detail-seed-safe")
+
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "hidden-token" not in detail_text
+        assert "<rss" not in detail_text
+        assert "https://secret.example.invalid" not in detail_text
 
 
 class TestMissingOptionalData:
