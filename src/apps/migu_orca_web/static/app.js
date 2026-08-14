@@ -1208,7 +1208,7 @@
     mncHelp.id = "modify-must-not-contain-help";
     mncHelp.className = "field-help";
     mncHelp.textContent =
-      "默认按正则匹配；要按字面文本排除 [v2] 或 v2，请勾选字面文本模式后输入 [v2]。";
+      "默认按字面文本匹配且不区分大小写；输入 [v2] 将按字面字符 [v2] 匹配。";
     container.appendChild(mncHelp);
     var mncLiteralWrapper = document.createElement("label");
     mncLiteralWrapper.className = "inline-check literal-mode-check";
@@ -1256,7 +1256,9 @@
       }
       var mcVal = mcInput.value.trim();
       var mncVal = mncInput.value.trim();
-      var nextMncVal = mncLiteralInput.checked && mncVal ? literalExcludePattern(mncVal) : mncVal;
+      // Stage 15 default is literal substring matching (use_regex=false), so
+      // the literal-mode checkbox is now a no-op: raw text is sent as-is.
+      var nextMncVal = mncVal;
       if (
         mcClear.checkbox.checked ||
         mncClear.checkbox.checked ||

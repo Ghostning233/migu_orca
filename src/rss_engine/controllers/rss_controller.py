@@ -128,24 +128,34 @@ def _text(element: ElementTree.Element | None) -> str | None:
 
 
 def filter_seeds(parsed: ParsedRss, rule: FilterRule) -> FilteredRss:
-    must_contain = _compile_rule(rule.must_contain, "must_contain")
-    must_not_contain = _compile_rule(rule.must_not_contain, "must_not_contain")
+    must_contain = rule.must_contain
+    must_not_contain = rule.must_not_contain
     valid: list[RssSeed] = []
     excluded: list[ExcludedSeed] = []
     for seed in parsed.seeds:
-        if must_not_contain and must_not_contain.search(seed.title):
+        if must_not_contain and _rule_matches(
+            must_not_contain,
+            seed.title,
+            rule=rule,
+            name="must_not_contain",
+        ):
             excluded.append(
                 ExcludedSeed(
                     name=seed.title,
-                    reason=f"命中必须不含规则：{rule.must_not_contain}",
+                    reason=f"命中排除规则：{must_not_contain}",
                     rule="must_not_contain",
                 )
             )
-        elif must_contain and not must_contain.search(seed.title):
+        elif must_contain and not _rule_matches(
+            must_contain,
+            seed.title,
+            rule=rule,
+            name="must_contain",
+        ):
             excluded.append(
                 ExcludedSeed(
                     name=seed.title,
-                    reason=f"未命中必须包含规则：{rule.must_contain}",
+                    reason=f"未命中包含规则：{must_contain}",
                     rule="must_contain",
                 )
             )
@@ -160,15 +170,32 @@ def filter_seeds(parsed: ParsedRss, rule: FilterRule) -> FilteredRss:
     )
 
 
-def _compile_rule(value: str, name: str) -> re.Pattern[str] | None:
-    if not value:
-        return None
-    try:
-        return re.compile(value)
-    except re.error as exc:
-        raise Stage1Error(
-            "config_error",
-            f"{name} 不是合法正则",
-            "filter_seeds",
-            {"rule": value, "reason": str(exc)},
-        ) from exc
+def _rule_matches(
+    value: str,
+    seed_name: str,
+    *,
+    rule: FilterRule,
+    name: str,
+) -> bool:
+    """Match a single non-empty rule value against a seed name.
+
+    use_regex=False performs a literal substring match; case_sensitive=False
+    ignores case for both literal and regex matching. Regex compilation only
+    happens when use_regex=True, so literal inputs such as ``[`` or ``[v2]``
+    never raise a regex validation error.
+    """
+    if rule.use_regex:
+        flags = 0 if rule.case_sensitive else re.IGNORECASE
+        try:
+            pattern = re.compile(value, flags)
+        except re.error as exc:
+            raise Stage1Error(
+                "config_error",
+                f"{name} 不是合法正则",
+                "filter_seeds",
+                {"rule": value, "reason": str(exc)},
+            ) from exc
+        return pattern.search(seed_name) is not None
+    if rule.case_sensitive:
+        return value in seed_name
+    return value.lower() in seed_name.lower()

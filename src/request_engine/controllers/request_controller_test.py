@@ -240,7 +240,8 @@ def test_validate_modify_patch_rejects_illegal_filter_rule_fields() -> None:
         ({"selected_subtitle_group": 1}, "selected_subtitle_group"),
         ({"filter_rule": []}, "filter_rule"),
         ({"filter_rule": {"must_contain": 1080}}, "filter_rule.must_contain"),
-        ({"filter_rule": {"must_not_contain": "["}}, "filter_rule.must_not_contain"),
+        ({"filter_rule": {"use_regex": "yes"}}, "filter_rule.use_regex"),
+        ({"filter_rule": {"case_sensitive": 1}}, "filter_rule.case_sensitive"),
     ],
 )
 def test_validate_modify_patch_rejects_invalid_patch_values(
@@ -286,6 +287,8 @@ def test_modify_request_recomputes_filter_rule_from_existing_source_info() -> No
     assert confirmable["filter_rule"] == {
         "must_contain": "02",
         "must_not_contain": "",
+        "use_regex": False,
+        "case_sensitive": False,
     }
     assert confirmable["effective_seed_names"] == ["[Loli] 番剧 - 02"]
     assert loli_source["valid_seed_count"] == 1
@@ -299,15 +302,91 @@ def test_modify_request_recomputes_filter_rule_from_existing_source_info() -> No
     assert loli_source["excluded_seed_names"] == [
         {
             "name": "[Loli] 番剧 - 01",
-            "reason": "未命中必须包含规则：02",
+            "reason": "未命中包含规则：02",
             "rule": "must_contain",
         },
         {
             "name": "[Loli] 番剧 - SP",
-            "reason": "未命中必须包含规则：02",
+            "reason": "未命中包含规则：02",
             "rule": "must_contain",
         },
     ]
+
+
+def test_modify_request_literal_default_accepts_brackets_without_regex_error() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(
+        request,
+        {"filter_rule": {"must_not_contain": "[v2]"}},
+    )
+
+    loli_source = modified["source_info"]["rss_sources"][0]
+    # 字面模式不会把 [v2] 编译成正则；没有种子包含 [v2] 文本，因此全部有效。
+    assert modified["confirmable_config"]["filter_rule"]["must_not_contain"] == "[v2]"
+    assert loli_source["valid_seed_count"] == 3
+    assert loli_source["invalid_seed_count"] == 0
+
+
+def test_modify_request_regex_invalid_raises_when_use_regex_enabled() -> None:
+    request = _pending_request_with_sources()
+
+    with pytest.raises(Stage1Error) as error:
+        modify_request(
+            request,
+            {"filter_rule": {"must_contain": "[", "use_regex": True}},
+        )
+
+    assert error.value.error_type == "invalid_modify_patch"
+
+
+def test_modify_request_case_sensitive_default_ignores_case() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(
+        request,
+        {"filter_rule": {"must_contain": "[loli]", "must_not_contain": ""}},
+    )
+
+    loli_source = modified["source_info"]["rss_sources"][0]
+    assert loli_source["valid_seed_count"] == 3
+
+
+def test_modify_request_case_sensitive_rejects_different_case() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(
+        request,
+        {
+            "filter_rule": {
+                "must_contain": "[loli]",
+                "must_not_contain": "",
+                "case_sensitive": True,
+            }
+        },
+    )
+
+    loli_source = modified["source_info"]["rss_sources"][0]
+    assert loli_source["valid_seed_count"] == 0
+    assert loli_source["excluded_seed_names"][0]["reason"] == "未命中包含规则：[loli]"
+
+
+def test_modify_request_regex_mode_matches_case_insensitively_by_default() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(
+        request,
+        {
+            "filter_rule": {
+                "must_contain": "loli",
+                "must_not_contain": "",
+                "use_regex": True,
+            }
+        },
+    )
+
+    loli_source = modified["source_info"]["rss_sources"][0]
+    assert loli_source["valid_seed_count"] == 3
 
 
 def test_modify_request_sanitizes_expected_folder_name() -> None:
@@ -375,6 +454,8 @@ def test_modify_request_accepted_recomputes_seed_filter() -> None:
     assert confirmable["filter_rule"] == {
         "must_contain": "02",
         "must_not_contain": "",
+        "use_regex": False,
+        "case_sensitive": False,
     }
     assert confirmable["effective_seed_names"] == ["[Loli] 番剧 - 02"]
     assert loli_source["valid_seed_count"] == 1

@@ -202,7 +202,12 @@ def test_http_client_accepts_stage3_payload_mapper_output() -> None:
         "title": "番剧 标准标题",
         "rss_url": "https://example.invalid/rss.xml",
         "save_path": "番剧 标准标题",
-        "filter_rule": {"must_contain": "1080p", "must_not_contain": "SP"},
+        "filter_rule": {
+            "must_contain": "1080p",
+            "must_not_contain": "SP",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
     }
 
 

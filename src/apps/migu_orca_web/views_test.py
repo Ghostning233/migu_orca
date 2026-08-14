@@ -1189,10 +1189,12 @@ def test_modify_accepted_request_recomputes_seeds_and_rejects_cancelled(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert payload["result"]["request"]["status"] == "ACCEPTED"
-    assert (
-        payload["result"]["request"]["confirmable_config"]["filter_rule"]
-        == {"must_contain": "01", "must_not_contain": ""}
-    )
+    assert payload["result"]["request"]["confirmable_config"]["filter_rule"] == {
+        "must_contain": "01",
+        "must_not_contain": "",
+        "use_regex": False,
+        "case_sensitive": False,
+    }
     assert payload["result"]["summary"]["effective_seed_count"] == 1
 
     cancel_response = _client().post(

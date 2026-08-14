@@ -81,7 +81,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "这是筛选语义的后端基础；UI 控件在后续 story 接入。"
     },
     {

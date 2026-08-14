@@ -326,7 +326,7 @@ class TestModifyFlow:
         assert page.locator("#modify-must-contain").count() >= 1
         assert page.locator("#modify-must-not-contain").count() >= 1
         assert page.locator("#modify-must-not-contain-literal").count() >= 1
-        assert "默认按正则匹配" in form.inner_text()
+        assert "默认按字面文本匹配" in form.inner_text()
         assert page.locator("#modify-folder-name").count() >= 1
         assert page.locator("#modify-clear-must-contain").count() >= 1
         assert page.locator("#modify-clear-must-not-contain").count() >= 1
@@ -359,7 +359,7 @@ class TestModifyFlow:
         _open_request_detail(page, live_server_url, storage_dir, "req-act-v2-literal")
 
         _click_modify(page)
-        page.locator("#modify-must-not-contain").fill("[v2]")
+        page.locator("#modify-must-not-contain").fill("V2")
         page.locator("#modify-must-not-contain-literal").check()
         page.locator("#detail-modify-form button:has-text('提交修改')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -368,7 +368,7 @@ class TestModifyFlow:
         detail_text = detail.inner_text()
         assert "修改成功" in page.locator("#page-notification").inner_text()
         assert "must_not_contain" in detail_text
-        assert "(?i:\\[?v2\\]?)" in detail_text
+        assert "V2" in detail_text
         assert "有效种子数" in detail_text
         assert "排除种子数" in detail_text
 
@@ -377,7 +377,7 @@ class TestModifyFlow:
         excluded_group = detail.locator(".seed-group:has-text('排除种子')")
         assert "V2" not in valid_group.inner_text()
         assert "V2" in excluded_group.inner_text()
-        assert "命中必须不含规则" in excluded_group.inner_text()
+        assert "命中排除规则" in excluded_group.inner_text()
 
     def test_modify_regex_v2_exclude_updates_seed_lists(
         self, page: Page, live_server_url: str, storage_dir: Path
