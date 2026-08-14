@@ -14,6 +14,7 @@
 - Settings-owned non-sensitive browser preferences use `miguOrca.web.storageDir` and `miguOrca.web.saveRequest` in `localStorage`; `/index` should read those keys through shared JS helpers and must not render editable storage preference controls.
 - Sensitive Settings forms should use collapsed `<details>` sections, guard JS initialization by element presence, require explicit `window.confirm`, and avoid localStorage/sessionStorage/URL persistence for endpoint, username, password, token, cookie, or SID values.
 - `/index` URL state may use only `request_id`; after a flow renders a fresh detail payload, call `loadList({loadSelectedDetail: false})` so list refreshes do not overwrite that detail with stale or missing storage data.
+- Request detail actions should use visible inline forms for extra input; modify clear operations use explicit empty strings in the existing restricted `filter_rule` / `expected_folder_name` patch fields, and browser tests should scope selectors to avoid action/form button label clashes.
 
 Started: Fri Aug 14 12:46 CST 2026
 ---
@@ -202,4 +203,28 @@ Thread: https://codex.openai.com/threads/unavailable
   - Accepted Request detail should link to Settings for Auto Bangumi submission instead of rendering sensitive inputs inline.
   - Settings forms can share `app.js` with `/index`, but all initialization must be guarded by element presence because each page owns different controls.
   - Capture Settings notification text before navigating back to `/index` in browser tests, because page navigation clears the Settings DOM state.
+---
+## 2026-08-14 14:13 CST - US-094
+Thread: https://codex.openai.com/threads/unavailable
+- Replaced prompt-based Request cancellation with a visible detail-panel cancel form, optional reason field, collapse action, danger styling, and explicit confirmation before the existing cancel API call.
+- Tightened modify behavior so unchanged submissions are blocked in the browser, clear operations for `must_contain`, `must_not_contain`, and `expected_folder_name` are explicit, and failed modify calls preserve the current detail/form state.
+- Added backend support and unit coverage for clearing `expected_folder_name` through the existing restricted modify patch field.
+- Files changed:
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/request_engine/controllers/request_controller.py`
+  - `src/request_engine/controllers/request_controller_test.py`
+  - `tests/browser/test_actions.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest ../../src/request_engine/controllers/request_controller_test.py ../../tests/browser/test_actions.py -q` passed: 45 tests.
+  - `uv run pytest -q` passed from repo root: 403 tests.
+  - `uv run pytest tests/browser/ -v` passed: 124 tests.
+  - `uv run python -m compileall -q src` passed.
+  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
+- **Learnings for future iterations:**
+  - Request detail action forms are built dynamically in shared `static/app.js`; keep selectors scoped because visible action buttons and hidden inline forms can share button labels.
+  - Modify clear semantics should be represented by explicit empty strings in the existing restricted `filter_rule` / `expected_folder_name` patch fields, not by adding new backend patch fields.
+  - Browser tests for action failures can intercept the request API and assert the existing detail DOM remains visible because `performAction` only reloads detail/list after success.
 ---

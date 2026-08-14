@@ -145,7 +145,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "如后端当前不支持清空字段，需要在 request controller 中补齐受限清空语义并添加单元测试。"
     },
     {

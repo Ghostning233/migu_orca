@@ -170,10 +170,10 @@ def validate_modify_patch(patch: dict[str, Any]) -> dict[str, Any]:
 
     if "expected_folder_name" in validated:
         folder_name = validated["expected_folder_name"]
-        if not isinstance(folder_name, str) or not folder_name.strip():
+        if not isinstance(folder_name, str):
             raise Stage1Error(
                 "invalid_modify_patch",
-                "expected_folder_name 必须是非空字符串",
+                "expected_folder_name 必须是字符串",
                 "validate_modify_patch",
                 {"field": "expected_folder_name"},
             )
@@ -210,8 +210,9 @@ def modify_request(request: dict[str, Any], patch: dict[str, Any]) -> dict[str, 
         )
 
     if "expected_folder_name" in validated:
-        confirmable["expected_folder_name"] = generate_folder_name(
-            validated["expected_folder_name"]
+        expected_folder_name = validated["expected_folder_name"]
+        confirmable["expected_folder_name"] = (
+            generate_folder_name(expected_folder_name) if expected_folder_name else ""
         )
 
     selected_source = _find_rss_source_by_group(

@@ -224,7 +224,6 @@ def test_validate_modify_patch_rejects_illegal_filter_rule_fields() -> None:
     [
         ([], None),
         ({"selected_subtitle_group": 1}, "selected_subtitle_group"),
-        ({"expected_folder_name": "  "}, "expected_folder_name"),
         ({"filter_rule": []}, "filter_rule"),
         ({"filter_rule": {"must_contain": 1080}}, "filter_rule.must_contain"),
         ({"filter_rule": {"must_not_contain": "["}}, "filter_rule.must_not_contain"),
@@ -298,6 +297,14 @@ def test_modify_request_sanitizes_expected_folder_name() -> None:
     modified = modify_request(request, {"expected_folder_name": " 番剧/NC\\版 "})
 
     assert modified["confirmable_config"]["expected_folder_name"] == "番剧_NC_版"
+
+
+def test_modify_request_allows_clearing_expected_folder_name() -> None:
+    request = _pending_request_with_sources()
+
+    modified = modify_request(request, {"expected_folder_name": "  "})
+
+    assert modified["confirmable_config"]["expected_folder_name"] == ""
 
 
 def test_modify_request_allows_clearing_selected_group() -> None:

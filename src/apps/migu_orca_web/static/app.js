@@ -1022,6 +1022,10 @@
     var sourceInfo = request.source_info || {};
     var rssSources = sourceInfo.rss_sources || [];
     var filterRule = config.filter_rule || {};
+    var originalGroup = config.selected_subtitle_group || "";
+    var originalMustContain = filterRule.must_contain || "";
+    var originalMustNotContain = filterRule.must_not_contain || "";
+    var originalFolderName = config.expected_folder_name || "";
 
     var container = document.createElement("div");
     container.id = "detail-modify-form";
@@ -1051,16 +1055,35 @@
     container.appendChild(groupLabel);
     container.appendChild(groupSelect);
 
+    function appendClearControl(id, labelText, targetInput) {
+      var wrapper = document.createElement("label");
+      wrapper.className = "inline-check";
+      wrapper.htmlFor = id;
+      var checkbox = document.createElement("input");
+      checkbox.id = id;
+      checkbox.type = "checkbox";
+      checkbox.addEventListener("change", function () {
+        targetInput.disabled = checkbox.checked;
+        if (checkbox.checked) {
+          targetInput.value = "";
+        }
+      });
+      wrapper.append(checkbox, document.createTextNode(labelText));
+      return { wrapper: wrapper, checkbox: checkbox };
+    }
+
     var mcLabel = document.createElement("label");
     mcLabel.textContent = "must_contain";
     mcLabel.htmlFor = "modify-must-contain";
     var mcInput = document.createElement("input");
     mcInput.id = "modify-must-contain";
     mcInput.type = "text";
-    mcInput.value = filterRule.must_contain || "";
+    mcInput.value = originalMustContain;
     mcInput.placeholder = "正则筛选规则（包含）";
+    var mcClear = appendClearControl("modify-clear-must-contain", "清空 must_contain", mcInput);
     container.appendChild(mcLabel);
     container.appendChild(mcInput);
+    container.appendChild(mcClear.wrapper);
 
     var mncLabel = document.createElement("label");
     mncLabel.textContent = "must_not_contain";
@@ -1068,10 +1091,12 @@
     var mncInput = document.createElement("input");
     mncInput.id = "modify-must-not-contain";
     mncInput.type = "text";
-    mncInput.value = filterRule.must_not_contain || "";
+    mncInput.value = originalMustNotContain;
     mncInput.placeholder = "正则筛选规则（排除）";
+    var mncClear = appendClearControl("modify-clear-must-not-contain", "清空 must_not_contain", mncInput);
     container.appendChild(mncLabel);
     container.appendChild(mncInput);
+    container.appendChild(mncClear.wrapper);
 
     var fnLabel = document.createElement("label");
     fnLabel.textContent = "folder_name";
@@ -1079,10 +1104,19 @@
     var fnInput = document.createElement("input");
     fnInput.id = "modify-folder-name";
     fnInput.type = "text";
-    fnInput.value = config.expected_folder_name || "";
+    fnInput.value = originalFolderName;
     fnInput.placeholder = "期望存储目录名";
+    var fnClear = appendClearControl("modify-clear-folder-name", "清空 folder_name", fnInput);
     container.appendChild(fnLabel);
     container.appendChild(fnInput);
+    container.appendChild(fnClear.wrapper);
+
+    var formError = document.createElement("p");
+    formError.id = "detail-modify-error";
+    formError.className = "field-error";
+    formError.setAttribute("role", "alert");
+    formError.hidden = true;
+    container.appendChild(formError);
 
     var btnRow = document.createElement("div");
     btnRow.className = "notification-actions";
@@ -1092,20 +1126,36 @@
     submitBtn.className = "detail-action";
     submitBtn.textContent = "提交修改";
     submitBtn.addEventListener("click", function () {
+      formError.hidden = true;
+      formError.textContent = "";
       var patch = {};
-      if (groupSelect.value) {
+      if (groupSelect.value && groupSelect.value !== originalGroup) {
         patch.selected_subtitle_group = groupSelect.value;
       }
       var mcVal = mcInput.value.trim();
       var mncVal = mncInput.value.trim();
-      if (mcVal || mncVal) {
+      if (
+        mcClear.checkbox.checked ||
+        mncClear.checkbox.checked ||
+        mcVal !== originalMustContain ||
+        mncVal !== originalMustNotContain
+      ) {
         patch.filter_rule = {};
-        if (mcVal) patch.filter_rule.must_contain = mcVal;
-        if (mncVal) patch.filter_rule.must_not_contain = mncVal;
+        if (mcClear.checkbox.checked || mcVal !== originalMustContain) {
+          patch.filter_rule.must_contain = mcClear.checkbox.checked ? "" : mcVal;
+        }
+        if (mncClear.checkbox.checked || mncVal !== originalMustNotContain) {
+          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : mncVal;
+        }
       }
       var fnVal = fnInput.value.trim();
-      if (fnVal) {
-        patch.expected_folder_name = fnVal;
+      if (fnClear.checkbox.checked || fnVal !== originalFolderName) {
+        patch.expected_folder_name = fnClear.checkbox.checked ? "" : fnVal;
+      }
+      if (!Object.keys(patch).length) {
+        formError.textContent = "请至少修改或清空一个字段。";
+        formError.hidden = false;
+        return;
       }
       performAction(request.request_id, "modify", { patch: patch });
     });
@@ -1119,6 +1169,56 @@
       container.hidden = true;
     });
     btnRow.appendChild(cancelBtn);
+
+    container.appendChild(btnRow);
+    return container;
+  }
+
+  function buildCancelForm(request) {
+    var container = document.createElement("div");
+    container.id = "detail-cancel-form";
+    container.className = "detail-section detail-inline-form detail-cancel-form";
+    container.hidden = true;
+
+    var heading = document.createElement("h4");
+    heading.textContent = "取消 Request";
+    container.appendChild(heading);
+
+    var reasonLabel = document.createElement("label");
+    reasonLabel.textContent = "取消原因（可选）";
+    reasonLabel.htmlFor = "cancel-reason";
+    var reasonInput = document.createElement("textarea");
+    reasonInput.id = "cancel-reason";
+    reasonInput.rows = 3;
+    reasonInput.placeholder = "例如：暂时不订阅，或匹配结果不符合预期";
+    container.append(reasonLabel, reasonInput);
+
+    var btnRow = document.createElement("div");
+    btnRow.className = "notification-actions";
+
+    var submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "danger-button detail-action";
+    submitBtn.textContent = "提交取消";
+    submitBtn.addEventListener("click", function () {
+      if (!window.confirm("确认取消此 Request？")) {
+        return;
+      }
+      var reason = reasonInput.value.trim();
+      performAction(request.request_id, "cancel", {
+        cancel_reason: reason || undefined,
+      });
+    });
+    btnRow.appendChild(submitBtn);
+
+    var collapseBtn = document.createElement("button");
+    collapseBtn.type = "button";
+    collapseBtn.className = "secondary-button";
+    collapseBtn.textContent = "收起";
+    collapseBtn.addEventListener("click", function () {
+      container.hidden = true;
+    });
+    btnRow.appendChild(collapseBtn);
 
     container.appendChild(btnRow);
     return container;
@@ -1178,13 +1278,13 @@
 
       var cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.className = "secondary-button detail-action";
+      cancelBtn.className = "danger-button detail-action";
       cancelBtn.textContent = "取消";
       cancelBtn.addEventListener("click", function () {
-        var reason = window.prompt("请输入取消原因（可选）：") || "";
-        performAction(request.request_id, "cancel", {
-          cancel_reason: reason || undefined,
-        });
+        var form = document.getElementById("detail-cancel-form");
+        if (form) {
+          form.hidden = !form.hidden;
+        }
       });
       actionsContainer.appendChild(cancelBtn);
 
@@ -1218,6 +1318,7 @@
       actionsContainer.appendChild(statusNote);
     }
 
+    var cancelForm = buildCancelForm(request);
     var modifyForm = buildModifyForm(request);
     var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
@@ -1256,6 +1357,7 @@
     detailContainer.append(
       heading,
       actionsContainer,
+      cancelForm,
       modifyForm,
       overviewSection,
       sourceSection,

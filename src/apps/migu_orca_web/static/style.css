@@ -357,6 +357,18 @@ button:disabled {
   outline: none;
 }
 
+.danger-button {
+  background: #b42318;
+  border-color: #8f1d14;
+  color: #ffffff;
+}
+
+.danger-button:hover,
+.danger-button:focus {
+  background: #971b12;
+  border-color: #74140d;
+}
+
 .empty-state {
   background: #f6f7f9;
   border: 1px dashed #bcc4d0;
@@ -496,9 +508,26 @@ button:disabled {
 }
 
 .detail-inline-form select,
-.detail-inline-form input {
+.detail-inline-form input,
+.detail-inline-form textarea {
   width: 100%;
   box-sizing: border-box;
+}
+
+.detail-inline-form textarea {
+  resize: vertical;
+}
+
+.detail-inline-form .inline-check {
+  align-items: center;
+  color: #586273;
+  display: flex;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.detail-inline-form .inline-check input {
+  width: auto;
 }
 
 .detail-inline-form .notification-actions {
