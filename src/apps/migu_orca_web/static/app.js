@@ -45,7 +45,7 @@
   let loadedRequests = [];
   let currentDetailPayload = null;
   let storageDirPreference = "";
-  let saveRequestPreference = false;
+  let saveRequestPreference = true;
 
   function readPreference(key) {
     try {
@@ -75,7 +75,8 @@
     const savedStorageDir = readPreference(preferenceKeys.storageDir);
     const savedSaveRequest = readPreference(preferenceKeys.saveRequest);
     storageDirPreference = savedStorageDir || "";
-    saveRequestPreference = savedSaveRequest === "true";
+    saveRequestPreference =
+      savedSaveRequest === null ? true : savedSaveRequest === "true";
     if (settingsStorageInput) {
       settingsStorageInput.value = storageDirPreference;
     }
@@ -153,9 +154,9 @@
   function clearWebPreferences() {
     removePreference(preferenceKeys.storageDir);
     removePreference(preferenceKeys.saveRequest);
-    applyPreferenceValues("", false);
+    applyPreferenceValues("", true);
     updateStoragePreferencesStatus(
-      "偏好已清除；Request 工作台将使用默认 `.migu_orca/storage` 并只生成预览。",
+      "偏好已清除；Request 工作台将使用默认 `.migu_orca/storage` 并保存 Request JSON。",
       "empty-state compact-state",
     );
   }
@@ -420,7 +421,7 @@
       control.disabled = isInFlight;
     }
     if (qbittorrentSubmitButton) {
-      qbittorrentSubmitButton.textContent = isInFlight ? "正在测试..." : "测试连接";
+      qbittorrentSubmitButton.textContent = isInFlight ? "正在测试..." : "测试 qBittorrent 连接";
     }
   }
 
@@ -696,12 +697,16 @@
     return;
   }
 
-  function buildCreateRequestPayload(title) {
+  function buildCreateRequestPayload(title, options) {
+    const saveRequest =
+      options && Object.prototype.hasOwnProperty.call(options, "saveRequest")
+        ? Boolean(options.saveRequest)
+        : currentSaveRequest();
     return {
       title: title,
       source: "static-fixture",
       storage_dir: currentStorageDir() || null,
-      save_request: currentSaveRequest(),
+      save_request: saveRequest,
     };
   }
 
@@ -872,11 +877,11 @@
     navigator.clipboard.writeText(String(value)).catch(() => {});
   }
 
-  function renderSeedList(container, seeds) {
+  function renderSeedList(container, seeds, emptyText) {
     if (!Array.isArray(seeds) || !seeds.length) {
       const empty = document.createElement("p");
       empty.className = "muted-text";
-      empty.textContent = "无有效种子标题。";
+      empty.textContent = emptyText || "无有效种子标题。";
       container.appendChild(empty);
       return;
     }
@@ -889,6 +894,74 @@
       list.appendChild(item);
     }
     container.appendChild(list);
+  }
+
+  function renderExcludedSeedList(container, seeds) {
+    if (!Array.isArray(seeds) || !seeds.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted-text";
+      empty.textContent = "无排除种子标题。";
+      container.appendChild(empty);
+      return;
+    }
+
+    const list = document.createElement("ul");
+    list.className = "seed-list excluded-seed-list";
+    for (const seed of seeds) {
+      const item = document.createElement("li");
+      const name = seed && seed.name ? seed.name : seed;
+      const reason = seed && seed.reason ? seed.reason : "";
+      item.textContent = displayValue(name);
+      if (reason) {
+        const reasonText = document.createElement("span");
+        reasonText.className = "seed-exclude-reason";
+        reasonText.textContent = " - " + reason;
+        item.appendChild(reasonText);
+      }
+      list.appendChild(item);
+    }
+    container.appendChild(list);
+  }
+
+  function selectedRssSource(sourceInfo, config) {
+    const rssSources = (sourceInfo && sourceInfo.rss_sources) || [];
+    const selectedGroup = config && config.selected_subtitle_group;
+    for (const source of rssSources) {
+      if (source.subtitle_group === selectedGroup) {
+        return source;
+      }
+    }
+    return rssSources.length ? rssSources[0] : {};
+  }
+
+  function combinedSeedNames(validSeeds, excludedSeeds) {
+    const names = [];
+    function addName(value) {
+      const name = value && value.name ? value.name : value;
+      if (name && names.indexOf(name) === -1) {
+        names.push(name);
+      }
+    }
+    if (Array.isArray(validSeeds)) {
+      validSeeds.forEach(addName);
+    }
+    if (Array.isArray(excludedSeeds)) {
+      excludedSeeds.forEach(addName);
+    }
+    return names;
+  }
+
+  function escapeRegexLiteral(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function literalExcludePattern(value) {
+    const trimmed = String(value || "").trim();
+    const bracketMatch = trimmed.match(/^\[([^\]]+)\]$/);
+    if (bracketMatch) {
+      return "(?i:\\[?" + escapeRegexLiteral(bracketMatch[1]) + "\\]?)";
+    }
+    return "(?i:" + escapeRegexLiteral(trimmed) + ")";
   }
 
   function renderHistorySection(container, history) {
@@ -1096,6 +1169,20 @@
     var mncClear = appendClearControl("modify-clear-must-not-contain", "清空 must_not_contain", mncInput);
     container.appendChild(mncLabel);
     container.appendChild(mncInput);
+    var mncHelp = document.createElement("p");
+    mncHelp.id = "modify-must-not-contain-help";
+    mncHelp.className = "field-help";
+    mncHelp.textContent =
+      "默认按正则匹配；要按字面文本排除 [v2] 或 v2，请勾选字面文本模式后输入 [v2]。";
+    container.appendChild(mncHelp);
+    var mncLiteralWrapper = document.createElement("label");
+    mncLiteralWrapper.className = "inline-check literal-mode-check";
+    mncLiteralWrapper.htmlFor = "modify-must-not-contain-literal";
+    var mncLiteralInput = document.createElement("input");
+    mncLiteralInput.id = "modify-must-not-contain-literal";
+    mncLiteralInput.type = "checkbox";
+    mncLiteralWrapper.append(mncLiteralInput, document.createTextNode("字面文本模式"));
+    container.appendChild(mncLiteralWrapper);
     container.appendChild(mncClear.wrapper);
 
     var fnLabel = document.createElement("label");
@@ -1134,18 +1221,19 @@
       }
       var mcVal = mcInput.value.trim();
       var mncVal = mncInput.value.trim();
+      var nextMncVal = mncLiteralInput.checked && mncVal ? literalExcludePattern(mncVal) : mncVal;
       if (
         mcClear.checkbox.checked ||
         mncClear.checkbox.checked ||
         mcVal !== originalMustContain ||
-        mncVal !== originalMustNotContain
+        nextMncVal !== originalMustNotContain
       ) {
         patch.filter_rule = {};
         if (mcClear.checkbox.checked || mcVal !== originalMustContain) {
           patch.filter_rule.must_contain = mcClear.checkbox.checked ? "" : mcVal;
         }
-        if (mncClear.checkbox.checked || mncVal !== originalMustNotContain) {
-          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : mncVal;
+        if (mncClear.checkbox.checked || nextMncVal !== originalMustNotContain) {
+          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : nextMncVal;
         }
       }
       var fnVal = fnInput.value.trim();
@@ -1224,15 +1312,59 @@
     return container;
   }
 
-  function renderDetailPayload(payload) {
+  async function savePreviewRequest(request) {
+    const title = request && request.input && request.input.raw_title
+      ? request.input.raw_title
+      : "";
+    if (!title) {
+      showNotification("error", "保存失败", "预览 Request 缺少标题，无法保存。");
+      return;
+    }
+
+    hideNotification();
+    setSubmitInFlight(true);
+    setState(detailContainer, "正在保存预览 Request...", "loading-state");
+    try {
+      const result = await fetchJson("/api/v1/requests", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(buildCreateRequestPayload(title, {saveRequest: true})),
+      });
+      selectedRequestId = result.request && result.request.request_id;
+      renderDetailPayload(result);
+      await loadList({loadSelectedDetail: false});
+      syncRequestIdToUrl(selectedRequestId);
+      showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+        actions: [
+          { label: "刷新列表", handler: loadList },
+          { label: "查看详情", handler: () => loadDetail(selectedRequestId) },
+        ],
+      });
+    } catch (error) {
+      setState(detailContainer, "预览 Request 保存失败。请稍后重试。", "error-state");
+      notifyApiError("保存失败", error);
+    } finally {
+      setSubmitInFlight(false);
+    }
+  }
+
+  function renderDetailPayload(payload, options) {
     currentDetailPayload = payload;
     var request = payload.request || payload;
+    var isPreview = Boolean(
+      (options && options.preview) ||
+      (Object.prototype.hasOwnProperty.call(payload, "saved_request") && !payload.saved_request)
+    );
     var input = request.input || {};
     var sourceInfo = request.source_info || {};
     var matched = sourceInfo.matched_bangumi || {};
     var config = request.confirmable_config || {};
     var filterRule = config.filter_rule || {};
-    var effectiveSeeds = config.effective_seed_names || [];
+    var source = selectedRssSource(sourceInfo, config);
+    var validSeeds = source.valid_seed_names || config.effective_seed_names || [];
+    var excludedSeeds = source.excluded_seed_names || [];
+    var allSeeds = source.seed_names || combinedSeedNames(validSeeds, excludedSeeds);
+    var effectiveSeeds = config.effective_seed_names || validSeeds;
 
     detailContainer.className = "request-detail";
     detailContainer.replaceChildren();
@@ -1246,6 +1378,7 @@
     var overviewFields = detailList([
       ["request_id", request.request_id],
       ["status", request.status],
+      ["保存状态", isPreview ? "预览（未保存）" : "已保存"],
       ["原始标题", input.raw_title],
       ["匹配标题", matched.title],
     ]);
@@ -1264,7 +1397,22 @@
     var actionsContainer = document.createElement("div");
     actionsContainer.className = "detail-actions notification-actions";
 
-    if (isPending) {
+    if (isPreview) {
+      var previewNote = document.createElement("p");
+      previewNote.className = "field-help preview-mode-note";
+      previewNote.textContent =
+        "预览模式：此 Request 尚未保存，只能查看，保存后才可确认、取消、修改或提交 Auto Bangumi。";
+      actionsContainer.appendChild(previewNote);
+
+      var savePreviewBtn = document.createElement("button");
+      savePreviewBtn.type = "button";
+      savePreviewBtn.className = "primary-button detail-action";
+      savePreviewBtn.textContent = "保存此 Request";
+      savePreviewBtn.addEventListener("click", function () {
+        savePreviewRequest(request);
+      });
+      actionsContainer.appendChild(savePreviewBtn);
+    } else if (isPending) {
       var acceptBtn = document.createElement("button");
       acceptBtn.type = "button";
       acceptBtn.className = "primary-button detail-action";
@@ -1318,8 +1466,8 @@
       actionsContainer.appendChild(statusNote);
     }
 
-    var cancelForm = buildCancelForm(request);
-    var modifyForm = buildModifyForm(request);
+    var cancelForm = isPreview ? document.createDocumentFragment() : buildCancelForm(request);
+    var modifyForm = isPreview ? document.createDocumentFragment() : buildModifyForm(request);
     var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
       detailList([
@@ -1336,6 +1484,7 @@
         ["must_not_contain", filterRule.must_not_contain],
         ["folder_name", config.expected_folder_name],
         ["有效种子数", effectiveSeeds.length],
+        ["排除种子数", excludedSeeds.length],
       ]),
     );
 
@@ -1344,9 +1493,29 @@
     seedDetails.className = "seed-details";
     var seedSummary = document.createElement("summary");
     seedSummary.textContent =
-      "查看完整有效种子标题列表 (" + effectiveSeeds.length + ")";
+      "查看筛选种子列表 (完整 " + allSeeds.length + " / 有效 " +
+      effectiveSeeds.length + " / 排除 " + excludedSeeds.length + ")";
     var seedsContainer = document.createElement("div");
-    renderSeedList(seedsContainer, effectiveSeeds);
+    seedsContainer.className = "seed-groups";
+    var allGroup = document.createElement("div");
+    allGroup.className = "seed-group";
+    var allHeading = document.createElement("h5");
+    allHeading.textContent = "完整种子 (" + allSeeds.length + ")";
+    allGroup.appendChild(allHeading);
+    renderSeedList(allGroup, allSeeds, "无种子标题。");
+    var validGroup = document.createElement("div");
+    validGroup.className = "seed-group";
+    var validHeading = document.createElement("h5");
+    validHeading.textContent = "有效种子 (" + effectiveSeeds.length + ")";
+    validGroup.appendChild(validHeading);
+    renderSeedList(validGroup, effectiveSeeds, "无有效种子标题。");
+    var excludedGroup = document.createElement("div");
+    excludedGroup.className = "seed-group";
+    var excludedHeading = document.createElement("h5");
+    excludedHeading.textContent = "排除种子 (" + excludedSeeds.length + ")";
+    excludedGroup.appendChild(excludedHeading);
+    renderExcludedSeedList(excludedGroup, excludedSeeds);
+    seedsContainer.append(allGroup, validGroup, excludedGroup);
     seedDetails.append(seedSummary, seedsContainer);
     seedsSection.appendChild(seedDetails);
 
@@ -1421,7 +1590,6 @@
 
     hideNotification();
     setSubmitInFlight(true);
-    persistWebPreferences();
     setState(detailContainer, "正在生成 Request...", "loading-state");
     try {
       const result = await fetchJson("/api/v1/requests", {
@@ -1431,10 +1599,12 @@
           ...payload,
         }),
       });
-      selectedRequestId = result.request && result.request.request_id;
-      renderDetailPayload(result);
+      var generatedRequestId = result.request && result.request.request_id;
+      selectedRequestId = result.saved_request ? generatedRequestId : null;
+      renderDetailPayload(result, {preview: !result.saved_request});
       await loadList({loadSelectedDetail: false});
       if (result.saved_request) {
+        selectedRequestId = generatedRequestId;
         syncRequestIdToUrl(selectedRequestId);
         showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
           actions: [
@@ -1449,7 +1619,20 @@
           ],
         });
       } else {
-        showNotification("success", "生成成功", "已生成 Request " + selectedRequestId);
+        syncRequestIdToUrl(null, {replace: true});
+        showNotification("success", "预览已生成", "这是未保存预览；保存后才可操作。", {
+          actions: [
+            {
+              label: "保存此 Request",
+              className: "primary-button",
+              handler: () => {
+                if (result.request) {
+                  savePreviewRequest(result.request);
+                }
+              },
+            },
+          ],
+        });
       }
     } catch (error) {
       setState(detailContainer, error.message, "error-state");

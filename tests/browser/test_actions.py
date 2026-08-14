@@ -325,6 +325,8 @@ class TestModifyFlow:
         assert page.locator("#modify-subtitle-group").count() >= 1
         assert page.locator("#modify-must-contain").count() >= 1
         assert page.locator("#modify-must-not-contain").count() >= 1
+        assert page.locator("#modify-must-not-contain-literal").count() >= 1
+        assert "默认按正则匹配" in form.inner_text()
         assert page.locator("#modify-folder-name").count() >= 1
         assert page.locator("#modify-clear-must-contain").count() >= 1
         assert page.locator("#modify-clear-must-not-contain").count() >= 1
@@ -349,6 +351,51 @@ class TestModifyFlow:
         # Detail should still show PENDING_CONFIRM (modify keeps status)
         detail_text = page.locator("#request-detail-container").inner_text()
         assert "PENDING_CONFIRM" in detail_text
+
+    def test_modify_literal_v2_exclude_shows_removed_seed_feedback(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-act-v2-literal")
+        _open_request_detail(page, live_server_url, storage_dir, "req-act-v2-literal")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("[v2]")
+        page.locator("#modify-must-not-contain-literal").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        detail_text = detail.inner_text()
+        assert "修改成功" in page.locator("#page-notification").inner_text()
+        assert "must_not_contain" in detail_text
+        assert "(?i:\\[?v2\\]?)" in detail_text
+        assert "有效种子数" in detail_text
+        assert "排除种子数" in detail_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        valid_group = detail.locator(".seed-group:has-text('有效种子')")
+        excluded_group = detail.locator(".seed-group:has-text('排除种子')")
+        assert "V2" not in valid_group.inner_text()
+        assert "V2" in excluded_group.inner_text()
+        assert "命中必须不含规则" in excluded_group.inner_text()
+
+    def test_modify_regex_v2_exclude_updates_seed_lists(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-act-v2-regex")
+        _open_request_detail(page, live_server_url, storage_dir, "req-act-v2-regex")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("V2")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        detail_text = detail.inner_text()
+        assert "V2" in detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        assert "V2" not in detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        assert "查看筛选种子列表 (完整 2 / 有效 1 / 排除 1)" in detail_text
 
     def test_modify_form_hidden_initially(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -440,11 +487,13 @@ class TestModifyFlow:
         _open_request_detail(page, live_server_url, storage_dir, "req-act-modify-failure")
 
         _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("V2")
         page.locator("#modify-folder-name").fill("失败后仍保留")
         page.locator("button:has-text('提交修改')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert page.locator("#detail-modify-form").is_visible()
+        assert page.locator("#modify-must-not-contain").input_value() == "V2"
         assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
         assert "PENDING_CONFIRM" in page.locator("#request-detail-container").inner_text()
 

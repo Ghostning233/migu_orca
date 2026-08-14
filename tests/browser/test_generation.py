@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.sync_api import Page, Request
+from playwright.sync_api import Page, Request, expect
 
 from tests.browser.conftest import create_saved_request, set_storage_preferences
 
@@ -98,6 +99,7 @@ class TestGenerateWithoutSave:
     """AC: 填写有效标题并保持 save_request 未勾选时，生成成功通知出现."""
 
     def test_generate_success_notification(self, page: Page, live_server_url: str) -> None:
+        set_storage_preferences(page, "/tmp/migu-orca-browser-preview", save_request=False)
         page.goto(f"{live_server_url}/index")
 
         page.fill('input[name="title"]', "葬送的芙莉莲")
@@ -106,7 +108,8 @@ class TestGenerateWithoutSave:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         notif = page.locator("#page-notification")
         text = notif.inner_text()
-        assert "生成成功" in text
+        assert "预览已生成" in text
+        assert "预览（未保存）" in page.locator("#request-detail-container").inner_text()
 
     def test_no_storage_written_when_save_unchecked(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -131,6 +134,70 @@ class TestGenerateWithoutSave:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert "request_id=" not in page.url
+
+    def test_preview_detail_is_read_only_and_does_not_call_saved_actions(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        set_storage_preferences(page, storage_dir, save_request=False)
+        blocked_calls: list[str] = []
+
+        def _capture_saved_action(route: Any, request: Request) -> None:
+            blocked_calls.append(request.url)
+            route.fulfill(
+                status=500,
+                content_type="application/json",
+                body='{"ok": false, "error_message": "unexpected saved action"}',
+            )
+
+        page.route("**/api/v1/requests/*/accept**", _capture_saved_action)
+        page.route("**/api/v1/requests/*/cancel**", _capture_saved_action)
+        page.route("**/api/v1/requests/*/modify**", _capture_saved_action)
+        page.route("**/api/v1/requests/*/submit-ab**", _capture_saved_action)
+
+        page.goto(f"{live_server_url}/index")
+        page.fill('input[name="title"]', "咒术回战")
+        page.click("#request-generate-submit")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        detail_text = detail.inner_text()
+        assert "预览（未保存）" in detail_text
+        assert "预览模式" in detail_text
+        expect(detail.locator(".detail-actions button:has-text('保存此 Request')")).to_be_visible()
+        expect(detail.locator(".detail-actions button:has-text('确认')")).to_have_count(0)
+        expect(detail.locator(".detail-actions button:has-text('取消')")).to_have_count(0)
+        expect(detail.locator(".detail-actions button:has-text('修改')")).to_have_count(0)
+        expect(detail.locator("text=去 Settings 提交 Auto Bangumi")).to_have_count(0)
+        expect(detail.locator("#detail-cancel-form")).to_have_count(0)
+        expect(detail.locator("#detail-modify-form")).to_have_count(0)
+        assert "request_id=" not in page.url
+        assert blocked_calls == []
+
+    def test_preview_save_restores_operable_saved_detail_list_and_url(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        set_storage_preferences(page, storage_dir, save_request=False)
+        page.goto(f"{live_server_url}/index")
+
+        page.fill('input[name="title"]', "咒术回战")
+        page.click("#request-generate-submit")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        assert "request_id=" not in page.url
+
+        page.locator("#request-detail-container button:has-text('保存此 Request')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        text = page.locator("#page-notification").inner_text()
+        assert "保存成功" in text
+        assert "request_id=" in page.url
+        request_id = page.url.split("request_id=", 1)[1].split("&", 1)[0]
+        assert request_id
+        expect(page.locator(f"[data-request-id='{request_id}']")).to_be_visible()
+        detail = page.locator("#request-detail-container")
+        assert "已保存" in detail.inner_text()
+        expect(detail.locator(".detail-actions button:has-text('确认')")).to_be_visible()
+        expect(detail.locator(".detail-actions button:has-text('取消')")).to_be_visible()
+        expect(detail.locator(".detail-actions button:has-text('修改')")).to_be_visible()
 
 
 class TestGenerateWithSave:
@@ -175,6 +242,93 @@ class TestGenerateWithSave:
         assert "request_id=" in page.url
         request_id = page.url.split("request_id=", 1)[1].split("&", 1)[0]
         assert request_id
+
+
+class TestDefaultGenerateOperableSavedRequest:
+    """US-097: 默认生成流程产出已保存且可操作的 Request."""
+
+    def _seed_storage_dir_only(self, page: Page, storage_root: Path) -> None:
+        page.add_init_script(
+            """
+            window.localStorage.setItem("miguOrca.web.storageDir", %s);
+            window.localStorage.removeItem("miguOrca.web.saveRequest");
+            """
+            % json.dumps(str(storage_root))
+        )
+
+    def _generate_default_request(
+        self, page: Page, live_server_url: str, storage_dir: Path, title: str
+    ) -> str:
+        self._seed_storage_dir_only(page, storage_dir)
+        page.goto(f"{live_server_url}/index")
+        page.fill('input[name="title"]', title)
+        page.click("#request-generate-submit")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        text = page.locator("#page-notification").inner_text()
+        assert "保存成功" in text or "已保存 Request" in text
+        assert "未找到已保存的 Request" not in page.locator("body").inner_text()
+        assert "request_id=" in page.url
+        request_id = page.url.split("request_id=", 1)[1].split("&", 1)[0]
+        assert request_id
+        expect(page.locator(f"[data-request-id='{request_id}']")).to_be_visible()
+        expect(page.locator(".detail-actions button:has-text('确认')")).to_be_visible()
+        expect(page.locator(".detail-actions button:has-text('取消')")).to_be_visible()
+        expect(page.locator(".detail-actions button:has-text('修改')")).to_be_visible()
+        return request_id
+
+    def test_default_generate_syncs_list_url_and_confirm(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        request_id = self._generate_default_request(
+            page, live_server_url, storage_dir, "咒术回战"
+        )
+
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.locator(".detail-actions button:has-text('确认')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "确认成功" in page.locator("#page-notification").inner_text()
+        assert "ACCEPTED" in page.locator("#request-detail-container").inner_text()
+        assert "ACCEPTED" in page.locator(f"[data-request-id='{request_id}']").inner_text()
+        assert "未找到已保存的 Request" not in page.locator("body").inner_text()
+
+    def test_default_generated_request_can_cancel(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        request_id = self._generate_default_request(
+            page, live_server_url, storage_dir, "咒术回战"
+        )
+
+        page.locator(".detail-actions button:has-text('取消')").click()
+        page.locator("#cancel-reason").fill("默认生成取消验证")
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.locator("#detail-cancel-form button:has-text('提交取消')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "取消成功" in page.locator("#page-notification").inner_text()
+        assert "CANCELLED" in page.locator("#request-detail-container").inner_text()
+        assert "CANCELLED" in page.locator(f"[data-request-id='{request_id}']").inner_text()
+        assert "未找到已保存的 Request" not in page.locator("body").inner_text()
+
+    def test_default_generated_request_can_modify(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        request_id = self._generate_default_request(
+            page, live_server_url, storage_dir, "咒术回战"
+        )
+
+        page.locator(".detail-actions button:has-text('修改')").click()
+        page.locator("#modify-folder-name").fill("Jujutsu Stage 14")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "修改成功" in page.locator("#page-notification").inner_text()
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "PENDING_CONFIRM" in detail_text
+        assert "Jujutsu Stage 14" in detail_text
+        assert "PENDING_CONFIRM" in page.locator(f"[data-request-id='{request_id}']").inner_text()
+        assert "未找到已保存的 Request" not in page.locator("body").inner_text()
 
 
 class TestSubmitButtonState:
@@ -227,7 +381,7 @@ class TestBrowserPreferences:
         page.wait_for_timeout(300)
 
         assert page.locator("#settings-storage-dir").input_value() == ""
-        assert not page.locator("#settings-save-request").is_checked()
+        assert page.locator("#settings-save-request").is_checked()
 
     def test_clear_button_present(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/settings")
@@ -259,4 +413,4 @@ class TestBrowserPreferences:
         summary = page.locator("#storage-preference-summary")
         text = summary.inner_text()
         assert "默认 `.migu_orca/storage`" in text
-        assert "默认只生成预览" in text
+        assert "默认保存 Request JSON" in text

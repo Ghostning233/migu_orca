@@ -633,6 +633,21 @@ button:disabled {
   margin-top: 12px;
 }
 
+.seed-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.seed-group h5 {
+  color: #1f2937;
+  font-size: 0.95rem;
+  margin: 0 0 8px;
+}
+
+.seed-exclude-reason {
+  color: #586273;
+}
+
 .muted-text {
   color: #586273;
   margin-bottom: 0;

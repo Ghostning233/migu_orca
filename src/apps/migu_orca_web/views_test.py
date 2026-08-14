@@ -224,7 +224,12 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'id="storage-preferences-clear"' in html
     assert "非敏感浏览器偏好" in html
     assert "localStorage" in html
-    assert 'id="qbittorrent-settings-details"' in html
+    qbittorrent_panel_html = html[
+        html.index('id="qbittorrent-settings-panel"') : html.index('id="auto-bangumi-settings-panel"')
+    ]
+    assert 'id="qbittorrent-settings-details"' not in html
+    assert "<details" not in qbittorrent_panel_html
+    assert "<summary" not in qbittorrent_panel_html
     assert 'id="settings-qbittorrent-test-form"' in html
     assert 'name="qbittorrent_endpoint"' in html
     assert 'name="qbittorrent_username"' in html
@@ -234,6 +239,7 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'name="qbittorrent_verify_tls"' in html
     assert 'id="settings-qbittorrent-result"' in html
     assert "尚未测试 qBittorrent 连接" in html
+    assert "测试 qBittorrent 连接" in html
     assert "status、reachable 和 version" in html
     assert "qBittorrent 连接测试将在此处迁移" not in html
     assert 'id="settings-ab-submit-form"' in html
@@ -276,8 +282,10 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "复制 request_id" in script
     assert "copyTextToClipboard" in script
     assert "navigator.clipboard.writeText" in script
-    assert "查看完整有效种子标题列表" in script
+    assert "查看筛选种子列表" in script
     assert "seed-details" in script
+    assert "literalExcludePattern" in script
+    assert "modify-must-not-contain-literal" in script
     assert "暂无状态历史。" in script
     assert "暂无 Auto Bangumi 提交结果。" in script
     assert "提交 Auto Bangumi" in script
@@ -339,6 +347,10 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert '["must_not_contain", filterRule.must_not_contain]' in script
     assert '["folder_name", config.expected_folder_name]' in script
     assert '["有效种子数", effectiveSeeds.length]' in script
+    assert '["排除种子数", excludedSeeds.length]' in script
+    assert "source.seed_names || combinedSeedNames(validSeeds, excludedSeeds)" in script
+    assert "完整种子" in script
+    assert "renderExcludedSeedList" in script
     assert "document.createElement(\"details\")" in script
     assert "seedSummary.textContent" in script
     assert "renderHistorySection(auditSection, payload.history)" in script
@@ -361,7 +373,7 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "notification.setAttribute(\"role\", kind === \"error\" ? \"alert\" : \"status\")" in script
     assert "notification-close" in script
     assert "关闭" in script
-    assert "生成成功" in script
+    assert "预览已生成" in script
     assert "保存成功" in script
     assert "已保存 Request " in script
     assert "刷新列表" in script
@@ -378,6 +390,25 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_renders_unsaved_preview_as_read_only() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "预览（未保存）" in script
+    assert "预览模式：此 Request 尚未保存，只能查看" in script
+    assert "保存此 Request" in script
+    assert "async function savePreviewRequest" in script
+    assert "buildCreateRequestPayload(title, {saveRequest: true})" in script
+    assert "renderDetailPayload(result, {preview: !result.saved_request})" in script
+    assert "selectedRequestId = result.saved_request ? generatedRequestId : null" in script
+    assert "syncRequestIdToUrl(null, {replace: true})" in script
+    assert script.index("if (isPreview)") < script.index("} else if (isPending)")
+    assert script.index("if (isPreview)") < script.index(
+        'performAction(request.request_id, "accept", {})'
+    )
 
 
 def test_static_app_script_shows_action_success_after_refresh() -> None:
@@ -463,11 +494,16 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert "source: \"static-fixture\"" in script
     assert "payload.source = \"mikan\"" not in script
     assert "payload.mikan_config" not in script
-    assert script.index("if (!title)") < script.index('fetchJson("/api/v1/requests"')
-    assert script.index("buildCreateRequestPayload(title)") < script.index(
+    generate_start = script.index("async function generateRequest")
+    generate_end = script.index('refreshButton.addEventListener("click", loadList)')
+    generate_script = script[generate_start:generate_end]
+    assert generate_script.index("if (!title)") < generate_script.index(
         'fetchJson("/api/v1/requests"',
     )
-    assert script.index("setSubmitInFlight(true)") < script.index(
+    assert generate_script.index("buildCreateRequestPayload(title)") < generate_script.index(
+        'fetchJson("/api/v1/requests"',
+    )
+    assert generate_script.index("setSubmitInFlight(true)") < generate_script.index(
         'fetchJson("/api/v1/requests"',
     )
 
@@ -490,7 +526,7 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert "persistWebPreferences" in script
     assert "clearWebPreferences" in script
     assert "savedStorageDir" in script
-    assert "saveRequestPreference = savedSaveRequest === \"true\"" in script
+    assert 'savedSaveRequest === null ? true : savedSaveRequest === "true"' in script
     assert "settingsStorageInput.value = storageDirPreference" in script
     assert "settingsSaveInput.checked = saveRequestPreference" in script
     assert "storage-preferences-clear" in script
@@ -656,6 +692,9 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".overview-actions" in css
     assert ".copy-request-id" in css
     assert ".seed-details summary" in css
+    assert ".seed-groups" in css
+    assert ".seed-exclude-reason" in css
+    assert "overflow-wrap" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css
 

@@ -72,7 +72,8 @@ class TestStage11MikanBrowserRegressions:
         page.click("#request-generate-submit")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
-        assert "生成成功" in page.locator("#page-notification").inner_text()
+        assert "预览已生成" in page.locator("#page-notification").inner_text()
+        assert "预览（未保存）" in page.locator("#request-detail-container").inner_text()
         assert not storage_dir.exists() or not any(storage_dir.iterdir())
         _assert_sensitive_values_not_rendered(page)
 

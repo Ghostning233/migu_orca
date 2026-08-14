@@ -351,6 +351,9 @@ def _recompute_source_seed_filter(
 
 def _source_seed_names(source: dict[str, Any]) -> list[str]:
     seed_names: list[str] = []
+    for seed_name in source.get("seed_names", []):
+        if seed_name not in seed_names:
+            seed_names.append(seed_name)
     for seed_name in source.get("valid_seed_names", []):
         if seed_name not in seed_names:
             seed_names.append(seed_name)
@@ -376,11 +379,16 @@ def _compile_request_filter_rule(value: str, field: str) -> re.Pattern[str] | No
 
 
 def _rss_result_to_dict(result: FilteredRss) -> dict[str, Any]:
+    seed_names = [seed.title for seed in result.valid_seeds]
+    for seed in result.excluded_seeds:
+        if seed.name not in seed_names:
+            seed_names.append(seed.name)
     return {
         "subtitle_group": result.source.subtitle_group,
         "rss_url": result.source.rss_url,
         "source_type": result.source.source_type,
         "total_seed_count": result.total_seed_count,
+        "seed_names": seed_names,
         "valid_seed_count": len(result.valid_seeds),
         "invalid_seed_count": len(result.excluded_seeds),
         "valid_seed_names": [seed.title for seed in result.valid_seeds],
