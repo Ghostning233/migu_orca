@@ -23,14 +23,14 @@ class TestRootRedirect:
         assert page.locator(".top-nav").count() >= 1
 
 
-class TestIndexStage12Shell:
-    """AC: /index 可加载 Stage 12 qBittorrent Direct 标识、顶部导航和运行模式提示."""
+class TestIndexStage13WorkbenchShell:
+    """AC: /index 可加载 Stage 13 Request 工作台、顶部导航和运行模式提示."""
 
-    def test_stage12_branding_visible(self, page: Page, live_server_url: str) -> None:
+    def test_stage13_workbench_branding_visible(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
 
         assert page.locator("text=MiGuOrca").count() >= 1
-        assert page.locator("text=Stage 12 qBittorrent Direct").count() >= 1
+        assert page.locator("text=Stage 13 Request 工作台").count() >= 1
         # Must NOT mention Stage 7
         assert page.locator("text=Stage 7 Web UI MVP").count() == 0
 
@@ -39,16 +39,12 @@ class TestIndexStage12Shell:
 
         nav = page.locator(".top-nav")
         assert nav.count() >= 1
-        for href in (
-            "#generate-panel",
-            "#qbittorrent-panel",
-            "#request-list-panel",
-            "#request-detail-panel",
-            "#acceptance-panel",
-        ):
+        for href in ("/index", "/settings"):
             assert nav.locator(f"a[href='{href}']").count() >= 1, (
                 f"Missing nav anchor: {href}"
             )
+        assert nav.locator("text=Request 工作台").count() >= 1
+        assert nav.locator("text=Settings").count() >= 1
 
     def test_mode_hint_describes_local_storage(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
@@ -58,36 +54,67 @@ class TestIndexStage12Shell:
         # Mode hint should mention offline/fixture behavior
         body = page.locator("body").inner_text()
         assert "fixture-backed" in body
-        assert "真实 MiKan 与 qBittorrent 连接测试必须显式选择" in body
-        assert "配置只用于当前请求且不写入 storage JSON" in body
+        assert "外部数据源、连接测试与提交配置集中在 Settings" in body
 
     def test_main_panels_present(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
 
         for panel_id in (
             "generate-panel",
-            "qbittorrent-panel",
             "request-list-panel",
             "request-detail-panel",
-            "acceptance-panel",
         ):
             assert page.locator(f"#{panel_id}").count() >= 1, (
                 f"Missing panel: #{panel_id}"
             )
+        for removed_panel_id in ("qbittorrent-panel", "acceptance-panel"):
+            assert page.locator(f"#{removed_panel_id}").count() == 0
 
     def test_all_section_headings_present(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
 
         for heading in (
             "Request 生成",
-            "qBittorrent 连接测试",
             "Request 列表",
             "Request 详情",
-            "验收说明",
         ):
             assert page.locator(f"text={heading}").count() >= 1, (
                 f"Missing heading: {heading}"
             )
+        assert page.locator("text=qBittorrent 连接测试").count() == 0
+        assert page.locator("text=验收说明").count() == 0
+
+
+class TestSettingsShell:
+    """AC: /settings provides a dedicated Settings page with shared navigation."""
+
+    def test_settings_case_redirects(self, page: Page, live_server_url: str) -> None:
+        page.goto(f"{live_server_url}/Settings")
+        page.wait_for_url("**/settings")
+        assert page.title() == "MiGuOrca Settings"
+
+    def test_settings_page_shell_and_placeholders(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        page.goto(f"{live_server_url}/settings")
+
+        assert page.title() == "MiGuOrca Settings"
+        assert page.locator("text=Stage 13 Settings").count() >= 1
+        nav = page.locator(".top-nav")
+        assert nav.locator("a[href='/index']").count() >= 1
+        assert nav.locator("a[href='/settings']").count() >= 1
+        assert nav.locator("a[aria-current='page'][href='/settings']").count() >= 1
+        for panel_id in (
+            "storage-settings-panel",
+            "data-source-settings-panel",
+            "qbittorrent-settings-panel",
+            "auto-bangumi-settings-panel",
+        ):
+            assert page.locator(f"#{panel_id}.panel").count() >= 1
+            assert page.locator(f"#{panel_id} .empty-state").count() >= 1
+
+        for heading in ("Storage 偏好", "数据源", "qBittorrent", "Auto Bangumi"):
+            assert page.locator(f"text={heading}").count() >= 1
 
 
 class TestStaticAssets:
@@ -147,8 +174,11 @@ class TestNoSensitiveContent:
         body = page.locator("body").inner_text()
         # Form help text should be present and instructional
         assert "至少输入 1 个非空白字符" in body
-        assert "留空时使用默认" in body
-        assert "未勾选时只生成预览" in body
+        assert "当前使用默认 `.migu_orca/storage`" in body
+        assert "默认只生成预览" in body
+        assert "前往 Settings" in body
+        assert "search_endpoint" not in body
+        assert "timeout_seconds" not in body
 
 
 class TestEmptyListState:

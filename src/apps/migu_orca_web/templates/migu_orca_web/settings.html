@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>MiGuOrca Settings</title>
+    <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
+    <script defer src="{{ url_for('migu_orca_web.static', filename='app.js') }}"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="header-copy">
+        <p class="stage-label">Stage 13 Settings</p>
+        <h1>MiGuOrca Settings</h1>
+        <p class="mode-summary">
+          配置与连接测试集中在 Settings；敏感外部系统配置保持显式输入，不写入浏览器存储、URL 或本地 Request JSON。
+        </p>
+      </div>
+      {% include "migu_orca_web/_top_nav.html" %}
+    </header>
+
+    <div
+      id="page-notification"
+      class="page-notification"
+      aria-live="polite"
+      aria-atomic="true"
+      role="status"
+      hidden
+    ></div>
+
+    <main class="app-layout settings-layout">
+      <section id="storage-settings-panel" class="panel settings-panel" aria-labelledby="storage-settings-heading">
+        <div class="panel-heading">
+          <h2 id="storage-settings-heading">Storage 偏好</h2>
+        </div>
+        <form id="storage-preferences-form" class="settings-form">
+          <p class="field-help">
+            非敏感浏览器偏好；仅写入当前浏览器 localStorage，不保存外部系统配置或凭据。
+          </p>
+
+          <label for="settings-storage-dir">默认 storage_dir</label>
+          <input
+            id="settings-storage-dir"
+            name="storage_dir"
+            type="text"
+            placeholder=".migu_orca/storage"
+            aria-describedby="settings-storage-dir-help"
+            autocomplete="off"
+          >
+          <p id="settings-storage-dir-help" class="field-help">
+            留空时 Request 工作台使用默认 `.migu_orca/storage`。
+          </p>
+
+          <label class="checkbox-row" for="settings-save-request">
+            <input
+              id="settings-save-request"
+              name="save_request"
+              type="checkbox"
+              value="true"
+              aria-describedby="settings-save-request-help"
+            >
+            默认保存 Request
+          </label>
+          <p id="settings-save-request-help" class="field-help">
+            开启后 Request 工作台默认写入 Request JSON；关闭时只生成预览。
+          </p>
+
+          <div
+            id="storage-preferences-status"
+            class="empty-state compact-state"
+            aria-live="polite"
+          >
+            尚未读取浏览器偏好。
+          </div>
+
+          <div class="notification-actions">
+            <button id="storage-preferences-save" class="primary-button" type="submit">
+              保存偏好
+            </button>
+            <button id="storage-preferences-clear" class="danger-button" type="button">
+              清除偏好
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section id="data-source-settings-panel" class="panel settings-panel" aria-labelledby="data-source-settings-heading">
+        <div class="panel-heading">
+          <h2 id="data-source-settings-heading">数据源</h2>
+        </div>
+        <div class="empty-state">
+          数据源设置将在此处逐步展开；真实 MiKan 配置仍保持显式请求级输入。
+        </div>
+      </section>
+
+      <section id="qbittorrent-settings-panel" class="panel settings-panel" aria-labelledby="qbittorrent-settings-heading">
+        <div class="panel-heading">
+          <h2 id="qbittorrent-settings-heading">qBittorrent</h2>
+        </div>
+        <details id="qbittorrent-settings-details" class="settings-disclosure">
+          <summary>测试 qBittorrent 连接</summary>
+          <form id="settings-qbittorrent-test-form" class="settings-form">
+            <p class="field-help">
+              配置仅用于本次连接测试；endpoint、username 和 password 不写入浏览器存储、URL 或 Request JSON。
+            </p>
+
+            <label for="settings-qbittorrent-endpoint">endpoint</label>
+            <input
+              id="settings-qbittorrent-endpoint"
+              name="qbittorrent_endpoint"
+              type="text"
+              placeholder="qBittorrent Web UI endpoint"
+              autocomplete="off"
+              aria-describedby="settings-qbittorrent-help settings-qbittorrent-error"
+            >
+
+            <label for="settings-qbittorrent-username">username</label>
+            <input
+              id="settings-qbittorrent-username"
+              name="qbittorrent_username"
+              type="text"
+              autocomplete="off"
+              aria-describedby="settings-qbittorrent-help settings-qbittorrent-error"
+            >
+
+            <label for="settings-qbittorrent-password">password</label>
+            <input
+              id="settings-qbittorrent-password"
+              name="qbittorrent_password"
+              type="password"
+              autocomplete="off"
+              aria-describedby="settings-qbittorrent-help settings-qbittorrent-error"
+            >
+
+            <label for="settings-qbittorrent-timeout-seconds">timeout_seconds</label>
+            <input
+              id="settings-qbittorrent-timeout-seconds"
+              name="qbittorrent_timeout_seconds"
+              type="number"
+              min="0.1"
+              step="0.1"
+              value="10"
+              aria-describedby="settings-qbittorrent-help settings-qbittorrent-error"
+            >
+
+            <label class="checkbox-row" for="settings-qbittorrent-verify-tls">
+              <input
+                id="settings-qbittorrent-verify-tls"
+                name="qbittorrent_verify_tls"
+                type="checkbox"
+                value="true"
+                checked
+              >
+              verify_tls
+            </label>
+            <p id="settings-qbittorrent-help" class="field-help">
+              提交前需要确认；成功后只显示 status、reachable 和 version，并清空敏感输入。
+            </p>
+            <p id="settings-qbittorrent-error" class="field-error" role="alert" hidden></p>
+
+            <div
+              id="settings-qbittorrent-result"
+              class="empty-state compact-state"
+              aria-live="polite"
+            >
+              尚未测试 qBittorrent 连接。
+            </div>
+
+            <div class="notification-actions">
+              <button
+                id="settings-qbittorrent-test-submit"
+                class="primary-button"
+                type="submit"
+              >
+                测试连接
+              </button>
+            </div>
+          </form>
+        </details>
+      </section>
+
+      <section id="auto-bangumi-settings-panel" class="panel settings-panel" aria-labelledby="auto-bangumi-settings-heading">
+        <div class="panel-heading">
+          <h2 id="auto-bangumi-settings-heading">Auto Bangumi</h2>
+        </div>
+        <div
+          id="settings-ab-context"
+          class="empty-state compact-state"
+          aria-live="polite"
+        >
+          从 ACCEPTED Request 详情进入后，可在此提交到 Auto Bangumi；token 不会持久化。
+        </div>
+        <form id="settings-ab-submit-form" class="settings-form" hidden>
+          <p class="field-help">
+            当前 request_id：<code id="settings-ab-request-id"></code>。仅 ACCEPTED Request 可提交；endpoint 和 token 只用于本次请求，不写入浏览器存储、URL 或 Request JSON。
+          </p>
+
+          <label for="settings-ab-endpoint">endpoint</label>
+          <input
+            id="settings-ab-endpoint"
+            name="ab_submit_endpoint"
+            type="text"
+            autocomplete="off"
+            placeholder="Auto Bangumi API 地址"
+            aria-describedby="settings-ab-help settings-ab-error"
+          >
+
+          <label for="settings-ab-token">token</label>
+          <input
+            id="settings-ab-token"
+            name="ab_submit_token"
+            type="password"
+            autocomplete="off"
+            placeholder="Auto Bangumi Token"
+            aria-describedby="settings-ab-help settings-ab-error"
+          >
+
+          <label class="checkbox-row" for="settings-ab-fallback-enabled">
+            <input
+              id="settings-ab-fallback-enabled"
+              name="ab_submit_fallback_enabled"
+              type="checkbox"
+              value="true"
+            >
+            fallback_enabled
+          </label>
+          <p id="settings-ab-help" class="field-help">
+            提交前需要确认；失败时只展示脱敏错误，成功后清空 endpoint 和 token。
+          </p>
+          <p id="settings-ab-error" class="field-error" role="alert" hidden></p>
+
+          <div
+            id="settings-ab-result"
+            class="empty-state compact-state"
+            aria-live="polite"
+          >
+            尚未提交 Auto Bangumi。
+          </div>
+
+          <div class="notification-actions">
+            <button id="settings-ab-submit" class="primary-button" type="submit">
+              提交 Auto Bangumi
+            </button>
+            <a id="settings-ab-return-link" class="secondary-button" href="{{ url_for('migu_orca_web.index') }}">
+              返回 Request 详情
+            </a>
+          </div>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

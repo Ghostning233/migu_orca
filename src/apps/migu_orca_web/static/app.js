@@ -1,15 +1,8 @@
 (function () {
   const form = document.getElementById("request-generate-form");
   const titleInput = document.getElementById("request-title");
-  const sourceSelect = document.getElementById("request-source");
-  const mikanConfigFields = document.getElementById("mikan-config-fields");
-  const mikanSearchEndpointInput = document.getElementById("mikan-search-endpoint");
-  const mikanTimeoutInput = document.getElementById("mikan-timeout-seconds");
-  const storageInput = document.getElementById("storage-dir");
-  const saveInput = document.getElementById("save-request");
   const formError = document.getElementById("request-form-error");
   const submitButton = document.getElementById("request-generate-submit");
-  const clearPreferencesButton = document.getElementById("clear-web-preferences");
   const refreshButton = document.getElementById("request-list-refresh");
   const listSearchInput = document.getElementById("request-list-search");
   const listStatusFilter = document.getElementById("request-list-status-filter");
@@ -18,16 +11,31 @@
   const listContainer = document.getElementById("request-list-container");
   const detailContainer = document.getElementById("request-detail-container");
   const notification = document.getElementById("page-notification");
-  const qbittorrentToggle = document.getElementById("qbittorrent-config-toggle");
-  const qbittorrentForm = document.getElementById("qbittorrent-test-form");
-  const qbittorrentEndpointInput = document.getElementById("qbittorrent-endpoint");
-  const qbittorrentUsernameInput = document.getElementById("qbittorrent-username");
-  const qbittorrentPasswordInput = document.getElementById("qbittorrent-password");
-  const qbittorrentTimeoutInput = document.getElementById("qbittorrent-timeout-seconds");
-  const qbittorrentVerifyTlsInput = document.getElementById("qbittorrent-verify-tls");
-  const qbittorrentFormError = document.getElementById("qbittorrent-form-error");
-  const qbittorrentSubmitButton = document.getElementById("qbittorrent-test-submit");
-  const qbittorrentResult = document.getElementById("qbittorrent-test-result");
+  const storageSummaryText = document.getElementById("storage-preference-summary-text");
+  const storagePreferencesForm = document.getElementById("storage-preferences-form");
+  const settingsStorageInput = document.getElementById("settings-storage-dir");
+  const settingsSaveInput = document.getElementById("settings-save-request");
+  const storagePreferencesStatus = document.getElementById("storage-preferences-status");
+  const clearPreferencesButton = document.getElementById("storage-preferences-clear");
+  const qbittorrentForm = document.getElementById("settings-qbittorrent-test-form");
+  const qbittorrentEndpointInput = document.getElementById("settings-qbittorrent-endpoint");
+  const qbittorrentUsernameInput = document.getElementById("settings-qbittorrent-username");
+  const qbittorrentPasswordInput = document.getElementById("settings-qbittorrent-password");
+  const qbittorrentTimeoutInput = document.getElementById("settings-qbittorrent-timeout-seconds");
+  const qbittorrentVerifyTlsInput = document.getElementById("settings-qbittorrent-verify-tls");
+  const qbittorrentFormError = document.getElementById("settings-qbittorrent-error");
+  const qbittorrentResult = document.getElementById("settings-qbittorrent-result");
+  const qbittorrentSubmitButton = document.getElementById("settings-qbittorrent-test-submit");
+  const settingsAbContext = document.getElementById("settings-ab-context");
+  const settingsAbForm = document.getElementById("settings-ab-submit-form");
+  const settingsAbRequestId = document.getElementById("settings-ab-request-id");
+  const settingsAbEndpointInput = document.getElementById("settings-ab-endpoint");
+  const settingsAbTokenInput = document.getElementById("settings-ab-token");
+  const settingsAbFallbackInput = document.getElementById("settings-ab-fallback-enabled");
+  const settingsAbFormError = document.getElementById("settings-ab-error");
+  const settingsAbResult = document.getElementById("settings-ab-result");
+  const settingsAbSubmitButton = document.getElementById("settings-ab-submit");
+  const settingsAbReturnLink = document.getElementById("settings-ab-return-link");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -36,6 +44,8 @@
   let selectedRequestId = null;
   let loadedRequests = [];
   let currentDetailPayload = null;
+  let storageDirPreference = "";
+  let saveRequestPreference = false;
 
   function readPreference(key) {
     try {
@@ -64,33 +74,94 @@
   function restoreWebPreferences() {
     const savedStorageDir = readPreference(preferenceKeys.storageDir);
     const savedSaveRequest = readPreference(preferenceKeys.saveRequest);
-    if (savedStorageDir) {
-      storageInput.value = savedStorageDir;
+    storageDirPreference = savedStorageDir || "";
+    saveRequestPreference = savedSaveRequest === "true";
+    if (settingsStorageInput) {
+      settingsStorageInput.value = storageDirPreference;
     }
-    if (savedSaveRequest !== null) {
-      saveInput.checked = savedSaveRequest === "true";
+    if (settingsSaveInput) {
+      settingsSaveInput.checked = saveRequestPreference;
     }
+    updateStoragePreferenceSummary();
+    updateStoragePreferencesStatus("已读取浏览器偏好。", "empty-state compact-state");
   }
 
-  function persistWebPreferences() {
-    const storageDir = storageInput.value.trim();
-    if (storageDir) {
-      writePreference(preferenceKeys.storageDir, storageDir);
+  function updateStoragePreferenceSummary() {
+    if (!storageSummaryText) {
+      return;
+    }
+    const storageText = storageDirPreference
+      ? "自定义 storage_dir：" + storageDirPreference
+      : "默认 `.migu_orca/storage`";
+    const saveText = saveRequestPreference
+      ? "默认保存 Request JSON"
+      : "默认只生成预览";
+    storageSummaryText.textContent =
+      "当前使用" + storageText + "；" + saveText + "。可在 Settings 修改。";
+  }
+
+  function updateStoragePreferencesStatus(message, className) {
+    if (!storagePreferencesStatus) {
+      return;
+    }
+    storagePreferencesStatus.className = className || "empty-state compact-state";
+    storagePreferencesStatus.textContent = message;
+  }
+
+  function currentStorageDir() {
+    return storageDirPreference.trim();
+  }
+
+  function currentSaveRequest() {
+    return saveRequestPreference;
+  }
+
+  function readSettingsFormPreferences() {
+    return {
+      storageDir: settingsStorageInput ? settingsStorageInput.value.trim() : "",
+      saveRequest: settingsSaveInput ? settingsSaveInput.checked : false,
+    };
+  }
+
+  function applyPreferenceValues(storageDir, saveRequest) {
+    storageDirPreference = storageDir || "";
+    saveRequestPreference = Boolean(saveRequest);
+    if (settingsStorageInput) {
+      settingsStorageInput.value = storageDirPreference;
+    }
+    if (settingsSaveInput) {
+      settingsSaveInput.checked = saveRequestPreference;
+    }
+    updateStoragePreferenceSummary();
+  }
+
+  function persistWebPreferences(event) {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+    const preferences = readSettingsFormPreferences();
+    applyPreferenceValues(preferences.storageDir, preferences.saveRequest);
+    if (storageDirPreference) {
+      writePreference(preferenceKeys.storageDir, storageDirPreference);
     } else {
       removePreference(preferenceKeys.storageDir);
     }
-    writePreference(preferenceKeys.saveRequest, String(saveInput.checked));
+    writePreference(preferenceKeys.saveRequest, String(saveRequestPreference));
+    updateStoragePreferencesStatus("偏好已保存。", "success-state compact-state");
   }
 
   function clearWebPreferences() {
     removePreference(preferenceKeys.storageDir);
     removePreference(preferenceKeys.saveRequest);
-    storageInput.value = "";
-    saveInput.checked = false;
+    applyPreferenceValues("", false);
+    updateStoragePreferencesStatus(
+      "偏好已清除；Request 工作台将使用默认 `.migu_orca/storage` 并只生成预览。",
+      "empty-state compact-state",
+    );
   }
 
   function storageQuery() {
-    const storageDir = storageInput.value.trim();
+    const storageDir = currentStorageDir();
     if (!storageDir) {
       return "";
     }
@@ -99,6 +170,39 @@
 
   function apiPath(path) {
     return path + storageQuery();
+  }
+
+  function requestIdFromLocation() {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get("request_id") || "").trim();
+  }
+
+  function syncRequestIdToUrl(requestId, options) {
+    if (!window.history || !window.history.pushState) {
+      return;
+    }
+    const url = new URL(window.location.href);
+    if (requestId) {
+      url.searchParams.set("request_id", requestId);
+    } else {
+      url.searchParams.delete("request_id");
+    }
+    if (url.href === window.location.href) {
+      return;
+    }
+    const method = options && options.replace ? "replaceState" : "pushState";
+    window.history[method]({request_id: requestId || null}, "", url);
+  }
+
+  if (form || storagePreferencesForm) {
+    restoreWebPreferences();
+  }
+
+  if (storagePreferencesForm) {
+    storagePreferencesForm.addEventListener("submit", persistWebPreferences);
+  }
+  if (clearPreferencesButton) {
+    clearPreferencesButton.addEventListener("click", clearWebPreferences);
   }
 
   function safeText(value) {
@@ -120,6 +224,9 @@
   }
 
   function hideNotification() {
+    if (!notification) {
+      return;
+    }
     notification.hidden = true;
     notification.replaceChildren();
     notification.className = "page-notification";
@@ -127,6 +234,9 @@
   }
 
   function showNotification(kind, title, message, options) {
+    if (!notification) {
+      return;
+    }
     notification.replaceChildren();
     notification.hidden = false;
     notification.className = "page-notification notification-" + kind;
@@ -193,32 +303,6 @@
     formError.textContent = "";
     formError.hidden = true;
     titleInput.removeAttribute("aria-invalid");
-    sourceSelect.removeAttribute("aria-invalid");
-    mikanSearchEndpointInput.removeAttribute("aria-invalid");
-    mikanTimeoutInput.removeAttribute("aria-invalid");
-  }
-
-  function setQbittorrentFormError(message, field) {
-    qbittorrentFormError.textContent = message;
-    qbittorrentFormError.hidden = false;
-    clearQbittorrentInvalidFields();
-    if (field) {
-      field.setAttribute("aria-invalid", "true");
-      field.focus();
-    }
-  }
-
-  function clearQbittorrentInvalidFields() {
-    qbittorrentEndpointInput.removeAttribute("aria-invalid");
-    qbittorrentUsernameInput.removeAttribute("aria-invalid");
-    qbittorrentPasswordInput.removeAttribute("aria-invalid");
-    qbittorrentTimeoutInput.removeAttribute("aria-invalid");
-  }
-
-  function clearQbittorrentFormError() {
-    qbittorrentFormError.textContent = "";
-    qbittorrentFormError.hidden = true;
-    clearQbittorrentInvalidFields();
   }
 
   function setSubmitInFlight(isInFlight) {
@@ -226,17 +310,6 @@
     submitButton.textContent = isInFlight
       ? "正在生成..."
       : submitButton.dataset.defaultLabel || "生成";
-  }
-
-  function setQbittorrentInFlight(isInFlight) {
-    var controls = qbittorrentForm.querySelectorAll("button, input");
-    for (var i = 0; i < controls.length; i++) {
-      controls[i].disabled = isInFlight;
-    }
-    qbittorrentToggle.disabled = isInFlight;
-    qbittorrentSubmitButton.textContent = isInFlight
-      ? "正在测试..."
-      : qbittorrentSubmitButton.dataset.defaultLabel || "测试连接";
   }
 
   function fieldValue(value) {
@@ -290,99 +363,143 @@
     return payload.result;
   }
 
-  function syncMikanConfigVisibility() {
-    mikanConfigFields.hidden = sourceSelect.value !== "mikan";
+  function setQbittorrentFormError(message, field) {
+    if (!qbittorrentFormError) {
+      return;
+    }
+    qbittorrentFormError.textContent = message;
+    qbittorrentFormError.hidden = false;
+    for (const input of [
+      qbittorrentEndpointInput,
+      qbittorrentUsernameInput,
+      qbittorrentPasswordInput,
+      qbittorrentTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearQbittorrentFormError() {
+    if (!qbittorrentFormError) {
+      return;
+    }
+    qbittorrentFormError.textContent = "";
+    qbittorrentFormError.hidden = true;
+    for (const input of [
+      qbittorrentEndpointInput,
+      qbittorrentUsernameInput,
+      qbittorrentPasswordInput,
+      qbittorrentTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setQbittorrentResult(message, className) {
+    if (!qbittorrentResult) {
+      return;
+    }
+    qbittorrentResult.className = className || "empty-state compact-state";
+    qbittorrentResult.textContent = message;
+  }
+
+  function setQbittorrentInFlight(isInFlight) {
+    if (!qbittorrentForm) {
+      return;
+    }
+    const controls = qbittorrentForm.querySelectorAll("button, input");
+    for (const control of controls) {
+      control.disabled = isInFlight;
+    }
+    if (qbittorrentSubmitButton) {
+      qbittorrentSubmitButton.textContent = isInFlight ? "正在测试..." : "测试连接";
+    }
+  }
+
+  function clearQbittorrentSensitiveFields() {
+    if (qbittorrentEndpointInput) {
+      qbittorrentEndpointInput.value = "";
+    }
+    if (qbittorrentUsernameInput) {
+      qbittorrentUsernameInput.value = "";
+    }
+    if (qbittorrentPasswordInput) {
+      qbittorrentPasswordInput.value = "";
+    }
   }
 
   function buildQbittorrentConnectionPayload() {
-    const endpoint = qbittorrentEndpointInput.value.trim();
+    const endpoint = qbittorrentEndpointInput ? qbittorrentEndpointInput.value.trim() : "";
+    const username = qbittorrentUsernameInput ? qbittorrentUsernameInput.value.trim() : "";
+    const password = qbittorrentPasswordInput ? qbittorrentPasswordInput.value.trim() : "";
+    const timeoutText = qbittorrentTimeoutInput ? qbittorrentTimeoutInput.value.trim() : "";
+    const timeoutSeconds = Number(timeoutText);
     if (!endpoint) {
-      throw {
-        message: "测试 qBittorrent 前必须填写 endpoint。",
-        field: qbittorrentEndpointInput,
-      };
+      const error = new Error("测试 qBittorrent 前必须填写 endpoint。");
+      error.field = qbittorrentEndpointInput;
+      throw error;
     }
-
-    const username = qbittorrentUsernameInput.value.trim();
     if (!username) {
-      throw {
-        message: "测试 qBittorrent 前必须填写 username。",
-        field: qbittorrentUsernameInput,
-      };
+      const error = new Error("测试 qBittorrent 前必须填写 username。");
+      error.field = qbittorrentUsernameInput;
+      throw error;
     }
-
-    const password = qbittorrentPasswordInput.value.trim();
     if (!password) {
-      throw {
-        message: "测试 qBittorrent 前必须填写 password。",
-        field: qbittorrentPasswordInput,
-      };
+      const error = new Error("测试 qBittorrent 前必须填写 password。");
+      error.field = qbittorrentPasswordInput;
+      throw error;
     }
-
-    const timeoutSeconds = Number(qbittorrentTimeoutInput.value);
     if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
-      throw {
-        message: "测试 qBittorrent 时 timeout_seconds 必须为正数。",
-        field: qbittorrentTimeoutInput,
-      };
+      const error = new Error("测试 qBittorrent 前 timeout_seconds 必须为正数。");
+      error.field = qbittorrentTimeoutInput;
+      throw error;
     }
-
     return {
       qbittorrent_config: {
         endpoint: endpoint,
         username: username,
         password: password,
         timeout_seconds: timeoutSeconds,
-        verify_tls: qbittorrentVerifyTlsInput.checked,
+        verify_tls: qbittorrentVerifyTlsInput ? qbittorrentVerifyTlsInput.checked : true,
       },
     };
   }
 
   function renderQbittorrentResult(summary) {
-    qbittorrentResult.className = "qbittorrent-result qbittorrent-result-success";
-    qbittorrentResult.replaceChildren();
-    const fields = detailList([
-      ["status", summary.status],
-      ["reachable", summary.reachable],
-      ["version", summary.version],
-    ]);
-    qbittorrentResult.appendChild(fields);
-  }
-
-  function clearQbittorrentSensitiveFields() {
-    qbittorrentEndpointInput.value = "";
-    qbittorrentUsernameInput.value = "";
-    qbittorrentPasswordInput.value = "";
+    const status = safeText(summary && summary.status);
+    const reachable = safeText(summary && summary.reachable);
+    const version = safeText(summary && summary.version);
+    setQbittorrentResult(
+      "status: " + status + "；reachable: " + reachable + "；version: " + version,
+      "qbittorrent-result qbittorrent-result-success success-state compact-state",
+    );
   }
 
   async function testQbittorrentConnection(event) {
     event.preventDefault();
     clearQbittorrentFormError();
-
     let payload;
     try {
       payload = buildQbittorrentConnectionPayload();
     } catch (validationError) {
-      setQbittorrentFormError(
-        validationError.message || "qBittorrent 配置校验失败。",
-        validationError.field,
-      );
-      showNotification(
-        "error",
-        "校验失败",
-        validationError.message || "qBittorrent 配置校验失败。",
-      );
+      setQbittorrentFormError(validationError.message, validationError.field);
+      setQbittorrentResult("请修正 qBittorrent 表单后再测试。", "error-state compact-state");
       return;
     }
-
     if (!window.confirm("确认使用当前 qBittorrent 配置测试连接？")) {
       return;
     }
 
-    hideNotification();
     setQbittorrentInFlight(true);
-    qbittorrentResult.className = "qbittorrent-result loading-state";
-    qbittorrentResult.textContent = "正在测试 qBittorrent 连接...";
+    setQbittorrentResult("正在测试 qBittorrent 连接...", "loading-state compact-state");
     try {
       const result = await fetchJson("/api/v1/qbittorrent/test-connection", {
         method: "POST",
@@ -391,52 +508,201 @@
       });
       renderQbittorrentResult(result);
       clearQbittorrentSensitiveFields();
-      qbittorrentForm.hidden = true;
-      qbittorrentToggle.setAttribute("aria-expanded", "false");
-      showNotification("success", "qBittorrent 连接成功", "连接测试完成。");
     } catch (error) {
-      qbittorrentResult.className = "qbittorrent-result muted-text";
-      qbittorrentResult.textContent = "qBittorrent 连接测试未通过。";
-      notifyApiError("qBittorrent 连接失败", error);
+      setQbittorrentResult(
+        "qBittorrent 连接测试失败。请检查配置后重试。",
+        "error-state compact-state",
+      );
     } finally {
       setQbittorrentInFlight(false);
     }
   }
 
+  if (qbittorrentForm) {
+    qbittorrentForm.addEventListener("submit", testQbittorrentConnection);
+  }
+
+  function settingsAbRequestIdFromLocation() {
+    return requestIdFromLocation();
+  }
+
+  function setSettingsAbError(message, field) {
+    if (!settingsAbFormError) {
+      return;
+    }
+    settingsAbFormError.textContent = message;
+    settingsAbFormError.hidden = false;
+    for (const input of [settingsAbEndpointInput, settingsAbTokenInput]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearSettingsAbError() {
+    if (!settingsAbFormError) {
+      return;
+    }
+    settingsAbFormError.textContent = "";
+    settingsAbFormError.hidden = true;
+    for (const input of [settingsAbEndpointInput, settingsAbTokenInput]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setSettingsAbResult(message, className) {
+    if (!settingsAbResult) {
+      return;
+    }
+    settingsAbResult.className = className || "empty-state compact-state";
+    settingsAbResult.textContent = message;
+  }
+
+  function setSettingsAbInFlight(isInFlight) {
+    if (!settingsAbForm) {
+      return;
+    }
+    const controls = settingsAbForm.querySelectorAll("button, input");
+    for (const control of controls) {
+      control.disabled = isInFlight;
+    }
+    if (settingsAbSubmitButton) {
+      settingsAbSubmitButton.textContent = isInFlight
+        ? "正在提交..."
+        : "提交 Auto Bangumi";
+    }
+  }
+
+  function clearSettingsAbSensitiveFields() {
+    if (settingsAbEndpointInput) {
+      settingsAbEndpointInput.value = "";
+    }
+    if (settingsAbTokenInput) {
+      settingsAbTokenInput.value = "";
+    }
+  }
+
+  function initializeSettingsAbForm() {
+    if (!settingsAbForm) {
+      return;
+    }
+    const requestId = settingsAbRequestIdFromLocation();
+    if (!requestId) {
+      settingsAbForm.hidden = true;
+      if (settingsAbContext) {
+        settingsAbContext.textContent =
+          "从 ACCEPTED Request 详情进入后，可在此提交到 Auto Bangumi。";
+      }
+      return;
+    }
+    settingsAbForm.hidden = false;
+    if (settingsAbRequestId) {
+      settingsAbRequestId.textContent = requestId;
+    }
+    if (settingsAbContext) {
+      settingsAbContext.textContent =
+        "已选择 Request " + requestId + "；请确认该 Request 已 ACCEPTED 后再提交。";
+    }
+    if (settingsAbReturnLink) {
+      settingsAbReturnLink.href = "/index?request_id=" + encodeURIComponent(requestId);
+    }
+  }
+
+  async function submitSettingsAb(event) {
+    event.preventDefault();
+    clearSettingsAbError();
+    const requestId = settingsAbRequestIdFromLocation();
+    const endpoint = settingsAbEndpointInput ? settingsAbEndpointInput.value.trim() : "";
+    const token = settingsAbTokenInput ? settingsAbTokenInput.value.trim() : "";
+    if (!requestId) {
+      setSettingsAbError("缺少 request_id，无法提交 Auto Bangumi。");
+      return;
+    }
+    if (!endpoint) {
+      setSettingsAbError("提交 Auto Bangumi 前必须填写 endpoint。", settingsAbEndpointInput);
+      return;
+    }
+    if (!token) {
+      setSettingsAbError("提交 Auto Bangumi 前必须填写 token。", settingsAbTokenInput);
+      return;
+    }
+    if (!window.confirm("确认提交此 Request 到 Auto Bangumi？")) {
+      return;
+    }
+
+    setSettingsAbInFlight(true);
+    setSettingsAbResult("正在提交 Auto Bangumi...", "loading-state compact-state");
+    try {
+      const result = await fetchJson(
+        apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/submit-ab"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            storage_dir: currentStorageDir() || null,
+            ab_config: {
+              endpoint: endpoint,
+              token: token,
+              fallback_enabled: settingsAbFallbackInput ? settingsAbFallbackInput.checked : false,
+            },
+          }),
+        },
+      );
+      const summary = result && result.ab_submit_result;
+      const subscriptionId = summary && summary.ab_subscription_id
+        ? "；ab_subscription_id: " + safeText(summary.ab_subscription_id)
+        : "";
+      clearSettingsAbSensitiveFields();
+      setSettingsAbResult(
+        "Auto Bangumi 提交成功；request_id: " + safeText(requestId) + subscriptionId,
+        "success-state compact-state",
+      );
+      showNotification("success", "Auto Bangumi 提交成功", "Request " + requestId, {
+        actions: settingsAbReturnLink
+          ? [
+              {
+                label: "返回详情",
+                handler: () => {
+                  window.location.href = settingsAbReturnLink.href;
+                },
+              },
+            ]
+          : [],
+      });
+    } catch (error) {
+      setSettingsAbResult(
+        "Auto Bangumi 提交失败。请检查配置与 Request 状态后重试。",
+        "error-state compact-state",
+      );
+      showNotification("error", "Auto Bangumi 提交失败", "请检查配置与 Request 状态后重试。");
+    } finally {
+      setSettingsAbInFlight(false);
+    }
+  }
+
+  initializeSettingsAbForm();
+
+  if (settingsAbForm) {
+    settingsAbForm.addEventListener("submit", submitSettingsAb);
+  }
+
+  if (!form) {
+    return;
+  }
+
   function buildCreateRequestPayload(title) {
-    const payload = {
+    return {
       title: title,
-      storage_dir: storageInput.value.trim() || null,
-      save_request: saveInput.checked,
+      source: "static-fixture",
+      storage_dir: currentStorageDir() || null,
+      save_request: currentSaveRequest(),
     };
-
-    if (sourceSelect.value !== "mikan") {
-      payload.source = "static-fixture";
-      return payload;
-    }
-
-    const searchEndpoint = mikanSearchEndpointInput.value.trim();
-    if (!searchEndpoint) {
-      throw {
-        message: "选择 mikan 时必须填写 search_endpoint。",
-        field: mikanSearchEndpointInput,
-      };
-    }
-
-    const timeoutSeconds = Number(mikanTimeoutInput.value);
-    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
-      throw {
-        message: "选择 mikan 时 timeout_seconds 必须为正数。",
-        field: mikanTimeoutInput,
-      };
-    }
-
-    payload.source = "mikan";
-    payload.mikan_config = {
-      search_endpoint: searchEndpoint,
-      timeout_seconds: timeoutSeconds,
-    };
-    return payload;
   }
 
   function requestLabel(summary) {
@@ -549,15 +815,14 @@
 
       item.append(title, meta);
       item.addEventListener("click", () => {
-        selectedRequestId = summary.request_id;
-        loadDetail(summary.request_id);
-        renderList();
+        selectRequest(summary.request_id, {pushUrl: true});
       });
       listContainer.appendChild(item);
     }
   }
 
-  async function loadList() {
+  async function loadList(options) {
+    const detailRequestId = selectedRequestId;
     hideNotification();
     setState(listContainer, "正在加载 Request 列表...", "loading-state");
     try {
@@ -565,6 +830,9 @@
       loadedRequests = result.requests || [];
       syncStatusFilterOptions(loadedRequests);
       renderList();
+      if (detailRequestId && !(options && options.loadSelectedDetail === false)) {
+        loadDetail(detailRequestId);
+      }
     } catch (error) {
       setState(listContainer, error.message, "error-state");
       notifyApiError("Request 列表加载失败", error);
@@ -715,28 +983,10 @@
     }
   }
 
-  function setAbSubmitInFlight(isInFlight) {
-    var form = document.getElementById("detail-ab-submit-form");
-    if (!form) {
-      return;
-    }
-    var controls = form.querySelectorAll("button, input");
-    for (var i = 0; i < controls.length; i++) {
-      var control = controls[i];
-      if (control.tagName === "INPUT" && control.type === "hidden") {
-        continue;
-      }
-      control.disabled = isInFlight;
-    }
-  }
-
   async function performAction(requestId, actionType, body) {
     if (!requestId) return;
     hideNotification();
     setActionInFlight(true);
-    if (actionType === "submit-ab") {
-      setAbSubmitInFlight(true);
-    }
     try {
       const result = await fetchJson(
         apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/" + actionType),
@@ -752,24 +1002,8 @@
         modify: "修改成功",
         "submit-ab": "Auto Bangumi 提交成功",
       };
-      if (actionType === "submit-ab") {
-        const nextPayload = {
-          ...(currentDetailPayload || {}),
-          request: result.request,
-          ab_result: {
-            available: true,
-            record: {
-              request_id: requestId,
-              ab_submit_result: result.ab_submit_result,
-            },
-            error: null,
-          },
-        };
-        renderDetailPayload(nextPayload);
-      } else {
-        await loadDetail(requestId);
-      }
-      await loadList();
+      await loadDetail(requestId);
+      await loadList({loadSelectedDetail: false});
       showNotification("success", titles[actionType] || "操作成功",
         "Request " + requestId, {
           actions: [
@@ -777,136 +1011,10 @@
           ],
         });
     } catch (error) {
-      notifyApiError(actionType === "submit-ab" ? "提交失败" : "操作失败", error);
+      notifyApiError("操作失败", error);
     } finally {
-      if (actionType === "submit-ab") {
-        setAbSubmitInFlight(false);
-      }
       setActionInFlight(false);
     }
-  }
-
-  function buildAbSubmitForm(request) {
-    var container = document.createElement("div");
-    container.id = "detail-ab-submit-form";
-    container.className = "detail-section detail-inline-form";
-    container.hidden = true;
-
-    var heading = document.createElement("h4");
-    heading.textContent = "Auto Bangumi 提交";
-    container.appendChild(heading);
-
-    var endpointLabel = document.createElement("label");
-    endpointLabel.textContent = "endpoint";
-    endpointLabel.htmlFor = "ab-submit-endpoint";
-    var endpointInput = document.createElement("input");
-    endpointInput.id = "ab-submit-endpoint";
-    endpointInput.name = "ab_submit_endpoint";
-    endpointInput.type = "text";
-    endpointInput.autocomplete = "off";
-    endpointInput.placeholder = "Auto Bangumi API 地址";
-    container.append(endpointLabel, endpointInput);
-
-    var tokenLabel = document.createElement("label");
-    tokenLabel.textContent = "token";
-    tokenLabel.htmlFor = "ab-submit-token";
-    var tokenInput = document.createElement("input");
-    tokenInput.id = "ab-submit-token";
-    tokenInput.name = "ab_submit_token";
-    tokenInput.type = "password";
-    tokenInput.autocomplete = "off";
-    tokenInput.placeholder = "Auto Bangumi Token";
-    container.append(tokenLabel, tokenInput);
-
-    var fallbackLabel = document.createElement("label");
-    fallbackLabel.className = "checkbox-row";
-    fallbackLabel.htmlFor = "ab-submit-fallback-enabled";
-    var fallbackInput = document.createElement("input");
-    fallbackInput.id = "ab-submit-fallback-enabled";
-    fallbackInput.name = "ab_submit_fallback_enabled";
-    fallbackInput.type = "checkbox";
-    fallbackInput.value = "true";
-    fallbackLabel.append(
-      fallbackInput,
-      document.createTextNode("fallback_enabled"),
-    );
-    container.appendChild(fallbackLabel);
-
-    var help = document.createElement("p");
-    help.className = "field-help";
-    help.textContent = "配置仅用于本次提交，不写入浏览器存储、URL 或 storage JSON。";
-    container.appendChild(help);
-
-    var error = document.createElement("p");
-    error.id = "ab-submit-form-error";
-    error.className = "field-error";
-    error.setAttribute("role", "alert");
-    error.hidden = true;
-    container.appendChild(error);
-
-    function setAbFormError(message, field) {
-      error.textContent = message;
-      error.hidden = false;
-      endpointInput.removeAttribute("aria-invalid");
-      tokenInput.removeAttribute("aria-invalid");
-      if (field) {
-        field.setAttribute("aria-invalid", "true");
-        field.focus();
-      }
-    }
-
-    function clearAbFormError() {
-      error.textContent = "";
-      error.hidden = true;
-      endpointInput.removeAttribute("aria-invalid");
-      tokenInput.removeAttribute("aria-invalid");
-    }
-
-    var btnRow = document.createElement("div");
-    btnRow.className = "notification-actions";
-
-    var submitBtn = document.createElement("button");
-    submitBtn.type = "button";
-    submitBtn.className = "detail-action";
-    submitBtn.textContent = "提交 Auto Bangumi";
-    submitBtn.addEventListener("click", function () {
-      clearAbFormError();
-      var endpoint = endpointInput.value.trim();
-      if (!endpoint) {
-        setAbFormError("提交 Auto Bangumi 前必须填写 endpoint。", endpointInput);
-        return;
-      }
-      var token = tokenInput.value.trim();
-      if (!token) {
-        setAbFormError("提交 Auto Bangumi 前必须填写 token。", tokenInput);
-        return;
-      }
-      if (!window.confirm("确认提交此 Request 到 Auto Bangumi？")) {
-        return;
-      }
-      performAction(request.request_id, "submit-ab", {
-        storage_dir: storageInput.value.trim() || null,
-        ab_config: {
-          endpoint: endpoint,
-          token: token,
-          fallback_enabled: fallbackInput.checked,
-        },
-      });
-    });
-    btnRow.appendChild(submitBtn);
-
-    var cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "secondary-button detail-action";
-    cancelBtn.textContent = "取消";
-    cancelBtn.addEventListener("click", function () {
-      clearAbFormError();
-      container.hidden = true;
-    });
-    btnRow.appendChild(cancelBtn);
-
-    container.appendChild(btnRow);
-    return container;
   }
 
   function buildModifyForm(request) {
@@ -914,6 +1022,10 @@
     var sourceInfo = request.source_info || {};
     var rssSources = sourceInfo.rss_sources || [];
     var filterRule = config.filter_rule || {};
+    var originalGroup = config.selected_subtitle_group || "";
+    var originalMustContain = filterRule.must_contain || "";
+    var originalMustNotContain = filterRule.must_not_contain || "";
+    var originalFolderName = config.expected_folder_name || "";
 
     var container = document.createElement("div");
     container.id = "detail-modify-form";
@@ -943,16 +1055,35 @@
     container.appendChild(groupLabel);
     container.appendChild(groupSelect);
 
+    function appendClearControl(id, labelText, targetInput) {
+      var wrapper = document.createElement("label");
+      wrapper.className = "inline-check";
+      wrapper.htmlFor = id;
+      var checkbox = document.createElement("input");
+      checkbox.id = id;
+      checkbox.type = "checkbox";
+      checkbox.addEventListener("change", function () {
+        targetInput.disabled = checkbox.checked;
+        if (checkbox.checked) {
+          targetInput.value = "";
+        }
+      });
+      wrapper.append(checkbox, document.createTextNode(labelText));
+      return { wrapper: wrapper, checkbox: checkbox };
+    }
+
     var mcLabel = document.createElement("label");
     mcLabel.textContent = "must_contain";
     mcLabel.htmlFor = "modify-must-contain";
     var mcInput = document.createElement("input");
     mcInput.id = "modify-must-contain";
     mcInput.type = "text";
-    mcInput.value = filterRule.must_contain || "";
+    mcInput.value = originalMustContain;
     mcInput.placeholder = "正则筛选规则（包含）";
+    var mcClear = appendClearControl("modify-clear-must-contain", "清空 must_contain", mcInput);
     container.appendChild(mcLabel);
     container.appendChild(mcInput);
+    container.appendChild(mcClear.wrapper);
 
     var mncLabel = document.createElement("label");
     mncLabel.textContent = "must_not_contain";
@@ -960,10 +1091,12 @@
     var mncInput = document.createElement("input");
     mncInput.id = "modify-must-not-contain";
     mncInput.type = "text";
-    mncInput.value = filterRule.must_not_contain || "";
+    mncInput.value = originalMustNotContain;
     mncInput.placeholder = "正则筛选规则（排除）";
+    var mncClear = appendClearControl("modify-clear-must-not-contain", "清空 must_not_contain", mncInput);
     container.appendChild(mncLabel);
     container.appendChild(mncInput);
+    container.appendChild(mncClear.wrapper);
 
     var fnLabel = document.createElement("label");
     fnLabel.textContent = "folder_name";
@@ -971,33 +1104,58 @@
     var fnInput = document.createElement("input");
     fnInput.id = "modify-folder-name";
     fnInput.type = "text";
-    fnInput.value = config.expected_folder_name || "";
+    fnInput.value = originalFolderName;
     fnInput.placeholder = "期望存储目录名";
+    var fnClear = appendClearControl("modify-clear-folder-name", "清空 folder_name", fnInput);
     container.appendChild(fnLabel);
     container.appendChild(fnInput);
+    container.appendChild(fnClear.wrapper);
+
+    var formError = document.createElement("p");
+    formError.id = "detail-modify-error";
+    formError.className = "field-error";
+    formError.setAttribute("role", "alert");
+    formError.hidden = true;
+    container.appendChild(formError);
 
     var btnRow = document.createElement("div");
     btnRow.className = "notification-actions";
 
     var submitBtn = document.createElement("button");
     submitBtn.type = "button";
-    submitBtn.className = "detail-action";
+    submitBtn.className = "primary-button detail-action";
     submitBtn.textContent = "提交修改";
     submitBtn.addEventListener("click", function () {
+      formError.hidden = true;
+      formError.textContent = "";
       var patch = {};
-      if (groupSelect.value) {
+      if (groupSelect.value && groupSelect.value !== originalGroup) {
         patch.selected_subtitle_group = groupSelect.value;
       }
       var mcVal = mcInput.value.trim();
       var mncVal = mncInput.value.trim();
-      if (mcVal || mncVal) {
+      if (
+        mcClear.checkbox.checked ||
+        mncClear.checkbox.checked ||
+        mcVal !== originalMustContain ||
+        mncVal !== originalMustNotContain
+      ) {
         patch.filter_rule = {};
-        if (mcVal) patch.filter_rule.must_contain = mcVal;
-        if (mncVal) patch.filter_rule.must_not_contain = mncVal;
+        if (mcClear.checkbox.checked || mcVal !== originalMustContain) {
+          patch.filter_rule.must_contain = mcClear.checkbox.checked ? "" : mcVal;
+        }
+        if (mncClear.checkbox.checked || mncVal !== originalMustNotContain) {
+          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : mncVal;
+        }
       }
       var fnVal = fnInput.value.trim();
-      if (fnVal) {
-        patch.expected_folder_name = fnVal;
+      if (fnClear.checkbox.checked || fnVal !== originalFolderName) {
+        patch.expected_folder_name = fnClear.checkbox.checked ? "" : fnVal;
+      }
+      if (!Object.keys(patch).length) {
+        formError.textContent = "请至少修改或清空一个字段。";
+        formError.hidden = false;
+        return;
       }
       performAction(request.request_id, "modify", { patch: patch });
     });
@@ -1011,6 +1169,56 @@
       container.hidden = true;
     });
     btnRow.appendChild(cancelBtn);
+
+    container.appendChild(btnRow);
+    return container;
+  }
+
+  function buildCancelForm(request) {
+    var container = document.createElement("div");
+    container.id = "detail-cancel-form";
+    container.className = "detail-section detail-inline-form detail-cancel-form";
+    container.hidden = true;
+
+    var heading = document.createElement("h4");
+    heading.textContent = "取消 Request";
+    container.appendChild(heading);
+
+    var reasonLabel = document.createElement("label");
+    reasonLabel.textContent = "取消原因（可选）";
+    reasonLabel.htmlFor = "cancel-reason";
+    var reasonInput = document.createElement("textarea");
+    reasonInput.id = "cancel-reason";
+    reasonInput.rows = 3;
+    reasonInput.placeholder = "例如：暂时不订阅，或匹配结果不符合预期";
+    container.append(reasonLabel, reasonInput);
+
+    var btnRow = document.createElement("div");
+    btnRow.className = "notification-actions";
+
+    var submitBtn = document.createElement("button");
+    submitBtn.type = "button";
+    submitBtn.className = "danger-button detail-action";
+    submitBtn.textContent = "提交取消";
+    submitBtn.addEventListener("click", function () {
+      if (!window.confirm("确认取消此 Request？")) {
+        return;
+      }
+      var reason = reasonInput.value.trim();
+      performAction(request.request_id, "cancel", {
+        cancel_reason: reason || undefined,
+      });
+    });
+    btnRow.appendChild(submitBtn);
+
+    var collapseBtn = document.createElement("button");
+    collapseBtn.type = "button";
+    collapseBtn.className = "secondary-button";
+    collapseBtn.textContent = "收起";
+    collapseBtn.addEventListener("click", function () {
+      container.hidden = true;
+    });
+    btnRow.appendChild(collapseBtn);
 
     container.appendChild(btnRow);
     return container;
@@ -1059,7 +1267,7 @@
     if (isPending) {
       var acceptBtn = document.createElement("button");
       acceptBtn.type = "button";
-      acceptBtn.className = "detail-action";
+      acceptBtn.className = "primary-button detail-action";
       acceptBtn.textContent = "确认";
       acceptBtn.addEventListener("click", function () {
         if (window.confirm("确认接受此 Request？")) {
@@ -1070,13 +1278,13 @@
 
       var cancelBtn = document.createElement("button");
       cancelBtn.type = "button";
-      cancelBtn.className = "secondary-button detail-action";
+      cancelBtn.className = "danger-button detail-action";
       cancelBtn.textContent = "取消";
       cancelBtn.addEventListener("click", function () {
-        var reason = window.prompt("请输入取消原因（可选）：") || "";
-        performAction(request.request_id, "cancel", {
-          cancel_reason: reason || undefined,
-        });
+        var form = document.getElementById("detail-cancel-form");
+        if (form) {
+          form.hidden = !form.hidden;
+        }
       });
       actionsContainer.appendChild(cancelBtn);
 
@@ -1097,22 +1305,11 @@
       statusNote.textContent = "此 Request 已" + fieldValue(request.status) + "，可提交到 Auto Bangumi。";
       actionsContainer.appendChild(statusNote);
 
-      var abSubmitBtn = document.createElement("button");
-      abSubmitBtn.type = "button";
+      var abSubmitBtn = document.createElement("a");
       abSubmitBtn.className = "secondary-button detail-action";
-      abSubmitBtn.textContent = "提交 Auto Bangumi";
-      abSubmitBtn.addEventListener("click", function () {
-        var form = document.getElementById("detail-ab-submit-form");
-        if (form) {
-          form.hidden = !form.hidden;
-          if (!form.hidden) {
-            var endpoint = document.getElementById("ab-submit-endpoint");
-            if (endpoint) {
-              endpoint.focus();
-            }
-          }
-        }
-      });
+      abSubmitBtn.href =
+        "/settings?request_id=" + encodeURIComponent(request.request_id) + "#auto-bangumi";
+      abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi";
       actionsContainer.appendChild(abSubmitBtn);
     } else {
       var statusNote = document.createElement("p");
@@ -1121,9 +1318,8 @@
       actionsContainer.appendChild(statusNote);
     }
 
+    var cancelForm = buildCancelForm(request);
     var modifyForm = buildModifyForm(request);
-    var abSubmitForm = buildAbSubmitForm(request);
-
     var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
       detailList([
@@ -1161,14 +1357,23 @@
     detailContainer.append(
       heading,
       actionsContainer,
+      cancelForm,
       modifyForm,
-      abSubmitForm,
       overviewSection,
       sourceSection,
       filterSection,
       seedsSection,
       auditSection,
     );
+  }
+
+  function selectRequest(requestId, options) {
+    selectedRequestId = requestId || null;
+    renderList();
+    if (options && options.pushUrl) {
+      syncRequestIdToUrl(selectedRequestId);
+    }
+    loadDetail(selectedRequestId);
   }
 
   async function loadDetail(requestId) {
@@ -1186,8 +1391,8 @@
       );
       renderDetailPayload(result);
     } catch (error) {
-      setState(detailContainer, error.message, "error-state");
-      notifyApiError("Request 详情加载失败", error);
+      setState(detailContainer, "Request 详情加载失败。请确认 request_id 是否存在。", "error-state");
+      showNotification("error", "Request 详情加载失败", "请确认 request_id 是否存在。");
     }
   }
 
@@ -1206,8 +1411,8 @@
     try {
       payload = buildCreateRequestPayload(title);
     } catch (validationError) {
-      setFormError(validationError.message || "MiKan 配置校验失败。", validationError.field);
-      showNotification("error", "校验失败", validationError.message || "MiKan 配置校验失败。");
+      setFormError(validationError.message || "Request 表单校验失败。", validationError.field);
+      showNotification("error", "校验失败", validationError.message || "Request 表单校验失败。");
       if (validationError.field && validationError.field.focus) {
         validationError.field.focus();
       }
@@ -1228,8 +1433,9 @@
       });
       selectedRequestId = result.request && result.request.request_id;
       renderDetailPayload(result);
-      await loadList();
+      await loadList({loadSelectedDetail: false});
       if (result.saved_request) {
+        syncRequestIdToUrl(selectedRequestId);
         showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
           actions: [
             {
@@ -1253,27 +1459,22 @@
     }
   }
 
-  restoreWebPreferences();
-  syncMikanConfigVisibility();
-  sourceSelect.addEventListener("change", function () {
-    clearFormError();
-    syncMikanConfigVisibility();
-  });
-  qbittorrentToggle.addEventListener("click", function () {
-    qbittorrentForm.hidden = !qbittorrentForm.hidden;
-    qbittorrentToggle.setAttribute("aria-expanded", String(!qbittorrentForm.hidden));
-    if (!qbittorrentForm.hidden) {
-      qbittorrentEndpointInput.focus();
-    }
-  });
-  qbittorrentForm.addEventListener("submit", testQbittorrentConnection);
-  storageInput.addEventListener("change", persistWebPreferences);
-  saveInput.addEventListener("change", persistWebPreferences);
-  clearPreferencesButton.addEventListener("click", clearWebPreferences);
   refreshButton.addEventListener("click", loadList);
   listSearchInput.addEventListener("input", renderList);
   listStatusFilter.addEventListener("change", renderList);
   listSortSelect.addEventListener("change", renderList);
   form.addEventListener("submit", generateRequest);
+  window.addEventListener("popstate", () => {
+    const requestId = requestIdFromLocation();
+    selectedRequestId = requestId || null;
+    renderList();
+    if (requestId) {
+      loadDetail(requestId);
+    } else {
+      hideNotification();
+      setState(detailContainer, "选择一个 Request 后查看详情。", "empty-state");
+    }
+  });
+  selectedRequestId = requestIdFromLocation() || null;
   loadList();
 })();

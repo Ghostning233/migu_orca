@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
-from tests.browser.conftest import create_saved_request
+from tests.browser.conftest import create_saved_request, set_storage_preferences
 
 
 pytestmark = pytest.mark.browser
@@ -24,8 +24,8 @@ def _navigate_to_list(
     page: Page, live_server_url: str, storage_dir: Path
 ) -> None:
     """Go to index, set storage_dir, refresh list, and wait for load."""
+    set_storage_preferences(page, storage_dir)
     page.goto(f"{live_server_url}/index")
-    page.fill('input[name="storage_dir"]', str(storage_dir))
     page.click("#request-list-refresh")
     # Wait for list to render (empty state replaced by real items)
     page.wait_for_selector("#request-list-container button.request-list-item", timeout=5000)

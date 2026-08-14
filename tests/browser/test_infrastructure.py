@@ -33,22 +33,21 @@ def test_root_redirects_to_index(page: Page, live_server_url: str) -> None:
     assert page.title().startswith("MiGuOrca")
 
 
-def test_index_loads_stage12_shell(page: Page, live_server_url: str) -> None:
-    """The /index page loads the Stage 12 qBittorrent Direct shell."""
+def test_index_loads_stage13_request_workbench(page: Page, live_server_url: str) -> None:
+    """The /index page loads the Stage 13 Request workbench shell."""
     page.goto(f"{live_server_url}/index")
 
     assert page.title().startswith("MiGuOrca")
     assert page.locator("text=MiGuOrca").count() >= 1
-    assert page.locator("text=Stage 12 qBittorrent Direct").count() >= 1
+    assert page.locator("text=Stage 13 Request 工作台").count() >= 1
 
     # Top navigation anchors
     nav = page.locator(".top-nav")
     assert nav.count() >= 1
-    assert nav.locator("a[href='#generate-panel']").count() >= 1
-    assert nav.locator("a[href='#qbittorrent-panel']").count() >= 1
-    assert nav.locator("a[href='#request-list-panel']").count() >= 1
-    assert nav.locator("a[href='#request-detail-panel']").count() >= 1
-    assert nav.locator("a[href='#acceptance-panel']").count() >= 1
+    assert nav.locator("a[href='/index']").count() >= 1
+    assert nav.locator("a[href='/settings']").count() >= 1
+    assert nav.locator("text=Request 工作台").count() >= 1
+    assert nav.locator("text=Settings").count() >= 1
 
     # Mode hint
     hint = page.locator("text=运行模式：本地 JSON storage").first
@@ -57,14 +56,31 @@ def test_index_loads_stage12_shell(page: Page, live_server_url: str) -> None:
     # Main panels are present
     for panel_id in (
         "generate-panel",
-        "qbittorrent-panel",
         "request-list-panel",
         "request-detail-panel",
-        "acceptance-panel",
     ):
         assert page.locator(f"#{panel_id}").count() >= 1, f"Missing panel: #{panel_id}"
+    assert page.locator("#qbittorrent-panel").count() == 0
+    assert page.locator("#acceptance-panel").count() == 0
 
     _check_no_sensitive_content(page.content())
+
+
+def test_settings_loads_placeholder_shell(page: Page, live_server_url: str) -> None:
+    """The /settings page loads the Stage 13 Settings shell."""
+    page.goto(f"{live_server_url}/settings")
+
+    assert page.title() == "MiGuOrca Settings"
+    assert page.locator("text=MiGuOrca Settings").count() >= 1
+    assert page.locator(".top-nav a[href='/index']").count() >= 1
+    assert page.locator(".top-nav a[href='/settings']").count() >= 1
+    for panel_id in (
+        "storage-settings-panel",
+        "data-source-settings-panel",
+        "qbittorrent-settings-panel",
+        "auto-bangumi-settings-panel",
+    ):
+        assert page.locator(f"#{panel_id}.panel").count() >= 1
 
 
 def test_static_assets_load_without_critical_errors(
@@ -115,11 +131,13 @@ def test_generation_form_present(page: Page, live_server_url: str) -> None:
 
     assert page.locator("#request-generate-form").count() >= 1
     assert page.locator('input[name="title"]').count() >= 1
-    assert page.locator('select[name="source"]').count() >= 1
-    assert page.locator('input[name="mikan_search_endpoint"]').count() >= 1
-    assert page.locator('input[name="mikan_timeout_seconds"]').count() >= 1
-    assert page.locator('input[name="storage_dir"]').count() >= 1
-    assert page.locator('input[name="save_request"]').count() >= 1
+    assert page.locator('select[name="source"]').count() == 0
+    assert page.locator('input[name="mikan_search_endpoint"]').count() == 0
+    assert page.locator('input[name="mikan_timeout_seconds"]').count() == 0
+    assert page.locator('input[name="storage_dir"]').count() == 0
+    assert page.locator('input[name="save_request"]').count() == 0
+    assert page.locator("#storage-preference-summary").count() >= 1
+    assert page.locator("#storage-preference-summary a[href*='/settings']").count() >= 1
     assert page.locator("#request-generate-submit").count() >= 1
     assert page.locator("#request-form-error").count() >= 1
 

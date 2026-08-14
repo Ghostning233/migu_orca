@@ -12,7 +12,8 @@
 | 1 | BL-003 | Web UI 确认 / 取消 / 修改 Request 的操作入口 | 完成 |
 | 2 | BL-004 | Web UI 真实 MiKan / Auto Bangumi 配置入口 | 完成 |
 | 3 | BL-005 | qBittorrent 直连 | 完成 |
-| 4 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 待办 |
+| 4 | BL-006 | Web UI Settings 信息架构优化 | 完成 |
+| 5 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 待办 |
 
 认证、权限模块当前优先级最低，现阶段无明确需求，默认不纳入后续开发计划。除非之后出现部署暴露、多人使用或远程访问场景，否则不为其单独规划 Stage。
 
@@ -77,6 +78,21 @@
 - 默认流程不得隐式连接 qBittorrent；必须由用户显式配置和触发。
 - qBittorrent 配置只用于当前连接测试请求，不写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。
 - 错误、日志和页面展示不得泄露认证信息、完整服务地址、cookie、SID、原始响应体或敏感路径。
+
+### BL-006: Web UI Settings 信息架构优化
+
+- 状态：完成 (Stage 13, 2026-08-14)
+- 来源：Stage 12 单页 Web UI 配置过载
+- 优先级：4
+- 不阻塞：Stage 13 验收通过
+
+目标：
+
+- 已将 `/index` 收敛为 Request 工作台，保留生成、列表、URL 可恢复详情、确认、可见取消表单和受限修改。
+- 已新增 `/settings` 页面，将非敏感 Storage 偏好、qBittorrent 连接测试和 request-scoped Auto Bangumi 提交配置迁移到 Settings。
+- 已统一 Stage 13 UI 质量要求：清晰视觉层级、按钮语义、空/加载/成功/错误状态、Settings 分区边界、响应式布局和 Request 详情可扫读性。
+- 已通过 Playwright 浏览器回归覆盖 Settings 保存/清除偏好、qBittorrent 成功/失败/确认、Auto Bangumi accepted-only 入口、URL 状态恢复、取消/修改交互和敏感信息脱敏。
+- 信息架构拆分不改变安全边界：真实外部系统 endpoint、token、username、password、cookie、SID、原始响应体和敏感路径仍不得持久化或泄露。
 
 ## 搜索与真实 MiKan 兼容性
 

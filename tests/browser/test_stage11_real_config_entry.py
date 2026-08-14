@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from playwright.sync_api import Page, Request
+from playwright.sync_api import Page
 
 from request_engine.controllers.request_controller import accept_request
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
-from tests.browser.conftest import create_saved_request
+from tests.browser.conftest import create_saved_request, set_storage_preferences
 
 
 pytestmark = pytest.mark.browser
@@ -25,8 +25,8 @@ RAW_RSS = "<rss><channel><title>raw</title></channel></rss>"
 def _open_request_detail(
     page: Page, live_server_url: str, storage_dir: Path, request_id: str
 ) -> None:
+    set_storage_preferences(page, storage_dir)
     page.goto(f"{live_server_url}/index")
-    page.fill('input[name="storage_dir"]', str(storage_dir))
     page.click("#request-list-refresh")
     page.wait_for_selector(f"[data-request-id='{request_id}']", timeout=5000)
     page.locator(f"[data-request-id='{request_id}']").click()
@@ -57,20 +57,17 @@ def _assert_sensitive_values_not_rendered(page: Page) -> None:
 
 
 class TestStage11MikanBrowserRegressions:
-    """AC: MiKan entry points remain explicit, validated, and offline by default."""
+    """AC: /index remains offline by default and no longer exposes MiKan config."""
 
     def test_default_fixture_mode_hides_mikan_config_and_generates_locally(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
+        set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
-        page.fill('input[name="storage_dir"]', str(storage_dir))
         page.fill('input[name="title"]', "葬送的芙莉莲")
-        save_checkbox = page.locator('input[name="save_request"]')
-        if save_checkbox.is_checked():
-            save_checkbox.uncheck()
 
-        assert page.locator('select[name="source"]').input_value() == "static-fixture"
-        assert page.locator("#mikan-config-fields").is_hidden()
+        assert page.locator('select[name="source"]').count() == 0
+        assert page.locator("#mikan-config-fields").count() == 0
 
         page.click("#request-generate-submit")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -79,46 +76,14 @@ class TestStage11MikanBrowserRegressions:
         assert not storage_dir.exists() or not any(storage_dir.iterdir())
         _assert_sensitive_values_not_rendered(page)
 
-    def test_mikan_selection_displays_fields_and_blocks_invalid_config(
+    def test_index_does_not_render_mikan_sensitive_fields(
         self, page: Page, live_server_url: str
     ) -> None:
-        calls: list[Request] = []
-
-        def _capture_generation(route: Any, request: Request) -> None:
-            if request.method == "POST":
-                calls.append(request)
-                route.fulfill(
-                    status=500,
-                    content_type="application/json",
-                    body=json.dumps(
-                        {
-                            "ok": False,
-                            "error_type": "unexpected",
-                            "error_message": "validation should block this request",
-                        }
-                    ),
-                )
-                return
-            route.continue_()
-
-        page.route("**/api/v1/requests", _capture_generation)
         page.goto(f"{live_server_url}/index")
-        page.fill('input[name="title"]', "葬送的芙莉莲")
-        page.select_option('select[name="source"]', "mikan")
-
-        assert page.locator("#mikan-config-fields").is_visible()
-
-        page.click("#request-generate-submit")
-        page.wait_for_timeout(300)
-        assert not calls
-        assert "必须填写 search_endpoint" in page.locator("#request-form-error").inner_text()
-
-        page.fill('input[name="mikan_search_endpoint"]', "redacted-search-entry")
-        page.fill('input[name="mikan_timeout_seconds"]', "-1")
-        page.click("#request-generate-submit")
-        page.wait_for_timeout(300)
-        assert not calls
-        assert "timeout_seconds 必须为正数" in page.locator("#request-form-error").inner_text()
+        assert page.locator('input[name="mikan_search_endpoint"]').count() == 0
+        assert page.locator('input[name="mikan_timeout_seconds"]').count() == 0
+        assert "search_endpoint" not in _visible_text(page)
+        assert "timeout_seconds" not in _visible_text(page)
 
 
 class TestStage11AutoBangumiBrowserRegressions:
@@ -134,7 +99,7 @@ class TestStage11AutoBangumiBrowserRegressions:
         assert (
             page.locator(
                 "#request-detail-container .detail-actions "
-                "button:visible:has-text('提交 Auto Bangumi')"
+                "a:visible:has-text('去 Settings 提交 Auto Bangumi')"
             ).count()
             == 0
         )
@@ -142,17 +107,18 @@ class TestStage11AutoBangumiBrowserRegressions:
         _open_request_detail(page, live_server_url, storage_dir, "req-stage11-accepted")
         page.locator(
             "#request-detail-container .detail-actions "
-            "button:visible:has-text('提交 Auto Bangumi')"
+            "a:visible:has-text('去 Settings 提交 Auto Bangumi')"
         ).click()
 
-        assert page.locator("#detail-ab-submit-form").is_visible()
-        assert page.locator("#ab-submit-token").get_attribute("type") == "password"
+        page.wait_for_url("**/settings?request_id=req-stage11-accepted#auto-bangumi")
+        assert page.locator("#settings-ab-submit-form").is_visible()
+        assert page.locator("#settings-ab-token").get_attribute("type") == "password"
 
         dialogs: list[str] = []
         page.once("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
-        page.fill("#ab-submit-endpoint", "redacted-ab-entry")
-        page.fill("#ab-submit-token", SENSITIVE_TOKEN)
-        page.locator("#detail-ab-submit-form button:has-text('提交 Auto Bangumi')").click()
+        page.fill("#settings-ab-endpoint", "redacted-ab-entry")
+        page.fill("#settings-ab-token", SENSITIVE_TOKEN)
+        page.locator("#settings-ab-submit").click()
         page.wait_for_timeout(300)
 
         assert dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
@@ -185,19 +151,23 @@ class TestStage11AutoBangumiBrowserRegressions:
             )
 
         page.route("**/api/v1/requests/req-stage11-ab-fail/submit-ab**", _fail_submit)
-        _open_request_detail(page, live_server_url, storage_dir, "req-stage11-ab-fail")
-
-        page.locator(".detail-actions button:has-text('提交 Auto Bangumi')").click()
-        page.fill("#ab-submit-endpoint", SENSITIVE_ENDPOINT)
-        page.fill("#ab-submit-token", SENSITIVE_TOKEN)
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/settings?request_id=req-stage11-ab-fail#auto-bangumi")
+        page.fill("#settings-ab-endpoint", SENSITIVE_ENDPOINT)
+        page.fill("#settings-ab-token", SENSITIVE_TOKEN)
         page.once("dialog", lambda dialog: dialog.accept())
-        page.locator("#detail-ab-submit-form button:has-text('提交 Auto Bangumi')").click()
+        page.locator("#settings-ab-submit").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
+        settings_text = page.locator("#auto-bangumi-settings-panel").inner_text()
+        notification_text = page.locator("#page-notification").inner_text()
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/index?request_id=req-stage11-ab-fail")
+        page.wait_for_selector("#request-detail-container", timeout=5000)
         detail_text = page.locator("#request-detail-container").inner_text()
         list_text = page.locator("#request-list-container").inner_text()
-        notification_text = page.locator("#page-notification").inner_text()
 
+        assert "req-stage11-ab-fail" in settings_text
         assert "req-stage11-ab-fail" in detail_text
         assert "ACCEPTED" in detail_text
         assert "咒术回战 第三季" in list_text

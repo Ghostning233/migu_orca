@@ -92,10 +92,10 @@ class TestKeyboardNavigation:
                 break
         assert found, "refresh button was not reachable via keyboard"
 
-    def test_tab_focuses_storage_dir_input(
+    def test_tab_focuses_settings_storage_dir_input(
         self, page: Page, live_server_url: str
     ) -> None:
-        page.goto(f"{live_server_url}/index")
+        page.goto(f"{live_server_url}/settings")
         page.locator("body").click()
 
         found = False
@@ -105,7 +105,7 @@ class TestKeyboardNavigation:
             if name == "storage_dir":
                 found = True
                 break
-        assert found, "storage_dir input was not reachable via keyboard"
+        assert found, "Settings storage_dir input was not reachable via keyboard"
 
 
 class TestFocusStyles:

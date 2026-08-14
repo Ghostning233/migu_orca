@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
-from tests.browser.conftest import create_saved_request
+from tests.browser.conftest import create_saved_request, set_storage_preferences
 from request_engine.controllers.request_controller import accept_request
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
@@ -18,8 +18,8 @@ def _open_request_detail(
     page: Page, live_server_url: str, storage_dir: Path, request_id: str
 ) -> None:
     """Navigate to index, set storage_dir, refresh list, and click a request item."""
+    set_storage_preferences(page, storage_dir)
     page.goto(f"{live_server_url}/index")
-    page.fill('input[name="storage_dir"]', str(storage_dir))
     page.click("#request-list-refresh")
     page.wait_for_timeout(800)
     item = page.locator(f"[data-request-id='{request_id}']")
@@ -31,7 +31,7 @@ def _open_request_detail(
 
 def _click_confirm(page: Page) -> None:
     """Click the confirm button scoped to the actions container."""
-    page.locator(".detail-actions button:not(.secondary-button)").click()
+    page.locator(".detail-actions button:has-text('确认')").click()
 
 
 def _click_cancel(page: Page) -> None:
@@ -45,7 +45,7 @@ def _click_modify(page: Page) -> None:
 
 
 def _click_ab_submit_entry(page: Page) -> None:
-    page.locator(".detail-actions button:has-text('提交 Auto Bangumi')").click()
+    page.locator(".detail-actions a:has-text('去 Settings 提交 Auto Bangumi')").click()
 
 
 def create_saved_accepted_request(
@@ -84,7 +84,7 @@ class TestActionButtons:
         _open_request_detail(page, live_server_url, storage_dir, "req-act-2")
         container = page.locator("#request-detail-container")
         assert container.locator("button:has-text('确认')").count() == 0
-        assert container.locator("button:has-text('提交 Auto Bangumi')").count() >= 1
+        assert container.locator("a:has-text('去 Settings 提交 Auto Bangumi')").count() >= 1
 
     def test_modify_button_toggles_form(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -109,28 +109,30 @@ class TestActionButtons:
 
         container = page.locator("#request-detail-container")
         assert (
-            container.locator(".detail-actions button:has-text('提交 Auto Bangumi')").count()
+            container.locator(".detail-actions a:has-text('去 Settings 提交 Auto Bangumi')").count()
             == 0
         )
 
 
 class TestAutoBangumiSubmitFlow:
-    """AC: ACCEPTED Request 可显式填写临时 AB 配置并确认提交."""
+    """AC: ACCEPTED Request links to Settings for temporary AB config."""
 
-    def test_ab_submit_form_has_temporary_config_fields(
+    def test_ab_submit_entry_links_to_settings_context(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-ab-form")
         _open_request_detail(page, live_server_url, storage_dir, "req-ab-form")
 
-        assert page.locator("#detail-ab-submit-form").is_hidden()
+        entry = page.locator(".detail-actions a:has-text('去 Settings 提交 Auto Bangumi')")
+        assert entry.count() >= 1
+        assert entry.get_attribute("href") == "/settings?request_id=req-ab-form#auto-bangumi"
+        assert page.locator("#detail-ab-submit-form").count() == 0
         _click_ab_submit_entry(page)
-
-        form = page.locator("#detail-ab-submit-form")
-        assert form.is_visible()
-        assert page.locator("#ab-submit-endpoint").count() >= 1
-        assert page.locator("#ab-submit-token").get_attribute("type") == "password"
-        assert page.locator("#ab-submit-fallback-enabled").get_attribute("type") == "checkbox"
+        page.wait_for_url("**/settings?request_id=req-ab-form#auto-bangumi")
+        assert page.locator("#settings-ab-submit-form").is_visible()
+        assert page.locator("#settings-ab-request-id").inner_text() == "req-ab-form"
+        assert page.locator("#settings-ab-token").get_attribute("type") == "password"
+        assert page.locator("#settings-ab-fallback-enabled").get_attribute("type") == "checkbox"
 
     def test_ab_submit_requires_confirmation_and_sends_request_scoped_config(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -161,18 +163,18 @@ class TestAutoBangumiSubmitFlow:
                 route.continue_()
 
         page.route("**/api/v1/requests/req-ab-submit/submit-ab**", handle_submit)
-        _open_request_detail(page, live_server_url, storage_dir, "req-ab-submit")
-        _click_ab_submit_entry(page)
-        page.locator("#ab-submit-endpoint").fill("ab-endpoint-value")
-        page.locator("#ab-submit-token").fill("browser-secret-token")
-        page.locator("#ab-submit-fallback-enabled").check()
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/settings?request_id=req-ab-submit#auto-bangumi")
+        page.locator("#settings-ab-endpoint").fill("ab-endpoint-value")
+        page.locator("#settings-ab-token").fill("browser-secret-token")
+        page.locator("#settings-ab-fallback-enabled").check()
 
         seen_dialogs = []
         page.on(
             "dialog",
             lambda dialog: (seen_dialogs.append(dialog.message), dialog.accept()),
         )
-        page.locator("#detail-ab-submit-form button:has-text('提交')").click()
+        page.locator("#settings-ab-submit").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert seen_dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
@@ -191,6 +193,8 @@ class TestAutoBangumiSubmitFlow:
         session_keys = page.evaluate("Object.keys(window.sessionStorage)")
         assert all("ab" not in key.lower() for key in storage_keys)
         assert session_keys == []
+        assert page.locator("#settings-ab-endpoint").input_value() == ""
+        assert page.locator("#settings-ab-token").input_value() == ""
 
 
 class TestConfirmFlow:
@@ -251,12 +255,42 @@ class TestCancelFlow:
         create_saved_request(storage_dir, "葬送的芙莉莲", "req-act-8")
         _open_request_detail(page, live_server_url, storage_dir, "req-act-8")
 
-        page.on("dialog", lambda dialog: dialog.accept("不需要这个番剧"))
         _click_cancel(page)
+        assert page.locator("#detail-cancel-form").is_visible()
+        page.locator("#cancel-reason").fill("不需要这个番剧")
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.locator("#detail-cancel-form button:has-text('提交取消')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         notif = page.locator("#page-notification")
         assert "取消成功" in notif.inner_text()
+
+    def test_cancel_uses_visible_form_and_confirmation(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-act-cancel-form")
+        captured = {}
+        dialogs = []
+
+        def handle_cancel(route):
+            if route.request.method == "POST":
+                captured["payload"] = route.request.post_data_json
+            route.continue_()
+
+        page.route("**/api/v1/requests/req-act-cancel-form/cancel**", handle_cancel)
+        _open_request_detail(page, live_server_url, storage_dir, "req-act-cancel-form")
+
+        _click_cancel(page)
+        form = page.locator("#detail-cancel-form")
+        assert form.is_visible()
+        assert page.locator("#cancel-reason").is_visible()
+        page.locator("#cancel-reason").fill("表单取消原因")
+        page.on("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.accept()))
+        page.locator("#detail-cancel-form button:has-text('提交取消')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert dialogs == ["确认取消此 Request？"]
+        assert captured["payload"]["cancel_reason"] == "表单取消原因"
 
     def test_cancel_updates_detail_status(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -264,8 +298,10 @@ class TestCancelFlow:
         create_saved_request(storage_dir, "葬送的芙莉莲", "req-act-9")
         _open_request_detail(page, live_server_url, storage_dir, "req-act-9")
 
-        page.on("dialog", lambda dialog: dialog.accept("不想追了"))
         _click_cancel(page)
+        page.locator("#cancel-reason").fill("不想追了")
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.locator("#detail-cancel-form button:has-text('提交取消')").click()
         page.wait_for_timeout(1500)
 
         detail_text = page.locator("#request-detail-container").inner_text()
@@ -290,6 +326,9 @@ class TestModifyFlow:
         assert page.locator("#modify-must-contain").count() >= 1
         assert page.locator("#modify-must-not-contain").count() >= 1
         assert page.locator("#modify-folder-name").count() >= 1
+        assert page.locator("#modify-clear-must-contain").count() >= 1
+        assert page.locator("#modify-clear-must-not-contain").count() >= 1
+        assert page.locator("#modify-clear-folder-name").count() >= 1
 
     def test_modify_folder_name_succeeds(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -319,6 +358,95 @@ class TestModifyFlow:
 
         form = page.locator("#detail-modify-form")
         assert form.get_attribute("hidden") is not None
+
+    def test_modify_empty_patch_is_blocked_in_browser(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-act-empty-modify")
+        calls = []
+
+        def handle_modify(route):
+            calls.append(route.request.post_data_json)
+            route.continue_()
+
+        page.route("**/api/v1/requests/req-act-empty-modify/modify**", handle_modify)
+        _open_request_detail(page, live_server_url, storage_dir, "req-act-empty-modify")
+
+        _click_modify(page)
+        page.locator("button:has-text('提交修改')").click()
+        page.wait_for_timeout(500)
+
+        assert calls == []
+        assert "请至少修改或清空一个字段" in page.locator("#detail-modify-error").inner_text()
+
+    def test_modify_clear_fields_sends_explicit_empty_values(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-act-clear-modify")
+        captured = {}
+
+        def handle_modify(route):
+            if route.request.method == "POST":
+                captured["payload"] = route.request.post_data_json
+                route.fulfill(
+                    json={
+                        "ok": True,
+                        "result": {
+                            "request": {
+                                "request_id": "req-act-clear-modify",
+                                "status": "PENDING_CONFIRM",
+                            },
+                            "summary": {
+                                "request_id": "req-act-clear-modify",
+                                "status": "PENDING_CONFIRM",
+                            },
+                        },
+                    }
+                )
+            else:
+                route.continue_()
+
+        page.route("**/api/v1/requests/req-act-clear-modify/modify**", handle_modify)
+        _open_request_detail(page, live_server_url, storage_dir, "req-act-clear-modify")
+
+        _click_modify(page)
+        page.locator("#modify-clear-must-contain").check()
+        page.locator("#modify-clear-must-not-contain").check()
+        page.locator("#modify-clear-folder-name").check()
+        page.locator("button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert captured["payload"]["patch"] == {
+            "filter_rule": {"must_contain": "", "must_not_contain": ""},
+            "expected_folder_name": "",
+        }
+
+    def test_modify_failure_preserves_form_state(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-act-modify-failure")
+
+        def handle_modify(route):
+            route.fulfill(
+                status=500,
+                json={
+                    "ok": False,
+                    "error_type": "invalid_modify_patch",
+                    "error_message": "修改失败",
+                },
+            )
+
+        page.route("**/api/v1/requests/req-act-modify-failure/modify**", handle_modify)
+        _open_request_detail(page, live_server_url, storage_dir, "req-act-modify-failure")
+
+        _click_modify(page)
+        page.locator("#modify-folder-name").fill("失败后仍保留")
+        page.locator("button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert page.locator("#detail-modify-form").is_visible()
+        assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
+        assert "PENDING_CONFIRM" in page.locator("#request-detail-container").inner_text()
 
 
 class TestErrorRecovery:

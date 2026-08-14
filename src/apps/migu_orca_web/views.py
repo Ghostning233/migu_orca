@@ -322,7 +322,17 @@ def index_redirect() -> object:
 
 @web_blueprint.get("/index")
 def index() -> str:
-    return render_template("migu_orca_web/index.html")
+    return render_template("migu_orca_web/index.html", active_page="index")
+
+
+@web_blueprint.get("/Settings")
+def settings_case_redirect() -> object:
+    return redirect(url_for("migu_orca_web.settings"))
+
+
+@web_blueprint.get("/settings")
+def settings() -> str:
+    return render_template("migu_orca_web/settings.html", active_page="settings")
 
 
 @class_route(api_blueprint, "/api/v1/requests", methods=["GET"])

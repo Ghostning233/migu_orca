@@ -105,78 +105,55 @@ def test_index_serves_web_ui_shell() -> None:
     assert response.status_code == 200
     assert "text/html" in response.content_type
     assert "MiGuOrca" in html
-    assert "<title>MiGuOrca Stage 12 qBittorrent Direct</title>" in html
-    assert "Stage 12 qBittorrent Direct" in html
+    assert "<title>MiGuOrca Request 工作台</title>" in html
+    assert "Stage 13 Request 工作台" in html
     assert "Stage 7 Web UI MVP" not in html
     assert "Stage 8 Web UI Usability" not in html
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert "运行模式：本地 JSON storage" in html
-    assert "默认离线使用仓库 fixture-backed 生成" in html
-    assert "真实 MiKan 与 qBittorrent 连接测试必须显式选择" in html
-    assert "配置只用于当前请求且不写入 storage JSON" in html
+    assert "Request 生成默认使用仓库 fixture-backed 数据" in html
+    assert "外部数据源、连接测试与提交配置集中在 Settings" in html
     assert "Request 生成" in html
-    assert "qBittorrent 连接测试" in html
     assert "Request 列表" in html
     assert "Request 详情" in html
-    assert "验收说明" in html
-    assert 'href="#generate-panel"' in html
-    assert 'href="#qbittorrent-panel"' in html
-    assert 'href="#request-list-panel"' in html
-    assert 'href="#request-detail-panel"' in html
-    assert 'href="#acceptance-panel"' in html
+    assert 'href="/index"' in html
+    assert 'href="/settings"' in html
+    assert 'aria-current="page"' in html
+    assert "Request 工作台" in html
+    assert "Settings" in html
     assert 'id="generate-panel"' in html
-    assert 'id="qbittorrent-panel"' in html
     assert 'id="request-list-panel"' in html
     assert 'id="request-detail-panel"' in html
-    assert 'id="acceptance-panel"' in html
     assert 'id="request-generate-form"' in html
     assert 'name="title"' in html
     assert "例如：葬送的芙莉莲" in html
     assert "至少输入 1 个非空白字符" in html
     assert 'aria-describedby="request-title-help request-form-error"' in html
-    assert 'id="request-source"' in html
-    assert 'name="source"' in html
-    assert '<option value="static-fixture" selected>static-fixture</option>' in html
-    assert '<option value="mikan">mikan</option>' in html
-    assert "默认离线生成" in html
-    assert 'id="mikan-config-fields"' in html
-    assert "hidden" in html
-    assert 'name="mikan_search_endpoint"' in html
-    assert 'name="mikan_timeout_seconds"' in html
-    assert "search_endpoint" in html
-    assert "timeout_seconds" in html
-    assert "仅用于当前生成请求，不保存到 storage JSON、浏览器存储或 URL" in html
-    assert 'name="storage_dir"' in html
-    assert "留空时使用默认 `.migu_orca/storage`" in html
-    assert 'name="save_request"' in html
-    assert "未勾选时只生成预览，不写入本地 storage" in html
-    assert "勾选后才保存 Request JSON" in html
+    assert 'id="request-source"' not in html
+    assert 'name="source"' not in html
+    assert 'id="mikan-config-fields"' not in html
+    assert 'name="mikan_search_endpoint"' not in html
+    assert 'name="mikan_timeout_seconds"' not in html
+    assert "search_endpoint" not in html
+    assert "timeout_seconds" not in html
+    assert 'name="storage_dir"' not in html
+    assert 'name="save_request"' not in html
+    assert 'id="storage-preference-summary"' in html
+    assert "当前使用默认 `.migu_orca/storage`" in html
+    assert "前往 Settings" in html
     assert 'id="request-form-error"' in html
     assert 'role="alert"' in html
     assert 'id="request-generate-submit"' in html
     assert 'data-default-label="生成"' in html
-    assert 'id="clear-web-preferences"' in html
-    assert "清除本地偏好" in html
-    assert 'id="qbittorrent-config-toggle"' in html
-    assert 'aria-expanded="false"' in html
-    assert 'aria-controls="qbittorrent-test-form"' in html
-    assert 'id="qbittorrent-test-form"' in html
-    assert 'class="inline-config-fields"' in html
-    assert '<form id="qbittorrent-test-form" class="inline-config-fields" method="post" hidden>' in html
-    assert 'name="qbittorrent_endpoint"' in html
-    assert 'name="qbittorrent_username"' in html
-    assert 'name="qbittorrent_password"' in html
-    assert 'id="qbittorrent-password"' in html
-    assert 'type="password"' in html
-    assert 'name="qbittorrent_timeout_seconds"' in html
-    assert 'name="qbittorrent_verify_tls"' in html
-    assert "verify_tls" in html
-    assert "仅测试连接，不启动下载" in html
-    assert "配置只随本次请求发送，不写入浏览器存储、URL 或 storage JSON" in html
-    assert 'id="qbittorrent-form-error"' in html
-    assert 'id="qbittorrent-test-submit"' in html
-    assert 'id="qbittorrent-test-result"' in html
-    assert "尚未测试 qBittorrent 连接" in html
+    assert 'id="clear-web-preferences"' not in html
+    assert 'id="qbittorrent-config-toggle"' not in html
+    assert 'id="qbittorrent-test-form"' not in html
+    assert 'name="qbittorrent_endpoint"' not in html
+    assert 'name="qbittorrent_username"' not in html
+    assert 'name="qbittorrent_password"' not in html
+    assert 'name="qbittorrent_timeout_seconds"' not in html
+    assert 'name="qbittorrent_verify_tls"' not in html
+    assert "verify_tls" not in html
     assert "/api/v1/qbittorrent/test-connection" not in html
     assert 'id="request-list-container"' in html
     assert 'id="request-list-refresh"' in html
@@ -195,7 +172,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'aria-live="polite"' in html
     assert 'aria-atomic="true"' in html
     assert 'role="status"' in html
-    assert 'aria-describedby="save-request-help"' in html
+    assert 'aria-describedby="save-request-help"' not in html
     assert 'aria-label="刷新 Request 列表"' in html
     assert 'aria-relevant="additions text"' in html
     assert "/migu-orca-static/app.js" in html
@@ -205,6 +182,74 @@ def test_index_serves_web_ui_shell() -> None:
     assert "http://" not in html
     assert "https://" not in html
     assert "<rss" not in html.lower()
+
+
+def test_settings_case_redirects_to_settings() -> None:
+    response = _client().get("/Settings")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/settings"
+
+
+def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
+    response = _client().get("/settings")
+
+    html = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "text/html" in response.content_type
+    assert "<title>MiGuOrca Settings</title>" in html
+    assert "MiGuOrca Settings" in html
+    assert "Stage 13 Settings" in html
+    assert 'href="/index"' in html
+    assert 'href="/settings"' in html
+    assert 'aria-current="page"' in html
+    assert "Request 工作台" in html
+    assert "Settings" in html
+    assert 'id="storage-settings-panel"' in html
+    assert 'id="data-source-settings-panel"' in html
+    assert 'id="qbittorrent-settings-panel"' in html
+    assert 'id="auto-bangumi-settings-panel"' in html
+    assert "Storage 偏好" in html
+    assert "数据源" in html
+    assert "qBittorrent" in html
+    assert "Auto Bangumi" in html
+    assert html.count('class="panel settings-panel"') == 4
+    assert "empty-state" in html
+    assert 'id="storage-preferences-form"' in html
+    assert 'id="settings-storage-dir"' in html
+    assert 'name="storage_dir"' in html
+    assert 'id="settings-save-request"' in html
+    assert 'name="save_request"' in html
+    assert 'id="storage-preferences-save"' in html
+    assert 'id="storage-preferences-clear"' in html
+    assert "非敏感浏览器偏好" in html
+    assert "localStorage" in html
+    assert 'id="qbittorrent-settings-details"' in html
+    assert 'id="settings-qbittorrent-test-form"' in html
+    assert 'name="qbittorrent_endpoint"' in html
+    assert 'name="qbittorrent_username"' in html
+    assert 'name="qbittorrent_password"' in html
+    assert 'type="password"' in html
+    assert 'name="qbittorrent_timeout_seconds"' in html
+    assert 'name="qbittorrent_verify_tls"' in html
+    assert 'id="settings-qbittorrent-result"' in html
+    assert "尚未测试 qBittorrent 连接" in html
+    assert "status、reachable 和 version" in html
+    assert "qBittorrent 连接测试将在此处迁移" not in html
+    assert 'id="settings-ab-submit-form"' in html
+    assert 'id="settings-ab-request-id"' in html
+    assert 'id="settings-ab-endpoint"' in html
+    assert 'name="ab_submit_endpoint"' in html
+    assert 'id="settings-ab-token"' in html
+    assert 'name="ab_submit_token"' in html
+    assert 'id="settings-ab-fallback-enabled"' in html
+    assert 'name="ab_submit_fallback_enabled"' in html
+    assert 'id="settings-ab-result"' in html
+    assert 'id="settings-ab-return-link"' in html
+    assert "仅 ACCEPTED Request 可提交" in html
+    assert "尚未提交 Auto Bangumi" in html
+    assert "/migu-orca-static/style.css" in html
+    assert "/migu-orca-static/app.js" in html
 
 
 def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
@@ -236,14 +281,20 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "暂无状态历史。" in script
     assert "暂无 Auto Bangumi 提交结果。" in script
     assert "提交 Auto Bangumi" in script
-    assert "detail-ab-submit-form" in script
-    assert "ab-submit-endpoint" in script
-    assert "ab-submit-token" in script
-    assert "ab-submit-fallback-enabled" in script
+    assert "去 Settings 提交 Auto Bangumi" in script
+    assert "settings-ab-submit-form" in script
+    assert "settings-ab-endpoint" in script
+    assert "settings-ab-token" in script
+    assert "settings-ab-fallback-enabled" in script
     assert "Auto Bangumi 提交" in script
     assert "fallback_enabled" in script
     assert "window.confirm(\"确认提交此 Request 到 Auto Bangumi？\")" in script
-    assert "storage_dir: storageInput.value.trim() || null" in script
+    assert "storage_dir: currentStorageDir() || null" in script
+    assert "requestIdFromLocation" in script
+    assert "syncRequestIdToUrl" in script
+    assert "url.searchParams.set(\"request_id\", requestId)" in script
+    assert "window.addEventListener(\"popstate\"" in script
+    assert "selectRequest(summary.request_id, {pushUrl: true})" in script
     assert "secret-token" not in script
     assert "http://" not in script
     assert "https://" not in script
@@ -258,9 +309,8 @@ def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:
     assert "currentDetailPayload" in script
     assert "status === \"ACCEPTED\"" in script
     assert "可提交到 Auto Bangumi" in script
-    assert "setAbSubmitInFlight(true)" in script
-    assert "setAbSubmitInFlight(false)" in script
-    assert "renderDetailPayload(nextPayload)" in script
+    assert "settingsAbReturnLink.href" in script
+    assert "clearSettingsAbSensitiveFields" in script
     assert "ab_submit_result" in script
     assert "提交成功" in script
     assert "提交失败" in script
@@ -341,7 +391,7 @@ def test_static_app_script_shows_action_success_after_refresh() -> None:
     assert action_script.index("await loadDetail(requestId);") < action_script.index(
         "showNotification(\"success\""
     )
-    assert action_script.index("await loadList();") < action_script.index(
+    assert action_script.index("await loadList({loadSelectedDetail: false});") < action_script.index(
         "showNotification(\"success\""
     )
 
@@ -388,19 +438,21 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert response.status_code == 200
     assert "request-form-error" in script
     assert "request-generate-submit" in script
-    assert "request-source" in script
-    assert "mikan-config-fields" in script
-    assert "mikan-search-endpoint" in script
-    assert "mikan-timeout-seconds" in script
+    assert "request-source" not in script
+    assert "mikan-config-fields" not in script
+    assert "await loadList({loadSelectedDetail: false});" in script
+    assert "syncRequestIdToUrl(selectedRequestId)" in script
+    assert "mikan-search-endpoint" not in script
+    assert "mikan-timeout-seconds" not in script
     assert "setFormError" in script
     assert "clearFormError" in script
     assert "setSubmitInFlight" in script
-    assert "syncMikanConfigVisibility" in script
+    assert "syncMikanConfigVisibility" not in script
     assert "buildCreateRequestPayload" in script
     assert "titleInput.value.trim()" in script
     assert "请输入标题，至少包含 1 个非空白字符。" in script
-    assert "选择 mikan 时必须填写 search_endpoint。" in script
-    assert "选择 mikan 时 timeout_seconds 必须为正数。" in script
+    assert "选择 mikan 时必须填写 search_endpoint。" not in script
+    assert "选择 mikan 时 timeout_seconds 必须为正数。" not in script
     assert "titleInput.focus()" in script
     assert "validationError.field.focus()" in script
     assert "setSubmitInFlight(true)" in script
@@ -408,9 +460,9 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert "正在生成..." in script
     assert '"title: title"' not in script
     assert "title: title" in script
-    assert "payload.source = \"static-fixture\"" in script
-    assert "payload.source = \"mikan\"" in script
-    assert "payload.mikan_config" in script
+    assert "source: \"static-fixture\"" in script
+    assert "payload.source = \"mikan\"" not in script
+    assert "payload.mikan_config" not in script
     assert script.index("if (!title)") < script.index('fetchJson("/api/v1/requests"')
     assert script.index("buildCreateRequestPayload(title)") < script.index(
         'fetchJson("/api/v1/requests"',
@@ -438,16 +490,13 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert "persistWebPreferences" in script
     assert "clearWebPreferences" in script
     assert "savedStorageDir" in script
-    assert "saveInput.checked = savedSaveRequest === \"true\"" in script
-    assert "storageInput.value = \"\"" in script
-    assert "saveInput.checked = false" in script
-    assert "clear-web-preferences" in script
-    assert "storageInput.addEventListener(\"change\", persistWebPreferences)" in script
-    assert "saveInput.addEventListener(\"change\", persistWebPreferences)" in script
+    assert "saveRequestPreference = savedSaveRequest === \"true\"" in script
+    assert "settingsStorageInput.value = storageDirPreference" in script
+    assert "settingsSaveInput.checked = saveRequestPreference" in script
+    assert "storage-preferences-clear" in script
+    assert "storagePreferencesForm.addEventListener(\"submit\", persistWebPreferences)" in script
     assert script.index("restoreWebPreferences()") < script.index("loadList()")
-    assert script.index("persistWebPreferences()") < script.index(
-        'fetchJson("/api/v1/requests"',
-    )
+    assert "currentSaveRequest()" in script
 
 
 def test_static_app_script_wires_explicit_ab_submit_form() -> None:
@@ -455,22 +504,23 @@ def test_static_app_script_wires_explicit_ab_submit_form() -> None:
 
     script = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "buildAbSubmitForm" in script
-    assert "detail-ab-submit-form" in script
-    assert "ab-submit-endpoint" in script
-    assert "ab-submit-token" in script
-    assert "ab-submit-fallback-enabled" in script
-    assert "tokenInput.type = \"password\"" in script
-    assert "fallbackInput.type = \"checkbox\"" in script
-    assert "配置仅用于本次提交，不写入浏览器存储、URL 或 storage JSON。" in script
+    assert "settings-ab-submit-form" in script
+    assert "settings-ab-endpoint" in script
+    assert "settings-ab-token" in script
+    assert "settings-ab-fallback-enabled" in script
+    assert "settingsAbTokenInput" in script
+    assert "settingsAbFallbackInput" in script
+    assert "initializeSettingsAbForm" in script
+    assert "submitSettingsAb" in script
     assert "提交 Auto Bangumi 前必须填写 endpoint。" in script
     assert "提交 Auto Bangumi 前必须填写 token。" in script
     assert "确认提交此 Request 到 Auto Bangumi？" in script
-    assert 'performAction(request.request_id, "submit-ab"' in script
-    assert "storage_dir: storageInput.value.trim() || null" in script
+    assert '"/submit-ab"' in script
+    assert "storage_dir: currentStorageDir() || null" in script
     assert "ab_config" in script
-    assert "fallback_enabled: fallbackInput.checked" in script
+    assert "fallback_enabled: settingsAbFallbackInput ? settingsAbFallbackInput.checked : false" in script
     assert "Auto Bangumi 提交成功" in script
+    assert "clearSettingsAbSensitiveFields" in script
     assert "secret-token" not in script
     assert "Authorization" not in script
     assert "http://" not in script
@@ -482,16 +532,15 @@ def test_static_app_script_wires_explicit_qbittorrent_connection_form() -> None:
 
     script = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "qbittorrent-config-toggle" in script
-    assert "qbittorrent-test-form" in script
-    assert "qbittorrent-endpoint" in script
-    assert "qbittorrent-username" in script
-    assert "qbittorrent-password" in script
-    assert "qbittorrent-timeout-seconds" in script
-    assert "qbittorrent-verify-tls" in script
-    assert "qbittorrent-form-error" in script
-    assert "qbittorrent-test-submit" in script
-    assert "qbittorrent-test-result" in script
+    assert "settings-qbittorrent-test-form" in script
+    assert "settings-qbittorrent-endpoint" in script
+    assert "settings-qbittorrent-username" in script
+    assert "settings-qbittorrent-password" in script
+    assert "settings-qbittorrent-timeout-seconds" in script
+    assert "settings-qbittorrent-verify-tls" in script
+    assert "settings-qbittorrent-error" in script
+    assert "settings-qbittorrent-test-submit" in script
+    assert "settings-qbittorrent-result" in script
     assert "buildQbittorrentConnectionPayload" in script
     assert "testQbittorrentConnection" in script
     assert "renderQbittorrentResult" in script
@@ -499,20 +548,10 @@ def test_static_app_script_wires_explicit_qbittorrent_connection_form() -> None:
     assert "测试 qBittorrent 前必须填写 endpoint。" in script
     assert "测试 qBittorrent 前必须填写 username。" in script
     assert "测试 qBittorrent 前必须填写 password。" in script
-    assert "测试 qBittorrent 时 timeout_seconds 必须为正数。" in script
+    assert "测试 qBittorrent 前 timeout_seconds 必须为正数。" in script
     assert "确认使用当前 qBittorrent 配置测试连接？" in script
     assert "/api/v1/qbittorrent/test-connection" in script
     assert "qbittorrent_config" in script
-    assert "endpoint: endpoint" in script
-    assert "username: username" in script
-    assert "password: password" in script
-    assert "timeout_seconds: timeoutSeconds" in script
-    assert "verify_tls: qbittorrentVerifyTlsInput.checked" in script
-    assert "qBittorrent 连接成功" in script
-    assert "qBittorrent 连接失败" in script
-    assert '["status", summary.status]' in script
-    assert '["reachable", summary.reachable]' in script
-    assert '["version", summary.version]' in script
     assert '["endpoint", summary.endpoint]' not in script
     assert '["username", summary.username]' not in script
     assert '["password", summary.password]' not in script
@@ -521,13 +560,6 @@ def test_static_app_script_wires_explicit_qbittorrent_connection_form() -> None:
     assert "qbittorrentEndpointInput.value = \"\"" in script
     assert "qbittorrentUsernameInput.value = \"\"" in script
     assert "qbittorrentPasswordInput.value = \"\"" in script
-    assert 'qbittorrentToggle.setAttribute("aria-expanded", "false")' in script
-    assert script.index("buildQbittorrentConnectionPayload()") < script.index(
-        'window.confirm("确认使用当前 qBittorrent 配置测试连接？")'
-    )
-    assert script.index('window.confirm("确认使用当前 qBittorrent 配置测试连接？")') < script.index(
-        'fetchJson("/api/v1/qbittorrent/test-connection"'
-    )
     assert "secret-session" not in script
     assert "private-password" not in script
     assert "http://" not in script
@@ -541,11 +573,10 @@ def test_static_app_script_does_not_auto_test_qbittorrent_connection_on_load() -
     assert response.status_code == 200
     initialization = script[script.rindex("restoreWebPreferences()"):]
     assert "loadList();" in initialization
-    assert 'fetchJson("/api/v1/qbittorrent/test-connection"' not in initialization[
-        : initialization.index('qbittorrentForm.addEventListener("submit", testQbittorrentConnection)')
-    ]
+    assert 'await testQbittorrentConnection' not in initialization
+    assert 'testQbittorrentConnection();' not in initialization
     assert 'qbittorrentForm.addEventListener("submit", testQbittorrentConnection)' in initialization
-    assert 'qbittorrentToggle.addEventListener("click"' in initialization
+    assert 'qbittorrentToggle.addEventListener("click"' not in initialization
 
 
 def test_static_app_script_does_not_persist_qbittorrent_config() -> None:
@@ -574,13 +605,15 @@ def test_static_app_script_shows_ab_submit_only_for_accepted_requests() -> None:
     assert response.status_code == 200
     assert 'var isAccepted = request.status === "ACCEPTED";' in script
     assert "else if (isAccepted)" in script
-    assert 'abSubmitBtn.textContent = "提交 Auto Bangumi"' in script
-    assert "detail-ab-submit-form" in script
-    assert "form.hidden = !form.hidden" in script
+    assert 'abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi"' in script
+    assert '"/settings?request_id="' in script
+    assert '"#auto-bangumi"' in script
+    assert "detail-ab-submit-form" not in script
+    assert "ab-submit-endpoint" not in script
     assert script.index("else if (isAccepted)") > script.index(
         'var isPending = request.status === "PENDING_CONFIRM";'
     )
-    assert script.index('abSubmitBtn.textContent = "提交 Auto Bangumi"') < script.index(
+    assert script.index('abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi"') < script.index(
         "actionsContainer.appendChild(abSubmitBtn)"
     )
 

@@ -3,26 +3,20 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MiGuOrca Stage 12 qBittorrent Direct</title>
+    <title>MiGuOrca Request 工作台</title>
     <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
     <script defer src="{{ url_for('migu_orca_web.static', filename='app.js') }}"></script>
   </head>
   <body>
     <header class="app-header">
       <div class="header-copy">
-        <p class="stage-label">Stage 12 qBittorrent Direct</p>
+        <p class="stage-label">Stage 13 Request 工作台</p>
         <h1>MiGuOrca</h1>
         <p class="mode-summary">
-          运行模式：本地 JSON storage；默认离线使用仓库 fixture-backed 生成；真实 MiKan 与 qBittorrent 连接测试必须显式选择，配置只用于当前请求且不写入 storage JSON。
+          运行模式：本地 JSON storage；Request 生成默认使用仓库 fixture-backed 数据。外部数据源、连接测试与提交配置集中在 Settings。
         </p>
       </div>
-      <nav class="top-nav" aria-label="页面导航">
-        <a href="#generate-panel">生成表单</a>
-        <a href="#qbittorrent-panel">qBittorrent</a>
-        <a href="#request-list-panel">Request 列表</a>
-        <a href="#request-detail-panel">Request 详情</a>
-        <a href="#acceptance-panel">验收说明</a>
-      </nav>
+      {% include "migu_orca_web/_top_nav.html" %}
     </header>
 
     <div
@@ -52,169 +46,44 @@
             至少输入 1 个非空白字符；提交前会在浏览器中拦截空标题。
           </p>
 
-          <label for="request-source">数据源</label>
-          <select
-            id="request-source"
-            name="source"
-            aria-describedby="request-source-help request-form-error"
+          <section
+            id="storage-preference-summary"
+            class="preference-summary"
+            aria-labelledby="storage-preference-summary-heading"
           >
-            <option value="static-fixture" selected>static-fixture</option>
-            <option value="mikan">mikan</option>
-          </select>
-          <p id="request-source-help" class="field-help">
-            默认离线生成；选择 mikan 后才会使用本次填写的真实 MiKan 配置。
-          </p>
-
-          <fieldset id="mikan-config-fields" class="inline-config-fields" hidden>
-            <legend>MiKan 配置</legend>
-            <label for="mikan-search-endpoint">search_endpoint</label>
-            <input
-              id="mikan-search-endpoint"
-              name="mikan_search_endpoint"
-              type="text"
-              autocomplete="off"
-              placeholder="MiKan 搜索入口"
-              aria-describedby="mikan-config-help request-form-error"
-            >
-
-            <label for="mikan-timeout-seconds">timeout_seconds</label>
-            <input
-              id="mikan-timeout-seconds"
-              name="mikan_timeout_seconds"
-              type="number"
-              inputmode="decimal"
-              step="0.1"
-              value="10"
-              aria-describedby="mikan-config-help request-form-error"
-            >
-            <p id="mikan-config-help" class="field-help">
-              仅用于当前生成请求，不保存到 storage JSON、浏览器存储或 URL。
+            <h3 id="storage-preference-summary-heading">Storage 偏好</h3>
+            <p id="storage-preference-summary-text">
+              当前使用默认 `.migu_orca/storage`；可在 Settings 修改默认 storage 与保存行为。
             </p>
-          </fieldset>
-
-          <label for="storage-dir">Storage 目录</label>
-          <input
-            id="storage-dir"
-            name="storage_dir"
-            type="text"
-            placeholder=".migu_orca/storage"
-            aria-describedby="storage-dir-help"
-            autocomplete="off"
-          >
-          <p id="storage-dir-help" class="field-help">
-            留空时使用默认 `.migu_orca/storage`；仅在勾选保存时写入本地 storage。
-          </p>
-
-          <label class="checkbox-row" for="save-request">
-            <input
-              id="save-request"
-              name="save_request"
-              type="checkbox"
-              value="true"
-              aria-describedby="save-request-help"
-            >
-            保存 Request
-          </label>
-          <p id="save-request-help" class="field-help">
-            未勾选时只生成预览，不写入本地 storage；勾选后才保存 Request JSON。
-          </p>
-
-          <button id="clear-web-preferences" class="secondary-button" type="button">
-            清除本地偏好
-          </button>
+            <a class="secondary-link" href="{{ url_for('migu_orca_web.settings') }}#storage-settings-panel">
+              前往 Settings
+            </a>
+          </section>
 
           <p id="request-form-error" class="field-error" role="alert" hidden></p>
 
-          <button id="request-generate-submit" type="submit" data-default-label="生成">
+          <button
+            id="request-generate-submit"
+            class="primary-button"
+            type="submit"
+            data-default-label="生成"
+          >
             生成
           </button>
         </form>
       </section>
 
-      <section id="qbittorrent-panel" class="panel qbittorrent-panel" aria-labelledby="qbittorrent-heading">
-        <div class="panel-heading">
-          <h2 id="qbittorrent-heading">qBittorrent 连接测试</h2>
-          <button
-            id="qbittorrent-config-toggle"
-            class="secondary-button"
-            type="button"
-            aria-expanded="false"
-            aria-controls="qbittorrent-test-form"
-          >
-            配置
-          </button>
-        </div>
-        <form id="qbittorrent-test-form" class="inline-config-fields" method="post" hidden>
-          <label for="qbittorrent-endpoint">endpoint</label>
-          <input
-            id="qbittorrent-endpoint"
-            name="qbittorrent_endpoint"
-            type="text"
-            autocomplete="off"
-            placeholder="qBittorrent Web UI endpoint"
-            aria-describedby="qbittorrent-config-help qbittorrent-form-error"
-          >
-
-          <label for="qbittorrent-username">username</label>
-          <input
-            id="qbittorrent-username"
-            name="qbittorrent_username"
-            type="text"
-            autocomplete="off"
-            placeholder="qBittorrent username"
-            aria-describedby="qbittorrent-config-help qbittorrent-form-error"
-          >
-
-          <label for="qbittorrent-password">password</label>
-          <input
-            id="qbittorrent-password"
-            name="qbittorrent_password"
-            type="password"
-            autocomplete="off"
-            placeholder="qBittorrent password"
-            aria-describedby="qbittorrent-config-help qbittorrent-form-error"
-          >
-
-          <label for="qbittorrent-timeout-seconds">timeout_seconds</label>
-          <input
-            id="qbittorrent-timeout-seconds"
-            name="qbittorrent_timeout_seconds"
-            type="number"
-            inputmode="decimal"
-            step="0.1"
-            value="10"
-            aria-describedby="qbittorrent-config-help qbittorrent-form-error"
-          >
-
-          <label class="checkbox-row" for="qbittorrent-verify-tls">
-            <input
-              id="qbittorrent-verify-tls"
-              name="qbittorrent_verify_tls"
-              type="checkbox"
-              value="true"
-              checked
-              aria-describedby="qbittorrent-config-help"
-            >
-            verify_tls
-          </label>
-
-          <p id="qbittorrent-config-help" class="field-help">
-            仅测试连接，不启动下载；配置只随本次请求发送，不写入浏览器存储、URL 或 storage JSON。
-          </p>
-          <p id="qbittorrent-form-error" class="field-error" role="alert" hidden></p>
-          <button id="qbittorrent-test-submit" type="submit" data-default-label="测试连接">
-            测试连接
-          </button>
-        </form>
-        <div id="qbittorrent-test-result" class="qbittorrent-result muted-text" aria-live="polite">
-          尚未测试 qBittorrent 连接。
-        </div>
-      </section>
-
       <section id="request-list-panel" class="panel request-list-panel" aria-labelledby="request-list-heading">
         <div class="panel-heading">
           <h2 id="request-list-heading">Request 列表</h2>
-          <button id="request-list-refresh" type="button" aria-label="刷新 Request 列表">刷新</button>
+          <button
+            id="request-list-refresh"
+            class="secondary-button"
+            type="button"
+            aria-label="刷新 Request 列表"
+          >
+            刷新
+          </button>
         </div>
         <div class="request-list-controls" aria-label="Request 列表筛选和排序">
           <label for="request-list-search">搜索</label>
@@ -262,13 +131,6 @@
         </div>
       </section>
 
-      <section id="acceptance-panel" class="panel acceptance-panel" aria-labelledby="acceptance-heading">
-        <h2 id="acceptance-heading">验收说明</h2>
-        <p>
-          使用 `uv run flask --app wsgi:app run` 启动本地 Web UI，并以 `uv run pytest` 和
-          `uv run python -m compileall -q src` 作为 Stage 12 质量检查。
-        </p>
-      </section>
     </main>
   </body>
 </html>
