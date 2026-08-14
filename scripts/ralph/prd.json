@@ -188,7 +188,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "收尾 story 完成后再将 Stage 13 PRD 和 progress 归档。"
     }
   ]

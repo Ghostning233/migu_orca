@@ -254,3 +254,24 @@ Thread: https://codex.openai.com/threads/unavailable
   - Completed async Settings results should use `success-state`; reserve `loading-state` for in-flight work.
   - Keep Stage 13 visual regressions in `tests/browser/test_ui_quality.py` so UI hierarchy requirements remain separate from behavior-specific browser tests.
 ---
+## 2026-08-14 14:29 CST - US-096
+Thread: https://codex.openai.com/threads/unavailable
+- Completed Stage 13 documentation closeout: README now describes `/index` as the Request workbench and `/settings` as the configuration and connection-test page, with updated local acceptance steps for Settings preferences, qBittorrent testing, Auto Bangumi Settings submission, URL detail recovery, UI quality gates, and security boundaries.
+- Updated the M13 Web UI module PRD to mark Stage 13 as connected, record Settings ownership and UI quality requirements, and clarify remaining boundaries.
+- Updated backlog with completed BL-006 for Web UI Settings information architecture and Stage 13 regression coverage.
+- Verified old Stage 12 single-page structure expectations are replaced by Stage 13 browser regressions covering Settings, removed workbench configuration controls, UI quality, and sensitive information redaction.
+- Files changed:
+  - `README.md`
+  - `docs/modules/M13-web-ui-PRD.md`
+  - `docs/backlog.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest -q` passed: 408 tests.
+  - `uv run pytest tests/browser/ -v` passed: 129 tests.
+  - `uv run python -m compileall -q src` passed.
+- **Learnings for future iterations:**
+  - Stage closeout docs need to update both the user-facing README flow and module/backlog state; otherwise the repo can still describe removed single-page UI behavior even when tests pass.
+  - Treat `tests/browser/test_ui_quality.py`, `tests/browser/test_shell.py`, and the Settings-specific browser tests as the canonical Stage 13 regression set for future UI structure changes.
+  - No separate dev-browser MCP skill/tool was available in this session; Playwright browser tests provided browser verification.
+---
