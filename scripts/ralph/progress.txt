@@ -2,6 +2,7 @@
 Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
+- `modify_request` in `request_engine/controllers/request_controller.py` accepts both `PENDING_CONFIRM` and `ACCEPTED` requests and preserves the original status (never resets to `PENDING_CONFIRM`); accept/cancel remain restricted to `PENDING_CONFIRM` only via `_copy_pending_request`.
 - Stage 14 has been completed and merged into `main`; current active work is Stage 15.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
@@ -26,4 +27,17 @@ Thread: https://codex.openai.com/threads/019ffe91-320e-7110-959e-c2c339c7f029
   - Pattern discovered: the storage repository centralizes path-safety in `_request_path`, so the delete function inherits traversal/empty rejection without duplicating it.
   - Gotcha encountered: the repo-root `.migu_orca/storage` had stale dev Requests that broke four browser tests expecting an empty default list; browser tests require `.migu_orca/storage` to be absent (gitignored, safe to clear).
   - Useful context: only `requests/<request_id>.json` is removed on delete; history and ab_result files are intentionally left untouched for now (the request file missing makes detail load return `request_not_found`).
+---
+## 2026-08-14 20:45:00 CST - US-104
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- `modify_request` now accepts `PENDING_CONFIRM` and `ACCEPTED` requests via a new `_copy_modifiable_request` helper (rejects `CANCELLED` and unknown statuses with the same stable `invalid_request_status` error). After modification the status is preserved instead of being reset to `PENDING_CONFIRM`, so an ACCEPTED Request stays ACCEPTED; the `user_action` ACCEPT record is untouched.
+- The restricted patch surface is unchanged: only `selected_subtitle_group`, `filter_rule`, and `expected_folder_name` (validated by `validate_modify_patch`) may be modified; illegal fields still raise `invalid_modify_patch_field`. `filter_rule` remains limited to `must_contain`/`must_not_contain`.
+- Modifying an ACCEPTED Request recomputes per-source valid/excluded seeds and `effective_seed_names`; Auto Bangumi submission still requires explicit `POST /submit-ab` and `build_ab_subscription_payload` still only accepts `ACCEPTED` status.
+- The Web modify API records a `MODIFY` history event (previous_status/next_status both ACCEPTED) for ACCEPTED modifications; the detail Audit section shows it.
+- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 436 tests; `uv run pytest tests/browser/ -q` passed with 140 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep the status-restriction gate in a dedicated copy helper (`_copy_pending_request` for accept/cancel, `_copy_modifiable_request` for modify) so each action documents which statuses it permits.
+  - Gotcha encountered: the old `test_modify_request_rejects_non_pending_request` asserted ACCEPTED was rejected; it must now assert CANCELLED is rejected instead, since ACCEPTED became a legal modify target.
+  - Useful context: modifying ACCEPTED keeps `user_action.action == "ACCEPT"` and the status ACCEPTED, so the existing `submit-ab` path remains valid without a re-confirm step.
 ---

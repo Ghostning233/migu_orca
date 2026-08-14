@@ -346,11 +346,67 @@ def test_modify_request_rejects_unknown_group_without_mutating_original() -> Non
     assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
 
 
-def test_modify_request_rejects_non_pending_request() -> None:
+def test_modify_request_allows_accepted_request_and_preserves_status() -> None:
+    accepted = accept_request(_pending_request_with_sources())
+
+    modified = modify_request(accepted, {"selected_subtitle_group": "NC"})
+
+    assert modified["status"] == "ACCEPTED"
+    assert modified["updated_at"] >= accepted["updated_at"]
+    assert modified["user_action"]["action"] == "ACCEPT"
+    assert modified["confirmable_config"]["selected_subtitle_group"] == "NC"
+    assert (
+        modified["confirmable_config"]["selected_rss_url"]
+        == "https://example.invalid/nc.xml"
+    )
+
+
+def test_modify_request_accepted_recomputes_seed_filter() -> None:
+    accepted = accept_request(_pending_request_with_sources())
+
+    modified = modify_request(
+        accepted,
+        {"filter_rule": {"must_contain": "02", "must_not_contain": ""}},
+    )
+
+    confirmable = modified["confirmable_config"]
+    loli_source = modified["source_info"]["rss_sources"][0]
+    assert modified["status"] == "ACCEPTED"
+    assert confirmable["filter_rule"] == {
+        "must_contain": "02",
+        "must_not_contain": "",
+    }
+    assert confirmable["effective_seed_names"] == ["[Loli] 番剧 - 02"]
+    assert loli_source["valid_seed_count"] == 1
+    assert loli_source["invalid_seed_count"] == 2
+    assert loli_source["valid_seed_names"] == ["[Loli] 番剧 - 02"]
+
+
+def test_modify_request_accepted_still_rejects_illegal_fields() -> None:
     accepted = accept_request(_pending_request_with_sources())
 
     with pytest.raises(Stage1Error) as error:
-        modify_request(accepted, {"selected_subtitle_group": "NC"})
+        modify_request(accepted, {"status": "ACCEPTED"})
+
+    assert error.value.error_type == "invalid_modify_patch_field"
+    assert error.value.details["illegal_fields"] == ["status"]
+
+
+def test_modify_request_rejects_cancelled_request() -> None:
+    cancelled = cancel_request(_pending_request_with_sources(), "不需要")
+
+    with pytest.raises(Stage1Error) as error:
+        modify_request(cancelled, {"selected_subtitle_group": "NC"})
 
     assert error.value.error_type == "invalid_request_status"
-    assert error.value.details == {"status": "ACCEPTED"}
+    assert error.value.details == {"status": "CANCELLED"}
+
+
+def test_modify_request_rejects_unknown_status() -> None:
+    unknown = {**_pending_request_with_sources(), "status": "UNKNOWN"}
+
+    with pytest.raises(Stage1Error) as error:
+        modify_request(unknown, {"selected_subtitle_group": "NC"})
+
+    assert error.value.error_type == "invalid_request_status"
+    assert error.value.details == {"status": "UNKNOWN"}

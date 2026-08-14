@@ -20,6 +20,7 @@ from subscription_engine.controllers.subscription_controller import generate_fol
 PENDING_CONFIRM = "PENDING_CONFIRM"
 ACCEPTED = "ACCEPTED"
 CANCELLED = "CANCELLED"
+MODIFIABLE_STATUSES = frozenset({PENDING_CONFIRM, ACCEPTED})
 MODIFY_PATCH_FIELDS = {
     "selected_subtitle_group",
     "filter_rule",
@@ -187,7 +188,7 @@ def validate_modify_patch(patch: dict[str, Any]) -> dict[str, Any]:
 
 def modify_request(request: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     validated = validate_modify_patch(patch)
-    updated = _copy_pending_request(request, "modify_request")
+    updated = _copy_modifiable_request(request, "modify_request")
     confirmable = updated["confirmable_config"]
     source_info = updated["source_info"]
     rss_sources = source_info.get("rss_sources", [])
@@ -222,7 +223,7 @@ def modify_request(request: dict[str, Any], patch: dict[str, Any]) -> dict[str, 
     confirmable["effective_seed_names"] = (
         list(selected_source.get("valid_seed_names", [])) if selected_source else []
     )
-    updated["status"] = PENDING_CONFIRM
+    # Status is preserved: ACCEPTED stays ACCEPTED, PENDING_CONFIRM stays PENDING_CONFIRM.
     updated["updated_at"] = datetime.now(UTC).isoformat()
     return updated
 
@@ -236,6 +237,21 @@ def _copy_pending_request(
         raise Stage1Error(
             "invalid_request_status",
             "只有 PENDING_CONFIRM Request 可以执行确认操作",
+            failed_step,
+            {"status": status},
+        )
+    return deepcopy(request)
+
+
+def _copy_modifiable_request(
+    request: dict[str, Any],
+    failed_step: str,
+) -> dict[str, Any]:
+    status = request.get("status")
+    if status not in MODIFIABLE_STATUSES:
+        raise Stage1Error(
+            "invalid_request_status",
+            "只有 PENDING_CONFIRM 或 ACCEPTED Request 可以修改",
             failed_step,
             {"status": status},
         )

@@ -39,7 +39,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "此 story 不实现 UI 按钮，只调整后端状态契约，避免 UI 先依赖不存在的行为。"
     },
     {

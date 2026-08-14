@@ -12,7 +12,11 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
 from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
-from request_engine.controllers.request_controller import accept_request, summarize_request
+from request_engine.controllers.request_controller import (
+    accept_request,
+    cancel_request,
+    summarize_request,
+)
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
@@ -44,6 +48,22 @@ def _saved_accepted_request(
             **generate_request(EntryRequest(raw_title=title))["request"],
             "request_id": request_id,
         }
+    )
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+    return request
+
+
+def _saved_cancelled_request(
+    tmp_path: Path,
+    title: str = "芙莉莲",
+    request_id: str = "request-cancelled",
+) -> dict[str, Any]:
+    request = cancel_request(
+        {
+            **generate_request(EntryRequest(raw_title=title))["request"],
+            "request_id": request_id,
+        },
+        "不需要",
     )
     save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
     return request
@@ -1083,6 +1103,89 @@ def test_delete_request_returns_unified_error_for_delete_failure(
     assert payload["error_data"]["details"]["directory"] == "requests"
     assert str(tmp_path) not in serialized
     assert "secret-token" not in serialized
+
+
+def test_modify_accepted_request_preserves_status_and_records_history(
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path, "芙莉莲", "request-1")
+    storage_dir = tmp_path / "storage"
+    patch = {"expected_folder_name": "芙莉莲 修改版"}
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/modify",
+        json={
+            "storage_dir": str(storage_dir),
+            "patch": patch,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["status"] == "ACCEPTED"
+    assert (
+        payload["result"]["request"]["confirmable_config"]["expected_folder_name"]
+        == "芙莉莲 修改版"
+    )
+    assert payload["result"]["summary"]["status"] == "ACCEPTED"
+
+    detail_response = _client().get(
+        f"/api/v1/requests/{request['request_id']}",
+        query_string={"storage_dir": str(storage_dir)},
+    )
+    detail = detail_response.get_json()
+    assert detail["ok"] is True
+    assert detail["result"]["history"]["available"] is True
+    assert detail["result"]["history"]["events"] == [
+        {
+            "request_id": "request-1",
+            "previous_status": "ACCEPTED",
+            "next_status": "ACCEPTED",
+            "action": "MODIFY",
+            "timestamp": payload["result"]["request"]["updated_at"],
+            "details": {"patch": patch},
+        }
+    ]
+
+
+def test_modify_accepted_request_recomputes_seeds_and_rejects_cancelled(
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path, "芙莉莲", "request-1")
+    cancelled = _saved_cancelled_request(tmp_path, "咒术回战", "request-cancelled")
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/modify",
+        json={
+            "storage_dir": str(storage_dir),
+            "patch": {"filter_rule": {"must_contain": "01", "must_not_contain": ""}},
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["status"] == "ACCEPTED"
+    assert (
+        payload["result"]["request"]["confirmable_config"]["filter_rule"]
+        == {"must_contain": "01", "must_not_contain": ""}
+    )
+    assert payload["result"]["summary"]["effective_seed_count"] == 1
+
+    cancel_response = _client().post(
+        f"/api/v1/requests/{cancelled['request_id']}/modify",
+        json={
+            "storage_dir": str(storage_dir),
+            "patch": {"expected_folder_name": "不应成功"},
+        },
+    )
+    cancel_payload = cancel_response.get_json()
+    assert cancel_payload["ok"] is False
+    assert cancel_payload["error_type"] == "invalid_request_status"
+    assert cancel_payload["error_data"]["details"] == {"status": "CANCELLED"}
+    assert str(tmp_path) not in str(cancel_payload)
 
 
 def test_create_request_generates_without_writing_storage(tmp_path: Path) -> None:
