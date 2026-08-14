@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>MiGuOrca Settings</title>
     <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
+    <script defer src="{{ url_for('migu_orca_web.static', filename='app.js') }}"></script>
   </head>
   <body>
     <header class="app-header">
@@ -23,9 +24,53 @@
         <div class="panel-heading">
           <h2 id="storage-settings-heading">Storage 偏好</h2>
         </div>
-        <div class="empty-state">
-          Storage 偏好将在此处管理；当前继续使用 Request 工作台中的默认行为。
-        </div>
+        <form id="storage-preferences-form" class="settings-form">
+          <p class="field-help">
+            非敏感浏览器偏好；仅写入当前浏览器 localStorage，不保存外部系统配置或凭据。
+          </p>
+
+          <label for="settings-storage-dir">默认 storage_dir</label>
+          <input
+            id="settings-storage-dir"
+            name="storage_dir"
+            type="text"
+            placeholder=".migu_orca/storage"
+            aria-describedby="settings-storage-dir-help"
+            autocomplete="off"
+          >
+          <p id="settings-storage-dir-help" class="field-help">
+            留空时 Request 工作台使用默认 `.migu_orca/storage`。
+          </p>
+
+          <label class="checkbox-row" for="settings-save-request">
+            <input
+              id="settings-save-request"
+              name="save_request"
+              type="checkbox"
+              value="true"
+              aria-describedby="settings-save-request-help"
+            >
+            默认保存 Request
+          </label>
+          <p id="settings-save-request-help" class="field-help">
+            开启后 Request 工作台默认写入 Request JSON；关闭时只生成预览。
+          </p>
+
+          <div
+            id="storage-preferences-status"
+            class="empty-state compact-state"
+            aria-live="polite"
+          >
+            尚未读取浏览器偏好。
+          </div>
+
+          <div class="notification-actions">
+            <button id="storage-preferences-save" type="submit">保存偏好</button>
+            <button id="storage-preferences-clear" class="secondary-button" type="button">
+              清除偏好
+            </button>
+          </div>
+        </form>
       </section>
 
       <section id="data-source-settings-panel" class="panel settings-panel" aria-labelledby="data-source-settings-heading">

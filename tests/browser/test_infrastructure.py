@@ -134,8 +134,10 @@ def test_generation_form_present(page: Page, live_server_url: str) -> None:
     assert page.locator('select[name="source"]').count() == 0
     assert page.locator('input[name="mikan_search_endpoint"]').count() == 0
     assert page.locator('input[name="mikan_timeout_seconds"]').count() == 0
-    assert page.locator('input[name="storage_dir"]').count() >= 1
-    assert page.locator('input[name="save_request"]').count() >= 1
+    assert page.locator('input[name="storage_dir"]').count() == 0
+    assert page.locator('input[name="save_request"]').count() == 0
+    assert page.locator("#storage-preference-summary").count() >= 1
+    assert page.locator("#storage-preference-summary a[href*='/settings']").count() >= 1
     assert page.locator("#request-generate-submit").count() >= 1
     assert page.locator("#request-form-error").count() >= 1
 

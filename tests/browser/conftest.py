@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import socket
 import subprocess
 import sys
@@ -191,3 +192,17 @@ def create_saved_request(storage_root: Path, title: str, request_id: str) -> dic
     }
     save_request_snapshot(load_storage_config(storage_root), request)
     return request
+
+
+def set_storage_preferences(
+    page: Any, storage_root: Path | str, *, save_request: bool = False
+) -> None:
+    """Seed non-sensitive Settings preferences before loading Web UI pages."""
+    storage_dir_json = json.dumps(str(storage_root))
+    save_request_json = json.dumps(save_request)
+    page.add_init_script(
+        f"""
+        window.localStorage.setItem("miguOrca.web.storageDir", {storage_dir_json});
+        window.localStorage.setItem("miguOrca.web.saveRequest", String({save_request_json}));
+        """
+    )

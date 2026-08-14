@@ -1,11 +1,8 @@
 (function () {
   const form = document.getElementById("request-generate-form");
   const titleInput = document.getElementById("request-title");
-  const storageInput = document.getElementById("storage-dir");
-  const saveInput = document.getElementById("save-request");
   const formError = document.getElementById("request-form-error");
   const submitButton = document.getElementById("request-generate-submit");
-  const clearPreferencesButton = document.getElementById("clear-web-preferences");
   const refreshButton = document.getElementById("request-list-refresh");
   const listSearchInput = document.getElementById("request-list-search");
   const listStatusFilter = document.getElementById("request-list-status-filter");
@@ -14,6 +11,12 @@
   const listContainer = document.getElementById("request-list-container");
   const detailContainer = document.getElementById("request-detail-container");
   const notification = document.getElementById("page-notification");
+  const storageSummaryText = document.getElementById("storage-preference-summary-text");
+  const storagePreferencesForm = document.getElementById("storage-preferences-form");
+  const settingsStorageInput = document.getElementById("settings-storage-dir");
+  const settingsSaveInput = document.getElementById("settings-save-request");
+  const storagePreferencesStatus = document.getElementById("storage-preferences-status");
+  const clearPreferencesButton = document.getElementById("storage-preferences-clear");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -22,6 +25,8 @@
   let selectedRequestId = null;
   let loadedRequests = [];
   let currentDetailPayload = null;
+  let storageDirPreference = "";
+  let saveRequestPreference = false;
 
   function readPreference(key) {
     try {
@@ -50,33 +55,94 @@
   function restoreWebPreferences() {
     const savedStorageDir = readPreference(preferenceKeys.storageDir);
     const savedSaveRequest = readPreference(preferenceKeys.saveRequest);
-    if (savedStorageDir) {
-      storageInput.value = savedStorageDir;
+    storageDirPreference = savedStorageDir || "";
+    saveRequestPreference = savedSaveRequest === "true";
+    if (settingsStorageInput) {
+      settingsStorageInput.value = storageDirPreference;
     }
-    if (savedSaveRequest !== null) {
-      saveInput.checked = savedSaveRequest === "true";
+    if (settingsSaveInput) {
+      settingsSaveInput.checked = saveRequestPreference;
     }
+    updateStoragePreferenceSummary();
+    updateStoragePreferencesStatus("已读取浏览器偏好。", "empty-state compact-state");
   }
 
-  function persistWebPreferences() {
-    const storageDir = storageInput.value.trim();
-    if (storageDir) {
-      writePreference(preferenceKeys.storageDir, storageDir);
+  function updateStoragePreferenceSummary() {
+    if (!storageSummaryText) {
+      return;
+    }
+    const storageText = storageDirPreference
+      ? "自定义 storage_dir：" + storageDirPreference
+      : "默认 `.migu_orca/storage`";
+    const saveText = saveRequestPreference
+      ? "默认保存 Request JSON"
+      : "默认只生成预览";
+    storageSummaryText.textContent =
+      "当前使用" + storageText + "；" + saveText + "。可在 Settings 修改。";
+  }
+
+  function updateStoragePreferencesStatus(message, className) {
+    if (!storagePreferencesStatus) {
+      return;
+    }
+    storagePreferencesStatus.className = className || "empty-state compact-state";
+    storagePreferencesStatus.textContent = message;
+  }
+
+  function currentStorageDir() {
+    return storageDirPreference.trim();
+  }
+
+  function currentSaveRequest() {
+    return saveRequestPreference;
+  }
+
+  function readSettingsFormPreferences() {
+    return {
+      storageDir: settingsStorageInput ? settingsStorageInput.value.trim() : "",
+      saveRequest: settingsSaveInput ? settingsSaveInput.checked : false,
+    };
+  }
+
+  function applyPreferenceValues(storageDir, saveRequest) {
+    storageDirPreference = storageDir || "";
+    saveRequestPreference = Boolean(saveRequest);
+    if (settingsStorageInput) {
+      settingsStorageInput.value = storageDirPreference;
+    }
+    if (settingsSaveInput) {
+      settingsSaveInput.checked = saveRequestPreference;
+    }
+    updateStoragePreferenceSummary();
+  }
+
+  function persistWebPreferences(event) {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+    const preferences = readSettingsFormPreferences();
+    applyPreferenceValues(preferences.storageDir, preferences.saveRequest);
+    if (storageDirPreference) {
+      writePreference(preferenceKeys.storageDir, storageDirPreference);
     } else {
       removePreference(preferenceKeys.storageDir);
     }
-    writePreference(preferenceKeys.saveRequest, String(saveInput.checked));
+    writePreference(preferenceKeys.saveRequest, String(saveRequestPreference));
+    updateStoragePreferencesStatus("偏好已保存。", "loading-state compact-state");
   }
 
   function clearWebPreferences() {
     removePreference(preferenceKeys.storageDir);
     removePreference(preferenceKeys.saveRequest);
-    storageInput.value = "";
-    saveInput.checked = false;
+    applyPreferenceValues("", false);
+    updateStoragePreferencesStatus(
+      "偏好已清除；Request 工作台将使用默认 `.migu_orca/storage` 并只生成预览。",
+      "empty-state compact-state",
+    );
   }
 
   function storageQuery() {
-    const storageDir = storageInput.value.trim();
+    const storageDir = currentStorageDir();
     if (!storageDir) {
       return "";
     }
@@ -85,6 +151,21 @@
 
   function apiPath(path) {
     return path + storageQuery();
+  }
+
+  if (form || storagePreferencesForm) {
+    restoreWebPreferences();
+  }
+
+  if (storagePreferencesForm) {
+    storagePreferencesForm.addEventListener("submit", persistWebPreferences);
+  }
+  if (clearPreferencesButton) {
+    clearPreferencesButton.addEventListener("click", clearWebPreferences);
+  }
+
+  if (!form) {
+    return;
   }
 
   function safeText(value) {
@@ -243,8 +324,8 @@
     return {
       title: title,
       source: "static-fixture",
-      storage_dir: storageInput.value.trim() || null,
-      save_request: saveInput.checked,
+      storage_dir: currentStorageDir() || null,
+      save_request: currentSaveRequest(),
     };
   }
 
@@ -694,7 +775,7 @@
         return;
       }
       performAction(request.request_id, "submit-ab", {
-        storage_dir: storageInput.value.trim() || null,
+        storage_dir: currentStorageDir() || null,
         ab_config: {
           endpoint: endpoint,
           token: token,
@@ -1062,10 +1143,6 @@
     }
   }
 
-  restoreWebPreferences();
-  storageInput.addEventListener("change", persistWebPreferences);
-  saveInput.addEventListener("change", persistWebPreferences);
-  clearPreferencesButton.addEventListener("click", clearWebPreferences);
   refreshButton.addEventListener("click", loadList);
   listSearchInput.addEventListener("input", renderList);
   listStatusFilter.addEventListener("change", renderList);

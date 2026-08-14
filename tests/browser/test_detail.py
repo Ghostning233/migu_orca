@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page
 
-from tests.browser.conftest import create_saved_request
+from tests.browser.conftest import create_saved_request, set_storage_preferences
 from request_engine.controllers.request_controller import accept_request
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
@@ -19,8 +19,8 @@ def _open_request_detail(
     page: Page, live_server_url: str, storage_dir: Path, request_id: str
 ) -> None:
     """Navigate to index, set storage_dir, refresh list, and click a request item."""
+    set_storage_preferences(page, storage_dir)
     page.goto(f"{live_server_url}/index")
-    page.fill('input[name="storage_dir"]', str(storage_dir))
     page.click("#request-list-refresh")
     # Wait for list to load from API
     page.wait_for_timeout(800)
@@ -321,8 +321,8 @@ class TestNotificationAndRecovery:
     def test_notification_has_close_button(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
+        set_storage_preferences(page, storage_dir, save_request=True)
         page.goto(f"{live_server_url}/index")
-        page.fill('input[name="storage_dir"]', str(storage_dir))
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)

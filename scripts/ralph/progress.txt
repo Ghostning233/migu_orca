@@ -10,6 +10,7 @@
 - Stage closeout documentation should keep `README.md`, `docs/backlog.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, and `scripts/ralph/progress.txt` synchronized.
 - Use shared Jinja includes for navigation shared across `/index` and `/settings`; pass `active_page` from Flask views for `aria-current` state.
 - `/index` is the Request workbench: keep generation/list/detail there and move external data source, qBittorrent, Auto Bangumi submission, and other configuration tasks to `/settings` stories.
+- Settings-owned non-sensitive browser preferences use `miguOrca.web.storageDir` and `miguOrca.web.saveRequest` in `localStorage`; `/index` should read those keys through shared JS helpers and must not render editable storage preference controls.
 
 Started: Fri Aug 14 12:46 CST 2026
 ---
@@ -91,4 +92,38 @@ Thread: https://codex.openai.com/threads/unavailable
   - `/index` should not initialize static JS for controls that only future Settings stories will own; absent controls should be removed from both template and initialization code together.
   - Browser tests that previously verified inline MiKan/qBittorrent forms should become boundary tests for `/index` until the corresponding Settings stories add new controls.
   - Storage directory and save-request controls intentionally remain on `/index` until US-090 migrates those preferences.
+---
+## 2026-08-14 13:39 CST - US-090
+Thread: https://codex.openai.com/threads/unavailable
+- Migrated non-sensitive Storage preferences to `/settings`, including default `storage_dir`, default `save_request`, save and clear actions, and unified state feedback.
+- Replaced `/index` storage preference inputs with a read-only Settings summary and link while preserving generation, list, detail, confirm, cancel, modify, and Auto Bangumi API calls through the saved Settings preferences.
+- Updated browser helpers and regressions to seed/read storage preferences through `localStorage` instead of the old `/index` input controls.
+- Files changed:
+  - `src/apps/migu_orca_web/templates/migu_orca_web/index.html`
+  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/static/style.css`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/conftest.py`
+  - `tests/browser/test_a11y.py`
+  - `tests/browser/test_actions.py`
+  - `tests/browser/test_detail.py`
+  - `tests/browser/test_generation.py`
+  - `tests/browser/test_infrastructure.py`
+  - `tests/browser/test_list.py`
+  - `tests/browser/test_shell.py`
+  - `tests/browser/test_stage11_real_config_entry.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed: 54 tests.
+  - `uv run pytest tests/browser/test_generation.py tests/browser/test_infrastructure.py tests/browser/test_a11y.py tests/browser/test_list.py tests/browser/test_detail.py tests/browser/test_actions.py tests/browser/test_stage11_real_config_entry.py -q` passed: 85 tests.
+  - `uv run python -m compileall -q src` passed.
+  - `uv run pytest -q` passed: 388 tests.
+  - `uv run pytest tests/browser/ -v` passed: 109 tests.
+  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
+- **Learnings for future iterations:**
+  - Keep Settings preference controls and `/index` summary in sync through `restoreWebPreferences`, `currentStorageDir`, and `currentSaveRequest`; avoid reintroducing direct `/index` storage inputs.
+  - Browser tests that need non-default storage should call `set_storage_preferences(page, storage_dir, save_request=...)` before navigating to `/index`.
+  - The Settings page now intentionally loads `app.js`; page-specific initialization must guard missing controls so future Settings sections can share helpers without breaking `/index`.
 ---

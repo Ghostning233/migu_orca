@@ -136,17 +136,16 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'name="mikan_timeout_seconds"' not in html
     assert "search_endpoint" not in html
     assert "timeout_seconds" not in html
-    assert 'name="storage_dir"' in html
-    assert "留空时使用默认 `.migu_orca/storage`" in html
-    assert 'name="save_request"' in html
-    assert "未勾选时只生成预览，不写入本地 storage" in html
-    assert "勾选后才保存 Request JSON" in html
+    assert 'name="storage_dir"' not in html
+    assert 'name="save_request"' not in html
+    assert 'id="storage-preference-summary"' in html
+    assert "当前使用默认 `.migu_orca/storage`" in html
+    assert "前往 Settings" in html
     assert 'id="request-form-error"' in html
     assert 'role="alert"' in html
     assert 'id="request-generate-submit"' in html
     assert 'data-default-label="生成"' in html
-    assert 'id="clear-web-preferences"' in html
-    assert "清除本地偏好" in html
+    assert 'id="clear-web-preferences"' not in html
     assert 'id="qbittorrent-config-toggle"' not in html
     assert 'id="qbittorrent-test-form"' not in html
     assert 'name="qbittorrent_endpoint"' not in html
@@ -173,7 +172,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'aria-live="polite"' in html
     assert 'aria-atomic="true"' in html
     assert 'role="status"' in html
-    assert 'aria-describedby="save-request-help"' in html
+    assert 'aria-describedby="save-request-help"' not in html
     assert 'aria-label="刷新 Request 列表"' in html
     assert 'aria-relevant="additions text"' in html
     assert "/migu-orca-static/app.js" in html
@@ -216,8 +215,17 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert "Auto Bangumi" in html
     assert html.count('class="panel settings-panel"') == 4
     assert "empty-state" in html
+    assert 'id="storage-preferences-form"' in html
+    assert 'id="settings-storage-dir"' in html
+    assert 'name="storage_dir"' in html
+    assert 'id="settings-save-request"' in html
+    assert 'name="save_request"' in html
+    assert 'id="storage-preferences-save"' in html
+    assert 'id="storage-preferences-clear"' in html
+    assert "非敏感浏览器偏好" in html
+    assert "localStorage" in html
     assert "/migu-orca-static/style.css" in html
-    assert "/migu-orca-static/app.js" not in html
+    assert "/migu-orca-static/app.js" in html
 
 
 def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
@@ -256,7 +264,7 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "Auto Bangumi 提交" in script
     assert "fallback_enabled" in script
     assert "window.confirm(\"确认提交此 Request 到 Auto Bangumi？\")" in script
-    assert "storage_dir: storageInput.value.trim() || null" in script
+    assert "storage_dir: currentStorageDir() || null" in script
     assert "secret-token" not in script
     assert "http://" not in script
     assert "https://" not in script
@@ -451,16 +459,13 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert "persistWebPreferences" in script
     assert "clearWebPreferences" in script
     assert "savedStorageDir" in script
-    assert "saveInput.checked = savedSaveRequest === \"true\"" in script
-    assert "storageInput.value = \"\"" in script
-    assert "saveInput.checked = false" in script
-    assert "clear-web-preferences" in script
-    assert "storageInput.addEventListener(\"change\", persistWebPreferences)" in script
-    assert "saveInput.addEventListener(\"change\", persistWebPreferences)" in script
+    assert "saveRequestPreference = savedSaveRequest === \"true\"" in script
+    assert "settingsStorageInput.value = storageDirPreference" in script
+    assert "settingsSaveInput.checked = saveRequestPreference" in script
+    assert "storage-preferences-clear" in script
+    assert "storagePreferencesForm.addEventListener(\"submit\", persistWebPreferences)" in script
     assert script.index("restoreWebPreferences()") < script.index("loadList()")
-    assert script.index("persistWebPreferences()") < script.index(
-        'fetchJson("/api/v1/requests"',
-    )
+    assert "currentSaveRequest()" in script
 
 
 def test_static_app_script_wires_explicit_ab_submit_form() -> None:
@@ -480,7 +485,7 @@ def test_static_app_script_wires_explicit_ab_submit_form() -> None:
     assert "提交 Auto Bangumi 前必须填写 token。" in script
     assert "确认提交此 Request 到 Auto Bangumi？" in script
     assert 'performAction(request.request_id, "submit-ab"' in script
-    assert "storage_dir: storageInput.value.trim() || null" in script
+    assert "storage_dir: currentStorageDir() || null" in script
     assert "ab_config" in script
     assert "fallback_enabled: fallbackInput.checked" in script
     assert "Auto Bangumi 提交成功" in script

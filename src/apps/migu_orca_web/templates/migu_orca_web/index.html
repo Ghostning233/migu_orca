@@ -46,36 +46,19 @@
             至少输入 1 个非空白字符；提交前会在浏览器中拦截空标题。
           </p>
 
-          <label for="storage-dir">Storage 目录</label>
-          <input
-            id="storage-dir"
-            name="storage_dir"
-            type="text"
-            placeholder=".migu_orca/storage"
-            aria-describedby="storage-dir-help"
-            autocomplete="off"
+          <section
+            id="storage-preference-summary"
+            class="preference-summary"
+            aria-labelledby="storage-preference-summary-heading"
           >
-          <p id="storage-dir-help" class="field-help">
-            留空时使用默认 `.migu_orca/storage`；仅在勾选保存时写入本地 storage。
-          </p>
-
-          <label class="checkbox-row" for="save-request">
-            <input
-              id="save-request"
-              name="save_request"
-              type="checkbox"
-              value="true"
-              aria-describedby="save-request-help"
-            >
-            保存 Request
-          </label>
-          <p id="save-request-help" class="field-help">
-            未勾选时只生成预览，不写入本地 storage；勾选后才保存 Request JSON。
-          </p>
-
-          <button id="clear-web-preferences" class="secondary-button" type="button">
-            清除本地偏好
-          </button>
+            <h3 id="storage-preference-summary-heading">Storage 偏好</h3>
+            <p id="storage-preference-summary-text">
+              当前使用默认 `.migu_orca/storage`；可在 Settings 修改默认 storage 与保存行为。
+            </p>
+            <a class="secondary-link" href="{{ url_for('migu_orca_web.settings') }}#storage-settings-panel">
+              前往 Settings
+            </a>
+          </section>
 
           <p id="request-form-error" class="field-error" role="alert" hidden></p>
 

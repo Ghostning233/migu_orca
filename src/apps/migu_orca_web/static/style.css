@@ -218,6 +218,47 @@ input[type="password"] {
   width: 100%;
 }
 
+input[type="checkbox"] {
+  min-height: 18px;
+  min-width: 18px;
+}
+
+.preference-summary {
+  background: #f6f7f9;
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.preference-summary h3 {
+  font-size: 0.96rem;
+  margin: 0;
+}
+
+.preference-summary p {
+  color: #3d4654;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.secondary-link {
+  color: #22577a;
+  font-weight: 700;
+  justify-self: start;
+}
+
+.settings-form {
+  display: grid;
+  gap: 12px;
+}
+
+.compact-state {
+  min-height: auto;
+}
+
 .inline-config-fields {
   border: 1px solid #d8dde5;
   border-radius: 6px;

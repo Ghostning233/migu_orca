@@ -10,7 +10,7 @@ from playwright.sync_api import Page
 from request_engine.controllers.request_controller import accept_request
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
-from tests.browser.conftest import create_saved_request
+from tests.browser.conftest import create_saved_request, set_storage_preferences
 
 
 pytestmark = pytest.mark.browser
@@ -25,8 +25,8 @@ RAW_RSS = "<rss><channel><title>raw</title></channel></rss>"
 def _open_request_detail(
     page: Page, live_server_url: str, storage_dir: Path, request_id: str
 ) -> None:
+    set_storage_preferences(page, storage_dir)
     page.goto(f"{live_server_url}/index")
-    page.fill('input[name="storage_dir"]', str(storage_dir))
     page.click("#request-list-refresh")
     page.wait_for_selector(f"[data-request-id='{request_id}']", timeout=5000)
     page.locator(f"[data-request-id='{request_id}']").click()
@@ -62,12 +62,9 @@ class TestStage11MikanBrowserRegressions:
     def test_default_fixture_mode_hides_mikan_config_and_generates_locally(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
+        set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
-        page.fill('input[name="storage_dir"]', str(storage_dir))
         page.fill('input[name="title"]', "葬送的芙莉莲")
-        save_checkbox = page.locator('input[name="save_request"]')
-        if save_checkbox.is_checked():
-            save_checkbox.uncheck()
 
         assert page.locator('select[name="source"]').count() == 0
         assert page.locator("#mikan-config-fields").count() == 0

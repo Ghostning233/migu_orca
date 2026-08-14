@@ -60,7 +60,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "只允许保存 storage 相关非敏感 UI 偏好，不保存真实外部系统 endpoint/token/username/password。"
     },
     {
