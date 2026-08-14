@@ -1090,6 +1090,41 @@
     }
   }
 
+  async function deleteRequest(requestId) {
+    if (!requestId) return;
+    hideNotification();
+    setActionInFlight(true);
+    try {
+      await fetchJson(
+        apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/delete"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ storage_dir: currentStorageDir() || null }),
+        }
+      );
+      if (selectedRequestId === requestId) {
+        selectedRequestId = null;
+      }
+      loadedRequests = (loadedRequests || []).filter(function (summary) {
+        return summary.request_id !== requestId;
+      });
+      renderList();
+      syncRequestIdToUrl(null);
+      setState(detailContainer, "Request 已删除。请选择一个 Request 查看详情。", "empty-state");
+      await loadList({loadSelectedDetail: false});
+      showNotification("success", "删除成功", "已删除 Request " + requestId, {
+        actions: [
+          { label: "刷新列表", handler: loadList },
+        ],
+      });
+    } catch (error) {
+      notifyApiError("删除失败", error);
+    } finally {
+      setActionInFlight(false);
+    }
+  }
+
   function buildModifyForm(request) {
     var config = request.confirmable_config || {};
     var sourceInfo = request.source_info || {};
@@ -1401,7 +1436,7 @@
       var previewNote = document.createElement("p");
       previewNote.className = "field-help preview-mode-note";
       previewNote.textContent =
-        "预览模式：此 Request 尚未保存，只能查看，保存后才可确认、取消、修改或提交 Auto Bangumi。";
+        "预览模式：此 Request 尚未保存，只能查看，保存后才可确认、取消、修改、删除或提交 Auto Bangumi。";
       actionsContainer.appendChild(previewNote);
 
       var savePreviewBtn = document.createElement("button");
@@ -1459,6 +1494,29 @@
         "/settings?request_id=" + encodeURIComponent(request.request_id) + "#auto-bangumi";
       abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi";
       actionsContainer.appendChild(abSubmitBtn);
+
+      var acceptedModifyBtn = document.createElement("button");
+      acceptedModifyBtn.type = "button";
+      acceptedModifyBtn.className = "secondary-button detail-action";
+      acceptedModifyBtn.textContent = "修改";
+      acceptedModifyBtn.addEventListener("click", function () {
+        var form = document.getElementById("detail-modify-form");
+        if (form) {
+          form.hidden = !form.hidden;
+        }
+      });
+      actionsContainer.appendChild(acceptedModifyBtn);
+
+      var deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "danger-button detail-action";
+      deleteBtn.textContent = "删除";
+      deleteBtn.addEventListener("click", function () {
+        if (window.confirm("确认删除此 Request？此操作不可恢复。")) {
+          deleteRequest(request.request_id);
+        }
+      });
+      actionsContainer.appendChild(deleteBtn);
     } else {
       var statusNote = document.createElement("p");
       statusNote.className = "field-help";

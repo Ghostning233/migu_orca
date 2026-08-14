@@ -14,6 +14,8 @@ Started: Fri Aug 14 20:20:45 CST 2026
 - Request detail seed feedback should continue to derive complete/valid/excluded lists from the selected RSS source and must not render raw RSS XML or raw response bodies.
 - Sensitive Web UI regressions should check URL state, `localStorage`, `sessionStorage`, visible body text, saved Request JSON, logs/screenshots/traces where applicable.
 - Browser tests require the repo-root `.migu_orca/storage` to be absent; stale saved Requests there fail `test_empty_list_state`, `test_no_default_storage_pollution`, `test_list_count_shows_zero`, and the Stage 14 visual hierarchy test.
+- Destructive Web UI actions (delete) require an explicit `window.confirm` gate; on success the front-end filters `loadedRequests`, calls `syncRequestIdToUrl(null)` to drop the URL `request_id`, clears the detail container to an empty state, then awaits `loadList` and shows the success notification AFTER the refresh (because `loadList` calls `hideNotification()` at its start).
+- ACCEPTED Request details show 修改/删除/去 Settings 提交 Auto Bangumi; preview Requests must keep the existing read-only contract (no saved-action buttons and no saved-action API calls).
 ---
 ## 2026-08-14 20:32:00 CST - US-103
 Thread: https://codex.openai.com/threads/019ffe91-320e-7110-959e-c2c339c7f029
@@ -40,4 +42,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Pattern discovered: keep the status-restriction gate in a dedicated copy helper (`_copy_pending_request` for accept/cancel, `_copy_modifiable_request` for modify) so each action documents which statuses it permits.
   - Gotcha encountered: the old `test_modify_request_rejects_non_pending_request` asserted ACCEPTED was rejected; it must now assert CANCELLED is rejected instead, since ACCEPTED became a legal modify target.
   - Useful context: modifying ACCEPTED keeps `user_action.action == "ACCEPT"` and the status ACCEPTED, so the existing `submit-ab` path remains valid without a re-confirm step.
+---
+## 2026-08-14 20:47:00 CST - US-105
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Added `修改` and `删除` buttons to the ACCEPTED Request detail action area alongside the existing `去 Settings 提交 Auto Bangumi` link, so all three actions are visible together. The ACCEPTED `修改` button toggles the existing `#detail-modify-form`; submission reuses `performAction(request_id, "modify", {patch})` which reloads the detail and list, keeping the status ACCEPTED and refreshing Filter/Seeds/Audit and the list summary.
+- Added a dedicated `deleteRequest(requestId)` flow in `app.js`: it gates on `window.confirm("确认删除此 Request？此操作不可恢复。")`, POSTs to the existing `/api/v1/requests/<id>/delete` endpoint, then on success removes the request from `loadedRequests`, calls `syncRequestIdToUrl(null)` to strip `request_id` from the URL, clears the detail container to an empty state, awaits a server list refresh, and only then shows the `删除成功` notification (must come after `loadList` because `loadList` hides notifications at its start). On failure it keeps the current detail and shows the unified sanitized error.
+- Preview Requests remain read-only: the preview note text now mentions 删除, and the existing preview read-only browser test now also blocks/asserts the delete route and button.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py` (new static test `test_static_app_script_shows_modify_and_delete_for_accepted_requests`), `tests/browser/test_actions.py` (new `TestAcceptedRequestManagement` class), `tests/browser/test_generation.py` (preview read-only test extended for delete), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 443 tests (297 unit + 146 browser); `uv run pytest tests/browser/ -q` passed with 146 browser tests.
+- Browser verification note: the `dev-browser` skill was not available in this session; UI verification was performed via the project's Playwright browser test suite (real Chromium against the Flask test server), covering ACCEPTED modify success, ACCEPTED delete success, delete cancel-not-calling-the-API, preview showing no delete/actions, and delete/modify error recovery.
+- **Learnings for future iterations:**
+  - Pattern discovered: a destructive Web UI flow must gate on `window.confirm`, and on success show its success notification AFTER `await loadList(...)` because `loadList` starts with `hideNotification()`; showing it before would hide it immediately.
+  - Pattern discovered: the ACCEPTED branch of `renderDetailPayload` previously only rendered the AB submit link; extend it with secondary/danger buttons rather than duplicating the PENDING branch.
+  - Gotcha encountered: `setActionInFlight` queries `.detail-action` buttons inside `#request-detail-container`; after a successful delete the container is replaced by an empty state, so the `finally` re-enable is a harmless no-op.
+  - Useful context: browser delete tests hit the real Flask backend with a tmp `storage_dir`, so after confirming delete the saved `requests/<id>.json` is actually gone from disk; assert on the file absence for a stronger check.
 ---

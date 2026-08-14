@@ -60,7 +60,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "删除是危险动作，应沿用现有 danger-button 语义并保持用户可恢复的错误状态。"
     },
     {

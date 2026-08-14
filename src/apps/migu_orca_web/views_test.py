@@ -674,6 +674,27 @@ def test_static_app_script_shows_ab_submit_only_for_accepted_requests() -> None:
     )
 
 
+def test_static_app_script_shows_modify_and_delete_for_accepted_requests() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "else if (isAccepted)" in script
+    assert 'acceptedModifyBtn.textContent = "修改"' in script
+    assert 'acceptedModifyBtn.className = "secondary-button detail-action"' in script
+    assert 'deleteBtn.textContent = "删除"' in script
+    assert 'deleteBtn.className = "danger-button detail-action"' in script
+    assert "deleteRequest(request.request_id)" in script
+    assert "async function deleteRequest(requestId)" in script
+    assert "syncRequestIdToUrl(null)" in script
+    assert 'actionsContainer.appendChild(deleteBtn)' in script
+    # The delete button must render after the AB submit entry for ACCEPTED details.
+    assert script.index('deleteBtn.textContent = "删除"') > script.index(
+        'abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi"'
+    )
+    assert '"删除成功"' in script
+
+
 def test_static_style_defines_generation_form_validation_states() -> None:
     response = _client().get("/migu-orca-static/style.css")
 

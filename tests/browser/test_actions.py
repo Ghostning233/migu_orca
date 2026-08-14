@@ -529,3 +529,169 @@ class TestErrorRecovery:
         detail_text = page.locator("#request-detail-container").inner_text()
         for section in ("Overview", "Source", "Filter", "Seeds", "Audit"):
             assert section in detail_text, f"Missing section: {section}"
+
+
+class TestAcceptedRequestManagement:
+    """US-105: ACCEPTED Request 详情展示修改/删除/去 Settings 提交 Auto Bangumi 动作."""
+
+    def test_accepted_request_shows_modify_delete_and_ab_submit(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-accepted-actions")
+        _open_request_detail(page, live_server_url, storage_dir, "req-accepted-actions")
+
+        actions = page.locator(".detail-actions")
+        assert actions.locator("button:has-text('修改')").count() >= 1
+        assert actions.locator("button:has-text('删除')").count() >= 1
+        assert (
+            actions.locator("a:has-text('去 Settings 提交 Auto Bangumi')").count() >= 1
+        )
+
+    def test_accepted_modify_keeps_status_and_refreshes_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-accepted-modify")
+        _open_request_detail(page, live_server_url, storage_dir, "req-accepted-modify")
+
+        page.locator(".detail-actions button:has-text('修改')").click()
+        page.wait_for_timeout(300)
+        assert page.locator("#detail-modify-form").is_visible()
+        page.locator("#modify-folder-name").fill("ACCEPTED 修改目录")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "修改成功" in page.locator("#page-notification").inner_text()
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "ACCEPTED" in detail_text
+        assert "ACCEPTED 修改目录" in detail_text
+        assert (
+            "ACCEPTED"
+            in page.locator("[data-request-id='req-accepted-modify']").inner_text()
+        )
+
+    def test_accepted_delete_success_refreshes_list_and_clears_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-accepted-delete")
+        _open_request_detail(page, live_server_url, storage_dir, "req-accepted-delete")
+
+        seen_dialogs: list[str] = []
+        page.on(
+            "dialog",
+            lambda dialog: (seen_dialogs.append(dialog.message), dialog.accept()),
+        )
+        page.locator(".detail-actions button:has-text('删除')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert seen_dialogs
+        assert "确认删除此 Request" in seen_dialogs[0]
+        assert "删除成功" in page.locator("#page-notification").inner_text()
+        assert page.locator("[data-request-id='req-accepted-delete']").count() == 0
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "Request 已删除" in detail_text
+        assert "request_id=" not in page.url
+        assert not (storage_dir / "requests" / "req-accepted-delete.json").exists()
+
+    def test_accepted_delete_cancel_does_not_call_api(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(
+            storage_dir, "葬送的芙莉莲", "req-accepted-delete-cancel"
+        )
+        calls: list[str] = []
+
+        def handle_delete(route: object) -> None:
+            calls.append(str(getattr(route, "request").url))
+            getattr(route, "continue_")()
+
+        page.route(
+            "**/api/v1/requests/req-accepted-delete-cancel/delete**", handle_delete
+        )
+        _open_request_detail(
+            page, live_server_url, storage_dir, "req-accepted-delete-cancel"
+        )
+
+        page.on("dialog", lambda dialog: dialog.dismiss())
+        page.locator(".detail-actions button:has-text('删除')").click()
+        page.wait_for_timeout(600)
+
+        assert calls == []
+        assert page.locator("[data-request-id='req-accepted-delete-cancel']").count() >= 1
+        assert (
+            "req-accepted-delete-cancel"
+            in page.locator("#request-detail-container").inner_text()
+        )
+        assert "request_id=req-accepted-delete-cancel" in page.url
+
+    def test_delete_failure_keeps_detail_and_shows_error(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(
+            storage_dir, "葬送的芙莉莲", "req-accepted-delete-fail"
+        )
+
+        def handle_delete(route: object) -> None:
+            getattr(route, "fulfill")(
+                status=500,
+                json={
+                    "ok": False,
+                    "error_type": "storage_error",
+                    "error_message": "删除 Request JSON 失败",
+                },
+            )
+
+        page.route(
+            "**/api/v1/requests/req-accepted-delete-fail/delete**", handle_delete
+        )
+        _open_request_detail(
+            page, live_server_url, storage_dir, "req-accepted-delete-fail"
+        )
+
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.locator(".detail-actions button:has-text('删除')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "删除失败" in page.locator("#page-notification").inner_text()
+        assert page.locator("[data-request-id='req-accepted-delete-fail']").count() >= 1
+        assert (
+            "req-accepted-delete-fail"
+            in page.locator("#request-detail-container").inner_text()
+        )
+        assert "request_id=req-accepted-delete-fail" in page.url
+
+    def test_accepted_modify_failure_keeps_form_and_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(
+            storage_dir, "葬送的芙莉莲", "req-accepted-modify-fail"
+        )
+
+        def handle_modify(route: object) -> None:
+            getattr(route, "fulfill")(
+                status=500,
+                json={
+                    "ok": False,
+                    "error_type": "invalid_modify_patch",
+                    "error_message": "修改失败",
+                },
+            )
+
+        page.route(
+            "**/api/v1/requests/req-accepted-modify-fail/modify**", handle_modify
+        )
+        _open_request_detail(
+            page, live_server_url, storage_dir, "req-accepted-modify-fail"
+        )
+
+        page.locator(".detail-actions button:has-text('修改')").click()
+        page.wait_for_timeout(300)
+        page.locator("#modify-folder-name").fill("失败后仍保留")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "修改失败" in page.locator("#page-notification").inner_text()
+        assert page.locator("#detail-modify-form").is_visible()
+        assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "ACCEPTED" in detail_text
+        assert page.locator("[data-request-id='req-accepted-modify-fail']").count() >= 1
