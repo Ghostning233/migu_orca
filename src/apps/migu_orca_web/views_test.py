@@ -224,6 +224,18 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'id="storage-preferences-clear"' in html
     assert "非敏感浏览器偏好" in html
     assert "localStorage" in html
+    assert 'id="qbittorrent-settings-details"' in html
+    assert 'id="settings-qbittorrent-test-form"' in html
+    assert 'name="qbittorrent_endpoint"' in html
+    assert 'name="qbittorrent_username"' in html
+    assert 'name="qbittorrent_password"' in html
+    assert 'type="password"' in html
+    assert 'name="qbittorrent_timeout_seconds"' in html
+    assert 'name="qbittorrent_verify_tls"' in html
+    assert 'id="settings-qbittorrent-result"' in html
+    assert "尚未测试 qBittorrent 连接" in html
+    assert "status、reachable 和 version" in html
+    assert "qBittorrent 连接测试将在此处迁移" not in html
     assert "/migu-orca-static/style.css" in html
     assert "/migu-orca-static/app.js" in html
 
@@ -500,30 +512,34 @@ def test_static_app_script_wires_explicit_qbittorrent_connection_form() -> None:
 
     script = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "qbittorrent-config-toggle" not in script
-    assert "qbittorrent-test-form" not in script
-    assert "qbittorrent-endpoint" not in script
-    assert "qbittorrent-username" not in script
-    assert "qbittorrent-password" not in script
-    assert "qbittorrent-timeout-seconds" not in script
-    assert "qbittorrent-verify-tls" not in script
-    assert "qbittorrent-form-error" not in script
-    assert "qbittorrent-test-submit" not in script
-    assert "qbittorrent-test-result" not in script
-    assert "buildQbittorrentConnectionPayload" not in script
-    assert "testQbittorrentConnection" not in script
-    assert "renderQbittorrentResult" not in script
-    assert "clearQbittorrentSensitiveFields" not in script
-    assert "测试 qBittorrent 前必须填写 endpoint。" not in script
-    assert "确认使用当前 qBittorrent 配置测试连接？" not in script
-    assert "/api/v1/qbittorrent/test-connection" not in script
-    assert "qbittorrent_config" not in script
+    assert "settings-qbittorrent-test-form" in script
+    assert "settings-qbittorrent-endpoint" in script
+    assert "settings-qbittorrent-username" in script
+    assert "settings-qbittorrent-password" in script
+    assert "settings-qbittorrent-timeout-seconds" in script
+    assert "settings-qbittorrent-verify-tls" in script
+    assert "settings-qbittorrent-error" in script
+    assert "settings-qbittorrent-test-submit" in script
+    assert "settings-qbittorrent-result" in script
+    assert "buildQbittorrentConnectionPayload" in script
+    assert "testQbittorrentConnection" in script
+    assert "renderQbittorrentResult" in script
+    assert "clearQbittorrentSensitiveFields" in script
+    assert "测试 qBittorrent 前必须填写 endpoint。" in script
+    assert "测试 qBittorrent 前必须填写 username。" in script
+    assert "测试 qBittorrent 前必须填写 password。" in script
+    assert "测试 qBittorrent 前 timeout_seconds 必须为正数。" in script
+    assert "确认使用当前 qBittorrent 配置测试连接？" in script
+    assert "/api/v1/qbittorrent/test-connection" in script
+    assert "qbittorrent_config" in script
     assert '["endpoint", summary.endpoint]' not in script
     assert '["username", summary.username]' not in script
     assert '["password", summary.password]' not in script
     assert '["sid", summary.sid]' not in script
     assert '["session", summary.session]' not in script
-    assert "qbittorrentEndpointInput.value = \"\"" not in script
+    assert "qbittorrentEndpointInput.value = \"\"" in script
+    assert "qbittorrentUsernameInput.value = \"\"" in script
+    assert "qbittorrentPasswordInput.value = \"\"" in script
     assert "secret-session" not in script
     assert "private-password" not in script
     assert "http://" not in script
@@ -537,8 +553,9 @@ def test_static_app_script_does_not_auto_test_qbittorrent_connection_on_load() -
     assert response.status_code == 200
     initialization = script[script.rindex("restoreWebPreferences()"):]
     assert "loadList();" in initialization
-    assert 'fetchJson("/api/v1/qbittorrent/test-connection"' not in initialization
-    assert 'qbittorrentForm.addEventListener("submit", testQbittorrentConnection)' not in initialization
+    assert 'await testQbittorrentConnection' not in initialization
+    assert 'testQbittorrentConnection();' not in initialization
+    assert 'qbittorrentForm.addEventListener("submit", testQbittorrentConnection)' in initialization
     assert 'qbittorrentToggle.addEventListener("click"' not in initialization
 
 

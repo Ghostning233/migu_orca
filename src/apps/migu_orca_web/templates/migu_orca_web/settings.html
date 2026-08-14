@@ -86,9 +86,82 @@
         <div class="panel-heading">
           <h2 id="qbittorrent-settings-heading">qBittorrent</h2>
         </div>
-        <div class="empty-state">
-          qBittorrent 连接测试将在此处迁移；凭据不会持久化。
-        </div>
+        <details id="qbittorrent-settings-details" class="settings-disclosure">
+          <summary>测试 qBittorrent 连接</summary>
+          <form id="settings-qbittorrent-test-form" class="settings-form">
+            <p class="field-help">
+              配置仅用于本次连接测试；endpoint、username 和 password 不写入浏览器存储、URL 或 Request JSON。
+            </p>
+
+            <label for="settings-qbittorrent-endpoint">endpoint</label>
+            <input
+              id="settings-qbittorrent-endpoint"
+              name="qbittorrent_endpoint"
+              type="text"
+              placeholder="qBittorrent Web UI endpoint"
+              autocomplete="off"
+              aria-describedby="settings-qbittorrent-help settings-qbittorrent-error"
+            >
+
+            <label for="settings-qbittorrent-username">username</label>
+            <input
+              id="settings-qbittorrent-username"
+              name="qbittorrent_username"
+              type="text"
+              autocomplete="off"
+              aria-describedby="settings-qbittorrent-help settings-qbittorrent-error"
+            >
+
+            <label for="settings-qbittorrent-password">password</label>
+            <input
+              id="settings-qbittorrent-password"
+              name="qbittorrent_password"
+              type="password"
+              autocomplete="off"
+              aria-describedby="settings-qbittorrent-help settings-qbittorrent-error"
+            >
+
+            <label for="settings-qbittorrent-timeout-seconds">timeout_seconds</label>
+            <input
+              id="settings-qbittorrent-timeout-seconds"
+              name="qbittorrent_timeout_seconds"
+              type="number"
+              min="0.1"
+              step="0.1"
+              value="10"
+              aria-describedby="settings-qbittorrent-help settings-qbittorrent-error"
+            >
+
+            <label class="checkbox-row" for="settings-qbittorrent-verify-tls">
+              <input
+                id="settings-qbittorrent-verify-tls"
+                name="qbittorrent_verify_tls"
+                type="checkbox"
+                value="true"
+                checked
+              >
+              verify_tls
+            </label>
+            <p id="settings-qbittorrent-help" class="field-help">
+              提交前需要确认；成功后只显示 status、reachable 和 version，并清空敏感输入。
+            </p>
+            <p id="settings-qbittorrent-error" class="field-error" role="alert" hidden></p>
+
+            <div
+              id="settings-qbittorrent-result"
+              class="empty-state compact-state"
+              aria-live="polite"
+            >
+              尚未测试 qBittorrent 连接。
+            </div>
+
+            <div class="notification-actions">
+              <button id="settings-qbittorrent-test-submit" type="submit">
+                测试连接
+              </button>
+            </div>
+          </form>
+        </details>
       </section>
 
       <section id="auto-bangumi-settings-panel" class="panel settings-panel" aria-labelledby="auto-bangumi-settings-heading">

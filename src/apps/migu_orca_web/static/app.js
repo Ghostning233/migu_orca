@@ -17,6 +17,15 @@
   const settingsSaveInput = document.getElementById("settings-save-request");
   const storagePreferencesStatus = document.getElementById("storage-preferences-status");
   const clearPreferencesButton = document.getElementById("storage-preferences-clear");
+  const qbittorrentForm = document.getElementById("settings-qbittorrent-test-form");
+  const qbittorrentEndpointInput = document.getElementById("settings-qbittorrent-endpoint");
+  const qbittorrentUsernameInput = document.getElementById("settings-qbittorrent-username");
+  const qbittorrentPasswordInput = document.getElementById("settings-qbittorrent-password");
+  const qbittorrentTimeoutInput = document.getElementById("settings-qbittorrent-timeout-seconds");
+  const qbittorrentVerifyTlsInput = document.getElementById("settings-qbittorrent-verify-tls");
+  const qbittorrentFormError = document.getElementById("settings-qbittorrent-error");
+  const qbittorrentResult = document.getElementById("settings-qbittorrent-result");
+  const qbittorrentSubmitButton = document.getElementById("settings-qbittorrent-test-submit");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -162,10 +171,6 @@
   }
   if (clearPreferencesButton) {
     clearPreferencesButton.addEventListener("click", clearWebPreferences);
-  }
-
-  if (!form) {
-    return;
   }
 
   function safeText(value) {
@@ -318,6 +323,169 @@
       throw error;
     }
     return payload.result;
+  }
+
+  function setQbittorrentFormError(message, field) {
+    if (!qbittorrentFormError) {
+      return;
+    }
+    qbittorrentFormError.textContent = message;
+    qbittorrentFormError.hidden = false;
+    for (const input of [
+      qbittorrentEndpointInput,
+      qbittorrentUsernameInput,
+      qbittorrentPasswordInput,
+      qbittorrentTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearQbittorrentFormError() {
+    if (!qbittorrentFormError) {
+      return;
+    }
+    qbittorrentFormError.textContent = "";
+    qbittorrentFormError.hidden = true;
+    for (const input of [
+      qbittorrentEndpointInput,
+      qbittorrentUsernameInput,
+      qbittorrentPasswordInput,
+      qbittorrentTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setQbittorrentResult(message, className) {
+    if (!qbittorrentResult) {
+      return;
+    }
+    qbittorrentResult.className = className || "empty-state compact-state";
+    qbittorrentResult.textContent = message;
+  }
+
+  function setQbittorrentInFlight(isInFlight) {
+    if (!qbittorrentForm) {
+      return;
+    }
+    const controls = qbittorrentForm.querySelectorAll("button, input");
+    for (const control of controls) {
+      control.disabled = isInFlight;
+    }
+    if (qbittorrentSubmitButton) {
+      qbittorrentSubmitButton.textContent = isInFlight ? "正在测试..." : "测试连接";
+    }
+  }
+
+  function clearQbittorrentSensitiveFields() {
+    if (qbittorrentEndpointInput) {
+      qbittorrentEndpointInput.value = "";
+    }
+    if (qbittorrentUsernameInput) {
+      qbittorrentUsernameInput.value = "";
+    }
+    if (qbittorrentPasswordInput) {
+      qbittorrentPasswordInput.value = "";
+    }
+  }
+
+  function buildQbittorrentConnectionPayload() {
+    const endpoint = qbittorrentEndpointInput ? qbittorrentEndpointInput.value.trim() : "";
+    const username = qbittorrentUsernameInput ? qbittorrentUsernameInput.value.trim() : "";
+    const password = qbittorrentPasswordInput ? qbittorrentPasswordInput.value.trim() : "";
+    const timeoutText = qbittorrentTimeoutInput ? qbittorrentTimeoutInput.value.trim() : "";
+    const timeoutSeconds = Number(timeoutText);
+    if (!endpoint) {
+      const error = new Error("测试 qBittorrent 前必须填写 endpoint。");
+      error.field = qbittorrentEndpointInput;
+      throw error;
+    }
+    if (!username) {
+      const error = new Error("测试 qBittorrent 前必须填写 username。");
+      error.field = qbittorrentUsernameInput;
+      throw error;
+    }
+    if (!password) {
+      const error = new Error("测试 qBittorrent 前必须填写 password。");
+      error.field = qbittorrentPasswordInput;
+      throw error;
+    }
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+      const error = new Error("测试 qBittorrent 前 timeout_seconds 必须为正数。");
+      error.field = qbittorrentTimeoutInput;
+      throw error;
+    }
+    return {
+      qbittorrent_config: {
+        endpoint: endpoint,
+        username: username,
+        password: password,
+        timeout_seconds: timeoutSeconds,
+        verify_tls: qbittorrentVerifyTlsInput ? qbittorrentVerifyTlsInput.checked : true,
+      },
+    };
+  }
+
+  function renderQbittorrentResult(summary) {
+    const status = safeText(summary && summary.status);
+    const reachable = safeText(summary && summary.reachable);
+    const version = safeText(summary && summary.version);
+    setQbittorrentResult(
+      "status: " + status + "；reachable: " + reachable + "；version: " + version,
+      "qbittorrent-result qbittorrent-result-success compact-state",
+    );
+  }
+
+  async function testQbittorrentConnection(event) {
+    event.preventDefault();
+    clearQbittorrentFormError();
+    let payload;
+    try {
+      payload = buildQbittorrentConnectionPayload();
+    } catch (validationError) {
+      setQbittorrentFormError(validationError.message, validationError.field);
+      setQbittorrentResult("请修正 qBittorrent 表单后再测试。", "error-state compact-state");
+      return;
+    }
+    if (!window.confirm("确认使用当前 qBittorrent 配置测试连接？")) {
+      return;
+    }
+
+    setQbittorrentInFlight(true);
+    setQbittorrentResult("正在测试 qBittorrent 连接...", "loading-state compact-state");
+    try {
+      const result = await fetchJson("/api/v1/qbittorrent/test-connection", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      renderQbittorrentResult(result);
+      clearQbittorrentSensitiveFields();
+    } catch (error) {
+      setQbittorrentResult(
+        "qBittorrent 连接测试失败。请检查配置后重试。",
+        "error-state compact-state",
+      );
+    } finally {
+      setQbittorrentInFlight(false);
+    }
+  }
+
+  if (qbittorrentForm) {
+    qbittorrentForm.addEventListener("submit", testQbittorrentConnection);
+  }
+
+  if (!form) {
+    return;
   }
 
   function buildCreateRequestPayload(title) {

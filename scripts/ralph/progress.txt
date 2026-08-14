@@ -11,6 +11,7 @@
 - Use shared Jinja includes for navigation shared across `/index` and `/settings`; pass `active_page` from Flask views for `aria-current` state.
 - `/index` is the Request workbench: keep generation/list/detail there and move external data source, qBittorrent, Auto Bangumi submission, and other configuration tasks to `/settings` stories.
 - Settings-owned non-sensitive browser preferences use `miguOrca.web.storageDir` and `miguOrca.web.saveRequest` in `localStorage`; `/index` should read those keys through shared JS helpers and must not render editable storage preference controls.
+- Sensitive Settings forms should use collapsed `<details>` sections, guard JS initialization by element presence, require explicit `window.confirm`, and avoid localStorage/sessionStorage/URL persistence for endpoint, username, password, token, cookie, or SID values.
 
 Started: Fri Aug 14 12:46 CST 2026
 ---
@@ -126,4 +127,27 @@ Thread: https://codex.openai.com/threads/unavailable
   - Keep Settings preference controls and `/index` summary in sync through `restoreWebPreferences`, `currentStorageDir`, and `currentSaveRequest`; avoid reintroducing direct `/index` storage inputs.
   - Browser tests that need non-default storage should call `set_storage_preferences(page, storage_dir, save_request=...)` before navigating to `/index`.
   - The Settings page now intentionally loads `app.js`; page-specific initialization must guard missing controls so future Settings sections can share helpers without breaking `/index`.
+---
+## 2026-08-14 13:45 CST - US-091
+Thread: https://codex.openai.com/threads/unavailable
+- Migrated qBittorrent connection testing into `/settings` with a collapsed Settings section, endpoint/username/password/timeout/verify_tls fields, password masking, explicit confirmation, safe success summary rendering, and sensitive-field clearing on success.
+- Kept `/index` free of qBittorrent controls and API calls while sharing guarded `app.js` helpers across Request workbench and Settings.
+- Added Flask shell assertions and Playwright coverage for Settings qBittorrent success, failure redaction, validation, confirmation cancellation, and non-persistence of qBittorrent values.
+- Files changed:
+  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_qbittorrent_connection.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest src/apps/migu_orca_web/views_test.py tests/browser/test_qbittorrent_connection.py -q` passed: 62 tests.
+  - `uv run pytest -q` passed: 393 tests.
+  - `uv run pytest tests/browser/ -v` passed: 114 tests.
+  - `uv run python -m compileall -q src` passed.
+  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
+- **Learnings for future iterations:**
+  - Settings page code must stay element-guarded because `app.js` is shared with `/index`.
+  - For sensitive Settings test forms, intercept API calls in browser tests and assert both request payload shape and browser-storage non-persistence.
+  - qBittorrent failure UI should ignore server-provided detail text and show a generic actionable message, while success rendering should only use the API's safe `status`, `reachable`, and `version` fields.
 ---
