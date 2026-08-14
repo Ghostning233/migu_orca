@@ -584,6 +584,17 @@ button:disabled {
   width: auto;
 }
 
+.detail-inline-form .filter-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 8px;
+}
+
+.detail-inline-form .filter-options .inline-check {
+  margin-top: 0;
+}
+
 .detail-inline-form .notification-actions {
   margin-top: 14px;
 }

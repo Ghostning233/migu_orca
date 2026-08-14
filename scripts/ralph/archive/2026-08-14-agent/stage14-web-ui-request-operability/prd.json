@@ -1,0 +1,130 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage14-web-ui-request-operability",
+  "description": "MiGuOrca Stage 14：修复 Stage 13 Web UI 中 Request 生成后的可操作性问题，明确已保存 Request 与未保存预览的 UI 契约，增强修改筛选结果和 Seeds 可视化，并简化 Settings 中 qBittorrent 连接测试分区。Stage 14 必须保持 Flask 服务端渲染与少量原生 JS 架构，不引入新的前端构建链，不放宽真实 MiKan、Auto Bangumi、qBittorrent 的敏感信息安全边界。",
+  "userStories": [
+    {
+      "id": "US-097",
+      "title": "修复生成 Request 后的保存与操作契约",
+      "description": "As a Web UI user, I want the normal generate flow to produce an operable saved Request so that confirm, cancel, modify, and the Request list work from the default workbench path.",
+      "acceptanceCriteria": [
+        "在 `/index` 的默认工作台流程中输入 `咒术回战` 并点击生成后，生成结果必须是已保存 Request，或 UI 必须明确进入只读预览模式；默认推荐实现为生成并保存",
+        "默认生成成功后，Request 详情必须展示可操作状态、同步当前 request_id，并刷新 Request 列表使新 Request 可见",
+        "已保存且状态为 `PENDING_CONFIRM` 的 Request 点击 `确认` 后必须调用 accept API 成功，并在详情与列表中显示更新后的状态",
+        "已保存且状态为 `PENDING_CONFIRM` 的 Request 点击 `取消` 后必须通过取消表单调用 cancel API 成功，并在详情与列表中显示更新后的状态",
+        "已保存且状态为 `PENDING_CONFIRM` 的 Request 点击 `修改` 并提交有效 patch 后必须调用 modify API 成功，并在详情与列表中显示更新后的状态与配置",
+        "正常默认生成、确认、取消、修改流程中不得出现 `未找到已保存的 Request`",
+        "如果 Settings 中仍保留 `save_request=false` 偏好，则 `/index` 必须清楚显示当前为预览模式，并且预览模式不得伪装成可操作的已保存 Request",
+        "浏览器测试覆盖 `咒术回战` 默认生成、列表出现、详情 URL 状态同步、确认、取消和修改成功路径",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "当前根因是前端使用 Settings 偏好传递 `save_request`，默认未保存预览却仍渲染确认、取消、修改按钮；后端操作 API 只从 storage 加载已保存 Request。"
+    },
+    {
+      "id": "US-098",
+      "title": "保护未保存预览 Request 的持久化动作",
+      "description": "As a Web UI user, I want unsaved preview details to be visibly read-only so that I do not trigger actions that can only work for persisted Requests.",
+      "acceptanceCriteria": [
+        "未保存预览 Request 详情必须展示清晰的 `预览` 或 `未保存` 状态标识",
+        "未保存预览 Request 不得展示或启用 `确认`、`取消`、`修改`、`提交 Auto Bangumi` 等依赖已保存 Request 的动作",
+        "未保存预览 Request 必须提供明确的 `保存此 Request`、`生成并保存` 或等价动作，用户执行后才可进入可操作详情",
+        "前端不得对未保存 Request 调用 `/api/v1/requests/<request_id>/accept`、`/cancel`、`/modify` 或 `/submit-ab`",
+        "预览模式不得把临时 request_id 写入 URL，也不得把敏感配置写入浏览器 storage",
+        "预览模式切换为保存模式后，详情、列表和 URL 状态必须一致",
+        "浏览器测试覆盖预览模式按钮禁用或隐藏、保存后动作恢复、无无效 API 调用和错误提示脱敏",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "本 story 可以与 US-097 同步实现，但验收时必须单独验证未保存预览不会触发持久化动作。"
+    },
+    {
+      "id": "US-099",
+      "title": "修复修改筛选规则后的可见反馈",
+      "description": "As a Web UI user, I want exclude filter changes to immediately show which seeds were removed so that I can verify rules such as `[v2]` before confirming downstream use.",
+      "acceptanceCriteria": [
+        "修改表单提交 `must_not_contain` 后，详情页必须重新渲染 Filter 与 Seeds 分区，并展示最新规则、有效种子数和排除种子数",
+        "用户在排除规则中输入 `[v2]` 时，UI 必须能帮助用户达成排除标题包含 `[v2]` 或 `v2` 的种子的意图；可通过 literal helper、自动转义、明确正则提示或等价交互实现",
+        "如果字段继续采用正则语义，UI 必须展示简短帮助文案，说明匹配字面 `[v2]` 应使用转义或通过 literal 模式输入",
+        "对测试 fixture 提交可稳定命中的排除规则后，有效种子列表不得包含已匹配排除规则的种子",
+        "被排除的种子必须在 excluded 列表中可见，并标识由排除规则导致",
+        "修改失败时保持原详情和表单状态，不清空用户输入，并展示统一脱敏错误",
+        "浏览器测试覆盖 `[v2]` 用户输入场景、稳定 regex 场景、成功修改后的 Seeds 变化和失败恢复",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "后端 `modify_request` 已会重算 source 的 `valid_seed_names` 与 `excluded_seed_names`，Stage 14 重点是 UI 输入语义与重新渲染可见性。"
+    },
+    {
+      "id": "US-100",
+      "title": "拆分 Seeds 为完整、有效与排除列表",
+      "description": "As a Web UI user, I want the Request detail Seeds section to show complete, valid, and excluded seed lists so that filtering effects are easy to inspect.",
+      "acceptanceCriteria": [
+        "Request 详情 Seeds 分区必须展示所选 source 的完整种子列表、有效种子列表和排除种子列表",
+        "每个列表必须展示对应数量；空列表使用一致的空状态文案",
+        "完整种子列表必须用于观察筛选前输入，不能只展示 `effective_seed_names`",
+        "有效种子列表必须与 `confirmable_config.effective_seed_names` 或所选 source 的 `valid_seed_names` 一致",
+        "排除种子列表必须来自所选 source 的 `excluded_seed_names` 或等价安全摘要，并尽量展示排除原因或规则类别",
+        "修改筛选规则或切换字幕组后，三个列表与数量必须同步刷新",
+        "Seeds 分区在窄屏和中屏下保持可读，不出现过密并排布局；可使用 tabs、details、分组卡片或渐进展开",
+        "不得在 Seeds 分区展示原始 RSS XML、原始响应体、真实外部 endpoint 或其他敏感信息",
+        "浏览器测试覆盖完整、有效、排除三个列表的存在、数量变化、空状态和敏感信息不泄露",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "当前前端只从 `confirmable_config.effective_seed_names` 渲染一个有效种子列表，无法对比筛选前后。"
+    },
+    {
+      "id": "US-101",
+      "title": "移除 Settings qBittorrent 测试分区下拉逻辑",
+      "description": "As a Settings user, I want qBittorrent connection settings to be shown directly so that the `测试 qBittorrent 连接` label is not a confusing dropdown.",
+      "acceptanceCriteria": [
+        "`/settings` 的 qBittorrent 分区不得使用 `<details>`、`<summary>` 或等价下拉结构包裹连接测试表单",
+        "qBittorrent endpoint、username、password、timeout_seconds、verify_tls 字段和测试按钮必须直接显示在 qBittorrent 分区内",
+        "测试按钮文案保留为明确动作，例如 `测试 qBittorrent 连接`，但它必须是按钮而不是分区展开控件",
+        "password 字段继续使用 `type=\"password\"`，成功测试后继续清空 endpoint、username 和 password",
+        "失败错误继续脱敏，不泄露 endpoint、username、password、cookie、SID、完整 URL 或原始响应体",
+        "更新现有浏览器测试，不再依赖 `qbittorrent-settings-details.open = true` 或断言敏感字段默认隐藏",
+        "Settings 页面在窄屏和中屏下 qBittorrent 表单保持单列可读",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Stage 13 曾要求敏感或低频配置支持折叠，但用户反馈该下拉无意义；Stage 14 对 qBittorrent 分区改为直接显示。"
+    },
+    {
+      "id": "US-102",
+      "title": "补齐 Stage 14 文档、测试与安全回归",
+      "description": "As a maintainer, I want Stage 14 regressions documented and tested so that future Web UI changes preserve the repaired request workflow.",
+      "acceptanceCriteria": [
+        "README 更新 Web UI 默认生成语义、预览模式语义、Seeds 三列表说明和 qBittorrent Settings 直显行为",
+        "相关 Stage PRD 或模块文档记录 Stage 14 已修复问题、实现决策和保留的安全边界",
+        "`docs/backlog.md` 更新 Stage 14 条目或关闭对应 Web UI bug 待办",
+        "`scripts/ralph/progress.txt` 记录 Stage 14 完成摘要、测试结果、风险和后续事项",
+        "浏览器测试覆盖 `/index` 默认生成、Request 列表、详情确认、取消、修改、filter 排除反馈、Seeds 完整/有效/排除列表和 `/settings` qBittorrent 直显",
+        "安全测试或浏览器断言确认 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体不会进入 storage JSON、browser storage、URL、日志、截图或 trace",
+        "`uv run pytest -q` 通过",
+        "`uv run pytest tests/browser/ -v` 通过",
+        "`uv run python -m compileall -q src` 通过",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "本 story 是 Stage 14 收尾门槛，完成后再归档 prd/progress 并准备提交。"
+    }
+  ]
+}

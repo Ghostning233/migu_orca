@@ -59,7 +59,14 @@ M09 负责 Request 确认交互能力，包括向用户展示 Request，并支�
 2. 校验修改字段是否合法。
 3. 对筛选规则或字幕组变化触发 M06 重新计算有效种子。
 4. 对命名相关变化触发 M07 重新生成或校验文件夹名。
-5. 返回新的 PENDING_CONFIRM Request。
+5. 返回状态保持原样（Stage 15 起）的新 Request：`PENDING_CONFIRM` 修改后仍为 `PENDING_CONFIRM`，`ACCEPTED` 修改后仍为 `ACCEPTED`，不回落为 `PENDING_CONFIRM`。
+6. 记录 `MODIFY` history 事件。
+
+修改范围约束（Stage 15 起）：
+
+- 可修改字段仍限定为 `selected_subtitle_group`、`filter_rule`、`expected_folder_name`，不开放完整 Request JSON 编辑。
+- `modify_request` 同时接受 `PENDING_CONFIRM` 与 `ACCEPTED`；`CANCELLED` 与未知状态拒绝修改并返回统一脱敏错误。
+- 修改 `ACCEPTED` Request 不会隐式触发 Auto Bangumi 提交，提交仍需用户显式执行。
 
 ### 3.3 取消
 
@@ -118,5 +125,5 @@ M09 负责 Request 确认交互能力，包括向用户展示 Request，并支�
 | --- | --- | --- | --- |
 | Q-M09-01 | 接受前是否必须重新读取 RSS？ | 是 | 待确认 |
 | Q-M09-02 | RSS 变化达到什么程度需要用户二次确认？ | 是 | 待确认 |
-| Q-M09-03 | 修改补丁格式如何定义？ | 是 | 待确认 |
+| Q-M09-03 | 修改补丁格式如何定义？ | 是 | 已确认：`patch` 对象只允许 `selected_subtitle_group`、`filter_rule`、`expected_folder_name`；`filter_rule` 内含 `must_contain` / `must_not_contain` / `use_regex` / `case_sensitive` |
 | Q-M09-04 | 第一版确认交互是 CLI、API，还是 Web UI？ | 是 | 待确认 |

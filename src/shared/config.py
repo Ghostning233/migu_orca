@@ -45,6 +45,15 @@ def load_user_preference(path: Path = DEFAULT_USER_CONFIG_PATH) -> UserPreferenc
             "筛选规则必须是字符串",
             "load_user_config",
         )
+    # 旧配置可能缺少 use_regex / case_sensitive，按默认 False 兼容加载。
+    use_regex = filter_data.get("use_regex", False)
+    case_sensitive = filter_data.get("case_sensitive", False)
+    if not isinstance(use_regex, bool) or not isinstance(case_sensitive, bool):
+        raise Stage1Error(
+            "config_error",
+            "筛选规则选项必须是布尔值",
+            "load_user_config",
+        )
     if not isinstance(priority, list) or not all(
         isinstance(item, str) for item in priority
     ):
@@ -58,6 +67,8 @@ def load_user_preference(path: Path = DEFAULT_USER_CONFIG_PATH) -> UserPreferenc
         filter_rule=FilterRule(
             must_contain=must_contain,
             must_not_contain=must_not_contain,
+            use_regex=use_regex,
+            case_sensitive=case_sensitive,
         ),
         subtitle_group_priority=priority,
     )

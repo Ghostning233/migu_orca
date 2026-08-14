@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向动画订阅场景的 RSS 编排工具，目标是在 MiKanProject 与 Auto Bangumi 之间提供一层自动化协作能力。
 
-当前已完成 Stage 14：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持 CLI 与 Web UI 中确认/修改/取消，并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。CLI 可以通过显式配置启用真实 MiKanProject 数据源；Web UI 当前将 `/index` 收敛为 Request 工作台，将 `/settings` 作为配置、偏好和连接测试页面。Settings 页面承载非敏感 Storage 浏览器偏好、直接展示的 qBittorrent 显式连接测试，以及仅在 `request_id` 上下文存在时展示的 Auto Bangumi 提交配置。`/index` 默认生成并保存 Request，使生成后的详情、URL 和列表都可继续确认、取消或修改；只有用户在 Settings 中显式设置 `save_request=false` 时才进入只读预览模式。默认生成、确认和 Web UI 浏览流程仍不会隐式访问真实 MiKanProject、Auto Bangumi 或 qBittorrent。真实 MiKan、Auto Bangumi 与 qBittorrent 配置在 Web UI 中只用于当前请求或当前提交，不写入 storage JSON、浏览器存储、URL、日志或 API 响应。
+当前已完成 Stage 15：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持 CLI 与 Web UI 中确认/修改/取消，已保存 Request 支持安全受限修改与显式删除（含 `ACCEPTED` 状态），并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。CLI 可以通过显式配置启用真实 MiKanProject 数据源；Web UI 当前将 `/index` 收敛为 Request 工作台，将 `/settings` 作为配置、偏好和连接测试页面。Settings 页面承载非敏感 Storage 浏览器偏好、直接展示的 qBittorrent 显式连接测试，以及仅在 `request_id` 上下文存在时展示的 Auto Bangumi 提交配置。`/index` 默认生成并保存 Request，使生成后的详情、URL 和列表都可继续确认、取消或修改；只有用户在 Settings 中显式设置 `save_request=false` 时才进入只读预览模式。筛选规则默认按普通字符（字面文本）匹配且大小写不敏感，可显式勾选 `使用正则` 与 `大小写敏感` 选项。默认生成、确认和 Web UI 浏览流程仍不会隐式访问真实 MiKanProject、Auto Bangumi 或 qBittorrent。真实 MiKan、Auto Bangumi 与 qBittorrent 配置在 Web UI 中只用于当前请求或当前提交，不写入 storage JSON、浏览器存储、URL、日志或 API 响应。
 
 ## 项目目标
 
@@ -16,16 +16,18 @@ MVP 聚焦单番剧的订阅闭环：
 ## 目前状态
 
 - 默认流程不访问真实 MiKanProject、Auto Bangumi 或 qBittorrent。
-- 已支持标题匹配、RSS 解析、正则筛选、字幕组选择、目录命名和 JSON 输出。
-- 已支持 Request 确认、取消和受限修改；确认后的 Request 可以进入显式 AB 提交流程。
+- 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
+- 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
 - 已建立真实 MiKanProject 数据源 adapter、可注入 HTTP transport、搜索页解析、番剧页 RSS 源发现、真实 RSS XML 读取和安全错误归一化。
 - 当前 CLI 只有在显式传入 `--source mikan` 和 `--mikan-config` 时才会构造真实 MiKan client；只有在显式传入 `--submit-ab` 和 `--ab-config` 时才会构造真实 Auto Bangumi HTTP client；只有在显式传入 `--save-request` 时才会写入本地 JSON 存储。
-- 已提供 Stage 14 Flask Web UI：`/` 重定向到 `/index`，`/index` 是 Request 工作台，`/settings` 是配置与连接测试页面，`/Settings` 重定向到 `/settings`。
+- 已提供 Stage 15 Flask Web UI：`/` 重定向到 `/index`，`/index` 是 Request 工作台，`/settings` 是配置与连接测试页面，`/Settings` 重定向到 `/settings`。
 - `/index` 默认生成并保存可操作 Request，可以搜索/筛选/排序本地 Request、读取 URL 可恢复的分组详情，并执行确认、可见取消表单和受限修改；显式预览模式会标记 `预览（未保存）`，隐藏持久化动作，并提供 `保存此 Request`。
-- Request 详情的 Seeds 分区展示完整、有效和排除三个列表及数量；修改排除规则后会刷新 Filter 与 Seeds，`[v2]` 可通过 literal helper 达成字面排除意图。
+- 已保存 `ACCEPTED` Request 详情同时展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作；`修改` 复用详情内修改表单并保持 `ACCEPTED` 状态，`删除` 需显式确认并刷新列表、清空详情和移除 URL `request_id`。
+- Request 详情的 Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区展示完整、有效和排除三个列表及数量，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言。
+- 筛选编辑控件使用 `包含规则` / `排除规则` 标签，并提供默认未勾选的 `使用正则` 与 `大小写敏感` 复选框；默认提交发送 `use_regex=false` / `case_sensitive=false`，字面文本 `[`、`[v2]` 不会触发正则错误。
 - `/settings` 可以管理非敏感 Storage 浏览器偏好、直接显示并显式测试 qBittorrent 连接，并在 `/settings?request_id=<id>#auto-bangumi` 中对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交配置。
-- Stage 14 已完成 Web UI Request 可操作性修复、预览契约、Seeds 可视化、qBittorrent Settings 直显和安全回归；默认流程不连接 qBittorrent，不启动下载，不改变 AB 提交流程。
+- Stage 15 已完成 ACCEPTED Request 修改/删除、筛选字面默认语义、大小写敏感与正则选项、Filter/Seeds 说明刷新和安全回归；默认流程不连接 qBittorrent，不启动下载，不改变 AB 提交流程。
 
 ## 关键约定
 
@@ -78,12 +80,13 @@ MVP 聚焦单番剧的订阅闭环：
 - 真实 AB client 当前发送的创建订阅 payload 字段为 `title`、`rss_url`、`save_path`、`filter_rule`，并要求响应中包含 `id`、`subscription_id` 或 `ab_subscription_id` 之一。真实 Auto Bangumi API 的 endpoint、请求字段和响应字段仍需要按实际部署版本验证。
 - Web UI 真实 Auto Bangumi 配置只在当前提交中使用，不能写入 storage JSON、状态历史、浏览器 `localStorage` / `sessionStorage`、URL query、日志、截图或测试 trace。
 - qBittorrent 配置同样必须保持 request-scoped：endpoint、username、password、cookie、SID、敏感路径和原始响应体不能写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图、测试 trace 或 API 响应。
-- Stage 14 允许 Settings 将非敏感 Storage 偏好写入浏览器 `localStorage`，键名为 `miguOrca.web.storageDir` 和 `miguOrca.web.saveRequest`；URL query 只能携带 `request_id` 等非敏感上下文。缺省 `saveRequest` 表示默认生成并保存，显式 `"false"` 表示预览模式。
-- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不属于 Stage 14 Web UI Request 可操作性范围。
+- Stage 15 允许 Settings 将非敏感 Storage 偏好写入浏览器 `localStorage`，键名为 `miguOrca.web.storageDir` 和 `miguOrca.web.saveRequest`；URL query 只能携带 `request_id` 等非敏感上下文。缺省 `saveRequest` 表示默认生成并保存，显式 `"false"` 表示预览模式。
+- 筛选规则默认按普通字符匹配：规则文本以字面子串（substring）形式出现在种子名中才算命中，大小写不敏感；`use_regex=true` 才按正则编译，`case_sensitive=true` 才区分大小写。筛选规则是用户输入的非密文字符串，允许写入 saved Request，但错误消息不得包含本地存储路径或原始外部响应。
+- 真实 MiKan 搜索策略和实站 RSS 解析兼容性优化仍在 [backlog](docs/backlog.md) 跟踪，不属于 Stage 15 Web UI ACCEPTED 管理与筛选语义范围。
 
-## Stage 14 Flask Web UI
+## Stage 15 Flask Web UI
 
-Stage 14 继续使用 Stage 7 引入的本地 Flask Web UI / 管理界面 MVP，并在 Stage 8 可用性、Stage 9 浏览器自动化、Stage 10 Request 操作入口、Stage 11 显式真实 MiKan / Auto Bangumi 配置入口、Stage 12 qBittorrent 显式连接测试和 Stage 13 Settings 信息架构基础上，修复 Request 生成后的可操作性。它复用现有 CLI 编排、真实 Auto Bangumi HTTP client adapter、qBittorrent connection-test controller 与 Stage 6 本地 JSON 存储能力，不改变 `migu-orca` CLI 默认行为，也不引入 React/Vite 等前端构建链。
+Stage 15 继续使用 Stage 7 引入的本地 Flask Web UI / 管理界面 MVP，并在 Stage 8 可用性、Stage 9 浏览器自动化、Stage 10 Request 操作入口、Stage 11 显式真实 MiKan / Auto Bangumi 配置入口、Stage 12 qBittorrent 显式连接测试、Stage 13 Settings 信息架构和 Stage 14 Request 可操作性修复基础上，补齐 `ACCEPTED` Request 的修改与删除能力，并将筛选规则默认语义从正则优化为大小写不敏感的字面字符匹配，同时提供显式 `使用正则` 与 `大小写敏感` 选项。它复用现有 CLI 编排、真实 Auto Bangumi HTTP client adapter、qBittorrent connection-test controller 与 Stage 6 本地 JSON 存储能力，不改变 `migu-orca` CLI 默认行为，也不引入 React/Vite 等前端构建链。
 
 启动方式：
 
@@ -100,7 +103,7 @@ uv run flask --app wsgi:app run
 - `GET /Settings`：重定向到 `/settings`。
 - `GET /healthz`、`GET /readiness`：健康检查。
 
-`/index` 页面包含 Request 生成表单、本地 Request 列表、URL 可恢复的详情区域、状态历史和 AB 提交结果摘要。页面提供共享顶部导航、运行模式摘要、非空标题浏览器校验、提交中按钮状态、Settings Storage 偏好只读摘要、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、可见取消/修改表单、窄屏单列布局和基础无障碍标记。缺省生成会保存 Request 并同步 `request_id` 到 URL；显式预览模式只展示只读详情和保存入口，不展示确认、取消、修改或 Auto Bangumi 提交动作。Seeds 分区展示完整种子、有效种子和排除种子三个列表。`/settings` 页面包含 Storage 偏好、数据源、qBittorrent 和 Auto Bangumi 分区；Storage 偏好只写入浏览器 `localStorage`，qBittorrent 连接测试表单直接显示，Auto Bangumi 按 `request_id` 上下文渐进展示，提交前必须显式确认。页面和 API 都不应展示 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径。
+`/index` 页面包含 Request 生成表单、本地 Request 列表、URL 可恢复的详情区域、状态历史和 AB 提交结果摘要。页面提供共享顶部导航、运行模式摘要、非空标题浏览器校验、提交中按钮状态、Settings Storage 偏好只读摘要、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、可见取消/修改表单、窄屏单列布局和基础无障碍标记。缺省生成会保存 Request 并同步 `request_id` 到 URL；显式预览模式只展示只读详情和保存入口，不展示确认、取消、修改、删除或 Auto Bangumi 提交动作。已保存 `ACCEPTED` Request 详情展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作，`删除` 前必须经浏览器确认框确认。Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区展示完整种子、有效种子和排除种子三个列表。`/settings` 页面包含 Storage 偏好、数据源、qBittorrent 和 Auto Bangumi 分区；Storage 偏好只写入浏览器 `localStorage`，qBittorrent 连接测试表单直接显示，Auto Bangumi 按 `request_id` 上下文渐进展示，提交前必须显式确认。页面和 API 都不应展示 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径。
 
 ### Web API
 
@@ -162,11 +165,15 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 }
 ```
 
-Stage 10 新增 Request 操作端点（仅 PENDING_CONFIRM 状态可操作）：
+Stage 10 新增 Request 操作端点（确认/取消仅 PENDING_CONFIRM 状态可操作；修改同时接受 PENDING_CONFIRM 与 ACCEPTED）：
 
 - `POST /api/v1/requests/<request_id>/accept?storage_dir=.migu_orca/storage`：确认 Request，状态变更为 ACCEPTED。
 - `POST /api/v1/requests/<request_id>/cancel?storage_dir=.migu_orca/storage`：取消 Request，请求体可含 `cancel_reason` 字段。
-- `POST /api/v1/requests/<request_id>/modify?storage_dir=.migu_orca/storage`：修改 Request，请求体含 `patch` 对象（允许字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`）。
+- `POST /api/v1/requests/<request_id>/modify?storage_dir=.migu_orca/storage`：修改 Request，请求体含 `patch` 对象（允许字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`）。修改 `ACCEPTED` Request 后状态保持 `ACCEPTED` 不回落为 `PENDING_CONFIRM`，并记录 `MODIFY` history 事件；修改后重新计算有效/排除 Seeds。
+
+Stage 15 新增已保存 Request 删除端点：
+
+- `POST /api/v1/requests/<path:request_id>/delete?storage_dir=.migu_orca/storage`：删除 `requests/<request_id>.json`。request_id 必须来自 URL 路径，payload 只允许携带 `storage_dir` 等现有非敏感上下文；删除函数拒绝空值、路径片段和路径穿越，返回统一脱敏错误，且响应只返回被删除 request_id 和安全摘要，不返回已删除 snapshot 的原始 JSON。删除成功后列表不再包含该 request_id，详情加载该 request_id 返回 `request_not_found`。
 
 Stage 11 新增真实配置入口端点：
 
@@ -248,23 +255,24 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/qbittorrent/test-connection' \
 5. 在生成表单中提交空白标题，确认页面在浏览器端提示错误且不会发起生成；再填写标题，确认提交按钮在请求中禁用，完成后通过统一通知展示生成或保存结果。
 6. 验证 Settings Storage 偏好：打开 `/settings`，修改默认 Storage 目录和默认保存 Request 开关后刷新页面，确认浏览器恢复最近偏好；点击 `清除偏好` 后恢复默认 `.migu_orca/storage` 和默认保存状态。该偏好只应存在于浏览器 `localStorage`，不写入 storage JSON 或 API 响应；缺省保存状态表示 `/index` 默认生成并保存 Request。
 7. 验证 Request 列表：刷新列表后使用文本搜索、status 筛选和默认/标题升序/request_id 升序排序，确认匹配计数形如 `显示 2 / 5`，无匹配时显示空状态，清空筛选后列表恢复。
-8. 验证 Request 详情：打开列表项后确认浏览器 URL 同步为 `/index?request_id=<id>`；刷新该 URL 后仍展示同一详情。详情应按 Overview、Source、Filter、Seeds、Audit 分组；request_id 可复制；RSS 只显示是否已选择，不显示完整 RSS URL；Seeds 可展开查看完整、有效和排除种子标题及数量；缺失 history 或 AB result 时保持非致命提示。
+8. 验证 Request 详情：打开列表项后确认浏览器 URL 同步为 `/index?request_id=<id>`；刷新该 URL 后仍展示同一详情。详情应按 Overview、Source、Filter、Seeds、Audit 分组；request_id 可复制；RSS 只显示是否已选择，不显示完整 RSS URL；Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 可展开查看完整、有效和排除种子标题及数量，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言；缺失 history 或 AB result 时保持非致命提示。
 9. 验证通知和恢复：列表加载失败时刷新按钮仍可用；详情加载失败时不清空已加载列表；通知可手动关闭，并会在下一次操作时替换旧消息。
-10. 验证 Stage 14 UI 质量门槛：`/index` 标题、运行模式摘要、主操作区、Request 列表和详情区应有清晰阅读顺序；`/settings` Storage、数据源、qBittorrent 和 Auto Bangumi 分区边界清晰；生成、确认、提交使用主按钮，刷新、修改、返回 Settings 使用次按钮，取消、清空和撤销类操作使用危险/警示样式。
+10. 验证 Stage 15 UI 质量门槛：`/index` 标题、运行模式摘要、主操作区、Request 列表和详情区应有清晰阅读顺序；`/settings` Storage、数据源、qBittorrent 和 Auto Bangumi 分区边界清晰；生成、确认、提交使用主按钮，刷新、修改、返回 Settings 使用次按钮，取消、清空、删除和撤销类操作使用危险/警示样式。
 11. 验证响应式和键盘操作：在中屏和移动宽度下 `/index` 与 `/settings` 为单列或低密度布局，不出现横向拥挤导航、过密并排表单或不可读详情表格；Tab 能聚焦主要控件和 Request 列表按钮；焦点样式可见，动态通知/列表/详情区域具备合适的语义标记。
-12. 验证 Request 操作：打开 PENDING_CONFIRM 状态的 Request 详情，确认出现确认、取消、修改按钮；点击确认后确认浏览器弹出确认框，确认后状态变为 ACCEPTED 且按钮消失；点击取消后展示详情区内可见取消表单，提交前必须确认；点击修改后展示内联表单，空 patch 必须在浏览器端阻止，显式清空 filter_rule 或 expected_folder_name 后状态保持 PENDING_CONFIRM 且 Audit 更新。
-13. 验证 Auto Bangumi Settings 入口：打开 `ACCEPTED` Request 详情，确认出现跳转 `/settings?request_id=<id>#auto-bangumi` 的入口；非 `ACCEPTED` Request 不显示该入口。Settings 中的 Auto Bangumi 表单包含 endpoint、password token 和 fallback 选项，展示当前 request_id、前置条件和返回详情链接，提交前必须确认；失败时只显示脱敏通知；成功后清理 endpoint 和 token 字段并提供返回 `/index?request_id=<id>` 的链接。
-14. 验证 qBittorrent Settings 连接测试：`/index` 不渲染 qBittorrent 配置且不调用 `/api/v1/qbittorrent/test-connection`；`/settings` qBittorrent 分区不使用 `<details>` / `<summary>`，endpoint、username、password、timeout_seconds、verify_tls 和 `测试 qBittorrent 连接` 按钮直接显示，password 使用密码输入框。空 endpoint、空 username、空 password 或非正数 timeout 必须在浏览器端阻止提交；提交前必须出现确认提示，确认后才发送 request-scoped `qbittorrent_config` POST body。
-15. 验证 qBittorrent 成功和失败路径：成功时页面只展示 `status`、`reachable`、`version` 等脱敏摘要，并清理 endpoint、username 和 password；失败时保留当前表单状态，只展示统一脱敏通知，不展示完整 endpoint、用户名、密码、cookie、SID、本地绝对路径或原始响应体。
-16. 验证脱敏和不落盘：页面、通知、API 响应、本地 storage JSON、浏览器 `localStorage` / `sessionStorage`、URL query、测试截图和 trace 不应包含 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML 或原始响应体。`localStorage` 只允许保存 Storage 偏好键。
-17. 通过 API 验证本地列表和详情：
+12. 验证 Request 操作：打开 PENDING_CONFIRM 状态的 Request 详情，确认出现确认、取消、修改按钮；点击确认后确认浏览器弹出确认框，确认后状态变为 ACCEPTED；点击取消后展示详情区内可见取消表单，提交前必须确认；点击修改后展示内联表单，空 patch 必须在浏览器端阻止，显式清空 filter_rule 或 expected_folder_name 后状态保持 PENDING_CONFIRM 且 Audit 更新。
+13. 验证 ACCEPTED Request 管理与筛选控件：打开 `ACCEPTED` Request 详情，确认同时出现 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作；`修改` 提交受限 patch 后详情保持 `ACCEPTED` 且 Filter、Seeds、Audit 刷新；`删除` 必须先确认，取消确认不调用删除 API，确认删除后列表刷新、详情清空且 URL 移除 `request_id`。在修改表单中确认 `包含规则` / `排除规则` 标签与默认未勾选的 `使用正则` / `大小写敏感` 复选框；默认提交发送 `use_regex=false` / `case_sensitive=false`，勾选后发送 `true`；普通字符模式下输入 `[` 或 `[v2]` 不得触发正则错误，勾选 `使用正则` 后非法正则才返回统一校验错误。
+14. 验证 Auto Bangumi Settings 入口：打开 `ACCEPTED` Request 详情，确认出现跳转 `/settings?request_id=<id>#auto-bangumi` 的入口；非 `ACCEPTED` Request 不显示该入口。Settings 中的 Auto Bangumi 表单包含 endpoint、password token 和 fallback 选项，展示当前 request_id、前置条件和返回详情链接，提交前必须确认；失败时只显示脱敏通知；成功后清理 endpoint 和 token 字段并提供返回 `/index?request_id=<id>` 的链接。
+15. 验证 qBittorrent Settings 连接测试：`/index` 不渲染 qBittorrent 配置且不调用 `/api/v1/qbittorrent/test-connection`；`/settings` qBittorrent 分区不使用 `<details>` / `<summary>`，endpoint、username、password、timeout_seconds、verify_tls 和 `测试 qBittorrent 连接` 按钮直接显示，password 使用密码输入框。空 endpoint、空 username、空 password 或非正数 timeout 必须在浏览器端阻止提交；提交前必须出现确认提示，确认后才发送 request-scoped `qbittorrent_config` POST body。
+16. 验证 qBittorrent 成功和失败路径：成功时页面只展示 `status`、`reachable`、`version` 等脱敏摘要，并清理 endpoint、username 和 password；失败时保留当前表单状态，只展示统一脱敏通知，不展示完整 endpoint、用户名、密码、cookie、SID、本地绝对路径或原始响应体。
+17. 验证脱敏和不落盘：页面、通知、API 响应、本地 storage JSON、浏览器 `localStorage` / `sessionStorage`、URL query、测试截图和 trace 不应包含 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML 或原始响应体。`localStorage` 只允许保存 Storage 偏好键。
+18. 通过 API 验证本地列表和详情：
 
    ```bash
    curl 'http://127.0.0.1:5000/api/v1/requests?storage_dir=.migu_orca/storage'
    curl 'http://127.0.0.1:5000/api/v1/requests/<request_id>?storage_dir=.migu_orca/storage'
    ```
 
-Stage 14 不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 下载/订阅动作。本阶段已完成 Web UI Request 可操作性修复、预览契约、Seeds 三列表、Settings qBittorrent 直显和安全回归；真实 MiKan 搜索/RSS 解析优化继续在 [backlog](docs/backlog.md) 跟踪，当前状态保持未完成。
+Stage 15 不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 下载/订阅动作。本阶段已完成 `ACCEPTED` Request 删除与受限修改、筛选字面默认语义、`使用正则` / `大小写敏感` 选项、Filter 与 Seeds 说明刷新和安全回归；真实 MiKan 搜索/RSS 解析优化继续在 [backlog](docs/backlog.md) 跟踪，当前状态保持未完成。
 
 示例 AB 配置：
 
@@ -299,15 +307,16 @@ Stage 14 不实现真实 MiKan 搜索/RSS 兼容性优化、认证系统、复�
 
 ## Ralph 开发流
 
-- 当前活跃 Ralph PRD：Stage 14 Web UI Request 可操作性修复 PRD
-- 最近完成阶段：Stage 14，Web UI Request 可操作性修复 PRD
+- 当前活跃 Ralph PRD：暂无新阶段；`scripts/ralph/prd.json` 保留最近完成的 Stage 15 PRD，全部 story 已通过
+- 最近完成并归档阶段：Stage 15，Web UI ACCEPTED 管理与筛选语义优化 PRD
+- 前一完成阶段：Stage 14，Web UI Request 可操作性修复 PRD
 - 前一完成阶段：Stage 13，Web UI Settings 信息架构优化 PRD
 - 前一完成阶段：Stage 12，qBittorrent 直连显式连接测试 PRD
 - 前一完成阶段：Stage 11，Web UI 显式真实 MiKan / Auto Bangumi 配置入口 PRD
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- 后续待办：`docs/backlog.md`，当前优先项为 BL-001 真实 MiKan 搜索和 RSS 源解析兼容性优化
+- 后续待办：`docs/backlog.md`，当前优先项为 BL-001 优化真实 MiKan 番剧搜索和 RSS 源解析
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
 - Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`
@@ -333,25 +342,25 @@ Ralph 运行过程中由下属 Agent 产生的本地中间提交不强制使用�
 
 当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex` 选择执行工具。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
 
-Claude 模型可以通过命令行参数显式指定：
+Claude 模型可以通过命令行参数显式指定。当前仓库里可直接运行的示例是：
 
 ```bash
-./scripts/ralph/ralph.sh --tool claude --model Hiku 7
+./scripts/ralph/ralph.sh --tool claude --model deepseek-v4-flash 7
 ```
 
 也可以通过环境变量指定：
 
 ```bash
-RALPH_MODEL=Hiku ./scripts/ralph/ralph.sh --tool claude 7
+RALPH_MODEL=deepseek-v4-flash ./scripts/ralph/ralph.sh --tool claude 7
 ```
 
-`--claude-model Hiku` 是 `--model Hiku` 的等价写法：
+`--claude-model` 是 `--model` 的等价写法：
 
 ```bash
-./scripts/ralph/ralph.sh --tool claude --claude-model Hiku 7
+./scripts/ralph/ralph.sh --tool claude --claude-model deepseek-v4-flash 7
 ```
 
-本地已通过 CCSwitch 将 Claude 的 `Hiku` 模型映射到实际提供方模型 `deepseek-v4-flash`。因此在本机运行上述命令时，Ralph 会向 Claude CLI 传入 `--model Hiku`，实际模型路由由 CCSwitch 配置决定。
+如果你的 Claude 环境已经为别名做了额外映射，也可以换成对应别名；但在本仓库当前环境中，`deepseek-v4-flash` 是可直接运行的模型名。
 
 `--model` 目前只会传递给 Claude 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
 
@@ -359,7 +368,7 @@ Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app
 
 Stage 8 已围绕 Web UI 可用性补强：顶部导航与运行模式提示、生成表单说明和本地校验、Storage 偏好记忆、Request 列表搜索/筛选/排序、详情区块重组、统一通知与错误恢复、响应式布局和基础无障碍验收。Stage 8 仍不包含真实 MiKan 搜索/RSS 兼容性优化、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 直连。
 
-Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。Stage 10 将 Web UI 扩展到确认、取消和修改流程。Stage 11 将 Web UI 扩展到显式真实 MiKan 配置入口和显式 Auto Bangumi 提交入口。Stage 12 将 Web UI 扩展到 qBittorrent 显式连接测试入口，并通过 Playwright route fake 验证连接测试，不访问真实 qBittorrent。Stage 13 将配置和连接测试迁移到 `/settings`，将 `/index` 收敛为 Request 工作台，补齐 URL 可恢复详情、可见取消/修改表单、按钮语义、状态反馈、Settings 分区和响应式 UI 回归。Stage 14 补齐默认生成保存、只读预览、默认生成后的确认/取消/修改、Seeds 完整/有效/排除列表、qBittorrent Settings 直显和敏感信息不落盘回归。测试默认使用本地 fixture、临时 storage 和 fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
+Stage 9 引入 Playwright 浏览器自动化测试基础设施，覆盖了 `/` 到 `/index` 路由验证、页面基础加载、Request 生成表单校验和显式保存流程、列表搜索/筛选/排序、详情分组和通知恢复、响应式布局和键盘可访问性等关键路径。Stage 10 将 Web UI 扩展到确认、取消和修改流程。Stage 11 将 Web UI 扩展到显式真实 MiKan 配置入口和显式 Auto Bangumi 提交入口。Stage 12 将 Web UI 扩展到 qBittorrent 显式连接测试入口，并通过 Playwright route fake 验证连接测试，不访问真实 qBittorrent。Stage 13 将配置和连接测试迁移到 `/settings`，将 `/index` 收敛为 Request 工作台，补齐 URL 可恢复详情、可见取消/修改表单、按钮语义、状态反馈、Settings 分区和响应式 UI 回归。Stage 14 补齐默认生成保存、只读预览、默认生成后的确认/取消/修改、Seeds 完整/有效/排除列表、qBittorrent Settings 直显和敏感信息不落盘回归。Stage 15 补齐 `ACCEPTED` Request 的删除与受限修改、筛选字面默认语义、`使用正则` / `大小写敏感` 选项、Filter 与 Seeds 排除说明和 Stage 15 安全回归。测试默认使用本地 fixture、临时 storage 和 fake endpoint seam，不访问真实 MiKan、Auto Bangumi 或 qBittorrent。
 
 ## Stage 9 浏览器自动化测试
 

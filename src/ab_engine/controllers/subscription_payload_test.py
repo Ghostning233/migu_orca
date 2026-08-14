@@ -37,7 +37,12 @@ def test_build_ab_subscription_payload_maps_accepted_request_fields() -> None:
         "title": "番剧 标准标题",
         "rss_url": "https://example.invalid/rss.xml",
         "save_path": "番剧 标准标题",
-        "filter_rule": {"must_contain": "1080p", "must_not_contain": "SP"},
+        "filter_rule": {
+            "must_contain": "1080p",
+            "must_not_contain": "SP",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
     }
 
 
@@ -89,6 +94,8 @@ def test_build_ab_subscription_payload_does_not_mutate_or_retain_request_objects
     assert payload["filter_rule"] == {
         "must_contain": "1080p",
         "must_not_contain": "SP",
+        "use_regex": False,
+        "case_sensitive": False,
     }
 
 

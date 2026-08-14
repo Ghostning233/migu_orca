@@ -152,6 +152,7 @@ class TestGenerateWithoutSave:
         page.route("**/api/v1/requests/*/accept**", _capture_saved_action)
         page.route("**/api/v1/requests/*/cancel**", _capture_saved_action)
         page.route("**/api/v1/requests/*/modify**", _capture_saved_action)
+        page.route("**/api/v1/requests/*/delete**", _capture_saved_action)
         page.route("**/api/v1/requests/*/submit-ab**", _capture_saved_action)
 
         page.goto(f"{live_server_url}/index")
@@ -167,6 +168,7 @@ class TestGenerateWithoutSave:
         expect(detail.locator(".detail-actions button:has-text('确认')")).to_have_count(0)
         expect(detail.locator(".detail-actions button:has-text('取消')")).to_have_count(0)
         expect(detail.locator(".detail-actions button:has-text('修改')")).to_have_count(0)
+        expect(detail.locator(".detail-actions button:has-text('删除')")).to_have_count(0)
         expect(detail.locator("text=去 Settings 提交 Auto Bangumi")).to_have_count(0)
         expect(detail.locator("#detail-cancel-form")).to_have_count(0)
         expect(detail.locator("#detail-modify-form")).to_have_count(0)

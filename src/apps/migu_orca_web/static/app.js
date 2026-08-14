@@ -951,19 +951,6 @@
     return names;
   }
 
-  function escapeRegexLiteral(value) {
-    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  }
-
-  function literalExcludePattern(value) {
-    const trimmed = String(value || "").trim();
-    const bracketMatch = trimmed.match(/^\[([^\]]+)\]$/);
-    if (bracketMatch) {
-      return "(?i:\\[?" + escapeRegexLiteral(bracketMatch[1]) + "\\]?)";
-    }
-    return "(?i:" + escapeRegexLiteral(trimmed) + ")";
-  }
-
   function renderHistorySection(container, history) {
     const section = createDetailSection("状态历史", "audit-section");
 
@@ -1090,6 +1077,41 @@
     }
   }
 
+  async function deleteRequest(requestId) {
+    if (!requestId) return;
+    hideNotification();
+    setActionInFlight(true);
+    try {
+      await fetchJson(
+        apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/delete"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ storage_dir: currentStorageDir() || null }),
+        }
+      );
+      if (selectedRequestId === requestId) {
+        selectedRequestId = null;
+      }
+      loadedRequests = (loadedRequests || []).filter(function (summary) {
+        return summary.request_id !== requestId;
+      });
+      renderList();
+      syncRequestIdToUrl(null);
+      setState(detailContainer, "Request 已删除。请选择一个 Request 查看详情。", "empty-state");
+      await loadList({loadSelectedDetail: false});
+      showNotification("success", "删除成功", "已删除 Request " + requestId, {
+        actions: [
+          { label: "刷新列表", handler: loadList },
+        ],
+      });
+    } catch (error) {
+      notifyApiError("删除失败", error);
+    } finally {
+      setActionInFlight(false);
+    }
+  }
+
   function buildModifyForm(request) {
     var config = request.confirmable_config || {};
     var sourceInfo = request.source_info || {};
@@ -1098,6 +1120,8 @@
     var originalGroup = config.selected_subtitle_group || "";
     var originalMustContain = filterRule.must_contain || "";
     var originalMustNotContain = filterRule.must_not_contain || "";
+    var originalUseRegex = filterRule.use_regex === true;
+    var originalCaseSensitive = filterRule.case_sensitive === true;
     var originalFolderName = config.expected_folder_name || "";
 
     var container = document.createElement("div");
@@ -1146,44 +1170,62 @@
     }
 
     var mcLabel = document.createElement("label");
-    mcLabel.textContent = "must_contain";
+    mcLabel.textContent = "包含规则";
     mcLabel.htmlFor = "modify-must-contain";
     var mcInput = document.createElement("input");
     mcInput.id = "modify-must-contain";
     mcInput.type = "text";
     mcInput.value = originalMustContain;
-    mcInput.placeholder = "正则筛选规则（包含）";
-    var mcClear = appendClearControl("modify-clear-must-contain", "清空 must_contain", mcInput);
+    mcInput.placeholder = "如 1080p（默认按字面匹配）";
+    var mcClear = appendClearControl("modify-clear-must-contain", "清空包含规则", mcInput);
     container.appendChild(mcLabel);
     container.appendChild(mcInput);
     container.appendChild(mcClear.wrapper);
 
     var mncLabel = document.createElement("label");
-    mncLabel.textContent = "must_not_contain";
+    mncLabel.textContent = "排除规则";
     mncLabel.htmlFor = "modify-must-not-contain";
     var mncInput = document.createElement("input");
     mncInput.id = "modify-must-not-contain";
     mncInput.type = "text";
     mncInput.value = originalMustNotContain;
-    mncInput.placeholder = "正则筛选规则（排除）";
-    var mncClear = appendClearControl("modify-clear-must-not-contain", "清空 must_not_contain", mncInput);
+    mncInput.placeholder = "如 [v2]（默认按字面匹配）";
+    var mncClear = appendClearControl("modify-clear-must-not-contain", "清空排除规则", mncInput);
     container.appendChild(mncLabel);
     container.appendChild(mncInput);
-    var mncHelp = document.createElement("p");
-    mncHelp.id = "modify-must-not-contain-help";
-    mncHelp.className = "field-help";
-    mncHelp.textContent =
-      "默认按正则匹配；要按字面文本排除 [v2] 或 v2，请勾选字面文本模式后输入 [v2]。";
-    container.appendChild(mncHelp);
-    var mncLiteralWrapper = document.createElement("label");
-    mncLiteralWrapper.className = "inline-check literal-mode-check";
-    mncLiteralWrapper.htmlFor = "modify-must-not-contain-literal";
-    var mncLiteralInput = document.createElement("input");
-    mncLiteralInput.id = "modify-must-not-contain-literal";
-    mncLiteralInput.type = "checkbox";
-    mncLiteralWrapper.append(mncLiteralInput, document.createTextNode("字面文本模式"));
-    container.appendChild(mncLiteralWrapper);
     container.appendChild(mncClear.wrapper);
+
+    var filterOptions = document.createElement("div");
+    filterOptions.className = "filter-options";
+
+    var regexWrapper = document.createElement("label");
+    regexWrapper.className = "inline-check filter-option";
+    regexWrapper.htmlFor = "modify-filter-use-regex";
+    var regexInput = document.createElement("input");
+    regexInput.id = "modify-filter-use-regex";
+    regexInput.type = "checkbox";
+    regexInput.checked = originalUseRegex;
+    regexWrapper.append(regexInput, document.createTextNode("使用正则"));
+    filterOptions.appendChild(regexWrapper);
+
+    var caseWrapper = document.createElement("label");
+    caseWrapper.className = "inline-check filter-option";
+    caseWrapper.htmlFor = "modify-filter-case-sensitive";
+    var caseInput = document.createElement("input");
+    caseInput.id = "modify-filter-case-sensitive";
+    caseInput.type = "checkbox";
+    caseInput.checked = originalCaseSensitive;
+    caseWrapper.append(caseInput, document.createTextNode("大小写敏感"));
+    filterOptions.appendChild(caseWrapper);
+
+    container.appendChild(filterOptions);
+
+    var filterHelp = document.createElement("p");
+    filterHelp.id = "modify-filter-help";
+    filterHelp.className = "field-help";
+    filterHelp.textContent =
+      "默认按字面文本匹配且不区分大小写；勾选「使用正则」后按正则匹配，勾选「大小写敏感」后区分大小写。";
+    container.appendChild(filterHelp);
 
     var fnLabel = document.createElement("label");
     fnLabel.textContent = "folder_name";
@@ -1221,20 +1263,25 @@
       }
       var mcVal = mcInput.value.trim();
       var mncVal = mncInput.value.trim();
-      var nextMncVal = mncLiteralInput.checked && mncVal ? literalExcludePattern(mncVal) : mncVal;
+      var useRegex = regexInput.checked;
+      var caseSensitive = caseInput.checked;
+      var mcChanged = mcClear.checkbox.checked || mcVal !== originalMustContain;
+      var mncChanged = mncClear.checkbox.checked || mncVal !== originalMustNotContain;
       if (
-        mcClear.checkbox.checked ||
-        mncClear.checkbox.checked ||
-        mcVal !== originalMustContain ||
-        nextMncVal !== originalMustNotContain
+        mcChanged ||
+        mncChanged ||
+        useRegex !== originalUseRegex ||
+        caseSensitive !== originalCaseSensitive
       ) {
         patch.filter_rule = {};
-        if (mcClear.checkbox.checked || mcVal !== originalMustContain) {
+        if (mcChanged) {
           patch.filter_rule.must_contain = mcClear.checkbox.checked ? "" : mcVal;
         }
-        if (mncClear.checkbox.checked || nextMncVal !== originalMustNotContain) {
-          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : nextMncVal;
+        if (mncChanged) {
+          patch.filter_rule.must_not_contain = mncClear.checkbox.checked ? "" : mncVal;
         }
+        patch.filter_rule.use_regex = useRegex;
+        patch.filter_rule.case_sensitive = caseSensitive;
       }
       var fnVal = fnInput.value.trim();
       if (fnClear.checkbox.checked || fnVal !== originalFolderName) {
@@ -1401,7 +1448,7 @@
       var previewNote = document.createElement("p");
       previewNote.className = "field-help preview-mode-note";
       previewNote.textContent =
-        "预览模式：此 Request 尚未保存，只能查看，保存后才可确认、取消、修改或提交 Auto Bangumi。";
+        "预览模式：此 Request 尚未保存，只能查看，保存后才可确认、取消、修改、删除或提交 Auto Bangumi。";
       actionsContainer.appendChild(previewNote);
 
       var savePreviewBtn = document.createElement("button");
@@ -1459,6 +1506,29 @@
         "/settings?request_id=" + encodeURIComponent(request.request_id) + "#auto-bangumi";
       abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi";
       actionsContainer.appendChild(abSubmitBtn);
+
+      var acceptedModifyBtn = document.createElement("button");
+      acceptedModifyBtn.type = "button";
+      acceptedModifyBtn.className = "secondary-button detail-action";
+      acceptedModifyBtn.textContent = "修改";
+      acceptedModifyBtn.addEventListener("click", function () {
+        var form = document.getElementById("detail-modify-form");
+        if (form) {
+          form.hidden = !form.hidden;
+        }
+      });
+      actionsContainer.appendChild(acceptedModifyBtn);
+
+      var deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "danger-button detail-action";
+      deleteBtn.textContent = "删除";
+      deleteBtn.addEventListener("click", function () {
+        if (window.confirm("确认删除此 Request？此操作不可恢复。")) {
+          deleteRequest(request.request_id);
+        }
+      });
+      actionsContainer.appendChild(deleteBtn);
     } else {
       var statusNote = document.createElement("p");
       statusNote.className = "field-help";
@@ -1478,10 +1548,14 @@
     );
 
     var filterSection = createDetailSection("Filter", "filter-section");
+    var matchMode = filterRule.use_regex === true ? "正则" : "普通字符";
+    var caseMode = filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写";
     filterSection.appendChild(
       detailList([
-        ["must_contain", filterRule.must_contain],
-        ["must_not_contain", filterRule.must_not_contain],
+        ["包含规则", filterRule.must_contain],
+        ["排除规则", filterRule.must_not_contain],
+        ["匹配模式", matchMode],
+        ["大小写", caseMode],
         ["folder_name", config.expected_folder_name],
         ["有效种子数", effectiveSeeds.length],
         ["排除种子数", excludedSeeds.length],

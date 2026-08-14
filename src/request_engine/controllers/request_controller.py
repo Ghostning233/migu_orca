@@ -20,12 +20,20 @@ from subscription_engine.controllers.subscription_controller import generate_fol
 PENDING_CONFIRM = "PENDING_CONFIRM"
 ACCEPTED = "ACCEPTED"
 CANCELLED = "CANCELLED"
+MODIFIABLE_STATUSES = frozenset({PENDING_CONFIRM, ACCEPTED})
 MODIFY_PATCH_FIELDS = {
     "selected_subtitle_group",
     "filter_rule",
     "expected_folder_name",
 }
-FILTER_RULE_PATCH_FIELDS = {"must_contain", "must_not_contain"}
+FILTER_RULE_PATCH_FIELDS = {
+    "must_contain",
+    "must_not_contain",
+    "use_regex",
+    "case_sensitive",
+}
+FILTER_RULE_STRING_FIELDS = {"must_contain", "must_not_contain"}
+FILTER_RULE_BOOL_FIELDS = {"use_regex", "case_sensitive"}
 
 
 def build_pending_request(
@@ -187,7 +195,7 @@ def validate_modify_patch(patch: dict[str, Any]) -> dict[str, Any]:
 
 def modify_request(request: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     validated = validate_modify_patch(patch)
-    updated = _copy_pending_request(request, "modify_request")
+    updated = _copy_modifiable_request(request, "modify_request")
     confirmable = updated["confirmable_config"]
     source_info = updated["source_info"]
     rss_sources = source_info.get("rss_sources", [])
@@ -222,7 +230,7 @@ def modify_request(request: dict[str, Any], patch: dict[str, Any]) -> dict[str, 
     confirmable["effective_seed_names"] = (
         list(selected_source.get("valid_seed_names", [])) if selected_source else []
     )
-    updated["status"] = PENDING_CONFIRM
+    # Status is preserved: ACCEPTED stays ACCEPTED, PENDING_CONFIRM stays PENDING_CONFIRM.
     updated["updated_at"] = datetime.now(UTC).isoformat()
     return updated
 
@@ -242,7 +250,22 @@ def _copy_pending_request(
     return deepcopy(request)
 
 
-def _validate_filter_rule_patch(value: Any) -> dict[str, str]:
+def _copy_modifiable_request(
+    request: dict[str, Any],
+    failed_step: str,
+) -> dict[str, Any]:
+    status = request.get("status")
+    if status not in MODIFIABLE_STATUSES:
+        raise Stage1Error(
+            "invalid_request_status",
+            "只有 PENDING_CONFIRM 或 ACCEPTED Request 可以修改",
+            failed_step,
+            {"status": status},
+        )
+    return deepcopy(request)
+
+
+def _validate_filter_rule_patch(value: Any) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise Stage1Error(
             "invalid_modify_patch",
@@ -264,30 +287,23 @@ def _validate_filter_rule_patch(value: Any) -> dict[str, str]:
         )
 
     validated = deepcopy(value)
-    for field, rule in validated.items():
-        if not isinstance(rule, str):
+    for field in FILTER_RULE_STRING_FIELDS & set(validated):
+        if not isinstance(validated[field], str):
             raise Stage1Error(
                 "invalid_modify_patch",
                 "filter_rule 字段必须是字符串",
                 "validate_modify_patch",
                 {"field": f"filter_rule.{field}"},
             )
-        _compile_patch_regex(rule, field)
+    for field in FILTER_RULE_BOOL_FIELDS & set(validated):
+        if not isinstance(validated[field], bool):
+            raise Stage1Error(
+                "invalid_modify_patch",
+                "filter_rule 选项必须是布尔值",
+                "validate_modify_patch",
+                {"field": f"filter_rule.{field}"},
+            )
     return validated
-
-
-def _compile_patch_regex(value: str, field: str) -> None:
-    if not value:
-        return
-    try:
-        re.compile(value)
-    except re.error as exc:
-        raise Stage1Error(
-            "invalid_modify_patch",
-            f"filter_rule.{field} 不是合法正则",
-            "validate_modify_patch",
-            {"field": f"filter_rule.{field}", "rule": value, "reason": str(exc)},
-        ) from exc
 
 
 def _find_rss_source_by_group(
@@ -309,33 +325,41 @@ def _find_rss_source_by_group(
 
 def _recompute_source_seed_filter(
     source: dict[str, Any],
-    filter_rule: dict[str, str],
+    filter_rule: dict[str, Any],
 ) -> None:
-    must_contain = _compile_request_filter_rule(
-        filter_rule.get("must_contain", ""),
-        "must_contain",
-    )
-    must_not_contain = _compile_request_filter_rule(
-        filter_rule.get("must_not_contain", ""),
-        "must_not_contain",
-    )
+    must_contain = filter_rule.get("must_contain", "")
+    must_not_contain = filter_rule.get("must_not_contain", "")
+    use_regex = filter_rule.get("use_regex", False)
+    case_sensitive = filter_rule.get("case_sensitive", False)
     seed_names = _source_seed_names(source)
     valid: list[str] = []
     excluded: list[dict[str, str]] = []
     for seed_name in seed_names:
-        if must_not_contain and must_not_contain.search(seed_name):
+        if must_not_contain and _filter_rule_matches(
+            must_not_contain,
+            seed_name,
+            field="must_not_contain",
+            use_regex=use_regex,
+            case_sensitive=case_sensitive,
+        ):
             excluded.append(
                 {
                     "name": seed_name,
-                    "reason": f"命中必须不含规则：{filter_rule['must_not_contain']}",
+                    "reason": f"命中排除规则：{must_not_contain}",
                     "rule": "must_not_contain",
                 }
             )
-        elif must_contain and not must_contain.search(seed_name):
+        elif must_contain and not _filter_rule_matches(
+            must_contain,
+            seed_name,
+            field="must_contain",
+            use_regex=use_regex,
+            case_sensitive=case_sensitive,
+        ):
             excluded.append(
                 {
                     "name": seed_name,
-                    "reason": f"未命中必须包含规则：{filter_rule['must_contain']}",
+                    "reason": f"未命中包含规则：{must_contain}",
                     "rule": "must_contain",
                 }
             )
@@ -364,18 +388,36 @@ def _source_seed_names(source: dict[str, Any]) -> list[str]:
     return seed_names
 
 
-def _compile_request_filter_rule(value: str, field: str) -> re.Pattern[str] | None:
-    if not value:
-        return None
-    try:
-        return re.compile(value)
-    except re.error as exc:  # pragma: no cover - validate_modify_patch guards this
-        raise Stage1Error(
-            "invalid_modify_patch",
-            f"filter_rule.{field} 不是合法正则",
-            "modify_request",
-            {"field": f"filter_rule.{field}", "rule": value, "reason": str(exc)},
-        ) from exc
+def _filter_rule_matches(
+    value: str,
+    seed_name: str,
+    *,
+    field: str,
+    use_regex: bool,
+    case_sensitive: bool,
+) -> bool:
+    """Match a single non-empty filter_rule value against a seed name.
+
+    use_regex=False performs a literal substring match; case_sensitive=False
+    ignores case for both literal and regex matching. Regex compilation only
+    happens when use_regex=True, so literal inputs such as ``[`` or ``[v2]``
+    never raise a regex validation error.
+    """
+    if use_regex:
+        flags = 0 if case_sensitive else re.IGNORECASE
+        try:
+            pattern = re.compile(value, flags)
+        except re.error as exc:
+            raise Stage1Error(
+                "invalid_modify_patch",
+                f"filter_rule.{field} 不是合法正则",
+                "modify_request",
+                {"field": f"filter_rule.{field}", "rule": value, "reason": str(exc)},
+            ) from exc
+        return pattern.search(seed_name) is not None
+    if case_sensitive:
+        return value in seed_name
+    return value.lower() in seed_name.lower()
 
 
 def _rss_result_to_dict(result: FilteredRss) -> dict[str, Any]:

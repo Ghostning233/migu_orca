@@ -1,7 +1,9 @@
 {
   "filter_rule": {
     "must_contain": "",
-    "must_not_contain": ""
+    "must_not_contain": "",
+    "use_regex": false,
+    "case_sensitive": false
   },
   "subtitle_group_priority": [
     "Loli",

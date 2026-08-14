@@ -325,8 +325,15 @@ class TestModifyFlow:
         assert page.locator("#modify-subtitle-group").count() >= 1
         assert page.locator("#modify-must-contain").count() >= 1
         assert page.locator("#modify-must-not-contain").count() >= 1
-        assert page.locator("#modify-must-not-contain-literal").count() >= 1
-        assert "默认按正则匹配" in form.inner_text()
+        assert "包含规则" in form.inner_text()
+        assert "排除规则" in form.inner_text()
+        regex_box = page.locator("#modify-filter-use-regex")
+        case_box = page.locator("#modify-filter-case-sensitive")
+        assert regex_box.count() >= 1
+        assert case_box.count() >= 1
+        assert regex_box.is_checked() is False
+        assert case_box.is_checked() is False
+        assert "默认按字面文本匹配" in form.inner_text()
         assert page.locator("#modify-folder-name").count() >= 1
         assert page.locator("#modify-clear-must-contain").count() >= 1
         assert page.locator("#modify-clear-must-not-contain").count() >= 1
@@ -359,16 +366,15 @@ class TestModifyFlow:
         _open_request_detail(page, live_server_url, storage_dir, "req-act-v2-literal")
 
         _click_modify(page)
-        page.locator("#modify-must-not-contain").fill("[v2]")
-        page.locator("#modify-must-not-contain-literal").check()
+        page.locator("#modify-must-not-contain").fill("V2")
         page.locator("#detail-modify-form button:has-text('提交修改')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         detail = page.locator("#request-detail-container")
         detail_text = detail.inner_text()
         assert "修改成功" in page.locator("#page-notification").inner_text()
-        assert "must_not_contain" in detail_text
-        assert "(?i:\\[?v2\\]?)" in detail_text
+        assert "排除规则" in detail_text
+        assert "V2" in detail_text
         assert "有效种子数" in detail_text
         assert "排除种子数" in detail_text
 
@@ -377,7 +383,7 @@ class TestModifyFlow:
         excluded_group = detail.locator(".seed-group:has-text('排除种子')")
         assert "V2" not in valid_group.inner_text()
         assert "V2" in excluded_group.inner_text()
-        assert "命中必须不含规则" in excluded_group.inner_text()
+        assert "命中排除规则" in excluded_group.inner_text()
 
     def test_modify_regex_v2_exclude_updates_seed_lists(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -387,6 +393,7 @@ class TestModifyFlow:
 
         _click_modify(page)
         page.locator("#modify-must-not-contain").fill("V2")
+        page.locator("#modify-filter-use-regex").check()
         page.locator("#detail-modify-form button:has-text('提交修改')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
@@ -464,7 +471,12 @@ class TestModifyFlow:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert captured["payload"]["patch"] == {
-            "filter_rule": {"must_contain": "", "must_not_contain": ""},
+            "filter_rule": {
+                "must_contain": "",
+                "must_not_contain": "",
+                "use_regex": False,
+                "case_sensitive": False,
+            },
             "expected_folder_name": "",
         }
 
@@ -498,6 +510,278 @@ class TestModifyFlow:
         assert "PENDING_CONFIRM" in page.locator("#request-detail-container").inner_text()
 
 
+class TestModifyFilterOptions:
+    """US-107: 修改表单默认字面匹配，勾选使用正则/大小写敏感时 payload 携带对应布尔值."""
+
+    def _capture_modify(
+        self, page: Page, request_id: str
+    ) -> dict:
+        captured: dict = {}
+
+        def handle_modify(route: object) -> None:
+            if getattr(route, "request").method == "POST":
+                captured["payload"] = getattr(route, "request").post_data_json
+                getattr(route, "fulfill")(
+                    json={
+                        "ok": True,
+                        "result": {
+                            "request": {
+                                "request_id": request_id,
+                                "status": "PENDING_CONFIRM",
+                            },
+                            "summary": {
+                                "request_id": request_id,
+                                "status": "PENDING_CONFIRM",
+                            },
+                        },
+                    }
+                )
+            else:
+                getattr(route, "continue_")()
+
+        page.route(f"**/api/v1/requests/{request_id}/modify**", handle_modify)
+        return captured
+
+    def test_default_filter_submit_sends_false_flags(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-filter-default")
+        captured = self._capture_modify(page, "req-filter-default")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-default")
+
+        _click_modify(page)
+        assert page.locator("#modify-filter-use-regex").is_checked() is False
+        assert page.locator("#modify-filter-case-sensitive").is_checked() is False
+        page.locator("#modify-must-contain").fill("1080p")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        filter_rule = captured["payload"]["patch"]["filter_rule"]
+        assert filter_rule["must_contain"] == "1080p"
+        assert filter_rule["use_regex"] is False
+        assert filter_rule["case_sensitive"] is False
+
+    def test_regex_checked_payload_sends_use_regex_true(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-filter-regex")
+        captured = self._capture_modify(page, "req-filter-regex")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-regex")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("^01")
+        page.locator("#modify-filter-use-regex").check()
+        assert page.locator("#modify-filter-use-regex").is_checked() is True
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        filter_rule = captured["payload"]["patch"]["filter_rule"]
+        assert filter_rule["must_not_contain"] == "^01"
+        assert filter_rule["use_regex"] is True
+        assert filter_rule["case_sensitive"] is False
+
+    def test_case_sensitive_checked_payload_sends_case_sensitive_true(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-filter-case")
+        captured = self._capture_modify(page, "req-filter-case")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-case")
+
+        _click_modify(page)
+        page.locator("#modify-must-contain").fill("V2")
+        page.locator("#modify-filter-case-sensitive").check()
+        assert page.locator("#modify-filter-case-sensitive").is_checked() is True
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        filter_rule = captured["payload"]["patch"]["filter_rule"]
+        assert filter_rule["must_contain"] == "V2"
+        assert filter_rule["use_regex"] is False
+        assert filter_rule["case_sensitive"] is True
+
+    def test_invalid_regex_error_recovery_preserves_form(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-regex-fail")
+
+        def handle_modify(route: object) -> None:
+            getattr(route, "fulfill")(
+                status=500,
+                json={
+                    "ok": False,
+                    "error_type": "invalid_modify_patch",
+                    "error_message": "filter_rule.must_not_contain 不是合法正则",
+                },
+            )
+
+        page.route("**/api/v1/requests/req-filter-regex-fail/modify**", handle_modify)
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-regex-fail")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("[")
+        page.locator("#modify-filter-use-regex").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "不是合法正则" in page.locator("#page-notification").inner_text()
+        assert page.locator("#detail-modify-form").is_visible()
+        assert page.locator("#modify-must-not-contain").input_value() == "["
+        assert page.locator("#modify-filter-use-regex").is_checked() is True
+
+
+class TestFilterDetailDisplay:
+    """US-108: 详情 Filter 分区展示规则、匹配模式与大小写状态；Seeds 排除原因可读."""
+
+    def _save_request_with_seed_names(
+        self, storage_dir: Path, title: str, request_id: str, seed_names: list[str]
+    ) -> None:
+        request = create_saved_request(storage_dir, title, request_id)
+        source = request["source_info"]["rss_sources"][0]
+        source["seed_names"] = list(seed_names)
+        source["valid_seed_names"] = list(seed_names)
+        source["valid_seed_count"] = len(seed_names)
+        source["excluded_seed_names"] = []
+        source["invalid_seed_count"] = 0
+        source["total_seed_count"] = len(seed_names)
+        request["confirmable_config"]["effective_seed_names"] = list(seed_names)
+        save_request_snapshot(load_storage_config(storage_dir), request)
+
+    def test_filter_section_shows_rules_mode_and_case_status(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-display-1")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-display-1")
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "包含规则" in filter_text
+        assert "排除规则" in filter_text
+        assert "匹配模式" in filter_text
+        assert "普通字符" in filter_text
+        assert "大小写" in filter_text
+        assert "不区分大小写" in filter_text
+
+        # Switch to regex + case-sensitive via the modify form and verify refresh.
+        _click_modify(page)
+        page.locator("#modify-must-contain").fill("1080p")
+        page.locator("#modify-filter-use-regex").check()
+        page.locator("#modify-filter-case-sensitive").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        refreshed = detail.locator(".filter-section").inner_text()
+        assert "匹配模式" in refreshed
+        assert "正则" in refreshed
+        assert "区分大小写" in refreshed
+        assert "普通字符" not in refreshed
+
+    def test_literal_v2_exclude_and_reason_display(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        self._save_request_with_seed_names(
+            storage_dir,
+            "咒术回战第三季",
+            "req-filter-v2-literal",
+            [
+                "[Loli] 咒术回战 第三季 - 01 [1080p][CHS].mkv",
+                "[Loli] 咒术回战 第三季 - 01 [v2][1080p][CHS].mkv",
+            ],
+        )
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-v2-literal")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("[v2]")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "排除规则" in filter_text
+        assert "[v2]" in filter_text
+        assert "普通字符" in filter_text
+        assert "不区分大小写" in filter_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        assert "[v2]" in excluded_text
+        assert "命中排除规则：[v2]" in excluded_text
+        assert "[v2]" not in valid_text
+
+    def test_case_insensitive_v2_matches_uppercase_V2(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-ci-v2")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-ci-v2")
+
+        _click_modify(page)
+        page.locator("#modify-must-contain").fill("v2")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "包含规则" in filter_text
+        assert "v2" in filter_text
+        assert "不区分大小写" in filter_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        # Seed 2 contains "V2"; case-insensitive "v2" must match it.
+        assert "V2" in valid_text
+        assert "未命中包含规则：v2" in excluded_text
+
+    def test_case_sensitive_v2_does_not_match_uppercase_V2(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-cs-v2")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-cs-v2")
+
+        _click_modify(page)
+        page.locator("#modify-must-contain").fill("v2")
+        page.locator("#modify-filter-case-sensitive").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "区分大小写" in filter_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        # Case-sensitive "v2" must NOT match the uppercase "V2" seed.
+        assert "V2" not in valid_text
+        assert "V2" in excluded_text
+        assert "未命中包含规则：v2" in excluded_text
+
+    def test_regex_mode_shows_regex_and_applies_pattern(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-regex-detail")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-regex-detail")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("V2 \\[1080p\\]")
+        page.locator("#modify-filter-use-regex").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "匹配模式" in filter_text
+        assert "正则" in filter_text
+        # Raw user text is shown as-is, never auto-transformed into a different pattern.
+        assert "V2 \\[1080p\\]" in filter_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        assert "命中排除规则：V2 \\[1080p\\]" in excluded_text
+        assert "V2 \\[1080p\\]" not in valid_text
+
+
 class TestErrorRecovery:
     """AC: 操作失败时通知展示错误消息，现有数据不丢失."""
 
@@ -529,3 +813,169 @@ class TestErrorRecovery:
         detail_text = page.locator("#request-detail-container").inner_text()
         for section in ("Overview", "Source", "Filter", "Seeds", "Audit"):
             assert section in detail_text, f"Missing section: {section}"
+
+
+class TestAcceptedRequestManagement:
+    """US-105: ACCEPTED Request 详情展示修改/删除/去 Settings 提交 Auto Bangumi 动作."""
+
+    def test_accepted_request_shows_modify_delete_and_ab_submit(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-accepted-actions")
+        _open_request_detail(page, live_server_url, storage_dir, "req-accepted-actions")
+
+        actions = page.locator(".detail-actions")
+        assert actions.locator("button:has-text('修改')").count() >= 1
+        assert actions.locator("button:has-text('删除')").count() >= 1
+        assert (
+            actions.locator("a:has-text('去 Settings 提交 Auto Bangumi')").count() >= 1
+        )
+
+    def test_accepted_modify_keeps_status_and_refreshes_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-accepted-modify")
+        _open_request_detail(page, live_server_url, storage_dir, "req-accepted-modify")
+
+        page.locator(".detail-actions button:has-text('修改')").click()
+        page.wait_for_timeout(300)
+        assert page.locator("#detail-modify-form").is_visible()
+        page.locator("#modify-folder-name").fill("ACCEPTED 修改目录")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "修改成功" in page.locator("#page-notification").inner_text()
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "ACCEPTED" in detail_text
+        assert "ACCEPTED 修改目录" in detail_text
+        assert (
+            "ACCEPTED"
+            in page.locator("[data-request-id='req-accepted-modify']").inner_text()
+        )
+
+    def test_accepted_delete_success_refreshes_list_and_clears_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-accepted-delete")
+        _open_request_detail(page, live_server_url, storage_dir, "req-accepted-delete")
+
+        seen_dialogs: list[str] = []
+        page.on(
+            "dialog",
+            lambda dialog: (seen_dialogs.append(dialog.message), dialog.accept()),
+        )
+        page.locator(".detail-actions button:has-text('删除')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert seen_dialogs
+        assert "确认删除此 Request" in seen_dialogs[0]
+        assert "删除成功" in page.locator("#page-notification").inner_text()
+        assert page.locator("[data-request-id='req-accepted-delete']").count() == 0
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "Request 已删除" in detail_text
+        assert "request_id=" not in page.url
+        assert not (storage_dir / "requests" / "req-accepted-delete.json").exists()
+
+    def test_accepted_delete_cancel_does_not_call_api(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(
+            storage_dir, "葬送的芙莉莲", "req-accepted-delete-cancel"
+        )
+        calls: list[str] = []
+
+        def handle_delete(route: object) -> None:
+            calls.append(str(getattr(route, "request").url))
+            getattr(route, "continue_")()
+
+        page.route(
+            "**/api/v1/requests/req-accepted-delete-cancel/delete**", handle_delete
+        )
+        _open_request_detail(
+            page, live_server_url, storage_dir, "req-accepted-delete-cancel"
+        )
+
+        page.on("dialog", lambda dialog: dialog.dismiss())
+        page.locator(".detail-actions button:has-text('删除')").click()
+        page.wait_for_timeout(600)
+
+        assert calls == []
+        assert page.locator("[data-request-id='req-accepted-delete-cancel']").count() >= 1
+        assert (
+            "req-accepted-delete-cancel"
+            in page.locator("#request-detail-container").inner_text()
+        )
+        assert "request_id=req-accepted-delete-cancel" in page.url
+
+    def test_delete_failure_keeps_detail_and_shows_error(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(
+            storage_dir, "葬送的芙莉莲", "req-accepted-delete-fail"
+        )
+
+        def handle_delete(route: object) -> None:
+            getattr(route, "fulfill")(
+                status=500,
+                json={
+                    "ok": False,
+                    "error_type": "storage_error",
+                    "error_message": "删除 Request JSON 失败",
+                },
+            )
+
+        page.route(
+            "**/api/v1/requests/req-accepted-delete-fail/delete**", handle_delete
+        )
+        _open_request_detail(
+            page, live_server_url, storage_dir, "req-accepted-delete-fail"
+        )
+
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.locator(".detail-actions button:has-text('删除')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "删除失败" in page.locator("#page-notification").inner_text()
+        assert page.locator("[data-request-id='req-accepted-delete-fail']").count() >= 1
+        assert (
+            "req-accepted-delete-fail"
+            in page.locator("#request-detail-container").inner_text()
+        )
+        assert "request_id=req-accepted-delete-fail" in page.url
+
+    def test_accepted_modify_failure_keeps_form_and_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_accepted_request(
+            storage_dir, "葬送的芙莉莲", "req-accepted-modify-fail"
+        )
+
+        def handle_modify(route: object) -> None:
+            getattr(route, "fulfill")(
+                status=500,
+                json={
+                    "ok": False,
+                    "error_type": "invalid_modify_patch",
+                    "error_message": "修改失败",
+                },
+            )
+
+        page.route(
+            "**/api/v1/requests/req-accepted-modify-fail/modify**", handle_modify
+        )
+        _open_request_detail(
+            page, live_server_url, storage_dir, "req-accepted-modify-fail"
+        )
+
+        page.locator(".detail-actions button:has-text('修改')").click()
+        page.wait_for_timeout(300)
+        page.locator("#modify-folder-name").fill("失败后仍保留")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "修改失败" in page.locator("#page-notification").inner_text()
+        assert page.locator("#detail-modify-form").is_visible()
+        assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "ACCEPTED" in detail_text
+        assert page.locator("[data-request-id='req-accepted-modify-fail']").count() >= 1

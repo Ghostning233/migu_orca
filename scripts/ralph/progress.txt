@@ -1,87 +1,122 @@
 # Ralph Progress Log
+Started: Fri Aug 14 20:20:45 CST 2026
+---
 ## Codebase Patterns
-- Browser tests that trigger Request generation should seed `miguOrca.web.storageDir` to a temporary fixture path before visiting `/index`; otherwise default `.migu_orca/storage` can be polluted and empty-list tests become order-dependent.
-- Explicit `miguOrca.web.saveRequest = "false"` is preview-only on `/index`; preview details must stay read-only, avoid URL `request_id` sync, and offer a save action before saved Request APIs are available.
-- Request detail seed feedback should derive valid/excluded lists from the selected `source_info.rss_sources` entry; `confirmable_config.effective_seed_names` is only the selected valid list and does not include exclusion reasons.
-- Selected RSS source summaries should carry safe title-only `seed_names` for the complete pre-filter Seeds list; use valid/excluded title fallback only for older saved Requests.
-- qBittorrent Settings connection testing is direct-rendered in `#settings-qbittorrent-test-form`; do not wrap it in `<details>`/`<summary>` or require tests to open a disclosure before filling fields.
-- Stage closeout docs should update README, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, the stage PRD, and affected module PRDs together so the current-stage baseline stays consistent.
-- Sensitive Web UI regressions should check URL state, `localStorage`, `sessionStorage`, visible body text, and saved Request JSON; qBittorrent and Auto Bangumi secrets are allowed only in explicit request bodies.
+- `modify_request` in `request_engine/controllers/request_controller.py` accepts both `PENDING_CONFIRM` and `ACCEPTED` requests and preserves the original status (never resets to `PENDING_CONFIRM`); accept/cancel remain restricted to `PENDING_CONFIRM` only via `_copy_pending_request`.
+- Stage 14 has been completed and merged into `main`; current active work is Stage 15.
+- `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
+- Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
+- Preview Requests must not expose delete, confirm, cancel, modify, or Auto Bangumi submit actions.
+- Storage request repository exposes `save_request_snapshot`, `load_request_snapshot`, `list_request_snapshots`, and `delete_request_snapshot`; all path-derived functions guard request_id through `_request_path` (rejects empty, path fragments, and traversal) and return stable sanitized errors.
+- Web API request action endpoints share the shape `POST /api/v1/requests/<path:request_id>/<action>` with a `RequestActionPayload` subclass whose `request_id` comes from the URL path and whose payload only carries `storage_dir`; delete returns a safe summary (request_id, storage, directory, filename, deleted) and never the deleted snapshot body.
+- `FilterRule` carries `use_regex` and `case_sensitive` (default `false`); old config or saved Requests missing them load with defaults via `.get("use_regex", False)` / `.get("case_sensitive", False)`.
+- Filter matching is literal substring by default (case-insensitive); regex is opt-in via `use_regex=true`. `rss_controller.filter_seeds` and `request_controller._recompute_source_seed_filter` keep the same semantics: compile regex only when `use_regex` is true, use `re.IGNORECASE` or `.lower()` when case-insensitive, and exclusion reasons are `命中排除规则：<rule>` / `未命中包含规则：<rule>`.
+- The Web modify filter form uses 包含规则/排除规则 labels plus 使用正则/大小写敏感 checkboxes (ids `modify-filter-use-regex` / `modify-filter-case-sensitive`); whenever a `filter_rule` patch is sent it always carries explicit `use_regex`/`case_sensitive` booleans reflecting the current checkbox state, so default submits send `false` and clearing fields keeps the regex/case option state. The Stage 14 literal helper (`literalExcludePattern`/`escapeRegexLiteral`) and the literal checkbox were removed.
+- Request detail seed feedback should continue to derive complete/valid/excluded lists from the selected RSS source and must not render raw RSS XML or raw response bodies.
+- The Request detail Filter section renders 包含规则/排除规则 labels plus 匹配模式 (`filter_rule.use_regex` ? "正则" : "普通字符") and 大小写 (`filter_rule.case_sensitive` ? "区分大小写" : "不区分大小写") from the saved `filter_rule`, always showing the raw rule text the user typed; the static `views_test.py` assertion strings must mirror these exact JS row expressions.
+- Sensitive Web UI regressions should check URL state, `localStorage`, `sessionStorage`, visible body text, saved Request JSON, logs/screenshots/traces where applicable.
+- Browser tests require the repo-root `.migu_orca/storage` to be absent; stale saved Requests there fail `test_empty_list_state`, `test_no_default_storage_pollution`, `test_list_count_shows_zero`, and the Stage 14 visual hierarchy test.
+- Destructive Web UI actions (delete) require an explicit `window.confirm` gate; on success the front-end filters `loadedRequests`, calls `syncRequestIdToUrl(null)` to drop the URL `request_id`, clears the detail container to an empty state, then awaits `loadList` and shows the success notification AFTER the refresh (because `loadList` calls `hideNotification()` at its start).
+- ACCEPTED Request details show 修改/删除/去 Settings 提交 Auto Bangumi; preview Requests must keep the existing read-only contract (no saved-action buttons and no saved-action API calls).
+- Stage 15 security regressions in `tests/browser/test_ui_quality.py` feed sensitive values through a mocked external response (qBittorrent test-connection), then run the stage's Web flows (ACCEPTED modify + delete) and assert URL, `localStorage`, `sessionStorage`, visible body text, and remaining saved Request JSON stay clean; building an ACCEPTED request inline needs `accept_request` + `save_request_snapshot` (the `create_saved_accepted_request` helper lives in `tests/browser/test_actions.py`, not conftest).
+- Stage closeout docs must stay synchronized across README, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, the stage PRD, and the affected module PRDs (Stage 15: M01, M06, M09, M11, M13).
+---
+## 2026-08-14 20:32:00 CST - US-103
+Thread: https://codex.openai.com/threads/019ffe91-320e-7110-959e-c2c339c7f029
+- Added path-safe `delete_request_snapshot` to the storage request repository: it validates request_id via the shared `_request_path` guard (rejects empty, path fragments, and traversal), returns a stable `request_not_found` error for missing Requests without leaking absolute paths, maps unlink OSError to a sanitized `storage_error`, and returns a safe summary `{request_id, storage, directory, filename, deleted}`.
+- Added the Web API delete entry `POST /api/v1/requests/<path:request_id>/delete` using the existing `RequestActionPayload` (request_id from URL path, `storage_dir` from payload). The response returns only the deleted request_id and safe summary, never the deleted snapshot JSON.
+- After a successful delete the Request list no longer includes the id and detail load returns the stable missing error.
+- Files changed: `src/storage_engine/controllers/request_repository.py`, `src/apps/migu_orca_web/views.py`, `src/storage_engine/controllers/request_repository_test.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 430 tests; `uv run pytest tests/browser/ -q` passed with 140 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: Web API action endpoints follow `POST /api/v1/requests/<path:request_id>/<action>` with `RequestActionPayload`; delete should reuse it and return only the safe deletion summary.
+  - Pattern discovered: the storage repository centralizes path-safety in `_request_path`, so the delete function inherits traversal/empty rejection without duplicating it.
+  - Gotcha encountered: the repo-root `.migu_orca/storage` had stale dev Requests that broke four browser tests expecting an empty default list; browser tests require `.migu_orca/storage` to be absent (gitignored, safe to clear).
+  - Useful context: only `requests/<request_id>.json` is removed on delete; history and ab_result files are intentionally left untouched for now (the request file missing makes detail load return `request_not_found`).
+---
+## 2026-08-14 20:45:00 CST - US-104
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- `modify_request` now accepts `PENDING_CONFIRM` and `ACCEPTED` requests via a new `_copy_modifiable_request` helper (rejects `CANCELLED` and unknown statuses with the same stable `invalid_request_status` error). After modification the status is preserved instead of being reset to `PENDING_CONFIRM`, so an ACCEPTED Request stays ACCEPTED; the `user_action` ACCEPT record is untouched.
+- The restricted patch surface is unchanged: only `selected_subtitle_group`, `filter_rule`, and `expected_folder_name` (validated by `validate_modify_patch`) may be modified; illegal fields still raise `invalid_modify_patch_field`. `filter_rule` remains limited to `must_contain`/`must_not_contain`.
+- Modifying an ACCEPTED Request recomputes per-source valid/excluded seeds and `effective_seed_names`; Auto Bangumi submission still requires explicit `POST /submit-ab` and `build_ab_subscription_payload` still only accepts `ACCEPTED` status.
+- The Web modify API records a `MODIFY` history event (previous_status/next_status both ACCEPTED) for ACCEPTED modifications; the detail Audit section shows it.
+- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 436 tests; `uv run pytest tests/browser/ -q` passed with 140 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep the status-restriction gate in a dedicated copy helper (`_copy_pending_request` for accept/cancel, `_copy_modifiable_request` for modify) so each action documents which statuses it permits.
+  - Gotcha encountered: the old `test_modify_request_rejects_non_pending_request` asserted ACCEPTED was rejected; it must now assert CANCELLED is rejected instead, since ACCEPTED became a legal modify target.
+  - Useful context: modifying ACCEPTED keeps `user_action.action == "ACCEPT"` and the status ACCEPTED, so the existing `submit-ab` path remains valid without a re-confirm step.
+---
+## 2026-08-14 20:47:00 CST - US-105
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Added `修改` and `删除` buttons to the ACCEPTED Request detail action area alongside the existing `去 Settings 提交 Auto Bangumi` link, so all three actions are visible together. The ACCEPTED `修改` button toggles the existing `#detail-modify-form`; submission reuses `performAction(request_id, "modify", {patch})` which reloads the detail and list, keeping the status ACCEPTED and refreshing Filter/Seeds/Audit and the list summary.
+- Added a dedicated `deleteRequest(requestId)` flow in `app.js`: it gates on `window.confirm("确认删除此 Request？此操作不可恢复。")`, POSTs to the existing `/api/v1/requests/<id>/delete` endpoint, then on success removes the request from `loadedRequests`, calls `syncRequestIdToUrl(null)` to strip `request_id` from the URL, clears the detail container to an empty state, awaits a server list refresh, and only then shows the `删除成功` notification (must come after `loadList` because `loadList` hides notifications at its start). On failure it keeps the current detail and shows the unified sanitized error.
+- Preview Requests remain read-only: the preview note text now mentions 删除, and the existing preview read-only browser test now also blocks/asserts the delete route and button.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py` (new static test `test_static_app_script_shows_modify_and_delete_for_accepted_requests`), `tests/browser/test_actions.py` (new `TestAcceptedRequestManagement` class), `tests/browser/test_generation.py` (preview read-only test extended for delete), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 443 tests (297 unit + 146 browser); `uv run pytest tests/browser/ -q` passed with 146 browser tests.
+- Browser verification note: the `dev-browser` skill was not available in this session; UI verification was performed via the project's Playwright browser test suite (real Chromium against the Flask test server), covering ACCEPTED modify success, ACCEPTED delete success, delete cancel-not-calling-the-API, preview showing no delete/actions, and delete/modify error recovery.
+- **Learnings for future iterations:**
+  - Pattern discovered: a destructive Web UI flow must gate on `window.confirm`, and on success show its success notification AFTER `await loadList(...)` because `loadList` starts with `hideNotification()`; showing it before would hide it immediately.
+  - Pattern discovered: the ACCEPTED branch of `renderDetailPayload` previously only rendered the AB submit link; extend it with secondary/danger buttons rather than duplicating the PENDING branch.
+  - Gotcha encountered: `setActionInFlight` queries `.detail-action` buttons inside `#request-detail-container`; after a successful delete the container is replaced by an empty state, so the `finally` re-enable is a harmless no-op.
+  - Useful context: browser delete tests hit the real Flask backend with a tmp `storage_dir`, so after confirming delete the saved `requests/<id>.json` is actually gone from disk; assert on the file absence for a stronger check.
+---
+## 2026-08-14 21:05:00 CST - US-106
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Added `use_regex` and `case_sensitive` (default `false`) to `FilterRule`; `asdict(filter_rule)` now persists them in new Requests and in Auto Bangumi payloads. Old configs and old saved Requests missing the fields load with defaults via `.get(..., False)` in `load_user_preference` and `_recompute_source_seed_filter`.
+- Reworked `rss_controller.filter_seeds` (and the `_rule_matches` helper) so default semantics are literal substring matching, case-insensitive; regex compilation only happens when `use_regex=true`, so literal inputs like `[` or `[v2]` no longer raise regex validation errors. Exclusion reasons changed to `命中排除规则：<rule>` and `未命中包含规则：<rule>`.
+- Reworked `request_controller` modify recompute: `_validate_filter_rule_patch` now type-checks string fields (`must_contain`/`must_not_contain`) and bool fields (`use_regex`/`case_sensitive`) instead of eagerly compiling regex; regex validation moved into `_filter_rule_matches` at recompute time (only when `use_regex=true`), so invalid regex raises `invalid_modify_patch` and the original Request is untouched (modify works on a deepcopy).
+- Frontend: the Stage 14 `字面文本模式` checkbox is now a no-op — raw filter text is sent as-is (`use_regex`/`case_sensitive` default false server-side), keeping the literal-v2 exclusion working end-to-end. Help text updated to "默认按字面文本匹配且不区分大小写". `literalExcludePattern` is left in place because a static test asserts it; US-107 replaces the literal checkbox with 使用正则/大小写敏感 controls.
+- Files changed: `src/shared/models.py`, `src/shared/config.py`, `src/rss_engine/controllers/rss_controller.py`, `src/request_engine/controllers/request_controller.py`, `src/apps/migu_orca_web/static/app.js`, `config/user/default_rules.json`, plus tests (`config_test.py`, `rss_controller_test.py`, `request_controller_test.py`, `views_test.py`, `ab_http_client_test.py`, `subscription_payload_test.py`, `tests/browser/test_actions.py`), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 458 tests (312 unit + 146 browser); `uv run pytest tests/browser/ -q` passed with 146 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep regex validation at match time (`_filter_rule_matches`) instead of patch-validation time, because whether a rule is invalid depends on the merged `use_regex` value which the patch alone may not carry.
+  - Pattern discovered: `FilterRule` fields flow through `asdict()` into saved Request JSON and AB payloads; exact-shape test assertions must include the new `use_regex`/`case_sensitive` keys (they are always present for newly generated Requests).
+  - Gotcha encountered: the Stage 14 literal-mode front-end transformed `[v2]` into the regex `(?i:\[?v2\]?)`, which silently breaks once the backend default becomes literal matching; the front-end must send raw text now that literal is the default.
+  - Gotcha encountered: the browser test fixture `jujutsu_s3_loli.xml` seed is `01 V2 [1080p]` — it contains `V2` but NOT the literal `[v2]`, so a literal `[v2]` exclude matches nothing; tests must use `V2` (or a seed that actually contains `[v2]`) to assert exclusion.
+  - Useful context: `uv run pytest -q` includes `tests/browser` (testpaths = ["src", "tests"]), so browser tests are part of the required "Tests pass" gate; keep them green even for backend-only stories.
+---
 
-Started: Fri Aug 14 16:04:26 CST 2026
----
-## 2026-08-14 16:16:31 CST - US-097
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- Implemented default saved Request generation for `/index`: missing `miguOrca.web.saveRequest` now defaults to saving, clear preferences restores saved generation, and generation no longer persists Settings-only form values from the workbench.
-- Updated the workbench storage summary and preference/browser expectations to match the saved-by-default contract while preserving explicit `save_request=false` preview behavior.
-- Added browser coverage for `咒术回战` default generate -> saved list item -> URL request_id sync -> confirm, cancel, and modify success paths with no `未找到已保存的 Request` state.
-- Isolated a qBittorrent browser generation regression test with temporary storage so it does not write default `.migu_orca/storage`.
-- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_generation.py`, `tests/browser/test_shell.py`, `tests/browser/test_qbittorrent_connection.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 411 tests; `uv run pytest tests/browser/ -v` passed with 132 browser tests.
+## 2026-08-14 21:10:00 CST - US-107
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Replaced the Stage 14 literal-mode checkbox and the `literalExcludePattern`/`escapeRegexLiteral` helpers with explicit 使用正则 (`#modify-filter-use-regex`) and 大小写敏感 (`#modify-filter-case-sensitive`) checkboxes in the modify form filter group; labels changed to 包含规则/排除规则 with clearer placeholders, and help text now explains the default literal, case-insensitive behavior.
+- The submit handler now always includes explicit `use_regex`/`case_sensitive` booleans in any `filter_rule` patch (reflecting current checkbox state), so a default submit of `包含规则=1080p` sends `use_regex=false`/`case_sensitive=false`, checking 使用正则 sends `use_regex=true` while preserving the raw regex text, and clearing filter fields keeps the regex/case option state. `filter_rule` is only patched when a filter field/option actually changes, so folder-only edits don't touch the flags.
+- Checkboxes initialize from the saved request's `filter_rule` (`use_regex === true` / `case_sensitive === true`), so old saved Requests missing the fields fall back to unchecked defaults.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py` (static assertions updated + new `test_static_app_script_sends_regex_and_case_sensitive_filter_options`), `tests/browser/test_actions.py` (new `TestModifyFilterOptions` class + updated modify-form/literal/regex/clear tests), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 463 tests (313 unit + 150 browser); `uv run pytest tests/browser/ -q` passed with 150 browser tests.
+- Browser verification note: the `dev-browser` skill was not available; UI verification was performed via the project's Playwright browser test suite (real Chromium against the Flask test server), covering default-unchecked payload shape, 使用正则 and 大小写敏感 payload flags, and invalid-regex error recovery preserving form state.
 - **Learnings for future iterations:**
-  - Pattern discovered: absent `miguOrca.web.saveRequest` is now the saved-by-default path; explicit localStorage value `"false"` remains preview mode for later read-only preview work.
-  - Gotcha encountered: calling Settings preference persistence from `/index` can overwrite save behavior because Settings form inputs are absent there.
-  - Useful context: Browser tests that generate Requests must seed temporary storage or explicitly preview to avoid leaking saved JSON into default `.migu_orca/storage`.
----
-## 2026-08-14 16:25:11 CST - US-098
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- Implemented explicit read-only rendering for unsaved preview Requests on `/index`, including a `预览（未保存）` saved-state row, preview-mode guidance, and only a `保存此 Request` action.
-- Added a save-from-preview path that regenerates the same title with `save_request: true`, then refreshes detail, Request list, and URL `request_id` state so normal confirm/cancel/modify actions return only after persistence.
-- Prevented preview generation from selecting or syncing temporary request IDs and updated preview notifications to make the unsaved mode explicit.
-- Added browser coverage for preview read-only controls, no calls to accept/cancel/modify/submit-ab while previewing, clean preview URL state, and saving preview into an operable saved Request.
-- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_generation.py`, `tests/browser/test_stage11_real_config_entry.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 414 tests; `uv run pytest tests/browser/ -v` passed with 134 browser tests.
+  - Pattern discovered: keep the modify form's filter options as one pair of checkboxes scoped to the whole filter_rule (both must_contain and must_not_contain), because the backend `FilterRule.use_regex`/`case_sensitive` are rule-wide, not per-field.
+  - Pattern discovered: initialize checkbox `.checked` from the saved request (`filterRule.use_regex === true`), and send the current boolean values whenever the filter_rule patch is included — this both satisfies the "default sends false" contract and preserves an existing regex/case-sensitive request on unrelated edits.
+  - Gotcha encountered: `performAction` shows its generic failure title `操作失败` in the notification; browser tests must assert on the error message body (`不是合法正则`) rather than a per-action title like `修改失败`.
+  - Gotcha encountered: `page.route` globs for the modify endpoint must be registered BEFORE `_open_request_detail` navigates, and the fake success response only needs to make `fetchJson` resolve (detail/list reloads hit the real backend afterwards).
+  - Useful context: `node --check` validates app.js syntax quickly; the project has no mypy/pyright config, so `compileall` + the full pytest suite (which includes browser tests) are the effective typecheck/quality gates.
+
+## 2026-08-14 21:35:00 CST - US-108
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Updated the Request detail Filter section in `renderDetailPayload` to show user-readable 包含规则/排除规则 labels (instead of raw `must_contain`/`must_not_contain`) plus 匹配模式 (普通字符 when `filter_rule.use_regex` is falsy, 正则 when true) and 大小写 (不区分大小写 when `case_sensitive` is falsy, 区分大小写 when true). The raw rule text is always shown as the user typed it — never an auto-generated regex — and folder_name/有效种子数/排除种子数 rows are preserved.
+- Seeds exclusion reasons were already user-readable from US-106 (`命中排除规则：<rule>` / `未命中包含规则：<rule>`); this story adds browser coverage proving the reason text renders in the 排除种子 list with the seed title.
+- Files changed: `src/apps/migu_orca_web/static/app.js` (Filter detail rows), `src/apps/migu_orca_web/views_test.py` (updated `test_static_app_script_groups_request_detail_without_exposing_rss_url` labels + new `test_static_app_script_shows_filter_mode_and_case_status_in_detail`), `tests/browser/test_actions.py` (updated `test_modify_literal_v2_exclude_shows_removed_seed_feedback` to assert 排除规则 label; new `TestFilterDetailDisplay` class with 5 tests), `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- New browser tests cover: Filter section mode/case status refresh after modify, literal `[v2]` exclusion + 命中排除规则 reason, case-insensitive `v2` matching the fixture `V2` seed, case-sensitive `v2` NOT matching `V2`, and regex mode (`V2 \[1080p\]`) showing 匹配模式=正则 with the raw pattern text.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 469 tests (314 unit + 155 browser); browser suite green.
+- Browser verification note: the `dev-browser` skill was not available; UI verification was performed via the project's Playwright browser test suite (real Chromium against the Flask test server).
 - **Learnings for future iterations:**
-  - Pattern discovered: explicit `save_request=false` should be treated as a read-only preview contract until the user saves.
-  - Gotcha encountered: static script tests can accidentally match the save-preview POST before the normal generate POST; scope ordering checks to the intended function body.
-  - Useful context: older browser regressions that exercise `save_request=false` need preview wording assertions, not generic generation-success wording.
+  - Pattern discovered: the detail Filter section derives its display labels from the saved `filter_rule` booleans: `var matchMode = filterRule.use_regex === true ? "正则" : "普通字符"` and `var caseMode = filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写"`; keep the same computed strings in static `views_test.py` assertions so the labels and the test stay in sync.
+  - Gotcha encountered: the static view test `test_static_app_script_groups_request_detail_without_exposing_rss_url` asserted the exact JS rows `["must_contain", filterRule.must_contain]`; renaming the labels to 包含规则/排除规则 requires updating that assertion, and the browser test `test_modify_literal_v2_exclude_shows_removed_seed_feedback` asserted `"must_not_contain" in detail_text` which now reads `排除规则`.
+  - Gotcha encountered: the jujutsu_s3_loli.xml fixture seeds contain `V2` but NOT the literal text `[v2]`, so a literal-`[v2]` browser test must mutate the saved snapshot's `source_info.rss_sources[0].seed_names`/`valid_seed_names` (and recompute counts) before opening the detail, or use the fixture `V2`/`v2` case-sensitivity pair instead.
+  - Pattern discovered: for regex-mode browser tests, choosing a pattern with escaped metacharacters (`V2 \[1080p\]`) distinguishes regex from literal matching on the fixture seeds and also proves the detail renders the raw user text, not a transformed pattern.
 ---
-## 2026-08-14 16:34:41 CST - US-099
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- Implemented visible modify-filter feedback for Request details: the Filter section now shows excluded seed counts, and the Seeds section expands into complete, valid, and excluded groups with excluded reasons.
-- Added a `must_not_contain` literal-mode helper so users can enter `[v2]` and have the UI send a safe case-insensitive regex that matches `v2` or bracketed `[v2]`, while preserving default regex semantics.
-- Added browser coverage for `[v2]` literal exclusion, stable `V2` regex exclusion, seed list/count refresh after successful modify, and preserving form input after modify failures.
-- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_actions.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 416 tests; `uv run pytest tests/browser/ -v` passed with 136 browser tests.
+## 2026-08-14 21:50:00 CST - US-109
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Completed Stage 15 documentation and regression closeout. README now documents ACCEPTED Request modify/delete, default literal matching, case-sensitivity and use-regex options, plus the filter detail display; the manual verification checklist gained an ACCEPTED-management/filter-controls step.
+- Marked BL-008 complete in `docs/backlog.md` and updated `docs/MiGuOrca_main_PRD.md` (v0.9, module table rows for M01/M06/M11/M13, roadmap Stage 15, next-step boundary), the stage 15 PRD (Completion + Implementation Decisions), and the affected module PRDs M01 (ACCEPTED modify status contract), M06 (literal-default filter semantics + use_regex/case_sensitive), M09 (modify preserves status), M11 (path-safe delete), M13 (Stage 15 UI quality requirements).
+- Added `test_stage15_accepted_modify_delete_do_not_leak_sensitive_values` in `tests/browser/test_ui_quality.py`: feeds endpoint/token/username/password/cookie/SID/raw HTML/raw RSS XML/raw response body through a mocked qBittorrent response, then runs the ACCEPTED modify + delete flow and asserts URL, localStorage, sessionStorage, visible body text, and remaining saved Request JSON stay clean (and the deleted request file is gone).
+- Files changed: `README.md`, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage15_web_ui_accepted_management_filter_PRD.md`, `docs/modules/M01-request-management-PRD.md`, `docs/modules/M06-torrent-filter-rule-PRD.md`, `docs/modules/M09-request-confirmation-PRD.md`, `docs/modules/M11-storage-state-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 470 tests (314 unit + 156 browser); `uv run pytest tests/browser/ -v` passed with 156 browser tests.
 - **Learnings for future iterations:**
-  - Pattern discovered: Request detail seed comparisons should use the selected RSS source’s `valid_seed_names` and `excluded_seed_names` because excluded entries carry the reason/rule metadata needed for UI feedback.
-  - Gotcha encountered: the qBittorrent browser tests still assert a collapsed Settings form; do not change those until US-101.
-  - Useful context: the Jujutsu fixture has two valid Loli seeds including `V2`, making it a stable browser fixture for modify-filter exclusion assertions.
----
-## 2026-08-14 16:44:26 CST - US-100
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- Implemented the complete/effective/excluded Seeds contract for Request details by adding safe `seed_names` title summaries to RSS source snapshots and preferring them in the Web UI.
-- Updated the Seeds UI labels and summary counts to show `完整`, `有效`, and `排除` groups with consistent empty states and excluded seed reasons.
-- Added backend/static/browser coverage for safe complete seed names, three visible Seeds lists, empty states, modify refresh counts, and no raw RSS/source value leakage in Request detail.
-- Files changed: `src/request_engine/controllers/request_controller.py`, `src/request_engine/controllers/request_controller_test.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_detail.py`, `tests/browser/test_actions.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 420 tests; `uv run pytest tests/browser/ -v` passed with 139 browser tests.
-- **Learnings for future iterations:**
-  - Patterns discovered: use selected source `seed_names` for complete Seeds display and `valid_seed_names` / `excluded_seed_names` for post-filter groups; keep raw RSS and response bodies out of source summaries and detail rendering.
-  - Gotchas encountered: Playwright `inner_text()` on collapsed `<details>` only includes visible summary text, so tests that inspect group contents must open `.seed-details` first.
-  - Useful context: `咒术回战第三季` remains a stable fixture for Seeds count changes because the selected Loli source has two titles and the `V2` rule excludes one.
----
-## 2026-08-14 16:50:53 CST - US-101
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- Removed the `/settings` qBittorrent connection form disclosure wrapper so endpoint, username, password, timeout_seconds, verify_tls, result, and test button are directly visible in the qBittorrent section.
-- Kept the password field masked, retained confirmation before testing, preserved success clearing of endpoint/username/password, and kept failure output redacted while preserving failed inputs.
-- Updated static and browser tests to assert the direct-rendered form contract and to stop opening `qbittorrent-settings-details`.
-- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_qbittorrent_connection.py`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src` passed; `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed with 55 tests; `uv run pytest tests/browser/test_qbittorrent_connection.py tests/browser/test_ui_quality.py -q` passed with 13 browser tests; `uv run pytest -q` passed with 420 tests; `uv run pytest tests/browser/ -v` passed with 139 browser tests.
-- **Learnings for future iterations:**
-  - Pattern discovered: qBittorrent Settings connection testing should remain a direct form with stable `settings-qbittorrent-*` IDs and no disclosure-opening prerequisite.
-  - Gotcha encountered: several browser tests still encoded the old collapsed Settings contract through `#qbittorrent-settings-details`; update both behavior and UI-quality tests when changing panel structure.
-  - Useful context: qBittorrent sensitive values remain transient form inputs only; success clears endpoint, username, and password, while failures preserve them for correction but render only redacted generic output.
----
-## 2026-08-14 17:01:17 CST - US-102
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- Completed Stage 14 documentation and regression closeout: README now documents default saved generation, explicit preview mode, Seeds complete/valid/excluded lists, and direct-rendered qBittorrent Settings behavior.
-- Updated Stage status and completed BL-007 across `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage14_web_ui_request_operability_PRD.md`, and `docs/modules/M13-web-ui-PRD.md`.
-- Added a Stage 14 browser security regression asserting sensitive qBittorrent values do not appear in URL state, browser storage, visible body text, or saved Request JSON after Settings interaction and default saved generation.
-- Files changed: `README.md`, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage14_web_ui_request_operability_PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 421 tests; `uv run pytest tests/browser/ -v` passed with 140 browser tests.
-- **Learnings for future iterations:**
-  - Patterns discovered: Stage closeout docs need synchronized updates in README, backlog, main PRD, stage PRD, and affected module PRDs to avoid stale current-stage claims.
-  - Patterns discovered: Web UI secret regressions should validate URL, browser storage, rendered text, and saved storage JSON, not just notifications.
-  - Gotcha encountered: `CODEX_CURRENT_THREAD_ID` was unset in this environment, so the progress URL keeps the same placeholder format used by earlier entries.
-  - Useful context: after US-102 all Stage 14 stories in `scripts/ralph/prd.json` are marked passing.
+  - Patterns discovered: a Stage security regression should route the sensitive values through a mocked external endpoint, run the stage's Web flows end-to-end, then assert all surfaces (URL, localStorage, sessionStorage, body text, remaining saved Request JSON, deleted-file absence). This mirrors the Stage 14 qBittorrent-secret regression.
+  - Patterns discovered: stage closeout needs synchronized doc updates across README, backlog, main PRD, stage PRD, and affected module PRDs; Stage 15 affected M01/M06/M09/M11/M13.
+  - Gotcha encountered: `create_saved_accepted_request` lives in `tests/browser/test_actions.py`, not conftest; the ui_quality security test builds the ACCEPTED request inline with `accept_request` + `save_request_snapshot`.
+  - Gotcha encountered: the qBittorrent route handler receives two args `(route, request)`; using a one-arg signature breaks Playwright routing.
+  - Useful context: after US-109 all Stage 15 stories in `scripts/ralph/prd.json` are marked passing; the dev-browser skill was unavailable, so UI verification used the project's Playwright browser suite.
 ---

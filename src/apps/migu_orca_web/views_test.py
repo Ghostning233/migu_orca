@@ -12,7 +12,11 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
 from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
-from request_engine.controllers.request_controller import accept_request, summarize_request
+from request_engine.controllers.request_controller import (
+    accept_request,
+    cancel_request,
+    summarize_request,
+)
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
@@ -44,6 +48,22 @@ def _saved_accepted_request(
             **generate_request(EntryRequest(raw_title=title))["request"],
             "request_id": request_id,
         }
+    )
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+    return request
+
+
+def _saved_cancelled_request(
+    tmp_path: Path,
+    title: str = "芙莉莲",
+    request_id: str = "request-cancelled",
+) -> dict[str, Any]:
+    request = cancel_request(
+        {
+            **generate_request(EntryRequest(raw_title=title))["request"],
+            "request_id": request_id,
+        },
+        "不需要",
     )
     save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
     return request
@@ -284,8 +304,14 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "navigator.clipboard.writeText" in script
     assert "查看筛选种子列表" in script
     assert "seed-details" in script
-    assert "literalExcludePattern" in script
-    assert "modify-must-not-contain-literal" in script
+    assert "modify-filter-use-regex" in script
+    assert "modify-filter-case-sensitive" in script
+    assert "使用正则" in script
+    assert "大小写敏感" in script
+    assert "包含规则" in script
+    assert "排除规则" in script
+    assert "literalExcludePattern" not in script
+    assert "modify-must-not-contain-literal" not in script
     assert "暂无状态历史。" in script
     assert "暂无 Auto Bangumi 提交结果。" in script
     assert "提交 Auto Bangumi" in script
@@ -343,8 +369,10 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert "copyButton.className = \"secondary-button copy-request-id\"" in script
     assert "copyTextToClipboard(request.request_id)" in script
     assert '["RSS 来源", config.selected_rss_url ? "已选择" : "未选择"]' in script
-    assert '["must_contain", filterRule.must_contain]' in script
-    assert '["must_not_contain", filterRule.must_not_contain]' in script
+    assert '["包含规则", filterRule.must_contain]' in script
+    assert '["排除规则", filterRule.must_not_contain]' in script
+    assert '["匹配模式", matchMode]' in script
+    assert '["大小写", caseMode]' in script
     assert '["folder_name", config.expected_folder_name]' in script
     assert '["有效种子数", effectiveSeeds.length]' in script
     assert '["排除种子数", excludedSeeds.length]' in script
@@ -357,6 +385,38 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert "renderAbResultSection(auditSection, payload.ab_result)" in script
     assert "selected_rss_url" in script
     assert "addDetailRow(fields, \"selected_rss_url\"" not in script
+
+
+def test_static_app_script_shows_filter_mode_and_case_status_in_detail() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'var matchMode = filterRule.use_regex === true ? "正则" : "普通字符"' in script
+    assert 'var caseMode = filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写"' in script
+    assert "匹配模式" in script
+    assert "普通字符" in script
+    assert "正则" in script
+    assert "不区分大小写" in script
+    assert "区分大小写" in script
+    assert '["包含规则", filterRule.must_contain]' in script
+    assert '["排除规则", filterRule.must_not_contain]' in script
+
+
+def test_static_app_script_sends_regex_and_case_sensitive_filter_options() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "patch.filter_rule.use_regex = useRegex" in script
+    assert "patch.filter_rule.case_sensitive = caseSensitive" in script
+    assert "useRegex !== originalUseRegex" in script
+    assert "caseSensitive !== originalCaseSensitive" in script
+    assert "regexInput.checked = originalUseRegex" in script
+    assert "caseInput.checked = originalCaseSensitive" in script
+    # Stage 14 literal helper must not auto-transform raw filter text anymore.
+    assert "escapeRegexLiteral" not in script
+    assert "(?i:" not in script
 
 
 def test_static_app_script_wires_page_notifications() -> None:
@@ -652,6 +712,27 @@ def test_static_app_script_shows_ab_submit_only_for_accepted_requests() -> None:
     assert script.index('abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi"') < script.index(
         "actionsContainer.appendChild(abSubmitBtn)"
     )
+
+
+def test_static_app_script_shows_modify_and_delete_for_accepted_requests() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "else if (isAccepted)" in script
+    assert 'acceptedModifyBtn.textContent = "修改"' in script
+    assert 'acceptedModifyBtn.className = "secondary-button detail-action"' in script
+    assert 'deleteBtn.textContent = "删除"' in script
+    assert 'deleteBtn.className = "danger-button detail-action"' in script
+    assert "deleteRequest(request.request_id)" in script
+    assert "async function deleteRequest(requestId)" in script
+    assert "syncRequestIdToUrl(null)" in script
+    assert 'actionsContainer.appendChild(deleteBtn)' in script
+    # The delete button must render after the AB submit entry for ACCEPTED details.
+    assert script.index('deleteBtn.textContent = "删除"') > script.index(
+        'abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi"'
+    )
+    assert '"删除成功"' in script
 
 
 def test_static_style_defines_generation_form_validation_states() -> None:
@@ -955,6 +1036,219 @@ def test_list_requests_returns_unified_error_for_damaged_snapshot(
     assert payload["error_data"]["failed_step"] == "load_request_snapshot"
     assert payload["error_data"]["details"]["request_id"] == "broken"
     assert str(tmp_path) not in str(payload)
+
+
+def test_delete_request_removes_saved_request_and_refreshes_list_and_detail(
+    tmp_path: Path,
+) -> None:
+    request = _saved_request(tmp_path, "芙莉莲", "request-1")
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/delete",
+        json={"storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": True,
+        "result": {
+            "request_id": "request-1",
+            "storage": "local_json",
+            "directory": "requests",
+            "filename": "request-1.json",
+            "deleted": True,
+        },
+    }
+    assert not (storage_dir / "requests" / "request-1.json").exists()
+
+    list_response = _client().get(
+        "/api/v1/requests",
+        query_string={"storage_dir": str(storage_dir)},
+    )
+    assert list_response.get_json() == {"ok": True, "result": {"requests": []}}
+
+    detail_response = _client().get(
+        "/api/v1/requests/request-1",
+        query_string={"storage_dir": str(storage_dir)},
+    )
+    assert detail_response.get_json() == {
+        "ok": False,
+        "error_type": "request_not_found",
+        "error_message": "未找到已保存的 Request",
+        "error_data": {
+            "failed_step": "load_request_snapshot",
+            "details": {"request_id": "request-1"},
+        },
+    }
+    assert str(tmp_path) not in str(payload)
+
+
+def test_delete_request_returns_unified_error_for_missing_request(
+    tmp_path: Path,
+) -> None:
+    response = _client().post(
+        "/api/v1/requests/missing-request/delete",
+        json={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "request_not_found",
+        "error_message": "未找到已保存的 Request",
+        "error_data": {
+            "failed_step": "delete_request_snapshot",
+            "details": {"request_id": "missing-request"},
+        },
+    }
+    assert str(tmp_path) not in str(payload)
+
+
+def test_delete_request_rejects_path_fragments_without_leaking_storage_path(
+    tmp_path: Path,
+) -> None:
+    response = _client().post(
+        "/api/v1/requests/nested%2Frequest/delete",
+        json={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "invalid_request_id",
+        "error_message": "request_id 不能包含路径片段",
+        "error_data": {
+            "failed_step": "delete_request_snapshot",
+            "details": {"field": "request_id"},
+        },
+    }
+    assert str(tmp_path) not in str(payload)
+
+
+def test_delete_request_returns_unified_error_for_delete_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fail_delete(*args: object, **kwargs: object) -> dict[str, object]:
+        raise Stage1Error(
+            "storage_error",
+            f"删除 Request JSON 失败 {tmp_path}/secret-token",
+            "delete_request_snapshot",
+            {
+                "request_id": "request-1",
+                "directory": "requests",
+                "reason": f"cannot unlink {tmp_path}/requests/request-1.json",
+            },
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.delete_request_snapshot",
+        fail_delete,
+    )
+
+    response = _client().post(
+        "/api/v1/requests/request-1/delete",
+        json={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    serialized = str(payload)
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "storage_error"
+    assert payload["error_data"]["failed_step"] == "delete_request_snapshot"
+    assert payload["error_data"]["details"]["directory"] == "requests"
+    assert str(tmp_path) not in serialized
+    assert "secret-token" not in serialized
+
+
+def test_modify_accepted_request_preserves_status_and_records_history(
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path, "芙莉莲", "request-1")
+    storage_dir = tmp_path / "storage"
+    patch = {"expected_folder_name": "芙莉莲 修改版"}
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/modify",
+        json={
+            "storage_dir": str(storage_dir),
+            "patch": patch,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["status"] == "ACCEPTED"
+    assert (
+        payload["result"]["request"]["confirmable_config"]["expected_folder_name"]
+        == "芙莉莲 修改版"
+    )
+    assert payload["result"]["summary"]["status"] == "ACCEPTED"
+
+    detail_response = _client().get(
+        f"/api/v1/requests/{request['request_id']}",
+        query_string={"storage_dir": str(storage_dir)},
+    )
+    detail = detail_response.get_json()
+    assert detail["ok"] is True
+    assert detail["result"]["history"]["available"] is True
+    assert detail["result"]["history"]["events"] == [
+        {
+            "request_id": "request-1",
+            "previous_status": "ACCEPTED",
+            "next_status": "ACCEPTED",
+            "action": "MODIFY",
+            "timestamp": payload["result"]["request"]["updated_at"],
+            "details": {"patch": patch},
+        }
+    ]
+
+
+def test_modify_accepted_request_recomputes_seeds_and_rejects_cancelled(
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path, "芙莉莲", "request-1")
+    cancelled = _saved_cancelled_request(tmp_path, "咒术回战", "request-cancelled")
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/modify",
+        json={
+            "storage_dir": str(storage_dir),
+            "patch": {"filter_rule": {"must_contain": "01", "must_not_contain": ""}},
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["status"] == "ACCEPTED"
+    assert payload["result"]["request"]["confirmable_config"]["filter_rule"] == {
+        "must_contain": "01",
+        "must_not_contain": "",
+        "use_regex": False,
+        "case_sensitive": False,
+    }
+    assert payload["result"]["summary"]["effective_seed_count"] == 1
+
+    cancel_response = _client().post(
+        f"/api/v1/requests/{cancelled['request_id']}/modify",
+        json={
+            "storage_dir": str(storage_dir),
+            "patch": {"expected_folder_name": "不应成功"},
+        },
+    )
+    cancel_payload = cancel_response.get_json()
+    assert cancel_payload["ok"] is False
+    assert cancel_payload["error_type"] == "invalid_request_status"
+    assert cancel_payload["error_data"]["details"] == {"status": "CANCELLED"}
+    assert str(tmp_path) not in str(cancel_payload)
 
 
 def test_create_request_generates_without_writing_storage(tmp_path: Path) -> None:

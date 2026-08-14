@@ -52,6 +52,8 @@ class ParsedRss:
 class FilterRule:
     must_contain: str = ""
     must_not_contain: str = ""
+    use_regex: bool = False
+    case_sensitive: bool = False
 
 
 @dataclass(frozen=True)

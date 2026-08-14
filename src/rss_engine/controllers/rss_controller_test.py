@@ -176,11 +176,103 @@ def test_filter_uses_must_not_contain_before_must_contain() -> None:
     ]
 
 
-def test_invalid_regex_is_config_error() -> None:
+def test_invalid_regex_is_config_error_when_use_regex_enabled() -> None:
     source = RssSource("组", "url", "static_fixture", "feed.xml")
     parsed = ParsedRss(source=source, seeds=[RssSeed("条目", "1")])
 
     with pytest.raises(Stage1Error) as error:
-        filter_seeds(parsed, FilterRule(must_contain="["))
+        filter_seeds(parsed, FilterRule(must_contain="[", use_regex=True))
 
     assert error.value.error_type == "config_error"
+
+
+def test_literal_default_does_not_compile_brackets_as_regex() -> None:
+    source = RssSource("组", "url", "static_fixture", "feed.xml")
+    parsed = ParsedRss(
+        source=source,
+        seeds=[
+            RssSeed("[Loli] 番剧 - 01 [v2]", "1"),
+            RssSeed("[Loli] 番剧 - 02", "2"),
+        ],
+    )
+
+    result = filter_seeds(parsed, FilterRule(must_contain="[v2]"))
+
+    assert [seed.title for seed in result.valid_seeds] == ["[Loli] 番剧 - 01 [v2]"]
+    assert [item.rule for item in result.excluded_seeds] == ["must_contain"]
+    assert result.excluded_seeds[0].reason == "未命中包含规则：[v2]"
+
+
+def test_literal_match_is_case_insensitive_by_default() -> None:
+    source = RssSource("组", "url", "static_fixture", "feed.xml")
+    parsed = ParsedRss(
+        source=source,
+        seeds=[RssSeed("番剧 01 V2 1080p", "1")],
+    )
+
+    result = filter_seeds(parsed, FilterRule(must_contain="v2"))
+
+    assert [seed.title for seed in result.valid_seeds] == ["番剧 01 V2 1080p"]
+    assert result.excluded_seeds == []
+
+
+def test_literal_case_sensitive_does_not_match_different_case() -> None:
+    source = RssSource("组", "url", "static_fixture", "feed.xml")
+    parsed = ParsedRss(
+        source=source,
+        seeds=[RssSeed("番剧 01 V2 1080p", "1")],
+    )
+
+    result = filter_seeds(
+        parsed,
+        FilterRule(must_contain="v2", case_sensitive=True),
+    )
+
+    assert result.valid_seeds == []
+    assert result.excluded_seeds[0].rule == "must_contain"
+    assert result.excluded_seeds[0].reason == "未命中包含规则：v2"
+
+
+def test_regex_match_is_case_insensitive_by_default() -> None:
+    source = RssSource("组", "url", "static_fixture", "feed.xml")
+    parsed = ParsedRss(
+        source=source,
+        seeds=[RssSeed("番剧 01 V2 1080p", "1")],
+    )
+
+    result = filter_seeds(
+        parsed,
+        FilterRule(must_contain="^番剧.*v2", use_regex=True),
+    )
+
+    assert [seed.title for seed in result.valid_seeds] == ["番剧 01 V2 1080p"]
+
+
+def test_regex_case_sensitive_does_not_match_different_case() -> None:
+    source = RssSource("组", "url", "static_fixture", "feed.xml")
+    parsed = ParsedRss(
+        source=source,
+        seeds=[RssSeed("番剧 01 V2 1080p", "1")],
+    )
+
+    result = filter_seeds(
+        parsed,
+        FilterRule(must_contain="^番剧.*v2", use_regex=True, case_sensitive=True),
+    )
+
+    assert result.valid_seeds == []
+    assert result.excluded_seeds[0].reason == "未命中包含规则：^番剧.*v2"
+
+
+def test_must_not_contain_literal_excludes_with_reason() -> None:
+    source = RssSource("组", "url", "static_fixture", "feed.xml")
+    parsed = ParsedRss(
+        source=source,
+        seeds=[RssSeed("[Loli] 番剧 - 01 [v2]", "1")],
+    )
+
+    result = filter_seeds(parsed, FilterRule(must_not_contain="[v2]"))
+
+    assert result.valid_seeds == []
+    assert result.excluded_seeds[0].rule == "must_not_contain"
+    assert result.excluded_seeds[0].reason == "命中排除规则：[v2]"
