@@ -12,6 +12,7 @@
 - `/index` is the Request workbench: keep generation/list/detail there and move external data source, qBittorrent, Auto Bangumi submission, and other configuration tasks to `/settings` stories.
 - Settings-owned non-sensitive browser preferences use `miguOrca.web.storageDir` and `miguOrca.web.saveRequest` in `localStorage`; `/index` should read those keys through shared JS helpers and must not render editable storage preference controls.
 - Sensitive Settings forms should use collapsed `<details>` sections, guard JS initialization by element presence, require explicit `window.confirm`, and avoid localStorage/sessionStorage/URL persistence for endpoint, username, password, token, cookie, or SID values.
+- `/index` URL state may use only `request_id`; after a flow renders a fresh detail payload, call `loadList({loadSelectedDetail: false})` so list refreshes do not overwrite that detail with stale or missing storage data.
 
 Started: Fri Aug 14 12:46 CST 2026
 ---
@@ -150,4 +151,28 @@ Thread: https://codex.openai.com/threads/unavailable
   - Settings page code must stay element-guarded because `app.js` is shared with `/index`.
   - For sensitive Settings test forms, intercept API calls in browser tests and assert both request payload shape and browser-storage non-persistence.
   - qBittorrent failure UI should ignore server-provided detail text and show a generic actionable message, while success rendering should only use the API's safe `status`, `reachable`, and `version` fields.
+---
+## 2026-08-14 13:54 CST - US-092
+Thread: https://codex.openai.com/threads/unavailable
+- Implemented Request detail URL state on `/index`: direct `?request_id=<id>` loads restore details, list item clicks push `request_id`, refresh preserves the selected detail, and browser back/forward rehydrates the detail panel.
+- Kept URL state limited to non-sensitive `request_id`, showed a generic safe detail-load error for missing IDs, and avoided writing preview-only generated Request IDs to the URL.
+- Added browser regressions for direct open, click URL sync, refresh restore, missing Request recovery, saved generation URL sync, and preview generation URL non-persistence.
+- Files changed:
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_detail.py`
+  - `tests/browser/test_generation.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed: 54 tests.
+  - `uv run pytest tests/browser/test_detail.py tests/browser/test_generation.py -q` passed: 37 tests.
+  - `uv run pytest -q` passed: 399 tests.
+  - `uv run pytest tests/browser/ -v` passed: 120 tests.
+  - `uv run python -m compileall -q src` passed.
+  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
+- **Learnings for future iterations:**
+  - URL query state must stay non-sensitive; keep storage_dir and external service config in Settings preferences or request-scoped POST bodies, not in the URL.
+  - List refresh can race with generation/action rendering, so suppress selected-detail auto-load when the caller already rendered the intended detail state.
+  - Missing detail loads should use a generic actionable error and keep the Request list usable.
 ---

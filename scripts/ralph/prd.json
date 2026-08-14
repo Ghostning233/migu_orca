@@ -102,7 +102,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "URL query 只能携带 request_id 等非敏感上下文，不能携带 storage_dir 或外部系统配置。"
     },
     {

@@ -162,6 +162,28 @@
     return path + storageQuery();
   }
 
+  function requestIdFromLocation() {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get("request_id") || "").trim();
+  }
+
+  function syncRequestIdToUrl(requestId, options) {
+    if (!window.history || !window.history.pushState) {
+      return;
+    }
+    const url = new URL(window.location.href);
+    if (requestId) {
+      url.searchParams.set("request_id", requestId);
+    } else {
+      url.searchParams.delete("request_id");
+    }
+    if (url.href === window.location.href) {
+      return;
+    }
+    const method = options && options.replace ? "replaceState" : "pushState";
+    window.history[method]({request_id: requestId || null}, "", url);
+  }
+
   if (form || storagePreferencesForm) {
     restoreWebPreferences();
   }
@@ -607,15 +629,14 @@
 
       item.append(title, meta);
       item.addEventListener("click", () => {
-        selectedRequestId = summary.request_id;
-        loadDetail(summary.request_id);
-        renderList();
+        selectRequest(summary.request_id, {pushUrl: true});
       });
       listContainer.appendChild(item);
     }
   }
 
-  async function loadList() {
+  async function loadList(options) {
+    const detailRequestId = selectedRequestId;
     hideNotification();
     setState(listContainer, "正在加载 Request 列表...", "loading-state");
     try {
@@ -623,6 +644,9 @@
       loadedRequests = result.requests || [];
       syncStatusFilterOptions(loadedRequests);
       renderList();
+      if (detailRequestId && !(options && options.loadSelectedDetail === false)) {
+        loadDetail(detailRequestId);
+      }
     } catch (error) {
       setState(listContainer, error.message, "error-state");
       notifyApiError("Request 列表加载失败", error);
@@ -827,7 +851,7 @@
       } else {
         await loadDetail(requestId);
       }
-      await loadList();
+      await loadList({loadSelectedDetail: false});
       showNotification("success", titles[actionType] || "操作成功",
         "Request " + requestId, {
           actions: [
@@ -1229,6 +1253,15 @@
     );
   }
 
+  function selectRequest(requestId, options) {
+    selectedRequestId = requestId || null;
+    renderList();
+    if (options && options.pushUrl) {
+      syncRequestIdToUrl(selectedRequestId);
+    }
+    loadDetail(selectedRequestId);
+  }
+
   async function loadDetail(requestId) {
     if (!requestId) {
       setState(detailContainer, "Request ID 无效。", "error-state");
@@ -1244,8 +1277,8 @@
       );
       renderDetailPayload(result);
     } catch (error) {
-      setState(detailContainer, error.message, "error-state");
-      notifyApiError("Request 详情加载失败", error);
+      setState(detailContainer, "Request 详情加载失败。请确认 request_id 是否存在。", "error-state");
+      showNotification("error", "Request 详情加载失败", "请确认 request_id 是否存在。");
     }
   }
 
@@ -1286,8 +1319,9 @@
       });
       selectedRequestId = result.request && result.request.request_id;
       renderDetailPayload(result);
-      await loadList();
+      await loadList({loadSelectedDetail: false});
       if (result.saved_request) {
+        syncRequestIdToUrl(selectedRequestId);
         showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
           actions: [
             {
@@ -1316,5 +1350,17 @@
   listStatusFilter.addEventListener("change", renderList);
   listSortSelect.addEventListener("change", renderList);
   form.addEventListener("submit", generateRequest);
+  window.addEventListener("popstate", () => {
+    const requestId = requestIdFromLocation();
+    selectedRequestId = requestId || null;
+    renderList();
+    if (requestId) {
+      loadDetail(requestId);
+    } else {
+      hideNotification();
+      setState(detailContainer, "选择一个 Request 后查看详情。", "empty-state");
+    }
+  });
+  selectedRequestId = requestIdFromLocation() || null;
   loadList();
 })();

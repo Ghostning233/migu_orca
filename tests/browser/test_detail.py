@@ -66,6 +66,66 @@ class TestDetailSections:
         assert "葬送的芙莉莲" in text
 
 
+class TestRequestDetailUrlState:
+    """AC: Request 详情选择状态可通过 URL 恢复."""
+
+    def test_direct_request_id_query_loads_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-url-direct")
+        set_storage_preferences(page, storage_dir)
+
+        page.goto(f"{live_server_url}/index?request_id=req-url-direct")
+        page.wait_for_selector("#request-detail-container .overview-section", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        assert "req-url-direct" in detail.inner_text()
+        assert page.locator("[data-request-id='req-url-direct']").get_attribute(
+            "aria-current"
+        ) == "true"
+
+    def test_clicking_list_item_pushes_request_id_query(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-url-click")
+        set_storage_preferences(page, storage_dir)
+
+        page.goto(f"{live_server_url}/index")
+        page.wait_for_selector("[data-request-id='req-url-click']", timeout=5000)
+        page.locator("[data-request-id='req-url-click']").click()
+        page.wait_for_url("**/index?request_id=req-url-click", timeout=5000)
+        page.wait_for_selector("#request-detail-container .overview-section", timeout=5000)
+
+        assert "req-url-click" in page.locator("#request-detail-container").inner_text()
+
+    def test_refresh_restores_request_id_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-url-refresh")
+        set_storage_preferences(page, storage_dir)
+
+        page.goto(f"{live_server_url}/index?request_id=req-url-refresh")
+        page.wait_for_selector("#request-detail-container .overview-section", timeout=5000)
+        page.reload()
+        page.wait_for_selector("#request-detail-container .overview-section", timeout=5000)
+
+        assert "req-url-refresh" in page.locator("#request-detail-container").inner_text()
+
+    def test_missing_request_id_shows_safe_error_and_keeps_list(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-url-existing")
+        set_storage_preferences(page, storage_dir)
+
+        page.goto(f"{live_server_url}/index?request_id=req-url-missing")
+        page.wait_for_selector("#request-detail-container.error-state", timeout=5000)
+
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "Request 详情加载失败" in detail_text
+        assert "req-url-missing" not in detail_text
+        page.wait_for_selector("[data-request-id='req-url-existing']", timeout=5000)
+
+
 class TestRequestIdCopy:
     """AC: request_id 复制按钮存在并可触发复制反馈."""
 

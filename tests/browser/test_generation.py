@@ -120,6 +120,18 @@ class TestGenerateWithoutSave:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         assert not storage_dir.exists() or not any(storage_dir.iterdir())
 
+    def test_preview_generation_does_not_write_request_id_to_url(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        set_storage_preferences(page, storage_dir, save_request=False)
+        page.goto(f"{live_server_url}/index")
+
+        page.fill('input[name="title"]', "葬送的芙莉莲")
+        page.click("#request-generate-submit")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "request_id=" not in page.url
+
 
 class TestGenerateWithSave:
     """AC: 填写有效标题并勾选 save_request 时，保存成功通知包含 request_id."""
@@ -149,6 +161,20 @@ class TestGenerateWithSave:
         req_dir = storage_dir / "requests"
         assert req_dir.is_dir()
         assert len(list(req_dir.glob("*.json"))) >= 1
+
+    def test_saved_generation_writes_request_id_to_url(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        set_storage_preferences(page, storage_dir, save_request=True)
+        page.goto(f"{live_server_url}/index")
+
+        page.fill('input[name="title"]', "葬送的芙莉莲")
+        page.click("#request-generate-submit")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert "request_id=" in page.url
+        request_id = page.url.split("request_id=", 1)[1].split("&", 1)[0]
+        assert request_id
 
 
 class TestSubmitButtonState:

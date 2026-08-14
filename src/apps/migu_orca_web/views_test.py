@@ -277,6 +277,11 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "fallback_enabled" in script
     assert "window.confirm(\"确认提交此 Request 到 Auto Bangumi？\")" in script
     assert "storage_dir: currentStorageDir() || null" in script
+    assert "requestIdFromLocation" in script
+    assert "syncRequestIdToUrl" in script
+    assert "url.searchParams.set(\"request_id\", requestId)" in script
+    assert "window.addEventListener(\"popstate\"" in script
+    assert "selectRequest(summary.request_id, {pushUrl: true})" in script
     assert "secret-token" not in script
     assert "http://" not in script
     assert "https://" not in script
@@ -374,7 +379,7 @@ def test_static_app_script_shows_action_success_after_refresh() -> None:
     assert action_script.index("await loadDetail(requestId);") < action_script.index(
         "showNotification(\"success\""
     )
-    assert action_script.index("await loadList();") < action_script.index(
+    assert action_script.index("await loadList({loadSelectedDetail: false});") < action_script.index(
         "showNotification(\"success\""
     )
 
@@ -423,6 +428,8 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert "request-generate-submit" in script
     assert "request-source" not in script
     assert "mikan-config-fields" not in script
+    assert "await loadList({loadSelectedDetail: false});" in script
+    assert "syncRequestIdToUrl(selectedRequestId)" in script
     assert "mikan-search-endpoint" not in script
     assert "mikan-timeout-seconds" not in script
     assert "setFormError" in script
