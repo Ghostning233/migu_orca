@@ -8,6 +8,7 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import (
+    delete_request_snapshot,
     list_request_snapshots,
     load_request_snapshot,
     save_request_snapshot,
@@ -177,6 +178,103 @@ def test_save_request_snapshot_returns_stable_error_for_write_failure(
         "error_type": "storage_error",
         "error_message": "保存 Request JSON 失败",
         "failed_step": "save_request_snapshot",
+        "details": {
+            "request_id": request["request_id"],
+            "directory": "requests",
+        },
+    }
+    assert str(tmp_path) not in str(error.value.as_dict())
+
+
+def test_delete_request_snapshot_removes_request_and_refreshes_list(
+    tmp_path: Path,
+) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    save_request_snapshot(config, request)
+
+    deleted = delete_request_snapshot(config, request["request_id"])
+
+    assert deleted == {
+        "request_id": request["request_id"],
+        "storage": "local_json",
+        "directory": "requests",
+        "filename": f"{request['request_id']}.json",
+        "deleted": True,
+    }
+    assert not (config.requests_dir / f"{request['request_id']}.json").exists()
+    assert list_request_snapshots(config) == []
+
+
+def test_delete_request_snapshot_returns_stable_error_for_missing_request(
+    tmp_path: Path,
+) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+
+    with pytest.raises(Stage1Error) as error:
+        delete_request_snapshot(config, "missing-request")
+
+    assert error.value.as_dict() == {
+        "error_type": "request_not_found",
+        "error_message": "未找到已保存的 Request",
+        "failed_step": "delete_request_snapshot",
+        "details": {"request_id": "missing-request"},
+    }
+    assert str(tmp_path) not in str(error.value.as_dict())
+
+
+def test_delete_request_snapshot_rejects_path_traversal_request_id(
+    tmp_path: Path,
+) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    save_request_snapshot(config, request)
+
+    with pytest.raises(Stage1Error) as error:
+        delete_request_snapshot(config, "../outside")
+
+    assert error.value.as_dict() == {
+        "error_type": "invalid_request_id",
+        "error_message": "request_id 不能包含路径片段",
+        "failed_step": "delete_request_snapshot",
+        "details": {"field": "request_id"},
+    }
+    assert request["request_id"] in {
+        saved["request_id"] for saved in list_request_snapshots(config)
+    }
+    assert not (tmp_path / "outside.json").exists()
+
+
+def test_delete_request_snapshot_rejects_nested_request_id(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+
+    with pytest.raises(Stage1Error) as error:
+        delete_request_snapshot(config, "nested/request")
+
+    assert error.value.error_type == "invalid_request_id"
+    assert error.value.failed_step == "delete_request_snapshot"
+
+
+def test_delete_request_snapshot_returns_stable_error_for_unlink_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = load_storage_config(tmp_path / "migu-state")
+    request = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    save_request_snapshot(config, request)
+
+    def fail_unlink(self: Path) -> None:
+        raise OSError("permission denied: /sensitive/path")
+
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    with pytest.raises(Stage1Error) as error:
+        delete_request_snapshot(config, request["request_id"])
+
+    assert error.value.as_dict() == {
+        "error_type": "storage_error",
+        "error_message": "删除 Request JSON 失败",
+        "failed_step": "delete_request_snapshot",
         "details": {
             "request_id": request["request_id"],
             "directory": "requests",

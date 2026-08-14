@@ -82,6 +82,41 @@ def load_request_snapshot(
     return deepcopy(loaded)
 
 
+def delete_request_snapshot(
+    config: StorageConfig,
+    request_id: str,
+) -> dict[str, Any]:
+    request_path = _request_path(config, request_id, "delete_request_snapshot")
+    if not request_path.exists():
+        raise Stage1Error(
+            "request_not_found",
+            "未找到已保存的 Request",
+            "delete_request_snapshot",
+            {"request_id": request_id.strip()},
+        )
+
+    try:
+        request_path.unlink()
+    except OSError as exc:
+        raise Stage1Error(
+            "storage_error",
+            "删除 Request JSON 失败",
+            "delete_request_snapshot",
+            {
+                "request_id": request_id.strip(),
+                "directory": config.requests_dir.name,
+            },
+        ) from exc
+
+    return {
+        "request_id": request_id.strip(),
+        "storage": "local_json",
+        "directory": config.requests_dir.name,
+        "filename": request_path.name,
+        "deleted": True,
+    }
+
+
 def list_request_snapshots(config: StorageConfig) -> list[dict[str, Any]]:
     if not config.requests_dir.exists():
         return []

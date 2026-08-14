@@ -1,17 +1,29 @@
 # Ralph Progress Log
+Started: Fri Aug 14 20:20:45 CST 2026
+---
 ## Codebase Patterns
 - Stage 14 has been completed and merged into `main`; current active work is Stage 15.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
 - Preview Requests must not expose delete, confirm, cancel, modify, or Auto Bangumi submit actions.
-- Current Stage 14 UI only exposes modify actions for `PENDING_CONFIRM`; `ACCEPTED` details show the Settings Auto Bangumi link but not modify/delete.
-- Current `request_controller.modify_request` rejects non-`PENDING_CONFIRM`; Stage 15 must allow restricted `ACCEPTED` modification while keeping status `ACCEPTED`.
-- Storage request repository currently has save/load/list but no delete function.
+- Storage request repository exposes `save_request_snapshot`, `load_request_snapshot`, `list_request_snapshots`, and `delete_request_snapshot`; all path-derived functions guard request_id through `_request_path` (rejects empty, path fragments, and traversal) and return stable sanitized errors.
+- Web API request action endpoints share the shape `POST /api/v1/requests/<path:request_id>/<action>` with a `RequestActionPayload` subclass whose `request_id` comes from the URL path and whose payload only carries `storage_dir`; delete returns a safe summary (request_id, storage, directory, filename, deleted) and never the deleted snapshot body.
 - Filter rules currently use `must_contain` and `must_not_contain` strings; Stage 15 should add `use_regex` and `case_sensitive` with default `false` and old JSON compatibility.
 - Stage 15 filter default should be literal substring matching, case-insensitive. Regex matching must be opt-in.
 - Request detail seed feedback should continue to derive complete/valid/excluded lists from the selected RSS source and must not render raw RSS XML or raw response bodies.
 - Sensitive Web UI regressions should check URL state, `localStorage`, `sessionStorage`, visible body text, saved Request JSON, logs/screenshots/traces where applicable.
-
-Started: Fri Aug 14 17:20:00 CST 2026
+- Browser tests require the repo-root `.migu_orca/storage` to be absent; stale saved Requests there fail `test_empty_list_state`, `test_no_default_storage_pollution`, `test_list_count_shows_zero`, and the Stage 14 visual hierarchy test.
 ---
-Stage 15 has not started implementation yet. The current work is planning and Ralph task definition.
+## 2026-08-14 20:32:00 CST - US-103
+Thread: https://codex.openai.com/threads/019ffe91-320e-7110-959e-c2c339c7f029
+- Added path-safe `delete_request_snapshot` to the storage request repository: it validates request_id via the shared `_request_path` guard (rejects empty, path fragments, and traversal), returns a stable `request_not_found` error for missing Requests without leaking absolute paths, maps unlink OSError to a sanitized `storage_error`, and returns a safe summary `{request_id, storage, directory, filename, deleted}`.
+- Added the Web API delete entry `POST /api/v1/requests/<path:request_id>/delete` using the existing `RequestActionPayload` (request_id from URL path, `storage_dir` from payload). The response returns only the deleted request_id and safe summary, never the deleted snapshot JSON.
+- After a successful delete the Request list no longer includes the id and detail load returns the stable missing error.
+- Files changed: `src/storage_engine/controllers/request_repository.py`, `src/apps/migu_orca_web/views.py`, `src/storage_engine/controllers/request_repository_test.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 430 tests; `uv run pytest tests/browser/ -q` passed with 140 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: Web API action endpoints follow `POST /api/v1/requests/<path:request_id>/<action>` with `RequestActionPayload`; delete should reuse it and return only the safe deletion summary.
+  - Pattern discovered: the storage repository centralizes path-safety in `_request_path`, so the delete function inherits traversal/empty rejection without duplicating it.
+  - Gotcha encountered: the repo-root `.migu_orca/storage` had stale dev Requests that broke four browser tests expecting an empty default list; browser tests require `.migu_orca/storage` to be absent (gitignored, safe to clear).
+  - Useful context: only `requests/<request_id>.json` is removed on delete; history and ab_result files are intentionally left untouched for now (the request file missing makes detail load return `request_not_found`).
+---

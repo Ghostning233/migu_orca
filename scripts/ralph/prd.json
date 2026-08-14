@@ -19,7 +19,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先补存储/API 基础能力；UI 删除按钮在后续 story 接入。"
     },
     {

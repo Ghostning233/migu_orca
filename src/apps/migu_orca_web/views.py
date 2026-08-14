@@ -28,6 +28,7 @@ from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import (
+    delete_request_snapshot,
     list_request_snapshots,
     load_request_snapshot,
 )
@@ -524,6 +525,17 @@ class RequestModifyView(PostView):
         if "saved_request" in result:
             response["saved_request"] = result["saved_request"]
         return response
+
+
+@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/delete", methods=["POST"])
+class RequestDeleteView(PostView):
+    request_validator_model = RequestActionPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestActionPayload)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        return delete_request_snapshot(config, payload.request_id)
 
 
 @class_route(api_blueprint, "/api/v1/requests/<path:request_id>/submit-ab", methods=["POST"])

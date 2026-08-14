@@ -957,6 +957,134 @@ def test_list_requests_returns_unified_error_for_damaged_snapshot(
     assert str(tmp_path) not in str(payload)
 
 
+def test_delete_request_removes_saved_request_and_refreshes_list_and_detail(
+    tmp_path: Path,
+) -> None:
+    request = _saved_request(tmp_path, "芙莉莲", "request-1")
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        f"/api/v1/requests/{request['request_id']}/delete",
+        json={"storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": True,
+        "result": {
+            "request_id": "request-1",
+            "storage": "local_json",
+            "directory": "requests",
+            "filename": "request-1.json",
+            "deleted": True,
+        },
+    }
+    assert not (storage_dir / "requests" / "request-1.json").exists()
+
+    list_response = _client().get(
+        "/api/v1/requests",
+        query_string={"storage_dir": str(storage_dir)},
+    )
+    assert list_response.get_json() == {"ok": True, "result": {"requests": []}}
+
+    detail_response = _client().get(
+        "/api/v1/requests/request-1",
+        query_string={"storage_dir": str(storage_dir)},
+    )
+    assert detail_response.get_json() == {
+        "ok": False,
+        "error_type": "request_not_found",
+        "error_message": "未找到已保存的 Request",
+        "error_data": {
+            "failed_step": "load_request_snapshot",
+            "details": {"request_id": "request-1"},
+        },
+    }
+    assert str(tmp_path) not in str(payload)
+
+
+def test_delete_request_returns_unified_error_for_missing_request(
+    tmp_path: Path,
+) -> None:
+    response = _client().post(
+        "/api/v1/requests/missing-request/delete",
+        json={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "request_not_found",
+        "error_message": "未找到已保存的 Request",
+        "error_data": {
+            "failed_step": "delete_request_snapshot",
+            "details": {"request_id": "missing-request"},
+        },
+    }
+    assert str(tmp_path) not in str(payload)
+
+
+def test_delete_request_rejects_path_fragments_without_leaking_storage_path(
+    tmp_path: Path,
+) -> None:
+    response = _client().post(
+        "/api/v1/requests/nested%2Frequest/delete",
+        json={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "invalid_request_id",
+        "error_message": "request_id 不能包含路径片段",
+        "error_data": {
+            "failed_step": "delete_request_snapshot",
+            "details": {"field": "request_id"},
+        },
+    }
+    assert str(tmp_path) not in str(payload)
+
+
+def test_delete_request_returns_unified_error_for_delete_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def fail_delete(*args: object, **kwargs: object) -> dict[str, object]:
+        raise Stage1Error(
+            "storage_error",
+            f"删除 Request JSON 失败 {tmp_path}/secret-token",
+            "delete_request_snapshot",
+            {
+                "request_id": "request-1",
+                "directory": "requests",
+                "reason": f"cannot unlink {tmp_path}/requests/request-1.json",
+            },
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.delete_request_snapshot",
+        fail_delete,
+    )
+
+    response = _client().post(
+        "/api/v1/requests/request-1/delete",
+        json={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    serialized = str(payload)
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "storage_error"
+    assert payload["error_data"]["failed_step"] == "delete_request_snapshot"
+    assert payload["error_data"]["details"]["directory"] == "requests"
+    assert str(tmp_path) not in serialized
+    assert "secret-token" not in serialized
+
+
 def test_create_request_generates_without_writing_storage(tmp_path: Path) -> None:
     storage_dir = tmp_path / "storage"
 
