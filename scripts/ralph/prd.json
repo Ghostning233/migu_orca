@@ -125,7 +125,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "继续使用 request-scoped 配置，不将 AB endpoint/token 写入 localStorage、sessionStorage、URL、storage JSON 或日志。"
     },
     {

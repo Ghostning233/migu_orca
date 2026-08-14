@@ -19,6 +19,15 @@
       {% include "migu_orca_web/_top_nav.html" %}
     </header>
 
+    <div
+      id="page-notification"
+      class="page-notification"
+      aria-live="polite"
+      aria-atomic="true"
+      role="status"
+      hidden
+    ></div>
+
     <main class="app-layout settings-layout">
       <section id="storage-settings-panel" class="panel settings-panel" aria-labelledby="storage-settings-heading">
         <div class="panel-heading">
@@ -168,9 +177,67 @@
         <div class="panel-heading">
           <h2 id="auto-bangumi-settings-heading">Auto Bangumi</h2>
         </div>
-        <div class="empty-state">
-          Auto Bangumi 提交配置将在此处按 Request 上下文显示；token 不会持久化。
+        <div
+          id="settings-ab-context"
+          class="empty-state compact-state"
+          aria-live="polite"
+        >
+          从 ACCEPTED Request 详情进入后，可在此提交到 Auto Bangumi；token 不会持久化。
         </div>
+        <form id="settings-ab-submit-form" class="settings-form" hidden>
+          <p class="field-help">
+            当前 request_id：<code id="settings-ab-request-id"></code>。仅 ACCEPTED Request 可提交；endpoint 和 token 只用于本次请求，不写入浏览器存储、URL 或 Request JSON。
+          </p>
+
+          <label for="settings-ab-endpoint">endpoint</label>
+          <input
+            id="settings-ab-endpoint"
+            name="ab_submit_endpoint"
+            type="text"
+            autocomplete="off"
+            placeholder="Auto Bangumi API 地址"
+            aria-describedby="settings-ab-help settings-ab-error"
+          >
+
+          <label for="settings-ab-token">token</label>
+          <input
+            id="settings-ab-token"
+            name="ab_submit_token"
+            type="password"
+            autocomplete="off"
+            placeholder="Auto Bangumi Token"
+            aria-describedby="settings-ab-help settings-ab-error"
+          >
+
+          <label class="checkbox-row" for="settings-ab-fallback-enabled">
+            <input
+              id="settings-ab-fallback-enabled"
+              name="ab_submit_fallback_enabled"
+              type="checkbox"
+              value="true"
+            >
+            fallback_enabled
+          </label>
+          <p id="settings-ab-help" class="field-help">
+            提交前需要确认；失败时只展示脱敏错误，成功后清空 endpoint 和 token。
+          </p>
+          <p id="settings-ab-error" class="field-error" role="alert" hidden></p>
+
+          <div
+            id="settings-ab-result"
+            class="empty-state compact-state"
+            aria-live="polite"
+          >
+            尚未提交 Auto Bangumi。
+          </div>
+
+          <div class="notification-actions">
+            <button id="settings-ab-submit" type="submit">提交 Auto Bangumi</button>
+            <a id="settings-ab-return-link" class="secondary-button" href="{{ url_for('migu_orca_web.index') }}">
+              返回 Request 详情
+            </a>
+          </div>
+        </form>
       </section>
     </main>
   </body>

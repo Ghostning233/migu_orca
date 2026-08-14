@@ -45,7 +45,7 @@ def _click_modify(page: Page) -> None:
 
 
 def _click_ab_submit_entry(page: Page) -> None:
-    page.locator(".detail-actions button:has-text('提交 Auto Bangumi')").click()
+    page.locator(".detail-actions a:has-text('去 Settings 提交 Auto Bangumi')").click()
 
 
 def create_saved_accepted_request(
@@ -84,7 +84,7 @@ class TestActionButtons:
         _open_request_detail(page, live_server_url, storage_dir, "req-act-2")
         container = page.locator("#request-detail-container")
         assert container.locator("button:has-text('确认')").count() == 0
-        assert container.locator("button:has-text('提交 Auto Bangumi')").count() >= 1
+        assert container.locator("a:has-text('去 Settings 提交 Auto Bangumi')").count() >= 1
 
     def test_modify_button_toggles_form(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -109,28 +109,30 @@ class TestActionButtons:
 
         container = page.locator("#request-detail-container")
         assert (
-            container.locator(".detail-actions button:has-text('提交 Auto Bangumi')").count()
+            container.locator(".detail-actions a:has-text('去 Settings 提交 Auto Bangumi')").count()
             == 0
         )
 
 
 class TestAutoBangumiSubmitFlow:
-    """AC: ACCEPTED Request 可显式填写临时 AB 配置并确认提交."""
+    """AC: ACCEPTED Request links to Settings for temporary AB config."""
 
-    def test_ab_submit_form_has_temporary_config_fields(
+    def test_ab_submit_entry_links_to_settings_context(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         create_saved_accepted_request(storage_dir, "葬送的芙莉莲", "req-ab-form")
         _open_request_detail(page, live_server_url, storage_dir, "req-ab-form")
 
-        assert page.locator("#detail-ab-submit-form").is_hidden()
+        entry = page.locator(".detail-actions a:has-text('去 Settings 提交 Auto Bangumi')")
+        assert entry.count() >= 1
+        assert entry.get_attribute("href") == "/settings?request_id=req-ab-form#auto-bangumi"
+        assert page.locator("#detail-ab-submit-form").count() == 0
         _click_ab_submit_entry(page)
-
-        form = page.locator("#detail-ab-submit-form")
-        assert form.is_visible()
-        assert page.locator("#ab-submit-endpoint").count() >= 1
-        assert page.locator("#ab-submit-token").get_attribute("type") == "password"
-        assert page.locator("#ab-submit-fallback-enabled").get_attribute("type") == "checkbox"
+        page.wait_for_url("**/settings?request_id=req-ab-form#auto-bangumi")
+        assert page.locator("#settings-ab-submit-form").is_visible()
+        assert page.locator("#settings-ab-request-id").inner_text() == "req-ab-form"
+        assert page.locator("#settings-ab-token").get_attribute("type") == "password"
+        assert page.locator("#settings-ab-fallback-enabled").get_attribute("type") == "checkbox"
 
     def test_ab_submit_requires_confirmation_and_sends_request_scoped_config(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -161,18 +163,18 @@ class TestAutoBangumiSubmitFlow:
                 route.continue_()
 
         page.route("**/api/v1/requests/req-ab-submit/submit-ab**", handle_submit)
-        _open_request_detail(page, live_server_url, storage_dir, "req-ab-submit")
-        _click_ab_submit_entry(page)
-        page.locator("#ab-submit-endpoint").fill("ab-endpoint-value")
-        page.locator("#ab-submit-token").fill("browser-secret-token")
-        page.locator("#ab-submit-fallback-enabled").check()
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/settings?request_id=req-ab-submit#auto-bangumi")
+        page.locator("#settings-ab-endpoint").fill("ab-endpoint-value")
+        page.locator("#settings-ab-token").fill("browser-secret-token")
+        page.locator("#settings-ab-fallback-enabled").check()
 
         seen_dialogs = []
         page.on(
             "dialog",
             lambda dialog: (seen_dialogs.append(dialog.message), dialog.accept()),
         )
-        page.locator("#detail-ab-submit-form button:has-text('提交')").click()
+        page.locator("#settings-ab-submit").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert seen_dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
@@ -191,6 +193,8 @@ class TestAutoBangumiSubmitFlow:
         session_keys = page.evaluate("Object.keys(window.sessionStorage)")
         assert all("ab" not in key.lower() for key in storage_keys)
         assert session_keys == []
+        assert page.locator("#settings-ab-endpoint").input_value() == ""
+        assert page.locator("#settings-ab-token").input_value() == ""
 
 
 class TestConfirmFlow:

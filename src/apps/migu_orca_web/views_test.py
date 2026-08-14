@@ -236,6 +236,18 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert "尚未测试 qBittorrent 连接" in html
     assert "status、reachable 和 version" in html
     assert "qBittorrent 连接测试将在此处迁移" not in html
+    assert 'id="settings-ab-submit-form"' in html
+    assert 'id="settings-ab-request-id"' in html
+    assert 'id="settings-ab-endpoint"' in html
+    assert 'name="ab_submit_endpoint"' in html
+    assert 'id="settings-ab-token"' in html
+    assert 'name="ab_submit_token"' in html
+    assert 'id="settings-ab-fallback-enabled"' in html
+    assert 'name="ab_submit_fallback_enabled"' in html
+    assert 'id="settings-ab-result"' in html
+    assert 'id="settings-ab-return-link"' in html
+    assert "仅 ACCEPTED Request 可提交" in html
+    assert "尚未提交 Auto Bangumi" in html
     assert "/migu-orca-static/style.css" in html
     assert "/migu-orca-static/app.js" in html
 
@@ -269,10 +281,11 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "暂无状态历史。" in script
     assert "暂无 Auto Bangumi 提交结果。" in script
     assert "提交 Auto Bangumi" in script
-    assert "detail-ab-submit-form" in script
-    assert "ab-submit-endpoint" in script
-    assert "ab-submit-token" in script
-    assert "ab-submit-fallback-enabled" in script
+    assert "去 Settings 提交 Auto Bangumi" in script
+    assert "settings-ab-submit-form" in script
+    assert "settings-ab-endpoint" in script
+    assert "settings-ab-token" in script
+    assert "settings-ab-fallback-enabled" in script
     assert "Auto Bangumi 提交" in script
     assert "fallback_enabled" in script
     assert "window.confirm(\"确认提交此 Request 到 Auto Bangumi？\")" in script
@@ -296,9 +309,8 @@ def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:
     assert "currentDetailPayload" in script
     assert "status === \"ACCEPTED\"" in script
     assert "可提交到 Auto Bangumi" in script
-    assert "setAbSubmitInFlight(true)" in script
-    assert "setAbSubmitInFlight(false)" in script
-    assert "renderDetailPayload(nextPayload)" in script
+    assert "settingsAbReturnLink.href" in script
+    assert "clearSettingsAbSensitiveFields" in script
     assert "ab_submit_result" in script
     assert "提交成功" in script
     assert "提交失败" in script
@@ -492,22 +504,23 @@ def test_static_app_script_wires_explicit_ab_submit_form() -> None:
 
     script = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "buildAbSubmitForm" in script
-    assert "detail-ab-submit-form" in script
-    assert "ab-submit-endpoint" in script
-    assert "ab-submit-token" in script
-    assert "ab-submit-fallback-enabled" in script
-    assert "tokenInput.type = \"password\"" in script
-    assert "fallbackInput.type = \"checkbox\"" in script
-    assert "配置仅用于本次提交，不写入浏览器存储、URL 或 storage JSON。" in script
+    assert "settings-ab-submit-form" in script
+    assert "settings-ab-endpoint" in script
+    assert "settings-ab-token" in script
+    assert "settings-ab-fallback-enabled" in script
+    assert "settingsAbTokenInput" in script
+    assert "settingsAbFallbackInput" in script
+    assert "initializeSettingsAbForm" in script
+    assert "submitSettingsAb" in script
     assert "提交 Auto Bangumi 前必须填写 endpoint。" in script
     assert "提交 Auto Bangumi 前必须填写 token。" in script
     assert "确认提交此 Request 到 Auto Bangumi？" in script
-    assert 'performAction(request.request_id, "submit-ab"' in script
+    assert '"/submit-ab"' in script
     assert "storage_dir: currentStorageDir() || null" in script
     assert "ab_config" in script
-    assert "fallback_enabled: fallbackInput.checked" in script
+    assert "fallback_enabled: settingsAbFallbackInput ? settingsAbFallbackInput.checked : false" in script
     assert "Auto Bangumi 提交成功" in script
+    assert "clearSettingsAbSensitiveFields" in script
     assert "secret-token" not in script
     assert "Authorization" not in script
     assert "http://" not in script
@@ -592,13 +605,15 @@ def test_static_app_script_shows_ab_submit_only_for_accepted_requests() -> None:
     assert response.status_code == 200
     assert 'var isAccepted = request.status === "ACCEPTED";' in script
     assert "else if (isAccepted)" in script
-    assert 'abSubmitBtn.textContent = "提交 Auto Bangumi"' in script
-    assert "detail-ab-submit-form" in script
-    assert "form.hidden = !form.hidden" in script
+    assert 'abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi"' in script
+    assert '"/settings?request_id="' in script
+    assert '"#auto-bangumi"' in script
+    assert "detail-ab-submit-form" not in script
+    assert "ab-submit-endpoint" not in script
     assert script.index("else if (isAccepted)") > script.index(
         'var isPending = request.status === "PENDING_CONFIRM";'
     )
-    assert script.index('abSubmitBtn.textContent = "提交 Auto Bangumi"') < script.index(
+    assert script.index('abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi"') < script.index(
         "actionsContainer.appendChild(abSubmitBtn)"
     )
 

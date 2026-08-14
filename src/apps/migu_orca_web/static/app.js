@@ -26,6 +26,16 @@
   const qbittorrentFormError = document.getElementById("settings-qbittorrent-error");
   const qbittorrentResult = document.getElementById("settings-qbittorrent-result");
   const qbittorrentSubmitButton = document.getElementById("settings-qbittorrent-test-submit");
+  const settingsAbContext = document.getElementById("settings-ab-context");
+  const settingsAbForm = document.getElementById("settings-ab-submit-form");
+  const settingsAbRequestId = document.getElementById("settings-ab-request-id");
+  const settingsAbEndpointInput = document.getElementById("settings-ab-endpoint");
+  const settingsAbTokenInput = document.getElementById("settings-ab-token");
+  const settingsAbFallbackInput = document.getElementById("settings-ab-fallback-enabled");
+  const settingsAbFormError = document.getElementById("settings-ab-error");
+  const settingsAbResult = document.getElementById("settings-ab-result");
+  const settingsAbSubmitButton = document.getElementById("settings-ab-submit");
+  const settingsAbReturnLink = document.getElementById("settings-ab-return-link");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -214,6 +224,9 @@
   }
 
   function hideNotification() {
+    if (!notification) {
+      return;
+    }
     notification.hidden = true;
     notification.replaceChildren();
     notification.className = "page-notification";
@@ -221,6 +234,9 @@
   }
 
   function showNotification(kind, title, message, options) {
+    if (!notification) {
+      return;
+    }
     notification.replaceChildren();
     notification.hidden = false;
     notification.className = "page-notification notification-" + kind;
@@ -504,6 +520,176 @@
 
   if (qbittorrentForm) {
     qbittorrentForm.addEventListener("submit", testQbittorrentConnection);
+  }
+
+  function settingsAbRequestIdFromLocation() {
+    return requestIdFromLocation();
+  }
+
+  function setSettingsAbError(message, field) {
+    if (!settingsAbFormError) {
+      return;
+    }
+    settingsAbFormError.textContent = message;
+    settingsAbFormError.hidden = false;
+    for (const input of [settingsAbEndpointInput, settingsAbTokenInput]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearSettingsAbError() {
+    if (!settingsAbFormError) {
+      return;
+    }
+    settingsAbFormError.textContent = "";
+    settingsAbFormError.hidden = true;
+    for (const input of [settingsAbEndpointInput, settingsAbTokenInput]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setSettingsAbResult(message, className) {
+    if (!settingsAbResult) {
+      return;
+    }
+    settingsAbResult.className = className || "empty-state compact-state";
+    settingsAbResult.textContent = message;
+  }
+
+  function setSettingsAbInFlight(isInFlight) {
+    if (!settingsAbForm) {
+      return;
+    }
+    const controls = settingsAbForm.querySelectorAll("button, input");
+    for (const control of controls) {
+      control.disabled = isInFlight;
+    }
+    if (settingsAbSubmitButton) {
+      settingsAbSubmitButton.textContent = isInFlight
+        ? "正在提交..."
+        : "提交 Auto Bangumi";
+    }
+  }
+
+  function clearSettingsAbSensitiveFields() {
+    if (settingsAbEndpointInput) {
+      settingsAbEndpointInput.value = "";
+    }
+    if (settingsAbTokenInput) {
+      settingsAbTokenInput.value = "";
+    }
+  }
+
+  function initializeSettingsAbForm() {
+    if (!settingsAbForm) {
+      return;
+    }
+    const requestId = settingsAbRequestIdFromLocation();
+    if (!requestId) {
+      settingsAbForm.hidden = true;
+      if (settingsAbContext) {
+        settingsAbContext.textContent =
+          "从 ACCEPTED Request 详情进入后，可在此提交到 Auto Bangumi。";
+      }
+      return;
+    }
+    settingsAbForm.hidden = false;
+    if (settingsAbRequestId) {
+      settingsAbRequestId.textContent = requestId;
+    }
+    if (settingsAbContext) {
+      settingsAbContext.textContent =
+        "已选择 Request " + requestId + "；请确认该 Request 已 ACCEPTED 后再提交。";
+    }
+    if (settingsAbReturnLink) {
+      settingsAbReturnLink.href = "/index?request_id=" + encodeURIComponent(requestId);
+    }
+  }
+
+  async function submitSettingsAb(event) {
+    event.preventDefault();
+    clearSettingsAbError();
+    const requestId = settingsAbRequestIdFromLocation();
+    const endpoint = settingsAbEndpointInput ? settingsAbEndpointInput.value.trim() : "";
+    const token = settingsAbTokenInput ? settingsAbTokenInput.value.trim() : "";
+    if (!requestId) {
+      setSettingsAbError("缺少 request_id，无法提交 Auto Bangumi。");
+      return;
+    }
+    if (!endpoint) {
+      setSettingsAbError("提交 Auto Bangumi 前必须填写 endpoint。", settingsAbEndpointInput);
+      return;
+    }
+    if (!token) {
+      setSettingsAbError("提交 Auto Bangumi 前必须填写 token。", settingsAbTokenInput);
+      return;
+    }
+    if (!window.confirm("确认提交此 Request 到 Auto Bangumi？")) {
+      return;
+    }
+
+    setSettingsAbInFlight(true);
+    setSettingsAbResult("正在提交 Auto Bangumi...", "loading-state compact-state");
+    try {
+      const result = await fetchJson(
+        apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/submit-ab"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            storage_dir: currentStorageDir() || null,
+            ab_config: {
+              endpoint: endpoint,
+              token: token,
+              fallback_enabled: settingsAbFallbackInput ? settingsAbFallbackInput.checked : false,
+            },
+          }),
+        },
+      );
+      const summary = result && result.ab_submit_result;
+      const subscriptionId = summary && summary.ab_subscription_id
+        ? "；ab_subscription_id: " + safeText(summary.ab_subscription_id)
+        : "";
+      clearSettingsAbSensitiveFields();
+      setSettingsAbResult(
+        "Auto Bangumi 提交成功；request_id: " + safeText(requestId) + subscriptionId,
+        "loading-state compact-state",
+      );
+      showNotification("success", "Auto Bangumi 提交成功", "Request " + requestId, {
+        actions: settingsAbReturnLink
+          ? [
+              {
+                label: "返回详情",
+                handler: () => {
+                  window.location.href = settingsAbReturnLink.href;
+                },
+              },
+            ]
+          : [],
+      });
+    } catch (error) {
+      setSettingsAbResult(
+        "Auto Bangumi 提交失败。请检查配置与 Request 状态后重试。",
+        "error-state compact-state",
+      );
+      showNotification("error", "Auto Bangumi 提交失败", "请检查配置与 Request 状态后重试。");
+    } finally {
+      setSettingsAbInFlight(false);
+    }
+  }
+
+  initializeSettingsAbForm();
+
+  if (settingsAbForm) {
+    settingsAbForm.addEventListener("submit", submitSettingsAb);
   }
 
   if (!form) {
@@ -797,28 +983,10 @@
     }
   }
 
-  function setAbSubmitInFlight(isInFlight) {
-    var form = document.getElementById("detail-ab-submit-form");
-    if (!form) {
-      return;
-    }
-    var controls = form.querySelectorAll("button, input");
-    for (var i = 0; i < controls.length; i++) {
-      var control = controls[i];
-      if (control.tagName === "INPUT" && control.type === "hidden") {
-        continue;
-      }
-      control.disabled = isInFlight;
-    }
-  }
-
   async function performAction(requestId, actionType, body) {
     if (!requestId) return;
     hideNotification();
     setActionInFlight(true);
-    if (actionType === "submit-ab") {
-      setAbSubmitInFlight(true);
-    }
     try {
       const result = await fetchJson(
         apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/" + actionType),
@@ -834,23 +1002,7 @@
         modify: "修改成功",
         "submit-ab": "Auto Bangumi 提交成功",
       };
-      if (actionType === "submit-ab") {
-        const nextPayload = {
-          ...(currentDetailPayload || {}),
-          request: result.request,
-          ab_result: {
-            available: true,
-            record: {
-              request_id: requestId,
-              ab_submit_result: result.ab_submit_result,
-            },
-            error: null,
-          },
-        };
-        renderDetailPayload(nextPayload);
-      } else {
-        await loadDetail(requestId);
-      }
+      await loadDetail(requestId);
       await loadList({loadSelectedDetail: false});
       showNotification("success", titles[actionType] || "操作成功",
         "Request " + requestId, {
@@ -859,136 +1011,10 @@
           ],
         });
     } catch (error) {
-      notifyApiError(actionType === "submit-ab" ? "提交失败" : "操作失败", error);
+      notifyApiError("操作失败", error);
     } finally {
-      if (actionType === "submit-ab") {
-        setAbSubmitInFlight(false);
-      }
       setActionInFlight(false);
     }
-  }
-
-  function buildAbSubmitForm(request) {
-    var container = document.createElement("div");
-    container.id = "detail-ab-submit-form";
-    container.className = "detail-section detail-inline-form";
-    container.hidden = true;
-
-    var heading = document.createElement("h4");
-    heading.textContent = "Auto Bangumi 提交";
-    container.appendChild(heading);
-
-    var endpointLabel = document.createElement("label");
-    endpointLabel.textContent = "endpoint";
-    endpointLabel.htmlFor = "ab-submit-endpoint";
-    var endpointInput = document.createElement("input");
-    endpointInput.id = "ab-submit-endpoint";
-    endpointInput.name = "ab_submit_endpoint";
-    endpointInput.type = "text";
-    endpointInput.autocomplete = "off";
-    endpointInput.placeholder = "Auto Bangumi API 地址";
-    container.append(endpointLabel, endpointInput);
-
-    var tokenLabel = document.createElement("label");
-    tokenLabel.textContent = "token";
-    tokenLabel.htmlFor = "ab-submit-token";
-    var tokenInput = document.createElement("input");
-    tokenInput.id = "ab-submit-token";
-    tokenInput.name = "ab_submit_token";
-    tokenInput.type = "password";
-    tokenInput.autocomplete = "off";
-    tokenInput.placeholder = "Auto Bangumi Token";
-    container.append(tokenLabel, tokenInput);
-
-    var fallbackLabel = document.createElement("label");
-    fallbackLabel.className = "checkbox-row";
-    fallbackLabel.htmlFor = "ab-submit-fallback-enabled";
-    var fallbackInput = document.createElement("input");
-    fallbackInput.id = "ab-submit-fallback-enabled";
-    fallbackInput.name = "ab_submit_fallback_enabled";
-    fallbackInput.type = "checkbox";
-    fallbackInput.value = "true";
-    fallbackLabel.append(
-      fallbackInput,
-      document.createTextNode("fallback_enabled"),
-    );
-    container.appendChild(fallbackLabel);
-
-    var help = document.createElement("p");
-    help.className = "field-help";
-    help.textContent = "配置仅用于本次提交，不写入浏览器存储、URL 或 storage JSON。";
-    container.appendChild(help);
-
-    var error = document.createElement("p");
-    error.id = "ab-submit-form-error";
-    error.className = "field-error";
-    error.setAttribute("role", "alert");
-    error.hidden = true;
-    container.appendChild(error);
-
-    function setAbFormError(message, field) {
-      error.textContent = message;
-      error.hidden = false;
-      endpointInput.removeAttribute("aria-invalid");
-      tokenInput.removeAttribute("aria-invalid");
-      if (field) {
-        field.setAttribute("aria-invalid", "true");
-        field.focus();
-      }
-    }
-
-    function clearAbFormError() {
-      error.textContent = "";
-      error.hidden = true;
-      endpointInput.removeAttribute("aria-invalid");
-      tokenInput.removeAttribute("aria-invalid");
-    }
-
-    var btnRow = document.createElement("div");
-    btnRow.className = "notification-actions";
-
-    var submitBtn = document.createElement("button");
-    submitBtn.type = "button";
-    submitBtn.className = "detail-action";
-    submitBtn.textContent = "提交 Auto Bangumi";
-    submitBtn.addEventListener("click", function () {
-      clearAbFormError();
-      var endpoint = endpointInput.value.trim();
-      if (!endpoint) {
-        setAbFormError("提交 Auto Bangumi 前必须填写 endpoint。", endpointInput);
-        return;
-      }
-      var token = tokenInput.value.trim();
-      if (!token) {
-        setAbFormError("提交 Auto Bangumi 前必须填写 token。", tokenInput);
-        return;
-      }
-      if (!window.confirm("确认提交此 Request 到 Auto Bangumi？")) {
-        return;
-      }
-      performAction(request.request_id, "submit-ab", {
-        storage_dir: currentStorageDir() || null,
-        ab_config: {
-          endpoint: endpoint,
-          token: token,
-          fallback_enabled: fallbackInput.checked,
-        },
-      });
-    });
-    btnRow.appendChild(submitBtn);
-
-    var cancelBtn = document.createElement("button");
-    cancelBtn.type = "button";
-    cancelBtn.className = "secondary-button detail-action";
-    cancelBtn.textContent = "取消";
-    cancelBtn.addEventListener("click", function () {
-      clearAbFormError();
-      container.hidden = true;
-    });
-    btnRow.appendChild(cancelBtn);
-
-    container.appendChild(btnRow);
-    return container;
   }
 
   function buildModifyForm(request) {
@@ -1179,22 +1205,11 @@
       statusNote.textContent = "此 Request 已" + fieldValue(request.status) + "，可提交到 Auto Bangumi。";
       actionsContainer.appendChild(statusNote);
 
-      var abSubmitBtn = document.createElement("button");
-      abSubmitBtn.type = "button";
+      var abSubmitBtn = document.createElement("a");
       abSubmitBtn.className = "secondary-button detail-action";
-      abSubmitBtn.textContent = "提交 Auto Bangumi";
-      abSubmitBtn.addEventListener("click", function () {
-        var form = document.getElementById("detail-ab-submit-form");
-        if (form) {
-          form.hidden = !form.hidden;
-          if (!form.hidden) {
-            var endpoint = document.getElementById("ab-submit-endpoint");
-            if (endpoint) {
-              endpoint.focus();
-            }
-          }
-        }
-      });
+      abSubmitBtn.href =
+        "/settings?request_id=" + encodeURIComponent(request.request_id) + "#auto-bangumi";
+      abSubmitBtn.textContent = "去 Settings 提交 Auto Bangumi";
       actionsContainer.appendChild(abSubmitBtn);
     } else {
       var statusNote = document.createElement("p");
@@ -1204,8 +1219,6 @@
     }
 
     var modifyForm = buildModifyForm(request);
-    var abSubmitForm = buildAbSubmitForm(request);
-
     var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
       detailList([
@@ -1244,7 +1257,6 @@
       heading,
       actionsContainer,
       modifyForm,
-      abSubmitForm,
       overviewSection,
       sourceSection,
       filterSection,

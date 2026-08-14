@@ -99,7 +99,7 @@ class TestStage11AutoBangumiBrowserRegressions:
         assert (
             page.locator(
                 "#request-detail-container .detail-actions "
-                "button:visible:has-text('提交 Auto Bangumi')"
+                "a:visible:has-text('去 Settings 提交 Auto Bangumi')"
             ).count()
             == 0
         )
@@ -107,17 +107,18 @@ class TestStage11AutoBangumiBrowserRegressions:
         _open_request_detail(page, live_server_url, storage_dir, "req-stage11-accepted")
         page.locator(
             "#request-detail-container .detail-actions "
-            "button:visible:has-text('提交 Auto Bangumi')"
+            "a:visible:has-text('去 Settings 提交 Auto Bangumi')"
         ).click()
 
-        assert page.locator("#detail-ab-submit-form").is_visible()
-        assert page.locator("#ab-submit-token").get_attribute("type") == "password"
+        page.wait_for_url("**/settings?request_id=req-stage11-accepted#auto-bangumi")
+        assert page.locator("#settings-ab-submit-form").is_visible()
+        assert page.locator("#settings-ab-token").get_attribute("type") == "password"
 
         dialogs: list[str] = []
         page.once("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
-        page.fill("#ab-submit-endpoint", "redacted-ab-entry")
-        page.fill("#ab-submit-token", SENSITIVE_TOKEN)
-        page.locator("#detail-ab-submit-form button:has-text('提交 Auto Bangumi')").click()
+        page.fill("#settings-ab-endpoint", "redacted-ab-entry")
+        page.fill("#settings-ab-token", SENSITIVE_TOKEN)
+        page.locator("#settings-ab-submit").click()
         page.wait_for_timeout(300)
 
         assert dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
@@ -150,19 +151,23 @@ class TestStage11AutoBangumiBrowserRegressions:
             )
 
         page.route("**/api/v1/requests/req-stage11-ab-fail/submit-ab**", _fail_submit)
-        _open_request_detail(page, live_server_url, storage_dir, "req-stage11-ab-fail")
-
-        page.locator(".detail-actions button:has-text('提交 Auto Bangumi')").click()
-        page.fill("#ab-submit-endpoint", SENSITIVE_ENDPOINT)
-        page.fill("#ab-submit-token", SENSITIVE_TOKEN)
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/settings?request_id=req-stage11-ab-fail#auto-bangumi")
+        page.fill("#settings-ab-endpoint", SENSITIVE_ENDPOINT)
+        page.fill("#settings-ab-token", SENSITIVE_TOKEN)
         page.once("dialog", lambda dialog: dialog.accept())
-        page.locator("#detail-ab-submit-form button:has-text('提交 Auto Bangumi')").click()
+        page.locator("#settings-ab-submit").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
+        settings_text = page.locator("#auto-bangumi-settings-panel").inner_text()
+        notification_text = page.locator("#page-notification").inner_text()
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/index?request_id=req-stage11-ab-fail")
+        page.wait_for_selector("#request-detail-container", timeout=5000)
         detail_text = page.locator("#request-detail-container").inner_text()
         list_text = page.locator("#request-list-container").inner_text()
-        notification_text = page.locator("#page-notification").inner_text()
 
+        assert "req-stage11-ab-fail" in settings_text
         assert "req-stage11-ab-fail" in detail_text
         assert "ACCEPTED" in detail_text
         assert "咒术回战 第三季" in list_text

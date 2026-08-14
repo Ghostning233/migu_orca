@@ -6,6 +6,7 @@
 - Real MiKan, Auto Bangumi, and qBittorrent configuration must remain explicit and request-scoped; do not write endpoint, token, username, password, cookie, SID, raw HTML/RSS, raw response bodies, or sensitive local paths to storage JSON, browser storage, URL, logs, screenshots, or traces.
 - qBittorrent connection tests must call `POST /api/v1/qbittorrent/test-connection` and only render `status`, `reachable`, and `version` on success.
 - Auto Bangumi submission must remain accepted-only and use `POST /api/v1/requests/<request_id>/submit-ab`; endpoint/token are temporary inputs and must be redacted from UI errors and persisted results.
+- Stage 13 Auto Bangumi UI lives in Settings: accepted Request details link to `/settings?request_id=<id>#auto-bangumi`, and Settings owns endpoint/token/fallback inputs plus the return link to `/index?request_id=<id>`.
 - Stage 13 UI work is not only route migration: `/index` and `/settings` must have clear visual hierarchy, consistent primary/secondary/danger button semantics, unified empty/loading/error states, readable medium/narrow layouts, and scannable Request detail sections.
 - Stage closeout documentation should keep `README.md`, `docs/backlog.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, and `scripts/ralph/progress.txt` synchronized.
 - Use shared Jinja includes for navigation shared across `/index` and `/settings`; pass `active_page` from Flask views for `aria-current` state.
@@ -175,4 +176,30 @@ Thread: https://codex.openai.com/threads/unavailable
   - URL query state must stay non-sensitive; keep storage_dir and external service config in Settings preferences or request-scoped POST bodies, not in the URL.
   - List refresh can race with generation/action rendering, so suppress selected-detail auto-load when the caller already rendered the intended detail state.
   - Missing detail loads should use a generic actionable error and keep the Request list usable.
+---
+## 2026-08-14 14:05 CST - US-093
+Thread: https://codex.openai.com/threads/unavailable
+- Migrated Auto Bangumi submission configuration from ACCEPTED Request detail into `/settings?request_id=<id>#auto-bangumi`.
+- Request detail now shows an accepted-only Settings link and no longer renders endpoint/token/fallback inputs inline.
+- Settings now shows request_id context, endpoint/token/fallback inputs, explicit confirmation, safe success/failure feedback, sensitive-field clearing on success, and a return link to `/index?request_id=<id>`.
+- Files changed:
+  - `src/apps/migu_orca_web/templates/migu_orca_web/settings.html`
+  - `src/apps/migu_orca_web/static/app.js`
+  - `src/apps/migu_orca_web/views_test.py`
+  - `tests/browser/test_actions.py`
+  - `tests/browser/test_detail.py`
+  - `tests/browser/test_stage11_real_config_entry.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- Quality checks:
+  - `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed: 54 tests.
+  - `uv run pytest tests/browser/test_actions.py tests/browser/test_detail.py tests/browser/test_stage11_real_config_entry.py tests/browser/test_shell.py -q` passed: 61 tests.
+  - `uv run pytest -q` passed from repo root: 399 tests.
+  - `uv run pytest tests/browser/ -v` passed: 120 tests.
+  - `uv run python -m compileall -q src` passed.
+  - No separate dev-browser MCP skill/tool was available; Playwright browser tests were used for browser verification.
+- **Learnings for future iterations:**
+  - Accepted Request detail should link to Settings for Auto Bangumi submission instead of rendering sensitive inputs inline.
+  - Settings forms can share `app.js` with `/index`, but all initialization must be guarded by element presence because each page owns different controls.
+  - Capture Settings notification text before navigating back to `/index` in browser tests, because page navigation clears the Settings DOM state.
 ---

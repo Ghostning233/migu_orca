@@ -154,7 +154,7 @@ class TestRequestIdCopy:
 
 
 class TestAutoBangumiSubmitEntry:
-    """AC: ACCEPTED Request 详情展示 Auto Bangumi 提交入口并使用临时配置表单."""
+    """AC: ACCEPTED Request 详情展示 Settings Auto Bangumi 提交入口."""
 
     def test_submit_entry_visible_only_for_accepted_request(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -163,17 +163,10 @@ class TestAutoBangumiSubmitEntry:
         _open_request_detail(page, live_server_url, storage_dir, "req-ab-1")
 
         detail = page.locator("#request-detail-container")
-        assert detail.locator("button:has-text('提交 Auto Bangumi')").count() >= 1
-        assert page.locator("#detail-ab-submit-form").is_hidden()
-
-        page.locator(".detail-actions button:has-text('提交 Auto Bangumi')").click()
-        page.wait_for_timeout(300)
-
-        form = page.locator("#detail-ab-submit-form")
-        assert form.is_visible()
-        assert page.locator("#ab-submit-endpoint").count() >= 1
-        assert page.locator("#ab-submit-token").get_attribute("type") == "password"
-        assert page.locator("#ab-submit-fallback-enabled").count() >= 1
+        entry = detail.locator("a:has-text('去 Settings 提交 Auto Bangumi')")
+        assert entry.count() >= 1
+        assert entry.get_attribute("href") == "/settings?request_id=req-ab-1#auto-bangumi"
+        assert page.locator("#detail-ab-submit-form").count() == 0
 
     def test_submit_entry_hidden_for_pending_request(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -183,23 +176,22 @@ class TestAutoBangumiSubmitEntry:
 
         detail = page.locator("#request-detail-container")
         assert (
-            detail.locator(".detail-actions > button:visible:has-text('提交 Auto Bangumi')").count()
+            detail.locator(
+                ".detail-actions > a:visible:has-text('去 Settings 提交 Auto Bangumi')"
+            ).count()
             == 0
         )
-        assert page.locator("#detail-ab-submit-form").count() >= 1
-        assert page.locator("#detail-ab-submit-form").is_hidden()
+        assert page.locator("#detail-ab-submit-form").count() == 0
 
     def test_submit_flow_uses_confirmation_and_refreshes_result(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         request = _save_accepted_request(storage_dir, "葬送的芙莉莲", "req-ab-3")
-        _open_request_detail(page, live_server_url, storage_dir, "req-ab-3")
-
-        page.locator(".detail-actions button:has-text('提交 Auto Bangumi')").click()
-        page.wait_for_timeout(300)
-        page.fill("#ab-submit-endpoint", "http://auto-bangumi.local/api/subscriptions")
-        page.fill("#ab-submit-token", "temporary-token")
-        page.check("#ab-submit-fallback-enabled")
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/settings?request_id=req-ab-3#auto-bangumi")
+        page.fill("#settings-ab-endpoint", "http://auto-bangumi.local/api/subscriptions")
+        page.fill("#settings-ab-token", "temporary-token")
+        page.check("#settings-ab-fallback-enabled")
 
         dialog_messages: list[str] = []
 
@@ -259,7 +251,7 @@ class TestAutoBangumiSubmitEntry:
             )
 
         page.route("**/api/v1/requests/req-ab-3/submit-ab**", _capture_submit)
-        page.locator("#detail-ab-submit-form button:has-text('提交 Auto Bangumi')").click()
+        page.locator("#settings-ab-submit").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert dialog_messages
@@ -271,9 +263,14 @@ class TestAutoBangumiSubmitEntry:
             "fallback_enabled": True,
         }
 
-        detail_text = page.locator("#request-detail-container").inner_text()
-        assert "Auto Bangumi 结果" in detail_text
-        assert "browser-subscription" in detail_text
+        settings_text = page.locator("#auto-bangumi-settings-panel").inner_text()
+        assert "Auto Bangumi 提交成功" in settings_text
+        assert "browser-subscription" in settings_text
+        assert page.locator("#settings-ab-endpoint").input_value() == ""
+        assert page.locator("#settings-ab-token").input_value() == ""
+        assert page.locator("#settings-ab-return-link").get_attribute("href") == (
+            "/index?request_id=req-ab-3"
+        )
         assert "提交成功" in page.locator("#page-notification").inner_text()
         storage_keys = page.evaluate("Object.keys(window.localStorage)")
         assert all("ab" not in key.lower() for key in storage_keys)
@@ -282,12 +279,10 @@ class TestAutoBangumiSubmitEntry:
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         _save_accepted_request(storage_dir, "葬送的芙莉莲", "req-ab-4")
-        _open_request_detail(page, live_server_url, storage_dir, "req-ab-4")
-
-        page.locator(".detail-actions button:has-text('提交 Auto Bangumi')").click()
-        page.wait_for_timeout(300)
-        page.fill("#ab-submit-endpoint", "http://auto-bangumi.local/api/subscriptions")
-        page.fill("#ab-submit-token", "temporary-token")
+        set_storage_preferences(page, storage_dir)
+        page.goto(f"{live_server_url}/settings?request_id=req-ab-4#auto-bangumi")
+        page.fill("#settings-ab-endpoint", "http://auto-bangumi.local/api/subscriptions")
+        page.fill("#settings-ab-token", "temporary-token")
 
         page.once("dialog", lambda dialog: dialog.accept())
 
@@ -306,11 +301,11 @@ class TestAutoBangumiSubmitEntry:
             )
 
         page.route("**/api/v1/requests/req-ab-4/submit-ab**", _fail_submit)
-        page.locator("#detail-ab-submit-form button:has-text('提交 Auto Bangumi')").click()
+        page.locator("#settings-ab-submit").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
-        detail_text = page.locator("#request-detail-container").inner_text()
-        assert "ACCEPTED" in detail_text
+        settings_text = page.locator("#auto-bangumi-settings-panel").inner_text()
+        assert "req-ab-4" in settings_text
         assert "Auto Bangumi 提交失败" in page.locator("#page-notification").inner_text()
 
 
