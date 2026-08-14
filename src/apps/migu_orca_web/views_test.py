@@ -369,8 +369,10 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert "copyButton.className = \"secondary-button copy-request-id\"" in script
     assert "copyTextToClipboard(request.request_id)" in script
     assert '["RSS 来源", config.selected_rss_url ? "已选择" : "未选择"]' in script
-    assert '["must_contain", filterRule.must_contain]' in script
-    assert '["must_not_contain", filterRule.must_not_contain]' in script
+    assert '["包含规则", filterRule.must_contain]' in script
+    assert '["排除规则", filterRule.must_not_contain]' in script
+    assert '["匹配模式", matchMode]' in script
+    assert '["大小写", caseMode]' in script
     assert '["folder_name", config.expected_folder_name]' in script
     assert '["有效种子数", effectiveSeeds.length]' in script
     assert '["排除种子数", excludedSeeds.length]' in script
@@ -383,6 +385,22 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert "renderAbResultSection(auditSection, payload.ab_result)" in script
     assert "selected_rss_url" in script
     assert "addDetailRow(fields, \"selected_rss_url\"" not in script
+
+
+def test_static_app_script_shows_filter_mode_and_case_status_in_detail() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert 'var matchMode = filterRule.use_regex === true ? "正则" : "普通字符"' in script
+    assert 'var caseMode = filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写"' in script
+    assert "匹配模式" in script
+    assert "普通字符" in script
+    assert "正则" in script
+    assert "不区分大小写" in script
+    assert "区分大小写" in script
+    assert '["包含规则", filterRule.must_contain]' in script
+    assert '["排除规则", filterRule.must_not_contain]' in script
 
 
 def test_static_app_script_sends_regex_and_case_sensitive_filter_options() -> None:

@@ -1548,10 +1548,14 @@
     );
 
     var filterSection = createDetailSection("Filter", "filter-section");
+    var matchMode = filterRule.use_regex === true ? "正则" : "普通字符";
+    var caseMode = filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写";
     filterSection.appendChild(
       detailList([
-        ["must_contain", filterRule.must_contain],
-        ["must_not_contain", filterRule.must_not_contain],
+        ["包含规则", filterRule.must_contain],
+        ["排除规则", filterRule.must_not_contain],
+        ["匹配模式", matchMode],
+        ["大小写", caseMode],
         ["folder_name", config.expected_folder_name],
         ["有效种子数", effectiveSeeds.length],
         ["排除种子数", excludedSeeds.length],

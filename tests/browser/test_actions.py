@@ -373,7 +373,7 @@ class TestModifyFlow:
         detail = page.locator("#request-detail-container")
         detail_text = detail.inner_text()
         assert "修改成功" in page.locator("#page-notification").inner_text()
-        assert "must_not_contain" in detail_text
+        assert "排除规则" in detail_text
         assert "V2" in detail_text
         assert "有效种子数" in detail_text
         assert "排除种子数" in detail_text
@@ -627,6 +627,159 @@ class TestModifyFilterOptions:
         assert page.locator("#detail-modify-form").is_visible()
         assert page.locator("#modify-must-not-contain").input_value() == "["
         assert page.locator("#modify-filter-use-regex").is_checked() is True
+
+
+class TestFilterDetailDisplay:
+    """US-108: 详情 Filter 分区展示规则、匹配模式与大小写状态；Seeds 排除原因可读."""
+
+    def _save_request_with_seed_names(
+        self, storage_dir: Path, title: str, request_id: str, seed_names: list[str]
+    ) -> None:
+        request = create_saved_request(storage_dir, title, request_id)
+        source = request["source_info"]["rss_sources"][0]
+        source["seed_names"] = list(seed_names)
+        source["valid_seed_names"] = list(seed_names)
+        source["valid_seed_count"] = len(seed_names)
+        source["excluded_seed_names"] = []
+        source["invalid_seed_count"] = 0
+        source["total_seed_count"] = len(seed_names)
+        request["confirmable_config"]["effective_seed_names"] = list(seed_names)
+        save_request_snapshot(load_storage_config(storage_dir), request)
+
+    def test_filter_section_shows_rules_mode_and_case_status(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-display-1")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-display-1")
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "包含规则" in filter_text
+        assert "排除规则" in filter_text
+        assert "匹配模式" in filter_text
+        assert "普通字符" in filter_text
+        assert "大小写" in filter_text
+        assert "不区分大小写" in filter_text
+
+        # Switch to regex + case-sensitive via the modify form and verify refresh.
+        _click_modify(page)
+        page.locator("#modify-must-contain").fill("1080p")
+        page.locator("#modify-filter-use-regex").check()
+        page.locator("#modify-filter-case-sensitive").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        refreshed = detail.locator(".filter-section").inner_text()
+        assert "匹配模式" in refreshed
+        assert "正则" in refreshed
+        assert "区分大小写" in refreshed
+        assert "普通字符" not in refreshed
+
+    def test_literal_v2_exclude_and_reason_display(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        self._save_request_with_seed_names(
+            storage_dir,
+            "咒术回战第三季",
+            "req-filter-v2-literal",
+            [
+                "[Loli] 咒术回战 第三季 - 01 [1080p][CHS].mkv",
+                "[Loli] 咒术回战 第三季 - 01 [v2][1080p][CHS].mkv",
+            ],
+        )
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-v2-literal")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("[v2]")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "排除规则" in filter_text
+        assert "[v2]" in filter_text
+        assert "普通字符" in filter_text
+        assert "不区分大小写" in filter_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        assert "[v2]" in excluded_text
+        assert "命中排除规则：[v2]" in excluded_text
+        assert "[v2]" not in valid_text
+
+    def test_case_insensitive_v2_matches_uppercase_V2(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-ci-v2")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-ci-v2")
+
+        _click_modify(page)
+        page.locator("#modify-must-contain").fill("v2")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "包含规则" in filter_text
+        assert "v2" in filter_text
+        assert "不区分大小写" in filter_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        # Seed 2 contains "V2"; case-insensitive "v2" must match it.
+        assert "V2" in valid_text
+        assert "未命中包含规则：v2" in excluded_text
+
+    def test_case_sensitive_v2_does_not_match_uppercase_V2(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-cs-v2")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-cs-v2")
+
+        _click_modify(page)
+        page.locator("#modify-must-contain").fill("v2")
+        page.locator("#modify-filter-case-sensitive").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "区分大小写" in filter_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        # Case-sensitive "v2" must NOT match the uppercase "V2" seed.
+        assert "V2" not in valid_text
+        assert "V2" in excluded_text
+        assert "未命中包含规则：v2" in excluded_text
+
+    def test_regex_mode_shows_regex_and_applies_pattern(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-filter-regex-detail")
+        _open_request_detail(page, live_server_url, storage_dir, "req-filter-regex-detail")
+
+        _click_modify(page)
+        page.locator("#modify-must-not-contain").fill("V2 \\[1080p\\]")
+        page.locator("#modify-filter-use-regex").check()
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        filter_text = detail.locator(".filter-section").inner_text()
+        assert "匹配模式" in filter_text
+        assert "正则" in filter_text
+        # Raw user text is shown as-is, never auto-transformed into a different pattern.
+        assert "V2 \\[1080p\\]" in filter_text
+
+        detail.locator(".seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        assert "命中排除规则：V2 \\[1080p\\]" in excluded_text
+        assert "V2 \\[1080p\\]" not in valid_text
 
 
 class TestErrorRecovery:

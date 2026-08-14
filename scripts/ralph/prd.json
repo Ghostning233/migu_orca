@@ -123,7 +123,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "此 story 依赖 US-106/US-107 的数据模型和控件。"
     },
     {
