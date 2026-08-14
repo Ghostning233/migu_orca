@@ -1,132 +1,167 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage12-qbittorrent-direct",
-  "description": "MiGuOrca Stage 12：实现 qBittorrent 直连能力。Stage 11 已完成 Web UI 显式真实 MiKan / Auto Bangumi 配置入口；Stage 12 聚焦 BL-005，在不改变默认离线行为、不隐式连接 qBittorrent、不持久化敏感认证信息的前提下，建立 qBittorrent 配置契约、HTTP client seam、连接测试 API、Web UI 显式配置入口、失败降级和浏览器自动化覆盖，为后续订阅或下载链路打通提供安全基础。",
+  "branchName": "agent/stage13-web-ui-settings",
+  "description": "MiGuOrca Stage 13：优化 Flask Web UI 信息架构，将配置相关能力迁移到独立 Settings 页面，收敛 /index 为 Request 工作台，并修复当前主页面中配置过载、URL 状态不可恢复、取消/修改交互不足等问题。Stage 13 不新增外部下载或订阅能力，不放宽真实 MiKan、Auto Bangumi 或 qBittorrent 的敏感配置安全边界。",
   "userStories": [
     {
-      "id": "US-081",
-      "title": "新增 qBittorrent 配置模型与脱敏边界",
-      "description": "As a maintainer, I want a typed qBittorrent configuration contract so that later client, API, and UI work share one safe validation boundary.",
+      "id": "US-088",
+      "title": "新增 Settings 页面路由与共享导航骨架",
+      "description": "As a Web UI user, I want a dedicated Settings page so that configuration and connection-test tasks are separated from the Request workbench.",
       "acceptanceCriteria": [
-        "新增 qBittorrent 配置模型，字段至少包含 `endpoint`、`username`、`password`、`timeout_seconds` 和 `verify_tls`",
-        "`endpoint`、`username` 和 `password` 必须显式提供；`timeout_seconds` 必须为正数；`verify_tls` 必须有安全默认值",
-        "配置加载或校验错误使用既有安全错误策略，不输出完整 endpoint URL、用户名、密码、cookie、SID、完整本地路径或原始 HTML",
-        "新增 qBittorrent 示例配置文件，示例值必须使用占位符，不包含真实地址、账号或密码",
-        "单元测试覆盖合法配置、缺失必填字段、非法 timeout 和错误脱敏",
+        "新增 `GET /settings` 页面路由并渲染独立 Settings 模板",
+        "`GET /Settings` 必须 301 或 302 重定向到 `/settings`",
+        "`GET /` 继续重定向到 `/index`，现有 `/index` 路由保持可访问",
+        "`/index` 和 `/settings` 都展示一致的顶部导航，至少包含 `Request 工作台` 与 `Settings` 两个链接",
+        "Settings 页面包含空状态或占位分区：Storage 偏好、数据源、qBittorrent、Auto Bangumi",
+        "新增 Flask view 测试覆盖 `/settings`、`/Settings` 和共享导航",
         "Tests pass",
-        "Typecheck passes"
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "优先放在独立模块边界，例如 `qbittorrent_engine`。不要在本 story 中接入 Web UI。"
+      "passes": false,
+      "notes": "保持服务端渲染和现有 static asset 方案，不引入前端构建链。"
     },
     {
-      "id": "US-082",
-      "title": "实现 qBittorrent HTTP client 与 fake transport seam",
-      "description": "As a maintainer, I want a qBittorrent client adapter with injectable transport so that real integration can be tested offline and deterministically.",
+      "id": "US-089",
+      "title": "收敛主页面为 Request 工作台",
+      "description": "As a Web UI user, I want the main page to focus on Request generation and management so that configuration panels do not distract from the normal workflow.",
       "acceptanceCriteria": [
-        "新增 qBittorrent client adapter，支持登录并通过 Web API 获取应用版本或等价轻量连接状态",
-        "client 必须支持可注入 HTTP transport，单元测试默认使用 fake transport，不访问真实 qBittorrent",
-        "登录成功后仅在内存中携带会话 cookie 或 SID，不写入 storage JSON、日志、fixture、浏览器 storage 或 URL",
-        "连接失败、认证失败、超时和非 JSON/异常响应必须归一化为安全错误，错误内容不得泄露完整 endpoint、用户名、密码、cookie、SID 或原始响应体",
-        "单元测试覆盖登录成功、认证失败、超时、异常响应和敏感信息脱敏",
+        "`/index` 不再渲染 qBittorrent endpoint、username、password、timeout_seconds 或 verify_tls 字段",
+        "`/index` 不再渲染 MiKan search_endpoint 和 timeout_seconds 字段",
+        "`/index` 不再渲染验收说明面板或 `acceptance-panel`",
+        "`/index` 仍保留标题输入、生成按钮、保存 Request 开关、Request 列表和 Request 详情",
+        "`/index` 顶部导航不再包含页面内 qBittorrent 或验收说明锚点，改为 Settings 页面入口",
+        "更新受影响的 Flask 静态测试和浏览器 shell 测试",
         "Tests pass",
-        "Typecheck passes"
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "只实现连接测试需要的最小 qBittorrent Web API 调用，不扩展下载或订阅动作。"
+      "passes": false,
+      "notes": "本 story 只做主页面精简；被移除的配置能力在后续 stories 放入 Settings。"
     },
     {
-      "id": "US-083",
-      "title": "新增 qBittorrent 显式连接测试控制器",
-      "description": "As a CLI and Web API caller, I want a shared qBittorrent connection-test action so that external connectivity can be verified without triggering downloads.",
+      "id": "US-090",
+      "title": "将 Storage 偏好迁移到 Settings",
+      "description": "As a Web UI user, I want storage preferences managed in Settings so that the Request generation form only asks for workflow inputs.",
       "acceptanceCriteria": [
-        "新增共享控制器函数，用于接收 inline qBittorrent 配置或配置文件路径并执行连接测试",
-        "连接测试只允许显式调用，不得在 Request 生成、确认、修改、取消或 Auto Bangumi 提交流程中自动触发",
-        "成功结果只返回脱敏摘要，例如 `status`、`version` 或 `reachable`，不得包含完整 endpoint、账号、密码、cookie、SID 或本地绝对路径",
-        "失败结果沿用安全错误策略，并支持可人工处理的降级摘要或明确的失败原因分类",
-        "单元测试覆盖 inline 配置、配置文件路径、成功摘要、失败分类和不隐式触发",
+        "Settings 页面提供默认 `storage_dir` 输入、默认 `save_request` 开关和清除偏好按钮",
+        "Storage 偏好继续只写入浏览器 `localStorage`，键名沿用或安全迁移现有 `miguOrca.web.storageDir` 与 `miguOrca.web.saveRequest`",
+        "`/index` 不再展示 `storage_dir` 输入框，但生成、列表、详情、确认、取消、修改和 AB 提交 API 调用仍使用 Settings 中保存的 storage_dir 偏好",
+        "`/index` 展示只读 Settings 摘要，说明当前 storage_dir 使用默认值还是自定义值，并提供跳转 Settings 的链接",
+        "清除 Settings 偏好后，`/index` 恢复使用默认 `.migu_orca/storage` 行为",
+        "浏览器测试覆盖 Settings 保存偏好、刷新恢复、清除偏好和 `/index` 读取偏好",
         "Tests pass",
-        "Typecheck passes"
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "复用 US-081/US-082 的配置和 client seam。"
+      "passes": false,
+      "notes": "只允许保存 storage 相关非敏感 UI 偏好，不保存真实外部系统 endpoint/token/username/password。"
     },
     {
-      "id": "US-084",
-      "title": "新增 Web API qBittorrent 显式连接测试端点",
-      "description": "As a Web UI user, I want an explicit API endpoint for qBittorrent connection testing so that the browser can verify configuration without storing credentials.",
+      "id": "US-091",
+      "title": "将 qBittorrent 连接测试迁移到 Settings",
+      "description": "As a Web UI user, I want qBittorrent connection testing in Settings so that the Request workbench remains focused and credentials stay request-scoped.",
       "acceptanceCriteria": [
-        "新增 `POST /api/v1/qbittorrent/test-connection` 端点",
-        "请求体必须包含 `qbittorrent_config` 对象，字段与 Stage 12 配置模型一致",
-        "端点必须复用共享连接测试控制器和 qBittorrent client seam，不复制认证或 HTTP 业务规则",
-        "API 成功响应使用统一 `{ok: true, result: ...}` envelope，结果只包含脱敏连接摘要",
-        "API 失败响应使用统一 `{ok: false, error_type, error_message}` envelope，错误不得泄露 endpoint、账号、密码、cookie、SID、完整路径或原始响应体",
-        "Web API 单元测试覆盖成功连接、缺失密码、认证失败、超时、非法 endpoint 和错误脱敏",
+        "Settings 页面提供 qBittorrent 连接测试表单，字段包含 endpoint、username、password、timeout_seconds 和 verify_tls",
+        "password 字段必须使用 `type=\"password\"`",
+        "提交前继续要求明确确认，确认后调用现有 `POST /api/v1/qbittorrent/test-connection`",
+        "成功结果只展示 `status`、`reachable` 和 `version`",
+        "提交成功后清空 endpoint、username 和 password 字段",
+        "失败时展示统一脱敏错误，不泄露 endpoint、username、password、cookie、SID、本地绝对路径或原始响应体",
+        "`/index` 页面加载和主流程不调用 qBittorrent API",
+        "浏览器测试覆盖 Settings qBittorrent 成功、失败、校验、确认和不持久化敏感字段",
         "Tests pass",
-        "Typecheck passes"
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "端点只做连接测试，不启动下载，不改写 Request snapshot。"
+      "passes": false,
+      "notes": "复用 Stage 12 API 和 controller，不新增下载或订阅动作。"
     },
     {
-      "id": "US-085",
-      "title": "在 Web UI 增加 qBittorrent 显式配置与连接测试入口",
-      "description": "As a Web UI user, I want a temporary qBittorrent connection-test form so that I can verify connectivity only when I deliberately provide configuration.",
+      "id": "US-092",
+      "title": "为 Request 详情增加 URL 状态恢复",
+      "description": "As a Web UI user, I want selected Request detail state reflected in the URL so that refreshes and Settings round trips preserve context.",
       "acceptanceCriteria": [
-        "Web UI 新增 qBittorrent 连接测试区域或详情入口，默认不自动展开敏感配置字段，不自动发起连接请求",
-        "表单字段至少包含 endpoint、username、password、timeout_seconds 和 verify_tls；password 输入框必须使用 `type=\"password\"`",
-        "提交前必须出现明确确认提示，确认后才调用 `POST /api/v1/qbittorrent/test-connection`",
-        "浏览器端校验 endpoint、username、password 非空，timeout_seconds 为正数；校验失败不发起 API 请求",
-        "成功时只显示脱敏连接摘要；失败时保留当前页面状态并展示统一脱敏错误通知",
-        "qBittorrent 配置不得写入 storage JSON、状态历史、浏览器 localStorage/sessionStorage、URL query、日志、截图或测试 trace",
-        "Web UI 静态测试覆盖表单结构、默认非自动连接、password 字段、确认提示文案和敏感信息不持久化",
+        "`/index?request_id=<id>` 加载后自动读取并展示对应 Request 详情",
+        "点击 Request 列表项后，浏览器 URL 使用 `history.pushState` 或等价方式同步 `request_id` query",
+        "刷新带 request_id 的 `/index` 页面后仍展示同一 Request 详情",
+        "当 request_id 不存在或加载失败时，详情区展示脱敏错误且列表仍可加载",
+        "生成并保存新 Request 后，URL 同步为该 Request 的 request_id",
+        "只生成预览且未保存时，不把临时 request_id 写入 URL",
+        "浏览器测试覆盖直接打开、点击列表、刷新恢复、缺失 Request 和生成保存后的 URL 行为",
         "Tests pass",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "保持服务端渲染页面和最小 JavaScript，不引入前端构建链。"
+      "passes": false,
+      "notes": "URL query 只能携带 request_id 等非敏感上下文，不能携带 storage_dir 或外部系统配置。"
     },
     {
-      "id": "US-086",
-      "title": "补充 qBittorrent 浏览器自动化回归覆盖",
-      "description": "As a maintainer, I want browser tests for qBittorrent connection testing so that explicit connection and credential-safety rules remain regression-safe.",
+      "id": "US-093",
+      "title": "将 Auto Bangumi 提交配置迁移到 Settings",
+      "description": "As a Web UI user, I want Auto Bangumi submission configuration handled in Settings so that Request detail stays readable and submission remains explicit.",
       "acceptanceCriteria": [
-        "浏览器测试覆盖页面默认加载时不调用 qBittorrent 连接测试 API",
-        "浏览器测试覆盖 qBittorrent 配置字段展示、password 输入、非空校验和非法 timeout 校验",
-        "浏览器测试覆盖提交前确认提示，以及确认后发送 request-scoped `qbittorrent_config` POST body",
-        "浏览器测试覆盖连接成功时只展示脱敏摘要，不展示完整 endpoint、用户名、密码、cookie、SID 或本地路径",
-        "浏览器测试覆盖连接失败时列表、详情和表单不丢失，只展示脱敏错误通知",
-        "浏览器测试默认使用 Playwright route fake，不访问真实 qBittorrent",
+        "ACCEPTED Request 详情页不再内联渲染 Auto Bangumi endpoint/token/fallback 表单",
+        "ACCEPTED Request 详情页展示 `去 Settings 提交 Auto Bangumi` 或等价按钮，链接到 `/settings?request_id=<id>#auto-bangumi`",
+        "PENDING_CONFIRM、CANCELLED 或其他非 ACCEPTED Request 不展示 Auto Bangumi 提交入口",
+        "Settings 页面在存在 request_id query 时展示 Auto Bangumi 提交表单，字段包含 endpoint、token 和 fallback_enabled",
+        "token 字段必须使用 `type=\"password\"`",
+        "提交前继续要求明确确认，确认后调用现有 `POST /api/v1/requests/<request_id>/submit-ab`",
+        "提交成功后清空 endpoint 和 token 字段，展示脱敏提交摘要，并提供返回 `/index?request_id=<id>` 的链接",
+        "失败时保留页面状态并展示统一脱敏错误，不泄露 endpoint、token、Authorization header、cookie、完整 URL 或原始响应体",
+        "浏览器测试覆盖 accepted-only 入口、Settings 提交成功、失败脱敏和返回详情链接",
         "Tests pass",
-        "Typecheck passes"
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "使用 Chromium / Google Chrome for Testing；如浏览器依赖缺失，先运行 `./script/setup-browser-deps.sh`。"
+      "passes": false,
+      "notes": "继续使用 request-scoped 配置，不将 AB endpoint/token 写入 localStorage、sessionStorage、URL、storage JSON 或日志。"
     },
     {
-      "id": "US-087",
-      "title": "补充 Stage 12 文档、backlog 和验收记录",
-      "description": "As a maintainer, I want Stage 12 documentation and backlog updates so that qBittorrent direct integration status is clear for future Ralph runs.",
+      "id": "US-094",
+      "title": "修复取消与修改交互",
+      "description": "As a Web UI user, I want cancel and modify actions to use visible forms with clear validation so that Request edits are predictable and accessible.",
       "acceptanceCriteria": [
-        "README 更新 Stage 12 当前能力说明，明确 qBittorrent 直连只支持显式连接测试，不隐式连接或下载",
-        "README Web API 章节新增 qBittorrent 连接测试 endpoint、payload 示例和脱敏响应说明",
-        "README 本地验收流程新增 qBittorrent 配置入口、连接成功、连接失败、确认提示和不落盘敏感配置检查",
-        "`docs/backlog.md` 中 BL-005 仅在 Stage 12 实现验收通过后标记为完成",
-        "`scripts/ralph/progress.txt` 记录 Stage 12 实现、关键安全约束、测试结果和后续 BL-001 状态",
-        "后续待办 BL-001 保持未完成",
+        "取消 Request 不再使用 `window.prompt`，改为详情区内可见取消表单或对话区域",
+        "取消表单支持可选原因、提交、收起，并在提交前要求明确确认",
+        "修改表单提交空 patch 时必须在浏览器端阻止并展示错误，不调用 modify API",
+        "修改表单必须支持明确清空 `must_contain`、`must_not_contain` 和 `expected_folder_name` 的操作",
+        "修改表单提交后仍只允许后端已支持的受限字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`",
+        "取消或修改失败时保留详情、列表和当前表单状态，并展示统一脱敏错误",
+        "浏览器测试覆盖取消表单、取消确认、空 patch 阻止、字段清空和失败恢复",
         "Tests pass",
-        "Typecheck passes"
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "文档收尾必须在实现和浏览器覆盖通过后完成。"
+      "passes": false,
+      "notes": "如后端当前不支持清空字段，需要在 request controller 中补齐受限清空语义并添加单元测试。"
+    },
+    {
+      "id": "US-095",
+      "title": "补齐 Stage 13 文档与浏览器回归收尾",
+      "description": "As a maintainer, I want Stage 13 documentation and regression coverage synchronized so that future development starts from the new Web UI structure.",
+      "acceptanceCriteria": [
+        "README 更新当前 Web UI 状态，说明 `/index` 是 Request 工作台、`/settings` 是配置与连接测试页面",
+        "README 更新本地验收流程，包含 `/settings`、Settings 偏好、qBittorrent 测试和 Auto Bangumi Settings 提交流程",
+        "`docs/modules/M13-web-ui-PRD.md` 更新 Stage 13 状态和后续边界",
+        "`docs/backlog.md` 增加或更新 Web UI 信息架构优化项并标记 Stage 13 完成情况",
+        "`scripts/ralph/progress.txt` 记录 Stage 13 完成摘要、安全边界、测试结果和后续未完成事项",
+        "所有旧的 Stage 12 单页结构测试已经更新为 Stage 13 结构测试，不再要求主页面存在 qBittorrent 或验收说明面板",
+        "`uv run pytest -q` 通过",
+        "`uv run pytest tests/browser/ -v` 通过",
+        "`uv run python -m compileall -q src` 通过",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "收尾 story 完成后再将 Stage 13 PRD 和 progress 归档。"
     }
   ]
 }
