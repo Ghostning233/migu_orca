@@ -45,7 +45,7 @@
   let loadedRequests = [];
   let currentDetailPayload = null;
   let storageDirPreference = "";
-  let saveRequestPreference = false;
+  let saveRequestPreference = true;
 
   function readPreference(key) {
     try {
@@ -75,7 +75,8 @@
     const savedStorageDir = readPreference(preferenceKeys.storageDir);
     const savedSaveRequest = readPreference(preferenceKeys.saveRequest);
     storageDirPreference = savedStorageDir || "";
-    saveRequestPreference = savedSaveRequest === "true";
+    saveRequestPreference =
+      savedSaveRequest === null ? true : savedSaveRequest === "true";
     if (settingsStorageInput) {
       settingsStorageInput.value = storageDirPreference;
     }
@@ -153,9 +154,9 @@
   function clearWebPreferences() {
     removePreference(preferenceKeys.storageDir);
     removePreference(preferenceKeys.saveRequest);
-    applyPreferenceValues("", false);
+    applyPreferenceValues("", true);
     updateStoragePreferencesStatus(
-      "偏好已清除；Request 工作台将使用默认 `.migu_orca/storage` 并只生成预览。",
+      "偏好已清除；Request 工作台将使用默认 `.migu_orca/storage` 并保存 Request JSON。",
       "empty-state compact-state",
     );
   }
@@ -1421,7 +1422,6 @@
 
     hideNotification();
     setSubmitInFlight(true);
-    persistWebPreferences();
     setState(detailContainer, "正在生成 Request...", "loading-state");
     try {
       const result = await fetchJson("/api/v1/requests", {

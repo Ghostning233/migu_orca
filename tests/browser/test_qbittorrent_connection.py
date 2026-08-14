@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from playwright.sync_api import Page, Request, expect
+
+from tests.browser.conftest import set_storage_preferences
 
 
 pytestmark = pytest.mark.browser
@@ -43,7 +46,7 @@ class TestQbittorrentNotOnWorkbench:
         assert calls == []
 
     def test_generation_does_not_call_qbittorrent_api(
-        self, page: Page, live_server_url: str
+        self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         qbt_calls: list[Request] = []
 
@@ -52,6 +55,7 @@ class TestQbittorrentNotOnWorkbench:
             route.abort()
 
         page.route("**/api/v1/qbittorrent/test-connection**", _capture_qbt)
+        set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")

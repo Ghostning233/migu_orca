@@ -490,7 +490,7 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert "persistWebPreferences" in script
     assert "clearWebPreferences" in script
     assert "savedStorageDir" in script
-    assert "saveRequestPreference = savedSaveRequest === \"true\"" in script
+    assert 'savedSaveRequest === null ? true : savedSaveRequest === "true"' in script
     assert "settingsStorageInput.value = storageDirPreference" in script
     assert "settingsSaveInput.checked = saveRequestPreference" in script
     assert "storage-preferences-clear" in script

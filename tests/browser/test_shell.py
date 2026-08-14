@@ -175,7 +175,7 @@ class TestNoSensitiveContent:
         # Form help text should be present and instructional
         assert "至少输入 1 个非空白字符" in body
         assert "当前使用默认 `.migu_orca/storage`" in body
-        assert "默认只生成预览" in body
+        assert "默认保存 Request JSON" in body
         assert "前往 Settings" in body
         assert "search_endpoint" not in body
         assert "timeout_seconds" not in body

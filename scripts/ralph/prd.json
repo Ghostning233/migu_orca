@@ -21,7 +21,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "当前根因是前端使用 Settings 偏好传递 `save_request`，默认未保存预览却仍渲染确认、取消、修改按钮；后端操作 API 只从 storage 加载已保存 Request。"
     },
     {

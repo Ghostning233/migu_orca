@@ -1,41 +1,19 @@
-Stage 14 Progress - Web UI Request Operability
+# Ralph Progress Log
+## Codebase Patterns
+- Browser tests that trigger Request generation should seed `miguOrca.web.storageDir` to a temporary fixture path before visiting `/index`; otherwise default `.migu_orca/storage` can be polluted and empty-list tests become order-dependent.
 
-Current Status:
-- Stage 13 has been completed and merged into main.
-- Stage 14 PRD has been created to address Web UI request operability bugs reported after Stage 13.
-- No Stage 14 implementation has started in this planning commit.
-
-Observed Stage 14 Bugs:
-- `/index` can render Request detail after generating `咒术回战`, but confirm, cancel, and modify fail with `未找到已保存的 Request`.
-- The default generate flow can create an unsaved preview while still exposing actions that require a persisted Request.
-- Request list validation is blocked because the normal generate flow does not reliably save a Request.
-- Modify exclude rule input `[v2]` does not give visible filtering feedback; Seeds still appear to include v2 titles from the user's perspective.
-- Request detail Seeds currently only shows an effective seed list, not complete source seeds and excluded seeds.
-- `/settings` qBittorrent connection test is wrapped in a disclosure/dropdown; user expects the configuration/test form to be shown directly.
-
-Codebase Patterns:
-- Flask routes and API handlers live under `src/apps/migu_orca_web/`.
-- Server-rendered templates live under `src/apps/migu_orca_web/templates/migu_orca_web/`.
-- Web UI JavaScript lives in `src/apps/migu_orca_web/static/app.js`.
-- The Request workbench is `/index`; Settings is `/settings`.
-- API responses use `{"data": ...}` for success and `{"error": {"code", "message", "details"}}` for failures.
-- Request action APIs load saved snapshots from storage; unsaved preview request IDs cannot be accepted, cancelled, modified, or submitted to Auto Bangumi.
-- `request_controller.modify_request` recomputes source `valid_seed_names` and `excluded_seed_names` when `filter_rule` changes.
-- Current detail rendering primarily uses `confirmable_config.effective_seed_names` for Seeds, which is insufficient for filter inspection.
-- Browser tests live under `tests/browser/` and use Playwright-style page checks.
-- Safety tests must continue to prevent real endpoint, token, username, password, cookie, SID, raw HTML, raw RSS XML, and raw response bodies from appearing in storage, browser storage, URL, logs, screenshots, or traces.
-
-Stage 14 Implementation Guidance:
-- First fix the persisted-vs-preview contract before improving visual details; otherwise action tests will keep failing for the wrong reason.
-- Prefer making the default `/index` generate flow save an operable Request, while keeping preview mode clearly read-only if it remains available.
-- Do not hide backend errors with generic UI state; surface sanitized, user-actionable messages.
-- Add UI support for inspecting complete, effective, and excluded seed lists after modifications.
-- Remove the qBittorrent Settings disclosure and update tests that previously opened it.
-- Keep the Flask SSR plus vanilla JS architecture; do not add React, Vite, or a build pipeline.
-
-Validation Required Before Stage 14 Completion:
-- `uv run pytest -q`
-- `uv run pytest tests/browser/ -v`
-- `uv run python -m compileall -q src`
-- Browser verification for the `咒术回战` generate -> list -> detail -> confirm/cancel/modify flows.
-- Browser verification for `[v2]` or equivalent literal/regex exclude behavior and Seeds list updates.
+Started: Fri Aug 14 16:04:26 CST 2026
+---
+## 2026-08-14 16:16:31 CST - US-097
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented default saved Request generation for `/index`: missing `miguOrca.web.saveRequest` now defaults to saving, clear preferences restores saved generation, and generation no longer persists Settings-only form values from the workbench.
+- Updated the workbench storage summary and preference/browser expectations to match the saved-by-default contract while preserving explicit `save_request=false` preview behavior.
+- Added browser coverage for `咒术回战` default generate -> saved list item -> URL request_id sync -> confirm, cancel, and modify success paths with no `未找到已保存的 Request` state.
+- Isolated a qBittorrent browser generation regression test with temporary storage so it does not write default `.migu_orca/storage`.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_generation.py`, `tests/browser/test_shell.py`, `tests/browser/test_qbittorrent_connection.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 411 tests; `uv run pytest tests/browser/ -v` passed with 132 browser tests.
+- **Learnings for future iterations:**
+  - Pattern discovered: absent `miguOrca.web.saveRequest` is now the saved-by-default path; explicit localStorage value `"false"` remains preview mode for later read-only preview work.
+  - Gotcha encountered: calling Settings preference persistence from `/index` can overwrite save behavior because Settings form inputs are absent there.
+  - Useful context: Browser tests that generate Requests must seed temporary storage or explicitly preview to avoid leaking saved JSON into default `.migu_orca/storage`.
+---
