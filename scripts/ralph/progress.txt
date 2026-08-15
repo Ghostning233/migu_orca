@@ -6,6 +6,7 @@ Started: Fri Aug 14 20:20:45 CST 2026
 - Stage 15 has been completed and merged into `main`; current active work is Stage 16 (`agent/stage16-mikan-bangumi-detail`).
 - Stage 16 and Stage 17 are split deliberately: Stage 16 implements selected MiKan `Home/Bangumi/<id>` detail parsing plus direct URL/ID entry; Stage 17 implements MiKan search candidate cards, manual selection, and cache on top of the Stage 16 parser.
 - Stage 16 MiKan detail-page fixture tests live beside `mikan_client_test.py` under `src/mikan_engine/controllers/fixtures/`; keep real MiKan parser coverage offline and drive it through injected `MikanTransport` instead of live network reads.
+- `MikanClient.get_bangumi_detail(matched_bangumi)` returns the safe structured `MikanBangumiDetail` model (bangumi metadata, page-level RSS, subgroup RSS, episode title/detail URL summaries); do not add magnet attributes or raw HTML/RSS to this public model or Request snapshots.
 - AI title normalization/search-query enhancement is a low-priority optional backlog item, not a dependency for Stage 16/17 and never a replacement for explicit user collection selection.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
@@ -136,4 +137,18 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: the existing `MikanClient.list_rss_sources` contract remains `RssSource`-only for now; richer detail metadata should build on `_MikanBangumiPageParser` in US-111 without writing raw HTML or magnets into Request snapshots.
   - Gotcha encountered: public MiKan paths include `/Home/...`, so fixture sanitization checks should look for local absolute paths like `/home/ghostning/` or `file://`, not the generic `/home/` substring.
   - Useful context: browser tests are part of `uv run pytest -q`, but this environment skipped them because the browser binary is unavailable.
+---
+## 2026-08-15 16:26:55 CST - US-111
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added safe structured MiKan detail models (`MikanBangumiDetail`, `MikanSubgroupDetail`, `MikanEpisodeSummary`) plus `MikanClient.get_bangumi_detail(matched_bangumi)` to read and parse selected `Home/Bangumi/<id>` pages through the existing injected `MikanTransport` seam.
+- Extended `_MikanBangumiPageParser` to parse `bangumi_id`, `.bangumi-title`, optional broadcast/poster fields, page-level `.mikan-rss`, subgroup names/RSS URLs, and episode title/detail URL summaries while de-duplicating RSS URLs and episode summaries.
+- Kept magnet attributes out of the public structured detail model and added sanitized parse failures for missing RSS/detail metadata under the stable `mikan_parse_failed` error type.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/mikan_engine/models/__init__.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest src/mikan_engine/controllers/mikan_client_test.py -q` passed with 21 tests; `uv run pytest -q` passed with 322 tests and 156 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: not applicable for US-111 because it is parser/model-only and has no UI behavior.
+- **Learnings for future iterations:**
+  - Pattern discovered: use `get_bangumi_detail` for Stage 16/17 selected-detail metadata and keep `list_rss_sources` as the existing `RssSource` compatibility surface until US-112 changes source prioritization.
+  - Pattern discovered: parse episode summaries from `/Home/Episode/...` anchors and subgroup context/title prefixes, but expose only title plus detail URL; magnet clipboard attributes are intentionally omitted from the model.
+  - Gotcha encountered: `_MikanBangumiPageParser` now tracks all anchors as well as table rows; when adding parser state, avoid early returns in `handle_endtag("a")` that would skip depth counters for surrounding title/subgroup/section contexts.
+  - Useful context: there is no `CODEX.md` under `src/mikan_engine`, so reusable parser knowledge was consolidated in this progress log instead.
 ---

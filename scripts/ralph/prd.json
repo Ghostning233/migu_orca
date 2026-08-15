@@ -36,7 +36,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "结构化详情模型可以是 M03 内部模型，不强制迁移 Request schema。"
     },
     {
