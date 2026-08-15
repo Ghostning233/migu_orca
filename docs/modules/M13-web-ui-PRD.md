@@ -2,7 +2,7 @@
 
 ## 1. 模块目标
 
-M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7 已实现 Flask Web UI MVP，Stage 8 补强可用性，Stage 9 增加浏览器自动化测试，Stage 10 增加确认、取消和受限修改操作入口，Stage 11 增加显式真实 MiKan / Auto Bangumi 配置入口，Stage 12 增加 qBittorrent 显式连接测试入口，Stage 13 将配置相关能力迁移到独立 Settings 页面并收敛 Request 工作台，Stage 14 修复默认生成后的 Request 可操作性、未保存预览契约、Seeds 三列表和 qBittorrent Settings 直显，Stage 15 增加 `ACCEPTED` Request 的修改与删除动作，并将筛选规则默认语义改为大小写不敏感的字面匹配，同时提供 `使用正则` 与 `大小写敏感` 选项。Stage 16 在 CLI/API 层完成真实 MiKan direct URL/ID 入口，但没有新增 Web UI 控件。Stage 17 已在 `/index` Request 生成流程中接入真实 MiKan 候选搜索、候选卡片手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签。Stage 18 将把真实 MiKan 候选搜索调整为 `/index` 普通 Web 主流程，并将 fixture 降级为开发/离线测试路径。
+M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7 已实现 Flask Web UI MVP，Stage 8 补强可用性，Stage 9 增加浏览器自动化测试，Stage 10 增加确认、取消和受限修改操作入口，Stage 11 增加显式真实 MiKan / Auto Bangumi 配置入口，Stage 12 增加 qBittorrent 显式连接测试入口，Stage 13 将配置相关能力迁移到独立 Settings 页面并收敛 Request 工作台，Stage 14 修复默认生成后的 Request 可操作性、未保存预览契约、Seeds 三列表和 qBittorrent Settings 直显，Stage 15 增加 `ACCEPTED` Request 的修改与删除动作，并将筛选规则默认语义改为大小写不敏感的字面匹配，同时提供 `使用正则` 与 `大小写敏感` 选项。Stage 16 在 CLI/API 层完成真实 MiKan direct URL/ID 入口，但没有新增 Web UI 控件。Stage 17 已在 `/index` Request 生成流程中接入真实 MiKan 候选搜索、候选卡片手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签。Stage 18 已把真实 MiKan 候选搜索调整为 `/index` 普通 Web 主流程，并将 fixture 降级为开发/离线测试路径。
 
 ## 2. 模块边界
 
@@ -42,7 +42,7 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 15 | ACCEPTED 管理与筛选语义优化 | 已接入 | 已保存 `ACCEPTED` Request 展示修改/删除/AB 提交动作；筛选默认字面匹配且大小写不敏感，提供 `使用正则` / `大小写敏感` 控件；Filter 展示匹配模式与大小写状态 |
 | Stage 16 | 真实 MiKan direct URL/ID 入口 | API-only | CLI/API 支持 `mikan_bangumi` request-scoped direct entry；Web UI 暂不展示直连输入控件 |
 | Stage 17 | 真实 MiKan 候选搜索、手动选择与直连 fallback | 已接入 | `/index` 默认折叠的候选搜索区支持候选卡片、`选择此合集` 手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签；全部复用 `mikan_bangumi` 生成链路，不自动选择、不自动生成 |
-| Stage 18 | 真实 MiKan 主流程、可编辑预览与 Seeds 优化 | 已规划 | `/index` 主生成区默认搜索真实 MiKan 候选；普通 UI 移除 `search_endpoint`、`timeout_seconds`、`query`；候选选择和直连 fallback 默认生成可编辑订阅草案；Seeds 改为有效、完整、排除顺序并按字幕组分组 |
+| Stage 18 | 真实 MiKan 主流程、可编辑预览与 Seeds 优化 | 已接入 | `/index` 主生成区默认搜索真实 MiKan 候选；普通 UI 移除 `search_endpoint`、`timeout_seconds`、`query`；候选选择和直连 fallback 默认生成可编辑订阅草案（`preview-modify` dry-run + `preview-save`）；Seeds 改为有效、完整、排除顺序并按字幕组分组；fixture 入口放入底部「开发 / 离线测试」面板并默认收起 |
 
 以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。
 
@@ -58,7 +58,7 @@ Stage 15 UI 质量要求：
 8. 空状态、加载状态、成功状态和错误状态使用统一容器，只展示用户可操作信息，不展示调试噪音或敏感配置。
 9. 中屏和窄屏下保持单列或低密度布局，Request 详情 Overview、Source、Filter、Seeds、Audit 分组必须可扫读。
 
-Stage 18 UI 调整要求：
+Stage 18 UI 调整要求（Stage 18 已落地）：
 
 1. `/index` 主生成区保留与列表同一行的布局，但标题输入默认触发真实 MiKan 候选搜索。
 2. 普通 UI 只要求番剧标题，不展示 `search_endpoint`、`timeout_seconds` 或 `query` 等技术字段名。
@@ -73,7 +73,7 @@ Stage 18 UI 调整要求：
 
 Web UI 后续可以支持：
 
-1. Stage 18 真实 MiKan 主流程、直连兜底、可编辑预览和 Seeds 分组展示（已规划）。
+1. Stage 18 真实 MiKan 主流程、直连兜底、可编辑预览和 Seeds 分组展示（已完成）。
 2. 字幕组和 RSS 源候选的更细粒度人工选择。
 3. 降级 JSON 下载或复制入口。
 4. 更多用户偏好和规则配置管理。

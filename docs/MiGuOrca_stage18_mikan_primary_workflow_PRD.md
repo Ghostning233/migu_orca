@@ -7,8 +7,9 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 18 PRD: MiKan Primary Workflow and Preview Refinement |
 | 文档类型 | Stage PRD |
-| 当前状态 | Planned |
+| 当前状态 | Completed |
 | 创建日期 | 2026-08-15 |
+| 完成日期 | 2026-08-15 |
 | 依赖阶段 | Stage 16、Stage 17 |
 
 ## 2. 背景
@@ -245,3 +246,26 @@ Stage 18 完成后，普通 Web 用户应可以：
 6. 在预览中修改字幕组、筛选规则和文件夹名。
 7. 确认无误后保存为正式订阅方案。
 8. 看到中文业务文案、中文状态和更合理的 Seeds 展示。
+
+## 10. Completion Summary
+
+Stage 18 已于 2026-08-15 完成，全部 8 个用户故事（US-124 至 US-131）通过验收：
+
+| 故事 | 结果 |
+| --- | --- |
+| US-124 新增默认 MiKan Web 配置 | 完成：`default_mikan_config()`（`https://mikanani.me/Home/Search`，timeout 15 秒），Web API `_resolve_mikan_config(explicit)` 支持默认/显式覆盖 |
+| US-125 将标题输入改为默认 MiKan 候选搜索 | 完成：`/index` 主生成区即真实 MiKan 候选搜索，只输入番剧标题，候选卡片含标题/MiKan ID/封面/推荐标签，普通 UI 移除 `search_endpoint`/`timeout_seconds`/`query` |
+| US-126 新增主生成区直连兜底勾选框 | 完成：`搜索无结果时使用直连合集` 复选框默认不勾选，勾选后显示 MiKan 合集 URL/ID 输入框并可生成预览 |
+| US-127 生成可编辑预览订阅草案 | 完成：候选选择和直连 fallback 默认 `save_request=false`，预览「订阅草案（未保存）」可编辑字幕组/筛选规则/文件夹名，`preview-modify` dry-run 重算种子，`preview-save` 持久化进入待确认流程 |
+| US-128 中文化用户态名称和状态 | 完成：订阅方案/订阅草案/待确认/已确认/已取消，`statusLabel`/`actionLabel` 集中映射，后端 `error_message` 同步中文化 |
+| US-129 重构 Seeds 展示顺序和字幕组分组 | 完成：有效种子（当前选中字幕组，默认可见）-> 完整种子（按字幕组分组，默认折叠）-> 排除种子（默认折叠） |
+| US-130 将 fixture 模式降级为开发离线测试路径 | 完成：`#dev-fixture-disclosure` 默认收起，普通路径不触发 fixture 生成；CLI/API seam/离线回归继续保留 |
+| US-131 补齐 Stage 18 文档与回归收尾 | 完成：README、主 PRD、模块 PRD、backlog 同步，Stage 18 安全回归通过（MiKan endpoint/raw HTML/raw RSS/magnet/cookie/token/原始响应体不进入任何持久或展示面） |
+
+实现决策：
+
+1. 系统默认 MiKan 配置由 Web API 层解析（`_resolve_mikan_config`），显式 `mikan_config` 继续作为测试 seam / 高级调用覆盖默认值。
+2. 候选选择与直连 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路，不新增第二套详情 parser。
+3. 预览草案通过 `POST /api/v1/requests/preview-modify`（dry-run `apply_modify_action`）与 `POST /api/v1/requests/preview-save`（`apply_request_save_action`）实现，不保存即可修改，保存后才进入待确认流程。
+4. Seeds 完整种子分组全部由现有 Request snapshot 的每源 `seed_names` 客户端派生，无需后端 schema 变更。
+5. fixture 入口保留在 `/index` 底部「开发 / 离线测试」面板并默认收起，`open_dev_fixture_panel` 是浏览器测试的统一展开 helper。

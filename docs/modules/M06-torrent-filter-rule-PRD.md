@@ -86,6 +86,8 @@ M06 借用 qBittorrent 的“必须包含”和“必须不含”概念。Stage 
 9. 每个被排除种子必须输出可读 reason：命中排除规则为 `命中排除规则：<rule>`，未命中包含规则为 `未命中包含规则：<rule>`。
 10. 旧配置或旧保存 Request 缺少 `use_regex` / `case_sensitive` 时，按默认 `false` 兼容加载。
 
+Stage 18 预览草案复用同一语义：`POST /api/v1/requests/preview-modify` 对未保存预览草案执行 dry-run 修改时，使用与已保存 Request 完全相同的 `_filter_rule_matches`（默认字面子串、大小写不敏感、`use_regex=true` 才编译正则），并重算当前选中字幕组的有效/排除种子展示。预览阶段修改的筛选规则在保存前不写入任何持久面。
+
 ## 7. 异常场景
 
 | 场景 | 处理方式 |

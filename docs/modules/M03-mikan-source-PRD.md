@@ -140,16 +140,16 @@ AI 番剧名解析不属于 M03 的必需能力。后续可作为独立可选增
 5. 真实 MiKan HTTP 读取失败 details 只允许保留 `category`、`field`、`status_code` 等可处理字段，并由调用方传入稳定 `failed_step`（搜索、详情、RSS 解析等）。
 6. 候选搜索缓存（`MikanCandidateCache`）只能存储公开候选元数据（query、title、bangumi_id、规范化 mikan_url、poster_url、aliases、timestamp），key 不得包含 token、cookie 或完整敏感 endpoint；缓存命中不得写回 storage JSON、history、浏览器 storage、URL、日志、截图或 trace。
 
-## 12. Stage 18 默认 MiKan 配置规划
+## 12. Stage 18 默认 MiKan 配置状态（已完成）
 
-Stage 18 将在 Web 主流程中使用系统默认 MiKan 配置：
+Stage 18 已在 Web 主流程中使用系统默认 MiKan 配置：
 
-1. 默认搜索 endpoint 等价于 `https://mikanani.me/Home/Search`，候选搜索时由系统追加 URL 编码后的 `searchstr=<番剧名>`。
-2. 默认 timeout 由系统配置或常量控制，例如 10 或 15 秒，不在普通 `/index` 页面展示。
-3. `POST /api/v1/mikan/candidates` 和 `mikan_bangumi` direct URL/ID fallback 在未传显式 `mikan_config` 时使用默认配置。
-4. 显式 `mikan_config` 继续保留为 CLI、高级 API 和测试 seam。
-5. bare numeric ID 的详情页 URL 可基于默认 MiKan host 派生，不再要求普通 Web 用户提供 search endpoint。
-6. 默认配置不得包含 secret；不得写入 storage JSON、状态历史、browser storage、URL、history、日志、截图或 trace。
+1. 默认搜索 endpoint 为常量 `DEFAULT_MIKAN_SEARCH_ENDPOINT = "https://mikanani.me/Home/Search"`，候选搜索时由系统追加 URL 编码后的 `searchstr=<番剧名>`。
+2. 默认 timeout 为常量 `DEFAULT_MIKAN_TIMEOUT_SECONDS = 15.0`（`default_mikan_config()`），不在普通 `/index` 页面展示。
+3. `POST /api/v1/mikan/candidates` 和 `mikan_bangumi` direct URL/ID fallback 在未传显式 `mikan_config` 时使用默认配置（Web API 层 `_resolve_mikan_config(explicit)`）。
+4. 显式 `mikan_config` 继续保留为 CLI、高级 API 和测试 seam，可覆盖默认值。
+5. bare numeric ID 的详情页 URL 基于默认 MiKan host 派生，不再要求普通 Web 用户提供 search endpoint。
+6. 默认配置不含 secret；不写入 storage JSON、状态历史、browser storage、URL、history、日志、截图或 trace。
 7. M03 仍只负责候选搜索、详情解析、RSS 源输出和安全错误边界，不负责 UI 文案或预览编辑。
 8. fixture 作为 M03 的离线测试 seam 保留：静态 MiKan/RSS fixture 只服务 CLI、单元测试和浏览器离线回归，不参与 Web 普通主流程。
 

@@ -75,6 +75,11 @@ Storage request repository（`src/storage_engine/controllers/request_repository.
 - 删除不存在的 Request 返回稳定 `request_not_found` 错误，不泄露本地绝对路径；unlink 失败映射为脱敏的 `storage_error`。
 - 删除只移除 `requests/<request_id>.json`；history 与 ab_results 文件暂不随删除清理，Request 文件缺失后详情加载返回 `request_not_found`。
 
+Stage 18 补充：
+
+- Web API `POST /api/v1/requests/preview-save` 通过 `apply_request_save_action` 复用 `save_request_snapshot` 持久化 `PENDING_CONFIRM` 预览草案；保存后的对象进入现有待确认流程，可继续确认/取消/修改/删除。
+- Request、history 与 AB result repository 的用户可见 `error_message` 已中文化（例如「未找到已保存的订阅方案」「保存/读取/删除/列出订阅方案 JSON 失败」），内部字段名、错误 type 和 API 字段保持不变。
+
 ## 7. 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |

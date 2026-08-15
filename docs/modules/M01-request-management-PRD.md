@@ -133,6 +133,14 @@ M01 负责接收标准化后的用户输入，创建、组装和管理 Request �
 - 受限修改（`modify_request`）自 Stage 15 起同时接受 `PENDING_CONFIRM` 与 `ACCEPTED`，修改后保持原状态不变（`ACCEPTED` 不会回落为 `PENDING_CONFIRM`），只允许修改 `selected_subtitle_group`、`filter_rule`、`expected_folder_name`，并记录 `MODIFY` history 事件；`CANCELLED` 与未知状态继续拒绝修改。
 - `ACCEPTED` Request 仍需要用户显式执行 `submit-ab` 才会提交到 Auto Bangumi，修改本身不会隐式触发提交。
 
+Stage 18 预览草案扩展：
+
+- 主流程（候选选择 / 直连 fallback）默认生成未保存的 `PENDING_CONFIRM` 预览草案（`save_request=false`），草案只存在于浏览器内存，不写入 storage。
+- Web API `POST /api/v1/requests/preview-modify` 对未保存草案执行 dry-run 修改（复用 `apply_modify_action` 的 deep-copy + 重算逻辑），不写入 storage，用于预览阶段实时重算有效/排除种子。
+- Web API `POST /api/v1/requests/preview-save` 通过 `apply_request_save_action` 把修改后的 `PENDING_CONFIRM` 草案持久化进入现有待确认流程（可继续确认/取消/修改/删除）；非 `PENDING_CONFIRM` 状态拒绝保存。
+- 预览草案的修改范围与已保存 Request 的受限修改一致（`selected_subtitle_group`、`filter_rule`、`expected_folder_name`），并应用相同的 `use_regex`/`case_sensitive` 筛选语义。
+- 用户可见 `error_message` 已中文化（例如「只有待确认订阅方案可以执行确认操作」「只有待确认或已确认订阅方案可以修改」），内部字段名与 API 字段保持不变。
+
 ## 7. 异常场景
 
 | 场景 | 处理方式 |

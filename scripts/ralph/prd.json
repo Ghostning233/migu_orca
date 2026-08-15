@@ -157,7 +157,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Stage closeout story；开发完成后再标记通过。"
     }
   ]
