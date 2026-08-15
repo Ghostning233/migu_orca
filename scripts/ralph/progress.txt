@@ -5,6 +5,7 @@ Started: Fri Aug 14 20:20:45 CST 2026
 - `modify_request` in `request_engine/controllers/request_controller.py` accepts both `PENDING_CONFIRM` and `ACCEPTED` requests and preserves the original status (never resets to `PENDING_CONFIRM`); accept/cancel remain restricted to `PENDING_CONFIRM` only via `_copy_pending_request`.
 - Stage 15 has been completed and merged into `main`; current active work is Stage 16 (`agent/stage16-mikan-bangumi-detail`).
 - Stage 16 and Stage 17 are split deliberately: Stage 16 implements selected MiKan `Home/Bangumi/<id>` detail parsing plus direct URL/ID entry; Stage 17 implements MiKan search candidate cards, manual selection, and cache on top of the Stage 16 parser.
+- Stage 16 MiKan detail-page fixture tests live beside `mikan_client_test.py` under `src/mikan_engine/controllers/fixtures/`; keep real MiKan parser coverage offline and drive it through injected `MikanTransport` instead of live network reads.
 - AI title normalization/search-query enhancement is a low-priority optional backlog item, not a dependency for Stage 16/17 and never a replacement for explicit user collection selection.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
@@ -121,4 +122,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Gotcha encountered: `create_saved_accepted_request` lives in `tests/browser/test_actions.py`, not conftest; the ui_quality security test builds the ACCEPTED request inline with `accept_request` + `save_request_snapshot`.
   - Gotcha encountered: the qBittorrent route handler receives two args `(route, request)`; using a one-arg signature breaks Playwright routing.
   - Useful context: after US-109 all Stage 15 stories in `scripts/ralph/prd.json` are marked passing; the dev-browser skill was unavailable, so UI verification used the project's Playwright browser suite.
+---
+## 2026-08-15 16:22:14 CST - US-110
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added a sanitized offline MiKan `Home/Bangumi/2353` detail-page HTML fixture covering the bangumi title, bangumi-level RSS link, subgroup names, subgroup-level RSS links, episode titles, episode detail links, and sanitized magnet attributes.
+- Extended the existing private MiKan bangumi-page parser with narrow `title()` and `subgroup_names()` accessors so fixture-driven parser tests can prove title/subgroup discovery without changing the production `MikanClient.list_rss_sources` return contract.
+- Added fixture-driven tests that parse the detail fixture through the public `MikanClient` transport seam, assert subgroup RSS URL extraction and de-dup-compatible `RssSource` shape, prove title/subgroup discovery, and verify the fixture does not contain common cookie/token/session/local-path markers.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/mikan_engine/controllers/fixtures/mikan_bangumi_2353_detail.html`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 317 tests and 156 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: not applicable for US-110 because it is parser/fixture-only and has no UI behavior.
+- **Learnings for future iterations:**
+  - Pattern discovered: use injected `MikanTransport` and local HTML fixtures for real MiKan parser coverage; do not let parser tests depend on live `mikanani.me`.
+  - Pattern discovered: the existing `MikanClient.list_rss_sources` contract remains `RssSource`-only for now; richer detail metadata should build on `_MikanBangumiPageParser` in US-111 without writing raw HTML or magnets into Request snapshots.
+  - Gotcha encountered: public MiKan paths include `/Home/...`, so fixture sanitization checks should look for local absolute paths like `/home/ghostning/` or `file://`, not the generic `/home/` substring.
+  - Useful context: browser tests are part of `uv run pytest -q`, but this environment skipped them because the browser binary is unavailable.
 ---

@@ -17,7 +17,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先建立离线验收基线，避免后续真实站点慢响应或结构变化直接破坏测试。"
     },
     {

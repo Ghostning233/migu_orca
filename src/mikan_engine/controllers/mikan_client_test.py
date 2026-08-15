@@ -1,13 +1,19 @@
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 import pytest
 
-from mikan_engine.controllers.mikan_client import create_mikan_client
+from mikan_engine.controllers.mikan_client import (
+    _MikanBangumiPageParser,
+    create_mikan_client,
+)
 from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.errors import Stage1Error
 from shared.models import MatchedBangumi
+
+FIXTURE_DIR = Path(__file__).with_name("fixtures")
 
 
 class FakeTransport:
@@ -286,6 +292,74 @@ def test_mikan_client_exposes_rss_source_listing_boundary() -> None:
     assert len(sources) == 2
 
 
+def test_mikan_client_parses_sanitized_bangumi_detail_fixture() -> None:
+    html = _read_fixture("mikan_bangumi_2353_detail.html")
+    transport = FakeTransport(html)
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikanani.me/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+    matched = MatchedBangumi(
+        title="无职转生～到了异世界就拿出真本事～",
+        aliases=[],
+        mikan_url="https://mikanani.me/Home/Bangumi/2353",
+        match_score=1,
+    )
+
+    sources = client.list_rss_sources(matched)
+
+    assert transport.requests == [("https://mikanani.me/Home/Bangumi/2353", 5)]
+    assert [source.subtitle_group for source in sources] == [
+        "桜都字幕组",
+        "喵萌奶茶屋",
+    ]
+    assert [source.rss_url for source in sources] == [
+        "https://mikanani.me/RSS/Bangumi?bangumiId=2353&subgroupid=203",
+        "https://mikanani.me/RSS/Bangumi?bangumiId=2353&subgroupid=1231",
+    ]
+    assert all(source.source_type == "mikan_http" for source in sources)
+    assert all(source.fixture_path == "" for source in sources)
+
+
+def test_mikan_bangumi_detail_fixture_exposes_title_subgroups_and_episode_links() -> None:
+    html = _read_fixture("mikan_bangumi_2353_detail.html")
+    parser = _MikanBangumiPageParser("https://mikanani.me/Home/Bangumi/2353")
+
+    parser.feed(html)
+
+    assert parser.title() == "无职转生～到了异世界就拿出真本事～"
+    assert parser.subgroup_names() == ["桜都字幕组", "喵萌奶茶屋"]
+    assert 'class="bangumi-title"' in html
+    assert 'class="mikan-rss"' in html
+    assert 'class="subgroup-name"' in html
+    assert "/Home/Episode/fixture-2353-01" in html
+    assert "magnet:?xt=urn:btih:SANITIZED235301" in html
+    assert "[桜都字幕组] 无职转生～到了异世界就拿出真本事～ - 01" in html
+
+
+def test_mikan_bangumi_detail_fixture_is_sanitized() -> None:
+    html = _read_fixture("mikan_bangumi_2353_detail.html")
+    forbidden_tokens = [
+        "cookie",
+        "token",
+        "authorization",
+        "session",
+        "sid=",
+        "/home/ghostning/",
+        "file://",
+        "/users/",
+        "c:\\",
+    ]
+
+    normalized_html = html.casefold()
+
+    assert "SANITIZED" in html
+    assert all(token not in normalized_html for token in forbidden_tokens)
+
+
 def test_mikan_client_uses_anchor_metadata_for_rss_source_group() -> None:
     transport = FakeTransport(
         """
@@ -390,3 +464,7 @@ def test_mikan_bangumi_page_http_failure_uses_rss_listing_step() -> None:
         "details": {"category": "timeout"},
     }
     assert "secret-token" not in str(error.value.as_dict())
+
+
+def _read_fixture(filename: str) -> str:
+    return (FIXTURE_DIR / filename).read_text(encoding="utf-8")

@@ -336,19 +336,40 @@ class _MikanBangumiPageParser(HTMLParser):
         self._completed_rows: list[_MikanPageRow] = []
         self._active_anchor: _MikanPageAnchor | None = None
         self._standalone_anchors: list[_MikanPageAnchor] = []
+        self._title_depth = 0
+        self._title_parts: list[str] = []
+        self._subgroup_depth = 0
+        self._subgroup_parts: list[str] = []
+        self._subgroup_names: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag_name = tag.lower()
+        if self._title_depth:
+            self._title_depth += 1
+        if self._subgroup_depth:
+            self._subgroup_depth += 1
+
         if tag_name == "tr":
             self._row_depth += 1
             if self._current_row is None:
                 self._current_row = _MikanPageRow()
 
         attr_map = {name.lower(): value for name, value in attrs if value is not None}
+        classes = set(attr_map.get("class", "").split())
+        if "bangumi-title" in classes:
+            self._title_depth = 1
+            self._title_parts = []
+        if "subgroup-name" in classes:
+            self._subgroup_depth = 1
+            self._subgroup_parts = []
         if tag_name == "a":
             self._active_anchor = _MikanPageAnchor(attr_map, [])
 
     def handle_data(self, data: str) -> None:
+        if self._title_depth:
+            self._title_parts.append(data)
+        if self._subgroup_depth:
+            self._subgroup_parts.append(data)
         if self._active_anchor is not None:
             self._active_anchor.text_parts.append(data)
         if self._current_row is not None:
@@ -364,11 +385,28 @@ class _MikanBangumiPageParser(HTMLParser):
             self._active_anchor = None
             return
 
+        if self._title_depth:
+            self._title_depth -= 1
+        if self._subgroup_depth:
+            self._subgroup_depth -= 1
+            if self._subgroup_depth == 0:
+                subgroup_name = _clean_title(" ".join(self._subgroup_parts))
+                if subgroup_name:
+                    self._subgroup_names.append(subgroup_name)
+                self._subgroup_parts = []
+
         if tag_name == "tr" and self._row_depth:
             self._row_depth -= 1
             if self._row_depth == 0 and self._current_row is not None:
                 self._completed_rows.append(self._current_row)
                 self._current_row = None
+
+    def title(self) -> str | None:
+        title = _clean_title(" ".join(self._title_parts))
+        return title or None
+
+    def subgroup_names(self) -> list[str]:
+        return _unique(self._subgroup_names)
 
     def rss_sources(self) -> list[RssSource]:
         rows = self._rows_with_sources()
