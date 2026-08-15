@@ -155,6 +155,16 @@ class MikanClient:
         )
         return _parse_bangumi_rss_sources(html, mikan_url)
 
+    def get_direct_bangumi_detail(self, direct_entry: str) -> MikanBangumiDetail:
+        mikan_url = _direct_bangumi_url(direct_entry, self._config)
+        html = _read_mikan_text(
+            self._transport,
+            mikan_url,
+            timeout=self._config.timeout_seconds,
+            failed_step="mikan_bangumi_detail",
+        )
+        return _parse_bangumi_detail(html, mikan_url)
+
     def get_bangumi_detail(self, matched_bangumi: MatchedBangumi) -> MikanBangumiDetail:
         mikan_url = matched_bangumi.mikan_url.strip()
         if not mikan_url:
@@ -170,6 +180,19 @@ class MikanClient:
             failed_step="mikan_bangumi_detail",
         )
         return _parse_bangumi_detail(html, mikan_url)
+
+    def list_rss_sources_from_detail(
+        self,
+        detail: MikanBangumiDetail,
+    ) -> list[RssSource]:
+        sources = _rss_sources_from_bangumi_detail(detail)
+        if not sources:
+            raise Stage1Error(
+                "mikan_parse_failed",
+                "MiKan 番剧页未找到 RSS 源",
+                "mikan_list_rss_sources",
+            )
+        return sources
 
 
 def create_mikan_client(
@@ -187,6 +210,83 @@ def _build_search_url(search_endpoint: str, raw_title: str) -> str:
     query = parse_qsl(parsed.query, keep_blank_values=True)
     query.append(("searchstr", raw_title))
     return urlunparse(parsed._replace(query=urlencode(query)))
+
+
+def _direct_bangumi_url(direct_entry: str, config: MikanConfig) -> str:
+    value = direct_entry.strip()
+    if not value:
+        raise _invalid_direct_entry("mikan_bangumi")
+    if _is_bangumi_id(value):
+        return _direct_bangumi_url_from_id(value, config)
+    return _validated_direct_bangumi_url(value, config)
+
+
+def _direct_bangumi_url_from_id(bangumi_id: str, config: MikanConfig) -> str:
+    base = urlparse(config.search_endpoint)
+    if base.scheme not in {"http", "https"} or not base.netloc:
+        raise Stage1Error(
+            "config_error",
+            "MiKan search_endpoint 无法派生番剧页 URL",
+            "mikan_direct_entry",
+            {"field": "search_endpoint"},
+        )
+    return urlunparse(
+        (
+            base.scheme,
+            base.netloc,
+            f"/Home/Bangumi/{bangumi_id}",
+            "",
+            "",
+            "",
+        )
+    )
+
+
+def _validated_direct_bangumi_url(value: str, config: MikanConfig) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise _invalid_direct_entry("mikan_bangumi")
+
+    config_origin = urlparse(config.search_endpoint)
+    if (
+        config_origin.scheme not in {"http", "https"}
+        or not config_origin.netloc
+        or parsed.netloc.casefold() != config_origin.netloc.casefold()
+    ):
+        raise _invalid_direct_entry("mikan_bangumi")
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) != 3:
+        raise _invalid_direct_entry("mikan_bangumi")
+    if [part.casefold() for part in path_parts[:2]] != ["home", "bangumi"]:
+        raise _invalid_direct_entry("mikan_bangumi")
+    bangumi_id = path_parts[2]
+    if not _is_bangumi_id(bangumi_id):
+        raise _invalid_direct_entry("mikan_bangumi")
+
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"/Home/Bangumi/{bangumi_id}",
+            "",
+            "",
+            "",
+        )
+    )
+
+
+def _invalid_direct_entry(field: str) -> Stage1Error:
+    return Stage1Error(
+        "invalid_input",
+        "MiKan bangumi 直连入口必须是数字 ID 或 Home/Bangumi URL",
+        "mikan_direct_entry",
+        {"field": field},
+    )
+
+
+def _is_bangumi_id(value: str) -> bool:
+    return value.isascii() and value.isdecimal()
 
 
 def _read_mikan_text(

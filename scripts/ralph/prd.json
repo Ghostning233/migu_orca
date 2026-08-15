@@ -73,7 +73,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "这是第一季等搜索不可达场景的最重要兜底。Web UI 展示控件可最小化，完整候选选择放 Stage 17。"
     },
     {

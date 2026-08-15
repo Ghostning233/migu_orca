@@ -82,6 +82,68 @@ def test_mikan_client_searches_with_injected_transport_and_encoded_query() -> No
     assert candidates[0].rss_sources == []
 
 
+def test_mikan_client_direct_id_derives_detail_url_from_config() -> None:
+    transport = FakeTransport(
+        """
+        <h1 class="bangumi-title">芙莉莲</h1>
+        <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=3072">RSS</a>
+        """
+    )
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search?classic=true",
+            timeout_seconds=7,
+        ),
+        transport=transport,
+    )
+
+    detail = client.get_direct_bangumi_detail("3072")
+
+    assert transport.requests == [("https://mikan.example/Home/Bangumi/3072", 7)]
+    assert detail.bangumi_id == "3072"
+    assert detail.mikan_url == "https://mikan.example/Home/Bangumi/3072"
+
+
+def test_mikan_client_direct_url_normalizes_and_rejects_unsafe_values() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            """
+            <h1 class="bangumi-title">芙莉莲</h1>
+            <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=3072">RSS</a>
+            """
+        ),
+    )
+
+    detail = client.get_direct_bangumi_detail(
+        "https://mikan.example/Home/Bangumi/3072?token=secret#frag"
+    )
+
+    assert detail.mikan_url == "https://mikan.example/Home/Bangumi/3072"
+    for value in [
+        "",
+        "not-a-url",
+        "ftp://mikan.example/Home/Bangumi/3072",
+        "https://mikan.example/Home/Search?searchstr=secret-token",
+        "https://evil.example/Home/Bangumi/3072?token=secret-token",
+        "https://mikan.example/Home/Bangumi/../3072",
+        "https://mikan.example/Home/Bangumi/abc",
+    ]:
+        with pytest.raises(Stage1Error) as error:
+            client.get_direct_bangumi_detail(value)
+
+        assert error.value.as_dict() == {
+            "error_type": "invalid_input",
+            "error_message": "MiKan bangumi 直连入口必须是数字 ID 或 Home/Bangumi URL",
+            "failed_step": "mikan_direct_entry",
+            "details": {"field": "mikan_bangumi"},
+        }
+        assert "secret-token" not in str(error.value.as_dict())
+
+
 def test_mikan_client_parses_search_fixture_candidates_and_deduplicates() -> None:
     transport = FakeTransport(
         """

@@ -1357,6 +1357,106 @@ def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
     assert request["confirmable_config"]["selected_rss_url"] == "https://mikan.example/RSS/Bangumi?bangumiId=123"
 
 
+def test_create_request_accepts_request_scoped_mikan_direct_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Bangumi/123": (
+                '<h1 class="bangumi-title">芙莉莲</h1>'
+                '<a class="mikan-rss" href="/RSS/Bangumi?bangumiId=123">RSS</a>'
+                '<section class="subgroup-section">'
+                '<h2 class="subgroup-name">Loli</h2>'
+                '<a href="/RSS/Bangumi?bangumiId=123&subgroupid=10">RSS</a>'
+                "</section>"
+            ),
+            "https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10": (
+                "<rss><channel><item><title>芙莉莲 - 01</title>"
+                "<link>https://example.invalid/1</link></item></channel></rss>"
+            ),
+        }
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return create_mikan_client(config, transport=transport)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "不会用于搜索",
+            "source": "mikan",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+            "mikan_bangumi": "123",
+            "storage_dir": str(storage_dir),
+            "save_request": True,
+        },
+    )
+
+    payload = response.get_json()
+    request = payload["result"]["request"]
+    saved_path = storage_dir / "requests" / payload["result"]["saved_request"]["filename"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert transport.requests == [
+        ("https://mikan.example/Home/Bangumi/123", 5.0),
+        ("https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10", 5.0),
+    ]
+    assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
+    assert (
+        request["source_info"]["matched_bangumi"]["mikan_url"]
+        == "https://mikan.example/Home/Bangumi/123"
+    )
+    assert saved_path.exists()
+    assert "mikan_bangumi" not in saved_path.read_text(encoding="utf-8")
+
+
+def test_create_request_rejects_invalid_mikan_direct_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        nonlocal called
+        called = True
+        raise AssertionError("generate_request should not be called for invalid payload")
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "芙莉莲",
+            "source": "mikan",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+            "mikan_bangumi": "   ",
+            "save_request": False,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"] == "mikan_bangumi"
+        for error in payload["error_data"]["errors"]
+    )
+    assert called is False
+
+
 def test_create_request_rejects_missing_mikan_config_when_source_is_mikan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

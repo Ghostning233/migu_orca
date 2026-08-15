@@ -14,7 +14,11 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     load_saved_request,
     main,
 )
-from mikan_engine.controllers.mikan_client import create_mikan_client
+from mikan_engine.controllers.mikan_client import (
+    MikanBangumiDetail,
+    MikanSubgroupDetail,
+    create_mikan_client,
+)
 from mikan_engine.controllers.mikan_config import MikanConfig
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
@@ -99,6 +103,79 @@ def test_generate_request_supports_inline_mikan_config_with_fake_transport_succe
         request["confirmable_config"]["selected_rss_url"]
         == "https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10"
     )
+
+
+def test_generate_request_mikan_direct_id_bypasses_search() -> None:
+    config = MikanConfig(
+        search_endpoint="https://mikan.example/Home/Search",
+        timeout_seconds=3,
+    )
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Bangumi/123": (
+                '<h1 class="bangumi-title">芙莉莲</h1>'
+                '<a class="mikan-rss" href="/RSS/Bangumi?bangumiId=123">RSS</a>'
+                '<section class="subgroup-section">'
+                '<h2 class="subgroup-name">Loli</h2>'
+                '<a href="/RSS/Bangumi?bangumiId=123&subgroupid=10">RSS</a>'
+                "</section>"
+            ),
+            "https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10": (
+                _FAKE_RSS_XML
+            ),
+        }
+    )
+    client = create_mikan_client(config, transport=transport)
+
+    result = generate_request(
+        EntryRequest(raw_title="不会用于搜索"),
+        source_mode="mikan_http",
+        mikan_config=config,
+        mikan_client=client,
+        mikan_bangumi="123",
+    )
+
+    request = result["request"]
+    assert result["success"] is True
+    assert transport.requests == [
+        ("https://mikan.example/Home/Bangumi/123", 3.0),
+        ("https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10", 3.0),
+    ]
+    assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
+    assert (
+        request["source_info"]["matched_bangumi"]["mikan_url"]
+        == "https://mikan.example/Home/Bangumi/123"
+    )
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
+
+
+def test_generate_request_mikan_direct_url_rejects_invalid_inputs() -> None:
+    config = MikanConfig(
+        search_endpoint="https://mikan.example/Home/Search",
+        timeout_seconds=3,
+    )
+    client = create_mikan_client(config, transport=_FakeMikanTransport())
+
+    for direct_entry in [
+        "",
+        "ftp://mikan.example/Home/Bangumi/123",
+        "https://mikan.example/Home/Search?searchstr=secret-token",
+        "https://evil.example/Home/Bangumi/123?token=secret-token",
+        "https://mikan.example/Home/Bangumi/../123",
+        "abc123",
+    ]:
+        result = generate_request(
+            EntryRequest(raw_title="芙莉莲"),
+            source_mode="mikan_http",
+            mikan_config=config,
+            mikan_client=client,
+            mikan_bangumi=direct_entry,
+        )
+
+        assert result["success"] is False
+        assert result["error"]["error_type"] == "invalid_input"
+        assert result["error"]["failed_step"] in {"mikan_direct_entry", "validate_input"}
+        assert "secret-token" not in json.dumps(result["error"])
 
 
 def test_generate_request_redacts_sensitive_real_mikan_failure() -> None:
@@ -738,6 +815,40 @@ def test_main_real_mikan_mode_can_accept_and_submit_ab(
     assert ab_client.calls
 
 
+def test_main_real_mikan_mode_accepts_direct_bangumi_without_title(
+    capsys,
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    mikan_config = _mikan_config(tmp_path)
+    mikan_client = _FakeMikanClient()
+
+    monkeypatch.setattr(
+        "mikan_engine.controllers.mikan_client.create_mikan_client",
+        lambda config: mikan_client,
+    )
+
+    exit_code = main(
+        [
+            "--source",
+            "mikan",
+            "--mikan-config",
+            str(mikan_config),
+            "--mikan-bangumi",
+            "100",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert output["request"]["input"]["raw_title"] == "100"
+    assert output["request"]["source_info"]["matched_bangumi"]["mikan_url"] == (
+        "https://mikan.example/Home/Bangumi/100"
+    )
+    assert mikan_client.searches == []
+    assert mikan_client.direct_entries == ["100"]
+
+
 def test_apply_ab_submit_action_skips_when_not_requested() -> None:
     result = apply_confirmation_action(
         generate_request(EntryRequest(raw_title="芙莉莲")),
@@ -1179,6 +1290,7 @@ class _FakeMikanClient:
         )
         self.transport = _FakeRssTransport()
         self.searches: list[str] = []
+        self.direct_entries: list[str] = []
         self.rss_source_matches: list[str] = []
 
     def list_bangumi_candidates(self, raw_title: str) -> list[BangumiCandidate]:
@@ -1195,6 +1307,38 @@ class _FakeMikanClient:
 
     def list_rss_sources(self, matched_bangumi: MatchedBangumi) -> list[RssSource]:
         self.rss_source_matches.append(matched_bangumi.title)
+        return [
+            RssSource(
+                subtitle_group="Loli",
+                rss_url="https://mikan.example/rss/frieren.xml",
+                source_type="mikan_http",
+                fixture_path="",
+            )
+        ]
+
+    def get_direct_bangumi_detail(self, direct_entry: str) -> MikanBangumiDetail:
+        self.direct_entries.append(direct_entry)
+        return MikanBangumiDetail(
+            bangumi_id="100",
+            title="葬送的芙莉莲",
+            mikan_url="https://mikan.example/Home/Bangumi/100",
+            broadcast_start=None,
+            poster_url=None,
+            bangumi_rss_url=None,
+            subgroups=[
+                MikanSubgroupDetail(
+                    name="Loli",
+                    rss_url="https://mikan.example/rss/frieren.xml",
+                    episodes=[],
+                )
+            ],
+        )
+
+    def list_rss_sources_from_detail(
+        self,
+        detail: MikanBangumiDetail,
+    ) -> list[RssSource]:
+        self.rss_source_matches.append(detail.title)
         return [
             RssSource(
                 subtitle_group="Loli",

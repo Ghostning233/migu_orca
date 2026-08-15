@@ -8,6 +8,7 @@ Started: Fri Aug 14 20:20:45 CST 2026
 - Stage 16 MiKan detail-page fixture tests live beside `mikan_client_test.py` under `src/mikan_engine/controllers/fixtures/`; keep real MiKan parser coverage offline and drive it through injected `MikanTransport` instead of live network reads.
 - `MikanClient.get_bangumi_detail(matched_bangumi)` returns the safe structured `MikanBangumiDetail` model (bangumi metadata, page-level RSS, subgroup RSS, episode title/detail URL summaries); do not add magnet attributes or raw HTML/RSS to this public model or Request snapshots.
 - `MikanClient.list_rss_sources(matched_bangumi)` is now derived from `MikanBangumiDetail`: return deduped subgroup-level `mikan_http` sources first, do not mix in the bangumi-level RSS when subgroup RSS exists, and fallback to one `全部字幕组` source only when no subgroup RSS is available.
+- MiKan direct entry is request-scoped: CLI uses `--mikan-bangumi`, Web API uses `mikan_bangumi`, both require `source=mikan` plus explicit MiKan config; bare ASCII numeric IDs derive `/Home/Bangumi/<id>` from `MikanConfig.search_endpoint`, while direct URLs must be same-origin HTTP(S) `/Home/Bangumi/<numeric-id>` and are normalized without query/fragment before Request snapshots.
 - AI title normalization/search-query enhancement is a low-priority optional backlog item, not a dependency for Stage 16/17 and never a replacement for explicit user collection selection.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
@@ -168,4 +169,19 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: use subgroup-level RSS URLs containing a subgroup query parameter for normal MiKan candidates; a bangumi-level RSS URL is a fallback candidate only.
   - Gotcha encountered: older tests that used `<a data-subtitle-group="...">RSS</a>` without a `.bangumi-title` are not valid Stage 16 detail pages once source listing depends on structured detail parsing.
   - Useful context: there is still no `CODEX.md` under `src/mikan_engine`; the reusable source-selection rule is consolidated in the progress log.
+---
+## 2026-08-15 16:38:52 CST - US-113
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added request-scoped MiKan bangumi direct entry support. `generate_request(..., source_mode="mikan_http", mikan_bangumi=...)` now bypasses MiKan search, parses the selected detail page, builds the matched bangumi from `MikanBangumiDetail`, and derives RSS sources from that same detail model before parsing RSS and generating a `PENDING_CONFIRM` Request.
+- Added CLI flag `--mikan-bangumi` for explicit MiKan `Home/Bangumi` URL or bare numeric ID input; it works with `--source mikan` and `--mikan-config`, and can be used without a separate title because the detail page supplies the canonical title.
+- Added Web API payload field `mikan_bangumi` for `POST /api/v1/requests`; it is passed only to request generation and is not written to browser storage, URL state, persistent config, or saved Request JSON.
+- Added safe direct-entry validation in `MikanClient`: empty values, non-HTTP(S), wrong origin, non-`/Home/Bangumi/<id>` paths, traversal-like paths, and non-ASCII/non-numeric IDs return stable sanitized errors; bare IDs derive the detail URL from `MikanConfig.search_endpoint` instead of a hardcoded host.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest src/mikan_engine/controllers/mikan_client_test.py -q` passed with 26 tests; `uv run pytest src/apps/migu_orca_entry/controllers/entry_controller_test.py -q` passed with 46 tests; `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed with 66 tests; `uv run pytest -q` passed with 332 tests and 156 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: no UI controls were changed for US-113; the direct entry Web behavior is API-only in Stage 16. Full browser suite was skipped by the environment due to missing browser binary.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep MiKan direct-entry URL normalization in `MikanClient`, not the Web or CLI layer, so CLI/API callers share the same sanitization and config-derived host behavior.
+  - Pattern discovered: use `MikanBangumiDetail` as the selected direct-entry source of truth, then convert it to `MatchedBangumi` plus `list_rss_sources_from_detail` for the existing Request/RSS/AB pipeline.
+  - Gotcha encountered: an explicitly blank direct-entry argument must be distinguished from omitted `mikan_bangumi`; otherwise generation may silently fall back to fuzzy search.
+  - Useful context: Stage 16 intentionally did not add a visible Web UI direct-entry control; Stage 17 can layer candidate/direct controls over the request-scoped API field.
 ---

@@ -75,6 +75,7 @@ class RequestCreatePayload(BaseModel):
         default=None,
         validate_default=True,
     )
+    mikan_bangumi: str | None = None
     storage_dir: str | None = None
     save_request: bool = False
 
@@ -105,6 +106,16 @@ class RequestCreatePayload(BaseModel):
         if source == "mikan" and value is None:
             raise ValueError("mikan_config is required when source is mikan")
         return value
+
+    @field_validator("mikan_bangumi")
+    @classmethod
+    def validate_mikan_bangumi(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        direct_entry = value.strip()
+        if not direct_entry:
+            raise ValueError("mikan_bangumi cannot be empty")
+        return direct_entry
 
 
 class RequestActionPayload(BaseModel):
@@ -382,6 +393,7 @@ class RequestCreateView(PostView):
             EntryRequest(raw_title=payload.title),
             source_mode="mikan_http" if payload.source == "mikan" else "static_fixture",
             mikan_config=mikan_config,
+            mikan_bangumi=payload.mikan_bangumi,
         )
         if not result["success"]:
             _raise_result_error(result)
