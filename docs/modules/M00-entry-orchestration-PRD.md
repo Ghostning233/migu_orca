@@ -147,7 +147,7 @@ Stage 16：解析用户选中的 MiKan 合集详情页
 
 Stage 16 已允许用户通过 CLI `--mikan-bangumi` 或 Web API `mikan_bangumi` 直接提供 MiKan `Home/Bangumi/<id>` URL 或 bangumi ID，从而绕过搜索候选选择，直接进入详情页解析。该参数只在当前请求中使用，不写入浏览器 storage、URL 或持久配置。bare ID 必须基于显式 MiKan config 的 `search_endpoint` 派生详情页 URL；URL 必须是同源 HTTP(S) `/Home/Bangumi/<numeric-id>`。
 
-Stage 17 再将搜索结果候选卡片接入 Web UI，并且即使只有一个候选也应要求用户确认，避免自动错选。Stage 17 的候选选择结果应复用 Stage 16 direct-entry 编排路径，而不是新增第二套详情页解析入口。
+Stage 17 已将搜索结果候选卡片接入 Web UI `/index`，并且即使只有一个候选也要求用户显式点击确认，避免自动错选。Stage 17 的候选选择结果和直连 URL/ID fallback 都复用 Stage 16 direct-entry 编排路径（Web API `mikan_bangumi` 字段），而不是新增第二套详情页解析入口。候选搜索通过 request-scoped Web API `POST /api/v1/mikan/candidates` 完成，配合进程内候选缓存和 display-only 推荐标签；候选搜索、候选选择和直连 fallback 的 MiKan config 都是 request-scoped，不写入 storage JSON、浏览器 storage、URL、history、日志或截图。
 
 AI 番剧名解析只允许作为后续可选增强模块生成多个搜索词；无 API key、无付费能力或 LLM 失败时，M00 仍必须可以通过 Stage 17 手动候选选择或 Stage 16 直连 URL/ID 完成真实 MiKan 流程。
 

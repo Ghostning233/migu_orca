@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -41,6 +41,24 @@ class MikanBangumiDetail:
     poster_url: str | None
     bangumi_rss_url: str | None
     subgroups: list[MikanSubgroupDetail]
+
+
+@dataclass(frozen=True)
+class MikanCandidate:
+    """A visible MiKan search candidate collection card.
+
+    Only public candidate metadata is stored: the bangumi id, display title,
+    normalized absolute bangumi URL, optional public poster URL, the query that
+    produced the search, and optional aliases. Raw HTML, raw RSS XML, cookies,
+    tokens, and full failed URLs never appear on this model.
+    """
+
+    bangumi_id: str
+    title: str
+    mikan_url: str
+    source_query: str
+    poster_url: str | None = None
+    aliases: list[str] = field(default_factory=list)
 
 
 class MikanTransport(Protocol):
@@ -109,6 +127,33 @@ class MikanClient:
             failed_step="mikan_search",
         )
         return _parse_search_candidates(html, self._config.search_endpoint)
+
+    def search_candidates(self, raw_title: str) -> list[MikanCandidate]:
+        """Search MiKan and return sanitized visible candidate cards.
+
+        The search is request-scoped and explicit: it requires a non-empty title
+        and reads the configured MiKan search page through the transport seam.
+        The page is treated as candidate discovery only; the returned candidates
+        are never auto-selected.
+        """
+        normalized_title = raw_title.strip()
+        if not normalized_title:
+            raise Stage1Error("invalid_input", "番剧名称不能为空", "mikan_search")
+        search_url = _build_search_url(
+            self._config.search_endpoint,
+            normalized_title,
+        )
+        html = _read_mikan_text(
+            self._transport,
+            search_url,
+            timeout=self._config.timeout_seconds,
+            failed_step="mikan_search",
+        )
+        return _parse_candidate_cards(
+            html,
+            self._config.search_endpoint,
+            normalized_title,
+        )
 
     def list_rss_sources(self, matched_bangumi: MatchedBangumi) -> list[RssSource]:
         mikan_url = matched_bangumi.mikan_url.strip()
@@ -371,6 +416,23 @@ def _parse_search_candidates(html: str, search_endpoint: str) -> list[BangumiCan
     return candidates
 
 
+def _parse_candidate_cards(
+    html: str,
+    search_endpoint: str,
+    source_query: str,
+) -> list[MikanCandidate]:
+    parser = _MikanCandidatePageParser(search_endpoint, source_query)
+    try:
+        parser.feed(html)
+    except Exception as exc:
+        raise Stage1Error(
+            "mikan_parse_failed",
+            "MiKan 搜索页解析失败",
+            "mikan_search",
+        ) from exc
+    return parser.candidates()
+
+
 def _parse_bangumi_rss_sources(html: str, bangumi_url: str) -> list[RssSource]:
     parser = _MikanBangumiPageParser(bangumi_url)
     try:
@@ -510,6 +572,128 @@ class _MikanSearchParser(HTMLParser):
             )
             seen_ids.add(bangumi_id)
         return candidates
+
+
+class _MikanCandidatePageParser(HTMLParser):
+    """Parse visible MiKan search candidate cards into sanitized models.
+
+    Candidate cards are scoped to their container elements (``.bangumi-item``,
+    ``.search-result``, ``.sk-bangumi``, ``.an-card``, ``.related-item``, etc.)
+    so the ``相关推荐`` and equivalent search sections are covered without
+    depending on a single page layout. Every candidate URL is normalized to an
+    absolute HTTP(S) bangumi URL; traversal, empty or non-numeric ids, wrong
+    paths, and non-HTTP(S) schemes are silently rejected. Cards are returned in
+    page order and deduplicated by ``bangumi_id``.
+    """
+
+    def __init__(self, base_url: str, source_query: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self._base_url = base_url
+        self._source_query = source_query
+        self._tag_stack: list[tuple[str, bool]] = []
+        self._card_depth = 0
+        self._current_card: _MikanCandidateCard | None = None
+        self._cards: list[_MikanCandidateCard] = []
+        self._active_href: str | None = None
+        self._active_title_attr: str | None = None
+        self._active_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_name = tag.lower()
+        attr_map = {name.lower(): value for name, value in attrs if value is not None}
+        classes = set(attr_map.get("class", "").split())
+
+        if self._card_depth and tag_name == "a":
+            normalized = _candidate_bangumi_url(attr_map.get("href", ""), self._base_url)
+            if normalized is not None:
+                if self._current_card is not None and self._current_card.href is None:
+                    self._current_card.href = normalized
+                self._active_href = normalized
+                self._active_title_attr = attr_map.get("title")
+                self._active_text = []
+        elif self._card_depth and tag_name == "img":
+            if self._current_card is not None and self._current_card.poster_url is None:
+                poster_url = _poster_url_from_attrs(attr_map, self._base_url)
+                if poster_url is not None:
+                    self._current_card.poster_url = poster_url
+
+        is_container = _is_candidate_card_container(tag_name, classes)
+        if is_container:
+            if self._card_depth == 0:
+                self._current_card = _MikanCandidateCard()
+            self._card_depth += 1
+        if tag_name not in _HTML_VOID_ELEMENTS:
+            self._tag_stack.append((tag_name, is_container))
+
+    def handle_data(self, data: str) -> None:
+        if self._active_href is not None:
+            self._active_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_name = tag.lower()
+        if tag_name == "a" and self._active_href is not None:
+            if self._current_card is not None and self._current_card.title is None:
+                title = _clean_title(" ".join(self._active_text))
+                if title:
+                    self._current_card.title = title
+                    self._current_card.title_attr = _clean_title(
+                        self._active_title_attr or ""
+                    )
+            self._active_href = None
+            self._active_title_attr = None
+            self._active_text = []
+
+        if self._tag_stack and self._tag_stack[-1][0] == tag_name:
+            _, is_container = self._tag_stack.pop()
+            if is_container:
+                if self._card_depth > 0:
+                    self._card_depth -= 1
+                if self._card_depth == 0:
+                    card = self._current_card
+                    self._current_card = None
+                    if card is not None and card.href is not None:
+                        self._cards.append(card)
+
+    def candidates(self) -> list[MikanCandidate]:
+        candidates: list[MikanCandidate] = []
+        seen_ids: set[str] = set()
+        for card in self._cards:
+            if card.href is None:
+                continue
+            bangumi_id = _extract_bangumi_id(card.href)
+            if bangumi_id is None or bangumi_id in seen_ids:
+                continue
+
+            names = [
+                _clean_title(card.title or ""),
+                _clean_title(card.title_attr or ""),
+            ]
+            names = [name for name in names if name]
+            if not names:
+                continue
+
+            canonical_title = names[0]
+            aliases = _unique([name for name in names[1:] if name != canonical_title])
+            candidates.append(
+                MikanCandidate(
+                    bangumi_id=bangumi_id,
+                    title=canonical_title,
+                    mikan_url=card.href,
+                    poster_url=card.poster_url,
+                    source_query=self._source_query,
+                    aliases=aliases,
+                )
+            )
+            seen_ids.add(bangumi_id)
+        return candidates
+
+
+class _MikanCandidateCard:
+    def __init__(self) -> None:
+        self.href: str | None = None
+        self.title: str | None = None
+        self.title_attr: str | None = None
+        self.poster_url: str | None = None
 
 
 class _MikanBangumiPageParser(HTMLParser):
@@ -755,6 +939,78 @@ def _extract_bangumi_id(href: str) -> str | None:
     if not bangumi_id:
         return None
     return bangumi_id
+
+
+CANDIDATE_CARD_CONTAINER_CLASSES = {
+    "bangumi-item",
+    "search-result",
+    "an-card",
+    "result-item",
+    "related-item",
+    "recommend-item",
+    "sk-bangumi",
+}
+
+CANDIDATE_CARD_CONTAINER_TAGS = {"div", "li", "article", "section"}
+
+_HTML_VOID_ELEMENTS = {
+    "area",
+    "base",
+    "br",
+    "col",
+    "embed",
+    "hr",
+    "img",
+    "input",
+    "link",
+    "meta",
+    "param",
+    "source",
+    "track",
+    "wbr",
+}
+
+
+def _is_candidate_card_container(tag_name: str, classes: set[str]) -> bool:
+    return tag_name in CANDIDATE_CARD_CONTAINER_TAGS and bool(
+        classes.intersection(CANDIDATE_CARD_CONTAINER_CLASSES)
+    )
+
+
+def _candidate_bangumi_url(href: str, base_url: str) -> str | None:
+    """Normalize a candidate href to an absolute bangumi URL or reject it.
+
+    The returned URL always has an HTTP(S) scheme, a netloc, and the normalized
+    path ``/Home/Bangumi/<numeric-id>`` without query or fragment. Traversal,
+    empty or non-numeric ids, non-bangumi paths, and non-HTTP(S) schemes return
+    ``None`` so the caller can skip the candidate safely.
+    """
+    if not href.strip():
+        return None
+    absolute_url = urljoin(base_url, href.strip())
+    parsed = urlparse(absolute_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) != 3:
+        return None
+    if [part.casefold() for part in path_parts[:2]] != ["home", "bangumi"]:
+        return None
+    bangumi_id = path_parts[2]
+    if not _is_bangumi_id(bangumi_id):
+        return None
+
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"/Home/Bangumi/{bangumi_id}",
+            "",
+            "",
+            "",
+        )
+    )
 
 
 def _rss_url_from_href(href: str, base_url: str) -> str | None:

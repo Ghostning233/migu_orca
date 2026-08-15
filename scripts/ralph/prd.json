@@ -19,7 +19,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先建立候选发现基础能力；不要在本 story 接 UI。"
     },
     {
@@ -37,7 +37,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "API 是 Stage 17 UI 的依赖；候选搜索必须保持显式和 request-scoped。"
     },
     {
@@ -57,7 +57,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "保持 Stage 15/16 信息架构边界；真实 MiKan 配置仍是临时输入。"
     },
     {
@@ -76,7 +76,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "这是 Stage 17 的主交互闭环；必须复用 Stage 16 parser，不要复制 detail parser。"
     },
     {
@@ -96,7 +96,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "这是解决 MiKan 推荐位找不到第一季等场景的 Web UI 兜底。"
     },
     {
@@ -114,7 +114,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "优先做进程内或轻量本地缓存；不要引入数据库。"
     },
     {
@@ -133,7 +133,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "此 story 是体验增强；不要引入 AI title normalization。"
     },
     {
@@ -151,7 +151,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Stage closeout 后再准备 Stage 18 或后续真实 MiKan 搜索增强。"
     }
   ]

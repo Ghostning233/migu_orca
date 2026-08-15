@@ -5,7 +5,7 @@
 - Stage: 17
 - Scope: MiKan search candidates, manual collection selection, and search cache
 - Date: 2026-08-15
-- Status: Planned
+- Status: Completed
 - Dependency: Stage 16 completed and merged in PR #28
 
 ## 2. Purpose
@@ -109,4 +109,30 @@ Update docs, backlog, Ralph progress, browser tests, and security checks for Sta
 3. `uv run pytest tests/browser/ -v` passes when browser binaries are available; otherwise skip reason must be recorded.
 4. Web UI candidate search and manual selection are covered by browser regression.
 5. Stage 17 does not leak sensitive external config or raw MiKan responses.
+
+## 10. Completion Summary
+
+Stage 17 completed on 2026-08-15.
+
+Implemented behavior:
+
+1. Added `MikanClient.search_candidates(raw_title) -> list[MikanCandidate]` and `_MikanCandidatePageParser` for the MiKan search page `相关推荐` region; candidate hrefs are normalized to absolute HTTP(S) `/Home/Bangumi/<numeric-id>` (query/fragment stripped), and traversal/empty/non-numeric IDs/non-HTTP(S) schemes are rejected. Candidates preserve page order, are deduped by `bangumi_id`, and return `[]` for a page with no candidates.
+2. Added the request-scoped Web API `POST /api/v1/mikan/candidates` (`MikanCandidateSearchPayload` with `query` + explicit `mikan_config`). It reads the search page through the existing `MikanClient` / transport seam and returns only sanitized public candidate metadata plus a display-only `recommendation` label. The default `POST /api/v1/requests` fixture path never calls it.
+3. Added the Web UI candidate search control on `/index` as a closed-by-default `<details>` disclosure (`#mikan-candidate-search`). Cards render title, MiKan ID, optional poster, and source query with loading/empty/error/retry states. No candidate is ever auto-selected.
+4. Added the `选择此合集` manual-selection action and the direct MiKan URL/ID fallback form. Both reuse the existing `POST /api/v1/requests` `mikan_bangumi` field (Stage 16 detail chain) — no second detail parser. Success reuses the shared `finalizeGeneratedRequest` path for detail/list refresh and URL `request_id` sync.
+5. Added an in-process candidate search cache (`mikan_candidate_cache.py`) with TTL + bounded eviction, keyed by `mikan-candidates:<sha256[:32] of search_endpoint>:<normalized query>`, storing only public candidate metadata; the API returns cached candidates on a hit without reading the transport.
+6. Added display-only recommendation labels (`mikan_candidate_recommendation.py`): `推荐：第 N 季` only for a confident season match, `季数不符` for conflicts, `可能匹配` for low-confidence title/alias matches, and `None` otherwise. Season extraction covers `第X季`, `S1/S2/S3`/`S01`, `Season N`, and Roman `I/II/III/IV` (trailing or parenthesized only). Labels never select or generate.
+
+Testing notes:
+
+1. `uv run python -m compileall -q src` passed during Stage 17 closeout.
+2. `uv run pytest -q` passed during Stage 17 closeout (browser suite included, Chromium available).
+3. `uv run pytest tests/browser/ -v` passed with the candidate search/manual-selection/fallback/cache/recommendation browser regression; the `dev-browser` skill was not available, so browser verification was done through the project's Playwright suite.
+4. Security regression confirmed that MiKan endpoints, raw HTML, raw RSS XML, cookies, tokens, and raw response bodies never enter storage JSON, history, browser storage, URL, logs, screenshots, or traces.
+
+Handoff:
+
+1. Stage 18 or later should treat BL-010 (AI title normalization / search-term augmentation) as an optional enhancement; it must not replace the manual candidate selection or the direct URL/ID fallback.
+2. Any future cached MiKan metadata should follow the `MikanCandidateCache` pattern: safe cache keys, TTL, bounded size, public-metadata-only entries, and test seams.
+3. Any future generation entry point that creates a Request must reuse `finalizeGeneratedRequest` in `app.js` to keep detail/list/URL-sync/default-save behavior consistent.
 

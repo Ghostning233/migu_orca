@@ -9,7 +9,7 @@ import pytest
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
-from mikan_engine.controllers.mikan_client import create_mikan_client
+from mikan_engine.controllers.mikan_client import MikanCandidate, create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
 from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
 from request_engine.controllers.request_controller import (
@@ -69,6 +69,18 @@ def _saved_cancelled_request(
     return request
 
 
+@pytest.fixture(autouse=True)
+def _clear_candidate_cache() -> None:
+    """Reset the shared in-process candidate cache before every view test.
+
+    The candidate search cache is a process-level singleton, so tests that do not
+    opt into cache behavior must never observe entries written by earlier tests.
+    """
+    from mikan_engine.controllers.mikan_candidate_cache import candidate_search_cache
+
+    candidate_search_cache.clear()
+
+
 class _FakeMikanTransport:
     def __init__(self, responses: dict[str, str] | None = None, error: Stage1Error | None = None) -> None:
         self.responses = responses or {}
@@ -109,6 +121,23 @@ class _FakeMikanClient:
                 fixture_path="",
             )
         ]
+
+
+class _FakeCandidateSearchClient:
+    def __init__(
+        self,
+        candidates: list[Any] | None = None,
+        error: Stage1Error | None = None,
+    ) -> None:
+        self.candidates = candidates or []
+        self.error = error
+        self.searches: list[str] = []
+
+    def search_candidates(self, raw_title: str) -> list[Any]:
+        self.searches.append(raw_title)
+        if self.error is not None:
+            raise self.error
+        return self.candidates
 
 
 def test_root_redirects_to_index() -> None:
@@ -154,8 +183,23 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-config-fields"' not in html
     assert 'name="mikan_search_endpoint"' not in html
     assert 'name="mikan_timeout_seconds"' not in html
-    assert "search_endpoint" not in html
-    assert "timeout_seconds" not in html
+    assert 'id="mikan-candidate-panel"' in html
+    assert 'id="mikan-candidate-search"' in html
+    assert 'id="mikan-candidate-query"' in html
+    assert 'id="mikan-candidate-search-endpoint"' in html
+    assert 'id="mikan-candidate-timeout-seconds"' in html
+    assert 'name="mikan_candidate_search_endpoint"' in html
+    assert 'name="mikan_candidate_timeout_seconds"' in html
+    assert 'id="mikan-candidate-search-submit"' in html
+    assert 'id="mikan-candidate-search-result"' in html
+    assert "search_endpoint" in html
+    assert "timeout_seconds" in html
+    assert 'id="mikan-fallback-form"' in html
+    assert 'id="mikan-fallback-bangumi"' in html
+    assert 'name="mikan_fallback_bangumi"' in html
+    assert 'id="mikan-fallback-help"' in html
+    assert 'id="mikan-fallback-error"' in html
+    assert 'id="mikan-fallback-generate"' in html
     assert 'name="storage_dir"' not in html
     assert 'name="save_request"' not in html
     assert 'id="storage-preference-summary"' in html
@@ -333,6 +377,46 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_wires_mikan_candidate_search_control() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "/api/v1/mikan/candidates" in script
+    assert "mikan-candidate-search-form" in script
+    assert "mikan-candidate-query" in script
+    assert "mikan-candidate-search-endpoint" in script
+    assert "mikan-candidate-timeout-seconds" in script
+    assert "mikan-candidate-search-submit" in script
+    assert "mikan-candidate-search-result" in script
+    assert "mikan-candidate-search-error" in script
+    assert "mikan_config" in script
+    assert "searchMikanCandidates" in script
+    assert "clearCandidateSensitiveFields" in script
+    assert "正在搜索 MiKan 候选" in script
+    assert "候选搜索失败" in script
+    assert "未找到候选合集" in script
+    assert "MiKan ID" in script
+    assert "来源 query" in script
+    assert "candidate.recommendation" in script
+    assert "candidate-recommendation" in script
+    assert "搜索结果不会自动选择合集" not in script
+    assert "选择此合集" in script
+    assert "generateRequestFromCandidate" in script
+    assert "finalizeGeneratedRequest" in script
+    assert "mikan_bangumi" in script
+    assert "lastCandidateSearchConfig" in script
+    assert "mikan-fallback-form" in script
+    assert "mikan-fallback-bangumi" in script
+    assert "mikan-fallback-error" in script
+    assert "mikan-fallback-generate" in script
+    assert "generateRequestFromFallback" in script
+    assert "MiKan 直连合集" in script
+    assert "使用直连合集生成" in script
+    assert "http://" not in script
+    assert "https://" not in script
 
 
 def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:
@@ -554,7 +638,7 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert "source: \"static-fixture\"" in script
     assert "payload.source = \"mikan\"" not in script
     assert "payload.mikan_config" not in script
-    generate_start = script.index("async function generateRequest")
+    generate_start = script.index("async function generateRequest(")
     generate_end = script.index('refreshButton.addEventListener("click", loadList)')
     generate_script = script[generate_start:generate_end]
     assert generate_script.index("if (!title)") < generate_script.index(
@@ -1551,6 +1635,592 @@ def test_create_request_rejects_invalid_mikan_timeout(
         error["field"].startswith("mikan_config.timeout_seconds")
         for error in payload["error_data"]["errors"]
     )
+    assert called is False
+
+
+def test_candidate_search_api_returns_sanitized_candidates_with_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-image" href="/Home/Bangumi/2353">'
+                '<img class="bangumi-poster" src="/assets/cover/2353.jpg">'
+                "</a>"
+                '<a class="an-text" href="/Home/Bangumi/2353" title="Frieren EN">'
+                "葬送的芙莉莲"
+                "</a>"
+                "</div>"
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/3072">咒术回战 第三季</a>'
+                "</div>"
+                "</section>"
+            )
+        }
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return create_mikan_client(config, transport=transport)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    response = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "芙莉莲",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["query"] == "芙莉莲"
+    assert payload["result"]["candidates"] == [
+        {
+            "bangumi_id": "2353",
+            "title": "葬送的芙莉莲",
+            "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+            "poster_url": "https://mikan.example/assets/cover/2353.jpg",
+            "source_query": "芙莉莲",
+            "aliases": ["Frieren EN"],
+            "recommendation": "可能匹配",
+        },
+        {
+            "bangumi_id": "3072",
+            "title": "咒术回战 第三季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/3072",
+            "poster_url": None,
+            "source_query": "芙莉莲",
+            "aliases": [],
+            "recommendation": None,
+        },
+    ]
+    assert transport.requests == [
+        (
+            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2",
+            5.0,
+        )
+    ]
+
+
+def test_candidate_search_api_returns_empty_list_when_no_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Search?searchstr=ghost": (
+                '<section class="related-recommendations"><p>暂无相关合集</p></section>'
+            )
+        }
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return create_mikan_client(config, transport=transport)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    response = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "ghost",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["candidates"] == []
+
+
+def test_candidate_search_api_rejects_empty_query_before_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_if_called(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("create_mikan_client should not be called for empty query")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fail_if_called,
+    )
+
+    response = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "   ",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"] == "query" for error in payload["error_data"]["errors"]
+    )
+
+
+def test_candidate_search_api_rejects_missing_mikan_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_if_called(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError(
+            "create_mikan_client should not be called without explicit mikan_config"
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fail_if_called,
+    )
+
+    response = _client().post(
+        "/api/v1/mikan/candidates",
+        json={"query": "芙莉莲"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(
+        error["field"] == "mikan_config"
+        for error in payload["error_data"]["errors"]
+    )
+
+
+@pytest.mark.parametrize(
+    "error, expected_error_type, expected_failed_step",
+    [
+        (
+            Stage1Error(
+                "mikan_http_failed",
+                "MiKan HTTP 请求失败",
+                "mikan_search",
+                {"status_code": 503},
+            ),
+            "mikan_http_failed",
+            "mikan_search",
+        ),
+        (
+            Stage1Error(
+                "mikan_timeout",
+                "MiKan HTTP 请求超时",
+                "mikan_search",
+                {"category": "timeout"},
+            ),
+            "mikan_timeout",
+            "mikan_search",
+        ),
+        (
+            Stage1Error(
+                "mikan_parse_failed",
+                "MiKan 页面解析失败",
+                "mikan_search",
+            ),
+            "mikan_parse_failed",
+            "mikan_search",
+        ),
+    ],
+)
+def test_candidate_search_api_returns_sanitized_mikan_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    error: Stage1Error,
+    expected_error_type: str,
+    expected_failed_step: str,
+) -> None:
+    client = _FakeCandidateSearchClient(error=error)
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return client
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    response = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "芙莉莲",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == expected_error_type
+    assert payload["error_data"]["failed_step"] == expected_failed_step
+    assert client.searches == ["芙莉莲"]
+
+
+def test_candidate_search_api_does_not_echo_raw_html_or_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                "<html><body>"
+                "<script>var sessionToken = 'secret-candidate-token'</script>"
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/42">芙莉莲</a>'
+                "</div>"
+                "</body></html>"
+            )
+        }
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return create_mikan_client(config, transport=transport)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    response = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "芙莉莲",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["candidates"] == [
+        {
+            "bangumi_id": "42",
+            "title": "芙莉莲",
+            "mikan_url": "https://mikan.example/Home/Bangumi/42",
+            "poster_url": None,
+            "source_query": "芙莉莲",
+            "aliases": [],
+            "recommendation": "可能匹配",
+        }
+    ]
+    body = response.get_data(as_text=True)
+    assert "secret-candidate-token" not in body
+    assert "<script" not in body
+    assert "<html" not in body
+    assert "<rss" not in body
+
+
+def test_candidate_search_api_includes_display_only_recommendation_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeCandidateSearchClient(
+        candidates=[
+            MikanCandidate(
+                bangumi_id="3072",
+                title="咒术回战 第三季",
+                mikan_url="https://mikan.example/Home/Bangumi/3072",
+                source_query="咒术回战 第三季",
+            ),
+            MikanCandidate(
+                bangumi_id="3071",
+                title="咒术回战 第二季",
+                mikan_url="https://mikan.example/Home/Bangumi/3071",
+                source_query="咒术回战 第三季",
+            ),
+        ]
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return client
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    response = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "咒术回战 第三季",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["candidates"] == [
+        {
+            "bangumi_id": "3072",
+            "title": "咒术回战 第三季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/3072",
+            "poster_url": None,
+            "source_query": "咒术回战 第三季",
+            "aliases": [],
+            "recommendation": "推荐：第 3 季",
+        },
+        {
+            "bangumi_id": "3071",
+            "title": "咒术回战 第二季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/3071",
+            "poster_url": None,
+            "source_query": "咒术回战 第三季",
+            "aliases": [],
+            "recommendation": "季数不符",
+        },
+    ]
+
+
+def test_candidate_search_api_serves_second_call_from_cache_without_transport(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/2353">葬送的芙莉莲</a>'
+                "</div>"
+                "</section>"
+            )
+        }
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return create_mikan_client(config, transport=transport)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    payload = {
+        "query": "芙莉莲",
+        "mikan_config": {
+            "search_endpoint": "https://mikan.example/Home/Search",
+            "timeout_seconds": 5,
+        },
+    }
+    first = _client().post("/api/v1/mikan/candidates", json=payload)
+    second = _client().post("/api/v1/mikan/candidates", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.get_json() == second.get_json()
+    assert transport.requests == [
+        ("https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2", 5.0)
+    ]
+
+
+def test_candidate_search_api_cache_isolates_different_queries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/2353">葬送的芙莉莲</a>'
+                "</div>"
+                "</section>"
+            ),
+            "https://mikan.example/Home/Search?searchstr=%E5%92%92%E6%9C%AF%E5%9B%9E%E6%88%98": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/3072">咒术回战 第三季</a>'
+                "</div>"
+                "</section>"
+            ),
+        }
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return create_mikan_client(config, transport=transport)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    common_config = {
+        "search_endpoint": "https://mikan.example/Home/Search",
+        "timeout_seconds": 5,
+    }
+    first = _client().post(
+        "/api/v1/mikan/candidates",
+        json={"query": "芙莉莲", "mikan_config": common_config},
+    )
+    second = _client().post(
+        "/api/v1/mikan/candidates",
+        json={"query": "咒术回战", "mikan_config": common_config},
+    )
+
+    assert first.get_json()["result"]["candidates"][0]["bangumi_id"] == "2353"
+    assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "3072"
+    assert len(transport.requests) == 2
+
+
+def test_candidate_search_api_cache_isolates_different_hosts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Search?searchstr=ghost": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/100">A 番剧</a>'
+                "</div>"
+                "</section>"
+            ),
+            "https://other.example/Home/Search?searchstr=ghost": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/200">B 番剧</a>'
+                "</div>"
+                "</section>"
+            ),
+        }
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return create_mikan_client(config, transport=transport)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    first = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "ghost",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+    second = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "ghost",
+            "mikan_config": {
+                "search_endpoint": "https://other.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    assert first.get_json()["result"]["candidates"][0]["bangumi_id"] == "100"
+    assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "200"
+    assert len(transport.requests) == 2
+
+
+def test_candidate_search_api_cache_expires_after_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mikan_engine.controllers.mikan_candidate_cache import CandidateSearchCache
+
+    now_holder = {"value": 1000.0}
+
+    def _now() -> float:
+        return now_holder["value"]
+
+    cache = CandidateSearchCache(ttl_seconds=300, now=_now)
+    monkeypatch.setattr("apps.migu_orca_web.views.candidate_search_cache", cache)
+
+    transport = _FakeMikanTransport(
+        {
+            "https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/2353">葬送的芙莉莲</a>'
+                "</div>"
+                "</section>"
+            )
+        }
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return create_mikan_client(config, transport=transport)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    payload = {
+        "query": "芙莉莲",
+        "mikan_config": {
+            "search_endpoint": "https://mikan.example/Home/Search",
+            "timeout_seconds": 5,
+        },
+    }
+    first = _client().post("/api/v1/mikan/candidates", json=payload)
+    assert first.status_code == 200
+    assert len(transport.requests) == 1
+
+    now_holder["value"] += 301.0
+    second = _client().post("/api/v1/mikan/candidates", json=payload)
+    assert second.status_code == 200
+    assert (
+        second.get_json()["result"]["candidates"]
+        == first.get_json()["result"]["candidates"]
+    )
+    assert len(transport.requests) == 2
+
+
+def test_default_request_create_does_not_call_candidate_search_api_or_real_mikan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    called = False
+
+    def fail_if_called(*args: Any, **kwargs: Any) -> Any:
+        nonlocal called
+        called = True
+        raise AssertionError(
+            "default fixture generation must not create a real MiKan client"
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fail_if_called,
+    )
+
+    response = _client().post(
+        "/api/v1/requests",
+        json={"title": "芙莉莲", "save_request": False},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["input"]["raw_title"] == "芙莉莲"
     assert called is False
 
 

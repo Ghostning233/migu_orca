@@ -36,6 +36,17 @@
   const settingsAbResult = document.getElementById("settings-ab-result");
   const settingsAbSubmitButton = document.getElementById("settings-ab-submit");
   const settingsAbReturnLink = document.getElementById("settings-ab-return-link");
+  const candidateSearchForm = document.getElementById("mikan-candidate-search-form");
+  const candidateQueryInput = document.getElementById("mikan-candidate-query");
+  const candidateEndpointInput = document.getElementById("mikan-candidate-search-endpoint");
+  const candidateTimeoutInput = document.getElementById("mikan-candidate-timeout-seconds");
+  const candidateSearchError = document.getElementById("mikan-candidate-search-error");
+  const candidateSearchResult = document.getElementById("mikan-candidate-search-result");
+  const candidateSearchSubmit = document.getElementById("mikan-candidate-search-submit");
+  const candidateFallbackForm = document.getElementById("mikan-fallback-form");
+  const candidateFallbackInput = document.getElementById("mikan-fallback-bangumi");
+  const candidateFallbackError = document.getElementById("mikan-fallback-error");
+  const candidateFallbackGenerate = document.getElementById("mikan-fallback-generate");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -46,6 +57,7 @@
   let currentDetailPayload = null;
   let storageDirPreference = "";
   let saveRequestPreference = true;
+  let lastCandidateSearchConfig = null;
 
   function readPreference(key) {
     try {
@@ -695,6 +707,449 @@
 
   if (!form) {
     return;
+  }
+
+  function setCandidateSearchError(message, field) {
+    if (!candidateSearchError) {
+      return;
+    }
+    candidateSearchError.textContent = message;
+    candidateSearchError.hidden = false;
+    for (const input of [
+      candidateQueryInput,
+      candidateEndpointInput,
+      candidateTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearCandidateSearchError() {
+    if (!candidateSearchError) {
+      return;
+    }
+    candidateSearchError.textContent = "";
+    candidateSearchError.hidden = true;
+    for (const input of [
+      candidateQueryInput,
+      candidateEndpointInput,
+      candidateTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setCandidateSearchResult(message, className) {
+    if (!candidateSearchResult) {
+      return;
+    }
+    candidateSearchResult.className = className || "empty-state compact-state";
+    candidateSearchResult.replaceChildren();
+    candidateSearchResult.textContent = message;
+  }
+
+  function candidateAreaControls() {
+    const controls = [];
+    for (const form of [candidateSearchForm, candidateFallbackForm]) {
+      if (!form) {
+        continue;
+      }
+      for (const control of form.querySelectorAll("button, input")) {
+        controls.push(control);
+      }
+    }
+    return controls;
+  }
+
+  function setCandidateSearchInFlight(isInFlight) {
+    for (const control of candidateAreaControls()) {
+      control.disabled = isInFlight;
+    }
+    if (candidateSearchSubmit) {
+      candidateSearchSubmit.textContent = isInFlight ? "正在搜索..." : "搜索候选";
+    }
+  }
+
+  function setCandidateFallbackInFlight(isInFlight) {
+    for (const control of candidateAreaControls()) {
+      control.disabled = isInFlight;
+    }
+    if (candidateFallbackGenerate) {
+      candidateFallbackGenerate.textContent = isInFlight
+        ? "正在生成..."
+        : "使用直连合集生成";
+    }
+  }
+
+  function setCandidateFallbackError(message, field) {
+    if (!candidateFallbackError) {
+      return;
+    }
+    candidateFallbackError.textContent = message;
+    candidateFallbackError.hidden = false;
+    for (const input of [
+      candidateFallbackInput,
+      candidateEndpointInput,
+      candidateTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearCandidateFallbackError() {
+    if (!candidateFallbackError) {
+      return;
+    }
+    candidateFallbackError.textContent = "";
+    candidateFallbackError.hidden = true;
+    for (const input of [
+      candidateFallbackInput,
+      candidateEndpointInput,
+      candidateTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function buildCandidateSearchPayload() {
+    const query = candidateQueryInput ? candidateQueryInput.value.trim() : "";
+    const endpoint = candidateEndpointInput
+      ? candidateEndpointInput.value.trim()
+      : "";
+    const timeoutText = candidateTimeoutInput ? candidateTimeoutInput.value.trim() : "";
+    const timeoutSeconds = Number(timeoutText);
+    if (!query) {
+      const error = new Error("搜索 MiKan 候选前必须填写 query。");
+      error.field = candidateQueryInput;
+      throw error;
+    }
+    if (!endpoint) {
+      const error = new Error("搜索 MiKan 候选前必须填写 search_endpoint。");
+      error.field = candidateEndpointInput;
+      throw error;
+    }
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+      const error = new Error("搜索 MiKan 候选前 timeout_seconds 必须为正数。");
+      error.field = candidateTimeoutInput;
+      throw error;
+    }
+    return {
+      query: query,
+      mikan_config: {
+        search_endpoint: endpoint,
+        timeout_seconds: timeoutSeconds,
+      },
+    };
+  }
+
+  function clearCandidateSensitiveFields() {
+    if (candidateEndpointInput) {
+      candidateEndpointInput.value = "";
+    }
+  }
+
+  function renderCandidateCards(candidates, query) {
+    const cards = Array.isArray(candidates) ? candidates : [];
+    if (!cards.length) {
+      setCandidateSearchResult(
+        "未找到候选合集。可调整 query 或 MiKan config 后重试。",
+        "empty-state compact-state",
+      );
+      return;
+    }
+
+    candidateSearchResult.className = "candidate-list-wrapper";
+    candidateSearchResult.replaceChildren();
+
+    const list = document.createElement("ul");
+    list.className = "candidate-list";
+    for (const candidate of cards) {
+      const item = document.createElement("li");
+      item.className = "candidate-card";
+
+      const title = document.createElement("strong");
+      title.textContent = safeText(candidate.title) || "未命名合集";
+      item.appendChild(title);
+
+      // Display-only recommendation label (e.g. 推荐：第 2 季 / 季数不符 /
+      // 可能匹配). It only annotates the card; it never selects the candidate
+      // or triggers Request generation.
+      if (candidate.recommendation) {
+        const badge = document.createElement("span");
+        badge.className = "candidate-recommendation";
+        badge.textContent = safeText(candidate.recommendation);
+        item.appendChild(badge);
+      }
+
+      const meta = document.createElement("div");
+      meta.className = "candidate-meta";
+      meta.textContent = "MiKan ID: " + safeText(candidate.bangumi_id);
+      item.appendChild(meta);
+
+      if (candidate.poster_url) {
+        const poster = document.createElement("img");
+        poster.className = "candidate-poster";
+        poster.alt = "";
+        poster.src = candidate.poster_url;
+        item.appendChild(poster);
+      }
+
+      const source = document.createElement("div");
+      source.className = "candidate-source";
+      source.textContent =
+        "来源 query: " + safeText(candidate.source_query || query);
+      item.appendChild(source);
+
+      const chooseButton = document.createElement("button");
+      chooseButton.type = "button";
+      chooseButton.className = "primary-button candidate-select";
+      chooseButton.textContent = "选择此合集";
+      chooseButton.addEventListener("click", () => {
+        generateRequestFromCandidate(candidate);
+      });
+      item.appendChild(chooseButton);
+
+      list.appendChild(item);
+    }
+    candidateSearchResult.appendChild(list);
+  }
+
+  async function searchMikanCandidates(event) {
+    event.preventDefault();
+    clearCandidateSearchError();
+    let payload;
+    try {
+      payload = buildCandidateSearchPayload();
+    } catch (validationError) {
+      setCandidateSearchError(
+        validationError.message || "候选搜索表单校验失败。",
+        validationError.field,
+      );
+      setCandidateSearchResult(
+        "请修正候选搜索表单后再搜索。",
+        "error-state compact-state",
+      );
+      return;
+    }
+
+    setCandidateSearchInFlight(true);
+    setCandidateSearchResult(
+      "正在搜索 MiKan 候选...",
+      "loading-state compact-state",
+    );
+    try {
+      const result = await fetchJson("/api/v1/mikan/candidates", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      const candidates = (result && result.candidates) || [];
+      renderCandidateCards(candidates, result.query || payload.query);
+      // Keep the request-scoped MiKan config in memory so selecting a
+      // candidate can reuse the same explicit config for Request generation.
+      // Read the inputs before clearCandidateSensitiveFields() wipes them.
+      lastCandidateSearchConfig = {
+        search_endpoint: candidateEndpointInput
+          ? candidateEndpointInput.value.trim()
+          : "",
+        timeout_seconds: Number(
+          candidateTimeoutInput ? candidateTimeoutInput.value.trim() : 0
+        ),
+      };
+      clearCandidateSensitiveFields();
+      showNotification(
+        "success",
+        "候选搜索完成",
+        "找到 " + candidates.length + " 个候选合集。",
+      );
+    } catch (error) {
+      setCandidateSearchResult(
+        "候选搜索失败。请检查 query 与 MiKan config 后重试。",
+        "error-state compact-state",
+      );
+      notifyApiError("候选搜索失败", error);
+    } finally {
+      setCandidateSearchInFlight(false);
+    }
+  }
+
+  if (candidateSearchForm) {
+    candidateSearchForm.addEventListener("submit", searchMikanCandidates);
+  }
+
+  if (candidateFallbackForm) {
+    candidateFallbackForm.addEventListener("submit", generateRequestFromFallback);
+  }
+
+  function setCandidateSelectionInFlight(isInFlight) {
+    const buttons = document.querySelectorAll(".candidate-select");
+    for (const button of buttons) {
+      button.disabled = isInFlight;
+    }
+  }
+
+  async function generateRequestFromCandidate(candidate) {
+    if (!candidate || !candidate.mikan_url) {
+      showNotification(
+        "error",
+        "生成失败",
+        "候选合集缺少 MiKan URL，无法生成 Request。",
+      );
+      return;
+    }
+    if (!lastCandidateSearchConfig) {
+      showNotification(
+        "error",
+        "生成失败",
+        "缺少 MiKan config，请先重新搜索候选。",
+      );
+      return;
+    }
+    hideNotification();
+    setCandidateSelectionInFlight(true);
+    setState(detailContainer, "正在从候选生成 Request...", "loading-state");
+    try {
+      const result = await fetchJson("/api/v1/requests", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          title: candidate.title || "未命名合集",
+          source: "mikan",
+          mikan_config: {
+            search_endpoint: lastCandidateSearchConfig.search_endpoint,
+            timeout_seconds: lastCandidateSearchConfig.timeout_seconds,
+          },
+          mikan_bangumi: candidate.mikan_url,
+          storage_dir: currentStorageDir() || null,
+          save_request: currentSaveRequest(),
+        }),
+      });
+      await finalizeGeneratedRequest(result);
+    } catch (error) {
+      setState(
+        detailContainer,
+        "从候选生成 Request 失败。请重试。",
+        "error-state",
+      );
+      notifyApiError("生成失败", error);
+    } finally {
+      setCandidateSelectionInFlight(false);
+    }
+  }
+
+  async function generateRequestFromFallback(event) {
+    event.preventDefault();
+    clearCandidateFallbackError();
+    const fallbackValue = candidateFallbackInput
+      ? candidateFallbackInput.value.trim()
+      : "";
+    if (!fallbackValue) {
+      setCandidateFallbackError(
+        "生成前必须填写 MiKan 合集 URL 或 ID。",
+        candidateFallbackInput,
+      );
+      return;
+    }
+    // Local sanity check only: the server enforces origin/path/ID rules and
+    // returns the unified sanitized error for wrong-origin or wrong-path URLs.
+    const isBareId = /^[0-9]+$/.test(fallbackValue);
+    const isHttpUrl = /^https?:\/\//i.test(fallbackValue);
+    if (!isBareId && !isHttpUrl) {
+      setCandidateFallbackError(
+        "必须是数字 ID 或 HTTP(S) URL。",
+        candidateFallbackInput,
+      );
+      return;
+    }
+
+    // Reuse the request-scoped MiKan config: prefer the current search form
+    // inputs, falling back to the in-memory config kept after a successful
+    // candidate search (whose sensitive search_endpoint was already cleared).
+    let mikanConfig;
+    const endpoint = candidateEndpointInput
+      ? candidateEndpointInput.value.trim()
+      : "";
+    if (endpoint) {
+      const timeoutText = candidateTimeoutInput
+        ? candidateTimeoutInput.value.trim()
+        : "";
+      const timeoutSeconds = Number(timeoutText);
+      if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+        setCandidateFallbackError(
+          "生成前 timeout_seconds 必须为正数。",
+          candidateTimeoutInput,
+        );
+        return;
+      }
+      mikanConfig = {
+        search_endpoint: endpoint,
+        timeout_seconds: timeoutSeconds,
+      };
+    } else if (lastCandidateSearchConfig) {
+      mikanConfig = {
+        search_endpoint: lastCandidateSearchConfig.search_endpoint,
+        timeout_seconds: lastCandidateSearchConfig.timeout_seconds,
+      };
+    } else {
+      setCandidateFallbackError(
+        "缺少 MiKan config，请先填写 search_endpoint 或搜索候选。",
+        candidateEndpointInput,
+      );
+      return;
+    }
+
+    const query = candidateQueryInput ? candidateQueryInput.value.trim() : "";
+    hideNotification();
+    setCandidateFallbackInFlight(true);
+    setState(
+      detailContainer,
+      "正在从直连 MiKan 合集生成 Request...",
+      "loading-state",
+    );
+    try {
+      const result = await fetchJson("/api/v1/requests", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          title: query || "MiKan 直连合集",
+          source: "mikan",
+          mikan_config: mikanConfig,
+          mikan_bangumi: fallbackValue,
+          storage_dir: currentStorageDir() || null,
+          save_request: currentSaveRequest(),
+        }),
+      });
+      await finalizeGeneratedRequest(result);
+      clearCandidateSensitiveFields();
+      if (candidateFallbackInput) {
+        candidateFallbackInput.value = "";
+      }
+    } catch (error) {
+      setState(
+        detailContainer,
+        "从直连 MiKan 合集生成 Request 失败。请重试。",
+        "error-state",
+      );
+      notifyApiError("生成失败", error);
+    } finally {
+      setCandidateFallbackInFlight(false);
+    }
   }
 
   function buildCreateRequestPayload(title, options) {
@@ -1639,6 +2094,44 @@
     }
   }
 
+  async function finalizeGeneratedRequest(result) {
+    var generatedRequestId = result.request && result.request.request_id;
+    selectedRequestId = result.saved_request ? generatedRequestId : null;
+    renderDetailPayload(result, {preview: !result.saved_request});
+    await loadList({loadSelectedDetail: false});
+    if (result.saved_request) {
+      selectedRequestId = generatedRequestId;
+      syncRequestIdToUrl(selectedRequestId);
+      showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+        actions: [
+          {
+            label: "刷新列表",
+            handler: loadList,
+          },
+          {
+            label: "查看详情",
+            handler: () => loadDetail(selectedRequestId),
+          },
+        ],
+      });
+    } else {
+      syncRequestIdToUrl(null, {replace: true});
+      showNotification("success", "预览已生成", "这是未保存预览；保存后才可操作。", {
+        actions: [
+          {
+            label: "保存此 Request",
+            className: "primary-button",
+            handler: () => {
+              if (result.request) {
+                savePreviewRequest(result.request);
+              }
+            },
+          },
+        ],
+      });
+    }
+  }
+
   async function generateRequest(event) {
     event.preventDefault();
     clearFormError();
@@ -1673,41 +2166,7 @@
           ...payload,
         }),
       });
-      var generatedRequestId = result.request && result.request.request_id;
-      selectedRequestId = result.saved_request ? generatedRequestId : null;
-      renderDetailPayload(result, {preview: !result.saved_request});
-      await loadList({loadSelectedDetail: false});
-      if (result.saved_request) {
-        selectedRequestId = generatedRequestId;
-        syncRequestIdToUrl(selectedRequestId);
-        showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
-          actions: [
-            {
-              label: "刷新列表",
-              handler: loadList,
-            },
-            {
-              label: "查看详情",
-              handler: () => loadDetail(selectedRequestId),
-            },
-          ],
-        });
-      } else {
-        syncRequestIdToUrl(null, {replace: true});
-        showNotification("success", "预览已生成", "这是未保存预览；保存后才可操作。", {
-          actions: [
-            {
-              label: "保存此 Request",
-              className: "primary-button",
-              handler: () => {
-                if (result.request) {
-                  savePreviewRequest(result.request);
-                }
-              },
-            },
-          ],
-        });
-      }
+      await finalizeGeneratedRequest(result);
     } catch (error) {
       setState(detailContainer, error.message, "error-state");
       notifyApiError("生成失败", error);

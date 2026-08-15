@@ -123,7 +123,7 @@ list_rss_sources(matched_bangumi) -> rss_sources
 真实 MiKan 能力按两个阶段拆分：
 
 1. Stage 16：已实现已选中合集详情页解析与直连 URL/ID 入口。输入为 MiKan `Home/Bangumi/<id>` URL、bangumi ID 或离线 HTML fixture；输出优先为字幕组级 `RssSource` 列表，番剧级 RSS 仅作为 `全部字幕组` fallback。
-2. Stage 17：实现搜索候选合集展示与用户手动选择。MiKan 搜索页的 `相关推荐` 候选数量有限，不能保证覆盖所有季度或第一季，因此搜索结果只作为候选发现，最终必须由用户确认。
+2. Stage 17：已实现搜索候选合集展示与用户手动选择。`MikanClient.search_candidates` 从 MiKan 搜索页 `相关推荐` 区域解析候选卡片，规范化为绝对 HTTP(S) `/Home/Bangumi/<numeric-id>` URL，按页面顺序返回并按 `bangumi_id` 去重；页面没有候选时返回空列表。MiKan 搜索页的 `相关推荐` 候选数量有限，不能保证覆盖所有季度或第一季，因此搜索结果只作为候选发现，最终必须由用户显式确认。候选搜索 API 使用进程内候选缓存（TTL + 有界条目，key 只含 search_endpoint 的 sha256 摘要与规范化 query），并提供 display-only 推荐标签（`推荐：第 N 季` / `季数不符` / `可能匹配`），标签永不自动选择或生成。
 
 Stage 16 的详情页 parser 输出安全结构化模型：`bangumi_id`、`title`、`mikan_url`、可选 `broadcast_start`、可选 `poster_url`、番剧级 RSS、字幕组条目和单集标题/详情页摘要。公共的 Request 生成兼容面仍是 `list_rss_sources(matched_bangumi)` 返回的 `RssSource` 列表；不要把原始 HTML、原始 RSS XML 或 magnet 值加入 Request snapshot。
 
@@ -138,6 +138,7 @@ AI 番剧名解析不属于 M03 的必需能力。后续可作为独立可选增
 3. 原始 HTML、原始 RSS XML、完整失败 URL、cookie、token、原始响应体和敏感路径不得写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或 trace。
 4. 公共 RSS URL 仅在作为 Request 源元数据时可保存。
 5. 真实 MiKan HTTP 读取失败 details 只允许保留 `category`、`field`、`status_code` 等可处理字段，并由调用方传入稳定 `failed_step`（搜索、详情、RSS 解析等）。
+6. 候选搜索缓存（`MikanCandidateCache`）只能存储公开候选元数据（query、title、bangumi_id、规范化 mikan_url、poster_url、aliases、timestamp），key 不得包含 token、cookie 或完整敏感 endpoint；缓存命中不得写回 storage JSON、history、浏览器 storage、URL、日志、截图或 trace。
 
 ## 12. 已确认事项与待确认问题
 

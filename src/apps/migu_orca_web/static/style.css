@@ -162,6 +162,81 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.candidate-search-panel {
+  grid-column: 1 / -1;
+}
+
+.candidate-search-disclosure {
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.candidate-search-disclosure summary {
+  color: #22577a;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.candidate-search-disclosure[open] summary {
+  margin-bottom: 12px;
+}
+
+.candidate-search-body {
+  margin-top: 12px;
+}
+
+.candidate-list {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.candidate-card {
+  background: #ffffff;
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
+.candidate-card strong {
+  overflow-wrap: anywhere;
+}
+
+.candidate-recommendation {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 12px;
+  color: #3730a3;
+  font-size: 0.82rem;
+  font-weight: 700;
+  justify-self: start;
+  padding: 2px 10px;
+}
+
+.candidate-meta {
+  color: #586273;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.candidate-poster {
+  border-radius: 4px;
+  max-height: 160px;
+  object-fit: cover;
+  width: 120px;
+}
+
+.candidate-source {
+  color: #586273;
+  font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
 .acceptance-panel {
   grid-column: 1 / -1;
 }

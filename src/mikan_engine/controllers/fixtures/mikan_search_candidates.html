@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>MiKan sanitized search fixture for candidate cards</title>
+  </head>
+  <body>
+    <main id="sk-container">
+      <section class="js-search-results">
+        <h2>搜索结果</h2>
+        <p class="search-empty">未找到精确匹配，展示相关推荐。</p>
+      </section>
+
+      <section class="related-recommendations">
+        <h2>相关推荐</h2>
+
+        <div class="bangumi-item" data-bangumi-id="2353">
+          <a class="an-image" href="/Home/Bangumi/2353">
+            <img class="bangumi-poster" src="/assets/cover/SANITIZED-2353.jpg" alt="无职转生 封面">
+          </a>
+          <a class="an-text" href="/Home/Bangumi/2353" title="Mushoku Tensei: Jobless Reincarnation">
+            无职转生～到了异世界就拿出真本事～
+          </a>
+        </div>
+
+        <div class="bangumi-item" data-bangumi-id="3072">
+          <a class="an-image" href="/Home/Bangumi/3072">
+            <img class="bangumi-poster" src="/assets/cover/SANITIZED-3072.jpg" alt="葬送的芙莉莲 封面">
+          </a>
+          <a class="an-text" href="/Home/Bangumi/3072">葬送的芙莉莲</a>
+        </div>
+
+        <div class="bangumi-item" data-bangumi-id="3072">
+          <a class="an-text" href="/Home/Bangumi/3072">葬送的芙莉莲（重复卡片）</a>
+        </div>
+
+        <div class="bangumi-item" data-bangumi-id="9999">
+          <a class="an-text" href="https://mikanani.me/Home/Bangumi/9999?tab=info">
+            咒术回战 第三季
+          </a>
+        </div>
+
+        <div class="bangumi-item">
+          <a class="an-text" href="/Home/News/123">非番剧链接</a>
+        </div>
+
+        <div class="bangumi-item">
+          <a class="an-text" href="ftp://mikanani.me/Home/Bangumi/8888">非 HTTP 链接</a>
+        </div>
+
+        <div class="bangumi-item">
+          <a class="an-text" href="/Home/Bangumi/../2354">路径穿越链接</a>
+        </div>
+
+        <div class="bangumi-item">
+          <a class="an-text" href="/Home/Bangumi/abc">非数字 ID</a>
+        </div>
+
+        <div class="bangumi-item">
+          <a class="an-text" href="/Home/Bangumi/">空 ID 链接</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

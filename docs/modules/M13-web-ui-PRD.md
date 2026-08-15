@@ -2,7 +2,7 @@
 
 ## 1. 模块目标
 
-M13 负责 Web UI 或管理界面能力，用于展示 Request、执行确认操作、管理配置和查看历史记录。Stage 7 已实现 Flask Web UI MVP，Stage 8 补强可用性，Stage 9 增加浏览器自动化测试，Stage 10 增加确认、取消和受限修改操作入口，Stage 11 增加显式真实 MiKan / Auto Bangumi 配置入口，Stage 12 增加 qBittorrent 显式连接测试入口，Stage 13 将配置相关能力迁移到独立 Settings 页面并收敛 Request 工作台，Stage 14 修复默认生成后的 Request 可操作性、未保存预览契约、Seeds 三列表和 qBittorrent Settings 直显，Stage 15 增加 `ACCEPTED` Request 的修改与删除动作，并将筛选规则默认语义改为大小写不敏感的字面匹配，同时提供 `使用正则` 与 `大小写敏感` 选项。Stage 16 在 CLI/API 层完成真实 MiKan direct URL/ID 入口，但没有新增 Web UI 控件；Stage 17 再接入搜索候选展示、手动选择和直连 fallback。
+M13 负责 Web UI 或管理界面能力，用于展示 Request、执行确认操作、管理配置和查看历史记录。Stage 7 已实现 Flask Web UI MVP，Stage 8 补强可用性，Stage 9 增加浏览器自动化测试，Stage 10 增加确认、取消和受限修改操作入口，Stage 11 增加显式真实 MiKan / Auto Bangumi 配置入口，Stage 12 增加 qBittorrent 显式连接测试入口，Stage 13 将配置相关能力迁移到独立 Settings 页面并收敛 Request 工作台，Stage 14 修复默认生成后的 Request 可操作性、未保存预览契约、Seeds 三列表和 qBittorrent Settings 直显，Stage 15 增加 `ACCEPTED` Request 的修改与删除动作，并将筛选规则默认语义改为大小写不敏感的字面匹配，同时提供 `使用正则` 与 `大小写敏感` 选项。Stage 16 在 CLI/API 层完成真实 MiKan direct URL/ID 入口，但没有新增 Web UI 控件。Stage 17 已在 `/index` Request 生成流程中接入真实 MiKan 候选搜索、候选卡片手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签。
 
 ## 2. 模块边界
 
@@ -40,9 +40,10 @@ M13 负责 Web UI 或管理界面能力，用于展示 Request、执行确认操
 | Stage 13 | Web UI Settings 信息架构 | 已接入 | `/index` 是 Request 工作台；`/settings` 管理 Storage 偏好、qBittorrent 连接测试和 request-scoped Auto Bangumi 提交 |
 | Stage 14 | Request 可操作性与筛选可视化 | 已接入 | `/index` 默认生成并保存可操作 Request；显式预览只读；Seeds 展示完整、有效、排除列表；qBittorrent Settings 表单直接显示 |
 | Stage 15 | ACCEPTED 管理与筛选语义优化 | 已接入 | 已保存 `ACCEPTED` Request 展示修改/删除/AB 提交动作；筛选默认字面匹配且大小写不敏感，提供 `使用正则` / `大小写敏感` 控件；Filter 展示匹配模式与大小写状态 |
-| Stage 16 | 真实 MiKan direct URL/ID 入口 | API-only | CLI/API 支持 `mikan_bangumi` request-scoped direct entry；Web UI 暂不展示直连输入控件，Stage 17 与候选选择一起接入 |
+| Stage 16 | 真实 MiKan direct URL/ID 入口 | API-only | CLI/API 支持 `mikan_bangumi` request-scoped direct entry；Web UI 暂不展示直连输入控件 |
+| Stage 17 | 真实 MiKan 候选搜索、手动选择与直连 fallback | 已接入 | `/index` 默认折叠的候选搜索区支持候选卡片、`选择此合集` 手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签；全部复用 `mikan_bangumi` 生成链路，不自动选择、不自动生成 |
 
-以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 是 request-scoped API 字段，不应写入浏览器 storage、URL 或持久配置。
+以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。
 
 Stage 15 UI 质量要求：
 
@@ -60,8 +61,8 @@ Stage 15 UI 质量要求：
 
 Web UI 后续可以支持：
 
-1. Stage 17 真实 MiKan 搜索候选合集展示与手动选择；即使只有一个候选，也应走确认流程，避免自动错选。
-2. Stage 17 在候选选择 UI 中接入 MiKan direct URL/ID fallback，并复用 Stage 16 `mikan_bangumi` API 字段。
+1. Stage 17 真实 MiKan 搜索候选合集展示与手动选择；即使只有一个候选，也已走确认流程，避免自动错选（已完成）。
+2. Stage 17 在候选选择 UI 中接入 MiKan direct URL/ID fallback，并复用 Stage 16 `mikan_bangumi` API 字段（已完成）。
 3. 字幕组和 RSS 源候选的更细粒度人工选择。
 4. 降级 JSON 下载或复制入口。
 5. 更多用户偏好和规则配置管理。

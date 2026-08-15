@@ -19,6 +19,15 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     _build_history_event,
     _confirmation_history_details,
 )
+from mikan_engine.controllers import mikan_client as mikan_client_module
+from mikan_engine.controllers.mikan_candidate_cache import (
+    candidate_cache_key,
+    candidate_search_cache,
+)
+from mikan_engine.controllers.mikan_candidate_recommendation import (
+    candidate_recommendation_label,
+)
+from mikan_engine.controllers.mikan_client import MikanCandidate
 from mikan_engine.controllers.mikan_config import MikanConfig
 from qbittorrent_engine.controllers.qbittorrent_controller import (
     test_qbittorrent_connection,
@@ -66,6 +75,19 @@ class RequestMikanConfigPayload(BaseModel):
         if not endpoint:
             raise ValueError("search_endpoint cannot be empty")
         return endpoint
+
+
+class MikanCandidateSearchPayload(BaseModel):
+    query: str
+    mikan_config: RequestMikanConfigPayload
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: str) -> str:
+        query = value.strip()
+        if not query:
+            raise ValueError("query cannot be empty")
+        return query
 
 
 class RequestCreatePayload(BaseModel):
@@ -225,6 +247,49 @@ def _optional_error(error: Stage1Error) -> dict[str, object]:
         "failed_step": error.failed_step,
         "details": error.details or {},
     }
+
+
+def _serialize_candidate(candidate: MikanCandidate, query: str) -> dict[str, object]:
+    return {
+        "bangumi_id": candidate.bangumi_id,
+        "title": candidate.title,
+        "mikan_url": candidate.mikan_url,
+        "poster_url": candidate.poster_url,
+        "source_query": candidate.source_query,
+        "aliases": list(candidate.aliases),
+        # Display-only recommendation label derived from the search query and
+        # public candidate metadata; never selects a candidate or triggers
+        # generation. Contains no raw HTML, RSS XML, cookies, or tokens.
+        "recommendation": candidate_recommendation_label(
+            query,
+            candidate.title,
+            candidate.aliases,
+        ),
+    }
+
+
+def _search_mikan_candidates(
+    query: str,
+    mikan_config: MikanConfig,
+) -> list[dict[str, object]]:
+    """Search real MiKan candidates through the existing transport seam.
+
+    Repeated searches for the same query against the same MiKan identity are
+    served from the in-process candidate cache so the transport is not called on
+    a cache hit. Returns (and caches) only sanitized public candidate metadata:
+    bangumi id, title, normalized bangumi URL, optional poster URL, the source
+    query, and aliases. Raw HTML, raw RSS XML, cookies, tokens, and full failed
+    URLs never appear in the response or the cache.
+    """
+    cache_key = candidate_cache_key(query, mikan_config)
+    cached = candidate_search_cache.get(cache_key)
+    if cached is not None:
+        return [_serialize_candidate(candidate, query) for candidate in cached]
+
+    client = mikan_client_module.create_mikan_client(mikan_config)
+    candidates = client.search_candidates(query)
+    candidate_search_cache.set(cache_key, candidates)
+    return [_serialize_candidate(candidate, query) for candidate in candidates]
 
 
 def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -414,6 +479,24 @@ class RequestCreateView(PostView):
         if "saved_request" in result:
             response["saved_request"] = result["saved_request"]
         return response
+
+
+@class_route(api_blueprint, "/api/v1/mikan/candidates", methods=["POST"])
+class MikanCandidateSearchView(PostView):
+    request_validator_model = MikanCandidateSearchPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, MikanCandidateSearchPayload)
+        payload = self.request_validator_model
+        mikan_config = MikanConfig(
+            search_endpoint=payload.mikan_config.search_endpoint,
+            timeout_seconds=payload.mikan_config.timeout_seconds,
+        )
+        candidates = _search_mikan_candidates(payload.query, mikan_config)
+        return {
+            "query": payload.query,
+            "candidates": candidates,
+        }
 
 
 @class_route(api_blueprint, "/api/v1/requests/<path:request_id>/accept", methods=["POST"])
