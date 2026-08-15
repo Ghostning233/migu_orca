@@ -171,8 +171,17 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-config-fields"' not in html
     assert 'name="mikan_search_endpoint"' not in html
     assert 'name="mikan_timeout_seconds"' not in html
-    assert "search_endpoint" not in html
-    assert "timeout_seconds" not in html
+    assert 'id="mikan-candidate-panel"' in html
+    assert 'id="mikan-candidate-search"' in html
+    assert 'id="mikan-candidate-query"' in html
+    assert 'id="mikan-candidate-search-endpoint"' in html
+    assert 'id="mikan-candidate-timeout-seconds"' in html
+    assert 'name="mikan_candidate_search_endpoint"' in html
+    assert 'name="mikan_candidate_timeout_seconds"' in html
+    assert 'id="mikan-candidate-search-submit"' in html
+    assert 'id="mikan-candidate-search-result"' in html
+    assert "search_endpoint" in html
+    assert "timeout_seconds" in html
     assert 'name="storage_dir"' not in html
     assert 'name="save_request"' not in html
     assert 'id="storage-preference-summary"' in html
@@ -350,6 +359,33 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "http://" not in script
     assert "https://" not in script
     assert "<rss" not in script.lower()
+
+
+def test_static_app_script_wires_mikan_candidate_search_control() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "/api/v1/mikan/candidates" in script
+    assert "mikan-candidate-search-form" in script
+    assert "mikan-candidate-query" in script
+    assert "mikan-candidate-search-endpoint" in script
+    assert "mikan-candidate-timeout-seconds" in script
+    assert "mikan-candidate-search-submit" in script
+    assert "mikan-candidate-search-result" in script
+    assert "mikan-candidate-search-error" in script
+    assert "mikan_config" in script
+    assert "searchMikanCandidates" in script
+    assert "clearCandidateSensitiveFields" in script
+    assert "正在搜索 MiKan 候选" in script
+    assert "候选搜索失败" in script
+    assert "未找到候选合集" in script
+    assert "MiKan ID" in script
+    assert "来源 query" in script
+    assert "搜索结果不会自动选择合集" not in script
+    assert "选择此合集" not in script
+    assert "http://" not in script
+    assert "https://" not in script
 
 
 def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:

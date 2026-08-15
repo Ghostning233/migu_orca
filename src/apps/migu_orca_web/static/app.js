@@ -36,6 +36,13 @@
   const settingsAbResult = document.getElementById("settings-ab-result");
   const settingsAbSubmitButton = document.getElementById("settings-ab-submit");
   const settingsAbReturnLink = document.getElementById("settings-ab-return-link");
+  const candidateSearchForm = document.getElementById("mikan-candidate-search-form");
+  const candidateQueryInput = document.getElementById("mikan-candidate-query");
+  const candidateEndpointInput = document.getElementById("mikan-candidate-search-endpoint");
+  const candidateTimeoutInput = document.getElementById("mikan-candidate-timeout-seconds");
+  const candidateSearchError = document.getElementById("mikan-candidate-search-error");
+  const candidateSearchResult = document.getElementById("mikan-candidate-search-result");
+  const candidateSearchSubmit = document.getElementById("mikan-candidate-search-submit");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -695,6 +702,202 @@
 
   if (!form) {
     return;
+  }
+
+  function setCandidateSearchError(message, field) {
+    if (!candidateSearchError) {
+      return;
+    }
+    candidateSearchError.textContent = message;
+    candidateSearchError.hidden = false;
+    for (const input of [
+      candidateQueryInput,
+      candidateEndpointInput,
+      candidateTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearCandidateSearchError() {
+    if (!candidateSearchError) {
+      return;
+    }
+    candidateSearchError.textContent = "";
+    candidateSearchError.hidden = true;
+    for (const input of [
+      candidateQueryInput,
+      candidateEndpointInput,
+      candidateTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setCandidateSearchResult(message, className) {
+    if (!candidateSearchResult) {
+      return;
+    }
+    candidateSearchResult.className = className || "empty-state compact-state";
+    candidateSearchResult.replaceChildren();
+    candidateSearchResult.textContent = message;
+  }
+
+  function setCandidateSearchInFlight(isInFlight) {
+    if (!candidateSearchForm) {
+      return;
+    }
+    const controls = candidateSearchForm.querySelectorAll("button, input");
+    for (const control of controls) {
+      control.disabled = isInFlight;
+    }
+    if (candidateSearchSubmit) {
+      candidateSearchSubmit.textContent = isInFlight ? "正在搜索..." : "搜索候选";
+    }
+  }
+
+  function buildCandidateSearchPayload() {
+    const query = candidateQueryInput ? candidateQueryInput.value.trim() : "";
+    const endpoint = candidateEndpointInput
+      ? candidateEndpointInput.value.trim()
+      : "";
+    const timeoutText = candidateTimeoutInput ? candidateTimeoutInput.value.trim() : "";
+    const timeoutSeconds = Number(timeoutText);
+    if (!query) {
+      const error = new Error("搜索 MiKan 候选前必须填写 query。");
+      error.field = candidateQueryInput;
+      throw error;
+    }
+    if (!endpoint) {
+      const error = new Error("搜索 MiKan 候选前必须填写 search_endpoint。");
+      error.field = candidateEndpointInput;
+      throw error;
+    }
+    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+      const error = new Error("搜索 MiKan 候选前 timeout_seconds 必须为正数。");
+      error.field = candidateTimeoutInput;
+      throw error;
+    }
+    return {
+      query: query,
+      mikan_config: {
+        search_endpoint: endpoint,
+        timeout_seconds: timeoutSeconds,
+      },
+    };
+  }
+
+  function clearCandidateSensitiveFields() {
+    if (candidateEndpointInput) {
+      candidateEndpointInput.value = "";
+    }
+  }
+
+  function renderCandidateCards(candidates, query) {
+    const cards = Array.isArray(candidates) ? candidates : [];
+    if (!cards.length) {
+      setCandidateSearchResult(
+        "未找到候选合集。可调整 query 或 MiKan config 后重试。",
+        "empty-state compact-state",
+      );
+      return;
+    }
+
+    candidateSearchResult.className = "candidate-list-wrapper";
+    candidateSearchResult.replaceChildren();
+
+    const list = document.createElement("ul");
+    list.className = "candidate-list";
+    for (const candidate of cards) {
+      const item = document.createElement("li");
+      item.className = "candidate-card";
+
+      const title = document.createElement("strong");
+      title.textContent = safeText(candidate.title) || "未命名合集";
+      item.appendChild(title);
+
+      const meta = document.createElement("div");
+      meta.className = "candidate-meta";
+      meta.textContent = "MiKan ID: " + safeText(candidate.bangumi_id);
+      item.appendChild(meta);
+
+      if (candidate.poster_url) {
+        const poster = document.createElement("img");
+        poster.className = "candidate-poster";
+        poster.alt = "";
+        poster.src = candidate.poster_url;
+        item.appendChild(poster);
+      }
+
+      const source = document.createElement("div");
+      source.className = "candidate-source";
+      source.textContent =
+        "来源 query: " + safeText(candidate.source_query || query);
+      item.appendChild(source);
+
+      list.appendChild(item);
+    }
+    candidateSearchResult.appendChild(list);
+  }
+
+  async function searchMikanCandidates(event) {
+    event.preventDefault();
+    clearCandidateSearchError();
+    let payload;
+    try {
+      payload = buildCandidateSearchPayload();
+    } catch (validationError) {
+      setCandidateSearchError(
+        validationError.message || "候选搜索表单校验失败。",
+        validationError.field,
+      );
+      setCandidateSearchResult(
+        "请修正候选搜索表单后再搜索。",
+        "error-state compact-state",
+      );
+      return;
+    }
+
+    setCandidateSearchInFlight(true);
+    setCandidateSearchResult(
+      "正在搜索 MiKan 候选...",
+      "loading-state compact-state",
+    );
+    try {
+      const result = await fetchJson("/api/v1/mikan/candidates", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      const candidates = (result && result.candidates) || [];
+      renderCandidateCards(candidates, result.query || payload.query);
+      clearCandidateSensitiveFields();
+      showNotification(
+        "success",
+        "候选搜索完成",
+        "找到 " + candidates.length + " 个候选合集。",
+      );
+    } catch (error) {
+      setCandidateSearchResult(
+        "候选搜索失败。请检查 query 与 MiKan config 后重试。",
+        "error-state compact-state",
+      );
+      notifyApiError("候选搜索失败", error);
+    } finally {
+      setCandidateSearchInFlight(false);
+    }
+  }
+
+  if (candidateSearchForm) {
+    candidateSearchForm.addEventListener("submit", searchMikanCandidates);
   }
 
   function buildCreateRequestPayload(title, options) {

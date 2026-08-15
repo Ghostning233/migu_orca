@@ -57,7 +57,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "保持 Stage 15/16 信息架构边界；真实 MiKan 配置仍是临时输入。"
     },
     {

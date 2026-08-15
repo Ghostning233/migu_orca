@@ -119,6 +119,76 @@
         </div>
       </section>
 
+      <section
+        id="mikan-candidate-panel"
+        class="panel candidate-search-panel"
+        aria-labelledby="mikan-candidate-heading"
+      >
+        <div class="panel-heading">
+          <h2 id="mikan-candidate-heading">真实 MiKan 候选搜索</h2>
+        </div>
+        <details id="mikan-candidate-search" class="candidate-search-disclosure">
+          <summary>展开候选搜索（可选；默认生成流程不使用真实 MiKan）</summary>
+          <div class="candidate-search-body">
+            <form id="mikan-candidate-search-form">
+              <p class="field-help">
+                可选：显式搜索真实 MiKan 的候选合集，以便检查可用合集。query 与 MiKan config 仅用于本次搜索，不写入浏览器存储、URL 或 Request JSON；搜索结果不会自动选择合集。
+              </p>
+
+              <label for="mikan-candidate-query">query</label>
+              <input
+                id="mikan-candidate-query"
+                name="mikan_candidate_query"
+                type="text"
+                autocomplete="off"
+                placeholder="例如：葬送的芙莉莲"
+                aria-describedby="mikan-candidate-help mikan-candidate-search-error"
+              >
+
+              <label for="mikan-candidate-search-endpoint">search_endpoint</label>
+              <input
+                id="mikan-candidate-search-endpoint"
+                name="mikan_candidate_search_endpoint"
+                type="text"
+                autocomplete="off"
+                placeholder="MiKan 搜索页地址"
+                aria-describedby="mikan-candidate-help mikan-candidate-search-error"
+              >
+
+              <label for="mikan-candidate-timeout-seconds">timeout_seconds</label>
+              <input
+                id="mikan-candidate-timeout-seconds"
+                name="mikan_candidate_timeout_seconds"
+                type="number"
+                min="0.1"
+                step="0.1"
+                value="10"
+                aria-describedby="mikan-candidate-help mikan-candidate-search-error"
+              >
+              <p id="mikan-candidate-help" class="field-help">
+                搜索成功后清空 search_endpoint；失败时保留输入以便重试。
+              </p>
+              <p id="mikan-candidate-search-error" class="field-error" role="alert" hidden></p>
+
+              <div
+                id="mikan-candidate-search-result"
+                class="empty-state compact-state"
+                aria-live="polite"
+                aria-relevant="additions text"
+              >
+                尚未搜索 MiKan 候选。
+              </div>
+
+              <div class="notification-actions">
+                <button id="mikan-candidate-search-submit" class="primary-button" type="submit">
+                  搜索候选
+                </button>
+              </div>
+            </form>
+          </div>
+        </details>
+      </section>
+
       <section id="request-detail-panel" class="panel request-detail-panel" aria-labelledby="request-detail-heading">
         <h2 id="request-detail-heading">Request 详情</h2>
         <div
