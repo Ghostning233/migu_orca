@@ -15,8 +15,8 @@
 | 4 | BL-006 | Web UI Settings 信息架构优化 | 完成 |
 | 5 | BL-007 | Web UI Request 可操作性与筛选可视化修复 | 完成 |
 | 6 | BL-008 | Web UI ACCEPTED 管理与筛选语义优化 | 完成 |
-| 7 | BL-009 | 真实 MiKan 合集详情页解析与直连入口 | 计划：Stage 16 |
-| 8 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 拆分：Stage 17 |
+| 7 | BL-009 | 真实 MiKan 合集详情页解析与直连入口 | 完成 |
+| 8 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | Stage 17 待办 |
 | 9 | BL-010 | AI 番剧名解析与搜索词增强 | 待办，低优先级 |
 
 认证、权限模块当前优先级最低，现阶段无明确需求，默认不纳入后续开发计划。除非之后出现部署暴露、多人使用或远程访问场景，否则不为其单独规划 Stage。
@@ -150,7 +150,7 @@
 
 ### BL-009: 真实 MiKan 合集详情页解析与直连入口
 
-- 状态：计划纳入 Stage 16
+- 状态：完成 (Stage 16, 2026-08-15)
 - 来源：真实 MiKan 搜索/详情页人工验证，2026-08-15
 - 优先级：7
 - 阻塞：Stage 17 搜索候选展示与选择
@@ -163,14 +163,15 @@
 
 目标：
 
-- 支持用户直接输入 MiKan `Home/Bangumi/<id>` URL 或 bangumi ID，绕过不稳定搜索。
-- 修复并增强真实 MiKan 番剧详情页解析，优先返回字幕组级 RSS 源，番剧级 RSS 仅作 fallback。
-- 增加离线 HTML fixture，覆盖当前 MiKan 详情页结构，不让测试依赖实站。
-- 继续保持安全边界：不得把原始 HTML、原始 RSS XML、完整失败 URL、cookie、token、原始响应体、敏感路径写入 storage、history、浏览器 storage、URL、日志、截图或 trace。
+- 已支持 CLI `--mikan-bangumi` 和 Web API `mikan_bangumi` 直接输入 MiKan `Home/Bangumi/<id>` URL 或 bangumi ID，绕过不稳定搜索。
+- 已修复并增强真实 MiKan 番剧详情页解析，优先返回字幕组级 RSS 源，番剧级 RSS 仅作 `全部字幕组` fallback。
+- 已增加离线 HTML fixture，覆盖当前 MiKan 详情页结构，不让测试依赖实站。
+- 已保持安全边界：原始 HTML、原始 RSS XML、完整失败 URL、cookie、token、原始响应体、敏感路径不写入 storage、history、浏览器 storage、URL、日志、截图或 trace。
+- Stage 16 未新增 Web UI direct-entry 控件；Stage 17 将把搜索候选展示、手动选择和直连 fallback 接入 UI。
 
 ### BL-001: 优化真实 MiKan 番剧搜索和 RSS 源解析
 
-- 状态：拆分；搜索候选展示计划纳入 Stage 17，详情页解析拆入 BL-009 / Stage 16
+- 状态：拆分；详情页解析已完成于 BL-009 / Stage 16，搜索候选展示计划纳入 Stage 17
 - 来源：Stage 5 验收后的真实 MiKan 试用
 - 优先级：4
 - 不阻塞：Stage 6 启动
@@ -184,15 +185,15 @@
 
 后续建议：
 
-- 增加针对 MiKan 实站当前 HTML 结构的离线 fixture，覆盖番剧页顶部 `.mikan-rss` 链接。
-- 区分番剧级 RSS 和字幕组级 RSS：若页面只有番剧级 RSS，应明确产出可用 `RssSource` 或给出更准确的错误。
+- 基于 Stage 16 详情页 parser 增加搜索候选展示：解析 MiKan 搜索页可见合集候选，展示标题、海报、MiKan ID 和来源查询。
+- 将候选选择结果或 direct URL/ID fallback 传入 Stage 16 `mikan_bangumi` direct-entry 路径，避免新增第二套详情解析。
 - 增强搜索关键词策略，例如中日文标题、数字季/第 N 季/第 N 期、罗马字别名的 fallback 查询。
 - 为真实搜索和 RSS 源解析增加手动验收脚本，输出候选和安全脱敏后的解析摘要。
 - 保持错误输出不包含原始 HTML、RSS XML、完整 URL、cookie 或 token。
 
 Stage 拆分结论：
 
-- Stage 16 先实现已选中合集详情页解析与直连 URL/ID 入口。
+- Stage 16 已实现已选中合集详情页解析与直连 URL/ID 入口。
 - Stage 17 再实现搜索候选合集展示、手动选择、候选缓存和可选推荐标记。
 - 搜索结果只能承诺“展示 MiKan 当前页面可解析到的候选合集”，不能承诺列出所有可能合集。
 

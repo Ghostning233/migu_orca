@@ -7,7 +7,7 @@
 - Architecture: Existing Python engines, Flask server-rendered Web UI, no new frontend build chain
 - Owner: Ralph autonomous development agent
 - Date: 2026-08-15
-- Status: Planned
+- Status: Completed
 
 ## 2. Background
 
@@ -163,3 +163,27 @@ AI title normalization is not Stage 17 unless explicitly reprioritized. It remai
 5. Direct MiKan URL/ID entry can generate a Request using subgroup-level RSS sources.
 6. Sensitive data and raw external content are not leaked.
 
+## 12. Completion Summary
+
+Stage 16 completed on 2026-08-15.
+
+Implemented behavior:
+
+1. Added a sanitized offline MiKan `Home/Bangumi/2353` detail fixture and fixture-driven parser tests through injected `MikanTransport`.
+2. Added safe structured MiKan detail models and `MikanClient.get_bangumi_detail(...)`.
+3. Derived `MikanClient.list_rss_sources(...)` from the structured detail parser, prioritizing subgroup-level `mikan_http` RSS and using one `全部字幕组` bangumi-level fallback only when subgroup RSS is absent.
+4. Added CLI `--mikan-bangumi` and Web API `mikan_bangumi` direct-entry support for MiKan `Home/Bangumi/<id>` URLs or bare numeric IDs.
+5. Centralized direct-entry validation in `MikanClient`; invalid inputs return stable sanitized errors.
+6. Hardened real MiKan reads with bounded response size, decode failure handling, operation-specific `failed_step`, and minimal machine-readable error details.
+
+Testing notes:
+
+1. `uv run python -m compileall -q src` passed during Stage 16 closeout.
+2. `uv run pytest -q` passed during Stage 16 closeout.
+3. Stage 16 did not add visible Web UI controls; browser tests are not required for new UI behavior. Existing browser tests may be skipped in environments without a browser binary.
+
+Handoff:
+
+1. Stage 17 should reuse the Stage 16 direct-entry path (`mikan_bangumi`) for both manual direct URL/ID fallback and selected search candidates.
+2. Stage 17 should not add a second MiKan detail parser.
+3. AI title normalization remains optional backlog work and must not replace user selection.

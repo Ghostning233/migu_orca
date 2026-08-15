@@ -110,7 +110,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "完成后 Stage 17 可以基于稳定详情页 parser 实现搜索候选选择。"
     }
   ]

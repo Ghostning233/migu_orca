@@ -118,12 +118,16 @@ list_rss_sources(matched_bangumi) -> rss_sources
 4. 输出能标识数据来自静态模拟源。
 5. 后续替换真实 MiKan 访问时，不需要改 M00 的主流程定义。
 
-## 11. Stage 16/17 真实 MiKan 规划
+## 11. Stage 16/17 真实 MiKan 状态
 
 真实 MiKan 能力按两个阶段拆分：
 
-1. Stage 16：实现已选中合集详情页解析与直连 URL/ID 入口。输入为 MiKan `Home/Bangumi/<id>` URL、bangumi ID 或离线 HTML fixture；输出优先为字幕组级 `RssSource` 列表，番剧级 RSS 仅作为 fallback。
+1. Stage 16：已实现已选中合集详情页解析与直连 URL/ID 入口。输入为 MiKan `Home/Bangumi/<id>` URL、bangumi ID 或离线 HTML fixture；输出优先为字幕组级 `RssSource` 列表，番剧级 RSS 仅作为 `全部字幕组` fallback。
 2. Stage 17：实现搜索候选合集展示与用户手动选择。MiKan 搜索页的 `相关推荐` 候选数量有限，不能保证覆盖所有季度或第一季，因此搜索结果只作为候选发现，最终必须由用户确认。
+
+Stage 16 的详情页 parser 输出安全结构化模型：`bangumi_id`、`title`、`mikan_url`、可选 `broadcast_start`、可选 `poster_url`、番剧级 RSS、字幕组条目和单集标题/详情页摘要。公共的 Request 生成兼容面仍是 `list_rss_sources(matched_bangumi)` 返回的 `RssSource` 列表；不要把原始 HTML、原始 RSS XML 或 magnet 值加入 Request snapshot。
+
+Direct entry URL/ID 校验集中在 M03 `MikanClient` 中，CLI、Web API 和未来 Web UI 都应复用同一校验与规范化逻辑。空值、非 HTTP(S)、跨源 URL、非 `/Home/Bangumi/<numeric-id>` path、路径穿越和非数字 ID 都应返回稳定脱敏错误。
 
 AI 番剧名解析不属于 M03 的必需能力。后续可作为独立可选增强模块生成多个搜索词，但不得替代用户对 MiKan 合集的最终选择。
 
@@ -133,6 +137,7 @@ AI 番剧名解析不属于 M03 的必需能力。后续可作为独立可选增
 2. 真实 MiKan 访问必须由显式配置、直连 URL/ID 或用户选择触发。
 3. 原始 HTML、原始 RSS XML、完整失败 URL、cookie、token、原始响应体和敏感路径不得写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或 trace。
 4. 公共 RSS URL 仅在作为 Request 源元数据时可保存。
+5. 真实 MiKan HTTP 读取失败 details 只允许保留 `category`、`field`、`status_code` 等可处理字段，并由调用方传入稳定 `failed_step`（搜索、详情、RSS 解析等）。
 
 ## 12. 已确认事项与待确认问题
 

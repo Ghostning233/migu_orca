@@ -4,7 +4,8 @@ Started: Fri Aug 14 20:20:45 CST 2026
 ## Codebase Patterns
 - `modify_request` in `request_engine/controllers/request_controller.py` accepts both `PENDING_CONFIRM` and `ACCEPTED` requests and preserves the original status (never resets to `PENDING_CONFIRM`); accept/cancel remain restricted to `PENDING_CONFIRM` only via `_copy_pending_request`.
 - Stage 15 has been completed and merged into `main`; current active work is Stage 16 (`agent/stage16-mikan-bangumi-detail`).
-- Stage 16 and Stage 17 are split deliberately: Stage 16 implements selected MiKan `Home/Bangumi/<id>` detail parsing plus direct URL/ID entry; Stage 17 implements MiKan search candidate cards, manual selection, and cache on top of the Stage 16 parser.
+- Stage 16 is complete; Stage 17 should implement MiKan search candidate cards, manual selection, direct URL/ID fallback in the UI, and cache on top of the Stage 16 parser.
+- Stage 16/17 split remains deliberate: Stage 16 owns selected MiKan `Home/Bangumi/<id>` detail parsing plus CLI/API direct URL/ID entry; Stage 17 must reuse `mikan_bangumi` for chosen candidates and must not introduce a second detail parser.
 - Stage 16 MiKan detail-page fixture tests live beside `mikan_client_test.py` under `src/mikan_engine/controllers/fixtures/`; keep real MiKan parser coverage offline and drive it through injected `MikanTransport` instead of live network reads.
 - `MikanClient.get_bangumi_detail(matched_bangumi)` returns the safe structured `MikanBangumiDetail` model (bangumi metadata, page-level RSS, subgroup RSS, episode title/detail URL summaries); do not add magnet attributes or raw HTML/RSS to this public model or Request snapshots.
 - `MikanClient.list_rss_sources(matched_bangumi)` is now derived from `MikanBangumiDetail`: return deduped subgroup-level `mikan_http` sources first, do not mix in the bangumi-level RSS when subgroup RSS exists, and fallback to one `全部字幕组` source only when no subgroup RSS is available.
@@ -200,4 +201,18 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: safe MiKan error details should stay machine-readable and minimal (`status_code` or `category`), never full endpoint URLs, response bodies, raw HTML, raw RSS XML, cookies, tokens, or exception messages.
   - Gotcha encountered: `parse_rss` uses the same `UrlopenMikanTransport` for `mikan_http` RSS sources, so MiKan HTTP hardening must include the RSS loader as well as `MikanClient`.
   - Useful context: there is still no `CODEX.md` under `src/mikan_engine` or `src/rss_engine`; reusable HTTP-boundary knowledge is consolidated in this progress log.
+---
+## 2026-08-15 16:52:34 CST - US-115
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Completed Stage 16 documentation and regression closeout. README now documents MiKan direct entry (`--mikan-bangumi` / API `mikan_bangumi`), detail-page parsing, subgroup-level RSS priority, `全部字幕组` bangumi-level fallback, direct-entry validation, sanitized HTTP/parser error boundaries, and the fact that Stage 16 did not add a visible Web UI direct-entry control.
+- Updated `docs/backlog.md`: BL-009 is complete, BL-001 is the Stage 17 search-candidate/display handoff, and BL-010 AI title normalization remains low-priority optional work.
+- Updated project/module PRDs: main PRD is v0.10 and points to Stage 17 next; M00 documents direct-entry orchestration and reuse by Stage 17; M03 documents the structured detail parser, `RssSource` compatibility surface, direct-entry validation, and safe error details; M13 records Stage 16 as API-only for Web UI and defers candidate/direct controls to Stage 17; Stage 16 PRD is marked completed with a closeout summary.
+- Files changed: `README.md`, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage16_mikan_bangumi_detail_PRD.md`, `docs/modules/M00-entry-orchestration-PRD.md`, `docs/modules/M03-mikan-source-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 336 tests and 156 skipped browser tests because the browser binary is not available; `uv run pytest tests/browser/ -v` collected 156 browser tests and skipped all for the same reason.
+- Browser verification note: US-115 changed docs only and Stage 16 added no visible Web UI direct-entry control; Stage 17 should add browser coverage when it introduces candidate/direct-entry UI.
+- **Learnings for future iterations:**
+  - Pattern discovered: Stage 16 closeout docs must stay synchronized across README, backlog, main PRD, Stage 16 PRD, and module PRDs M00/M03/M13.
+  - Pattern discovered: Stage 17 should pass selected candidates or direct URL/ID fallback through the existing `mikan_bangumi` request-scoped API field instead of creating another detail parser or storing direct-entry state in browser storage.
+  - Gotcha encountered: browser tests are part of the standard suite, but this environment lacks the browser binary; record explicit skip counts from both `uv run pytest -q` and `uv run pytest tests/browser/ -v`.
+  - Useful context: Stage 16 is now fully passing in `scripts/ralph/prd.json`; the next Ralph PRD should be Stage 17 candidate selection work.
 ---
