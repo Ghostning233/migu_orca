@@ -7,6 +7,7 @@ Started: Fri Aug 14 20:20:45 CST 2026
 - Stage 16 and Stage 17 are split deliberately: Stage 16 implements selected MiKan `Home/Bangumi/<id>` detail parsing plus direct URL/ID entry; Stage 17 implements MiKan search candidate cards, manual selection, and cache on top of the Stage 16 parser.
 - Stage 16 MiKan detail-page fixture tests live beside `mikan_client_test.py` under `src/mikan_engine/controllers/fixtures/`; keep real MiKan parser coverage offline and drive it through injected `MikanTransport` instead of live network reads.
 - `MikanClient.get_bangumi_detail(matched_bangumi)` returns the safe structured `MikanBangumiDetail` model (bangumi metadata, page-level RSS, subgroup RSS, episode title/detail URL summaries); do not add magnet attributes or raw HTML/RSS to this public model or Request snapshots.
+- `MikanClient.list_rss_sources(matched_bangumi)` is now derived from `MikanBangumiDetail`: return deduped subgroup-level `mikan_http` sources first, do not mix in the bangumi-level RSS when subgroup RSS exists, and fallback to one `全部字幕组` source only when no subgroup RSS is available.
 - AI title normalization/search-query enhancement is a low-priority optional backlog item, not a dependency for Stage 16/17 and never a replacement for explicit user collection selection.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
@@ -151,4 +152,20 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: parse episode summaries from `/Home/Episode/...` anchors and subgroup context/title prefixes, but expose only title plus detail URL; magnet clipboard attributes are intentionally omitted from the model.
   - Gotcha encountered: `_MikanBangumiPageParser` now tracks all anchors as well as table rows; when adding parser state, avoid early returns in `handle_endtag("a")` that would skip depth counters for surrounding title/subgroup/section contexts.
   - Useful context: there is no `CODEX.md` under `src/mikan_engine`, so reusable parser knowledge was consolidated in this progress log instead.
+---
+
+## 2026-08-15 16:32:01 CST - US-112
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Reworked `MikanClient.list_rss_sources(matched_bangumi)` to parse the selected bangumi page into the safe `MikanBangumiDetail` model first, then convert deduped subgroup RSS entries into `RssSource` values with `source_type="mikan_http"` and empty `fixture_path`.
+- Added bangumi-level RSS fallback behavior: when no subgroup RSS exists but the page-level RSS is available, the client returns one explicit `全部字幕组` source; when subgroup RSS exists, the page-level RSS is intentionally excluded from normal candidates.
+- Tightened subgroup name extraction for RSS anchors inside `.subgroup-section`, so RSS link text such as `RSS`/`订阅` no longer becomes the subtitle group name when a surrounding `.subgroup-name` is available.
+- Updated the real MiKan entry-controller integration fixture to use a Stage 16-style detail page with `.bangumi-title`, `.subgroup-name`, and subgroup-level RSS.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest src/mikan_engine/controllers/mikan_client_test.py -q` passed with 24 tests; `uv run pytest -q` passed with 325 tests and 156 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: not applicable for US-112 because it is parser/source-selection behavior and has no UI changes; browser tests were skipped by the environment due to missing browser binary.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep `list_rss_sources` as the compatibility surface for downstream Request/RSS/AB code, but derive it from `MikanBangumiDetail` so Stage 16/17 share one parser path.
+  - Pattern discovered: use subgroup-level RSS URLs containing a subgroup query parameter for normal MiKan candidates; a bangumi-level RSS URL is a fallback candidate only.
+  - Gotcha encountered: older tests that used `<a data-subtitle-group="...">RSS</a>` without a `.bangumi-title` are not valid Stage 16 detail pages once source listing depends on structured detail parsing.
+  - Useful context: there is still no `CODEX.md` under `src/mikan_engine`; the reusable source-selection rule is consolidated in the progress log.
 ---

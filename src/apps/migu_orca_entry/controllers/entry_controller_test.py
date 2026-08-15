@@ -66,10 +66,15 @@ def test_generate_request_supports_inline_mikan_config_with_fake_transport_succe
                 '<a href="/Home/Bangumi/123" title="芙莉莲">芙莉莲</a>'
             ),
             "https://mikan.example/Home/Bangumi/123": (
-                '<tr><td><a data-subtitle-group="Loli" '
-                'href="/RSS/Bangumi?bangumiId=123">RSS</a></td></tr>'
+                '<h1 class="bangumi-title">芙莉莲</h1>'
+                '<section class="subgroup-section">'
+                '<h2 class="subgroup-name">Loli</h2>'
+                '<a href="/RSS/Bangumi?bangumiId=123&subgroupid=10">RSS</a>'
+                "</section>"
             ),
-            "https://mikan.example/RSS/Bangumi?bangumiId=123": _FAKE_RSS_XML,
+            "https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10": (
+                _FAKE_RSS_XML
+            ),
         }
     )
     client = create_mikan_client(config, transport=transport)
@@ -86,11 +91,14 @@ def test_generate_request_supports_inline_mikan_config_with_fake_transport_succe
     assert transport.requests == [
         ("https://mikan.example/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2", 3.0),
         ("https://mikan.example/Home/Bangumi/123", 3.0),
-        ("https://mikan.example/RSS/Bangumi?bangumiId=123", 3.0),
+        ("https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10", 3.0),
     ]
     assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
     assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
-    assert request["confirmable_config"]["selected_rss_url"] == "https://mikan.example/RSS/Bangumi?bangumiId=123"
+    assert (
+        request["confirmable_config"]["selected_rss_url"]
+        == "https://mikan.example/RSS/Bangumi?bangumiId=123&subgroupid=10"
+    )
 
 
 def test_generate_request_redacts_sensitive_real_mikan_failure() -> None:

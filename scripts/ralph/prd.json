@@ -54,7 +54,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "MiGuOrca 当前主链路仍以 RSS 订阅为核心，magnet 解析不应抢先改变主数据契约。"
     },
     {

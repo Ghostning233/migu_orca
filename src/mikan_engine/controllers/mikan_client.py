@@ -297,14 +297,52 @@ def _parse_bangumi_rss_sources(html: str, bangumi_url: str) -> list[RssSource]:
             "mikan_list_rss_sources",
         ) from exc
 
-    sources = parser.rss_sources()
+    detail = parser.bangumi_detail()
+    sources = _rss_sources_from_bangumi_detail(detail) if detail is not None else []
     if not sources:
         raise Stage1Error(
             "mikan_parse_failed",
             "MiKan 番剧页未找到 RSS 源",
             "mikan_list_rss_sources",
-        )
+    )
     return sources
+
+
+def _rss_sources_from_bangumi_detail(
+    detail: MikanBangumiDetail | None,
+) -> list[RssSource]:
+    if detail is None:
+        return []
+
+    sources: list[RssSource] = []
+    seen_urls: set[str] = set()
+    for subgroup in detail.subgroups:
+        rss_url = subgroup.rss_url
+        if rss_url is None or rss_url in seen_urls:
+            continue
+        sources.append(
+            RssSource(
+                subtitle_group=subgroup.name,
+                rss_url=rss_url,
+                source_type="mikan_http",
+                fixture_path="",
+            )
+        )
+        seen_urls.add(rss_url)
+
+    if sources:
+        return sources
+
+    if detail.bangumi_rss_url is None:
+        return []
+    return [
+        RssSource(
+            subtitle_group="全部字幕组",
+            rss_url=detail.bangumi_rss_url,
+            source_type="mikan_http",
+            fixture_path="",
+        )
+    ]
 
 
 def _parse_bangumi_detail(html: str, bangumi_url: str) -> MikanBangumiDetail:
@@ -693,6 +731,9 @@ def _subtitle_group_from_anchor(
     anchor: _MikanPageAnchor,
     row_text: str,
 ) -> str | None:
+    if anchor.subgroup_name:
+        return anchor.subgroup_name
+
     for key in (
         "data-subtitle-group",
         "data-subtitle-group-name",
