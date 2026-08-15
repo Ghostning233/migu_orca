@@ -9,9 +9,11 @@ import mikan_engine.controllers.mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import (
     MAX_MIKAN_RESPONSE_BYTES,
     _MikanBangumiPageParser,
+    _MikanCandidatePageParser,
     UrlopenMikanTransport,
     create_mikan_client,
 )
+from mikan_engine.models import MikanCandidate
 from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.errors import Stage1Error
 from shared.models import MatchedBangumi
@@ -924,6 +926,219 @@ def test_mikan_bangumi_detail_http_failure_uses_detail_step() -> None:
         "details": {"status_code": 500},
     }
     assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_client_parses_candidate_fixture_with_posters_and_order() -> None:
+    html = _read_fixture("mikan_search_candidates.html")
+    transport = FakeTransport(html)
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikanani.me/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+
+    candidates = client.search_candidates("无职转生")
+
+    assert transport.requests == [
+        ("https://mikanani.me/Home/Search?searchstr=%E6%97%A0%E8%81%8C%E8%BD%AC%E7%94%9F", 5)
+    ]
+    assert [candidate.bangumi_id for candidate in candidates] == ["2353", "3072", "9999"]
+    assert [candidate.title for candidate in candidates] == [
+        "无职转生～到了异世界就拿出真本事～",
+        "葬送的芙莉莲",
+        "咒术回战 第三季",
+    ]
+    assert [candidate.mikan_url for candidate in candidates] == [
+        "https://mikanani.me/Home/Bangumi/2353",
+        "https://mikanani.me/Home/Bangumi/3072",
+        "https://mikanani.me/Home/Bangumi/9999",
+    ]
+    assert [candidate.poster_url for candidate in candidates] == [
+        "https://mikanani.me/assets/cover/SANITIZED-2353.jpg",
+        "https://mikanani.me/assets/cover/SANITIZED-3072.jpg",
+        None,
+    ]
+    assert all(candidate.source_query == "无职转生" for candidate in candidates)
+    assert candidates[0].aliases == ["Mushoku Tensei: Jobless Reincarnation"]
+    assert candidates[1].aliases == []
+    assert candidates[2].aliases == []
+
+
+def test_mikan_candidate_search_rejects_unsafe_hrefs() -> None:
+    transport = FakeTransport(
+        """
+        <section class="related-recommendations">
+          <h2>相关推荐</h2>
+          <div class="bangumi-item">
+            <a class="an-text" href="/Home/Bangumi/100">迷宫饭</a>
+          </div>
+          <div class="bangumi-item">
+            <a class="an-text" href="/Home/News/1">不是番剧</a>
+          </div>
+          <div class="bangumi-item">
+            <a class="an-text" href="ftp://mikan.example/Home/Bangumi/200">非 HTTP</a>
+          </div>
+          <div class="bangumi-item">
+            <a class="an-text" href="/Home/Bangumi/../300">路径穿越</a>
+          </div>
+          <div class="bangumi-item">
+            <a class="an-text" href="/Home/Bangumi/abc">非数字 ID</a>
+          </div>
+          <div class="bangumi-item">
+            <a class="an-text" href="/Home/Bangumi/">空 ID</a>
+          </div>
+        </section>
+        """
+    )
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+
+    candidates = client.search_candidates("迷宫饭")
+
+    assert len(candidates) == 1
+    assert candidates[0].bangumi_id == "100"
+    assert candidates[0].title == "迷宫饭"
+    assert candidates[0].mikan_url == "https://mikan.example/Home/Bangumi/100"
+
+
+def test_mikan_candidate_search_returns_empty_when_none_found() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            """
+            <section class="related-recommendations">
+              <h2>相关推荐</h2>
+              <p>暂无相关合集</p>
+              <a href="/Home/News/1">只有新闻链接</a>
+            </section>
+            """
+        ),
+    )
+
+    candidates = client.search_candidates("不存在的番剧")
+
+    assert candidates == []
+
+
+def test_mikan_candidate_search_rejects_empty_query_before_transport() -> None:
+    transport = FakeTransport()
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.search_candidates("  ")
+
+    assert error.value.error_type == "invalid_input"
+    assert error.value.failed_step == "mikan_search"
+    assert transport.requests == []
+
+
+def test_mikan_candidate_search_http_failure_is_sanitized() -> None:
+    http_error = HTTPError(
+        "https://mikan.example/Home/Search?searchstr=secret-token",
+        503,
+        "backend leaked secret-token",
+        {},
+        None,
+    )
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=ErrorTransport(http_error),
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.search_candidates("芙莉莲")
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_http_failed",
+        "error_message": "MiKan HTTP 请求失败",
+        "failed_step": "mikan_search",
+        "details": {"status_code": 503},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_candidate_search_handles_nested_non_card_containers() -> None:
+    transport = FakeTransport(
+        """
+        <section class="related-recommendations">
+          <h2>相关推荐</h2>
+          <div class="bangumi-item">
+            <div class="inner-card">
+              <a class="an-text" href="/Home/Bangumi/100">迷宫饭</a>
+            </div>
+          </div>
+          <div class="bangumi-item">
+            <a class="an-text" href="/Home/Bangumi/200">葬送的芙莉莲</a>
+          </div>
+        </section>
+        """
+    )
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+
+    candidates = client.search_candidates("迷宫饭")
+
+    assert [candidate.bangumi_id for candidate in candidates] == ["100", "200"]
+
+
+def test_mikan_candidate_page_parser_exposes_related_recommendation_cards() -> None:
+    html = _read_fixture("mikan_search_candidates.html")
+    parser = _MikanCandidatePageParser(
+        "https://mikanani.me/Home/Search",
+        "无职转生",
+    )
+
+    parser.feed(html)
+
+    assert "相关推荐" in html
+    assert 'class="bangumi-item"' in html
+    assert 'class="bangumi-poster"' in html
+    assert "/Home/Bangumi/2353" in html
+    assert all(isinstance(candidate, MikanCandidate) for candidate in parser.candidates())
+
+
+def test_mikan_candidate_fixture_is_sanitized() -> None:
+    html = _read_fixture("mikan_search_candidates.html")
+    forbidden_tokens = [
+        "cookie",
+        "token",
+        "authorization",
+        "session",
+        "sid=",
+        "/home/ghostning/",
+        "file://",
+        "/users/",
+        "c:\\",
+    ]
+
+    normalized_html = html.casefold()
+
+    assert "SANITIZED" in html
+    assert all(token not in normalized_html for token in forbidden_tokens)
 
 
 def _read_fixture(filename: str) -> str:

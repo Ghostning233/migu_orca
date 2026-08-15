@@ -19,7 +19,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先建立候选发现基础能力；不要在本 story 接 UI。"
     },
     {
