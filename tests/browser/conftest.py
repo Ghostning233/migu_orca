@@ -206,3 +206,17 @@ def set_storage_preferences(
         window.localStorage.setItem("miguOrca.web.saveRequest", String({save_request_json}));
         """
     )
+
+
+def open_dev_fixture_panel(page: Any) -> None:
+    """Expand the dev/offline-test fixture disclosure so its form is actionable.
+
+    The `/index` fixture generation form (`#request-generate-form`) lives inside a
+    closed-by-default `<details id="dev-fixture-disclosure">` (US-130), so any test
+    that fills `input[name="title"]` / clicks `#request-generate-submit` must expand
+    the disclosure first. This helper is idempotent and waits for the form to render.
+    """
+    disclosure = page.locator("#dev-fixture-disclosure")
+    if disclosure.count() >= 1 and disclosure.get_attribute("open") is None:
+        disclosure.locator("summary").click()
+    page.wait_for_selector("#request-generate-form", state="visible", timeout=5000)

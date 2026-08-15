@@ -38,12 +38,11 @@
   const settingsAbReturnLink = document.getElementById("settings-ab-return-link");
   const candidateSearchForm = document.getElementById("mikan-candidate-search-form");
   const candidateQueryInput = document.getElementById("mikan-candidate-query");
-  const candidateEndpointInput = document.getElementById("mikan-candidate-search-endpoint");
-  const candidateTimeoutInput = document.getElementById("mikan-candidate-timeout-seconds");
   const candidateSearchError = document.getElementById("mikan-candidate-search-error");
   const candidateSearchResult = document.getElementById("mikan-candidate-search-result");
   const candidateSearchSubmit = document.getElementById("mikan-candidate-search-submit");
   const candidateFallbackForm = document.getElementById("mikan-fallback-form");
+  const candidateFallbackEnabled = document.getElementById("mikan-fallback-enabled");
   const candidateFallbackInput = document.getElementById("mikan-fallback-bangumi");
   const candidateFallbackError = document.getElementById("mikan-fallback-error");
   const candidateFallbackGenerate = document.getElementById("mikan-fallback-generate");
@@ -57,7 +56,6 @@
   let currentDetailPayload = null;
   let storageDirPreference = "";
   let saveRequestPreference = true;
-  let lastCandidateSearchConfig = null;
 
   function readPreference(key) {
     try {
@@ -107,7 +105,7 @@
       ? "自定义 storage_dir：" + storageDirPreference
       : "默认 `.migu_orca/storage`";
     const saveText = saveRequestPreference
-      ? "默认保存 Request JSON"
+      ? "默认保存订阅方案 JSON"
       : "默认只生成预览";
     storageSummaryText.textContent =
       "当前使用" + storageText + "；" + saveText + "。可在 Settings 修改。";
@@ -168,7 +166,7 @@
     removePreference(preferenceKeys.saveRequest);
     applyPreferenceValues("", true);
     updateStoragePreferencesStatus(
-      "偏好已清除；Request 工作台将使用默认 `.migu_orca/storage` 并保存 Request JSON。",
+      "偏好已清除；订阅方案工作台将使用默认 `.migu_orca/storage` 并保存订阅方案 JSON。",
       "empty-state compact-state",
     );
   }
@@ -341,6 +339,32 @@
       return "[redacted_url]";
     }
     return text;
+  }
+
+  // User-facing Chinese label for a Request status code. Internal/API values
+  // keep their stable English codes; only what is rendered to users is mapped.
+  function statusLabel(status) {
+    const labels = {
+      PENDING_CONFIRM: "待确认",
+      ACCEPTED: "已确认",
+      CANCELLED: "已取消",
+    };
+    const value = fieldValue(status);
+    return Object.prototype.hasOwnProperty.call(labels, value)
+      ? labels[value]
+      : value;
+  }
+
+  function actionLabel(action) {
+    const labels = {
+      ACCEPT: "确认",
+      CANCEL: "取消",
+      MODIFY: "修改",
+    };
+    const value = fieldValue(action);
+    return Object.prototype.hasOwnProperty.call(labels, value)
+      ? labels[value]
+      : value;
   }
 
   function scrubConfig(value) {
@@ -610,7 +634,7 @@
       settingsAbForm.hidden = true;
       if (settingsAbContext) {
         settingsAbContext.textContent =
-          "从 ACCEPTED Request 详情进入后，可在此提交到 Auto Bangumi。";
+          "从已确认订阅方案详情进入后，可在此提交到 Auto Bangumi。";
       }
       return;
     }
@@ -620,7 +644,7 @@
     }
     if (settingsAbContext) {
       settingsAbContext.textContent =
-        "已选择 Request " + requestId + "；请确认该 Request 已 ACCEPTED 后再提交。";
+        "已选择订阅方案 " + requestId + "；请确认该订阅方案已确认后再提交。";
     }
     if (settingsAbReturnLink) {
       settingsAbReturnLink.href = "/index?request_id=" + encodeURIComponent(requestId);
@@ -645,7 +669,7 @@
       setSettingsAbError("提交 Auto Bangumi 前必须填写 token。", settingsAbTokenInput);
       return;
     }
-    if (!window.confirm("确认提交此 Request 到 Auto Bangumi？")) {
+    if (!window.confirm("确认提交此订阅方案到 Auto Bangumi？")) {
       return;
     }
 
@@ -676,7 +700,7 @@
         "Auto Bangumi 提交成功；request_id: " + safeText(requestId) + subscriptionId,
         "success-state compact-state",
       );
-      showNotification("success", "Auto Bangumi 提交成功", "Request " + requestId, {
+      showNotification("success", "Auto Bangumi 提交成功", "订阅方案 " + requestId, {
         actions: settingsAbReturnLink
           ? [
               {
@@ -690,10 +714,10 @@
       });
     } catch (error) {
       setSettingsAbResult(
-        "Auto Bangumi 提交失败。请检查配置与 Request 状态后重试。",
+        "Auto Bangumi 提交失败。请检查配置与订阅方案状态后重试。",
         "error-state compact-state",
       );
-      showNotification("error", "Auto Bangumi 提交失败", "请检查配置与 Request 状态后重试。");
+      showNotification("error", "Auto Bangumi 提交失败", "请检查配置与订阅方案状态后重试。");
     } finally {
       setSettingsAbInFlight(false);
     }
@@ -715,14 +739,8 @@
     }
     candidateSearchError.textContent = message;
     candidateSearchError.hidden = false;
-    for (const input of [
-      candidateQueryInput,
-      candidateEndpointInput,
-      candidateTimeoutInput,
-    ]) {
-      if (input) {
-        input.removeAttribute("aria-invalid");
-      }
+    if (candidateQueryInput) {
+      candidateQueryInput.removeAttribute("aria-invalid");
     }
     if (field) {
       field.setAttribute("aria-invalid", "true");
@@ -736,14 +754,8 @@
     }
     candidateSearchError.textContent = "";
     candidateSearchError.hidden = true;
-    for (const input of [
-      candidateQueryInput,
-      candidateEndpointInput,
-      candidateTimeoutInput,
-    ]) {
-      if (input) {
-        input.removeAttribute("aria-invalid");
-      }
+    if (candidateQueryInput) {
+      candidateQueryInput.removeAttribute("aria-invalid");
     }
   }
 
@@ -758,6 +770,9 @@
 
   function candidateAreaControls() {
     const controls = [];
+    if (candidateFallbackEnabled) {
+      controls.push(candidateFallbackEnabled);
+    }
     for (const form of [candidateSearchForm, candidateFallbackForm]) {
       if (!form) {
         continue;
@@ -767,6 +782,16 @@
       }
     }
     return controls;
+  }
+
+  function syncCandidateFallbackVisibility() {
+    if (!candidateFallbackForm || !candidateFallbackEnabled) {
+      return;
+    }
+    candidateFallbackForm.hidden = !candidateFallbackEnabled.checked;
+    if (!candidateFallbackEnabled.checked) {
+      clearCandidateFallbackError();
+    }
   }
 
   function setCandidateSearchInFlight(isInFlight) {
@@ -795,14 +820,8 @@
     }
     candidateFallbackError.textContent = message;
     candidateFallbackError.hidden = false;
-    for (const input of [
-      candidateFallbackInput,
-      candidateEndpointInput,
-      candidateTimeoutInput,
-    ]) {
-      if (input) {
-        input.removeAttribute("aria-invalid");
-      }
+    if (candidateFallbackInput) {
+      candidateFallbackInput.removeAttribute("aria-invalid");
     }
     if (field) {
       field.setAttribute("aria-invalid", "true");
@@ -816,59 +835,28 @@
     }
     candidateFallbackError.textContent = "";
     candidateFallbackError.hidden = true;
-    for (const input of [
-      candidateFallbackInput,
-      candidateEndpointInput,
-      candidateTimeoutInput,
-    ]) {
-      if (input) {
-        input.removeAttribute("aria-invalid");
-      }
+    if (candidateFallbackInput) {
+      candidateFallbackInput.removeAttribute("aria-invalid");
     }
   }
 
   function buildCandidateSearchPayload() {
     const query = candidateQueryInput ? candidateQueryInput.value.trim() : "";
-    const endpoint = candidateEndpointInput
-      ? candidateEndpointInput.value.trim()
-      : "";
-    const timeoutText = candidateTimeoutInput ? candidateTimeoutInput.value.trim() : "";
-    const timeoutSeconds = Number(timeoutText);
     if (!query) {
-      const error = new Error("搜索 MiKan 候选前必须填写 query。");
+      const error = new Error("搜索 MiKan 候选前必须填写番剧标题。");
       error.field = candidateQueryInput;
       throw error;
     }
-    if (!endpoint) {
-      const error = new Error("搜索 MiKan 候选前必须填写 search_endpoint。");
-      error.field = candidateEndpointInput;
-      throw error;
-    }
-    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
-      const error = new Error("搜索 MiKan 候选前 timeout_seconds 必须为正数。");
-      error.field = candidateTimeoutInput;
-      throw error;
-    }
-    return {
-      query: query,
-      mikan_config: {
-        search_endpoint: endpoint,
-        timeout_seconds: timeoutSeconds,
-      },
-    };
-  }
-
-  function clearCandidateSensitiveFields() {
-    if (candidateEndpointInput) {
-      candidateEndpointInput.value = "";
-    }
+    // The Web API falls back to the system-default MiKan config when no
+    // request-scoped config is sent, so the UI only needs the anime title.
+    return {query: query};
   }
 
   function renderCandidateCards(candidates, query) {
     const cards = Array.isArray(candidates) ? candidates : [];
     if (!cards.length) {
       setCandidateSearchResult(
-        "未找到候选合集。可调整 query 或 MiKan config 后重试。",
+        "未找到候选合集。可调整番剧标题后重试，或勾选「搜索无结果时使用直连合集」直接生成订阅草案。",
         "empty-state compact-state",
       );
       return;
@@ -912,8 +900,7 @@
 
       const source = document.createElement("div");
       source.className = "candidate-source";
-      source.textContent =
-        "来源 query: " + safeText(candidate.source_query || query);
+      source.textContent = "搜索词：" + safeText(candidate.source_query || query);
       item.appendChild(source);
 
       const chooseButton = document.createElement("button");
@@ -961,18 +948,6 @@
       });
       const candidates = (result && result.candidates) || [];
       renderCandidateCards(candidates, result.query || payload.query);
-      // Keep the request-scoped MiKan config in memory so selecting a
-      // candidate can reuse the same explicit config for Request generation.
-      // Read the inputs before clearCandidateSensitiveFields() wipes them.
-      lastCandidateSearchConfig = {
-        search_endpoint: candidateEndpointInput
-          ? candidateEndpointInput.value.trim()
-          : "",
-        timeout_seconds: Number(
-          candidateTimeoutInput ? candidateTimeoutInput.value.trim() : 0
-        ),
-      };
-      clearCandidateSensitiveFields();
       showNotification(
         "success",
         "候选搜索完成",
@@ -980,7 +955,7 @@
       );
     } catch (error) {
       setCandidateSearchResult(
-        "候选搜索失败。请检查 query 与 MiKan config 后重试。",
+        "候选搜索失败。请稍后重试。",
         "error-state compact-state",
       );
       notifyApiError("候选搜索失败", error);
@@ -997,6 +972,13 @@
     candidateFallbackForm.addEventListener("submit", generateRequestFromFallback);
   }
 
+  if (candidateFallbackEnabled) {
+    candidateFallbackEnabled.addEventListener(
+      "change",
+      syncCandidateFallbackVisibility,
+    );
+  }
+
   function setCandidateSelectionInFlight(isInFlight) {
     const buttons = document.querySelectorAll(".candidate-select");
     for (const button of buttons) {
@@ -1009,42 +991,35 @@
       showNotification(
         "error",
         "生成失败",
-        "候选合集缺少 MiKan URL，无法生成 Request。",
-      );
-      return;
-    }
-    if (!lastCandidateSearchConfig) {
-      showNotification(
-        "error",
-        "生成失败",
-        "缺少 MiKan config，请先重新搜索候选。",
+        "候选合集缺少 MiKan URL，无法生成订阅方案。",
       );
       return;
     }
     hideNotification();
     setCandidateSelectionInFlight(true);
-    setState(detailContainer, "正在从候选生成 Request...", "loading-state");
+    setState(detailContainer, "正在从候选生成订阅草案...", "loading-state");
     try {
+      // The server resolves the system-default MiKan config when no
+      // request-scoped config is sent, so candidate generation only needs the
+      // selected candidate's normalized bangumi URL. Candidate selection always
+      // produces an editable preview draft (save_request=false); the user
+      // explicitly saves it with 保存草案.
       const result = await fetchJson("/api/v1/requests", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           title: candidate.title || "未命名合集",
           source: "mikan",
-          mikan_config: {
-            search_endpoint: lastCandidateSearchConfig.search_endpoint,
-            timeout_seconds: lastCandidateSearchConfig.timeout_seconds,
-          },
           mikan_bangumi: candidate.mikan_url,
           storage_dir: currentStorageDir() || null,
-          save_request: currentSaveRequest(),
+          save_request: false,
         }),
       });
       await finalizeGeneratedRequest(result);
     } catch (error) {
       setState(
         detailContainer,
-        "从候选生成 Request 失败。请重试。",
+        "从候选生成订阅草案失败。请重试。",
         "error-state",
       );
       notifyApiError("生成失败", error);
@@ -1078,72 +1053,37 @@
       return;
     }
 
-    // Reuse the request-scoped MiKan config: prefer the current search form
-    // inputs, falling back to the in-memory config kept after a successful
-    // candidate search (whose sensitive search_endpoint was already cleared).
-    let mikanConfig;
-    const endpoint = candidateEndpointInput
-      ? candidateEndpointInput.value.trim()
-      : "";
-    if (endpoint) {
-      const timeoutText = candidateTimeoutInput
-        ? candidateTimeoutInput.value.trim()
-        : "";
-      const timeoutSeconds = Number(timeoutText);
-      if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
-        setCandidateFallbackError(
-          "生成前 timeout_seconds 必须为正数。",
-          candidateTimeoutInput,
-        );
-        return;
-      }
-      mikanConfig = {
-        search_endpoint: endpoint,
-        timeout_seconds: timeoutSeconds,
-      };
-    } else if (lastCandidateSearchConfig) {
-      mikanConfig = {
-        search_endpoint: lastCandidateSearchConfig.search_endpoint,
-        timeout_seconds: lastCandidateSearchConfig.timeout_seconds,
-      };
-    } else {
-      setCandidateFallbackError(
-        "缺少 MiKan config，请先填写 search_endpoint 或搜索候选。",
-        candidateEndpointInput,
-      );
-      return;
-    }
-
     const query = candidateQueryInput ? candidateQueryInput.value.trim() : "";
     hideNotification();
     setCandidateFallbackInFlight(true);
     setState(
       detailContainer,
-      "正在从直连 MiKan 合集生成 Request...",
+      "正在从直连 MiKan 合集生成订阅草案...",
       "loading-state",
     );
     try {
+      // No request-scoped MiKan config is sent: the server falls back to the
+      // system default, so the fallback works without a user-supplied endpoint.
+      // Direct fallback also produces an editable preview draft (save_request=false).
       const result = await fetchJson("/api/v1/requests", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           title: query || "MiKan 直连合集",
           source: "mikan",
-          mikan_config: mikanConfig,
           mikan_bangumi: fallbackValue,
           storage_dir: currentStorageDir() || null,
-          save_request: currentSaveRequest(),
+          save_request: false,
         }),
       });
       await finalizeGeneratedRequest(result);
-      clearCandidateSensitiveFields();
       if (candidateFallbackInput) {
         candidateFallbackInput.value = "";
       }
     } catch (error) {
       setState(
         detailContainer,
-        "从直连 MiKan 合集生成 Request 失败。请重试。",
+        "从直连 MiKan 合集生成订阅草案失败。请重试。",
         "error-state",
       );
       notifyApiError("生成失败", error);
@@ -1170,7 +1110,7 @@
       summary.bangumi_title ||
       summary.request_id ||
       summary.selected_subtitle_group ||
-      "未命名 Request"
+      "未命名订阅方案"
     );
   }
 
@@ -1199,13 +1139,13 @@
 
     const allOption = document.createElement("option");
     allOption.value = "";
-    allOption.textContent = "All";
+    allOption.textContent = "全部";
     listStatusFilter.appendChild(allOption);
 
     for (const status of statuses) {
       const option = document.createElement("option");
       option.value = status;
-      option.textContent = status;
+      option.textContent = statusLabel(status);
       listStatusFilter.appendChild(option);
     }
 
@@ -1244,11 +1184,11 @@
     listContainer.className = "request-list";
     listContainer.replaceChildren();
     if (!loadedRequests.length) {
-      setState(listContainer, "暂无已保存的 Request。", "empty-state");
+      setState(listContainer, "暂无已保存的订阅方案。", "empty-state");
       return;
     }
     if (!requests.length) {
-      setState(listContainer, "没有匹配的 Request。清空搜索或筛选后可恢复列表。", "empty-state");
+      setState(listContainer, "没有匹配的订阅方案。清空搜索或筛选后可恢复列表。", "empty-state");
       return;
     }
 
@@ -1257,7 +1197,7 @@
       item.type = "button";
       item.className = "request-list-item";
       item.dataset.requestId = summary.request_id || "";
-      item.setAttribute("aria-label", "查看 Request 详情：" + requestLabel(summary));
+      item.setAttribute("aria-label", "查看订阅方案详情：" + requestLabel(summary));
       if (summary.request_id === selectedRequestId) {
         item.classList.add("is-selected");
         item.setAttribute("aria-current", "true");
@@ -1268,7 +1208,7 @@
 
       const meta = document.createElement("span");
       meta.textContent = [
-        fieldValue(summary.status),
+        statusLabel(summary.status),
         fieldValue(summary.selected_subtitle_group),
         fieldValue(summary.expected_folder_name),
       ].join(" / ");
@@ -1284,7 +1224,7 @@
   async function loadList(options) {
     const detailRequestId = selectedRequestId;
     hideNotification();
-    setState(listContainer, "正在加载 Request 列表...", "loading-state");
+    setState(listContainer, "正在加载订阅方案列表...", "loading-state");
     try {
       const result = await fetchJson(apiPath("/api/v1/requests"));
       loadedRequests = result.requests || [];
@@ -1295,7 +1235,7 @@
       }
     } catch (error) {
       setState(listContainer, error.message, "error-state");
-      notifyApiError("Request 列表加载失败", error);
+      notifyApiError("订阅方案列表加载失败", error);
     }
   }
 
@@ -1432,13 +1372,19 @@
     table.className = "history-table";
     const head = document.createElement("thead");
     head.innerHTML =
-      "<tr><th>action</th><th>previous_status</th><th>next_status</th><th>timestamp</th></tr>";
+      "<tr><th>操作</th><th>前一状态</th><th>后一状态</th><th>时间</th></tr>";
     const body = document.createElement("tbody");
     for (const event of events) {
       const row = document.createElement("tr");
-      for (const key of ["action", "previous_status", "next_status", "timestamp"]) {
+      const columns = [
+        actionLabel(event.action),
+        statusLabel(event.previous_status),
+        statusLabel(event.next_status),
+        displayValue(event.timestamp),
+      ];
+      for (const value of columns) {
         const cell = document.createElement("td");
-        cell.textContent = displayValue(event[key]);
+        cell.textContent = value;
         row.appendChild(cell);
       }
       body.appendChild(row);
@@ -1520,7 +1466,7 @@
       await loadDetail(requestId);
       await loadList({loadSelectedDetail: false});
       showNotification("success", titles[actionType] || "操作成功",
-        "Request " + requestId, {
+        "订阅方案 " + requestId, {
           actions: [
             { label: "刷新列表", handler: loadList },
           ],
@@ -1553,9 +1499,9 @@
       });
       renderList();
       syncRequestIdToUrl(null);
-      setState(detailContainer, "Request 已删除。请选择一个 Request 查看详情。", "empty-state");
+      setState(detailContainer, "订阅方案已删除。请选择一个订阅方案查看详情。", "empty-state");
       await loadList({loadSelectedDetail: false});
-      showNotification("success", "删除成功", "已删除 Request " + requestId, {
+      showNotification("success", "删除成功", "已删除订阅方案 " + requestId, {
         actions: [
           { label: "刷新列表", handler: loadList },
         ],
@@ -1585,7 +1531,7 @@
     container.hidden = true;
 
     var heading = document.createElement("h4");
-    heading.textContent = "修改 Request";
+    heading.textContent = "修改订阅方案";
     container.appendChild(heading);
 
     var groupLabel = document.createElement("label");
@@ -1764,6 +1710,141 @@
     return container;
   }
 
+  function buildPreviewEditForm(request) {
+    // Editable preview draft form. Unlike the saved-request modify form this is
+    // always visible, uses the dry-run preview-modify endpoint to recompute seed
+    // display, and never calls the saved modify API.
+    const config = request.confirmable_config || {};
+    const sourceInfo = request.source_info || {};
+    const rssSources = sourceInfo.rss_sources || [];
+    const filterRule = config.filter_rule || {};
+    const originalGroup = config.selected_subtitle_group || "";
+    const originalMustContain = filterRule.must_contain || "";
+    const originalMustNotContain = filterRule.must_not_contain || "";
+    const originalUseRegex = filterRule.use_regex === true;
+    const originalCaseSensitive = filterRule.case_sensitive === true;
+    const originalFolderName = config.expected_folder_name || "";
+
+    const container = document.createElement("div");
+    container.id = "detail-preview-edit-form";
+    container.className = "detail-section detail-inline-form detail-preview-edit-form";
+
+    const heading = document.createElement("h4");
+    heading.textContent = "编辑订阅草案";
+    container.appendChild(heading);
+
+    const groupLabel = document.createElement("label");
+    groupLabel.textContent = "字幕组";
+    groupLabel.htmlFor = "preview-subtitle-group";
+    const groupSelect = document.createElement("select");
+    groupSelect.id = "preview-subtitle-group";
+    for (let i = 0; i < rssSources.length; i++) {
+      const src = rssSources[i];
+      const opt = document.createElement("option");
+      opt.value = src.subtitle_group || "";
+      opt.textContent = src.subtitle_group || "未知字幕组";
+      groupSelect.appendChild(opt);
+    }
+    groupSelect.value = originalGroup;
+    container.appendChild(groupLabel);
+    container.appendChild(groupSelect);
+
+    const mcLabel = document.createElement("label");
+    mcLabel.textContent = "包含规则";
+    mcLabel.htmlFor = "preview-must-contain";
+    const mcInput = document.createElement("input");
+    mcInput.id = "preview-must-contain";
+    mcInput.type = "text";
+    mcInput.value = originalMustContain;
+    mcInput.placeholder = "如 1080p（默认按字面匹配）";
+    container.appendChild(mcLabel);
+    container.appendChild(mcInput);
+
+    const mncLabel = document.createElement("label");
+    mncLabel.textContent = "排除规则";
+    mncLabel.htmlFor = "preview-must-not-contain";
+    const mncInput = document.createElement("input");
+    mncInput.id = "preview-must-not-contain";
+    mncInput.type = "text";
+    mncInput.value = originalMustNotContain;
+    mncInput.placeholder = "如 [v2]（默认按字面匹配）";
+    container.appendChild(mncLabel);
+    container.appendChild(mncInput);
+
+    const filterOptions = document.createElement("div");
+    filterOptions.className = "filter-options";
+
+    const regexWrapper = document.createElement("label");
+    regexWrapper.className = "inline-check filter-option";
+    regexWrapper.htmlFor = "preview-filter-use-regex";
+    const regexInput = document.createElement("input");
+    regexInput.id = "preview-filter-use-regex";
+    regexInput.type = "checkbox";
+    regexInput.checked = originalUseRegex;
+    regexWrapper.append(regexInput, document.createTextNode("使用正则"));
+    filterOptions.appendChild(regexWrapper);
+
+    const caseWrapper = document.createElement("label");
+    caseWrapper.className = "inline-check filter-option";
+    caseWrapper.htmlFor = "preview-filter-case-sensitive";
+    const caseInput = document.createElement("input");
+    caseInput.id = "preview-filter-case-sensitive";
+    caseInput.type = "checkbox";
+    caseInput.checked = originalCaseSensitive;
+    caseWrapper.append(caseInput, document.createTextNode("大小写敏感"));
+    filterOptions.appendChild(caseWrapper);
+
+    container.appendChild(filterOptions);
+
+    const filterHelp = document.createElement("p");
+    filterHelp.id = "preview-filter-help";
+    filterHelp.className = "field-help";
+    filterHelp.textContent =
+      "默认按字面文本匹配且不区分大小写；勾选「使用正则」后按正则匹配，勾选「大小写敏感」后区分大小写。";
+    container.appendChild(filterHelp);
+
+    const fnLabel = document.createElement("label");
+    fnLabel.textContent = "folder_name";
+    fnLabel.htmlFor = "preview-folder-name";
+    const fnInput = document.createElement("input");
+    fnInput.id = "preview-folder-name";
+    fnInput.type = "text";
+    fnInput.value = originalFolderName;
+    fnInput.placeholder = "期望存储目录名";
+    container.appendChild(fnLabel);
+    container.appendChild(fnInput);
+
+    const formError = document.createElement("p");
+    formError.id = "preview-edit-error";
+    formError.className = "field-error";
+    formError.setAttribute("role", "alert");
+    formError.hidden = true;
+    container.appendChild(formError);
+
+    const btnRow = document.createElement("div");
+    btnRow.className = "notification-actions";
+
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "primary-button detail-action";
+    applyBtn.textContent = "应用修改";
+    applyBtn.addEventListener("click", function () {
+      formError.hidden = true;
+      formError.textContent = "";
+      const patch = collectPreviewEditPatch(request);
+      if (!patch || !Object.keys(patch).length) {
+        formError.textContent = "请至少修改一个字段。";
+        formError.hidden = false;
+        return;
+      }
+      previewModifyAndRerender(request, patch);
+    });
+    btnRow.appendChild(applyBtn);
+
+    container.appendChild(btnRow);
+    return container;
+  }
+
   function buildCancelForm(request) {
     var container = document.createElement("div");
     container.id = "detail-cancel-form";
@@ -1771,7 +1852,7 @@
     container.hidden = true;
 
     var heading = document.createElement("h4");
-    heading.textContent = "取消 Request";
+    heading.textContent = "取消订阅方案";
     container.appendChild(heading);
 
     var reasonLabel = document.createElement("label");
@@ -1791,7 +1872,7 @@
     submitBtn.className = "danger-button detail-action";
     submitBtn.textContent = "提交取消";
     submitBtn.addEventListener("click", function () {
-      if (!window.confirm("确认取消此 Request？")) {
+      if (!window.confirm("确认取消此订阅方案？")) {
         return;
       }
       var reason = reasonInput.value.trim();
@@ -1815,38 +1896,146 @@
   }
 
   async function savePreviewRequest(request) {
-    const title = request && request.input && request.input.raw_title
-      ? request.input.raw_title
-      : "";
-    if (!title) {
-      showNotification("error", "保存失败", "预览 Request 缺少标题，无法保存。");
+    if (!request) {
+      showNotification("error", "保存失败", "订阅草案缺失，无法保存。");
       return;
     }
 
     hideNotification();
-    setSubmitInFlight(true);
-    setState(detailContainer, "正在保存预览 Request...", "loading-state");
+    setActionInFlight(true);
+    setState(detailContainer, "正在保存订阅草案...", "loading-state");
     try {
-      const result = await fetchJson("/api/v1/requests", {
+      // Persist the (possibly modified) preview draft as-is. The server only
+      // accepts PENDING_CONFIRM drafts, so the saved object enters the existing
+      // confirmation flow and can then be confirmed, cancelled, modified, or
+      // deleted like any other saved Request.
+      const result = await fetchJson("/api/v1/requests/preview-save", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(buildCreateRequestPayload(title, {saveRequest: true})),
+        body: JSON.stringify({
+          request: request,
+          storage_dir: currentStorageDir() || null,
+        }),
       });
-      selectedRequestId = result.request && result.request.request_id;
+      const generatedRequestId = result.request && result.request.request_id;
+      selectedRequestId = generatedRequestId;
       renderDetailPayload(result);
       await loadList({loadSelectedDetail: false});
       syncRequestIdToUrl(selectedRequestId);
-      showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+      showNotification("success", "保存成功", "已保存订阅草案 " + selectedRequestId, {
         actions: [
           { label: "刷新列表", handler: loadList },
           { label: "查看详情", handler: () => loadDetail(selectedRequestId) },
         ],
       });
     } catch (error) {
-      setState(detailContainer, "预览 Request 保存失败。请稍后重试。", "error-state");
+      setState(detailContainer, "订阅草案保存失败。请稍后重试。", "error-state");
       notifyApiError("保存失败", error);
     } finally {
-      setSubmitInFlight(false);
+      setActionInFlight(false);
+    }
+  }
+
+  function collectPreviewEditPatch(request) {
+    // Read the currently visible preview edit form and build a modify patch
+    // against the request's current config. Returns null when the form is
+    // absent, and an empty object when nothing changed.
+    const form = document.getElementById("detail-preview-edit-form");
+    if (!form || !request) {
+      return null;
+    }
+    const config = request.confirmable_config || {};
+    const filterRule = config.filter_rule || {};
+    const originalGroup = config.selected_subtitle_group || "";
+    const originalMustContain = filterRule.must_contain || "";
+    const originalMustNotContain = filterRule.must_not_contain || "";
+    const originalUseRegex = filterRule.use_regex === true;
+    const originalCaseSensitive = filterRule.case_sensitive === true;
+    const originalFolderName = config.expected_folder_name || "";
+
+    const groupSelect = form.querySelector("#preview-subtitle-group");
+    const mcInput = form.querySelector("#preview-must-contain");
+    const mncInput = form.querySelector("#preview-must-not-contain");
+    const regexInput = form.querySelector("#preview-filter-use-regex");
+    const caseInput = form.querySelector("#preview-filter-case-sensitive");
+    const fnInput = form.querySelector("#preview-folder-name");
+
+    const patch = {};
+    if (groupSelect && groupSelect.value && groupSelect.value !== originalGroup) {
+      patch.selected_subtitle_group = groupSelect.value;
+    }
+    const mcVal = mcInput ? mcInput.value.trim() : "";
+    const mncVal = mncInput ? mncInput.value.trim() : "";
+    const useRegex = regexInput ? regexInput.checked : false;
+    const caseSensitive = caseInput ? caseInput.checked : false;
+    const mcChanged = mcVal !== originalMustContain;
+    const mncChanged = mncVal !== originalMustNotContain;
+    if (
+      mcChanged ||
+      mncChanged ||
+      useRegex !== originalUseRegex ||
+      caseSensitive !== originalCaseSensitive
+    ) {
+      patch.filter_rule = {};
+      if (mcChanged) {
+        patch.filter_rule.must_contain = mcVal;
+      }
+      if (mncChanged) {
+        patch.filter_rule.must_not_contain = mncVal;
+      }
+      patch.filter_rule.use_regex = useRegex;
+      patch.filter_rule.case_sensitive = caseSensitive;
+    }
+    const fnVal = fnInput ? fnInput.value.trim() : "";
+    if (fnVal !== originalFolderName) {
+      patch.expected_folder_name = fnVal;
+    }
+    return patch;
+  }
+
+  async function previewModify(request, patch) {
+    // Dry-run modify: recompute the in-memory preview request without saving.
+    const result = await fetchJson("/api/v1/requests/preview-modify", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        request: request,
+        patch: patch || {},
+        storage_dir: currentStorageDir() || null,
+      }),
+    });
+    return result && result.request;
+  }
+
+  function updateCurrentPreviewRequest(modified) {
+    if (currentDetailPayload && typeof currentDetailPayload === "object") {
+      if (currentDetailPayload.request) {
+        currentDetailPayload.request = modified;
+      } else {
+        currentDetailPayload = modified;
+      }
+    } else {
+      currentDetailPayload = modified;
+    }
+  }
+
+  async function previewModifyAndRerender(request, patch) {
+    hideNotification();
+    setActionInFlight(true);
+    setState(detailContainer, "正在重新计算订阅草案...", "loading-state");
+    try {
+      const modified = await previewModify(request, patch);
+      if (!modified) {
+        throw new Error("订阅草案修改失败。");
+      }
+      updateCurrentPreviewRequest(modified);
+      renderDetailPayload(currentDetailPayload, {preview: true});
+      showNotification("success", "已应用修改", "订阅草案种子展示已重新计算。");
+    } catch (error) {
+      setState(detailContainer, "订阅草案修改失败。请重试。", "error-state");
+      notifyApiError("修改失败", error);
+    } finally {
+      setActionInFlight(false);
     }
   }
 
@@ -1865,22 +2054,40 @@
     var source = selectedRssSource(sourceInfo, config);
     var validSeeds = source.valid_seed_names || config.effective_seed_names || [];
     var excludedSeeds = source.excluded_seed_names || [];
-    var allSeeds = source.seed_names || combinedSeedNames(validSeeds, excludedSeeds);
     var effectiveSeeds = config.effective_seed_names || validSeeds;
+    var rssSources = sourceInfo.rss_sources || [];
+    var selectedGroupName = config.selected_subtitle_group || "未选择字幕组";
+    // Complete seeds grouped by the MiKan subtitle group the detail page
+    // resolved. Each group keeps its own complete seed list (seed_names), with
+    // a fallback to combined valid/excluded titles for older snapshots.
+    var groupedSeeds = [];
+    var totalCompleteCount = 0;
+    for (var rsi = 0; rsi < rssSources.length; rsi++) {
+      var rssSource = rssSources[rsi];
+      var groupName = rssSource.subtitle_group || "未知字幕组";
+      var groupSeedNames =
+        rssSource.seed_names ||
+        combinedSeedNames(
+          rssSource.valid_seed_names || [],
+          rssSource.excluded_seed_names || [],
+        );
+      groupedSeeds.push({subtitleGroup: groupName, seedNames: groupSeedNames});
+      totalCompleteCount += groupSeedNames.length;
+    }
 
     detailContainer.className = "request-detail";
     detailContainer.replaceChildren();
 
     var heading = document.createElement("h3");
-    heading.textContent = input.raw_title || matched.title || "Request";
+    heading.textContent = input.raw_title || matched.title || "订阅方案";
 
     var overviewSection = createDetailSection("Overview", "overview-section");
     var overviewHeader = document.createElement("div");
     overviewHeader.className = "overview-actions";
     var overviewFields = detailList([
       ["request_id", request.request_id],
-      ["status", request.status],
-      ["保存状态", isPreview ? "预览（未保存）" : "已保存"],
+      ["状态", statusLabel(request.status)],
+      ["保存状态", isPreview ? "订阅草案（未保存）" : "已保存"],
       ["原始标题", input.raw_title],
       ["匹配标题", matched.title],
     ]);
@@ -1903,24 +2110,34 @@
       var previewNote = document.createElement("p");
       previewNote.className = "field-help preview-mode-note";
       previewNote.textContent =
-        "预览模式：此 Request 尚未保存，只能查看，保存后才可确认、取消、修改、删除或提交 Auto Bangumi。";
+        "订阅草案（未保存）：可编辑下方订阅方案；点击「应用修改」重新计算种子展示，点击「保存草案」后进入待确认流程。";
       actionsContainer.appendChild(previewNote);
 
-      var savePreviewBtn = document.createElement("button");
-      savePreviewBtn.type = "button";
-      savePreviewBtn.className = "primary-button detail-action";
-      savePreviewBtn.textContent = "保存此 Request";
-      savePreviewBtn.addEventListener("click", function () {
-        savePreviewRequest(request);
+      var saveDraftBtn = document.createElement("button");
+      saveDraftBtn.type = "button";
+      saveDraftBtn.className = "primary-button detail-action";
+      saveDraftBtn.textContent = "保存草案";
+      saveDraftBtn.addEventListener("click", async function () {
+        var patch = collectPreviewEditPatch(request);
+        if (patch && Object.keys(patch).length) {
+          try {
+            var modified = await previewModify(request, patch);
+            savePreviewRequest(modified);
+          } catch (error) {
+            notifyApiError("保存失败", error);
+          }
+        } else {
+          savePreviewRequest(request);
+        }
       });
-      actionsContainer.appendChild(savePreviewBtn);
+      actionsContainer.appendChild(saveDraftBtn);
     } else if (isPending) {
       var acceptBtn = document.createElement("button");
       acceptBtn.type = "button";
       acceptBtn.className = "primary-button detail-action";
       acceptBtn.textContent = "确认";
       acceptBtn.addEventListener("click", function () {
-        if (window.confirm("确认接受此 Request？")) {
+        if (window.confirm("确认接受此订阅方案？")) {
           performAction(request.request_id, "accept", {});
         }
       });
@@ -1952,7 +2169,7 @@
     } else if (isAccepted) {
       var statusNote = document.createElement("p");
       statusNote.className = "field-help";
-      statusNote.textContent = "此 Request 已" + fieldValue(request.status) + "，可提交到 Auto Bangumi。";
+      statusNote.textContent = "此订阅方案已" + statusLabel(request.status) + "，可提交到 Auto Bangumi。";
       actionsContainer.appendChild(statusNote);
 
       var abSubmitBtn = document.createElement("a");
@@ -1979,7 +2196,7 @@
       deleteBtn.className = "danger-button detail-action";
       deleteBtn.textContent = "删除";
       deleteBtn.addEventListener("click", function () {
-        if (window.confirm("确认删除此 Request？此操作不可恢复。")) {
+        if (window.confirm("确认删除此订阅方案？此操作不可恢复。")) {
           deleteRequest(request.request_id);
         }
       });
@@ -1987,12 +2204,12 @@
     } else {
       var statusNote = document.createElement("p");
       statusNote.className = "field-help";
-      statusNote.textContent = "此 Request 已" + fieldValue(request.status) + "，不可操作。";
+      statusNote.textContent = "此订阅方案已" + statusLabel(request.status) + "，不可操作。";
       actionsContainer.appendChild(statusNote);
     }
 
     var cancelForm = isPreview ? document.createDocumentFragment() : buildCancelForm(request);
-    var modifyForm = isPreview ? document.createDocumentFragment() : buildModifyForm(request);
+    var modifyForm = isPreview ? buildPreviewEditForm(request) : buildModifyForm(request);
     var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
       detailList([
@@ -2018,35 +2235,60 @@
     );
 
     var seedsSection = createDetailSection("Seeds", "seeds-section");
-    var seedDetails = document.createElement("details");
-    seedDetails.className = "seed-details";
-    var seedSummary = document.createElement("summary");
-    seedSummary.textContent =
-      "查看筛选种子列表 (完整 " + allSeeds.length + " / 有效 " +
-      effectiveSeeds.length + " / 排除 " + excludedSeeds.length + ")";
-    var seedsContainer = document.createElement("div");
-    seedsContainer.className = "seed-groups";
-    var allGroup = document.createElement("div");
-    allGroup.className = "seed-group";
-    var allHeading = document.createElement("h5");
-    allHeading.textContent = "完整种子 (" + allSeeds.length + ")";
-    allGroup.appendChild(allHeading);
-    renderSeedList(allGroup, allSeeds, "无种子标题。");
-    var validGroup = document.createElement("div");
-    validGroup.className = "seed-group";
-    var validHeading = document.createElement("h5");
-    validHeading.textContent = "有效种子 (" + effectiveSeeds.length + ")";
-    validGroup.appendChild(validHeading);
-    renderSeedList(validGroup, effectiveSeeds, "无有效种子标题。");
+
+    // Effective seeds come first and are always visible, so the user
+    // immediately sees which subtitle group the valid list belongs to.
+    var effectiveGroup = document.createElement("div");
+    effectiveGroup.className = "seed-group effective-seed-group";
+    var effectiveHeading = document.createElement("h5");
+    effectiveHeading.textContent =
+      "有效种子（当前选中字幕组：" + selectedGroupName + "）(" +
+      effectiveSeeds.length + ")";
+    effectiveGroup.appendChild(effectiveHeading);
+    renderSeedList(effectiveGroup, effectiveSeeds, "无有效种子标题。");
+    seedsSection.appendChild(effectiveGroup);
+
+    // Complete seeds come second, grouped by the MiKan subtitle group that the
+    // detail page resolved. Each group shows its name and seed count with an
+    // expandable seed list; the whole area collapses by default.
+    var completeDetails = document.createElement("details");
+    completeDetails.className = "seed-details complete-seed-details";
+    var completeSummary = document.createElement("summary");
+    completeSummary.textContent =
+      "完整种子（按字幕组分组）(" + totalCompleteCount + ")";
+    var completeGroups = document.createElement("div");
+    completeGroups.className = "seed-groups complete-seed-groups";
+    if (!groupedSeeds.length) {
+      var noComplete = document.createElement("p");
+      noComplete.className = "muted-text";
+      noComplete.textContent = "无种子标题。";
+      completeGroups.appendChild(noComplete);
+    }
+    for (var groupIndex = 0; groupIndex < groupedSeeds.length; groupIndex++) {
+      var groupData = groupedSeeds[groupIndex];
+      var groupDetails = document.createElement("details");
+      groupDetails.className = "subgroup-seed-group";
+      var groupSummary = document.createElement("summary");
+      groupSummary.textContent =
+        groupData.subtitleGroup + " (" + groupData.seedNames.length + ")";
+      groupDetails.appendChild(groupSummary);
+      renderSeedList(groupDetails, groupData.seedNames, "无种子标题。");
+      completeGroups.appendChild(groupDetails);
+    }
+    completeDetails.append(completeSummary, completeGroups);
+    seedsSection.appendChild(completeDetails);
+
+    // Excluded seeds come last, collapsed by default, with Chinese exclusion
+    // reasons rendered beside each seed title.
+    var excludedDetails = document.createElement("details");
+    excludedDetails.className = "seed-details excluded-seed-details";
+    var excludedSummary = document.createElement("summary");
+    excludedSummary.textContent = "排除种子 (" + excludedSeeds.length + ")";
     var excludedGroup = document.createElement("div");
     excludedGroup.className = "seed-group";
-    var excludedHeading = document.createElement("h5");
-    excludedHeading.textContent = "排除种子 (" + excludedSeeds.length + ")";
-    excludedGroup.appendChild(excludedHeading);
     renderExcludedSeedList(excludedGroup, excludedSeeds);
-    seedsContainer.append(allGroup, validGroup, excludedGroup);
-    seedDetails.append(seedSummary, seedsContainer);
-    seedsSection.appendChild(seedDetails);
+    excludedDetails.append(excludedSummary, excludedGroup);
+    seedsSection.appendChild(excludedDetails);
 
     var auditSection = createDetailSection("Audit", "audit-group-section");
     renderHistorySection(auditSection, payload.history);
@@ -2076,21 +2318,21 @@
 
   async function loadDetail(requestId) {
     if (!requestId) {
-      setState(detailContainer, "Request ID 无效。", "error-state");
-      showNotification("error", "详情加载失败", "Request ID 无效。");
+      setState(detailContainer, "订阅方案 ID 无效。", "error-state");
+      showNotification("error", "详情加载失败", "订阅方案 ID 无效。");
       return;
     }
 
     hideNotification();
-    setState(detailContainer, "正在加载 Request 详情...", "loading-state");
+    setState(detailContainer, "正在加载订阅方案详情...", "loading-state");
     try {
       const result = await fetchJson(
         apiPath("/api/v1/requests/" + encodeURIComponent(requestId)),
       );
       renderDetailPayload(result);
     } catch (error) {
-      setState(detailContainer, "Request 详情加载失败。请确认 request_id 是否存在。", "error-state");
-      showNotification("error", "Request 详情加载失败", "请确认 request_id 是否存在。");
+      setState(detailContainer, "订阅方案详情加载失败。请确认 request_id 是否存在。", "error-state");
+      showNotification("error", "订阅方案详情加载失败", "请确认 request_id 是否存在。");
     }
   }
 
@@ -2102,7 +2344,7 @@
     if (result.saved_request) {
       selectedRequestId = generatedRequestId;
       syncRequestIdToUrl(selectedRequestId);
-      showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+      showNotification("success", "保存成功", "已保存订阅方案 " + selectedRequestId, {
         actions: [
           {
             label: "刷新列表",
@@ -2116,19 +2358,28 @@
       });
     } else {
       syncRequestIdToUrl(null, {replace: true});
-      showNotification("success", "预览已生成", "这是未保存预览；保存后才可操作。", {
-        actions: [
-          {
-            label: "保存此 Request",
-            className: "primary-button",
-            handler: () => {
-              if (result.request) {
-                savePreviewRequest(result.request);
-              }
+      showNotification(
+        "success",
+        "预览已生成",
+        "这是未保存的订阅草案；保存后可确认、修改或删除。",
+        {
+          actions: [
+            {
+              label: "保存草案",
+              className: "primary-button",
+              handler: () => {
+                const current =
+                  (currentDetailPayload && currentDetailPayload.request) ||
+                  result.request ||
+                  null;
+                if (current) {
+                  savePreviewRequest(current);
+                }
+              },
             },
-          },
-        ],
-      });
+          ],
+        },
+      );
     }
   }
 
@@ -2147,8 +2398,8 @@
     try {
       payload = buildCreateRequestPayload(title);
     } catch (validationError) {
-      setFormError(validationError.message || "Request 表单校验失败。", validationError.field);
-      showNotification("error", "校验失败", validationError.message || "Request 表单校验失败。");
+      setFormError(validationError.message || "订阅方案表单校验失败。", validationError.field);
+      showNotification("error", "校验失败", validationError.message || "订阅方案表单校验失败。");
       if (validationError.field && validationError.field.focus) {
         validationError.field.focus();
       }
@@ -2188,9 +2439,10 @@
       loadDetail(requestId);
     } else {
       hideNotification();
-      setState(detailContainer, "选择一个 Request 后查看详情。", "empty-state");
+      setState(detailContainer, "选择一个订阅方案后查看详情。", "empty-state");
     }
   });
   selectedRequestId = requestIdFromLocation() || null;
+  syncCandidateFallbackVisibility();
   loadList();
 })();

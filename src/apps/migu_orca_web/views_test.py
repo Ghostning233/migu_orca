@@ -10,7 +10,12 @@ from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from mikan_engine.controllers.mikan_client import MikanCandidate, create_mikan_client
-from mikan_engine.controllers.mikan_config import MikanConfig
+from mikan_engine.controllers.mikan_config import (
+    DEFAULT_MIKAN_SEARCH_ENDPOINT,
+    DEFAULT_MIKAN_TIMEOUT_SECONDS,
+    MikanConfig,
+    default_mikan_config,
+)
 from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
 from request_engine.controllers.request_controller import (
     accept_request,
@@ -154,25 +159,30 @@ def test_index_serves_web_ui_shell() -> None:
     assert response.status_code == 200
     assert "text/html" in response.content_type
     assert "MiGuOrca" in html
-    assert "<title>MiGuOrca Request 工作台</title>" in html
-    assert "Stage 13 Request 工作台" in html
+    assert "<title>MiGuOrca 订阅方案工作台</title>" in html
+    assert "Stage 13 订阅方案工作台" in html
     assert "Stage 7 Web UI MVP" not in html
     assert "Stage 8 Web UI Usability" not in html
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert "运行模式：本地 JSON storage" in html
-    assert "Request 生成默认使用仓库 fixture-backed 数据" in html
+    assert "主流程通过真实 MiKan 候选搜索" in html
+    assert "fixture-backed 生成保留在开发/离线测试区域" in html
     assert "外部数据源、连接测试与提交配置集中在 Settings" in html
-    assert "Request 生成" in html
-    assert "Request 列表" in html
-    assert "Request 详情" in html
+    assert "真实 MiKan 候选搜索" in html
+    assert "订阅方案列表" in html
+    assert "订阅方案详情" in html
     assert 'href="/index"' in html
     assert 'href="/settings"' in html
     assert 'aria-current="page"' in html
-    assert "Request 工作台" in html
+    assert "订阅方案工作台" in html
     assert "Settings" in html
     assert 'id="generate-panel"' in html
     assert 'id="request-list-panel"' in html
     assert 'id="request-detail-panel"' in html
+    assert 'id="dev-fixture-panel"' in html
+    assert 'id="dev-fixture-disclosure"' in html
+    assert 'id="dev-fixture-disclosure" open' not in html
+    assert "默认收起" in html
     assert 'id="request-generate-form"' in html
     assert 'name="title"' in html
     assert "例如：葬送的芙莉莲" in html
@@ -183,18 +193,22 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-config-fields"' not in html
     assert 'name="mikan_search_endpoint"' not in html
     assert 'name="mikan_timeout_seconds"' not in html
-    assert 'id="mikan-candidate-panel"' in html
-    assert 'id="mikan-candidate-search"' in html
+    assert 'id="mikan-candidate-search-form"' in html
     assert 'id="mikan-candidate-query"' in html
-    assert 'id="mikan-candidate-search-endpoint"' in html
-    assert 'id="mikan-candidate-timeout-seconds"' in html
-    assert 'name="mikan_candidate_search_endpoint"' in html
-    assert 'name="mikan_candidate_timeout_seconds"' in html
+    assert 'name="mikan_candidate_title"' in html
+    assert 'id="mikan-candidate-search-endpoint"' not in html
+    assert 'id="mikan-candidate-timeout-seconds"' not in html
+    assert 'name="mikan_candidate_search_endpoint"' not in html
+    assert 'name="mikan_candidate_timeout_seconds"' not in html
     assert 'id="mikan-candidate-search-submit"' in html
     assert 'id="mikan-candidate-search-result"' in html
-    assert "search_endpoint" in html
-    assert "timeout_seconds" in html
+    assert "search_endpoint" not in html
+    assert "timeout_seconds" not in html
+    assert 'id="mikan-fallback-enabled"' in html
+    assert 'name="mikan_fallback_enabled"' in html
+    assert "搜索无结果时使用直连合集" in html
     assert 'id="mikan-fallback-form"' in html
+    assert 'id="mikan-fallback-form" class="candidate-fallback-form" hidden' in html
     assert 'id="mikan-fallback-bangumi"' in html
     assert 'name="mikan_fallback_bangumi"' in html
     assert 'id="mikan-fallback-help"' in html
@@ -209,6 +223,8 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'role="alert"' in html
     assert 'id="request-generate-submit"' in html
     assert 'data-default-label="生成"' in html
+    assert "开发 / 离线测试" in html
+    assert "Fixture 生成（开发 / 离线测试路径，不使用真实 MiKan）" in html
     assert 'id="clear-web-preferences"' not in html
     assert 'id="qbittorrent-config-toggle"' not in html
     assert 'id="qbittorrent-test-form"' not in html
@@ -224,7 +240,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="request-list-search"' in html
     assert "标题、request_id、字幕组或 folder_name" in html
     assert 'id="request-list-status-filter"' in html
-    assert "<option value=\"\">All</option>" in html
+    assert "<option value=\"\">全部</option>" in html
     assert 'id="request-list-sort"' in html
     assert '<option value="default">默认顺序</option>' in html
     assert '<option value="title_asc">标题升序</option>' in html
@@ -237,7 +253,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'aria-atomic="true"' in html
     assert 'role="status"' in html
     assert 'aria-describedby="save-request-help"' not in html
-    assert 'aria-label="刷新 Request 列表"' in html
+    assert 'aria-label="刷新订阅方案列表"' in html
     assert 'aria-relevant="additions text"' in html
     assert "/migu-orca-static/app.js" in html
     assert "token" not in html.lower()
@@ -267,7 +283,7 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'href="/index"' in html
     assert 'href="/settings"' in html
     assert 'aria-current="page"' in html
-    assert "Request 工作台" in html
+    assert "订阅方案工作台" in html
     assert "Settings" in html
     assert 'id="storage-settings-panel"' in html
     assert 'id="data-source-settings-panel"' in html
@@ -316,7 +332,7 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'name="ab_submit_fallback_enabled"' in html
     assert 'id="settings-ab-result"' in html
     assert 'id="settings-ab-return-link"' in html
-    assert "仅 ACCEPTED Request 可提交" in html
+    assert "仅已确认订阅方案可提交" in html
     assert "尚未提交 Auto Bangumi" in html
     assert "/migu-orca-static/style.css" in html
     assert "/migu-orca-static/app.js" in html
@@ -346,7 +362,12 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "复制 request_id" in script
     assert "copyTextToClipboard" in script
     assert "navigator.clipboard.writeText" in script
-    assert "查看筛选种子列表" in script
+    assert "有效种子（当前选中字幕组：" in script
+    assert "完整种子（按字幕组分组）" in script
+    assert "排除种子 (" in script
+    assert "complete-seed-details" in script
+    assert "excluded-seed-details" in script
+    assert "subgroup-seed-group" in script
     assert "seed-details" in script
     assert "modify-filter-use-regex" in script
     assert "modify-filter-case-sensitive" in script
@@ -366,7 +387,7 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "settings-ab-fallback-enabled" in script
     assert "Auto Bangumi 提交" in script
     assert "fallback_enabled" in script
-    assert "window.confirm(\"确认提交此 Request 到 Auto Bangumi？\")" in script
+    assert "window.confirm(\"确认提交此订阅方案到 Auto Bangumi？\")" in script
     assert "storage_dir: currentStorageDir() || null" in script
     assert "requestIdFromLocation" in script
     assert "syncRequestIdToUrl" in script
@@ -387,19 +408,19 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "/api/v1/mikan/candidates" in script
     assert "mikan-candidate-search-form" in script
     assert "mikan-candidate-query" in script
-    assert "mikan-candidate-search-endpoint" in script
-    assert "mikan-candidate-timeout-seconds" in script
+    assert "mikan-candidate-search-endpoint" not in script
+    assert "mikan-candidate-timeout-seconds" not in script
     assert "mikan-candidate-search-submit" in script
     assert "mikan-candidate-search-result" in script
     assert "mikan-candidate-search-error" in script
-    assert "mikan_config" in script
+    assert "mikan_config" not in script
     assert "searchMikanCandidates" in script
-    assert "clearCandidateSensitiveFields" in script
+    assert "clearCandidateSensitiveFields" not in script
     assert "正在搜索 MiKan 候选" in script
     assert "候选搜索失败" in script
     assert "未找到候选合集" in script
     assert "MiKan ID" in script
-    assert "来源 query" in script
+    assert "搜索词：" in script
     assert "candidate.recommendation" in script
     assert "candidate-recommendation" in script
     assert "搜索结果不会自动选择合集" not in script
@@ -407,7 +428,9 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "generateRequestFromCandidate" in script
     assert "finalizeGeneratedRequest" in script
     assert "mikan_bangumi" in script
-    assert "lastCandidateSearchConfig" in script
+    assert "lastCandidateSearchConfig" not in script
+    assert "mikan-fallback-enabled" in script
+    assert "syncCandidateFallbackVisibility" in script
     assert "mikan-fallback-form" in script
     assert "mikan-fallback-bangumi" in script
     assert "mikan-fallback-error" in script
@@ -415,6 +438,9 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "generateRequestFromFallback" in script
     assert "MiKan 直连合集" in script
     assert "使用直连合集生成" in script
+    # Candidate selection and direct fallback always produce an editable preview
+    # draft (save_request=false); the user explicitly saves it with 保存草案.
+    assert "save_request: false" in script
     assert "http://" not in script
     assert "https://" not in script
 
@@ -447,7 +473,7 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert 'createDetailSection("Seeds", "seeds-section")' in script
     assert 'createDetailSection("Audit", "audit-group-section")' in script
     assert '["request_id", request.request_id]' in script
-    assert '["status", request.status]' in script
+    assert '["状态", statusLabel(request.status)]' in script
     assert '["原始标题", input.raw_title]' in script
     assert '["匹配标题", matched.title]' in script
     assert "copyButton.className = \"secondary-button copy-request-id\"" in script
@@ -460,15 +486,42 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert '["folder_name", config.expected_folder_name]' in script
     assert '["有效种子数", effectiveSeeds.length]' in script
     assert '["排除种子数", excludedSeeds.length]' in script
-    assert "source.seed_names || combinedSeedNames(validSeeds, excludedSeeds)" in script
+    assert "rssSource.seed_names ||" in script
+    assert "combinedSeedNames(" in script
+    assert "groupedSeeds.push({subtitleGroup: groupName, seedNames: groupSeedNames})" in script
+    assert "totalCompleteCount" in script
     assert "完整种子" in script
+    assert "有效种子（当前选中字幕组：" in script
     assert "renderExcludedSeedList" in script
     assert "document.createElement(\"details\")" in script
-    assert "seedSummary.textContent" in script
+    assert "completeSummary.textContent" in script
     assert "renderHistorySection(auditSection, payload.history)" in script
     assert "renderAbResultSection(auditSection, payload.ab_result)" in script
     assert "selected_rss_url" in script
     assert "addDetailRow(fields, \"selected_rss_url\"" not in script
+
+
+def test_static_app_script_maps_status_codes_to_chinese_labels() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "function statusLabel(status)" in script
+    assert "PENDING_CONFIRM: \"待确认\"" in script
+    assert "ACCEPTED: \"已确认\"" in script
+    assert "CANCELLED: \"已取消\"" in script
+    assert "function actionLabel(action)" in script
+    assert "ACCEPT: \"确认\"" in script
+    assert "CANCEL: \"取消\"" in script
+    assert "MODIFY: \"修改\"" in script
+    assert "statusLabel(summary.status)" in script
+    assert "statusLabel(request.status)" in script
+    assert "option.textContent = statusLabel(status)" in script
+    assert "全部" in script
+    # The raw status codes never render into user-visible strings in the main UI.
+    assert '"待确认"' in script
+    assert '"已确认"' in script
+    assert '"已取消"' in script
 
 
 def test_static_app_script_shows_filter_mode_and_case_status_in_detail() -> None:
@@ -519,11 +572,11 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "关闭" in script
     assert "预览已生成" in script
     assert "保存成功" in script
-    assert "已保存 Request " in script
+    assert "已保存订阅方案 " in script
     assert "刷新列表" in script
     assert "查看详情" in script
-    assert "Request 列表加载失败" in script
-    assert "Request 详情加载失败" in script
+    assert "订阅方案列表加载失败" in script
+    assert "订阅方案详情加载失败" in script
     assert "校验失败" in script
     assert "error.errorData = payload.error_data || null" in script
     assert "summarizeValidationErrors" in script
@@ -536,23 +589,39 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "<rss" not in script.lower()
 
 
-def test_static_app_script_renders_unsaved_preview_as_read_only() -> None:
+def test_static_app_script_renders_unsaved_preview_as_editable_draft() -> None:
     response = _client().get("/migu-orca-static/app.js")
 
     script = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "预览（未保存）" in script
-    assert "预览模式：此 Request 尚未保存，只能查看" in script
-    assert "保存此 Request" in script
+    assert "订阅草案（未保存）" in script
+    assert "订阅草案（未保存）：可编辑下方订阅方案" in script
+    assert "保存草案" in script
     assert "async function savePreviewRequest" in script
-    assert "buildCreateRequestPayload(title, {saveRequest: true})" in script
+    assert "/api/v1/requests/preview-save" in script
+    assert "/api/v1/requests/preview-modify" in script
+    assert "async function previewModify" in script
+    assert "collectPreviewEditPatch" in script
+    assert "buildPreviewEditForm" in script
+    assert "detail-preview-edit-form" in script
+    assert "preview-subtitle-group" in script
+    assert "preview-must-contain" in script
+    assert "preview-must-not-contain" in script
+    assert "preview-filter-use-regex" in script
+    assert "preview-filter-case-sensitive" in script
+    assert "preview-folder-name" in script
+    assert "应用修改" in script
     assert "renderDetailPayload(result, {preview: !result.saved_request})" in script
     assert "selectedRequestId = result.saved_request ? generatedRequestId : null" in script
     assert "syncRequestIdToUrl(null, {replace: true})" in script
+    # The preview draft never renders confirm/cancel/delete/AB actions.
     assert script.index("if (isPreview)") < script.index("} else if (isPending)")
     assert script.index("if (isPreview)") < script.index(
         'performAction(request.request_id, "accept", {})'
     )
+    # The preview edit form is distinct from the saved-request modify form.
+    assert "detail-modify-form" in script
+    assert "detail-preview-edit-form" in script
 
 
 def test_static_app_script_shows_action_success_after_refresh() -> None:
@@ -591,13 +660,13 @@ def test_static_app_script_wires_request_list_filter_sort_controls() -> None:
     assert "summary.folder_name" in script
     assert "summary.status" in script
     assert "listCount.textContent = \"显示 \"" in script
-    assert "没有匹配的 Request。清空搜索或筛选后可恢复列表。" in script
+    assert "没有匹配的订阅方案。清空搜索或筛选后可恢复列表。" in script
     assert "listSearchInput.addEventListener(\"input\", renderList)" in script
     assert "listStatusFilter.addEventListener(\"change\", renderList)" in script
     assert "listSortSelect.addEventListener(\"change\", renderList)" in script
     assert "document.createElement(\"button\")" in script
     assert "item.type = \"button\"" in script
-    assert 'item.setAttribute("aria-label", "查看 Request 详情：" + requestLabel(summary))' in script
+    assert 'item.setAttribute("aria-label", "查看订阅方案详情：" + requestLabel(summary))' in script
     assert 'item.setAttribute("aria-current", "true")' in script
     assert "fetchJson(apiPath(\"/api/v1/requests\"))" in script
     assert "fetchJson(apiPath(\"/api/v1/requests?search" not in script
@@ -694,7 +763,7 @@ def test_static_app_script_wires_explicit_ab_submit_form() -> None:
     assert "submitSettingsAb" in script
     assert "提交 Auto Bangumi 前必须填写 endpoint。" in script
     assert "提交 Auto Bangumi 前必须填写 token。" in script
-    assert "确认提交此 Request 到 Auto Bangumi？" in script
+    assert "确认提交此订阅方案到 Auto Bangumi？" in script
     assert '"/submit-ab"' in script
     assert "storage_dir: currentStorageDir() || null" in script
     assert "ab_config" in script
@@ -1070,7 +1139,7 @@ def test_get_request_detail_returns_unified_error_for_missing_request(
     assert payload == {
         "ok": False,
         "error_type": "request_not_found",
-        "error_message": "未找到已保存的 Request",
+        "error_message": "未找到已保存的订阅方案",
         "error_data": {
             "failed_step": "load_request_snapshot",
             "details": {"request_id": "missing-request"},
@@ -1160,7 +1229,7 @@ def test_delete_request_removes_saved_request_and_refreshes_list_and_detail(
     assert detail_response.get_json() == {
         "ok": False,
         "error_type": "request_not_found",
-        "error_message": "未找到已保存的 Request",
+        "error_message": "未找到已保存的订阅方案",
         "error_data": {
             "failed_step": "load_request_snapshot",
             "details": {"request_id": "request-1"},
@@ -1182,7 +1251,7 @@ def test_delete_request_returns_unified_error_for_missing_request(
     assert payload == {
         "ok": False,
         "error_type": "request_not_found",
-        "error_message": "未找到已保存的 Request",
+        "error_message": "未找到已保存的订阅方案",
         "error_data": {
             "failed_step": "delete_request_snapshot",
             "details": {"request_id": "missing-request"},
@@ -1220,7 +1289,7 @@ def test_delete_request_returns_unified_error_for_delete_failure(
     def fail_delete(*args: object, **kwargs: object) -> dict[str, object]:
         raise Stage1Error(
             "storage_error",
-            f"删除 Request JSON 失败 {tmp_path}/secret-token",
+            f"删除订阅方案 JSON 失败 {tmp_path}/secret-token",
             "delete_request_snapshot",
             {
                 "request_id": "request-1",
@@ -1541,17 +1610,34 @@ def test_create_request_rejects_invalid_mikan_direct_entry(
     assert called is False
 
 
-def test_create_request_rejects_missing_mikan_config_when_source_is_mikan(
+def test_create_request_uses_default_mikan_config_when_source_is_mikan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    called = False
+    captured: dict[str, Any] = {}
+    factory_configs: list[MikanConfig] = []
 
-    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        nonlocal called
-        called = True
-        raise AssertionError("generate_request should not be called for invalid payload")
+    def fake_create_mikan_client(config: MikanConfig) -> _FakeMikanClient:
+        factory_configs.append(config)
+        transport = _FakeMikanTransport(
+            {
+                "https://mikan.example/RSS/Bangumi?bangumiId=123": (
+                    "<rss><channel><item><title>芙莉莲 - 01</title>"
+                    "<link>https://example.invalid/1</link></item></channel></rss>"
+                )
+            }
+        )
+        return _FakeMikanClient(config, transport)
 
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        captured["source_mode"] = kwargs.get("source_mode")
+        captured["mikan_config"] = kwargs.get("mikan_config")
+        return generate_request(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1563,14 +1649,17 @@ def test_create_request_rejects_missing_mikan_config_when_source_is_mikan(
     )
 
     payload = response.get_json()
+    request = payload["result"]["request"]
     assert response.status_code == 200
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert any(
-        error["field"] == "mikan_config"
-        for error in payload["error_data"]["errors"]
-    )
-    assert called is False
+    assert payload["ok"] is True
+    assert captured["source_mode"] == "mikan_http"
+    assert isinstance(captured["mikan_config"], MikanConfig)
+    assert captured["mikan_config"] == default_mikan_config()
+    assert captured["mikan_config"].search_endpoint == "https://mikanani.me/Home/Search"
+    assert captured["mikan_config"].timeout_seconds == 15.0
+    assert factory_configs == [captured["mikan_config"]]
+    assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
 
 
 def test_create_request_rejects_unsupported_source(
@@ -1779,17 +1868,29 @@ def test_candidate_search_api_rejects_empty_query_before_network(
     )
 
 
-def test_candidate_search_api_rejects_missing_mikan_config(
+def test_candidate_search_api_uses_default_mikan_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_if_called(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError(
-            "create_mikan_client should not be called without explicit mikan_config"
-        )
+    transport = _FakeMikanTransport(
+        {
+            "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/2353">葬送的芙莉莲</a>'
+                "</div>"
+                "</section>"
+            )
+        }
+    )
+    received_configs: list[MikanConfig] = []
+
+    def fake_create_mikan_client(config: MikanConfig):
+        received_configs.append(config)
+        return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
         "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
-        fail_if_called,
+        fake_create_mikan_client,
     )
 
     response = _client().post(
@@ -1799,12 +1900,28 @@ def test_candidate_search_api_rejects_missing_mikan_config(
 
     payload = response.get_json()
     assert response.status_code == 200
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert any(
-        error["field"] == "mikan_config"
-        for error in payload["error_data"]["errors"]
-    )
+    assert payload["ok"] is True
+    assert payload["result"]["query"] == "芙莉莲"
+    assert payload["result"]["candidates"] == [
+        {
+            "bangumi_id": "2353",
+            "title": "葬送的芙莉莲",
+            "mikan_url": "https://mikanani.me/Home/Bangumi/2353",
+            "poster_url": None,
+            "source_query": "芙莉莲",
+            "aliases": [],
+            "recommendation": "可能匹配",
+        }
+    ]
+    assert received_configs == [default_mikan_config()]
+    assert received_configs[0].search_endpoint == DEFAULT_MIKAN_SEARCH_ENDPOINT
+    assert received_configs[0].timeout_seconds == DEFAULT_MIKAN_TIMEOUT_SECONDS
+    assert transport.requests == [
+        (
+            "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2",
+            DEFAULT_MIKAN_TIMEOUT_SECONDS,
+        )
+    ]
 
 
 @pytest.mark.parametrize(
@@ -2250,6 +2367,131 @@ def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
     assert saved_path.exists()
 
 
+def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
+    preview = generate_request(EntryRequest(raw_title="咒术回战"))["request"]
+    original_filter = preview["confirmable_config"]["filter_rule"]
+    assert original_filter["must_not_contain"] == ""
+
+    response = _client().post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "request": preview,
+            "patch": {
+                "filter_rule": {
+                    "must_not_contain": "V2",
+                    "use_regex": False,
+                    "case_sensitive": False,
+                }
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    modified = payload["result"]["request"]
+    assert modified["confirmable_config"]["filter_rule"]["must_not_contain"] == "V2"
+    # The preview is recomputed in memory and never written to storage.
+    assert not (tmp_path / "storage").exists()
+
+    # Seeds were recomputed: the Loli source now excludes the V2 seed with a
+    # Chinese exclusion reason, so valid + invalid equals total.
+    selected_group = modified["confirmable_config"]["selected_subtitle_group"]
+    source = next(
+        s for s in modified["source_info"]["rss_sources"]
+        if s["subtitle_group"] == selected_group
+    )
+    assert source["valid_seed_count"] + source["invalid_seed_count"] == source["total_seed_count"]
+    excluded = source["excluded_seed_names"]
+    assert any(
+        "V2" in entry["name"] and entry["reason"] == "命中排除规则：V2"
+        for entry in excluded
+    )
+
+
+def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None:
+    preview = generate_request(EntryRequest(raw_title="咒术回战"))["request"]
+    groups = {s["subtitle_group"] for s in preview["source_info"]["rss_sources"]}
+    current = preview["confirmable_config"]["selected_subtitle_group"]
+    other = next(g for g in groups if g != current)
+
+    response = _client().post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "request": preview,
+            "patch": {"selected_subtitle_group": other},
+        },
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is True
+    modified = payload["result"]["request"]
+    confirmable = modified["confirmable_config"]
+    assert confirmable["selected_subtitle_group"] == other
+    other_source = next(
+        s for s in modified["source_info"]["rss_sources"]
+        if s["subtitle_group"] == other
+    )
+    assert confirmable["selected_rss_url"] == other_source["rss_url"]
+    # effective_seed_names now reflect the newly selected group's valid seeds.
+    assert confirmable["effective_seed_names"] == other_source["valid_seed_names"]
+
+
+def test_preview_modify_rejects_invalid_patch_field() -> None:
+    preview = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+
+    response = _client().post(
+        "/api/v1/requests/preview-modify",
+        json={"request": preview, "patch": {"illegal_field": "x"}},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_modify_patch_field"
+
+
+def test_preview_save_persists_draft_and_enters_confirmation_flow(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+    preview = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+
+    response = _client().post(
+        "/api/v1/requests/preview-save",
+        json={"request": preview, "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert result["request"]["request_id"] == preview["request_id"]
+    assert result["request"]["status"] == "PENDING_CONFIRM"
+    assert result["saved_request"] == {
+        "request_id": preview["request_id"],
+        "storage": "local_json",
+        "directory": "requests",
+        "filename": f"{preview['request_id']}.json",
+    }
+    saved_path = storage_dir / "requests" / f"{preview['request_id']}.json"
+    assert saved_path.exists()
+
+
+def test_preview_save_rejects_non_pending_status() -> None:
+    accepted = accept_request(
+        generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    )
+
+    response = _client().post(
+        "/api/v1/requests/preview-save",
+        json={"request": accepted},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_request_status"
+
+
 def test_create_request_returns_validation_error_for_missing_title() -> None:
     response = _client().post(
         "/api/v1/requests",
@@ -2299,7 +2541,7 @@ def test_create_request_returns_unified_error_for_save_failure(
             "request": None,
             "error": Stage1Error(
                 "storage_error",
-                "保存 Request JSON 失败",
+                "保存订阅方案 JSON 失败",
                 "save_request_snapshot",
                 {
                     "reason": f"cannot write {tmp_path}/private-token at https://example.test/api",
@@ -2326,7 +2568,7 @@ def test_create_request_returns_unified_error_for_save_failure(
     assert response.status_code == 200
     assert payload["ok"] is False
     assert payload["error_type"] == "storage_error"
-    assert payload["error_message"] == "保存 Request JSON 失败"
+    assert payload["error_message"] == "保存订阅方案 JSON 失败"
     assert payload["error_data"]["failed_step"] == "save_request_snapshot"
     assert payload["error_data"]["details"]["directory"] == "requests"
     assert str(tmp_path) not in str(payload)
@@ -2505,7 +2747,7 @@ def test_submit_ab_rejects_non_accepted_request(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert payload["ok"] is False
     assert payload["error_type"] == "invalid_request_status"
-    assert payload["error_message"] == "只有 ACCEPTED Request 可以提交到 Auto Bangumi"
+    assert payload["error_message"] == "只有已确认订阅方案可以提交到 Auto Bangumi"
     assert payload["error_data"]["failed_step"] == "build_ab_subscription_payload"
     assert "secret-token" not in str(payload)
     assert "auto-bangumi.local" not in str(payload)

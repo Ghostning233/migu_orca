@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page
+from tests.browser.conftest import open_dev_fixture_panel
 
 
 pytestmark = pytest.mark.browser
@@ -39,14 +40,14 @@ def test_index_loads_stage13_request_workbench(page: Page, live_server_url: str)
 
     assert page.title().startswith("MiGuOrca")
     assert page.locator("text=MiGuOrca").count() >= 1
-    assert page.locator("text=Stage 13 Request 工作台").count() >= 1
+    assert page.locator("text=Stage 13 订阅方案工作台").count() >= 1
 
     # Top navigation anchors
     nav = page.locator(".top-nav")
     assert nav.count() >= 1
     assert nav.locator("a[href='/index']").count() >= 1
     assert nav.locator("a[href='/settings']").count() >= 1
-    assert nav.locator("text=Request 工作台").count() >= 1
+    assert nav.locator("text=订阅方案工作台").count() >= 1
     assert nav.locator("text=Settings").count() >= 1
 
     # Mode hint
@@ -128,6 +129,7 @@ def test_no_default_storage_pollution(
 def test_generation_form_present(page: Page, live_server_url: str) -> None:
     """The Request generation form is rendered with all expected controls."""
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
 
     assert page.locator("#request-generate-form").count() >= 1
     assert page.locator('input[name="title"]').count() >= 1
@@ -161,6 +163,7 @@ def test_notification_area_present(page: Page, live_server_url: str) -> None:
 def test_accessibility_landmarks(page: Page, live_server_url: str) -> None:
     """The page has basic semantic landmarks for accessibility."""
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
 
     # Form error area is an alert region
     assert page.locator('#request-form-error[role="alert"]').count() >= 1

@@ -10,7 +10,11 @@ from playwright.sync_api import Page
 from request_engine.controllers.request_controller import accept_request
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
-from tests.browser.conftest import create_saved_request, set_storage_preferences
+from tests.browser.conftest import (
+    create_saved_request,
+    open_dev_fixture_panel,
+    set_storage_preferences,
+)
 
 
 pytestmark = pytest.mark.browser
@@ -64,6 +68,7 @@ class TestStage11MikanBrowserRegressions:
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         page.fill('input[name="title"]', "葬送的芙莉莲")
 
         assert page.locator('select[name="source"]').count() == 0
@@ -73,7 +78,7 @@ class TestStage11MikanBrowserRegressions:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert "预览已生成" in page.locator("#page-notification").inner_text()
-        assert "预览（未保存）" in page.locator("#request-detail-container").inner_text()
+        assert "订阅草案（未保存）" in page.locator("#request-detail-container").inner_text()
         assert not storage_dir.exists() or not any(storage_dir.iterdir())
         _assert_sensitive_values_not_rendered(page)
 
@@ -122,7 +127,7 @@ class TestStage11AutoBangumiBrowserRegressions:
         page.locator("#settings-ab-submit").click()
         page.wait_for_timeout(300)
 
-        assert dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
+        assert dialogs == ["确认提交此订阅方案到 Auto Bangumi？"]
         storage_keys = page.evaluate("Object.keys(window.localStorage)")
         session_keys = page.evaluate("Object.keys(window.sessionStorage)")
         assert all("ab" not in key.lower() for key in storage_keys)
@@ -170,7 +175,7 @@ class TestStage11AutoBangumiBrowserRegressions:
 
         assert "req-stage11-ab-fail" in settings_text
         assert "req-stage11-ab-fail" in detail_text
-        assert "ACCEPTED" in detail_text
+        assert "已确认" in detail_text
         assert "咒术回战 第三季" in list_text
         assert "Auto Bangumi 提交失败" in notification_text
         _assert_sensitive_values_not_rendered(page)

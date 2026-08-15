@@ -170,10 +170,10 @@ def generate_request(
         LOGGER.warning("Request 生成失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("Request 生成发生未预期错误")
+        LOGGER.exception("订阅方案生成发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
-            "Request 生成发生未预期错误",
+            "订阅方案生成发生未预期错误",
             "generate_request",
             {"reason": str(exc)},
         )
@@ -228,10 +228,10 @@ def apply_confirmation_action(
         LOGGER.warning("Request 确认失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("Request 确认发生未预期错误")
+        LOGGER.exception("订阅方案确认发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
-            "Request 确认发生未预期错误",
+            "订阅方案确认发生未预期错误",
             "confirm_request",
             {"reason": str(exc)},
         )
@@ -252,10 +252,10 @@ def apply_modify_action(
         LOGGER.warning("Request 修改失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("Request 修改发生未预期错误")
+        LOGGER.exception("订阅方案修改发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
-            "Request 修改发生未预期错误",
+            "订阅方案修改发生未预期错误",
             "modify_request",
             {"reason": str(exc)},
         )
@@ -352,10 +352,10 @@ def apply_request_save_action(
         LOGGER.warning("Request 保存失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("Request 保存发生未预期错误")
+        LOGGER.exception("订阅方案保存发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
-            "Request 保存发生未预期错误",
+            "订阅方案保存发生未预期错误",
             "save_request_snapshot",
             {"reason": str(exc)},
         )
@@ -376,10 +376,10 @@ def list_saved_requests(
         LOGGER.warning("Request 查询失败：%s", exc.message)
         return {"success": False, "requests": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("Request 查询发生未预期错误")
+        LOGGER.exception("订阅方案查询发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
-            "Request 查询发生未预期错误",
+            "订阅方案查询发生未预期错误",
             "list_request_snapshots",
             {"reason": str(exc)},
         )
@@ -399,10 +399,10 @@ def load_saved_request(
         LOGGER.warning("Request 读取失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("Request 读取发生未预期错误")
+        LOGGER.exception("订阅方案读取发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
-            "Request 读取发生未预期错误",
+            "订阅方案读取发生未预期错误",
             "load_request_snapshot",
             {"reason": str(exc)},
         )
@@ -538,7 +538,7 @@ def _run_storage_query_action(args: argparse.Namespace) -> dict[str, Any] | None
     if args.list_requests and args.load_request:
         error = Stage1Error(
             "invalid_input",
-            "Request 查询参数不能同时使用",
+            "订阅方案查询参数不能同时使用",
             "parse_args",
             {"fields": ["list_requests", "load_request"]},
         )

@@ -177,7 +177,7 @@ class TestAutoBangumiSubmitFlow:
         page.locator("#settings-ab-submit").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
-        assert seen_dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
+        assert seen_dialogs == ["确认提交此订阅方案到 Auto Bangumi？"]
         assert "/api/v1/requests/req-ab-submit/submit-ab" in captured["url"]
         assert "browser-secret-token" not in captured["url"]
         assert "ab-endpoint-value" not in captured["url"]
@@ -224,9 +224,13 @@ class TestConfirmFlow:
         page.wait_for_timeout(1500)
 
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "ACCEPTED" in detail_text
-        # Buttons should be gone after refresh
-        assert page.locator("button:has-text('确认')").count() == 0
+        assert "已确认" in detail_text
+        # Confirm action button should be gone after refresh (list items now show
+        # the Chinese status label "已确认", so scope to the detail action area).
+        assert (
+            page.locator("#request-detail-container .detail-actions button:has-text('确认')").count()
+            == 0
+        )
 
     def test_confirm_updates_list_count(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -289,7 +293,7 @@ class TestCancelFlow:
         page.locator("#detail-cancel-form button:has-text('提交取消')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
-        assert dialogs == ["确认取消此 Request？"]
+        assert dialogs == ["确认取消此订阅方案？"]
         assert captured["payload"]["cancel_reason"] == "表单取消原因"
 
     def test_cancel_updates_detail_status(
@@ -305,7 +309,7 @@ class TestCancelFlow:
         page.wait_for_timeout(1500)
 
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "CANCELLED" in detail_text
+        assert "已取消" in detail_text
 
 
 class TestModifyFlow:
@@ -355,9 +359,9 @@ class TestModifyFlow:
         notif = page.locator("#page-notification")
         assert "修改成功" in notif.inner_text()
 
-        # Detail should still show PENDING_CONFIRM (modify keeps status)
+        # Detail should still show 待确认 (modify keeps status)
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "PENDING_CONFIRM" in detail_text
+        assert "待确认" in detail_text
 
     def test_modify_literal_v2_exclude_shows_removed_seed_feedback(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -378,9 +382,9 @@ class TestModifyFlow:
         assert "有效种子数" in detail_text
         assert "排除种子数" in detail_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        valid_group = detail.locator(".seed-group:has-text('有效种子')")
-        excluded_group = detail.locator(".seed-group:has-text('排除种子')")
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        valid_group = detail.locator(".effective-seed-group")
+        excluded_group = detail.locator(".excluded-seed-details .seed-group")
         assert "V2" not in valid_group.inner_text()
         assert "V2" in excluded_group.inner_text()
         assert "命中排除规则" in excluded_group.inner_text()
@@ -398,11 +402,13 @@ class TestModifyFlow:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         detail = page.locator("#request-detail-container")
-        detail.locator(".seed-details").evaluate("element => element.open = true")
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
         detail_text = detail.inner_text()
-        assert "V2" in detail.locator(".seed-group:has-text('排除种子')").inner_text()
-        assert "V2" not in detail.locator(".seed-group:has-text('有效种子')").inner_text()
-        assert "查看筛选种子列表 (完整 2 / 有效 1 / 排除 1)" in detail_text
+        assert "V2" in detail.locator(".excluded-seed-details").inner_text()
+        assert "V2" not in detail.locator(".effective-seed-group").inner_text()
+        assert "有效种子（当前选中字幕组：Loli）(1)" in detail_text
+        assert "完整种子（按字幕组分组）(3)" in detail_text
+        assert "排除种子 (1)" in detail_text
 
     def test_modify_form_hidden_initially(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -507,7 +513,7 @@ class TestModifyFlow:
         assert page.locator("#detail-modify-form").is_visible()
         assert page.locator("#modify-must-not-contain").input_value() == "V2"
         assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
-        assert "PENDING_CONFIRM" in page.locator("#request-detail-container").inner_text()
+        assert "待确认" in page.locator("#request-detail-container").inner_text()
 
 
 class TestModifyFilterOptions:
@@ -701,9 +707,9 @@ class TestFilterDetailDisplay:
         assert "普通字符" in filter_text
         assert "不区分大小写" in filter_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
-        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".excluded-seed-details .seed-group").inner_text()
+        valid_text = detail.locator(".effective-seed-group").inner_text()
         assert "[v2]" in excluded_text
         assert "命中排除规则：[v2]" in excluded_text
         assert "[v2]" not in valid_text
@@ -725,9 +731,9 @@ class TestFilterDetailDisplay:
         assert "v2" in filter_text
         assert "不区分大小写" in filter_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
-        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        valid_text = detail.locator(".effective-seed-group").inner_text()
+        excluded_text = detail.locator(".excluded-seed-details .seed-group").inner_text()
         # Seed 2 contains "V2"; case-insensitive "v2" must match it.
         assert "V2" in valid_text
         assert "未命中包含规则：v2" in excluded_text
@@ -748,9 +754,9 @@ class TestFilterDetailDisplay:
         filter_text = detail.locator(".filter-section").inner_text()
         assert "区分大小写" in filter_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
-        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        valid_text = detail.locator(".effective-seed-group").inner_text()
+        excluded_text = detail.locator(".excluded-seed-details .seed-group").inner_text()
         # Case-sensitive "v2" must NOT match the uppercase "V2" seed.
         assert "V2" not in valid_text
         assert "V2" in excluded_text
@@ -775,9 +781,9 @@ class TestFilterDetailDisplay:
         # Raw user text is shown as-is, never auto-transformed into a different pattern.
         assert "V2 \\[1080p\\]" in filter_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
-        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".excluded-seed-details .seed-group").inner_text()
+        valid_text = detail.locator(".effective-seed-group").inner_text()
         assert "命中排除规则：V2 \\[1080p\\]" in excluded_text
         assert "V2 \\[1080p\\]" not in valid_text
 
@@ -846,7 +852,7 @@ class TestAcceptedRequestManagement:
 
         assert "修改成功" in page.locator("#page-notification").inner_text()
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "ACCEPTED" in detail_text
+        assert "已确认" in detail_text
         assert "ACCEPTED 修改目录" in detail_text
         assert (
             "ACCEPTED"
@@ -868,11 +874,11 @@ class TestAcceptedRequestManagement:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert seen_dialogs
-        assert "确认删除此 Request" in seen_dialogs[0]
+        assert "确认删除此订阅方案" in seen_dialogs[0]
         assert "删除成功" in page.locator("#page-notification").inner_text()
         assert page.locator("[data-request-id='req-accepted-delete']").count() == 0
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "Request 已删除" in detail_text
+        assert "订阅方案已删除" in detail_text
         assert "request_id=" not in page.url
         assert not (storage_dir / "requests" / "req-accepted-delete.json").exists()
 
@@ -920,7 +926,7 @@ class TestAcceptedRequestManagement:
                 json={
                     "ok": False,
                     "error_type": "storage_error",
-                    "error_message": "删除 Request JSON 失败",
+                    "error_message": "删除订阅方案 JSON 失败",
                 },
             )
 
@@ -977,5 +983,5 @@ class TestAcceptedRequestManagement:
         assert page.locator("#detail-modify-form").is_visible()
         assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "ACCEPTED" in detail_text
+        assert "已确认" in detail_text
         assert page.locator("[data-request-id='req-accepted-modify-fail']").count() >= 1

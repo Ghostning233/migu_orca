@@ -89,7 +89,9 @@ class TestStatusFilter:
         filt = page.locator("#request-list-status-filter")
         assert filt.count() >= 1
         options = [opt.inner_text() for opt in filt.locator("option").all()]
-        assert "All" in options or any("PENDING_CONFIRM" in o for o in options)
+        assert "全部" in options or any(
+            label in o for o in options for label in ("待确认", "已确认", "已取消")
+        )
 
 
 class TestSort:
@@ -140,7 +142,7 @@ class TestEmptySearchResult:
 
         container = page.locator("#request-list-container")
         text = container.inner_text()
-        assert "没有匹配的 Request" in text
+        assert "没有匹配的订阅方案" in text
 
     def test_clear_search_restores_full_list(
         self, page: Page, live_server_url: str, storage_with_requests: Path

@@ -28,7 +28,7 @@ def save_request_snapshot(
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
-            "保存 Request JSON 失败",
+            "保存订阅方案 JSON 失败",
             "save_request_snapshot",
             {"request_id": request_id, "directory": config.requests_dir.name},
         ) from exc
@@ -49,7 +49,7 @@ def load_request_snapshot(
     if not request_path.exists():
         raise Stage1Error(
             "request_not_found",
-            "未找到已保存的 Request",
+            "未找到已保存的订阅方案",
             "load_request_snapshot",
             {"request_id": request_id},
         )
@@ -59,14 +59,14 @@ def load_request_snapshot(
     except json.JSONDecodeError as exc:
         raise Stage1Error(
             "storage_json_error",
-            "读取 Request JSON 失败",
+            "读取订阅方案 JSON 失败",
             "load_request_snapshot",
             {"request_id": request_id, "reason": exc.msg},
         ) from exc
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
-            "读取 Request JSON 失败",
+            "读取订阅方案 JSON 失败",
             "load_request_snapshot",
             {"request_id": request_id, "directory": config.requests_dir.name},
         ) from exc
@@ -74,7 +74,7 @@ def load_request_snapshot(
     if not isinstance(loaded, dict):
         raise Stage1Error(
             "storage_json_error",
-            "Request JSON 必须是对象",
+            "订阅方案 JSON 必须是对象",
             "load_request_snapshot",
             {"request_id": request_id},
         )
@@ -90,7 +90,7 @@ def delete_request_snapshot(
     if not request_path.exists():
         raise Stage1Error(
             "request_not_found",
-            "未找到已保存的 Request",
+            "未找到已保存的订阅方案",
             "delete_request_snapshot",
             {"request_id": request_id.strip()},
         )
@@ -100,7 +100,7 @@ def delete_request_snapshot(
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
-            "删除 Request JSON 失败",
+            "删除订阅方案 JSON 失败",
             "delete_request_snapshot",
             {
                 "request_id": request_id.strip(),
@@ -134,7 +134,7 @@ def list_request_snapshots(config: StorageConfig) -> list[dict[str, Any]]:
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
-            "列出已保存 Request 失败",
+            "列出已保存订阅方案失败",
             "list_request_snapshots",
             {"directory": config.requests_dir.name},
         ) from exc

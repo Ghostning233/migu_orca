@@ -22,7 +22,7 @@ def save_ab_submit_result(
     if not isinstance(ab_submit_result, dict):
         raise Stage1Error(
             "invalid_ab_submit_result",
-            "Request 缺少有效 Auto Bangumi 提交结果",
+            "订阅方案缺少有效 Auto Bangumi 提交结果",
             "save_ab_submit_result",
             {"request_id": request_id, "field": "ab_submit_result"},
         )

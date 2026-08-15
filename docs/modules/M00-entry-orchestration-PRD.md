@@ -151,15 +151,45 @@ Stage 17 已将搜索结果候选卡片接入 Web UI `/index`，并且即使只�
 
 AI 番剧名解析只允许作为后续可选增强模块生成多个搜索词；无 API key、无付费能力或 LLM 失败时，M00 仍必须可以通过 Stage 17 手动候选选择或 Stage 16 直连 URL/ID 完成真实 MiKan 流程。
 
-## 12. 已确认事项与待确认问题
+## 12. Stage 18 编排状态（已完成）
 
-### 12.1 已确认事项
+Stage 18 已把真实 MiKan 收敛为 Web 主流程：
+
+```text
+用户输入番剧标题
+  ↓
+使用系统默认 MiKan 配置搜索候选合集
+  ↓
+用户手动选择合集
+  ↓
+解析选中合集详情页
+  ↓
+生成可编辑订阅草案预览
+  ↓
+用户调整字幕组、筛选规则和文件夹名
+  ↓
+保存为正式订阅方案
+```
+
+编排规则（Stage 18 已落地）：
+
+1. Web `/index` 普通主流程以真实 MiKan 候选搜索为入口，不再默认生成 fixture Request。
+2. fixture 生成能力保留给 CLI、API seam、离线开发和回归测试；Web UI 中的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起（`#dev-fixture-disclosure` 不带 `open`），普通用户路径不会触发 fixture 生成。
+3. Web 候选搜索默认使用系统 MiKan 配置（`default_mikan_config()`，endpoint 等价于 `https://mikanani.me/Home/Search`，timeout 15 秒），普通 UI 不要求用户填写 `search_endpoint` 或 `timeout_seconds`。
+4. 直连 URL/ID fallback 独立可用，输入 MiKan `Home/Bangumi/<id>` URL 或 bare ID 后直接复用 Stage 16 `mikan_bangumi` 链路。
+5. 候选选择和直连 fallback 默认先生成未保存预览草案（`save_request=false`），保存动作必须由用户显式触发（`preview-save`）。
+6. 预览阶段允许调整字幕组、筛选规则和文件夹名，通过 `preview-modify` dry-run 同步更新有效/排除种子展示。
+7. AI 番剧名解析仍为可选增强，不是 Stage 18 依赖。
+
+## 13. 已确认事项与待确认问题
+
+### 13.1 已确认事项
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
 | D-M00-03 | 所有字幕组有效种子数为 0 时是否仍生成 Request | 仍生成；默认字幕组和 RSS 为 null，并增加提示 |
 
-### 12.2 待确认问题
+### 13.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |

@@ -3,17 +3,17 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MiGuOrca Request 工作台</title>
+    <title>MiGuOrca 订阅方案工作台</title>
     <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
     <script defer src="{{ url_for('migu_orca_web.static', filename='app.js') }}"></script>
   </head>
   <body>
     <header class="app-header">
       <div class="header-copy">
-        <p class="stage-label">Stage 13 Request 工作台</p>
+        <p class="stage-label">Stage 13 订阅方案工作台</p>
         <h1>MiGuOrca</h1>
         <p class="mode-summary">
-          运行模式：本地 JSON storage；Request 生成默认使用仓库 fixture-backed 数据。外部数据源、连接测试与提交配置集中在 Settings。
+          运行模式：本地 JSON storage；主流程通过真实 MiKan 候选搜索生成订阅方案，fixture-backed 生成保留在开发/离线测试区域。外部数据源、连接测试与提交配置集中在 Settings。
         </p>
       </div>
       {% include "migu_orca_web/_top_nav.html" %}
@@ -30,62 +30,104 @@
 
     <main class="app-layout">
       <section id="generate-panel" class="panel generate-panel" aria-labelledby="generate-heading">
-        <h2 id="generate-heading">Request 生成</h2>
-        <form id="request-generate-form" method="post">
-          <label for="request-title">标题</label>
+        <div class="panel-heading">
+          <h2 id="generate-heading">真实 MiKan 候选搜索</h2>
+        </div>
+
+        <section
+          id="storage-preference-summary"
+          class="preference-summary"
+          aria-labelledby="storage-preference-summary-heading"
+        >
+          <h3 id="storage-preference-summary-heading">Storage 偏好</h3>
+          <p id="storage-preference-summary-text">
+            当前使用默认 `.migu_orca/storage`；默认生成并保存订阅方案，可在 Settings 修改 storage 与保存行为。
+          </p>
+          <a class="secondary-link" href="{{ url_for('migu_orca_web.settings') }}#storage-settings-panel">
+            前往 Settings
+          </a>
+        </section>
+
+        <form id="mikan-candidate-search-form" method="post">
+          <label for="mikan-candidate-query">番剧标题</label>
           <input
-            id="request-title"
-            name="title"
+            id="mikan-candidate-query"
+            name="mikan_candidate_title"
             type="text"
             autocomplete="off"
             placeholder="例如：葬送的芙莉莲"
-            aria-describedby="request-title-help request-form-error"
-            required
+            aria-describedby="mikan-candidate-help mikan-candidate-search-error"
           >
-          <p id="request-title-help" class="field-help">
-            至少输入 1 个非空白字符；提交前会在浏览器中拦截空标题。
+          <p id="mikan-candidate-help" class="field-help">
+            输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
           </p>
+          <p id="mikan-candidate-search-error" class="field-error" role="alert" hidden></p>
 
-          <section
-            id="storage-preference-summary"
-            class="preference-summary"
-            aria-labelledby="storage-preference-summary-heading"
+          <div
+            id="mikan-candidate-search-result"
+            class="empty-state compact-state"
+            aria-live="polite"
+            aria-relevant="additions text"
           >
-            <h3 id="storage-preference-summary-heading">Storage 偏好</h3>
-            <p id="storage-preference-summary-text">
-              当前使用默认 `.migu_orca/storage`；默认生成并保存 Request，可在 Settings 修改 storage 与保存行为。
-            </p>
-            <a class="secondary-link" href="{{ url_for('migu_orca_web.settings') }}#storage-settings-panel">
-              前往 Settings
-            </a>
-          </section>
+            输入番剧标题后搜索候选合集。
+          </div>
 
-          <p id="request-form-error" class="field-error" role="alert" hidden></p>
+          <div class="notification-actions">
+            <button id="mikan-candidate-search-submit" class="primary-button" type="submit">
+              搜索候选
+            </button>
+          </div>
+        </form>
 
-          <button
-            id="request-generate-submit"
-            class="primary-button"
-            type="submit"
-            data-default-label="生成"
+        <label class="checkbox-row" for="mikan-fallback-enabled">
+          <input
+            id="mikan-fallback-enabled"
+            name="mikan_fallback_enabled"
+            type="checkbox"
+            autocomplete="off"
+            aria-describedby="mikan-fallback-gate-help"
           >
-            生成
-          </button>
+          搜索无结果时使用直连合集
+        </label>
+        <p id="mikan-fallback-gate-help" class="field-help">
+          可选：勾选后可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或订阅方案 JSON。
+        </p>
+
+        <form id="mikan-fallback-form" class="candidate-fallback-form" hidden>
+          <label for="mikan-fallback-bangumi">MiKan 合集 URL 或 ID</label>
+          <input
+            id="mikan-fallback-bangumi"
+            name="mikan_fallback_bangumi"
+            type="text"
+            autocomplete="off"
+            placeholder="mikan.example/Home/Bangumi/2353 或 2353"
+            aria-describedby="mikan-fallback-help mikan-fallback-error"
+          >
+          <p id="mikan-fallback-help" class="field-help">
+            仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
+          </p>
+          <p id="mikan-fallback-error" class="field-error" role="alert" hidden></p>
+          <div class="notification-actions">
+            <button id="mikan-fallback-generate" class="secondary-button" type="submit">
+              使用直连合集生成
+            </button>
+          </div>
         </form>
       </section>
 
       <section id="request-list-panel" class="panel request-list-panel" aria-labelledby="request-list-heading">
         <div class="panel-heading">
-          <h2 id="request-list-heading">Request 列表</h2>
+          <h2 id="request-list-heading">订阅方案列表</h2>
           <button
             id="request-list-refresh"
             class="secondary-button"
             type="button"
-            aria-label="刷新 Request 列表"
+            aria-label="刷新订阅方案列表"
           >
             刷新
           </button>
         </div>
-        <div class="request-list-controls" aria-label="Request 列表筛选和排序">
+        <div class="request-list-controls" aria-label="订阅方案列表筛选和排序">
           <label for="request-list-search">搜索</label>
           <input
             id="request-list-search"
@@ -96,7 +138,7 @@
 
           <label for="request-list-status-filter">状态</label>
           <select id="request-list-status-filter">
-            <option value="">All</option>
+            <option value="">全部</option>
           </select>
 
           <label for="request-list-sort">排序</label>
@@ -115,115 +157,64 @@
           aria-live="polite"
           aria-relevant="additions text"
         >
-          暂无已加载的 Request。
+          暂无已加载的订阅方案。
         </div>
-      </section>
-
-      <section
-        id="mikan-candidate-panel"
-        class="panel candidate-search-panel"
-        aria-labelledby="mikan-candidate-heading"
-      >
-        <div class="panel-heading">
-          <h2 id="mikan-candidate-heading">真实 MiKan 候选搜索</h2>
-        </div>
-        <details id="mikan-candidate-search" class="candidate-search-disclosure">
-          <summary>展开候选搜索（可选；默认生成流程不使用真实 MiKan）</summary>
-          <div class="candidate-search-body">
-            <form id="mikan-candidate-search-form">
-              <p class="field-help">
-                可选：显式搜索真实 MiKan 的候选合集，以便检查可用合集。query 与 MiKan config 仅用于本次搜索，不写入浏览器存储、URL 或 Request JSON；搜索结果不会自动选择合集。
-              </p>
-
-              <label for="mikan-candidate-query">query</label>
-              <input
-                id="mikan-candidate-query"
-                name="mikan_candidate_query"
-                type="text"
-                autocomplete="off"
-                placeholder="例如：葬送的芙莉莲"
-                aria-describedby="mikan-candidate-help mikan-candidate-search-error"
-              >
-
-              <label for="mikan-candidate-search-endpoint">search_endpoint</label>
-              <input
-                id="mikan-candidate-search-endpoint"
-                name="mikan_candidate_search_endpoint"
-                type="text"
-                autocomplete="off"
-                placeholder="MiKan 搜索页地址"
-                aria-describedby="mikan-candidate-help mikan-candidate-search-error"
-              >
-
-              <label for="mikan-candidate-timeout-seconds">timeout_seconds</label>
-              <input
-                id="mikan-candidate-timeout-seconds"
-                name="mikan_candidate_timeout_seconds"
-                type="number"
-                min="0.1"
-                step="0.1"
-                value="10"
-                aria-describedby="mikan-candidate-help mikan-candidate-search-error"
-              >
-              <p id="mikan-candidate-help" class="field-help">
-                搜索成功后清空 search_endpoint；失败时保留输入以便重试。
-              </p>
-              <p id="mikan-candidate-search-error" class="field-error" role="alert" hidden></p>
-
-              <div
-                id="mikan-candidate-search-result"
-                class="empty-state compact-state"
-                aria-live="polite"
-                aria-relevant="additions text"
-              >
-                尚未搜索 MiKan 候选。
-              </div>
-
-              <div class="notification-actions">
-                <button id="mikan-candidate-search-submit" class="primary-button" type="submit">
-                  搜索候选
-                </button>
-              </div>
-            </form>
-
-            <form id="mikan-fallback-form" class="candidate-fallback-form">
-              <h3 class="candidate-fallback-heading">搜索无结果时的直连兜底</h3>
-              <p class="field-help">
-                可选：搜索无结果时，可粘贴 MiKan 合集 URL 或数字 ID 直接生成 Request；仅用于本次生成，不写入浏览器存储、URL、history 或 Request JSON。
-              </p>
-              <label for="mikan-fallback-bangumi">MiKan 合集 URL 或 ID</label>
-              <input
-                id="mikan-fallback-bangumi"
-                name="mikan_fallback_bangumi"
-                type="text"
-                autocomplete="off"
-                placeholder="mikan.example/Home/Bangumi/2353 或 2353"
-                aria-describedby="mikan-fallback-help mikan-fallback-error"
-              >
-              <p id="mikan-fallback-help" class="field-help">
-                仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
-              </p>
-              <p id="mikan-fallback-error" class="field-error" role="alert" hidden></p>
-              <div class="notification-actions">
-                <button id="mikan-fallback-generate" class="secondary-button" type="submit">
-                  使用直连合集生成
-                </button>
-              </div>
-            </form>
-          </div>
-        </details>
       </section>
 
       <section id="request-detail-panel" class="panel request-detail-panel" aria-labelledby="request-detail-heading">
-        <h2 id="request-detail-heading">Request 详情</h2>
+        <h2 id="request-detail-heading">订阅方案详情</h2>
         <div
           id="request-detail-container"
           class="empty-state"
           aria-live="polite"
           aria-relevant="additions text"
         >
-          选择一个 Request 后查看详情。
+          选择一个订阅方案后查看详情。
         </div>
+      </section>
+
+      <section
+        id="dev-fixture-panel"
+        class="panel dev-fixture-panel"
+        aria-labelledby="dev-fixture-heading"
+      >
+        <div class="panel-heading">
+          <h2 id="dev-fixture-heading">开发 / 离线测试</h2>
+        </div>
+        <details id="dev-fixture-disclosure">
+          <summary>Fixture 生成（开发 / 离线测试路径，不使用真实 MiKan）</summary>
+          <div class="dev-fixture-body">
+            <p class="field-help">
+              此区域仅供开发与离线测试使用，默认收起；普通用户请使用上方「真实 MiKan 候选搜索」主流程。
+            </p>
+            <form id="request-generate-form" method="post">
+              <label for="request-title">标题</label>
+              <input
+                id="request-title"
+                name="title"
+                type="text"
+                autocomplete="off"
+                placeholder="例如：葬送的芙莉莲"
+                aria-describedby="request-title-help request-form-error"
+                required
+              >
+              <p id="request-title-help" class="field-help">
+                至少输入 1 个非空白字符；提交前会在浏览器中拦截空标题。
+              </p>
+
+              <p id="request-form-error" class="field-error" role="alert" hidden></p>
+
+              <button
+                id="request-generate-submit"
+                class="primary-button"
+                type="submit"
+                data-default-label="生成"
+              >
+                生成
+              </button>
+            </form>
+          </div>
+        </details>
       </section>
 
     </main>

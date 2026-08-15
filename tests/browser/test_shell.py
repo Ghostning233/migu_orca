@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page
 
+from tests.browser.conftest import open_dev_fixture_panel
+
 
 pytestmark = pytest.mark.browser
 
@@ -30,7 +32,7 @@ class TestIndexStage13WorkbenchShell:
         page.goto(f"{live_server_url}/index")
 
         assert page.locator("text=MiGuOrca").count() >= 1
-        assert page.locator("text=Stage 13 Request 工作台").count() >= 1
+        assert page.locator("text=Stage 13 订阅方案工作台").count() >= 1
         # Must NOT mention Stage 7
         assert page.locator("text=Stage 7 Web UI MVP").count() == 0
 
@@ -43,7 +45,7 @@ class TestIndexStage13WorkbenchShell:
             assert nav.locator(f"a[href='{href}']").count() >= 1, (
                 f"Missing nav anchor: {href}"
             )
-        assert nav.locator("text=Request 工作台").count() >= 1
+        assert nav.locator("text=订阅方案工作台").count() >= 1
         assert nav.locator("text=Settings").count() >= 1
 
     def test_mode_hint_describes_local_storage(self, page: Page, live_server_url: str) -> None:
@@ -74,9 +76,9 @@ class TestIndexStage13WorkbenchShell:
         page.goto(f"{live_server_url}/index")
 
         for heading in (
-            "Request 生成",
-            "Request 列表",
-            "Request 详情",
+            "真实 MiKan 候选搜索",
+            "订阅方案列表",
+            "订阅方案详情",
         ):
             assert page.locator(f"text={heading}").count() >= 1, (
                 f"Missing heading: {heading}"
@@ -171,11 +173,14 @@ class TestNoSensitiveContent:
 
     def test_generation_form_descriptions_safe(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
+        # The fixture form is inside the collapsed dev/offline-test disclosure
+        # (US-130), so expand it before asserting its help text is instructional.
+        open_dev_fixture_panel(page)
         body = page.locator("body").inner_text()
         # Form help text should be present and instructional
         assert "至少输入 1 个非空白字符" in body
         assert "当前使用默认 `.migu_orca/storage`" in body
-        assert "默认保存 Request JSON" in body
+        assert "默认保存订阅方案 JSON" in body
         assert "前往 Settings" in body
         assert "search_endpoint" not in body
         assert "timeout_seconds" not in body

@@ -31,7 +31,7 @@ def append_status_history(
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
-            "保存 Request 状态历史失败",
+            "保存订阅方案状态历史失败",
             "append_status_history",
             {"request_id": request_id, "directory": config.history_dir.name},
         ) from exc
@@ -67,14 +67,14 @@ def _load_history_file(
     except json.JSONDecodeError as exc:
         raise Stage1Error(
             "storage_json_error",
-            "读取 Request 状态历史失败",
+            "读取订阅方案状态历史失败",
             failed_step,
             {"request_id": request_id, "reason": exc.msg},
         ) from exc
     except OSError as exc:
         raise Stage1Error(
             "storage_error",
-            "读取 Request 状态历史失败",
+            "读取订阅方案状态历史失败",
             failed_step,
             {"request_id": request_id, "directory": "history"},
         ) from exc
@@ -84,7 +84,7 @@ def _load_history_file(
     ):
         raise Stage1Error(
             "storage_json_error",
-            "Request 状态历史 JSON 必须是对象数组",
+            "订阅方案状态历史 JSON 必须是对象数组",
             failed_step,
             {"request_id": request_id},
         )

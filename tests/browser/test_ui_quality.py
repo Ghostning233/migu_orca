@@ -6,8 +6,14 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from tests.browser.conftest import create_saved_request, set_storage_preferences
-from request_engine.controllers.request_controller import accept_request
+from tests.browser.conftest import (
+    create_saved_request,
+    open_dev_fixture_panel,
+    set_storage_preferences,
+)
+from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from request_engine.controllers.request_controller import accept_request, summarize_request
+from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
 
@@ -28,6 +34,7 @@ def test_index_uses_stage14_visual_hierarchy_and_button_semantics(
     page: Page, live_server_url: str
 ) -> None:
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
 
     expect(page.locator("#generate-panel")).to_be_visible()
     expect(page.locator("#request-list-panel")).to_be_visible()
@@ -111,6 +118,7 @@ def test_notifications_and_state_feedback_do_not_expose_sensitive_values(
     page: Page, live_server_url: str
 ) -> None:
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
     page.fill("#request-title", " ")
     page.click("#request-generate-submit")
 
@@ -173,6 +181,7 @@ def test_stage14_sensitive_settings_values_do_not_persist_or_leak(
 
     set_storage_preferences(page, storage_dir, save_request=True)
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
     page.fill("#request-title", "咒术回战")
     page.click("#request-generate-submit")
     page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -287,7 +296,7 @@ def test_stage15_accepted_modify_delete_do_not_leak_sensitive_values(
     assert "修改成功" in page.locator("#page-notification").inner_text()
 
     detail_text = page.locator("#request-detail-container").inner_text()
-    assert "ACCEPTED" in detail_text
+    assert "已确认" in detail_text
     assert "Stage15 脱敏目录" in detail_text
     # RSS is shown only as "已选择"; the raw endpoint URL must never render.
     assert "已选择" in detail_text
@@ -325,7 +334,7 @@ def test_stage15_accepted_modify_delete_do_not_leak_sensitive_values(
 
     assert not (storage_dir / "requests" / "req-stage15-sec.json").exists()
     assert page.locator("[data-request-id='req-stage15-sec']").count() == 0
-    assert "Request 已删除" in post_delete_state["bodyText"]
+    assert "订阅方案已删除" in post_delete_state["bodyText"]
     assert "request_id=" not in post_delete_state["url"]
 
     for state in (browser_state, post_delete_state):
@@ -341,6 +350,161 @@ def test_stage15_accepted_modify_delete_do_not_leak_sensitive_values(
     )
     for value in sensitive_values:
         assert value not in remaining_storage_json
+
+    local_storage = page.evaluate(
+        """() => Object.fromEntries(
+            Array.from({ length: window.localStorage.length }, (_, index) => {
+                const key = window.localStorage.key(index);
+                return [key, window.localStorage.getItem(key)];
+            })
+        )"""
+    )
+    assert local_storage == {
+        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.saveRequest": "false",
+    }
+
+
+def test_stage18_mikan_primary_flow_does_not_leak_sensitive_values(
+    page: Page, live_server_url: str, storage_dir: Path
+) -> None:
+    """US-131: The Stage 18 MiKan primary workflow must not leak secrets.
+
+    MiKan endpoint, raw HTML, raw RSS XML, cookie, token, raw response body, and
+    magnet must never enter storage JSON, history, browser storage, URL, logs,
+    screenshots, or traces. The values are fed through a mocked candidate search
+    response, then the flow searches, selects a candidate, edits the preview
+    draft, and saves it through the real preview-save backend so every sensitive
+    surface is checked against the persisted snapshot.
+    """
+    sensitive_values = (
+        "http://private-mikan.stage18.local/Home/Search",
+        "stage18-mikan-cookie",
+        "stage18-mikan-token",
+        "<html>stage18 raw html</html>",
+        "<rss version='2.0'>stage18 raw rss</rss>",
+        "stage18 raw response body",
+        "magnet:?xt=urn:btih:stage18sensitivehash",
+    )
+
+    def _fulfill_candidates(route: object, request: Request) -> None:
+        getattr(route, "fulfill")(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "query": "芙莉莲",
+                        "candidates": [
+                            {
+                                "bangumi_id": "42",
+                                "title": "葬送的芙莉莲",
+                                "mikan_url": "https://mikan.example/Home/Bangumi/42",
+                                "poster_url": None,
+                                "source_query": "芙莉莲",
+                                "aliases": [],
+                                "recommendation": None,
+                                # Extra fields a malicious/buggy source could add:
+                                "search_endpoint": sensitive_values[0],
+                                "cookie": sensitive_values[1],
+                                "token": sensitive_values[2],
+                                "raw_html": sensitive_values[3],
+                                "raw_rss_xml": sensitive_values[4],
+                                "raw_response_body": sensitive_values[5],
+                                "magnet": sensitive_values[6],
+                            }
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    page.route("**/api/v1/mikan/candidates", _fulfill_candidates)
+
+    # Return an unsaved static-fixture preview draft for the generation POST so
+    # the flow renders the editable preview without any live MiKan network read.
+    preview = {
+        **generate_request(EntryRequest(raw_title="葬送的芙莉莲"))["request"],
+        "request_id": "req-stage18-sec",
+    }
+    preview_body = json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "request": preview,
+                "summary": summarize_request(preview),
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    def _fulfill_generation(route: object, request: Request) -> None:
+        if getattr(request, "method") != "POST":
+            getattr(route, "continue_")()
+            return
+        getattr(route, "fulfill")(
+            status=200, content_type="application/json", body=preview_body
+        )
+
+    page.route("**/api/v1/requests", _fulfill_generation)
+
+    set_storage_preferences(page, storage_dir, save_request=False)
+    page.goto(f"{live_server_url}/index")
+    page.fill("#mikan-candidate-query", "芙莉莲")
+    page.click("#mikan-candidate-search-submit")
+    expect(page.locator(".candidate-card")).to_have_count(1)
+
+    # The card renderer must only expose public candidate metadata.
+    card_text = page.locator(".candidate-card").inner_text()
+    for value in sensitive_values:
+        assert value not in card_text
+
+    # Manual selection -> editable preview draft (save_request=false).
+    page.locator("button:has-text('选择此合集')").click()
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+    assert "预览已生成" in page.locator("#page-notification").inner_text()
+    assert "request_id=" not in page.url
+
+    # Edit the preview draft, recompute seeds, then persist via the real
+    # preview-save backend so the snapshot reflects the full Stage 18 flow.
+    page.fill("#preview-folder-name", "Stage18 脱敏目录")
+    page.fill("#preview-must-not-contain", "V2")
+    page.click("button:has-text('应用修改')")
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+    page.locator("#request-detail-container button:has-text('保存草案')").click()
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+    assert "request_id=req-stage18-sec" in page.url
+
+    browser_state = page.evaluate(
+        """() => ({
+            url: window.location.href,
+            localStorage: JSON.stringify(window.localStorage),
+            sessionStorage: JSON.stringify(window.sessionStorage),
+            bodyText: document.body.innerText,
+        })"""
+    )
+    for value in sensitive_values:
+        assert value not in browser_state["url"]
+        assert value not in browser_state["localStorage"]
+        assert value not in browser_state["sessionStorage"]
+        assert value not in browser_state["bodyText"]
+
+    saved_path = storage_dir / "requests" / "req-stage18-sec.json"
+    assert saved_path.exists()
+    saved_json = json.loads(saved_path.read_text(encoding="utf-8"))
+    saved_text = json.dumps(saved_json, ensure_ascii=False)
+    for value in sensitive_values:
+        assert value not in saved_text
+    assert saved_json["status"] == "PENDING_CONFIRM"
+
+    # history/ must also stay free of the sensitive values (empty or clean).
+    history_root = storage_dir / "history"
+    if history_root.is_dir():
+        for path in history_root.glob("*.json"):
+            for value in sensitive_values:
+                assert value not in path.read_text(encoding="utf-8")
 
     local_storage = page.evaluate(
         """() => Object.fromEntries(

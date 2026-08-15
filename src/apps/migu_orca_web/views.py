@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, redirect, render_template, url_for
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from extensions.flask_api import class_route
 from extensions.flask_api.api import sanitize_error_data
@@ -28,12 +28,15 @@ from mikan_engine.controllers.mikan_candidate_recommendation import (
     candidate_recommendation_label,
 )
 from mikan_engine.controllers.mikan_client import MikanCandidate
-from mikan_engine.controllers.mikan_config import MikanConfig
+from mikan_engine.controllers.mikan_config import MikanConfig, default_mikan_config
 from qbittorrent_engine.controllers.qbittorrent_controller import (
     test_qbittorrent_connection,
 )
 from qbittorrent_engine.controllers.qbittorrent_config import build_qbittorrent_config
-from request_engine.controllers.request_controller import summarize_request
+from request_engine.controllers.request_controller import (
+    PENDING_CONFIRM,
+    summarize_request,
+)
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import (
@@ -79,7 +82,10 @@ class RequestMikanConfigPayload(BaseModel):
 
 class MikanCandidateSearchPayload(BaseModel):
     query: str
-    mikan_config: RequestMikanConfigPayload
+    mikan_config: RequestMikanConfigPayload | None = Field(
+        default=None,
+        validate_default=True,
+    )
 
     @field_validator("query")
     @classmethod
@@ -117,18 +123,6 @@ class RequestCreatePayload(BaseModel):
             raise ValueError("source must be static-fixture or mikan")
         return source
 
-    @field_validator("mikan_config")
-    @classmethod
-    def validate_mikan_config(
-        cls,
-        value: RequestMikanConfigPayload | None,
-        info: ValidationInfo,
-    ) -> RequestMikanConfigPayload | None:
-        source = info.data.get("source") if info.data is not None else None
-        if source == "mikan" and value is None:
-            raise ValueError("mikan_config is required when source is mikan")
-        return value
-
     @field_validator("mikan_bangumi")
     @classmethod
     def validate_mikan_bangumi(cls, value: str | None) -> str | None:
@@ -153,6 +147,21 @@ class RequestCancelPayload(RequestActionPayload):
 
 class RequestModifyPayload(RequestActionPayload):
     patch: dict[str, Any]
+
+
+class RequestPreviewModifyPayload(BaseModel):
+    """Recompute an unsaved preview request in memory (no persistence)."""
+
+    request: dict[str, Any]
+    patch: dict[str, Any]
+    storage_dir: str | None = None
+
+
+class RequestPreviewSavePayload(BaseModel):
+    """Persist an unsaved, already-modified preview draft."""
+
+    request: dict[str, Any]
+    storage_dir: str | None = None
 
 
 class RequestAbConfigPayload(BaseModel):
@@ -223,18 +232,34 @@ def _storage_dir(value: str | None) -> Path | None:
     return Path(value.strip())
 
 
+def _resolve_mikan_config(explicit: RequestMikanConfigPayload | None) -> MikanConfig:
+    """Build the MiKan config for a request, falling back to system defaults.
+
+    An explicit request-scoped ``mikan_config`` overrides the system default as a
+    test seam or for advanced callers. The resolved config is request-scoped only:
+    it is never written to browser storage, URL state, history, or Request
+    snapshots, and it contains no secrets.
+    """
+    if explicit is not None:
+        return MikanConfig(
+            search_endpoint=explicit.search_endpoint,
+            timeout_seconds=explicit.timeout_seconds,
+        )
+    return default_mikan_config()
+
+
 def _raise_result_error(result: dict[str, Any]) -> None:
     error = result.get("error")
     if not isinstance(error, dict):
         raise Stage1Error(
             "unexpected_error",
-            "Request API 操作失败",
+            "订阅方案 API 操作失败",
             "migu_orca_web_api",
         )
     details = error.get("details")
     raise Stage1Error(
         str(error.get("error_type") or "unexpected_error"),
-        str(error.get("error_message") or "Request API 操作失败"),
+        str(error.get("error_message") or "订阅方案 API 操作失败"),
         str(error.get("failed_step") or "migu_orca_web_api"),
         details if isinstance(details, dict) else None,
     )
@@ -449,11 +474,8 @@ class RequestCreateView(PostView):
         assert isinstance(self.request_validator_model, RequestCreatePayload)
         payload = self.request_validator_model
         mikan_config = None
-        if payload.source == "mikan" and payload.mikan_config is not None:
-            mikan_config = MikanConfig(
-                search_endpoint=payload.mikan_config.search_endpoint,
-                timeout_seconds=payload.mikan_config.timeout_seconds,
-            )
+        if payload.source == "mikan":
+            mikan_config = _resolve_mikan_config(payload.mikan_config)
         result = generate_request(
             EntryRequest(raw_title=payload.title),
             source_mode="mikan_http" if payload.source == "mikan" else "static_fixture",
@@ -481,6 +503,62 @@ class RequestCreateView(PostView):
         return response
 
 
+@class_route(api_blueprint, "/api/v1/requests/preview-modify", methods=["POST"])
+class RequestPreviewModifyView(PostView):
+    request_validator_model = RequestPreviewModifyPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestPreviewModifyPayload)
+        payload = self.request_validator_model
+        # The preview request is an in-memory generated draft (status
+        # PENDING_CONFIRM but never written to storage). modify_request
+        # recomputes per-source seed filters and the selected group's effective
+        # seeds without saving, so the UI can show live seed updates before the
+        # user decides to persist the draft.
+        result = apply_modify_action(
+            {"success": True, "request": payload.request, "error": None},
+            payload.patch,
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        req = result["request"]
+        return {"request": req, "summary": summarize_request(req)}
+
+
+@class_route(api_blueprint, "/api/v1/requests/preview-save", methods=["POST"])
+class RequestPreviewSaveView(PostView):
+    request_validator_model = RequestPreviewSavePayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestPreviewSavePayload)
+        payload = self.request_validator_model
+        request = payload.request
+        # Only a PENDING_CONFIRM draft may be saved; this keeps the saved object
+        # entering the existing confirmation flow (accept/cancel/modify/delete).
+        if request.get("status") != PENDING_CONFIRM:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认的订阅草案可以保存",
+                "save_preview_request",
+                {"status": request.get("status")},
+            )
+        result = apply_request_save_action(
+            {"success": True, "request": request, "error": None},
+            True,
+            storage_dir=_storage_dir(payload.storage_dir),
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        req = result["request"]
+        response: dict[str, object] = {
+            "request": req,
+            "summary": summarize_request(req),
+        }
+        if "saved_request" in result:
+            response["saved_request"] = result["saved_request"]
+        return response
+
+
 @class_route(api_blueprint, "/api/v1/mikan/candidates", methods=["POST"])
 class MikanCandidateSearchView(PostView):
     request_validator_model = MikanCandidateSearchPayload
@@ -488,10 +566,7 @@ class MikanCandidateSearchView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, MikanCandidateSearchPayload)
         payload = self.request_validator_model
-        mikan_config = MikanConfig(
-            search_endpoint=payload.mikan_config.search_endpoint,
-            timeout_seconds=payload.mikan_config.timeout_seconds,
-        )
+        mikan_config = _resolve_mikan_config(payload.mikan_config)
         candidates = _search_mikan_candidates(payload.query, mikan_config)
         return {
             "query": payload.query,

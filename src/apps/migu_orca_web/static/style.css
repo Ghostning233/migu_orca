@@ -162,27 +162,27 @@ h2 {
   grid-column: 1 / -1;
 }
 
-.candidate-search-panel {
+.dev-fixture-panel {
   grid-column: 1 / -1;
 }
 
-.candidate-search-disclosure {
+.dev-fixture-disclosure {
   border: 1px solid #d8dde5;
   border-radius: 6px;
   padding: 12px;
 }
 
-.candidate-search-disclosure summary {
+.dev-fixture-disclosure summary {
   color: #22577a;
   cursor: pointer;
   font-weight: 700;
 }
 
-.candidate-search-disclosure[open] summary {
+.dev-fixture-disclosure[open] summary {
   margin-bottom: 12px;
 }
 
-.candidate-search-body {
+.dev-fixture-body {
   margin-top: 12px;
 }
 
@@ -235,6 +235,19 @@ h2 {
   color: #586273;
   font-size: 0.86rem;
   overflow-wrap: anywhere;
+}
+
+.candidate-fallback-form {
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+}
+
+.candidate-fallback-form[hidden] {
+  display: none;
 }
 
 .acceptance-panel {
@@ -728,6 +741,30 @@ button:disabled {
   color: #1f2937;
   font-size: 0.95rem;
   margin: 0 0 8px;
+}
+
+.effective-seed-group {
+  background: #f8fafc;
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+}
+
+.subgroup-seed-group {
+  border: 1px solid #e6eaf0;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.subgroup-seed-group summary {
+  color: #22577a;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.subgroup-seed-group .seed-list {
+  margin-top: 8px;
 }
 
 .seed-exclude-reason {
