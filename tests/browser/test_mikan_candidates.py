@@ -7,7 +7,8 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.browser.conftest import set_storage_preferences
+from tests.browser.conftest import create_saved_request, set_storage_preferences
+from request_engine.controllers.request_controller import summarize_request
 
 
 pytestmark = pytest.mark.browser
@@ -265,10 +266,11 @@ class TestCandidateSearchNoAutoSelection:
         page.click("#mikan-candidate-search-submit")
 
         expect(page.locator(".candidate-card")).to_have_count(1)
-        # No selection action is offered and no Request is generated or saved.
+        # The explicit selection action is offered, but nothing is selected or
+        # generated automatically even with a single candidate.
         assert (
             page.locator(".candidate-card button:has-text('选择此合集')").count()
-            == 0
+            == 1
         )
         assert "request_id=" not in page.url
         assert not storage_dir.exists() or not any(storage_dir.iterdir())
@@ -362,3 +364,326 @@ class TestCandidateSearchSensitiveBoundary:
             "miguOrca.web.storageDir": str(storage_dir),
             "miguOrca.web.saveRequest": "true",
         }
+
+
+def _candidate(  # type: ignore[no-untyped-def]
+    *,
+    bangumi_id: str,
+    title: str,
+    mikan_url: str,
+    source_query: str = "芙莉莲",
+    poster_url: str | None = None,
+    aliases: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "bangumi_id": bangumi_id,
+        "title": title,
+        "mikan_url": mikan_url,
+        "poster_url": poster_url,
+        "source_query": source_query,
+        "aliases": aliases or [],
+    }
+
+
+def _generation_result_json(saved_request: dict[str, Any]) -> str:
+    """Build a successful `POST /api/v1/requests` response body from a saved request."""
+    return json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "request": saved_request,
+                "summary": summarize_request(saved_request),
+                "saved_request": saved_request,
+            }
+        },
+        ensure_ascii=False,
+    )
+
+
+def _register_generation_capture(
+    page: Page,
+    captured: list[dict[str, Any]],
+    *,
+    body: str,
+) -> None:
+    """Route `POST /api/v1/requests` to capture the payload and return a fake body.
+
+    Non-POST requests (the GET list refresh after generation) pass through to the
+    real Flask backend.
+    """
+
+    def _handler(route: Any, request: Any) -> None:
+        if request.method != "POST":
+            route.continue_()
+            return
+        captured.append(request.post_data_json)
+        route.fulfill(status=200, content_type="application/json", body=body)
+
+    page.route("**/api/v1/requests", _handler)
+
+
+class TestCandidateManualSelection:
+    """AC: 每个候选卡片提供显式「选择此合集」动作，选择后复用 mikan_bangumi 生成 Request."""
+
+    def test_multi_candidate_manual_selection_generates_request(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [
+                        _candidate(
+                            bangumi_id="2353",
+                            title="葬送的芙莉莲",
+                            mikan_url="https://mikan.example/Home/Bangumi/2353",
+                        ),
+                        _candidate(
+                            bangumi_id="3072",
+                            title="咒术回战 第三季",
+                            mikan_url="https://mikan.example/Home/Bangumi/3072",
+                        ),
+                    ],
+                ),
+            ),
+        )
+        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-cand-1")
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(
+            page, captured, body=_generation_result_json(saved)
+        )
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(2)
+
+        # Click the explicit selection action on the first candidate only.
+        page.locator(".candidate-card").nth(0).locator(
+            "button:has-text('选择此合集')"
+        ).click()
+
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        assert captured
+        payload = captured[0]
+        assert payload["source"] == "mikan"
+        assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
+        assert payload["mikan_config"]["search_endpoint"] == "https://mikan.example/Home/Search"
+        assert payload["mikan_config"]["timeout_seconds"] == 5
+        assert payload["title"] == "葬送的芙莉莲"
+        assert payload["save_request"] is True
+
+        # Success flow reuses the existing detail/list/URL-sync behavior.
+        assert "保存成功" in page.locator("#page-notification").inner_text()
+        assert "request_id=req-cand-1" in page.url
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "葬送的芙莉莲" in detail_text
+
+    def test_single_candidate_still_requires_click_then_generates(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [
+                        _candidate(
+                            bangumi_id="42",
+                            title="葬送的芙莉莲",
+                            mikan_url="https://mikan.example/Home/Bangumi/42",
+                        ),
+                    ],
+                ),
+            ),
+        )
+        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-cand-single")
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(
+            page, captured, body=_generation_result_json(saved)
+        )
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(1)
+
+        # Nothing is generated until the explicit click.
+        assert captured == []
+        assert "request_id=" not in page.url
+
+        page.locator("button:has-text('选择此合集')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        assert captured
+        assert captured[0]["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/42"
+
+    def test_generation_failure_preserves_candidates_and_inputs(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [
+                        _candidate(
+                            bangumi_id="42",
+                            title="葬送的芙莉莲",
+                            mikan_url="https://mikan.example/Home/Bangumi/42",
+                        ),
+                    ],
+                ),
+            ),
+        )
+
+        def _fail_generation(route: Any, request: Any) -> None:
+            if request.method != "POST":
+                route.continue_()
+                return
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": False,
+                        "error_type": "mikan_parse_failed",
+                        "error_message": "MiKan 番剧页解析失败",
+                        "error_data": {
+                            "failed_step": "mikan_bangumi_detail",
+                            "details": {"category": "parse"},
+                        },
+                    }
+                ),
+            )
+
+        page.route("**/api/v1/requests", _fail_generation)
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(1)
+
+        page.locator("button:has-text('选择此合集')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        # Unified sanitized error is shown.
+        notif = page.locator("#page-notification").inner_text()
+        assert "生成失败" in notif
+        assert "MiKan 番剧页解析失败" in notif
+
+        # Candidate list and the search inputs are preserved for retry.
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
+        # The endpoint input was cleared by the earlier successful search; the
+        # in-memory config still allowed generation, and failure keeps it usable.
+        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
+
+
+class TestCandidateSelectionSensitiveBoundary:
+    """AC: 候选选择不得把 MiKan config、raw HTML、raw RSS、cookie、token 写入任何持久面."""
+
+    def test_candidate_selection_does_not_leak_sensitive_values(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        sensitive_values = (
+            "http://private-mikan.stage17.local/Home/Search",
+            "stage17-select-token",
+            "stage17-select-cookie",
+            "<html>stage17 select raw html</html>",
+            "<rss version='2.0'>stage17 select raw rss</rss>",
+            "stage17 select raw response body",
+        )
+
+        def _fulfill_candidates(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "query": "芙莉莲",
+                            "candidates": [
+                                {
+                                    **_candidate(
+                                        bangumi_id="42",
+                                        title="葬送的芙莉莲",
+                                        mikan_url="https://mikan.example/Home/Bangumi/42",
+                                    ),
+                                    "token": sensitive_values[1],
+                                    "cookie": sensitive_values[2],
+                                    "raw_html": sensitive_values[3],
+                                    "raw_rss_xml": sensitive_values[4],
+                                    "raw_response_body": sensitive_values[5],
+                                }
+                            ],
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/mikan/candidates", _fulfill_candidates)
+        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-cand-sec")
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(
+            page, captured, body=_generation_result_json(saved)
+        )
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint=sensitive_values[0],
+        )
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(1)
+
+        page.locator("button:has-text('选择此合集')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        assert captured
+
+        # The generation payload carries the request-scoped MiKan config, but
+        # no sensitive surface may retain it.
+        browser_state = page.evaluate(
+            """() => ({
+                url: window.location.href,
+                localStorage: JSON.stringify(window.localStorage),
+                sessionStorage: JSON.stringify(window.sessionStorage),
+                bodyText: document.body.innerText,
+            })"""
+        )
+        for value in sensitive_values:
+            assert value not in browser_state["url"]
+            assert value not in browser_state["localStorage"]
+            assert value not in browser_state["sessionStorage"]
+            assert value not in browser_state["bodyText"]
+
+        # The saved Request JSON is a clean static-fixture snapshot with no
+        # MiKan config, raw HTML/RSS, cookies, or tokens.
+        saved_path = storage_dir / "requests" / "req-cand-sec.json"
+        saved_json = json.loads(saved_path.read_text(encoding="utf-8"))
+        for value in sensitive_values:
+            assert value not in json.dumps(saved_json, ensure_ascii=False)

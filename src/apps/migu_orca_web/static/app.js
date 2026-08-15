@@ -53,6 +53,7 @@
   let currentDetailPayload = null;
   let storageDirPreference = "";
   let saveRequestPreference = true;
+  let lastCandidateSearchConfig = null;
 
   function readPreference(key) {
     try {
@@ -843,6 +844,15 @@
         "来源 query: " + safeText(candidate.source_query || query);
       item.appendChild(source);
 
+      const chooseButton = document.createElement("button");
+      chooseButton.type = "button";
+      chooseButton.className = "primary-button candidate-select";
+      chooseButton.textContent = "选择此合集";
+      chooseButton.addEventListener("click", () => {
+        generateRequestFromCandidate(candidate);
+      });
+      item.appendChild(chooseButton);
+
       list.appendChild(item);
     }
     candidateSearchResult.appendChild(list);
@@ -879,6 +889,17 @@
       });
       const candidates = (result && result.candidates) || [];
       renderCandidateCards(candidates, result.query || payload.query);
+      // Keep the request-scoped MiKan config in memory so selecting a
+      // candidate can reuse the same explicit config for Request generation.
+      // Read the inputs before clearCandidateSensitiveFields() wipes them.
+      lastCandidateSearchConfig = {
+        search_endpoint: candidateEndpointInput
+          ? candidateEndpointInput.value.trim()
+          : "",
+        timeout_seconds: Number(
+          candidateTimeoutInput ? candidateTimeoutInput.value.trim() : 0
+        ),
+      };
       clearCandidateSensitiveFields();
       showNotification(
         "success",
@@ -898,6 +919,62 @@
 
   if (candidateSearchForm) {
     candidateSearchForm.addEventListener("submit", searchMikanCandidates);
+  }
+
+  function setCandidateSelectionInFlight(isInFlight) {
+    const buttons = document.querySelectorAll(".candidate-select");
+    for (const button of buttons) {
+      button.disabled = isInFlight;
+    }
+  }
+
+  async function generateRequestFromCandidate(candidate) {
+    if (!candidate || !candidate.mikan_url) {
+      showNotification(
+        "error",
+        "生成失败",
+        "候选合集缺少 MiKan URL，无法生成 Request。",
+      );
+      return;
+    }
+    if (!lastCandidateSearchConfig) {
+      showNotification(
+        "error",
+        "生成失败",
+        "缺少 MiKan config，请先重新搜索候选。",
+      );
+      return;
+    }
+    hideNotification();
+    setCandidateSelectionInFlight(true);
+    setState(detailContainer, "正在从候选生成 Request...", "loading-state");
+    try {
+      const result = await fetchJson("/api/v1/requests", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          title: candidate.title || "未命名合集",
+          source: "mikan",
+          mikan_config: {
+            search_endpoint: lastCandidateSearchConfig.search_endpoint,
+            timeout_seconds: lastCandidateSearchConfig.timeout_seconds,
+          },
+          mikan_bangumi: candidate.mikan_url,
+          storage_dir: currentStorageDir() || null,
+          save_request: currentSaveRequest(),
+        }),
+      });
+      await finalizeGeneratedRequest(result);
+    } catch (error) {
+      setState(
+        detailContainer,
+        "从候选生成 Request 失败。请重试。",
+        "error-state",
+      );
+      notifyApiError("生成失败", error);
+    } finally {
+      setCandidateSelectionInFlight(false);
+    }
   }
 
   function buildCreateRequestPayload(title, options) {
@@ -1842,6 +1919,44 @@
     }
   }
 
+  async function finalizeGeneratedRequest(result) {
+    var generatedRequestId = result.request && result.request.request_id;
+    selectedRequestId = result.saved_request ? generatedRequestId : null;
+    renderDetailPayload(result, {preview: !result.saved_request});
+    await loadList({loadSelectedDetail: false});
+    if (result.saved_request) {
+      selectedRequestId = generatedRequestId;
+      syncRequestIdToUrl(selectedRequestId);
+      showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+        actions: [
+          {
+            label: "刷新列表",
+            handler: loadList,
+          },
+          {
+            label: "查看详情",
+            handler: () => loadDetail(selectedRequestId),
+          },
+        ],
+      });
+    } else {
+      syncRequestIdToUrl(null, {replace: true});
+      showNotification("success", "预览已生成", "这是未保存预览；保存后才可操作。", {
+        actions: [
+          {
+            label: "保存此 Request",
+            className: "primary-button",
+            handler: () => {
+              if (result.request) {
+                savePreviewRequest(result.request);
+              }
+            },
+          },
+        ],
+      });
+    }
+  }
+
   async function generateRequest(event) {
     event.preventDefault();
     clearFormError();
@@ -1876,41 +1991,7 @@
           ...payload,
         }),
       });
-      var generatedRequestId = result.request && result.request.request_id;
-      selectedRequestId = result.saved_request ? generatedRequestId : null;
-      renderDetailPayload(result, {preview: !result.saved_request});
-      await loadList({loadSelectedDetail: false});
-      if (result.saved_request) {
-        selectedRequestId = generatedRequestId;
-        syncRequestIdToUrl(selectedRequestId);
-        showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
-          actions: [
-            {
-              label: "刷新列表",
-              handler: loadList,
-            },
-            {
-              label: "查看详情",
-              handler: () => loadDetail(selectedRequestId),
-            },
-          ],
-        });
-      } else {
-        syncRequestIdToUrl(null, {replace: true});
-        showNotification("success", "预览已生成", "这是未保存预览；保存后才可操作。", {
-          actions: [
-            {
-              label: "保存此 Request",
-              className: "primary-button",
-              handler: () => {
-                if (result.request) {
-                  savePreviewRequest(result.request);
-                }
-              },
-            },
-          ],
-        });
-      }
+      await finalizeGeneratedRequest(result);
     } catch (error) {
       setState(detailContainer, error.message, "error-state");
       notifyApiError("生成失败", error);

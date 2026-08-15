@@ -76,7 +76,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "这是 Stage 17 的主交互闭环；必须复用 Stage 16 parser，不要复制 detail parser。"
     },
     {

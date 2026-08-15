@@ -383,7 +383,11 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "MiKan ID" in script
     assert "来源 query" in script
     assert "搜索结果不会自动选择合集" not in script
-    assert "选择此合集" not in script
+    assert "选择此合集" in script
+    assert "generateRequestFromCandidate" in script
+    assert "finalizeGeneratedRequest" in script
+    assert "mikan_bangumi" in script
+    assert "lastCandidateSearchConfig" in script
     assert "http://" not in script
     assert "https://" not in script
 
@@ -607,7 +611,7 @@ def test_static_app_script_wires_generation_form_validation_and_busy_state() -> 
     assert "source: \"static-fixture\"" in script
     assert "payload.source = \"mikan\"" not in script
     assert "payload.mikan_config" not in script
-    generate_start = script.index("async function generateRequest")
+    generate_start = script.index("async function generateRequest(")
     generate_end = script.index('refreshButton.addEventListener("click", loadList)')
     generate_script = script[generate_start:generate_end]
     assert generate_script.index("if (!title)") < generate_script.index(
