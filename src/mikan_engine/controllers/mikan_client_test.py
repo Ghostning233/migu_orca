@@ -5,8 +5,11 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
+import mikan_engine.controllers.mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import (
+    MAX_MIKAN_RESPONSE_BYTES,
     _MikanBangumiPageParser,
+    UrlopenMikanTransport,
     create_mikan_client,
 )
 from mikan_engine.controllers.mikan_config import MikanConfig
@@ -32,6 +35,24 @@ class ErrorTransport:
 
     def get_text(self, url: str, *, timeout: float) -> str:
         raise self.error
+
+
+class _FakeUrlopenResponse:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+        self.read_sizes: list[int] = []
+
+    def __enter__(self) -> "_FakeUrlopenResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        if size < 0:
+            return self.body
+        return self.body[:size]
 
 
 def test_create_mikan_client_keeps_explicit_config_and_transport() -> None:
@@ -256,6 +277,83 @@ def test_mikan_search_timeout_is_stable_and_reason_free() -> None:
         "error_message": "MiKan HTTP 请求超时",
         "failed_step": "mikan_search",
         "details": {"category": "timeout"},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_urlopen_transport_uses_bounded_read_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _FakeUrlopenResponse(b"ok")
+    timeouts: list[float] = []
+
+    def fake_urlopen(request: object, *, timeout: float) -> _FakeUrlopenResponse:
+        timeouts.append(timeout)
+        return response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+
+    text = UrlopenMikanTransport().get_text("https://mikan.example/Home/Search", timeout=3)
+
+    assert text == "ok"
+    assert response.read_sizes == [MAX_MIKAN_RESPONSE_BYTES + 1]
+    assert timeouts == [3]
+
+
+def test_mikan_urlopen_oversized_response_is_sanitized_by_call_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_urlopen(request: object, *, timeout: float) -> _FakeUrlopenResponse:
+        return _FakeUrlopenResponse(b"x" * (MAX_MIKAN_RESPONSE_BYTES + 1))
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search?token=secret-token",
+            timeout_seconds=5,
+        )
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.list_bangumi_candidates("芙莉莲")
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_parse_failed",
+        "error_message": "MiKan 页面解析失败",
+        "failed_step": "mikan_search",
+        "details": {"category": "response_too_large"},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_urlopen_encoding_failure_is_sanitized_by_detail_call_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_urlopen(request: object, *, timeout: float) -> _FakeUrlopenResponse:
+        return _FakeUrlopenResponse(b"\xff\xfe")
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        )
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1?cookie=secret-token",
+        match_score=1,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.get_bangumi_detail(matched)
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_parse_failed",
+        "error_message": "MiKan 页面解析失败",
+        "failed_step": "mikan_bangumi_detail",
+        "details": {"category": "encoding"},
     }
     assert "secret-token" not in str(error.value.as_dict())
 

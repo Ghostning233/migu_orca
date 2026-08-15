@@ -91,7 +91,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "人工验证发现实站详情页可能较慢，真实 adapter 不能假定页面总能快速完整返回。"
     },
     {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.error import HTTPError
 
 import pytest
 
@@ -22,6 +23,17 @@ class FakeTransport:
 class FailingTransport:
     def get_text(self, url: str, *, timeout: float) -> str:
         raise OSError("network failed with hidden xml <rss>secret</rss>")
+
+
+class HttpErrorTransport:
+    def get_text(self, url: str, *, timeout: float) -> str:
+        raise HTTPError(
+            "https://mikan.example/RSS/Bangumi?token=secret-token",
+            502,
+            "bad gateway secret-token",
+            {},
+            None,
+        )
 
 
 def test_parse_rss_skips_item_missing_link(tmp_path: Path) -> None:
@@ -110,6 +122,26 @@ def test_parse_mikan_http_read_failure_is_content_free_stage1_error() -> None:
     assert error.value.failed_step == "parse_rss"
     assert "hidden xml" not in error.value.message
     assert "hidden xml" not in str(error.value.details)
+
+
+def test_parse_mikan_http_error_uses_parse_rss_step_and_safe_details() -> None:
+    source = RssSource(
+        "喵萌",
+        "https://mikan.example/RSS/Bangumi?bangumiId=100&token=secret-token",
+        "mikan_http",
+        "",
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        parse_rss(source, Path.cwd(), transport=HttpErrorTransport())
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_http_failed",
+        "error_message": "MiKan HTTP 请求失败",
+        "failed_step": "parse_rss",
+        "details": {"status_code": 502},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
 
 
 def test_parse_mikan_http_invalid_xml_does_not_include_raw_xml() -> None:

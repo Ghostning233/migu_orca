@@ -4,7 +4,11 @@ import re
 import xml.etree.ElementTree as ElementTree
 from pathlib import Path
 
-from mikan_engine.controllers.mikan_client import MikanTransport, UrlopenMikanTransport
+from mikan_engine.controllers.mikan_client import (
+    MikanTransport,
+    UrlopenMikanTransport,
+    _read_mikan_text,
+)
 from shared.errors import Stage1Error
 from shared.models import (
     ExcludedSeed,
@@ -72,7 +76,12 @@ def _load_mikan_http(
 
     rss_transport = transport or UrlopenMikanTransport()
     try:
-        xml_text = rss_transport.get_text(rss_url, timeout=timeout)
+        xml_text = _read_mikan_text(
+            rss_transport,
+            rss_url,
+            timeout=timeout,
+            failed_step="parse_rss",
+        )
     except Stage1Error:
         raise
     except Exception as exc:

@@ -9,6 +9,7 @@ Started: Fri Aug 14 20:20:45 CST 2026
 - `MikanClient.get_bangumi_detail(matched_bangumi)` returns the safe structured `MikanBangumiDetail` model (bangumi metadata, page-level RSS, subgroup RSS, episode title/detail URL summaries); do not add magnet attributes or raw HTML/RSS to this public model or Request snapshots.
 - `MikanClient.list_rss_sources(matched_bangumi)` is now derived from `MikanBangumiDetail`: return deduped subgroup-level `mikan_http` sources first, do not mix in the bangumi-level RSS when subgroup RSS exists, and fallback to one `全部字幕组` source only when no subgroup RSS is available.
 - MiKan direct entry is request-scoped: CLI uses `--mikan-bangumi`, Web API uses `mikan_bangumi`, both require `source=mikan` plus explicit MiKan config; bare ASCII numeric IDs derive `/Home/Bangumi/<id>` from `MikanConfig.search_endpoint`, while direct URLs must be same-origin HTTP(S) `/Home/Bangumi/<numeric-id>` and are normalized without query/fragment before Request snapshots.
+- Real MiKan HTTP reads should go through `_read_mikan_text(..., failed_step=...)` so search, detail, RSS, encoding, timeout, HTTP, connection, and oversized-response failures are assigned the caller's stable `failed_step` with sanitized details only.
 - AI title normalization/search-query enhancement is a low-priority optional backlog item, not a dependency for Stage 16/17 and never a replacement for explicit user collection selection.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
@@ -184,4 +185,19 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: use `MikanBangumiDetail` as the selected direct-entry source of truth, then convert it to `MatchedBangumi` plus `list_rss_sources_from_detail` for the existing Request/RSS/AB pipeline.
   - Gotcha encountered: an explicitly blank direct-entry argument must be distinguished from omitted `mikan_bangumi`; otherwise generation may silently fall back to fuzzy search.
   - Useful context: Stage 16 intentionally did not add a visible Web UI direct-entry control; Stage 17 can layer candidate/direct controls over the request-scoped API field.
+---
+## 2026-08-15 16:44:29 CST - US-114
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Hardened real MiKan reads by moving `UrlopenMikanTransport` to raw bounded reads and centralizing sanitized error mapping in `_read_mikan_text`, so caller-selected steps (`mikan_search`, `mikan_bangumi_detail`, `mikan_list_rss_sources`, `parse_rss`) are preserved instead of being hardcoded by the transport.
+- Added a 2 MB response limit for real MiKan HTTP reads; oversized pages fail with stable `mikan_parse_failed` and `details.category=response_too_large`, without raw HTML, URLs, tokens, or response body content.
+- Added safe handling for UTF-8 decode failures (`details.category=encoding`) and kept HTTP/connection/timeout failures limited to safe fields like `status_code` or `category`.
+- Routed MiKan RSS HTTP reads through the same sanitizer so real RSS read failures use `failed_step=parse_rss` and never expose secret-bearing RSS URLs or raw XML.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/rss_engine/controllers/rss_controller.py`, `src/rss_engine/controllers/rss_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest src/mikan_engine/controllers/mikan_client_test.py -q` passed with 29 tests; `uv run pytest src/rss_engine/controllers/rss_controller_test.py -q` passed with 16 tests; `uv run pytest -q` passed with 336 tests and 156 skipped browser tests because the browser binary is not available in this environment; `uv run pytest tests/browser/ -v` collected 156 browser tests and skipped all for the same reason.
+- Browser verification note: not applicable for US-114 because it is HTTP/parser error-boundary behavior and has no UI changes; browser suite could not execute because Chromium is unavailable.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep real MiKan transport exceptions raw until `_read_mikan_text` can assign the operation-specific `failed_step`; otherwise detail/RSS errors can accidentally look like search failures.
+  - Pattern discovered: safe MiKan error details should stay machine-readable and minimal (`status_code` or `category`), never full endpoint URLs, response bodies, raw HTML, raw RSS XML, cookies, tokens, or exception messages.
+  - Gotcha encountered: `parse_rss` uses the same `UrlopenMikanTransport` for `mikan_http` RSS sources, so MiKan HTTP hardening must include the RSS loader as well as `MikanClient`.
+  - Useful context: there is still no `CODEX.md` under `src/mikan_engine` or `src/rss_engine`; reusable HTTP-boundary knowledge is consolidated in this progress log.
 ---

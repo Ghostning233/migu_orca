@@ -12,6 +12,13 @@ from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, MatchedBangumi, RssSource
 
 
+MAX_MIKAN_RESPONSE_BYTES = 2_000_000
+
+
+class MikanResponseTooLargeError(Exception):
+    """Raised when a MiKan response exceeds the bounded read limit."""
+
+
 @dataclass(frozen=True)
 class MikanEpisodeSummary:
     title: str
@@ -55,47 +62,11 @@ class UrlopenMikanTransport:
             },
             method="GET",
         )
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                body = response.read()
-        except HTTPError as exc:
-            raise Stage1Error(
-                "mikan_http_failed",
-                "MiKan HTTP 请求失败",
-                "mikan_search",
-                {"status_code": exc.code},
-            ) from exc
-        except URLError as exc:
-            reason = getattr(exc, "reason", None)
-            if isinstance(reason, TimeoutError):
-                raise Stage1Error(
-                    "mikan_timeout",
-                    "MiKan HTTP 请求超时",
-                    "mikan_search",
-                    {"category": "timeout"},
-                ) from exc
-            raise Stage1Error(
-                "mikan_connection_failed",
-                "MiKan HTTP 连接失败",
-                "mikan_search",
-                {"category": "connection"},
-            ) from exc
-        except TimeoutError as exc:
-            raise Stage1Error(
-                "mikan_timeout",
-                "MiKan HTTP 请求超时",
-                "mikan_search",
-                {"category": "timeout"},
-            ) from exc
-
-        try:
-            return body.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise Stage1Error(
-                "mikan_parse_failed",
-                "MiKan 搜索页编码无法解析",
-                "mikan_search",
-            ) from exc
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read(MAX_MIKAN_RESPONSE_BYTES + 1)
+        if len(body) > MAX_MIKAN_RESPONSE_BYTES:
+            raise MikanResponseTooLargeError
+        return body.decode("utf-8")
 
 
 class MikanClient:
@@ -306,6 +277,10 @@ def _read_mikan_text(
         raise _mikan_timeout(failed_step) from exc
     except ConnectionError as exc:
         raise _mikan_connection_failed(failed_step) from exc
+    except UnicodeDecodeError as exc:
+        raise _mikan_parse_failed(failed_step, "encoding") from exc
+    except MikanResponseTooLargeError as exc:
+        raise _mikan_parse_failed(failed_step, "response_too_large") from exc
     except Stage1Error as exc:
         raise _sanitize_mikan_stage_error(exc, failed_step) from exc
 
@@ -322,10 +297,10 @@ def _sanitize_mikan_stage_error(error: Stage1Error, failed_step: str) -> Stage1E
     if error.error_type == "mikan_connection_failed":
         return _mikan_connection_failed(failed_step)
     if error.error_type == "mikan_parse_failed":
-        return Stage1Error(
-            "mikan_parse_failed",
-            "MiKan 页面解析失败",
+        category = error.details.get("category")
+        return _mikan_parse_failed(
             failed_step,
+            category if isinstance(category, str) else None,
         )
     return error
 
@@ -362,6 +337,16 @@ def _mikan_timeout(failed_step: str) -> Stage1Error:
         "MiKan HTTP 请求超时",
         failed_step,
         {"category": "timeout"},
+    )
+
+
+def _mikan_parse_failed(failed_step: str, category: str | None = None) -> Stage1Error:
+    details = {"category": category} if category is not None else {}
+    return Stage1Error(
+        "mikan_parse_failed",
+        "MiKan 页面解析失败",
+        failed_step,
+        details,
     )
 
 
