@@ -109,7 +109,7 @@ class TestGenerateWithoutSave:
         notif = page.locator("#page-notification")
         text = notif.inner_text()
         assert "预览已生成" in text
-        assert "预览（未保存）" in page.locator("#request-detail-container").inner_text()
+        assert "订阅草案（未保存）" in page.locator("#request-detail-container").inner_text()
 
     def test_no_storage_written_when_save_unchecked(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -135,7 +135,7 @@ class TestGenerateWithoutSave:
 
         assert "request_id=" not in page.url
 
-    def test_preview_detail_is_read_only_and_does_not_call_saved_actions(
+    def test_preview_detail_is_editable_draft_and_does_not_call_saved_actions(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=False)
@@ -162,12 +162,12 @@ class TestGenerateWithoutSave:
 
         detail = page.locator("#request-detail-container")
         detail_text = detail.inner_text()
-        assert "预览（未保存）" in detail_text
-        assert "预览模式" in detail_text
-        expect(detail.locator(".detail-actions button:has-text('保存此 Request')")).to_be_visible()
+        assert "订阅草案（未保存）" in detail_text
+        expect(detail.locator("#detail-preview-edit-form")).to_be_visible()
+        expect(detail.locator(".detail-actions button:has-text('保存草案')")).to_be_visible()
+        # The preview draft offers no saved-request actions.
         expect(detail.locator(".detail-actions button:has-text('确认')")).to_have_count(0)
         expect(detail.locator(".detail-actions button:has-text('取消')")).to_have_count(0)
-        expect(detail.locator(".detail-actions button:has-text('修改')")).to_have_count(0)
         expect(detail.locator(".detail-actions button:has-text('删除')")).to_have_count(0)
         expect(detail.locator("text=去 Settings 提交 Auto Bangumi")).to_have_count(0)
         expect(detail.locator("#detail-cancel-form")).to_have_count(0)
@@ -186,7 +186,7 @@ class TestGenerateWithoutSave:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         assert "request_id=" not in page.url
 
-        page.locator("#request-detail-container button:has-text('保存此 Request')").click()
+        page.locator("#request-detail-container button:has-text('保存草案')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         text = page.locator("#page-notification").inner_text()

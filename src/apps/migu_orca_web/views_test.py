@@ -431,6 +431,9 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "generateRequestFromFallback" in script
     assert "MiKan 直连合集" in script
     assert "使用直连合集生成" in script
+    # Candidate selection and direct fallback always produce an editable preview
+    # draft (save_request=false); the user explicitly saves it with 保存草案.
+    assert "save_request: false" in script
     assert "http://" not in script
     assert "https://" not in script
 
@@ -552,23 +555,39 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "<rss" not in script.lower()
 
 
-def test_static_app_script_renders_unsaved_preview_as_read_only() -> None:
+def test_static_app_script_renders_unsaved_preview_as_editable_draft() -> None:
     response = _client().get("/migu-orca-static/app.js")
 
     script = response.get_data(as_text=True)
     assert response.status_code == 200
-    assert "预览（未保存）" in script
-    assert "预览模式：此 Request 尚未保存，只能查看" in script
-    assert "保存此 Request" in script
+    assert "订阅草案（未保存）" in script
+    assert "订阅草案（未保存）：可编辑下方订阅方案" in script
+    assert "保存草案" in script
     assert "async function savePreviewRequest" in script
-    assert "buildCreateRequestPayload(title, {saveRequest: true})" in script
+    assert "/api/v1/requests/preview-save" in script
+    assert "/api/v1/requests/preview-modify" in script
+    assert "async function previewModify" in script
+    assert "collectPreviewEditPatch" in script
+    assert "buildPreviewEditForm" in script
+    assert "detail-preview-edit-form" in script
+    assert "preview-subtitle-group" in script
+    assert "preview-must-contain" in script
+    assert "preview-must-not-contain" in script
+    assert "preview-filter-use-regex" in script
+    assert "preview-filter-case-sensitive" in script
+    assert "preview-folder-name" in script
+    assert "应用修改" in script
     assert "renderDetailPayload(result, {preview: !result.saved_request})" in script
     assert "selectedRequestId = result.saved_request ? generatedRequestId : null" in script
     assert "syncRequestIdToUrl(null, {replace: true})" in script
+    # The preview draft never renders confirm/cancel/delete/AB actions.
     assert script.index("if (isPreview)") < script.index("} else if (isPending)")
     assert script.index("if (isPreview)") < script.index(
         'performAction(request.request_id, "accept", {})'
     )
+    # The preview edit form is distinct from the saved-request modify form.
+    assert "detail-modify-form" in script
+    assert "detail-preview-edit-form" in script
 
 
 def test_static_app_script_shows_action_success_after_refresh() -> None:
@@ -2312,6 +2331,131 @@ def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
         "filename": f"{payload['result']['request']['request_id']}.json",
     }
     assert saved_path.exists()
+
+
+def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
+    preview = generate_request(EntryRequest(raw_title="咒术回战"))["request"]
+    original_filter = preview["confirmable_config"]["filter_rule"]
+    assert original_filter["must_not_contain"] == ""
+
+    response = _client().post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "request": preview,
+            "patch": {
+                "filter_rule": {
+                    "must_not_contain": "V2",
+                    "use_regex": False,
+                    "case_sensitive": False,
+                }
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    modified = payload["result"]["request"]
+    assert modified["confirmable_config"]["filter_rule"]["must_not_contain"] == "V2"
+    # The preview is recomputed in memory and never written to storage.
+    assert not (tmp_path / "storage").exists()
+
+    # Seeds were recomputed: the Loli source now excludes the V2 seed with a
+    # Chinese exclusion reason, so valid + invalid equals total.
+    selected_group = modified["confirmable_config"]["selected_subtitle_group"]
+    source = next(
+        s for s in modified["source_info"]["rss_sources"]
+        if s["subtitle_group"] == selected_group
+    )
+    assert source["valid_seed_count"] + source["invalid_seed_count"] == source["total_seed_count"]
+    excluded = source["excluded_seed_names"]
+    assert any(
+        "V2" in entry["name"] and entry["reason"] == "命中排除规则：V2"
+        for entry in excluded
+    )
+
+
+def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None:
+    preview = generate_request(EntryRequest(raw_title="咒术回战"))["request"]
+    groups = {s["subtitle_group"] for s in preview["source_info"]["rss_sources"]}
+    current = preview["confirmable_config"]["selected_subtitle_group"]
+    other = next(g for g in groups if g != current)
+
+    response = _client().post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "request": preview,
+            "patch": {"selected_subtitle_group": other},
+        },
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is True
+    modified = payload["result"]["request"]
+    confirmable = modified["confirmable_config"]
+    assert confirmable["selected_subtitle_group"] == other
+    other_source = next(
+        s for s in modified["source_info"]["rss_sources"]
+        if s["subtitle_group"] == other
+    )
+    assert confirmable["selected_rss_url"] == other_source["rss_url"]
+    # effective_seed_names now reflect the newly selected group's valid seeds.
+    assert confirmable["effective_seed_names"] == other_source["valid_seed_names"]
+
+
+def test_preview_modify_rejects_invalid_patch_field() -> None:
+    preview = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+
+    response = _client().post(
+        "/api/v1/requests/preview-modify",
+        json={"request": preview, "patch": {"illegal_field": "x"}},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_modify_patch_field"
+
+
+def test_preview_save_persists_draft_and_enters_confirmation_flow(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+    preview = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+
+    response = _client().post(
+        "/api/v1/requests/preview-save",
+        json={"request": preview, "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert result["request"]["request_id"] == preview["request_id"]
+    assert result["request"]["status"] == "PENDING_CONFIRM"
+    assert result["saved_request"] == {
+        "request_id": preview["request_id"],
+        "storage": "local_json",
+        "directory": "requests",
+        "filename": f"{preview['request_id']}.json",
+    }
+    saved_path = storage_dir / "requests" / f"{preview['request_id']}.json"
+    assert saved_path.exists()
+
+
+def test_preview_save_rejects_non_pending_status() -> None:
+    accepted = accept_request(
+        generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    )
+
+    response = _client().post(
+        "/api/v1/requests/preview-save",
+        json={"request": accepted},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_request_status"
 
 
 def test_create_request_returns_validation_error_for_missing_title() -> None:

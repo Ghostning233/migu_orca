@@ -975,7 +975,9 @@
     try {
       // The server resolves the system-default MiKan config when no
       // request-scoped config is sent, so candidate generation only needs the
-      // selected candidate's normalized bangumi URL.
+      // selected candidate's normalized bangumi URL. Candidate selection always
+      // produces an editable preview draft (save_request=false); the user
+      // explicitly saves it with 保存草案.
       const result = await fetchJson("/api/v1/requests", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -984,7 +986,7 @@
           source: "mikan",
           mikan_bangumi: candidate.mikan_url,
           storage_dir: currentStorageDir() || null,
-          save_request: currentSaveRequest(),
+          save_request: false,
         }),
       });
       await finalizeGeneratedRequest(result);
@@ -1036,6 +1038,7 @@
     try {
       // No request-scoped MiKan config is sent: the server falls back to the
       // system default, so the fallback works without a user-supplied endpoint.
+      // Direct fallback also produces an editable preview draft (save_request=false).
       const result = await fetchJson("/api/v1/requests", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
@@ -1044,7 +1047,7 @@
           source: "mikan",
           mikan_bangumi: fallbackValue,
           storage_dir: currentStorageDir() || null,
-          save_request: currentSaveRequest(),
+          save_request: false,
         }),
       });
       await finalizeGeneratedRequest(result);
@@ -1675,6 +1678,141 @@
     return container;
   }
 
+  function buildPreviewEditForm(request) {
+    // Editable preview draft form. Unlike the saved-request modify form this is
+    // always visible, uses the dry-run preview-modify endpoint to recompute seed
+    // display, and never calls the saved modify API.
+    const config = request.confirmable_config || {};
+    const sourceInfo = request.source_info || {};
+    const rssSources = sourceInfo.rss_sources || [];
+    const filterRule = config.filter_rule || {};
+    const originalGroup = config.selected_subtitle_group || "";
+    const originalMustContain = filterRule.must_contain || "";
+    const originalMustNotContain = filterRule.must_not_contain || "";
+    const originalUseRegex = filterRule.use_regex === true;
+    const originalCaseSensitive = filterRule.case_sensitive === true;
+    const originalFolderName = config.expected_folder_name || "";
+
+    const container = document.createElement("div");
+    container.id = "detail-preview-edit-form";
+    container.className = "detail-section detail-inline-form detail-preview-edit-form";
+
+    const heading = document.createElement("h4");
+    heading.textContent = "编辑订阅草案";
+    container.appendChild(heading);
+
+    const groupLabel = document.createElement("label");
+    groupLabel.textContent = "字幕组";
+    groupLabel.htmlFor = "preview-subtitle-group";
+    const groupSelect = document.createElement("select");
+    groupSelect.id = "preview-subtitle-group";
+    for (let i = 0; i < rssSources.length; i++) {
+      const src = rssSources[i];
+      const opt = document.createElement("option");
+      opt.value = src.subtitle_group || "";
+      opt.textContent = src.subtitle_group || "未知字幕组";
+      groupSelect.appendChild(opt);
+    }
+    groupSelect.value = originalGroup;
+    container.appendChild(groupLabel);
+    container.appendChild(groupSelect);
+
+    const mcLabel = document.createElement("label");
+    mcLabel.textContent = "包含规则";
+    mcLabel.htmlFor = "preview-must-contain";
+    const mcInput = document.createElement("input");
+    mcInput.id = "preview-must-contain";
+    mcInput.type = "text";
+    mcInput.value = originalMustContain;
+    mcInput.placeholder = "如 1080p（默认按字面匹配）";
+    container.appendChild(mcLabel);
+    container.appendChild(mcInput);
+
+    const mncLabel = document.createElement("label");
+    mncLabel.textContent = "排除规则";
+    mncLabel.htmlFor = "preview-must-not-contain";
+    const mncInput = document.createElement("input");
+    mncInput.id = "preview-must-not-contain";
+    mncInput.type = "text";
+    mncInput.value = originalMustNotContain;
+    mncInput.placeholder = "如 [v2]（默认按字面匹配）";
+    container.appendChild(mncLabel);
+    container.appendChild(mncInput);
+
+    const filterOptions = document.createElement("div");
+    filterOptions.className = "filter-options";
+
+    const regexWrapper = document.createElement("label");
+    regexWrapper.className = "inline-check filter-option";
+    regexWrapper.htmlFor = "preview-filter-use-regex";
+    const regexInput = document.createElement("input");
+    regexInput.id = "preview-filter-use-regex";
+    regexInput.type = "checkbox";
+    regexInput.checked = originalUseRegex;
+    regexWrapper.append(regexInput, document.createTextNode("使用正则"));
+    filterOptions.appendChild(regexWrapper);
+
+    const caseWrapper = document.createElement("label");
+    caseWrapper.className = "inline-check filter-option";
+    caseWrapper.htmlFor = "preview-filter-case-sensitive";
+    const caseInput = document.createElement("input");
+    caseInput.id = "preview-filter-case-sensitive";
+    caseInput.type = "checkbox";
+    caseInput.checked = originalCaseSensitive;
+    caseWrapper.append(caseInput, document.createTextNode("大小写敏感"));
+    filterOptions.appendChild(caseWrapper);
+
+    container.appendChild(filterOptions);
+
+    const filterHelp = document.createElement("p");
+    filterHelp.id = "preview-filter-help";
+    filterHelp.className = "field-help";
+    filterHelp.textContent =
+      "默认按字面文本匹配且不区分大小写；勾选「使用正则」后按正则匹配，勾选「大小写敏感」后区分大小写。";
+    container.appendChild(filterHelp);
+
+    const fnLabel = document.createElement("label");
+    fnLabel.textContent = "folder_name";
+    fnLabel.htmlFor = "preview-folder-name";
+    const fnInput = document.createElement("input");
+    fnInput.id = "preview-folder-name";
+    fnInput.type = "text";
+    fnInput.value = originalFolderName;
+    fnInput.placeholder = "期望存储目录名";
+    container.appendChild(fnLabel);
+    container.appendChild(fnInput);
+
+    const formError = document.createElement("p");
+    formError.id = "preview-edit-error";
+    formError.className = "field-error";
+    formError.setAttribute("role", "alert");
+    formError.hidden = true;
+    container.appendChild(formError);
+
+    const btnRow = document.createElement("div");
+    btnRow.className = "notification-actions";
+
+    const applyBtn = document.createElement("button");
+    applyBtn.type = "button";
+    applyBtn.className = "primary-button detail-action";
+    applyBtn.textContent = "应用修改";
+    applyBtn.addEventListener("click", function () {
+      formError.hidden = true;
+      formError.textContent = "";
+      const patch = collectPreviewEditPatch(request);
+      if (!patch || !Object.keys(patch).length) {
+        formError.textContent = "请至少修改一个字段。";
+        formError.hidden = false;
+        return;
+      }
+      previewModifyAndRerender(request, patch);
+    });
+    btnRow.appendChild(applyBtn);
+
+    container.appendChild(btnRow);
+    return container;
+  }
+
   function buildCancelForm(request) {
     var container = document.createElement("div");
     container.id = "detail-cancel-form";
@@ -1726,38 +1864,146 @@
   }
 
   async function savePreviewRequest(request) {
-    const title = request && request.input && request.input.raw_title
-      ? request.input.raw_title
-      : "";
-    if (!title) {
-      showNotification("error", "保存失败", "预览 Request 缺少标题，无法保存。");
+    if (!request) {
+      showNotification("error", "保存失败", "订阅草案缺失，无法保存。");
       return;
     }
 
     hideNotification();
-    setSubmitInFlight(true);
-    setState(detailContainer, "正在保存预览 Request...", "loading-state");
+    setActionInFlight(true);
+    setState(detailContainer, "正在保存订阅草案...", "loading-state");
     try {
-      const result = await fetchJson("/api/v1/requests", {
+      // Persist the (possibly modified) preview draft as-is. The server only
+      // accepts PENDING_CONFIRM drafts, so the saved object enters the existing
+      // confirmation flow and can then be confirmed, cancelled, modified, or
+      // deleted like any other saved Request.
+      const result = await fetchJson("/api/v1/requests/preview-save", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(buildCreateRequestPayload(title, {saveRequest: true})),
+        body: JSON.stringify({
+          request: request,
+          storage_dir: currentStorageDir() || null,
+        }),
       });
-      selectedRequestId = result.request && result.request.request_id;
+      const generatedRequestId = result.request && result.request.request_id;
+      selectedRequestId = generatedRequestId;
       renderDetailPayload(result);
       await loadList({loadSelectedDetail: false});
       syncRequestIdToUrl(selectedRequestId);
-      showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+      showNotification("success", "保存成功", "已保存订阅草案 " + selectedRequestId, {
         actions: [
           { label: "刷新列表", handler: loadList },
           { label: "查看详情", handler: () => loadDetail(selectedRequestId) },
         ],
       });
     } catch (error) {
-      setState(detailContainer, "预览 Request 保存失败。请稍后重试。", "error-state");
+      setState(detailContainer, "订阅草案保存失败。请稍后重试。", "error-state");
       notifyApiError("保存失败", error);
     } finally {
-      setSubmitInFlight(false);
+      setActionInFlight(false);
+    }
+  }
+
+  function collectPreviewEditPatch(request) {
+    // Read the currently visible preview edit form and build a modify patch
+    // against the request's current config. Returns null when the form is
+    // absent, and an empty object when nothing changed.
+    const form = document.getElementById("detail-preview-edit-form");
+    if (!form || !request) {
+      return null;
+    }
+    const config = request.confirmable_config || {};
+    const filterRule = config.filter_rule || {};
+    const originalGroup = config.selected_subtitle_group || "";
+    const originalMustContain = filterRule.must_contain || "";
+    const originalMustNotContain = filterRule.must_not_contain || "";
+    const originalUseRegex = filterRule.use_regex === true;
+    const originalCaseSensitive = filterRule.case_sensitive === true;
+    const originalFolderName = config.expected_folder_name || "";
+
+    const groupSelect = form.querySelector("#preview-subtitle-group");
+    const mcInput = form.querySelector("#preview-must-contain");
+    const mncInput = form.querySelector("#preview-must-not-contain");
+    const regexInput = form.querySelector("#preview-filter-use-regex");
+    const caseInput = form.querySelector("#preview-filter-case-sensitive");
+    const fnInput = form.querySelector("#preview-folder-name");
+
+    const patch = {};
+    if (groupSelect && groupSelect.value && groupSelect.value !== originalGroup) {
+      patch.selected_subtitle_group = groupSelect.value;
+    }
+    const mcVal = mcInput ? mcInput.value.trim() : "";
+    const mncVal = mncInput ? mncInput.value.trim() : "";
+    const useRegex = regexInput ? regexInput.checked : false;
+    const caseSensitive = caseInput ? caseInput.checked : false;
+    const mcChanged = mcVal !== originalMustContain;
+    const mncChanged = mncVal !== originalMustNotContain;
+    if (
+      mcChanged ||
+      mncChanged ||
+      useRegex !== originalUseRegex ||
+      caseSensitive !== originalCaseSensitive
+    ) {
+      patch.filter_rule = {};
+      if (mcChanged) {
+        patch.filter_rule.must_contain = mcVal;
+      }
+      if (mncChanged) {
+        patch.filter_rule.must_not_contain = mncVal;
+      }
+      patch.filter_rule.use_regex = useRegex;
+      patch.filter_rule.case_sensitive = caseSensitive;
+    }
+    const fnVal = fnInput ? fnInput.value.trim() : "";
+    if (fnVal !== originalFolderName) {
+      patch.expected_folder_name = fnVal;
+    }
+    return patch;
+  }
+
+  async function previewModify(request, patch) {
+    // Dry-run modify: recompute the in-memory preview request without saving.
+    const result = await fetchJson("/api/v1/requests/preview-modify", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        request: request,
+        patch: patch || {},
+        storage_dir: currentStorageDir() || null,
+      }),
+    });
+    return result && result.request;
+  }
+
+  function updateCurrentPreviewRequest(modified) {
+    if (currentDetailPayload && typeof currentDetailPayload === "object") {
+      if (currentDetailPayload.request) {
+        currentDetailPayload.request = modified;
+      } else {
+        currentDetailPayload = modified;
+      }
+    } else {
+      currentDetailPayload = modified;
+    }
+  }
+
+  async function previewModifyAndRerender(request, patch) {
+    hideNotification();
+    setActionInFlight(true);
+    setState(detailContainer, "正在重新计算订阅草案...", "loading-state");
+    try {
+      const modified = await previewModify(request, patch);
+      if (!modified) {
+        throw new Error("订阅草案修改失败。");
+      }
+      updateCurrentPreviewRequest(modified);
+      renderDetailPayload(currentDetailPayload, {preview: true});
+      showNotification("success", "已应用修改", "订阅草案种子展示已重新计算。");
+    } catch (error) {
+      setState(detailContainer, "订阅草案修改失败。请重试。", "error-state");
+      notifyApiError("修改失败", error);
+    } finally {
+      setActionInFlight(false);
     }
   }
 
@@ -1791,7 +2037,7 @@
     var overviewFields = detailList([
       ["request_id", request.request_id],
       ["status", request.status],
-      ["保存状态", isPreview ? "预览（未保存）" : "已保存"],
+      ["保存状态", isPreview ? "订阅草案（未保存）" : "已保存"],
       ["原始标题", input.raw_title],
       ["匹配标题", matched.title],
     ]);
@@ -1814,17 +2060,27 @@
       var previewNote = document.createElement("p");
       previewNote.className = "field-help preview-mode-note";
       previewNote.textContent =
-        "预览模式：此 Request 尚未保存，只能查看，保存后才可确认、取消、修改、删除或提交 Auto Bangumi。";
+        "订阅草案（未保存）：可编辑下方订阅方案；点击「应用修改」重新计算种子展示，点击「保存草案」后进入待确认流程。";
       actionsContainer.appendChild(previewNote);
 
-      var savePreviewBtn = document.createElement("button");
-      savePreviewBtn.type = "button";
-      savePreviewBtn.className = "primary-button detail-action";
-      savePreviewBtn.textContent = "保存此 Request";
-      savePreviewBtn.addEventListener("click", function () {
-        savePreviewRequest(request);
+      var saveDraftBtn = document.createElement("button");
+      saveDraftBtn.type = "button";
+      saveDraftBtn.className = "primary-button detail-action";
+      saveDraftBtn.textContent = "保存草案";
+      saveDraftBtn.addEventListener("click", async function () {
+        var patch = collectPreviewEditPatch(request);
+        if (patch && Object.keys(patch).length) {
+          try {
+            var modified = await previewModify(request, patch);
+            savePreviewRequest(modified);
+          } catch (error) {
+            notifyApiError("保存失败", error);
+          }
+        } else {
+          savePreviewRequest(request);
+        }
       });
-      actionsContainer.appendChild(savePreviewBtn);
+      actionsContainer.appendChild(saveDraftBtn);
     } else if (isPending) {
       var acceptBtn = document.createElement("button");
       acceptBtn.type = "button";
@@ -1903,7 +2159,7 @@
     }
 
     var cancelForm = isPreview ? document.createDocumentFragment() : buildCancelForm(request);
-    var modifyForm = isPreview ? document.createDocumentFragment() : buildModifyForm(request);
+    var modifyForm = isPreview ? buildPreviewEditForm(request) : buildModifyForm(request);
     var sourceSection = createDetailSection("Source", "source-section");
     sourceSection.appendChild(
       detailList([
@@ -2027,19 +2283,28 @@
       });
     } else {
       syncRequestIdToUrl(null, {replace: true});
-      showNotification("success", "预览已生成", "这是未保存预览；保存后才可操作。", {
-        actions: [
-          {
-            label: "保存此 Request",
-            className: "primary-button",
-            handler: () => {
-              if (result.request) {
-                savePreviewRequest(result.request);
-              }
+      showNotification(
+        "success",
+        "预览已生成",
+        "这是未保存的订阅草案；保存后可确认、修改或删除。",
+        {
+          actions: [
+            {
+              label: "保存草案",
+              className: "primary-button",
+              handler: () => {
+                const current =
+                  (currentDetailPayload && currentDetailPayload.request) ||
+                  result.request ||
+                  null;
+                if (current) {
+                  savePreviewRequest(current);
+                }
+              },
             },
-          },
-        ],
-      });
+          ],
+        },
+      );
     }
   }
 

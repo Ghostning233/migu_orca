@@ -33,7 +33,10 @@ from qbittorrent_engine.controllers.qbittorrent_controller import (
     test_qbittorrent_connection,
 )
 from qbittorrent_engine.controllers.qbittorrent_config import build_qbittorrent_config
-from request_engine.controllers.request_controller import summarize_request
+from request_engine.controllers.request_controller import (
+    PENDING_CONFIRM,
+    summarize_request,
+)
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import (
@@ -144,6 +147,21 @@ class RequestCancelPayload(RequestActionPayload):
 
 class RequestModifyPayload(RequestActionPayload):
     patch: dict[str, Any]
+
+
+class RequestPreviewModifyPayload(BaseModel):
+    """Recompute an unsaved preview request in memory (no persistence)."""
+
+    request: dict[str, Any]
+    patch: dict[str, Any]
+    storage_dir: str | None = None
+
+
+class RequestPreviewSavePayload(BaseModel):
+    """Persist an unsaved, already-modified preview draft."""
+
+    request: dict[str, Any]
+    storage_dir: str | None = None
 
 
 class RequestAbConfigPayload(BaseModel):
@@ -479,6 +497,62 @@ class RequestCreateView(PostView):
         response: dict[str, object] = {
             "request": request,
             "summary": summarize_request(request),
+        }
+        if "saved_request" in result:
+            response["saved_request"] = result["saved_request"]
+        return response
+
+
+@class_route(api_blueprint, "/api/v1/requests/preview-modify", methods=["POST"])
+class RequestPreviewModifyView(PostView):
+    request_validator_model = RequestPreviewModifyPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestPreviewModifyPayload)
+        payload = self.request_validator_model
+        # The preview request is an in-memory generated draft (status
+        # PENDING_CONFIRM but never written to storage). modify_request
+        # recomputes per-source seed filters and the selected group's effective
+        # seeds without saving, so the UI can show live seed updates before the
+        # user decides to persist the draft.
+        result = apply_modify_action(
+            {"success": True, "request": payload.request, "error": None},
+            payload.patch,
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        req = result["request"]
+        return {"request": req, "summary": summarize_request(req)}
+
+
+@class_route(api_blueprint, "/api/v1/requests/preview-save", methods=["POST"])
+class RequestPreviewSaveView(PostView):
+    request_validator_model = RequestPreviewSavePayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestPreviewSavePayload)
+        payload = self.request_validator_model
+        request = payload.request
+        # Only a PENDING_CONFIRM draft may be saved; this keeps the saved object
+        # entering the existing confirmation flow (accept/cancel/modify/delete).
+        if request.get("status") != PENDING_CONFIRM:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认的订阅草案可以保存",
+                "save_preview_request",
+                {"status": request.get("status")},
+            )
+        result = apply_request_save_action(
+            {"success": True, "request": request, "error": None},
+            True,
+            storage_dir=_storage_dir(payload.storage_dir),
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        req = result["request"]
+        response: dict[str, object] = {
+            "request": req,
+            "summary": summarize_request(req),
         }
         if "saved_request" in result:
             response["saved_request"] = result["saved_request"]

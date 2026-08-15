@@ -80,7 +80,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "预览可编辑是主流程质量门槛；不能只保存后再允许修改。"
     },
     {

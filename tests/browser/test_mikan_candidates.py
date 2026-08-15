@@ -8,7 +8,9 @@ import pytest
 from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import create_saved_request, set_storage_preferences
+from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from request_engine.controllers.request_controller import summarize_request
+from shared.models import EntryRequest
 
 
 pytestmark = pytest.mark.browser
@@ -376,6 +378,28 @@ def _generation_result_json(saved_request: dict[str, Any]) -> str:
     )
 
 
+def _preview_request(title: str, request_id: str) -> dict[str, Any]:
+    """Build an unsaved preview Request dict (PENDING_CONFIRM, not on disk)."""
+    return {
+        **generate_request(EntryRequest(raw_title=title))["request"],
+        "request_id": request_id,
+    }
+
+
+def _preview_result_json(request: dict[str, Any]) -> str:
+    """Build a `POST /api/v1/requests` response body for an unsaved preview draft."""
+    return json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "request": request,
+                "summary": summarize_request(request),
+            }
+        },
+        ensure_ascii=False,
+    )
+
+
 def _register_generation_capture(
     page: Page,
     captured: list[dict[str, Any]],
@@ -532,15 +556,13 @@ class TestCandidateRecommendationLabels:
                 ),
             ),
         )
-        saved = create_saved_request(
-            storage_dir, "葬送的芙莉莲 第二季", "req-rec-1"
-        )
+        preview = _preview_request("葬送的芙莉莲 第二季", "req-rec-1")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(
-            page, captured, body=_generation_result_json(saved)
+            page, captured, body=_preview_result_json(preview)
         )
 
-        set_storage_preferences(page, storage_dir, save_request=True)
+        set_storage_preferences(page, storage_dir, save_request=False)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲 第二季")
         page.click("#mikan-candidate-search-submit")
@@ -558,6 +580,7 @@ class TestCandidateRecommendationLabels:
         assert captured
         assert captured[0]["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/3072"
         assert captured[0]["title"] == "葬送的芙莉莲 第二季"
+        assert captured[0]["save_request"] is False
         # The main flow relies on the server-side default MiKan config.
         assert "mikan_config" not in captured[0]
 
@@ -590,13 +613,13 @@ class TestCandidateManualSelection:
                 ),
             ),
         )
-        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-cand-1")
+        preview = _preview_request("葬送的芙莉莲", "req-cand-1")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(
-            page, captured, body=_generation_result_json(saved)
+            page, captured, body=_preview_result_json(preview)
         )
 
-        set_storage_preferences(page, storage_dir, save_request=True)
+        set_storage_preferences(page, storage_dir, save_request=False)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
@@ -613,15 +636,18 @@ class TestCandidateManualSelection:
         assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
         assert payload["title"] == "葬送的芙莉莲"
-        assert payload["save_request"] is True
+        # Candidate selection always produces an editable preview draft.
+        assert payload["save_request"] is False
         # The main flow relies on the server-side default MiKan config.
         assert "mikan_config" not in payload
 
-        # Success flow reuses the existing detail/list/URL-sync behavior.
-        assert "保存成功" in page.locator("#page-notification").inner_text()
-        assert "request_id=req-cand-1" in page.url
+        # The generated preview draft is not saved and never sets a URL request_id.
+        assert "预览已生成" in page.locator("#page-notification").inner_text()
+        assert "request_id=" not in page.url
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "葬送的芙莉莲" in detail_text
+        assert "订阅草案（未保存）" in detail_text
+        # The editable preview form is offered directly.
+        expect(page.locator("#detail-preview-edit-form")).to_be_visible()
 
     def test_single_candidate_still_requires_click_then_generates(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -643,13 +669,13 @@ class TestCandidateManualSelection:
                 ),
             ),
         )
-        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-cand-single")
+        preview = _preview_request("葬送的芙莉莲", "req-cand-single")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(
-            page, captured, body=_generation_result_json(saved)
+            page, captured, body=_preview_result_json(preview)
         )
 
-        set_storage_preferences(page, storage_dir, save_request=True)
+        set_storage_preferences(page, storage_dir, save_request=False)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
@@ -663,6 +689,7 @@ class TestCandidateManualSelection:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         assert captured
         assert captured[0]["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/42"
+        assert captured[0]["save_request"] is False
         assert "mikan_config" not in captured[0]
 
     def test_generation_failure_preserves_candidates_and_inputs(
@@ -770,13 +797,13 @@ class TestCandidateSelectionSensitiveBoundary:
             )
 
         page.route("**/api/v1/mikan/candidates", _fulfill_candidates)
-        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-cand-sec")
+        preview = _preview_request("葬送的芙莉莲", "req-cand-sec")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(
-            page, captured, body=_generation_result_json(saved)
+            page, captured, body=_preview_result_json(preview)
         )
 
-        set_storage_preferences(page, storage_dir, save_request=True)
+        set_storage_preferences(page, storage_dir, save_request=False)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
@@ -788,6 +815,8 @@ class TestCandidateSelectionSensitiveBoundary:
 
         # No request-scoped MiKan config is sent; the server applies defaults.
         assert "mikan_config" not in captured[0]
+        # The preview draft is not saved by itself and never sets a URL id.
+        assert "request_id=" not in page.url
 
         browser_state = page.evaluate(
             """() => ({
@@ -803,12 +832,21 @@ class TestCandidateSelectionSensitiveBoundary:
             assert value not in browser_state["sessionStorage"]
             assert value not in browser_state["bodyText"]
 
-        # The saved Request JSON is a clean static-fixture snapshot with no
-        # MiKan config, raw HTML/RSS, cookies, or tokens.
+        # Saving the draft through the real preview-save backend must persist a
+        # clean static-fixture snapshot with no MiKan config, raw HTML/RSS,
+        # cookies, or tokens.
+        page.locator(
+            "#request-detail-container button:has-text('保存草案')"
+        ).click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         saved_path = storage_dir / "requests" / "req-cand-sec.json"
+        assert saved_path.exists()
         saved_json = json.loads(saved_path.read_text(encoding="utf-8"))
         for value in sensitive_values:
             assert value not in json.dumps(saved_json, ensure_ascii=False)
+        # The saved draft enters the PENDING_CONFIRM confirmation flow.
+        assert saved_json["status"] == "PENDING_CONFIRM"
+        assert "request_id=req-cand-sec" in page.url
 
 
 def _register_generation_failure(page: Page) -> None:
@@ -887,13 +925,13 @@ class TestCandidateFallbackDirectEntry:
     def test_url_fallback_generates_request(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
-        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-url")
+        preview = _preview_request("葬送的芙莉莲", "req-fb-url")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(
-            page, captured, body=_generation_result_json(saved)
+            page, captured, body=_preview_result_json(preview)
         )
 
-        set_storage_preferences(page, storage_dir, save_request=True)
+        set_storage_preferences(page, storage_dir, save_request=False)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
         _enable_candidate_fallback(page)
@@ -909,15 +947,16 @@ class TestCandidateFallbackDirectEntry:
         assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
         assert payload["title"] == "芙莉莲"
-        assert payload["save_request"] is True
+        # Direct fallback also produces an editable preview draft.
+        assert payload["save_request"] is False
         # The fallback works without a user-supplied endpoint (server default).
         assert "mikan_config" not in payload
 
-        # Success reuses the existing detail/list/URL-sync behavior.
-        assert "保存成功" in page.locator("#page-notification").inner_text()
-        assert "request_id=req-fb-url" in page.url
+        # The fallback preview draft is not saved and never sets a URL id.
+        assert "预览已生成" in page.locator("#page-notification").inner_text()
+        assert "request_id=" not in page.url
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "葬送的芙莉莲" in detail_text
+        assert "订阅草案（未保存）" in detail_text
 
         # The fallback value is cleared after success.
         assert page.locator("#mikan-fallback-bangumi").input_value() == ""
@@ -925,13 +964,13 @@ class TestCandidateFallbackDirectEntry:
     def test_id_fallback_generates_request(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
-        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-id")
+        preview = _preview_request("葬送的芙莉莲", "req-fb-id")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(
-            page, captured, body=_generation_result_json(saved)
+            page, captured, body=_preview_result_json(preview)
         )
 
-        set_storage_preferences(page, storage_dir, save_request=True)
+        set_storage_preferences(page, storage_dir, save_request=False)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
         _enable_candidate_fallback(page)
@@ -943,8 +982,9 @@ class TestCandidateFallbackDirectEntry:
         payload = captured[0]
         assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "2353"
+        assert payload["save_request"] is False
         assert "mikan_config" not in payload
-        assert "request_id=req-fb-id" in page.url
+        assert "request_id=" not in page.url
 
     def test_empty_fallback_shows_validation_error_without_calling_api(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -994,13 +1034,13 @@ class TestCandidateFallbackDirectEntry:
                 body=_candidate_result_json("ghost", []),
             ),
         )
-        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-empty")
+        preview = _preview_request("葬送的芙莉莲", "req-fb-empty")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(
-            page, captured, body=_generation_result_json(saved)
+            page, captured, body=_preview_result_json(preview)
         )
 
-        set_storage_preferences(page, storage_dir, save_request=True)
+        set_storage_preferences(page, storage_dir, save_request=False)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="ghost")
         page.click("#mikan-candidate-search-submit")
@@ -1016,8 +1056,9 @@ class TestCandidateFallbackDirectEntry:
         assert captured
         payload = captured[0]
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/42"
+        assert payload["save_request"] is False
         assert "mikan_config" not in payload
-        assert "request_id=req-fb-empty" in page.url
+        assert "request_id=" not in page.url
 
     def test_fallback_failure_preserves_inputs_and_shows_sanitized_error(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -1052,13 +1093,13 @@ class TestCandidateFallbackSensitiveBoundary:
         sensitive_values = (
             "https://private-mikan.stage18.local/Home/Bangumi/42",
         )
-        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-sec")
+        preview = _preview_request("葬送的芙莉莲", "req-fb-sec")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(
-            page, captured, body=_generation_result_json(saved)
+            page, captured, body=_preview_result_json(preview)
         )
 
-        set_storage_preferences(page, storage_dir, save_request=True)
+        set_storage_preferences(page, storage_dir, save_request=False)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
         _enable_candidate_fallback(page)
@@ -1068,10 +1109,12 @@ class TestCandidateFallbackSensitiveBoundary:
 
         assert captured
         assert captured[0]["mikan_bangumi"] == sensitive_values[0]
+        assert captured[0]["save_request"] is False
         assert "mikan_config" not in captured[0]
 
-        # The fallback input is cleared after success.
+        # The fallback input is cleared after success and no URL id is set.
         assert page.locator("#mikan-fallback-bangumi").input_value() == ""
+        assert "request_id=" not in page.url
 
         browser_state = page.evaluate(
             """() => ({
@@ -1087,9 +1130,244 @@ class TestCandidateFallbackSensitiveBoundary:
             assert value not in browser_state["sessionStorage"]
             assert value not in browser_state["bodyText"]
 
-        # The saved Request JSON is a clean static-fixture snapshot with no
-        # MiKan endpoint or fallback URL.
+        # Saving the draft through the real preview-save backend persists a
+        # clean static-fixture snapshot with no MiKan endpoint or fallback URL.
+        page.locator(
+            "#request-detail-container button:has-text('保存草案')"
+        ).click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         saved_path = storage_dir / "requests" / "req-fb-sec.json"
+        assert saved_path.exists()
         saved_json = json.loads(saved_path.read_text(encoding="utf-8"))
         for value in sensitive_values:
             assert value not in json.dumps(saved_json, ensure_ascii=False)
+
+
+def _open_preview_draft(
+    page: Page,
+    live_server_url: str,
+    storage_dir: Path,
+    *,
+    title: str = "咒术回战",
+    request_id: str = "req-preview-1",
+) -> dict[str, Any]:
+    """Route candidate search + generation and open an editable preview draft."""
+    page.route(
+        "**/api/v1/mikan/candidates",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=_candidate_result_json(
+                title,
+                [
+                    _candidate(
+                        bangumi_id="42",
+                        title=title,
+                        mikan_url="https://mikan.example/Home/Bangumi/42",
+                    )
+                ],
+            ),
+        ),
+    )
+    preview = _preview_request(title, request_id)
+    captured: list[dict[str, Any]] = []
+    _register_generation_capture(
+        page, captured, body=_preview_result_json(preview)
+    )
+    set_storage_preferences(page, storage_dir, save_request=False)
+    _open_candidate_search(page, live_server_url)
+    _fill_candidate_search(page, query=title)
+    page.click("#mikan-candidate-search-submit")
+    expect(page.locator(".candidate-card")).to_have_count(1)
+    page.locator("button:has-text('选择此合集')").click()
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+    return preview
+
+
+class TestEditablePreviewDraft:
+    """AC: 候选选择默认生成可编辑预览订阅草案，保存后才进入待确认流程."""
+
+    def test_preview_shows_editable_form_without_saved_actions(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _open_preview_draft(
+            page, live_server_url, storage_dir,
+            title="咒术回战", request_id="req-preview-form",
+        )
+
+        detail = page.locator("#request-detail-container")
+        text = detail.inner_text()
+        assert "订阅草案（未保存）" in text
+        # The editable form is shown directly with every required control.
+        expect(detail.locator("#detail-preview-edit-form")).to_be_visible()
+        expect(detail.locator("#preview-subtitle-group")).to_be_visible()
+        expect(detail.locator("#preview-must-contain")).to_be_visible()
+        expect(detail.locator("#preview-must-not-contain")).to_be_visible()
+        expect(detail.locator("#preview-filter-use-regex")).to_be_visible()
+        expect(detail.locator("#preview-filter-case-sensitive")).to_be_visible()
+        expect(detail.locator("#preview-folder-name")).to_be_visible()
+        expect(detail.locator("button:has-text('应用修改')")).to_be_visible()
+        expect(detail.locator("button:has-text('保存草案')")).to_be_visible()
+        # No saved-request actions are offered.
+        expect(detail.locator(".detail-actions button:has-text('确认')")).to_have_count(0)
+        expect(detail.locator(".detail-actions button:has-text('取消')")).to_have_count(0)
+        expect(detail.locator(".detail-actions button:has-text('删除')")).to_have_count(0)
+        expect(detail.locator("text=去 Settings 提交 Auto Bangumi")).to_have_count(0)
+        expect(detail.locator("#detail-modify-form")).to_have_count(0)
+        expect(detail.locator("#detail-cancel-form")).to_have_count(0)
+        assert "request_id=" not in page.url
+
+    def test_preview_edit_never_calls_saved_action_endpoints(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        blocked_calls: list[str] = []
+
+        def _capture_saved_action(route: Any, request: Any) -> None:
+            blocked_calls.append(request.url)
+            route.fulfill(
+                status=500,
+                content_type="application/json",
+                body='{"ok": false, "error_message": "unexpected saved action"}',
+            )
+
+        page.route("**/api/v1/requests/*/accept**", _capture_saved_action)
+        page.route("**/api/v1/requests/*/cancel**", _capture_saved_action)
+        page.route("**/api/v1/requests/*/modify**", _capture_saved_action)
+        page.route("**/api/v1/requests/*/delete**", _capture_saved_action)
+        page.route("**/api/v1/requests/*/submit-ab**", _capture_saved_action)
+
+        _open_preview_draft(
+            page, live_server_url, storage_dir,
+            title="咒术回战", request_id="req-preview-blocked",
+        )
+        # Editing the preview uses the dry-run preview-modify endpoint, not the
+        # saved-request modify API.
+        page.fill("#preview-must-not-contain", "V2")
+        page.click("button:has-text('应用修改')")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        text = page.locator("#request-detail-container").inner_text()
+        # The recompute is visible without expanding the collapsed seed list.
+        assert "有效种子数" in text
+        assert "排除种子数\n1" in text
+        assert blocked_calls == []
+
+    def test_preview_modify_filter_rule_recomputes_seeds(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _open_preview_draft(
+            page, live_server_url, storage_dir,
+            title="咒术回战", request_id="req-preview-filter",
+        )
+        detail = page.locator("#request-detail-container")
+        # Default fixture filter is empty: the selected Loli source has 2 seeds.
+        initial = detail.inner_text()
+        assert "有效种子数" in initial
+
+        page.fill("#preview-must-not-contain", "V2")
+        page.click("button:has-text('应用修改')")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        text = detail.inner_text()
+        # The Filter section and seeds summary reflect the recomputed counts.
+        assert "有效种子数\n1" in text
+        assert "排除种子数\n1" in text
+        assert "查看筛选种子列表 (完整 2 / 有效 1 / 排除 1)" in text
+        # Expand the collapsed seed list to verify the Chinese exclusion reason.
+        detail.locator(".seed-details summary").click()
+        text = detail.inner_text()
+        assert "命中排除规则：V2" in text
+        # The form keeps the applied value after re-render.
+        assert page.locator("#preview-must-not-contain").input_value() == "V2"
+        # Editing never writes storage.
+        assert not storage_dir.exists() or not any(storage_dir.iterdir())
+
+    def test_preview_modify_subtitle_group_updates_seeds(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _open_preview_draft(
+            page, live_server_url, storage_dir,
+            title="咒术回战", request_id="req-preview-group",
+        )
+        detail = page.locator("#request-detail-container")
+        # The default selected group is Loli (priority order), so the Filter
+        # section shows its effective seed count.
+        assert "有效种子数" in detail.inner_text()
+
+        page.select_option("#preview-subtitle-group", value="喵萌")
+        page.click("button:has-text('应用修改')")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        text = detail.inner_text()
+        # Source section reflects the newly selected subtitle group.
+        assert "喵萌" in text
+        # The edit form keeps the newly selected group.
+        assert page.locator("#preview-subtitle-group").input_value() == "喵萌"
+
+    def test_preview_modify_folder_name(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _open_preview_draft(
+            page, live_server_url, storage_dir,
+            title="咒术回战", request_id="req-preview-folder",
+        )
+        detail = page.locator("#request-detail-container")
+
+        page.fill("#preview-folder-name", "MyCustomFolder")
+        page.click("button:has-text('应用修改')")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        text = detail.inner_text()
+        assert "MyCustomFolder" in text
+        assert page.locator("#preview-folder-name").input_value() == "MyCustomFolder"
+
+    def test_preview_save_preserves_modifications(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _open_preview_draft(
+            page, live_server_url, storage_dir,
+            title="咒术回战", request_id="req-preview-save",
+        )
+        detail = page.locator("#request-detail-container")
+
+        # Edit folder name and filter rule, then apply to recompute seeds.
+        page.fill("#preview-folder-name", "MyCustomFolder")
+        page.fill("#preview-must-not-contain", "V2")
+        page.click("button:has-text('应用修改')")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        assert "排除种子数\n1" in detail.inner_text()
+        assert "MyCustomFolder" in detail.inner_text()
+
+        # Save the draft through the real preview-save backend.
+        page.locator(
+            "#request-detail-container button:has-text('保存草案')"
+        ).click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        # The saved Request JSON preserves the modifications and enters the
+        # existing PENDING_CONFIRM confirmation flow.
+        saved_path = storage_dir / "requests" / "req-preview-save.json"
+        saved_json = json.loads(saved_path.read_text(encoding="utf-8"))
+        assert saved_json["status"] == "PENDING_CONFIRM"
+        assert (
+            saved_json["confirmable_config"]["expected_folder_name"]
+            == "MyCustomFolder"
+        )
+        assert (
+            saved_json["confirmable_config"]["filter_rule"]["must_not_contain"]
+            == "V2"
+        )
+        assert "request_id=req-preview-save" in page.url
+        expect(
+            page.locator("[data-request-id='req-preview-save']")
+        ).to_be_visible()
+        saved_detail = detail.inner_text()
+        assert "已保存" in saved_detail
+        expect(
+            detail.locator(".detail-actions button:has-text('确认')")
+        ).to_be_visible()
+        expect(
+            detail.locator(".detail-actions button:has-text('取消')")
+        ).to_be_visible()
+        expect(
+            detail.locator(".detail-actions button:has-text('修改')")
+        ).to_be_visible()
