@@ -42,6 +42,7 @@
   const candidateSearchResult = document.getElementById("mikan-candidate-search-result");
   const candidateSearchSubmit = document.getElementById("mikan-candidate-search-submit");
   const candidateFallbackForm = document.getElementById("mikan-fallback-form");
+  const candidateFallbackEnabled = document.getElementById("mikan-fallback-enabled");
   const candidateFallbackInput = document.getElementById("mikan-fallback-bangumi");
   const candidateFallbackError = document.getElementById("mikan-fallback-error");
   const candidateFallbackGenerate = document.getElementById("mikan-fallback-generate");
@@ -743,6 +744,9 @@
 
   function candidateAreaControls() {
     const controls = [];
+    if (candidateFallbackEnabled) {
+      controls.push(candidateFallbackEnabled);
+    }
     for (const form of [candidateSearchForm, candidateFallbackForm]) {
       if (!form) {
         continue;
@@ -752,6 +756,16 @@
       }
     }
     return controls;
+  }
+
+  function syncCandidateFallbackVisibility() {
+    if (!candidateFallbackForm || !candidateFallbackEnabled) {
+      return;
+    }
+    candidateFallbackForm.hidden = !candidateFallbackEnabled.checked;
+    if (!candidateFallbackEnabled.checked) {
+      clearCandidateFallbackError();
+    }
   }
 
   function setCandidateSearchInFlight(isInFlight) {
@@ -816,7 +830,7 @@
     const cards = Array.isArray(candidates) ? candidates : [];
     if (!cards.length) {
       setCandidateSearchResult(
-        "未找到候选合集。可调整番剧标题后重试。",
+        "未找到候选合集。可调整番剧标题后重试，或勾选「搜索无结果时使用直连合集」直接生成订阅草案。",
         "empty-state compact-state",
       );
       return;
@@ -930,6 +944,13 @@
 
   if (candidateFallbackForm) {
     candidateFallbackForm.addEventListener("submit", generateRequestFromFallback);
+  }
+
+  if (candidateFallbackEnabled) {
+    candidateFallbackEnabled.addEventListener(
+      "change",
+      syncCandidateFallbackVisibility,
+    );
   }
 
   function setCandidateSelectionInFlight(isInFlight) {
@@ -2082,5 +2103,6 @@
     }
   });
   selectedRequestId = requestIdFromLocation() || null;
+  syncCandidateFallbackVisibility();
   loadList();
 })();

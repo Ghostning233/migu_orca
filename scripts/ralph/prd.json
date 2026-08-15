@@ -59,7 +59,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "直连 fallback 必须独立于候选搜索配置，可直接生成预览草案。"
     },
     {

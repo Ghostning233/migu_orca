@@ -27,6 +27,12 @@ def _fill_candidate_search(
     page.fill("#mikan-candidate-query", query)
 
 
+def _enable_candidate_fallback(page: Page) -> None:
+    """Check the direct-collection fallback gate and wait for the form to show."""
+    page.check("#mikan-fallback-enabled")
+    expect(page.locator("#mikan-fallback-form")).to_be_visible()
+
+
 def _candidate_result_json(query: str, candidates: list[dict[str, Any]]) -> str:
     return json.dumps(
         {"ok": True, "result": {"query": query, "candidates": candidates}},
@@ -831,6 +837,50 @@ def _register_generation_failure(page: Page) -> None:
     page.route("**/api/v1/requests", _handler)
 
 
+class TestCandidateFallbackCheckbox:
+    """AC: 主生成区有「搜索无结果时使用直连合集」复选框，默认不勾选并隐藏直连输入."""
+
+    def test_fallback_checkbox_hidden_by_default(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _open_candidate_search(page, live_server_url)
+
+        # The gate checkbox is visible but unchecked; the fallback form is hidden.
+        checkbox = page.locator("#mikan-fallback-enabled")
+        expect(checkbox).to_be_visible()
+        assert not checkbox.is_checked()
+        expect(page.locator("#mikan-fallback-form")).to_be_hidden()
+        assert (
+            page.locator("#mikan-fallback-form").get_attribute("hidden")
+            is not None
+        )
+
+    def test_fallback_checkbox_reveals_and_hides_form(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _open_candidate_search(page, live_server_url)
+
+        page.check("#mikan-fallback-enabled")
+        expect(page.locator("#mikan-fallback-form")).to_be_visible()
+        expect(page.locator("#mikan-fallback-bangumi")).to_be_visible()
+        expect(page.locator("#mikan-fallback-generate")).to_be_visible()
+
+        # Unchecking hides the direct-entry area again.
+        page.uncheck("#mikan-fallback-enabled")
+        expect(page.locator("#mikan-fallback-form")).to_be_hidden()
+
+    def test_fallback_uncheck_clears_error_state(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _open_candidate_search(page, live_server_url)
+        page.check("#mikan-fallback-enabled")
+        # Trigger a local validation error so the error paragraph is visible.
+        page.click("#mikan-fallback-generate")
+        expect(page.locator("#mikan-fallback-error")).not_to_be_hidden()
+        page.uncheck("#mikan-fallback-enabled")
+        expect(page.locator("#mikan-fallback-error")).to_be_hidden()
+
+
 class TestCandidateFallbackDirectEntry:
     """AC: 搜索无结果时可用 MiKan 合集 URL 或 ID fallback 直连生成 Request."""
 
@@ -846,6 +896,7 @@ class TestCandidateFallbackDirectEntry:
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
+        _enable_candidate_fallback(page)
         page.fill(
             "#mikan-fallback-bangumi",
             "https://mikan.example/Home/Bangumi/2353",
@@ -883,6 +934,7 @@ class TestCandidateFallbackDirectEntry:
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
+        _enable_candidate_fallback(page)
         page.fill("#mikan-fallback-bangumi", "2353")
         page.click("#mikan-fallback-generate")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -903,6 +955,7 @@ class TestCandidateFallbackDirectEntry:
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
+        _enable_candidate_fallback(page)
         page.click("#mikan-fallback-generate")
 
         expect(page.locator("#mikan-fallback-error")).to_contain_text(
@@ -920,6 +973,7 @@ class TestCandidateFallbackDirectEntry:
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
+        _enable_candidate_fallback(page)
         page.fill("#mikan-fallback-bangumi", "not a url or id")
         page.click("#mikan-fallback-generate")
 
@@ -954,6 +1008,7 @@ class TestCandidateFallbackDirectEntry:
             "未找到候选合集"
         )
 
+        _enable_candidate_fallback(page)
         page.fill("#mikan-fallback-bangumi", "https://mikan.example/Home/Bangumi/42")
         page.click("#mikan-fallback-generate")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -971,6 +1026,7 @@ class TestCandidateFallbackDirectEntry:
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
+        _enable_candidate_fallback(page)
         page.fill("#mikan-fallback-bangumi", "https://mikan.example/Home/Bangumi/42")
         page.click("#mikan-fallback-generate")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -1005,6 +1061,7 @@ class TestCandidateFallbackSensitiveBoundary:
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
+        _enable_candidate_fallback(page)
         page.fill("#mikan-fallback-bangumi", sensitive_values[0])
         page.click("#mikan-fallback-generate")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)

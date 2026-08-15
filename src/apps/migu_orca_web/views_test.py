@@ -202,7 +202,11 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-candidate-search-result"' in html
     assert "search_endpoint" not in html
     assert "timeout_seconds" not in html
+    assert 'id="mikan-fallback-enabled"' in html
+    assert 'name="mikan_fallback_enabled"' in html
+    assert "搜索无结果时使用直连合集" in html
     assert 'id="mikan-fallback-form"' in html
+    assert 'id="mikan-fallback-form" class="candidate-fallback-form" hidden' in html
     assert 'id="mikan-fallback-bangumi"' in html
     assert 'name="mikan_fallback_bangumi"' in html
     assert 'id="mikan-fallback-help"' in html
@@ -418,6 +422,8 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "finalizeGeneratedRequest" in script
     assert "mikan_bangumi" in script
     assert "lastCandidateSearchConfig" not in script
+    assert "mikan-fallback-enabled" in script
+    assert "syncCandidateFallbackVisibility" in script
     assert "mikan-fallback-form" in script
     assert "mikan-fallback-bangumi" in script
     assert "mikan-fallback-error" in script

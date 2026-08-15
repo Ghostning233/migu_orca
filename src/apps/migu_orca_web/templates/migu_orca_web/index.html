@@ -79,11 +79,21 @@
           </div>
         </form>
 
-        <form id="mikan-fallback-form" class="candidate-fallback-form">
-          <h3 class="candidate-fallback-heading">搜索无结果时的直连兜底</h3>
-          <p class="field-help">
-            可选：搜索无结果时，可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或 Request JSON。
-          </p>
+        <label class="checkbox-row" for="mikan-fallback-enabled">
+          <input
+            id="mikan-fallback-enabled"
+            name="mikan_fallback_enabled"
+            type="checkbox"
+            autocomplete="off"
+            aria-describedby="mikan-fallback-gate-help"
+          >
+          搜索无结果时使用直连合集
+        </label>
+        <p id="mikan-fallback-gate-help" class="field-help">
+          可选：勾选后可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或 Request JSON。
+        </p>
+
+        <form id="mikan-fallback-form" class="candidate-fallback-form" hidden>
           <label for="mikan-fallback-bangumi">MiKan 合集 URL 或 ID</label>
           <input
             id="mikan-fallback-bangumi"
