@@ -3,7 +3,15 @@ Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
 - `modify_request` in `request_engine/controllers/request_controller.py` accepts both `PENDING_CONFIRM` and `ACCEPTED` requests and preserves the original status (never resets to `PENDING_CONFIRM`); accept/cancel remain restricted to `PENDING_CONFIRM` only via `_copy_pending_request`.
-- Stage 14 has been completed and merged into `main`; current active work is Stage 15.
+- Stage 15 has been completed and merged into `main`; current active work is Stage 16 (`agent/stage16-mikan-bangumi-detail`).
+- Stage 16 is complete; Stage 17 should implement MiKan search candidate cards, manual selection, direct URL/ID fallback in the UI, and cache on top of the Stage 16 parser.
+- Stage 16/17 split remains deliberate: Stage 16 owns selected MiKan `Home/Bangumi/<id>` detail parsing plus CLI/API direct URL/ID entry; Stage 17 must reuse `mikan_bangumi` for chosen candidates and must not introduce a second detail parser.
+- Stage 16 MiKan detail-page fixture tests live beside `mikan_client_test.py` under `src/mikan_engine/controllers/fixtures/`; keep real MiKan parser coverage offline and drive it through injected `MikanTransport` instead of live network reads.
+- `MikanClient.get_bangumi_detail(matched_bangumi)` returns the safe structured `MikanBangumiDetail` model (bangumi metadata, page-level RSS, subgroup RSS, episode title/detail URL summaries); do not add magnet attributes or raw HTML/RSS to this public model or Request snapshots.
+- `MikanClient.list_rss_sources(matched_bangumi)` is now derived from `MikanBangumiDetail`: return deduped subgroup-level `mikan_http` sources first, do not mix in the bangumi-level RSS when subgroup RSS exists, and fallback to one `全部字幕组` source only when no subgroup RSS is available.
+- MiKan direct entry is request-scoped: CLI uses `--mikan-bangumi`, Web API uses `mikan_bangumi`, both require `source=mikan` plus explicit MiKan config; bare ASCII numeric IDs derive `/Home/Bangumi/<id>` from `MikanConfig.search_endpoint`, while direct URLs must be same-origin HTTP(S) `/Home/Bangumi/<numeric-id>` and are normalized without query/fragment before Request snapshots.
+- Real MiKan HTTP reads should go through `_read_mikan_text(..., failed_step=...)` so search, detail, RSS, encoding, timeout, HTTP, connection, and oversized-response failures are assigned the caller's stable `failed_step` with sanitized details only.
+- AI title normalization/search-query enhancement is a low-priority optional backlog item, not a dependency for Stage 16/17 and never a replacement for explicit user collection selection.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
 - Preview Requests must not expose delete, confirm, cancel, modify, or Auto Bangumi submit actions.
@@ -119,4 +127,92 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Gotcha encountered: `create_saved_accepted_request` lives in `tests/browser/test_actions.py`, not conftest; the ui_quality security test builds the ACCEPTED request inline with `accept_request` + `save_request_snapshot`.
   - Gotcha encountered: the qBittorrent route handler receives two args `(route, request)`; using a one-arg signature breaks Playwright routing.
   - Useful context: after US-109 all Stage 15 stories in `scripts/ralph/prd.json` are marked passing; the dev-browser skill was unavailable, so UI verification used the project's Playwright browser suite.
+---
+## 2026-08-15 16:22:14 CST - US-110
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added a sanitized offline MiKan `Home/Bangumi/2353` detail-page HTML fixture covering the bangumi title, bangumi-level RSS link, subgroup names, subgroup-level RSS links, episode titles, episode detail links, and sanitized magnet attributes.
+- Extended the existing private MiKan bangumi-page parser with narrow `title()` and `subgroup_names()` accessors so fixture-driven parser tests can prove title/subgroup discovery without changing the production `MikanClient.list_rss_sources` return contract.
+- Added fixture-driven tests that parse the detail fixture through the public `MikanClient` transport seam, assert subgroup RSS URL extraction and de-dup-compatible `RssSource` shape, prove title/subgroup discovery, and verify the fixture does not contain common cookie/token/session/local-path markers.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/mikan_engine/controllers/fixtures/mikan_bangumi_2353_detail.html`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 317 tests and 156 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: not applicable for US-110 because it is parser/fixture-only and has no UI behavior.
+- **Learnings for future iterations:**
+  - Pattern discovered: use injected `MikanTransport` and local HTML fixtures for real MiKan parser coverage; do not let parser tests depend on live `mikanani.me`.
+  - Pattern discovered: the existing `MikanClient.list_rss_sources` contract remains `RssSource`-only for now; richer detail metadata should build on `_MikanBangumiPageParser` in US-111 without writing raw HTML or magnets into Request snapshots.
+  - Gotcha encountered: public MiKan paths include `/Home/...`, so fixture sanitization checks should look for local absolute paths like `/home/ghostning/` or `file://`, not the generic `/home/` substring.
+  - Useful context: browser tests are part of `uv run pytest -q`, but this environment skipped them because the browser binary is unavailable.
+---
+## 2026-08-15 16:26:55 CST - US-111
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added safe structured MiKan detail models (`MikanBangumiDetail`, `MikanSubgroupDetail`, `MikanEpisodeSummary`) plus `MikanClient.get_bangumi_detail(matched_bangumi)` to read and parse selected `Home/Bangumi/<id>` pages through the existing injected `MikanTransport` seam.
+- Extended `_MikanBangumiPageParser` to parse `bangumi_id`, `.bangumi-title`, optional broadcast/poster fields, page-level `.mikan-rss`, subgroup names/RSS URLs, and episode title/detail URL summaries while de-duplicating RSS URLs and episode summaries.
+- Kept magnet attributes out of the public structured detail model and added sanitized parse failures for missing RSS/detail metadata under the stable `mikan_parse_failed` error type.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/mikan_engine/models/__init__.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest src/mikan_engine/controllers/mikan_client_test.py -q` passed with 21 tests; `uv run pytest -q` passed with 322 tests and 156 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: not applicable for US-111 because it is parser/model-only and has no UI behavior.
+- **Learnings for future iterations:**
+  - Pattern discovered: use `get_bangumi_detail` for Stage 16/17 selected-detail metadata and keep `list_rss_sources` as the existing `RssSource` compatibility surface until US-112 changes source prioritization.
+  - Pattern discovered: parse episode summaries from `/Home/Episode/...` anchors and subgroup context/title prefixes, but expose only title plus detail URL; magnet clipboard attributes are intentionally omitted from the model.
+  - Gotcha encountered: `_MikanBangumiPageParser` now tracks all anchors as well as table rows; when adding parser state, avoid early returns in `handle_endtag("a")` that would skip depth counters for surrounding title/subgroup/section contexts.
+  - Useful context: there is no `CODEX.md` under `src/mikan_engine`, so reusable parser knowledge was consolidated in this progress log instead.
+---
+
+## 2026-08-15 16:32:01 CST - US-112
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Reworked `MikanClient.list_rss_sources(matched_bangumi)` to parse the selected bangumi page into the safe `MikanBangumiDetail` model first, then convert deduped subgroup RSS entries into `RssSource` values with `source_type="mikan_http"` and empty `fixture_path`.
+- Added bangumi-level RSS fallback behavior: when no subgroup RSS exists but the page-level RSS is available, the client returns one explicit `全部字幕组` source; when subgroup RSS exists, the page-level RSS is intentionally excluded from normal candidates.
+- Tightened subgroup name extraction for RSS anchors inside `.subgroup-section`, so RSS link text such as `RSS`/`订阅` no longer becomes the subtitle group name when a surrounding `.subgroup-name` is available.
+- Updated the real MiKan entry-controller integration fixture to use a Stage 16-style detail page with `.bangumi-title`, `.subgroup-name`, and subgroup-level RSS.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest src/mikan_engine/controllers/mikan_client_test.py -q` passed with 24 tests; `uv run pytest -q` passed with 325 tests and 156 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: not applicable for US-112 because it is parser/source-selection behavior and has no UI changes; browser tests were skipped by the environment due to missing browser binary.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep `list_rss_sources` as the compatibility surface for downstream Request/RSS/AB code, but derive it from `MikanBangumiDetail` so Stage 16/17 share one parser path.
+  - Pattern discovered: use subgroup-level RSS URLs containing a subgroup query parameter for normal MiKan candidates; a bangumi-level RSS URL is a fallback candidate only.
+  - Gotcha encountered: older tests that used `<a data-subtitle-group="...">RSS</a>` without a `.bangumi-title` are not valid Stage 16 detail pages once source listing depends on structured detail parsing.
+  - Useful context: there is still no `CODEX.md` under `src/mikan_engine`; the reusable source-selection rule is consolidated in the progress log.
+---
+## 2026-08-15 16:38:52 CST - US-113
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added request-scoped MiKan bangumi direct entry support. `generate_request(..., source_mode="mikan_http", mikan_bangumi=...)` now bypasses MiKan search, parses the selected detail page, builds the matched bangumi from `MikanBangumiDetail`, and derives RSS sources from that same detail model before parsing RSS and generating a `PENDING_CONFIRM` Request.
+- Added CLI flag `--mikan-bangumi` for explicit MiKan `Home/Bangumi` URL or bare numeric ID input; it works with `--source mikan` and `--mikan-config`, and can be used without a separate title because the detail page supplies the canonical title.
+- Added Web API payload field `mikan_bangumi` for `POST /api/v1/requests`; it is passed only to request generation and is not written to browser storage, URL state, persistent config, or saved Request JSON.
+- Added safe direct-entry validation in `MikanClient`: empty values, non-HTTP(S), wrong origin, non-`/Home/Bangumi/<id>` paths, traversal-like paths, and non-ASCII/non-numeric IDs return stable sanitized errors; bare IDs derive the detail URL from `MikanConfig.search_endpoint` instead of a hardcoded host.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `src/apps/migu_orca_entry/controllers/entry_controller_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest src/mikan_engine/controllers/mikan_client_test.py -q` passed with 26 tests; `uv run pytest src/apps/migu_orca_entry/controllers/entry_controller_test.py -q` passed with 46 tests; `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed with 66 tests; `uv run pytest -q` passed with 332 tests and 156 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: no UI controls were changed for US-113; the direct entry Web behavior is API-only in Stage 16. Full browser suite was skipped by the environment due to missing browser binary.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep MiKan direct-entry URL normalization in `MikanClient`, not the Web or CLI layer, so CLI/API callers share the same sanitization and config-derived host behavior.
+  - Pattern discovered: use `MikanBangumiDetail` as the selected direct-entry source of truth, then convert it to `MatchedBangumi` plus `list_rss_sources_from_detail` for the existing Request/RSS/AB pipeline.
+  - Gotcha encountered: an explicitly blank direct-entry argument must be distinguished from omitted `mikan_bangumi`; otherwise generation may silently fall back to fuzzy search.
+  - Useful context: Stage 16 intentionally did not add a visible Web UI direct-entry control; Stage 17 can layer candidate/direct controls over the request-scoped API field.
+---
+## 2026-08-15 16:44:29 CST - US-114
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Hardened real MiKan reads by moving `UrlopenMikanTransport` to raw bounded reads and centralizing sanitized error mapping in `_read_mikan_text`, so caller-selected steps (`mikan_search`, `mikan_bangumi_detail`, `mikan_list_rss_sources`, `parse_rss`) are preserved instead of being hardcoded by the transport.
+- Added a 2 MB response limit for real MiKan HTTP reads; oversized pages fail with stable `mikan_parse_failed` and `details.category=response_too_large`, without raw HTML, URLs, tokens, or response body content.
+- Added safe handling for UTF-8 decode failures (`details.category=encoding`) and kept HTTP/connection/timeout failures limited to safe fields like `status_code` or `category`.
+- Routed MiKan RSS HTTP reads through the same sanitizer so real RSS read failures use `failed_step=parse_rss` and never expose secret-bearing RSS URLs or raw XML.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/rss_engine/controllers/rss_controller.py`, `src/rss_engine/controllers/rss_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest src/mikan_engine/controllers/mikan_client_test.py -q` passed with 29 tests; `uv run pytest src/rss_engine/controllers/rss_controller_test.py -q` passed with 16 tests; `uv run pytest -q` passed with 336 tests and 156 skipped browser tests because the browser binary is not available in this environment; `uv run pytest tests/browser/ -v` collected 156 browser tests and skipped all for the same reason.
+- Browser verification note: not applicable for US-114 because it is HTTP/parser error-boundary behavior and has no UI changes; browser suite could not execute because Chromium is unavailable.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep real MiKan transport exceptions raw until `_read_mikan_text` can assign the operation-specific `failed_step`; otherwise detail/RSS errors can accidentally look like search failures.
+  - Pattern discovered: safe MiKan error details should stay machine-readable and minimal (`status_code` or `category`), never full endpoint URLs, response bodies, raw HTML, raw RSS XML, cookies, tokens, or exception messages.
+  - Gotcha encountered: `parse_rss` uses the same `UrlopenMikanTransport` for `mikan_http` RSS sources, so MiKan HTTP hardening must include the RSS loader as well as `MikanClient`.
+  - Useful context: there is still no `CODEX.md` under `src/mikan_engine` or `src/rss_engine`; reusable HTTP-boundary knowledge is consolidated in this progress log.
+---
+## 2026-08-15 16:52:34 CST - US-115
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Completed Stage 16 documentation and regression closeout. README now documents MiKan direct entry (`--mikan-bangumi` / API `mikan_bangumi`), detail-page parsing, subgroup-level RSS priority, `全部字幕组` bangumi-level fallback, direct-entry validation, sanitized HTTP/parser error boundaries, and the fact that Stage 16 did not add a visible Web UI direct-entry control.
+- Updated `docs/backlog.md`: BL-009 is complete, BL-001 is the Stage 17 search-candidate/display handoff, and BL-010 AI title normalization remains low-priority optional work.
+- Updated project/module PRDs: main PRD is v0.10 and points to Stage 17 next; M00 documents direct-entry orchestration and reuse by Stage 17; M03 documents the structured detail parser, `RssSource` compatibility surface, direct-entry validation, and safe error details; M13 records Stage 16 as API-only for Web UI and defers candidate/direct controls to Stage 17; Stage 16 PRD is marked completed with a closeout summary.
+- Files changed: `README.md`, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage16_mikan_bangumi_detail_PRD.md`, `docs/modules/M00-entry-orchestration-PRD.md`, `docs/modules/M03-mikan-source-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src` passed; `uv run pytest -q` passed with 336 tests and 156 skipped browser tests because the browser binary is not available; `uv run pytest tests/browser/ -v` collected 156 browser tests and skipped all for the same reason.
+- Browser verification note: US-115 changed docs only and Stage 16 added no visible Web UI direct-entry control; Stage 17 should add browser coverage when it introduces candidate/direct-entry UI.
+- **Learnings for future iterations:**
+  - Pattern discovered: Stage 16 closeout docs must stay synchronized across README, backlog, main PRD, Stage 16 PRD, and module PRDs M00/M03/M13.
+  - Pattern discovered: Stage 17 should pass selected candidates or direct URL/ID fallback through the existing `mikan_bangumi` request-scoped API field instead of creating another detail parser or storing direct-entry state in browser storage.
+  - Gotcha encountered: browser tests are part of the standard suite, but this environment lacks the browser binary; record explicit skip counts from both `uv run pytest -q` and `uv run pytest tests/browser/ -v`.
+  - Useful context: Stage 16 is now fully passing in `scripts/ralph/prd.json`; the next Ralph PRD should be Stage 17 candidate selection work.
 ---

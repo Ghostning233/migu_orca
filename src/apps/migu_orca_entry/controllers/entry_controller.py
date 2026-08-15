@@ -32,7 +32,7 @@ from shared.config import (
 )
 from shared.errors import Stage1Error
 from shared.logging import configure_logging
-from shared.models import EntryRequest, FilteredRss
+from shared.models import EntryRequest, FilteredRss, MatchedBangumi
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
 from storage_engine.controllers.history_repository import append_status_history
 from storage_engine.controllers.request_repository import (
@@ -62,9 +62,19 @@ def generate_request(
     mikan_config: MikanConfig | None = None,
     mikan_client: MikanClient | None = None,
     mikan_rss_transport: MikanTransport | None = None,
+    mikan_bangumi: str | None = None,
 ) -> dict[str, Any]:
     try:
-        if not entry.raw_title.strip():
+        direct_entry_provided = mikan_bangumi is not None
+        direct_entry = (mikan_bangumi or "").strip()
+        if direct_entry_provided and not direct_entry:
+            raise Stage1Error(
+                "invalid_input",
+                "MiKan bangumi 直连入口必须是数字 ID 或 Home/Bangumi URL",
+                "mikan_direct_entry",
+                {"field": "mikan_bangumi"},
+            )
+        if not entry.raw_title.strip() and not direct_entry:
             raise Stage1Error("invalid_input", "番剧名称不能为空", "validate_input")
 
         preference = load_user_preference(user_config_path)
@@ -72,6 +82,13 @@ def generate_request(
         rss_transport = mikan_rss_transport
         rss_timeout = 10.0
         if source_mode == "static_fixture":
+            if direct_entry:
+                raise Stage1Error(
+                    "invalid_input",
+                    "MiKan 直连入口仅支持真实 MiKan 数据源",
+                    "mikan_direct_entry",
+                    {"field": "mikan_bangumi"},
+                )
             candidates = load_catalog(catalog_path)
         elif source_mode == "mikan_http":
             real_mikan_client = _resolve_mikan_client(
@@ -79,7 +96,11 @@ def generate_request(
                 mikan_config=mikan_config,
                 mikan_client=mikan_client,
             )
-            candidates = real_mikan_client.list_bangumi_candidates(entry.raw_title)
+            candidates = (
+                []
+                if direct_entry
+                else real_mikan_client.list_bangumi_candidates(entry.raw_title)
+            )
             rss_transport = rss_transport or real_mikan_client.transport
             rss_timeout = real_mikan_client.config.timeout_seconds
         else:
@@ -89,12 +110,22 @@ def generate_request(
                 "generate_request",
                 {"source_mode": source_mode},
             )
-        matched, candidate = match_bangumi(entry.raw_title, candidates)
-        rss_sources = (
-            real_mikan_client.list_rss_sources(matched)
-            if real_mikan_client is not None
-            else candidate.rss_sources
-        )
+        if direct_entry and real_mikan_client is not None:
+            detail = real_mikan_client.get_direct_bangumi_detail(direct_entry)
+            matched = MatchedBangumi(
+                title=detail.title,
+                aliases=[],
+                mikan_url=detail.mikan_url,
+                match_score=1.0,
+            )
+            rss_sources = real_mikan_client.list_rss_sources_from_detail(detail)
+        else:
+            matched, candidate = match_bangumi(entry.raw_title, candidates)
+            rss_sources = (
+                real_mikan_client.list_rss_sources(matched)
+                if real_mikan_client is not None
+                else candidate.rss_sources
+            )
         rss_results: list[FilteredRss] = []
         flow_warnings: list[str] = []
         for source in rss_sources:
@@ -390,6 +421,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="显式选择数据源；默认使用离线静态 fixture",
     )
     parser.add_argument("--mikan-config", type=Path)
+    parser.add_argument(
+        "--mikan-bangumi",
+        help="显式 MiKan Home/Bangumi URL 或数字 ID；仅在 --source mikan 时生效",
+    )
     parser.add_argument("--log-file", type=Path)
     parser.add_argument(
         "--modify-patch",
@@ -429,7 +464,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if storage_query_result is not None:
         print(json.dumps(storage_query_result, ensure_ascii=False, indent=2))
         return 0 if storage_query_result["success"] else 1
-    if args.title is None:
+    if args.title is None and args.mikan_bangumi is None:
         result = {
             "success": False,
             "request": None,
@@ -450,11 +485,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     modify_patch = modify_patch_result["patch"]
     history_events: list[dict[str, Any]] = []
     result = generate_request(
-        EntryRequest(raw_title=args.title),
+        EntryRequest(raw_title=args.title or args.mikan_bangumi or ""),
         catalog_path=args.catalog,
         user_config_path=args.user_config,
         source_mode="mikan_http" if args.source == "mikan" else "static_fixture",
         mikan_config_path=args.mikan_config,
+        mikan_bangumi=args.mikan_bangumi,
     )
     if modify_patch is not None:
         previous_request = result["request"] if result["success"] else None

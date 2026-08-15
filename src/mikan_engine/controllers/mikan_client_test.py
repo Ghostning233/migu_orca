@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 
 import pytest
 
-from mikan_engine.controllers.mikan_client import create_mikan_client
+import mikan_engine.controllers.mikan_client as mikan_client_module
+from mikan_engine.controllers.mikan_client import (
+    MAX_MIKAN_RESPONSE_BYTES,
+    _MikanBangumiPageParser,
+    UrlopenMikanTransport,
+    create_mikan_client,
+)
 from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.errors import Stage1Error
 from shared.models import MatchedBangumi
+
+FIXTURE_DIR = Path(__file__).with_name("fixtures")
 
 
 class FakeTransport:
@@ -26,6 +35,24 @@ class ErrorTransport:
 
     def get_text(self, url: str, *, timeout: float) -> str:
         raise self.error
+
+
+class _FakeUrlopenResponse:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+        self.read_sizes: list[int] = []
+
+    def __enter__(self) -> "_FakeUrlopenResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        if size < 0:
+            return self.body
+        return self.body[:size]
 
 
 def test_create_mikan_client_keeps_explicit_config_and_transport() -> None:
@@ -74,6 +101,68 @@ def test_mikan_client_searches_with_injected_transport_and_encoded_query() -> No
     assert candidates[0].aliases == ["Sousou no Frieren"]
     assert candidates[0].mikan_url == "https://mikan.example/Home/Bangumi/3072"
     assert candidates[0].rss_sources == []
+
+
+def test_mikan_client_direct_id_derives_detail_url_from_config() -> None:
+    transport = FakeTransport(
+        """
+        <h1 class="bangumi-title">芙莉莲</h1>
+        <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=3072">RSS</a>
+        """
+    )
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search?classic=true",
+            timeout_seconds=7,
+        ),
+        transport=transport,
+    )
+
+    detail = client.get_direct_bangumi_detail("3072")
+
+    assert transport.requests == [("https://mikan.example/Home/Bangumi/3072", 7)]
+    assert detail.bangumi_id == "3072"
+    assert detail.mikan_url == "https://mikan.example/Home/Bangumi/3072"
+
+
+def test_mikan_client_direct_url_normalizes_and_rejects_unsafe_values() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            """
+            <h1 class="bangumi-title">芙莉莲</h1>
+            <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=3072">RSS</a>
+            """
+        ),
+    )
+
+    detail = client.get_direct_bangumi_detail(
+        "https://mikan.example/Home/Bangumi/3072?token=secret#frag"
+    )
+
+    assert detail.mikan_url == "https://mikan.example/Home/Bangumi/3072"
+    for value in [
+        "",
+        "not-a-url",
+        "ftp://mikan.example/Home/Bangumi/3072",
+        "https://mikan.example/Home/Search?searchstr=secret-token",
+        "https://evil.example/Home/Bangumi/3072?token=secret-token",
+        "https://mikan.example/Home/Bangumi/../3072",
+        "https://mikan.example/Home/Bangumi/abc",
+    ]:
+        with pytest.raises(Stage1Error) as error:
+            client.get_direct_bangumi_detail(value)
+
+        assert error.value.as_dict() == {
+            "error_type": "invalid_input",
+            "error_message": "MiKan bangumi 直连入口必须是数字 ID 或 Home/Bangumi URL",
+            "failed_step": "mikan_direct_entry",
+            "details": {"field": "mikan_bangumi"},
+        }
+        assert "secret-token" not in str(error.value.as_dict())
 
 
 def test_mikan_client_parses_search_fixture_candidates_and_deduplicates() -> None:
@@ -192,6 +281,83 @@ def test_mikan_search_timeout_is_stable_and_reason_free() -> None:
     assert "secret-token" not in str(error.value.as_dict())
 
 
+def test_mikan_urlopen_transport_uses_bounded_read_and_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _FakeUrlopenResponse(b"ok")
+    timeouts: list[float] = []
+
+    def fake_urlopen(request: object, *, timeout: float) -> _FakeUrlopenResponse:
+        timeouts.append(timeout)
+        return response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+
+    text = UrlopenMikanTransport().get_text("https://mikan.example/Home/Search", timeout=3)
+
+    assert text == "ok"
+    assert response.read_sizes == [MAX_MIKAN_RESPONSE_BYTES + 1]
+    assert timeouts == [3]
+
+
+def test_mikan_urlopen_oversized_response_is_sanitized_by_call_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_urlopen(request: object, *, timeout: float) -> _FakeUrlopenResponse:
+        return _FakeUrlopenResponse(b"x" * (MAX_MIKAN_RESPONSE_BYTES + 1))
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search?token=secret-token",
+            timeout_seconds=5,
+        )
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.list_bangumi_candidates("芙莉莲")
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_parse_failed",
+        "error_message": "MiKan 页面解析失败",
+        "failed_step": "mikan_search",
+        "details": {"category": "response_too_large"},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_urlopen_encoding_failure_is_sanitized_by_detail_call_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_urlopen(request: object, *, timeout: float) -> _FakeUrlopenResponse:
+        return _FakeUrlopenResponse(b"\xff\xfe")
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        )
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1?cookie=secret-token",
+        match_score=1,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.get_bangumi_detail(matched)
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_parse_failed",
+        "error_message": "MiKan 页面解析失败",
+        "failed_step": "mikan_bangumi_detail",
+        "details": {"category": "encoding"},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
 def test_mikan_injected_stage_error_is_sanitized() -> None:
     client = create_mikan_client(
         MikanConfig(
@@ -225,6 +391,8 @@ def test_mikan_client_exposes_rss_source_listing_boundary() -> None:
         """
         <html>
           <body>
+            <h1 class="bangumi-title">芙莉莲</h1>
+            <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=1">RSS</a>
             <table>
               <tr>
                 <td>喵萌奶茶屋</td>
@@ -284,11 +452,287 @@ def test_mikan_client_exposes_rss_source_listing_boundary() -> None:
         == "https://mikan.example/RSS/Bangumi?bangumiId=1&subtitleGroupId=11"
     )
     assert len(sources) == 2
+    assert all(
+        source.rss_url != "https://mikan.example/RSS/Bangumi?bangumiId=1"
+        for source in sources
+    )
+
+
+def test_mikan_client_parses_sanitized_bangumi_detail_fixture() -> None:
+    html = _read_fixture("mikan_bangumi_2353_detail.html")
+    transport = FakeTransport(html)
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikanani.me/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+    matched = MatchedBangumi(
+        title="无职转生～到了异世界就拿出真本事～",
+        aliases=[],
+        mikan_url="https://mikanani.me/Home/Bangumi/2353",
+        match_score=1,
+    )
+
+    sources = client.list_rss_sources(matched)
+
+    assert transport.requests == [("https://mikanani.me/Home/Bangumi/2353", 5)]
+    assert [source.subtitle_group for source in sources] == [
+        "桜都字幕组",
+        "喵萌奶茶屋",
+    ]
+    assert [source.rss_url for source in sources] == [
+        "https://mikanani.me/RSS/Bangumi?bangumiId=2353&subgroupid=203",
+        "https://mikanani.me/RSS/Bangumi?bangumiId=2353&subgroupid=1231",
+    ]
+    assert all(source.source_type == "mikan_http" for source in sources)
+    assert all(source.fixture_path == "" for source in sources)
+
+
+def test_mikan_client_list_rss_sources_prefers_subgroups_over_bangumi_rss() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            """
+            <h1 class="bangumi-title">芙莉莲</h1>
+            <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=1">RSS</a>
+            <section class="subgroup-section">
+              <h2 class="subgroup-name">喵萌奶茶屋</h2>
+              <a href="/RSS/Bangumi?bangumiId=1&subgroupid=10">RSS</a>
+            </section>
+            <section class="subgroup-section">
+              <h2 class="subgroup-name">桜都字幕组</h2>
+              <a href="/RSS/Bangumi?bangumiId=1&subgroupid=11">RSS</a>
+            </section>
+            """
+        ),
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1",
+        match_score=1,
+    )
+
+    sources = client.list_rss_sources(matched)
+
+    assert [source.subtitle_group for source in sources] == ["喵萌奶茶屋", "桜都字幕组"]
+    assert [source.rss_url for source in sources] == [
+        "https://mikan.example/RSS/Bangumi?bangumiId=1&subgroupid=10",
+        "https://mikan.example/RSS/Bangumi?bangumiId=1&subgroupid=11",
+    ]
+    assert all(source.source_type == "mikan_http" for source in sources)
+    assert all(source.fixture_path == "" for source in sources)
+
+
+def test_mikan_client_list_rss_sources_deduplicates_subgroup_rss_urls() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            """
+            <h1 class="bangumi-title">芙莉莲</h1>
+            <section class="subgroup-section">
+              <h2 class="subgroup-name">喵萌奶茶屋</h2>
+              <a href="/RSS/Bangumi?bangumiId=1&subgroupid=10">RSS</a>
+              <a href="/RSS/Bangumi?bangumiId=1&subgroupid=10">订阅</a>
+            </section>
+            """
+        ),
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1",
+        match_score=1,
+    )
+
+    sources = client.list_rss_sources(matched)
+
+    assert len(sources) == 1
+    assert sources[0].subtitle_group == "喵萌奶茶屋"
+    assert (
+        sources[0].rss_url
+        == "https://mikan.example/RSS/Bangumi?bangumiId=1&subgroupid=10"
+    )
+
+
+def test_mikan_client_list_rss_sources_falls_back_to_bangumi_rss() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            """
+            <h1 class="bangumi-title">芙莉莲</h1>
+            <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=1">RSS</a>
+            <section class="subgroup-section">
+              <h2 class="subgroup-name">喵萌奶茶屋</h2>
+              <a href="/Home/Episode/1">[喵萌奶茶屋] 芙莉莲 - 01</a>
+            </section>
+            """
+        ),
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1",
+        match_score=1,
+    )
+
+    sources = client.list_rss_sources(matched)
+
+    assert len(sources) == 1
+    assert sources[0].subtitle_group == "全部字幕组"
+    assert sources[0].rss_url == "https://mikan.example/RSS/Bangumi?bangumiId=1"
+    assert sources[0].source_type == "mikan_http"
+    assert sources[0].fixture_path == ""
+
+
+def test_mikan_client_parses_structured_bangumi_detail_fixture() -> None:
+    html = _read_fixture("mikan_bangumi_2353_detail.html")
+    transport = FakeTransport(html)
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikanani.me/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+    matched = MatchedBangumi(
+        title="无职转生～到了异世界就拿出真本事～",
+        aliases=[],
+        mikan_url="https://mikanani.me/Home/Bangumi/2353",
+        match_score=1,
+    )
+
+    detail = client.get_bangumi_detail(matched)
+
+    assert transport.requests == [("https://mikanani.me/Home/Bangumi/2353", 5)]
+    assert detail.bangumi_id == "2353"
+    assert detail.title == "无职转生～到了异世界就拿出真本事～"
+    assert detail.mikan_url == "https://mikanani.me/Home/Bangumi/2353"
+    assert detail.broadcast_start is None
+    assert detail.poster_url is None
+    assert (
+        detail.bangumi_rss_url
+        == "https://mikanani.me/RSS/Bangumi?bangumiId=2353"
+    )
+    assert [subgroup.name for subgroup in detail.subgroups] == [
+        "桜都字幕组",
+        "喵萌奶茶屋",
+    ]
+    assert [subgroup.rss_url for subgroup in detail.subgroups] == [
+        "https://mikanani.me/RSS/Bangumi?bangumiId=2353&subgroupid=203",
+        "https://mikanani.me/RSS/Bangumi?bangumiId=2353&subgroupid=1231",
+    ]
+    assert detail.subgroups[0].episodes[0].title == (
+        "[桜都字幕组] 无职转生～到了异世界就拿出真本事～ - 01 "
+        "[1080p][简繁内封]"
+    )
+    assert (
+        detail.subgroups[0].episodes[0].episode_url
+        == "https://mikanani.me/Home/Episode/fixture-2353-01"
+    )
+    assert "magnet:" not in repr(detail)
+    assert "SANITIZED235301" not in repr(detail)
+
+
+def test_mikan_bangumi_detail_deduplicates_rss_urls_and_episode_summaries() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            """
+            <h1 class="bangumi-title">芙莉莲</h1>
+            <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=1">RSS</a>
+            <section class="subgroup-section">
+              <h2 class="subgroup-name">喵萌奶茶屋</h2>
+              <table>
+                <tr>
+                  <td class="subgroup-name">喵萌奶茶屋</td>
+                  <td>
+                    <a href="/RSS/Bangumi?bangumiId=1&subgroupid=10">RSS</a>
+                    <a href="/RSS/Bangumi?bangumiId=1&subgroupid=10">订阅</a>
+                  </td>
+                </tr>
+                <tr>
+                  <td>
+                    <a href="/Home/Episode/1">[喵萌奶茶屋] 芙莉莲 - 01</a>
+                    <a href="/Home/Episode/1">[喵萌奶茶屋] 芙莉莲 - 01</a>
+                  </td>
+                </tr>
+              </table>
+            </section>
+            """
+        ),
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1",
+        match_score=1,
+    )
+
+    detail = client.get_bangumi_detail(matched)
+
+    assert len(detail.subgroups) == 1
+    assert detail.subgroups[0].rss_url == (
+        "https://mikan.example/RSS/Bangumi?bangumiId=1&subgroupid=10"
+    )
+    assert len(detail.subgroups[0].episodes) == 1
+    assert detail.subgroups[0].episodes[0].title == "[喵萌奶茶屋] 芙莉莲 - 01"
+
+
+def test_mikan_bangumi_detail_fixture_exposes_title_subgroups_and_episode_links() -> None:
+    html = _read_fixture("mikan_bangumi_2353_detail.html")
+    parser = _MikanBangumiPageParser("https://mikanani.me/Home/Bangumi/2353")
+
+    parser.feed(html)
+
+    assert parser.title() == "无职转生～到了异世界就拿出真本事～"
+    assert parser.subgroup_names() == ["桜都字幕组", "喵萌奶茶屋"]
+    assert 'class="bangumi-title"' in html
+    assert 'class="mikan-rss"' in html
+    assert 'class="subgroup-name"' in html
+    assert "/Home/Episode/fixture-2353-01" in html
+    assert "magnet:?xt=urn:btih:SANITIZED235301" in html
+    assert "[桜都字幕组] 无职转生～到了异世界就拿出真本事～ - 01" in html
+
+
+def test_mikan_bangumi_detail_fixture_is_sanitized() -> None:
+    html = _read_fixture("mikan_bangumi_2353_detail.html")
+    forbidden_tokens = [
+        "cookie",
+        "token",
+        "authorization",
+        "session",
+        "sid=",
+        "/home/ghostning/",
+        "file://",
+        "/users/",
+        "c:\\",
+    ]
+
+    normalized_html = html.casefold()
+
+    assert "SANITIZED" in html
+    assert all(token not in normalized_html for token in forbidden_tokens)
 
 
 def test_mikan_client_uses_anchor_metadata_for_rss_source_group() -> None:
     transport = FakeTransport(
         """
+        <h1 class="bangumi-title">芙莉莲</h1>
         <a
           data-subtitle-group="Lilith-Raws"
           href="https://mikan.example/feed/frieren.xml"
@@ -342,27 +786,88 @@ def test_mikan_client_rejects_empty_bangumi_url_before_transport() -> None:
     assert transport.requests == []
 
 
+def test_mikan_client_rejects_empty_detail_url_before_transport() -> None:
+    transport = FakeTransport()
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="  ",
+        match_score=1,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.get_bangumi_detail(matched)
+
+    assert error.value.error_type == "invalid_input"
+    assert error.value.failed_step == "mikan_bangumi_detail"
+    assert transport.requests == []
+
+
 def test_mikan_client_raises_parse_error_when_bangumi_page_has_no_rss_sources() -> None:
     client = create_mikan_client(
         MikanConfig(
             search_endpoint="https://mikan.example/search",
             timeout_seconds=5,
         ),
-        transport=FakeTransport("<a href='/Home/Bangumi/2'>not rss</a>"),
+        transport=FakeTransport(
+            "<h1 class='bangumi-title'>secret-token 番剧</h1><div>raw html</div>"
+        ),
     )
     matched = MatchedBangumi(
         title="芙莉莲",
         aliases=[],
-        mikan_url="https://mikan.example/Home/Bangumi/1",
+        mikan_url="https://mikan.example/Home/Bangumi/1?cookie=secret-token",
         match_score=1,
     )
 
     with pytest.raises(Stage1Error) as error:
         client.list_rss_sources(matched)
 
-    assert error.value.error_type == "mikan_parse_failed"
-    assert error.value.failed_step == "mikan_list_rss_sources"
-    assert "<html" not in str(error.value.as_dict())
+    assert error.value.as_dict() == {
+        "error_type": "mikan_parse_failed",
+        "error_message": "MiKan 番剧页未找到 RSS 源",
+        "failed_step": "mikan_list_rss_sources",
+        "details": {},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+    assert "raw html" not in str(error.value.as_dict())
+
+
+def test_mikan_client_raises_safe_detail_parse_error_when_page_has_no_rss() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            "<h1 class='bangumi-title'>secret-token 番剧</h1><div>raw html</div>"
+        ),
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1?cookie=secret-token",
+        match_score=1,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.get_bangumi_detail(matched)
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_parse_failed",
+        "error_message": "MiKan 番剧页未找到可用 RSS",
+        "failed_step": "mikan_bangumi_detail",
+        "details": {},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+    assert "raw html" not in str(error.value.as_dict())
 
 
 def test_mikan_bangumi_page_http_failure_uses_rss_listing_step() -> None:
@@ -390,3 +895,36 @@ def test_mikan_bangumi_page_http_failure_uses_rss_listing_step() -> None:
         "details": {"category": "timeout"},
     }
     assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_bangumi_detail_http_failure_uses_detail_step() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikan.example/search",
+            timeout_seconds=5,
+        ),
+        transport=ErrorTransport(
+            HTTPError("https://mikan.example/secret", 500, "", {}, None)
+        ),
+    )
+    matched = MatchedBangumi(
+        title="芙莉莲",
+        aliases=[],
+        mikan_url="https://mikan.example/Home/Bangumi/1?cookie=secret-token",
+        match_score=1,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.get_bangumi_detail(matched)
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_http_failed",
+        "error_message": "MiKan HTTP 请求失败",
+        "failed_step": "mikan_bangumi_detail",
+        "details": {"status_code": 500},
+    }
+    assert "secret-token" not in str(error.value.as_dict())
+
+
+def _read_fixture(filename: str) -> str:
+    return (FIXTURE_DIR / filename).read_text(encoding="utf-8")

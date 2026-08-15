@@ -129,15 +129,37 @@ CLI 入口作为该能力的调用包装。
 5. 当任一关键步骤失败时，返回 failed_step 和可读错误原因。
 6. 所有字幕组有效种子数为 0 时仍能生成 PENDING_CONFIRM Request，默认选择为空并输出可读提示。
 
-## 11. 已确认事项与待确认问题
+## 11. Stage 16/17 真实 MiKan 编排状态
 
-### 11.1 已确认事项
+后续真实 MiKan 编排应收敛为：
+
+```text
+用户输入番剧名或 MiKan URL/ID
+  ↓
+可选：AI 番剧名解析或搜索词增强（低优先级，不是主链路依赖）
+  ↓
+Stage 17：搜索并展示 MiKan 候选合集，用户手动选择
+  ↓
+Stage 16：解析用户选中的 MiKan 合集详情页
+  ↓
+现有 RSS 解析、筛选、字幕组选择、目录命名和 Request 生成
+```
+
+Stage 16 已允许用户通过 CLI `--mikan-bangumi` 或 Web API `mikan_bangumi` 直接提供 MiKan `Home/Bangumi/<id>` URL 或 bangumi ID，从而绕过搜索候选选择，直接进入详情页解析。该参数只在当前请求中使用，不写入浏览器 storage、URL 或持久配置。bare ID 必须基于显式 MiKan config 的 `search_endpoint` 派生详情页 URL；URL 必须是同源 HTTP(S) `/Home/Bangumi/<numeric-id>`。
+
+Stage 17 再将搜索结果候选卡片接入 Web UI，并且即使只有一个候选也应要求用户确认，避免自动错选。Stage 17 的候选选择结果应复用 Stage 16 direct-entry 编排路径，而不是新增第二套详情页解析入口。
+
+AI 番剧名解析只允许作为后续可选增强模块生成多个搜索词；无 API key、无付费能力或 LLM 失败时，M00 仍必须可以通过 Stage 17 手动候选选择或 Stage 16 直连 URL/ID 完成真实 MiKan 流程。
+
+## 12. 已确认事项与待确认问题
+
+### 12.1 已确认事项
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
 | D-M00-03 | 所有字幕组有效种子数为 0 时是否仍生成 Request | 仍生成；默认字幕组和 RSS 为 null，并增加提示 |
 
-### 11.2 待确认问题
+### 12.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |

@@ -1,150 +1,117 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage15-web-ui-accepted-management-filter",
-  "description": "MiGuOrca Stage 15：在 Stage 14 已完成 Web UI Request 可操作性修复后，继续补齐 ACCEPTED Request 的删除与受限修改能力，并将筛选规则从默认正则语义优化为默认大小写不敏感的字面字符匹配，同时提供显式 `使用正则` 与 `大小写敏感` 选项。Stage 15 必须保持 Flask 服务端渲染与少量原生 JS 架构，不引入新的前端构建链，不放宽真实 MiKan、Auto Bangumi、qBittorrent 的敏感信息安全边界。",
+  "branchName": "agent/stage16-mikan-bangumi-detail",
+  "description": "MiGuOrca Stage 16：在 Stage 15 Web UI ACCEPTED 管理与筛选语义优化完成后，优先补齐真实 MiKan 已选中合集详情页解析与直连 URL/ID 入口。Stage 16 不实现搜索候选展示 UI，不实现 AI 番剧名解析，不新增下载或订阅动作；它为 Stage 17 的真实 MiKan 搜索候选选择提供稳定的详情页解析基础。",
   "userStories": [
     {
-      "id": "US-103",
-      "title": "新增已保存 Request 删除能力",
-      "description": "As a Web UI user, I want to delete saved Requests so that obsolete ACCEPTED or other saved Requests can be removed from the local list.",
+      "id": "US-110",
+      "title": "新增 MiKan 合集详情页离线 fixture",
+      "description": "As a developer, I want sanitized MiKan bangumi detail-page fixtures so that real MiKan parsing can be tested offline and repeatably.",
       "acceptanceCriteria": [
-        "在 storage repository 中新增 path-safe 的 Request 删除函数，按 request_id 删除对应 `requests/<request_id>.json`",
-        "删除函数必须拒绝包含路径片段、空值或路径穿越的 request_id，并返回统一脱敏错误",
-        "删除不存在的 Request 必须返回稳定错误，不泄露本地绝对路径",
-        "新增 Web API 删除入口，例如 `POST /api/v1/requests/<request_id>/delete` 或等价路由，payload 只允许携带 `storage_dir` 等现有非敏感上下文",
-        "删除成功后 API 返回被删除 request_id 和安全摘要，不返回已删除 Request 的完整原始 JSON",
-        "删除成功后 Request 列表不再包含该 request_id，详情加载该 request_id 返回缺失错误",
-        "单元测试覆盖删除成功、不存在、路径穿越、列表刷新和错误脱敏",
+        "新增至少一个 MiKan `Home/Bangumi/<id>` 详情页离线 fixture，覆盖番剧标题、番剧级 RSS、字幕组名称、字幕组级 RSS、种子标题、单集详情页链接和 magnet 属性",
+        "fixture 必须经过安全审查，不包含 cookie、token、登录态、真实用户信息或本地绝对路径",
+        "fixture 可以基于 `https://mikanani.me/Home/Bangumi/2353` 当前公开结构，但不得让单元测试依赖实时网络",
+        "新增 parser 单元测试先使用 fixture 驱动，证明当前 parser 能定位标题、RSS 链接和字幕组分区",
+        "测试断言不得保存或输出原始 HTML 全文、原始 RSS XML 或完整失败 URL",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "先补存储/API 基础能力；UI 删除按钮在后续 story 接入。"
+      "notes": "先建立离线验收基线，避免后续真实站点慢响应或结构变化直接破坏测试。"
     },
     {
-      "id": "US-104",
-      "title": "允许 ACCEPTED Request 安全受限修改",
-      "description": "As a Web UI user, I want to modify an ACCEPTED Request with the same restricted fields so that I can correct filter or folder settings after confirmation.",
+      "id": "US-111",
+      "title": "解析选中 MiKan 合集详情元数据",
+      "description": "As a real MiKan user, I want MiGuOrca to parse a selected bangumi detail page so that the system can understand the collection before generating RSS sources.",
       "acceptanceCriteria": [
-        "`modify_request` 或等价 controller 必须允许 `PENDING_CONFIRM` 与 `ACCEPTED` Request 执行受限修改",
-        "`CANCELLED` 或未知状态 Request 继续拒绝修改，并返回统一脱敏错误",
-        "对 `ACCEPTED` Request 修改后，状态必须保持 `ACCEPTED`，不得回退为 `PENDING_CONFIRM`",
-        "对 `PENDING_CONFIRM` Request 修改后，现有行为保持为 `PENDING_CONFIRM`",
-        "允许修改字段仍限定为 `selected_subtitle_group`、`filter_rule`、`expected_folder_name`，不得开放完整 Request JSON 编辑",
-        "修改 `ACCEPTED` Request 后必须重新计算有效/排除 Seeds，并保持 Auto Bangumi 提交入口仍只需显式提交",
-        "Web modify API 必须为 ACCEPTED 修改记录 `MODIFY` history event，并在详情 Audit 中可见",
-        "单元测试覆盖 ACCEPTED 修改成功、状态保持、CANCELLED 拒绝、history 保存和不放宽可修改字段",
+        "新增或扩展详情页 parser，输出结构化元数据：`bangumi_id`、`title`、`mikan_url`、可选 `broadcast_start`、可选 `poster_url`、番剧级 RSS、字幕组条目和安全种子标题摘要",
+        "parser 必须识别 MiKan 主标题区域，例如包含 `.bangumi-title` 和 `.mikan-rss` 的结构",
+        "parser 必须识别字幕组分区标题，例如 `.subgroup-name` 或详情页当前等价结构",
+        "parser 必须识别字幕组级 RSS 链接，例如 `/RSS/Bangumi?bangumiId=<id>&subgroupid=<id>`",
+        "parser 必须识别单集详情页链接和安全种子标题摘要，但 magnet 链接不得写入 Request snapshot，除非仅作为内部模型或测试断言使用",
+        "重复 RSS URL 必须去重",
+        "没有任何可用 RSS 时返回稳定 `mikan_parse_failed`，错误中不得包含原始 HTML 或完整 URL",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "此 story 不实现 UI 按钮，只调整后端状态契约，避免 UI 先依赖不存在的行为。"
+      "notes": "结构化详情模型可以是 M03 内部模型，不强制迁移 Request schema。"
     },
     {
-      "id": "US-105",
-      "title": "为 ACCEPTED Request 增加 Web UI 修改与删除动作",
-      "description": "As a Web UI user, I want visible modify and delete controls on ACCEPTED Request details so that accepted items remain manageable.",
+      "id": "US-112",
+      "title": "优先输出字幕组级 RSS 源",
+      "description": "As a subscriber, I want MiGuOrca to use subgroup RSS feeds when available so that later filtering and subtitle-group selection work correctly.",
       "acceptanceCriteria": [
-        "已保存 `ACCEPTED` Request 详情必须同时展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作",
-        "点击 `修改` 必须复用现有详情内修改表单，并可提交受限 patch 到 modify API",
-        "ACCEPTED 修改成功后详情保持 `ACCEPTED` 状态，Filter、Seeds、Audit 和列表摘要刷新",
-        "点击 `删除` 必须要求明确确认，取消确认时不得调用删除 API",
-        "删除成功后必须刷新 Request 列表、清空或替换详情为空状态，并从 URL 移除 `request_id`",
-        "未保存预览 Request 不得展示删除、确认、取消、修改或 Auto Bangumi 提交动作",
-        "删除失败或修改失败时保留当前详情并展示统一脱敏错误",
-        "浏览器测试覆盖 ACCEPTED 修改成功、ACCEPTED 删除成功、删除取消确认、预览不展示删除和错误恢复",
+        "`MikanClient.list_rss_sources(matched_bangumi)` 必须优先返回字幕组级 `RssSource`，`subtitle_group` 来自对应字幕组名称而不是 `RSS` 链接文本",
+        "字幕组级 RSS 源的 `source_type` 必须为 `mikan_http`，`fixture_path` 必须为空字符串",
+        "当存在字幕组级 RSS 时，不应把番剧级 RSS 混入常规字幕组候选列表",
+        "当没有字幕组级 RSS 但存在番剧级 RSS 时，可返回一个明确 fallback 源，例如 `全部字幕组` 或 `番剧合集 RSS`，并附带 warning 或可诊断信息",
+        "现有 RSS parser、字幕组选择、Request 生成和 AB payload 映射必须继续兼容",
+        "单元测试覆盖多字幕组、重复 RSS、仅番剧级 RSS fallback、无 RSS parse error、字幕组名称提取和安全错误脱敏",
         "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Typecheck passes"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "删除是危险动作，应沿用现有 danger-button 语义并保持用户可恢复的错误状态。"
+      "notes": "MiGuOrca 当前主链路仍以 RSS 订阅为核心，magnet 解析不应抢先改变主数据契约。"
     },
     {
-      "id": "US-106",
-      "title": "将筛选规则改为字面匹配默认语义",
-      "description": "As a user configuring filters, I want default include/exclude rules to match literal characters case-insensitively so that simple text input behaves predictably.",
+      "id": "US-113",
+      "title": "新增 MiKan 合集 URL 或 ID 直连入口",
+      "description": "As a user who already found the correct MiKan collection, I want to paste a bangumi URL or ID so that I can bypass unreliable fuzzy search.",
       "acceptanceCriteria": [
-        "`FilterRule` 或等价数据结构新增 `use_regex` 与 `case_sensitive` 字段，默认值均为 `false`",
-        "旧配置或旧保存 Request 中缺少 `use_regex`、`case_sensitive` 时必须按默认 `false` 兼容加载",
-        "`use_regex=false` 时，`must_contain` 和 `must_not_contain` 按字面 substring 匹配，不编译为正则",
-        "`case_sensitive=false` 时，字面匹配和正则匹配都必须大小写不敏感",
-        "`case_sensitive=true` 时，`v2` 不应匹配只包含 `V2` 的种子名",
-        "`must_contain` 默认语义：规则文本出现在种子名中才有效，否则进入排除列表，排除原因标识为未命中包含规则",
-        "`must_not_contain` 默认语义：规则文本出现在种子名中即排除，排除原因标识为命中排除规则",
-        "`use_regex=true` 时保留正则能力，非法正则继续返回统一校验错误；`use_regex=false` 时输入 `[`、`[v2]` 等字符不得触发正则错误",
-        "更新 RSS engine、Request modify 重算逻辑、配置加载和相关单元测试",
+        "CLI 或入口 controller 支持显式 MiKan bangumi URL 或 bangumi ID 参数；参数命名需与现有 `--source mikan` / `--mikan-config` 约定保持一致",
+        "Web API `POST /api/v1/requests` 支持 request-scoped 的 MiKan direct entry payload，不写入浏览器 storage、URL 或持久配置",
+        "存在 direct entry 时，生成流程必须绕过 MiKan 搜索候选匹配，直接读取并解析指定 `Home/Bangumi/<id>` 详情页",
+        "接受 bare ID 时必须基于显式 MiKan config 派生详情页 URL；不得硬编码为唯一不可配置 host",
+        "拒绝空值、非 HTTP(S)、非 MiKan Bangumi path、路径穿越、无效 ID 和无法从配置派生 URL 的输入，并返回脱敏错误",
+        "直接 URL/ID 成功路径可以生成 PENDING_CONFIRM Request，且 Request 的 `matched_bangumi.mikan_url` 指向选中详情页",
+        "单元测试覆盖 CLI/controller/API payload、URL 输入、ID 输入、搜索绕过、无效输入和安全脱敏",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "这是筛选语义的后端基础；UI 控件在后续 story 接入。"
+      "notes": "这是第一季等搜索不可达场景的最重要兜底。Web UI 展示控件可最小化，完整候选选择放 Stage 17。"
     },
     {
-      "id": "US-107",
-      "title": "优化 Web UI 筛选编辑控件",
-      "description": "As a Web UI user, I want filter controls with explicit regex and case-sensitive checkboxes so that I can choose simple or advanced matching.",
+      "id": "US-114",
+      "title": "强化真实 MiKan 读取超时和错误边界",
+      "description": "As a maintainer, I want real MiKan reads to fail safely so that slow or large pages do not leak data or hang the workflow indefinitely.",
       "acceptanceCriteria": [
-        "修改表单中的筛选字段改用中文或清晰标签：`包含规则` 与 `排除规则`，避免只展示 `must_contain` 和 `must_not_contain` 作为主要说明",
-        "筛选输入旁边或同一分组内必须展示 `使用正则` 复选框，默认未选中",
-        "筛选输入旁边或同一分组内必须展示 `大小写敏感` 复选框，默认未选中",
-        "默认提交 `包含规则=1080p` 或 `排除规则=[v2]` 时，前端 payload 必须发送 `use_regex=false` 与 `case_sensitive=false`",
-        "勾选 `使用正则` 后，payload 必须发送 `use_regex=true` 并保留用户输入的正则文本，不再使用 Stage14 的 literal helper 自动转换规则",
-        "勾选 `大小写敏感` 后，payload 必须发送 `case_sensitive=true`",
-        "清空筛选字段必须继续通过现有清空控件或等价交互发送明确空值，且不丢失 regex/case 选项的预期状态",
-        "浏览器测试覆盖默认未勾选、勾选使用正则、勾选大小写敏感、payload shape 和错误恢复",
+        "真实 MiKan HTTP 读取继续使用显式 `timeout_seconds`，并对搜索页、详情页、RSS 读取分别设置正确 `failed_step`",
+        "如果实现有限读取或最大页面大小保护，超限时必须返回稳定脱敏错误，不返回原始 HTML 片段",
+        "HTTP、连接、超时、编码、解析失败均返回稳定 `Stage1Error` 类型和安全 details",
+        "错误 details 只允许包含 `category`、`field`、`status_code` 等可处理字段，不包含完整 endpoint、完整 URL、cookie、token、raw HTML、raw RSS XML 或原始响应体",
+        "日志、API 响应、Request snapshot、history 和测试输出均不得包含敏感或原始外部响应内容",
+        "新增或更新测试覆盖慢响应/timeout、HTTP error、URL 中带敏感 query、原始 HTML parse failure 和 malformed response",
         "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Stage14 的 `字面文本模式` 只覆盖排除规则；Stage15 应用更统一的 `使用正则` 和 `大小写敏感` 控件替代它。"
+      "notes": "人工验证发现实站详情页可能较慢，真实 adapter 不能假定页面总能快速完整返回。"
     },
     {
-      "id": "US-108",
-      "title": "刷新 Filter 详情与 Seeds 排除说明",
-      "description": "As a Web UI user, I want filter mode and seed exclusion reasons to be readable so that I can verify why each seed is valid or excluded.",
+      "id": "US-115",
+      "title": "补齐 Stage 16 文档与回归收尾",
+      "description": "As a maintainer, I want Stage 16 behavior documented and tested so that direct MiKan detail parsing remains stable before Stage 17 search selection work starts.",
       "acceptanceCriteria": [
-        "Request 详情 Filter 分区必须展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写敏感状态",
-        "Seeds 排除列表中的原因必须使用用户可读语言，区分 `命中排除规则` 与 `未命中包含规则`",
-        "普通字符模式下，详情不得把用户输入显示成自动生成的正则表达式",
-        "正则模式下，详情必须明确标识当前为正则匹配",
-        "大小写不敏感模式下，详情必须明确标识不区分大小写",
-        "修改筛选规则后，Filter、完整 Seeds、有效 Seeds 和排除 Seeds 必须同步刷新",
-        "浏览器测试覆盖普通字符 `[v2]` 排除、大小写不敏感 `v2` 匹配 `V2`、大小写敏感不匹配、正则模式和详情原因展示",
-        "不得在 Filter 或 Seeds 详情中展示原始 RSS XML、原始响应体、真实 endpoint、token、username、password、cookie 或 SID",
-        "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "README 记录 MiKan direct entry、详情页解析、字幕组级 RSS 优先、番剧级 RSS fallback 和安全边界",
+        "主 PRD、M03、M00、M13 或相关模块文档记录 Stage 16 已完成行为与 Stage 17 handoff",
+        "`docs/backlog.md` 更新 BL-009、BL-001 和 AI 番剧名解析待办状态",
+        "`scripts/ralph/progress.txt` 记录 Stage 16 完成摘要、测试结果、风险和后续事项",
+        "如 Web UI 有最小 direct entry 控件，浏览器测试必须覆盖该入口和敏感信息边界；如无 UI 改动，应说明 Stage 17 接入计划",
+        "`uv run pytest -q` 通过",
+        "`uv run python -m compileall -q src` 通过",
+        "涉及浏览器行为时 `uv run pytest tests/browser/ -v` 通过或记录浏览器不可用原因",
+        "Typecheck passes"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "此 story 依赖 US-106/US-107 的数据模型和控件。"
-    },
-    {
-      "id": "US-109",
-      "title": "补齐 Stage 15 文档与回归收尾",
-      "description": "As a maintainer, I want Stage 15 behavior documented and tested so that accepted Request management and filter semantics remain stable.",
-      "acceptanceCriteria": [
-        "README 更新 ACCEPTED Request 可修改/可删除行为、默认字面匹配、大小写敏感选项和使用正则选项",
-        "相关 Stage PRD 或模块文档记录 Stage 15 已修复问题、实现决策和保留的安全边界",
-        "`docs/backlog.md` 更新 Stage 15 条目或关闭对应 Web UI bug 待办",
-        "`scripts/ralph/progress.txt` 记录 Stage 15 完成摘要、测试结果、风险和后续事项",
-        "浏览器回归覆盖 ACCEPTED 修改、ACCEPTED 删除、默认字面筛选、大小写不敏感、大小写敏感和正则模式",
-        "安全回归确认 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体不会进入 storage JSON、browser storage、URL、日志、截图或 trace",
-        "`uv run pytest -q` 通过",
-        "`uv run pytest tests/browser/ -v` 通过",
-        "`uv run python -m compileall -q src` 通过",
-        "Typecheck passes"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": "完成后再归档 Stage15 Ralph 任务并准备提交/合并。"
+      "notes": "完成后 Stage 17 可以基于稳定详情页 parser 实现搜索候选选择。"
     }
   ]
 }

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -9,6 +10,37 @@ from urllib.request import Request, urlopen
 from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, MatchedBangumi, RssSource
+
+
+MAX_MIKAN_RESPONSE_BYTES = 2_000_000
+
+
+class MikanResponseTooLargeError(Exception):
+    """Raised when a MiKan response exceeds the bounded read limit."""
+
+
+@dataclass(frozen=True)
+class MikanEpisodeSummary:
+    title: str
+    episode_url: str
+
+
+@dataclass(frozen=True)
+class MikanSubgroupDetail:
+    name: str
+    rss_url: str | None
+    episodes: list[MikanEpisodeSummary]
+
+
+@dataclass(frozen=True)
+class MikanBangumiDetail:
+    bangumi_id: str
+    title: str
+    mikan_url: str
+    broadcast_start: str | None
+    poster_url: str | None
+    bangumi_rss_url: str | None
+    subgroups: list[MikanSubgroupDetail]
 
 
 class MikanTransport(Protocol):
@@ -30,47 +62,11 @@ class UrlopenMikanTransport:
             },
             method="GET",
         )
-        try:
-            with urlopen(request, timeout=timeout) as response:
-                body = response.read()
-        except HTTPError as exc:
-            raise Stage1Error(
-                "mikan_http_failed",
-                "MiKan HTTP 请求失败",
-                "mikan_search",
-                {"status_code": exc.code},
-            ) from exc
-        except URLError as exc:
-            reason = getattr(exc, "reason", None)
-            if isinstance(reason, TimeoutError):
-                raise Stage1Error(
-                    "mikan_timeout",
-                    "MiKan HTTP 请求超时",
-                    "mikan_search",
-                    {"category": "timeout"},
-                ) from exc
-            raise Stage1Error(
-                "mikan_connection_failed",
-                "MiKan HTTP 连接失败",
-                "mikan_search",
-                {"category": "connection"},
-            ) from exc
-        except TimeoutError as exc:
-            raise Stage1Error(
-                "mikan_timeout",
-                "MiKan HTTP 请求超时",
-                "mikan_search",
-                {"category": "timeout"},
-            ) from exc
-
-        try:
-            return body.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise Stage1Error(
-                "mikan_parse_failed",
-                "MiKan 搜索页编码无法解析",
-                "mikan_search",
-            ) from exc
+        with urlopen(request, timeout=timeout) as response:
+            body = response.read(MAX_MIKAN_RESPONSE_BYTES + 1)
+        if len(body) > MAX_MIKAN_RESPONSE_BYTES:
+            raise MikanResponseTooLargeError
+        return body.decode("utf-8")
 
 
 class MikanClient:
@@ -130,6 +126,45 @@ class MikanClient:
         )
         return _parse_bangumi_rss_sources(html, mikan_url)
 
+    def get_direct_bangumi_detail(self, direct_entry: str) -> MikanBangumiDetail:
+        mikan_url = _direct_bangumi_url(direct_entry, self._config)
+        html = _read_mikan_text(
+            self._transport,
+            mikan_url,
+            timeout=self._config.timeout_seconds,
+            failed_step="mikan_bangumi_detail",
+        )
+        return _parse_bangumi_detail(html, mikan_url)
+
+    def get_bangumi_detail(self, matched_bangumi: MatchedBangumi) -> MikanBangumiDetail:
+        mikan_url = matched_bangumi.mikan_url.strip()
+        if not mikan_url:
+            raise Stage1Error(
+                "invalid_input",
+                "MiKan 番剧页 URL 不能为空",
+                "mikan_bangumi_detail",
+            )
+        html = _read_mikan_text(
+            self._transport,
+            mikan_url,
+            timeout=self._config.timeout_seconds,
+            failed_step="mikan_bangumi_detail",
+        )
+        return _parse_bangumi_detail(html, mikan_url)
+
+    def list_rss_sources_from_detail(
+        self,
+        detail: MikanBangumiDetail,
+    ) -> list[RssSource]:
+        sources = _rss_sources_from_bangumi_detail(detail)
+        if not sources:
+            raise Stage1Error(
+                "mikan_parse_failed",
+                "MiKan 番剧页未找到 RSS 源",
+                "mikan_list_rss_sources",
+            )
+        return sources
+
 
 def create_mikan_client(
     config: MikanConfig,
@@ -146,6 +181,83 @@ def _build_search_url(search_endpoint: str, raw_title: str) -> str:
     query = parse_qsl(parsed.query, keep_blank_values=True)
     query.append(("searchstr", raw_title))
     return urlunparse(parsed._replace(query=urlencode(query)))
+
+
+def _direct_bangumi_url(direct_entry: str, config: MikanConfig) -> str:
+    value = direct_entry.strip()
+    if not value:
+        raise _invalid_direct_entry("mikan_bangumi")
+    if _is_bangumi_id(value):
+        return _direct_bangumi_url_from_id(value, config)
+    return _validated_direct_bangumi_url(value, config)
+
+
+def _direct_bangumi_url_from_id(bangumi_id: str, config: MikanConfig) -> str:
+    base = urlparse(config.search_endpoint)
+    if base.scheme not in {"http", "https"} or not base.netloc:
+        raise Stage1Error(
+            "config_error",
+            "MiKan search_endpoint 无法派生番剧页 URL",
+            "mikan_direct_entry",
+            {"field": "search_endpoint"},
+        )
+    return urlunparse(
+        (
+            base.scheme,
+            base.netloc,
+            f"/Home/Bangumi/{bangumi_id}",
+            "",
+            "",
+            "",
+        )
+    )
+
+
+def _validated_direct_bangumi_url(value: str, config: MikanConfig) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise _invalid_direct_entry("mikan_bangumi")
+
+    config_origin = urlparse(config.search_endpoint)
+    if (
+        config_origin.scheme not in {"http", "https"}
+        or not config_origin.netloc
+        or parsed.netloc.casefold() != config_origin.netloc.casefold()
+    ):
+        raise _invalid_direct_entry("mikan_bangumi")
+
+    path_parts = [part for part in parsed.path.split("/") if part]
+    if len(path_parts) != 3:
+        raise _invalid_direct_entry("mikan_bangumi")
+    if [part.casefold() for part in path_parts[:2]] != ["home", "bangumi"]:
+        raise _invalid_direct_entry("mikan_bangumi")
+    bangumi_id = path_parts[2]
+    if not _is_bangumi_id(bangumi_id):
+        raise _invalid_direct_entry("mikan_bangumi")
+
+    return urlunparse(
+        (
+            parsed.scheme,
+            parsed.netloc,
+            f"/Home/Bangumi/{bangumi_id}",
+            "",
+            "",
+            "",
+        )
+    )
+
+
+def _invalid_direct_entry(field: str) -> Stage1Error:
+    return Stage1Error(
+        "invalid_input",
+        "MiKan bangumi 直连入口必须是数字 ID 或 Home/Bangumi URL",
+        "mikan_direct_entry",
+        {"field": field},
+    )
+
+
+def _is_bangumi_id(value: str) -> bool:
+    return value.isascii() and value.isdecimal()
 
 
 def _read_mikan_text(
@@ -165,6 +277,10 @@ def _read_mikan_text(
         raise _mikan_timeout(failed_step) from exc
     except ConnectionError as exc:
         raise _mikan_connection_failed(failed_step) from exc
+    except UnicodeDecodeError as exc:
+        raise _mikan_parse_failed(failed_step, "encoding") from exc
+    except MikanResponseTooLargeError as exc:
+        raise _mikan_parse_failed(failed_step, "response_too_large") from exc
     except Stage1Error as exc:
         raise _sanitize_mikan_stage_error(exc, failed_step) from exc
 
@@ -181,10 +297,10 @@ def _sanitize_mikan_stage_error(error: Stage1Error, failed_step: str) -> Stage1E
     if error.error_type == "mikan_connection_failed":
         return _mikan_connection_failed(failed_step)
     if error.error_type == "mikan_parse_failed":
-        return Stage1Error(
-            "mikan_parse_failed",
-            "MiKan 页面解析失败",
+        category = error.details.get("category")
+        return _mikan_parse_failed(
             failed_step,
+            category if isinstance(category, str) else None,
         )
     return error
 
@@ -224,6 +340,16 @@ def _mikan_timeout(failed_step: str) -> Stage1Error:
     )
 
 
+def _mikan_parse_failed(failed_step: str, category: str | None = None) -> Stage1Error:
+    details = {"category": category} if category is not None else {}
+    return Stage1Error(
+        "mikan_parse_failed",
+        "MiKan 页面解析失败",
+        failed_step,
+        details,
+    )
+
+
 def _parse_search_candidates(html: str, search_endpoint: str) -> list[BangumiCandidate]:
     parser = _MikanSearchParser(search_endpoint)
     try:
@@ -256,14 +382,73 @@ def _parse_bangumi_rss_sources(html: str, bangumi_url: str) -> list[RssSource]:
             "mikan_list_rss_sources",
         ) from exc
 
-    sources = parser.rss_sources()
+    detail = parser.bangumi_detail()
+    sources = _rss_sources_from_bangumi_detail(detail) if detail is not None else []
     if not sources:
         raise Stage1Error(
             "mikan_parse_failed",
             "MiKan 番剧页未找到 RSS 源",
             "mikan_list_rss_sources",
-        )
+    )
     return sources
+
+
+def _rss_sources_from_bangumi_detail(
+    detail: MikanBangumiDetail | None,
+) -> list[RssSource]:
+    if detail is None:
+        return []
+
+    sources: list[RssSource] = []
+    seen_urls: set[str] = set()
+    for subgroup in detail.subgroups:
+        rss_url = subgroup.rss_url
+        if rss_url is None or rss_url in seen_urls:
+            continue
+        sources.append(
+            RssSource(
+                subtitle_group=subgroup.name,
+                rss_url=rss_url,
+                source_type="mikan_http",
+                fixture_path="",
+            )
+        )
+        seen_urls.add(rss_url)
+
+    if sources:
+        return sources
+
+    if detail.bangumi_rss_url is None:
+        return []
+    return [
+        RssSource(
+            subtitle_group="全部字幕组",
+            rss_url=detail.bangumi_rss_url,
+            source_type="mikan_http",
+            fixture_path="",
+        )
+    ]
+
+
+def _parse_bangumi_detail(html: str, bangumi_url: str) -> MikanBangumiDetail:
+    parser = _MikanBangumiPageParser(bangumi_url)
+    try:
+        parser.feed(html)
+    except Exception as exc:
+        raise Stage1Error(
+            "mikan_parse_failed",
+            "MiKan 番剧页解析失败",
+            "mikan_bangumi_detail",
+        ) from exc
+
+    detail = parser.bangumi_detail()
+    if detail is None:
+        raise Stage1Error(
+            "mikan_parse_failed",
+            "MiKan 番剧页未找到可用 RSS",
+            "mikan_bangumi_detail",
+        )
+    return detail
 
 
 class _MikanSearchParser(HTMLParser):
@@ -336,19 +521,66 @@ class _MikanBangumiPageParser(HTMLParser):
         self._completed_rows: list[_MikanPageRow] = []
         self._active_anchor: _MikanPageAnchor | None = None
         self._standalone_anchors: list[_MikanPageAnchor] = []
+        self._title_depth = 0
+        self._title_parts: list[str] = []
+        self._subgroup_depth = 0
+        self._subgroup_parts: list[str] = []
+        self._subgroup_names: list[str] = []
+        self._subgroup_section_depth = 0
+        self._current_subgroup_name: str | None = None
+        self._anchors: list[_MikanPageAnchor] = []
+        self._broadcast_depth = 0
+        self._broadcast_parts: list[str] = []
+        self._poster_url: str | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag_name = tag.lower()
+        if self._title_depth:
+            self._title_depth += 1
+        if self._subgroup_depth:
+            self._subgroup_depth += 1
+        if self._broadcast_depth:
+            self._broadcast_depth += 1
+        if self._subgroup_section_depth:
+            self._subgroup_section_depth += 1
+
         if tag_name == "tr":
             self._row_depth += 1
             if self._current_row is None:
                 self._current_row = _MikanPageRow()
 
         attr_map = {name.lower(): value for name, value in attrs if value is not None}
+        classes = set(attr_map.get("class", "").split())
+        if "bangumi-title" in classes:
+            self._title_depth = 1
+            self._title_parts = []
+        if "subgroup-section" in classes:
+            self._subgroup_section_depth = 1
+            self._current_subgroup_name = None
+        if "subgroup-name" in classes:
+            self._subgroup_depth = 1
+            self._subgroup_parts = []
+        if classes.intersection({"broadcast-start", "broadcast-date", "air-date"}):
+            self._broadcast_depth = 1
+            self._broadcast_parts = []
+        if tag_name == "img" and self._poster_url is None:
+            image_url = _poster_url_from_attrs(attr_map, self._base_url)
+            if image_url is not None:
+                self._poster_url = image_url
         if tag_name == "a":
-            self._active_anchor = _MikanPageAnchor(attr_map, [])
+            self._active_anchor = _MikanPageAnchor(
+                attr_map,
+                [],
+                self._current_subgroup_name,
+            )
 
     def handle_data(self, data: str) -> None:
+        if self._title_depth:
+            self._title_parts.append(data)
+        if self._subgroup_depth:
+            self._subgroup_parts.append(data)
+        if self._broadcast_depth:
+            self._broadcast_parts.append(data)
         if self._active_anchor is not None:
             self._active_anchor.text_parts.append(data)
         if self._current_row is not None:
@@ -361,14 +593,39 @@ class _MikanBangumiPageParser(HTMLParser):
                 self._current_row.anchors.append(self._active_anchor)
             else:
                 self._standalone_anchors.append(self._active_anchor)
+            self._anchors.append(self._active_anchor)
             self._active_anchor = None
-            return
+
+        if self._title_depth:
+            self._title_depth -= 1
+        if self._subgroup_depth:
+            self._subgroup_depth -= 1
+            if self._subgroup_depth == 0:
+                subgroup_name = _clean_title(" ".join(self._subgroup_parts))
+                if subgroup_name:
+                    self._subgroup_names.append(subgroup_name)
+                    if self._subgroup_section_depth:
+                        self._current_subgroup_name = subgroup_name
+                self._subgroup_parts = []
+        if self._broadcast_depth:
+            self._broadcast_depth -= 1
+        if self._subgroup_section_depth:
+            self._subgroup_section_depth -= 1
+            if self._subgroup_section_depth == 0:
+                self._current_subgroup_name = None
 
         if tag_name == "tr" and self._row_depth:
             self._row_depth -= 1
             if self._row_depth == 0 and self._current_row is not None:
                 self._completed_rows.append(self._current_row)
                 self._current_row = None
+
+    def title(self) -> str | None:
+        title = _clean_title(" ".join(self._title_parts))
+        return title or None
+
+    def subgroup_names(self) -> list[str]:
+        return _unique(self._subgroup_names)
 
     def rss_sources(self) -> list[RssSource]:
         rows = self._rows_with_sources()
@@ -394,6 +651,70 @@ class _MikanBangumiPageParser(HTMLParser):
                 seen_urls.add(rss_url)
         return sources
 
+    def bangumi_detail(self) -> MikanBangumiDetail | None:
+        bangumi_id = _extract_bangumi_id(self._base_url)
+        title = self.title()
+        if bangumi_id is None or title is None:
+            return None
+
+        bangumi_rss_url = self._bangumi_rss_url()
+        subgroups = self._subgroup_details()
+        if bangumi_rss_url is None and not any(group.rss_url for group in subgroups):
+            return None
+
+        return MikanBangumiDetail(
+            bangumi_id=bangumi_id,
+            title=title,
+            mikan_url=urlunparse(urlparse(self._base_url)),
+            broadcast_start=_clean_title(" ".join(self._broadcast_parts)) or None,
+            poster_url=self._poster_url,
+            bangumi_rss_url=bangumi_rss_url,
+            subgroups=subgroups,
+        )
+
+    def _bangumi_rss_url(self) -> str | None:
+        for anchor in self._anchors:
+            rss_url = _rss_url_from_href(anchor.attrs.get("href", ""), self._base_url)
+            if rss_url is None:
+                continue
+            if _rss_query_subgroup_id(rss_url) is None:
+                return rss_url
+        return None
+
+    def _subgroup_details(self) -> list[MikanSubgroupDetail]:
+        sources_by_group = {source.subtitle_group: source.rss_url for source in self.rss_sources()}
+        episodes_by_group: dict[str, list[MikanEpisodeSummary]] = {
+            group_name: [] for group_name in self.subgroup_names()
+        }
+
+        for anchor in self._anchors:
+            episode_url = _episode_url_from_href(anchor.attrs.get("href", ""), self._base_url)
+            if episode_url is None:
+                continue
+            title = _clean_title(" ".join(anchor.text_parts))
+            if not title:
+                continue
+            group_name = anchor.subgroup_name or _subgroup_name_from_episode_title(title)
+            if group_name is None:
+                continue
+            episodes_by_group.setdefault(group_name, []).append(
+                MikanEpisodeSummary(title=title, episode_url=episode_url)
+            )
+
+        group_names = _unique(
+            self.subgroup_names()
+            + list(sources_by_group.keys())
+            + list(episodes_by_group.keys())
+        )
+        return [
+            MikanSubgroupDetail(
+                name=group_name,
+                rss_url=sources_by_group.get(group_name),
+                episodes=_unique_episodes(episodes_by_group.get(group_name, [])),
+            )
+            for group_name in group_names
+        ]
+
     def _rows_with_sources(self) -> list["_MikanPageRow"]:
         rows = list(self._completed_rows)
         if self._current_row is not None:
@@ -404,9 +725,15 @@ class _MikanBangumiPageParser(HTMLParser):
 
 
 class _MikanPageAnchor:
-    def __init__(self, attrs: dict[str, str], text_parts: list[str]) -> None:
+    def __init__(
+        self,
+        attrs: dict[str, str],
+        text_parts: list[str],
+        subgroup_name: str | None = None,
+    ) -> None:
         self.attrs = attrs
         self.text_parts = text_parts
+        self.subgroup_name = subgroup_name
 
 
 class _MikanPageRow:
@@ -443,10 +770,55 @@ def _rss_url_from_href(href: str, base_url: str) -> str | None:
     return urlunparse(parsed)
 
 
+def _episode_url_from_href(href: str, base_url: str) -> str | None:
+    if not href.strip():
+        return None
+    absolute_url = urljoin(base_url, href.strip())
+    parsed = urlparse(absolute_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    if "/home/episode/" not in parsed.path.casefold():
+        return None
+    return urlunparse(parsed)
+
+
+def _poster_url_from_attrs(attrs: dict[str, str], base_url: str) -> str | None:
+    classes = set(attrs.get("class", "").split())
+    if not classes.intersection({"bangumi-poster", "poster", "cover"}):
+        return None
+    src = attrs.get("src", "").strip()
+    if not src:
+        return None
+    absolute_url = urljoin(base_url, src)
+    parsed = urlparse(absolute_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return urlunparse(parsed)
+
+
+def _rss_query_subgroup_id(rss_url: str) -> str | None:
+    parsed = urlparse(rss_url)
+    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+        if key.casefold() in {"subgroupid", "subtitlegroupid"} and value.strip():
+            return value.strip()
+    return None
+
+
+def _subgroup_name_from_episode_title(title: str) -> str | None:
+    stripped = title.strip()
+    if not stripped.startswith("[") or "]" not in stripped:
+        return None
+    subgroup_name = stripped.split("]", 1)[0].strip("[] ")
+    return subgroup_name or None
+
+
 def _subtitle_group_from_anchor(
     anchor: _MikanPageAnchor,
     row_text: str,
 ) -> str | None:
+    if anchor.subgroup_name:
+        return anchor.subgroup_name
+
     for key in (
         "data-subtitle-group",
         "data-subtitle-group-name",
@@ -484,3 +856,15 @@ def _unique(values: list[str]) -> list[str]:
         if value not in unique_values:
             unique_values.append(value)
     return unique_values
+
+
+def _unique_episodes(episodes: list[MikanEpisodeSummary]) -> list[MikanEpisodeSummary]:
+    unique_episodes: list[MikanEpisodeSummary] = []
+    seen: set[tuple[str, str]] = set()
+    for episode in episodes:
+        key = (episode.title, episode.episode_url)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_episodes.append(episode)
+    return unique_episodes
