@@ -9,7 +9,7 @@ import pytest
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
-from mikan_engine.controllers.mikan_client import create_mikan_client
+from mikan_engine.controllers.mikan_client import MikanCandidate, create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
 from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
 from request_engine.controllers.request_controller import (
@@ -400,6 +400,8 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "未找到候选合集" in script
     assert "MiKan ID" in script
     assert "来源 query" in script
+    assert "candidate.recommendation" in script
+    assert "candidate-recommendation" in script
     assert "搜索结果不会自动选择合集" not in script
     assert "选择此合集" in script
     assert "generateRequestFromCandidate" in script
@@ -1690,6 +1692,7 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
             "poster_url": "https://mikan.example/assets/cover/2353.jpg",
             "source_query": "芙莉莲",
             "aliases": ["Frieren EN"],
+            "recommendation": "可能匹配",
         },
         {
             "bangumi_id": "3072",
@@ -1698,6 +1701,7 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
             "poster_url": None,
             "source_query": "芙莉莲",
             "aliases": [],
+            "recommendation": None,
         },
     ]
     assert transport.requests == [
@@ -1918,6 +1922,7 @@ def test_candidate_search_api_does_not_echo_raw_html_or_sensitive_values(
             "poster_url": None,
             "source_query": "芙莉莲",
             "aliases": [],
+            "recommendation": "可能匹配",
         }
     ]
     body = response.get_data(as_text=True)
@@ -1925,6 +1930,70 @@ def test_candidate_search_api_does_not_echo_raw_html_or_sensitive_values(
     assert "<script" not in body
     assert "<html" not in body
     assert "<rss" not in body
+
+
+def test_candidate_search_api_includes_display_only_recommendation_labels(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _FakeCandidateSearchClient(
+        candidates=[
+            MikanCandidate(
+                bangumi_id="3072",
+                title="咒术回战 第三季",
+                mikan_url="https://mikan.example/Home/Bangumi/3072",
+                source_query="咒术回战 第三季",
+            ),
+            MikanCandidate(
+                bangumi_id="3071",
+                title="咒术回战 第二季",
+                mikan_url="https://mikan.example/Home/Bangumi/3071",
+                source_query="咒术回战 第三季",
+            ),
+        ]
+    )
+
+    def fake_create_mikan_client(config: MikanConfig):
+        return client
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+
+    response = _client().post(
+        "/api/v1/mikan/candidates",
+        json={
+            "query": "咒术回战 第三季",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["candidates"] == [
+        {
+            "bangumi_id": "3072",
+            "title": "咒术回战 第三季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/3072",
+            "poster_url": None,
+            "source_query": "咒术回战 第三季",
+            "aliases": [],
+            "recommendation": "推荐：第 3 季",
+        },
+        {
+            "bangumi_id": "3071",
+            "title": "咒术回战 第二季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/3071",
+            "poster_url": None,
+            "source_query": "咒术回战 第三季",
+            "aliases": [],
+            "recommendation": "季数不符",
+        },
+    ]
 
 
 def test_candidate_search_api_serves_second_call_from_cache_without_transport(

@@ -374,8 +374,9 @@ def _candidate(  # type: ignore[no-untyped-def]
     source_query: str = "芙莉莲",
     poster_url: str | None = None,
     aliases: list[str] | None = None,
+    recommendation: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "bangumi_id": bangumi_id,
         "title": title,
         "mikan_url": mikan_url,
@@ -383,6 +384,9 @@ def _candidate(  # type: ignore[no-untyped-def]
         "source_query": source_query,
         "aliases": aliases or [],
     }
+    if recommendation is not None:
+        result["recommendation"] = recommendation
+    return result
 
 
 def _generation_result_json(saved_request: dict[str, Any]) -> str:
@@ -420,6 +424,184 @@ def _register_generation_capture(
         route.fulfill(status=200, content_type="application/json", body=body)
 
     page.route("**/api/v1/requests", _handler)
+
+
+class TestCandidateRecommendationLabels:
+    """AC: 候选卡片可显示 display-only 推荐标签，标签不自动选择候选或生成 Request."""
+
+    def test_recommendation_label_renders_on_cards(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲 第二季",
+                    [
+                        _candidate(
+                            bangumi_id="3072",
+                            title="葬送的芙莉莲 第二季",
+                            mikan_url="https://mikan.example/Home/Bangumi/3072",
+                            recommendation="推荐：第 2 季",
+                        ),
+                        _candidate(
+                            bangumi_id="2353",
+                            title="葬送的芙莉莲",
+                            mikan_url="https://mikan.example/Home/Bangumi/2353",
+                            recommendation="可能匹配",
+                        ),
+                    ],
+                ),
+            ),
+        )
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲 第二季",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-candidate-search-submit")
+
+        expect(page.locator(".candidate-card")).to_have_count(2)
+        expect(page.locator(".candidate-recommendation").nth(0)).to_have_text(
+            "推荐：第 2 季"
+        )
+        expect(page.locator(".candidate-recommendation").nth(1)).to_have_text(
+            "可能匹配"
+        )
+        # The label does not reorder the cards: MiKan page order is preserved.
+        assert (
+            page.locator(".candidate-card").nth(0).locator("strong").inner_text()
+            == "葬送的芙莉莲 第二季"
+        )
+
+    def test_no_recommendation_field_renders_no_badge(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [
+                        _candidate(
+                            bangumi_id="2353",
+                            title="葬送的芙莉莲",
+                            mikan_url="https://mikan.example/Home/Bangumi/2353",
+                        ),
+                    ],
+                ),
+            ),
+        )
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-candidate-search-submit")
+
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        expect(page.locator(".candidate-recommendation")).to_have_count(0)
+
+    def test_conflicting_season_shows_no_strong_copy_and_no_auto_generation(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(page, captured, body='{"ok": true}')
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲 第二季",
+                    [
+                        _candidate(
+                            bangumi_id="2353",
+                            title="葬送的芙莉莲 第一季",
+                            mikan_url="https://mikan.example/Home/Bangumi/2353",
+                            recommendation="季数不符",
+                        ),
+                    ],
+                ),
+            ),
+        )
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲 第二季",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-candidate-search-submit")
+
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        expect(page.locator(".candidate-recommendation")).to_have_text("季数不符")
+        # A conflicting season must not show strong recommendation copy.
+        assert (
+            "推荐：第"
+            not in page.locator("#mikan-candidate-search-result").inner_text()
+        )
+        # Single candidate still requires an explicit manual selection.
+        assert captured == []
+        assert "request_id=" not in page.url
+
+    def test_single_candidate_with_strong_label_still_requires_manual_selection(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲 第二季",
+                    [
+                        _candidate(
+                            bangumi_id="3072",
+                            title="葬送的芙莉莲 第二季",
+                            mikan_url="https://mikan.example/Home/Bangumi/3072",
+                            recommendation="推荐：第 2 季",
+                        ),
+                    ],
+                ),
+            ),
+        )
+        saved = create_saved_request(
+            storage_dir, "葬送的芙莉莲 第二季", "req-rec-1"
+        )
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(
+            page, captured, body=_generation_result_json(saved)
+        )
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲 第二季",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-candidate-search-submit")
+
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        expect(page.locator(".candidate-recommendation")).to_have_text(
+            "推荐：第 2 季"
+        )
+        # The label must not auto-select the candidate or auto-generate.
+        assert captured == []
+        assert "request_id=" not in page.url
+
+        page.locator("button:has-text('选择此合集')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        assert captured
+        assert captured[0]["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/3072"
+        assert captured[0]["title"] == "葬送的芙莉莲 第二季"
 
 
 class TestCandidateManualSelection:

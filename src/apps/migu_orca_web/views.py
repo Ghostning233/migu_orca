@@ -24,6 +24,9 @@ from mikan_engine.controllers.mikan_candidate_cache import (
     candidate_cache_key,
     candidate_search_cache,
 )
+from mikan_engine.controllers.mikan_candidate_recommendation import (
+    candidate_recommendation_label,
+)
 from mikan_engine.controllers.mikan_client import MikanCandidate
 from mikan_engine.controllers.mikan_config import MikanConfig
 from qbittorrent_engine.controllers.qbittorrent_controller import (
@@ -246,7 +249,7 @@ def _optional_error(error: Stage1Error) -> dict[str, object]:
     }
 
 
-def _serialize_candidate(candidate: MikanCandidate) -> dict[str, object]:
+def _serialize_candidate(candidate: MikanCandidate, query: str) -> dict[str, object]:
     return {
         "bangumi_id": candidate.bangumi_id,
         "title": candidate.title,
@@ -254,6 +257,14 @@ def _serialize_candidate(candidate: MikanCandidate) -> dict[str, object]:
         "poster_url": candidate.poster_url,
         "source_query": candidate.source_query,
         "aliases": list(candidate.aliases),
+        # Display-only recommendation label derived from the search query and
+        # public candidate metadata; never selects a candidate or triggers
+        # generation. Contains no raw HTML, RSS XML, cookies, or tokens.
+        "recommendation": candidate_recommendation_label(
+            query,
+            candidate.title,
+            candidate.aliases,
+        ),
     }
 
 
@@ -273,12 +284,12 @@ def _search_mikan_candidates(
     cache_key = candidate_cache_key(query, mikan_config)
     cached = candidate_search_cache.get(cache_key)
     if cached is not None:
-        return [_serialize_candidate(candidate) for candidate in cached]
+        return [_serialize_candidate(candidate, query) for candidate in cached]
 
     client = mikan_client_module.create_mikan_client(mikan_config)
     candidates = client.search_candidates(query)
     candidate_search_cache.set(cache_key, candidates)
-    return [_serialize_candidate(candidate) for candidate in candidates]
+    return [_serialize_candidate(candidate, query) for candidate in candidates]
 
 
 def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:

@@ -887,6 +887,16 @@
       title.textContent = safeText(candidate.title) || "未命名合集";
       item.appendChild(title);
 
+      // Display-only recommendation label (e.g. 推荐：第 2 季 / 季数不符 /
+      // 可能匹配). It only annotates the card; it never selects the candidate
+      // or triggers Request generation.
+      if (candidate.recommendation) {
+        const badge = document.createElement("span");
+        badge.className = "candidate-recommendation";
+        badge.textContent = safeText(candidate.recommendation);
+        item.appendChild(badge);
+      }
+
       const meta = document.createElement("div");
       meta.className = "candidate-meta";
       meta.textContent = "MiKan ID: " + safeText(candidate.bangumi_id);

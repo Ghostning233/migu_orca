@@ -133,7 +133,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "此 story 是体验增强；不要引入 AI title normalization。"
     },
     {
