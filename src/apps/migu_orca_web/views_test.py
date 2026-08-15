@@ -10,7 +10,12 @@ from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from mikan_engine.controllers.mikan_client import MikanCandidate, create_mikan_client
-from mikan_engine.controllers.mikan_config import MikanConfig
+from mikan_engine.controllers.mikan_config import (
+    DEFAULT_MIKAN_SEARCH_ENDPOINT,
+    DEFAULT_MIKAN_TIMEOUT_SECONDS,
+    MikanConfig,
+    default_mikan_config,
+)
 from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
 from request_engine.controllers.request_controller import (
     accept_request,
@@ -1541,17 +1546,34 @@ def test_create_request_rejects_invalid_mikan_direct_entry(
     assert called is False
 
 
-def test_create_request_rejects_missing_mikan_config_when_source_is_mikan(
+def test_create_request_uses_default_mikan_config_when_source_is_mikan(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    called = False
+    captured: dict[str, Any] = {}
+    factory_configs: list[MikanConfig] = []
 
-    def fail_if_called(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        nonlocal called
-        called = True
-        raise AssertionError("generate_request should not be called for invalid payload")
+    def fake_create_mikan_client(config: MikanConfig) -> _FakeMikanClient:
+        factory_configs.append(config)
+        transport = _FakeMikanTransport(
+            {
+                "https://mikan.example/RSS/Bangumi?bangumiId=123": (
+                    "<rss><channel><item><title>芙莉莲 - 01</title>"
+                    "<link>https://example.invalid/1</link></item></channel></rss>"
+                )
+            }
+        )
+        return _FakeMikanClient(config, transport)
 
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+    def spy_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        captured["source_mode"] = kwargs.get("source_mode")
+        captured["mikan_config"] = kwargs.get("mikan_config")
+        return generate_request(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
+        fake_create_mikan_client,
+    )
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1563,14 +1585,17 @@ def test_create_request_rejects_missing_mikan_config_when_source_is_mikan(
     )
 
     payload = response.get_json()
+    request = payload["result"]["request"]
     assert response.status_code == 200
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert any(
-        error["field"] == "mikan_config"
-        for error in payload["error_data"]["errors"]
-    )
-    assert called is False
+    assert payload["ok"] is True
+    assert captured["source_mode"] == "mikan_http"
+    assert isinstance(captured["mikan_config"], MikanConfig)
+    assert captured["mikan_config"] == default_mikan_config()
+    assert captured["mikan_config"].search_endpoint == "https://mikanani.me/Home/Search"
+    assert captured["mikan_config"].timeout_seconds == 15.0
+    assert factory_configs == [captured["mikan_config"]]
+    assert request["source_info"]["matched_bangumi"]["title"] == "芙莉莲"
+    assert request["confirmable_config"]["selected_subtitle_group"] == "Loli"
 
 
 def test_create_request_rejects_unsupported_source(
@@ -1779,17 +1804,29 @@ def test_candidate_search_api_rejects_empty_query_before_network(
     )
 
 
-def test_candidate_search_api_rejects_missing_mikan_config(
+def test_candidate_search_api_uses_default_mikan_config(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_if_called(*args: Any, **kwargs: Any) -> Any:
-        raise AssertionError(
-            "create_mikan_client should not be called without explicit mikan_config"
-        )
+    transport = _FakeMikanTransport(
+        {
+            "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2": (
+                '<section class="related-recommendations">'
+                '<div class="bangumi-item">'
+                '<a class="an-text" href="/Home/Bangumi/2353">葬送的芙莉莲</a>'
+                "</div>"
+                "</section>"
+            )
+        }
+    )
+    received_configs: list[MikanConfig] = []
+
+    def fake_create_mikan_client(config: MikanConfig):
+        received_configs.append(config)
+        return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
         "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
-        fail_if_called,
+        fake_create_mikan_client,
     )
 
     response = _client().post(
@@ -1799,12 +1836,28 @@ def test_candidate_search_api_rejects_missing_mikan_config(
 
     payload = response.get_json()
     assert response.status_code == 200
-    assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert any(
-        error["field"] == "mikan_config"
-        for error in payload["error_data"]["errors"]
-    )
+    assert payload["ok"] is True
+    assert payload["result"]["query"] == "芙莉莲"
+    assert payload["result"]["candidates"] == [
+        {
+            "bangumi_id": "2353",
+            "title": "葬送的芙莉莲",
+            "mikan_url": "https://mikanani.me/Home/Bangumi/2353",
+            "poster_url": None,
+            "source_query": "芙莉莲",
+            "aliases": [],
+            "recommendation": "可能匹配",
+        }
+    ]
+    assert received_configs == [default_mikan_config()]
+    assert received_configs[0].search_endpoint == DEFAULT_MIKAN_SEARCH_ENDPOINT
+    assert received_configs[0].timeout_seconds == DEFAULT_MIKAN_TIMEOUT_SECONDS
+    assert transport.requests == [
+        (
+            "https://mikanani.me/Home/Search?searchstr=%E8%8A%99%E8%8E%89%E8%8E%B2",
+            DEFAULT_MIKAN_TIMEOUT_SECONDS,
+        )
+    ]
 
 
 @pytest.mark.parametrize(

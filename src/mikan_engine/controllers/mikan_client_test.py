@@ -14,7 +14,11 @@ from mikan_engine.controllers.mikan_client import (
     create_mikan_client,
 )
 from mikan_engine.models import MikanCandidate
-from mikan_engine.controllers.mikan_config import MikanConfig
+from mikan_engine.controllers.mikan_config import (
+    DEFAULT_MIKAN_TIMEOUT_SECONDS,
+    MikanConfig,
+    default_mikan_config,
+)
 from shared.errors import Stage1Error
 from shared.models import MatchedBangumi
 
@@ -125,6 +129,24 @@ def test_mikan_client_direct_id_derives_detail_url_from_config() -> None:
     assert transport.requests == [("https://mikan.example/Home/Bangumi/3072", 7)]
     assert detail.bangumi_id == "3072"
     assert detail.mikan_url == "https://mikan.example/Home/Bangumi/3072"
+
+
+def test_mikan_client_direct_id_derives_detail_url_from_default_host() -> None:
+    transport = FakeTransport(
+        """
+        <h1 class="bangumi-title">芙莉莲</h1>
+        <a class="mikan-rss" href="/RSS/Bangumi?bangumiId=3072">RSS</a>
+        """
+    )
+    client = create_mikan_client(default_mikan_config(), transport=transport)
+
+    detail = client.get_direct_bangumi_detail("3072")
+
+    assert transport.requests == [
+        ("https://mikanani.me/Home/Bangumi/3072", DEFAULT_MIKAN_TIMEOUT_SECONDS)
+    ]
+    assert detail.bangumi_id == "3072"
+    assert detail.mikan_url == "https://mikanani.me/Home/Bangumi/3072"
 
 
 def test_mikan_client_direct_url_normalizes_and_rejects_unsafe_values() -> None:

@@ -16,6 +16,27 @@ class MikanConfig:
     timeout_seconds: float
 
 
+# System-default MiKan Web config. The default endpoint is MiKanProject's public
+# search page; callers append ``searchstr=<title>`` when searching. The default is
+# server-side only, contains no secrets, and is never written to browser storage,
+# URL state, history, or Request snapshots.
+DEFAULT_MIKAN_SEARCH_ENDPOINT = "https://mikanani.me/Home/Search"
+DEFAULT_MIKAN_TIMEOUT_SECONDS = 15.0
+
+
+def default_mikan_config() -> MikanConfig:
+    """Return the system-default MiKan config for the Web primary flow.
+
+    Used when a request carries no request-scoped ``mikan_config`` (candidate
+    search and direct URL/ID fallback). An explicit ``mikan_config`` still
+    overrides the default as a test seam or for advanced callers.
+    """
+    return MikanConfig(
+        search_endpoint=DEFAULT_MIKAN_SEARCH_ENDPOINT,
+        timeout_seconds=DEFAULT_MIKAN_TIMEOUT_SECONDS,
+    )
+
+
 def load_mikan_config(path: Path) -> MikanConfig:
     """Load real MiKan source config from a caller-provided JSON path."""
 

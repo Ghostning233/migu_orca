@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from flask import Blueprint, redirect, render_template, url_for
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from extensions.flask_api import class_route
 from extensions.flask_api.api import sanitize_error_data
@@ -28,7 +28,7 @@ from mikan_engine.controllers.mikan_candidate_recommendation import (
     candidate_recommendation_label,
 )
 from mikan_engine.controllers.mikan_client import MikanCandidate
-from mikan_engine.controllers.mikan_config import MikanConfig
+from mikan_engine.controllers.mikan_config import MikanConfig, default_mikan_config
 from qbittorrent_engine.controllers.qbittorrent_controller import (
     test_qbittorrent_connection,
 )
@@ -79,7 +79,10 @@ class RequestMikanConfigPayload(BaseModel):
 
 class MikanCandidateSearchPayload(BaseModel):
     query: str
-    mikan_config: RequestMikanConfigPayload
+    mikan_config: RequestMikanConfigPayload | None = Field(
+        default=None,
+        validate_default=True,
+    )
 
     @field_validator("query")
     @classmethod
@@ -116,18 +119,6 @@ class RequestCreatePayload(BaseModel):
         if source not in {"static-fixture", "mikan"}:
             raise ValueError("source must be static-fixture or mikan")
         return source
-
-    @field_validator("mikan_config")
-    @classmethod
-    def validate_mikan_config(
-        cls,
-        value: RequestMikanConfigPayload | None,
-        info: ValidationInfo,
-    ) -> RequestMikanConfigPayload | None:
-        source = info.data.get("source") if info.data is not None else None
-        if source == "mikan" and value is None:
-            raise ValueError("mikan_config is required when source is mikan")
-        return value
 
     @field_validator("mikan_bangumi")
     @classmethod
@@ -221,6 +212,22 @@ def _storage_dir(value: str | None) -> Path | None:
     if value is None or not value.strip():
         return None
     return Path(value.strip())
+
+
+def _resolve_mikan_config(explicit: RequestMikanConfigPayload | None) -> MikanConfig:
+    """Build the MiKan config for a request, falling back to system defaults.
+
+    An explicit request-scoped ``mikan_config`` overrides the system default as a
+    test seam or for advanced callers. The resolved config is request-scoped only:
+    it is never written to browser storage, URL state, history, or Request
+    snapshots, and it contains no secrets.
+    """
+    if explicit is not None:
+        return MikanConfig(
+            search_endpoint=explicit.search_endpoint,
+            timeout_seconds=explicit.timeout_seconds,
+        )
+    return default_mikan_config()
 
 
 def _raise_result_error(result: dict[str, Any]) -> None:
@@ -449,11 +456,8 @@ class RequestCreateView(PostView):
         assert isinstance(self.request_validator_model, RequestCreatePayload)
         payload = self.request_validator_model
         mikan_config = None
-        if payload.source == "mikan" and payload.mikan_config is not None:
-            mikan_config = MikanConfig(
-                search_endpoint=payload.mikan_config.search_endpoint,
-                timeout_seconds=payload.mikan_config.timeout_seconds,
-            )
+        if payload.source == "mikan":
+            mikan_config = _resolve_mikan_config(payload.mikan_config)
         result = generate_request(
             EntryRequest(raw_title=payload.title),
             source_mode="mikan_http" if payload.source == "mikan" else "static_fixture",
@@ -488,10 +492,7 @@ class MikanCandidateSearchView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, MikanCandidateSearchPayload)
         payload = self.request_validator_model
-        mikan_config = MikanConfig(
-            search_endpoint=payload.mikan_config.search_endpoint,
-            timeout_seconds=payload.mikan_config.timeout_seconds,
-        )
+        mikan_config = _resolve_mikan_config(payload.mikan_config)
         candidates = _search_mikan_candidates(payload.query, mikan_config)
         return {
             "query": payload.query,
