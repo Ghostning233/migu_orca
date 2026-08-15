@@ -687,3 +687,274 @@ class TestCandidateSelectionSensitiveBoundary:
         saved_json = json.loads(saved_path.read_text(encoding="utf-8"))
         for value in sensitive_values:
             assert value not in json.dumps(saved_json, ensure_ascii=False)
+
+
+def _register_generation_failure(page: Page) -> None:
+    """Route `POST /api/v1/requests` to a sanitized MiKan parse failure."""
+
+    def _handler(route: Any, request: Any) -> None:
+        if request.method != "POST":
+            route.continue_()
+            return
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": False,
+                    "error_type": "mikan_parse_failed",
+                    "error_message": "MiKan 番剧页解析失败",
+                    "error_data": {
+                        "failed_step": "mikan_bangumi_detail",
+                        "details": {"category": "parse"},
+                    },
+                }
+            ),
+        )
+
+    page.route("**/api/v1/requests", _handler)
+
+
+class TestCandidateFallbackDirectEntry:
+    """AC: 搜索无结果时可用 MiKan 合集 URL 或 ID fallback 直连生成 Request."""
+
+    def test_url_fallback_generates_request(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-url")
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(
+            page, captured, body=_generation_result_json(saved)
+        )
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.fill(
+            "#mikan-fallback-bangumi",
+            "https://mikan.example/Home/Bangumi/2353",
+        )
+        page.click("#mikan-fallback-generate")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert captured
+        payload = captured[0]
+        assert payload["source"] == "mikan"
+        assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
+        assert payload["mikan_config"]["search_endpoint"] == "https://mikan.example/Home/Search"
+        assert payload["mikan_config"]["timeout_seconds"] == 5
+        assert payload["title"] == "芙莉莲"
+        assert payload["save_request"] is True
+
+        # Success reuses the existing detail/list/URL-sync behavior.
+        assert "保存成功" in page.locator("#page-notification").inner_text()
+        assert "request_id=req-fb-url" in page.url
+        detail_text = page.locator("#request-detail-container").inner_text()
+        assert "葬送的芙莉莲" in detail_text
+
+        # The sensitive endpoint and the fallback value are cleared after success.
+        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
+        assert page.locator("#mikan-fallback-bangumi").input_value() == ""
+
+    def test_id_fallback_generates_request(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-id")
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(
+            page, captured, body=_generation_result_json(saved)
+        )
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.fill("#mikan-fallback-bangumi", "2353")
+        page.click("#mikan-fallback-generate")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert captured
+        payload = captured[0]
+        assert payload["source"] == "mikan"
+        assert payload["mikan_bangumi"] == "2353"
+        assert payload["mikan_config"]["search_endpoint"] == "https://mikan.example/Home/Search"
+        assert "request_id=req-fb-id" in page.url
+
+    def test_empty_fallback_shows_validation_error_without_calling_api(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(page, captured, body='{"ok": true}')
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-fallback-generate")
+
+        expect(page.locator("#mikan-fallback-error")).to_contain_text(
+            "生成前必须填写 MiKan 合集 URL 或 ID"
+        )
+        assert captured == []
+        assert "request_id=" not in page.url
+
+    def test_invalid_fallback_value_shows_validation_error_without_calling_api(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(page, captured, body='{"ok": true}')
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.fill("#mikan-fallback-bangumi", "not a url or id")
+        page.click("#mikan-fallback-generate")
+
+        expect(page.locator("#mikan-fallback-error")).to_contain_text(
+            "必须是数字 ID 或 HTTP(S) URL"
+        )
+        assert captured == []
+        assert "request_id=" not in page.url
+
+    def test_search_no_results_then_fallback_generates_request(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json("ghost", []),
+            ),
+        )
+        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-empty")
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(
+            page, captured, body=_generation_result_json(saved)
+        )
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="ghost",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator("#mikan-candidate-search-result")).to_contain_text(
+            "未找到候选合集"
+        )
+        # A successful (empty) search clears the sensitive endpoint input but
+        # keeps the request-scoped config in memory for the fallback.
+        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
+
+        page.fill("#mikan-fallback-bangumi", "https://mikan.example/Home/Bangumi/42")
+        page.click("#mikan-fallback-generate")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert captured
+        payload = captured[0]
+        assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/42"
+        assert payload["mikan_config"]["search_endpoint"] == "https://mikan.example/Home/Search"
+        assert payload["mikan_config"]["timeout_seconds"] == 5
+        assert "request_id=req-fb-empty" in page.url
+
+    def test_fallback_failure_preserves_inputs_and_shows_sanitized_error(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _register_generation_failure(page)
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint="https://mikan.example/Home/Search",
+        )
+        page.fill("#mikan-fallback-bangumi", "https://mikan.example/Home/Bangumi/42")
+        page.click("#mikan-fallback-generate")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        notif = page.locator("#page-notification").inner_text()
+        assert "生成失败" in notif
+        assert "MiKan 番剧页解析失败" in notif
+
+        # Inputs are preserved on failure so the user can retry.
+        assert (
+            page.locator("#mikan-fallback-bangumi").input_value()
+            == "https://mikan.example/Home/Bangumi/42"
+        )
+        assert (
+            page.locator("#mikan-candidate-search-endpoint").input_value()
+            == "https://mikan.example/Home/Search"
+        )
+
+
+class TestCandidateFallbackSensitiveBoundary:
+    """AC: fallback 输入不得写入 browser storage、URL、Request snapshot、history 或日志."""
+
+    def test_fallback_does_not_persist_or_leak_sensitive_values(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        sensitive_values = (
+            "http://private-mikan.stage17.local/Home/Search",
+            "https://private-mikan.stage17.local/Home/Bangumi/42",
+        )
+        saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-sec")
+        captured: list[dict[str, Any]] = []
+        _register_generation_capture(
+            page, captured, body=_generation_result_json(saved)
+        )
+
+        set_storage_preferences(page, storage_dir, save_request=True)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(
+            page,
+            query="芙莉莲",
+            endpoint=sensitive_values[0],
+        )
+        page.fill("#mikan-fallback-bangumi", sensitive_values[1])
+        page.click("#mikan-fallback-generate")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        assert captured
+        assert captured[0]["mikan_config"]["search_endpoint"] == sensitive_values[0]
+        assert captured[0]["mikan_bangumi"] == sensitive_values[1]
+
+        # The sensitive endpoint and fallback inputs are cleared after success.
+        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
+        assert page.locator("#mikan-fallback-bangumi").input_value() == ""
+
+        browser_state = page.evaluate(
+            """() => ({
+                url: window.location.href,
+                localStorage: JSON.stringify(window.localStorage),
+                sessionStorage: JSON.stringify(window.sessionStorage),
+                bodyText: document.body.innerText,
+            })"""
+        )
+        for value in sensitive_values:
+            assert value not in browser_state["url"]
+            assert value not in browser_state["localStorage"]
+            assert value not in browser_state["sessionStorage"]
+            assert value not in browser_state["bodyText"]
+
+        # The saved Request JSON is a clean static-fixture snapshot with no
+        # MiKan endpoint or fallback URL.
+        saved_path = storage_dir / "requests" / "req-fb-sec.json"
+        saved_json = json.loads(saved_path.read_text(encoding="utf-8"))
+        for value in sensitive_values:
+            assert value not in json.dumps(saved_json, ensure_ascii=False)

@@ -185,6 +185,31 @@
                 </button>
               </div>
             </form>
+
+            <form id="mikan-fallback-form" class="candidate-fallback-form">
+              <h3 class="candidate-fallback-heading">搜索无结果时的直连兜底</h3>
+              <p class="field-help">
+                可选：搜索无结果时，可粘贴 MiKan 合集 URL 或数字 ID 直接生成 Request；仅用于本次生成，不写入浏览器存储、URL、history 或 Request JSON。
+              </p>
+              <label for="mikan-fallback-bangumi">MiKan 合集 URL 或 ID</label>
+              <input
+                id="mikan-fallback-bangumi"
+                name="mikan_fallback_bangumi"
+                type="text"
+                autocomplete="off"
+                placeholder="mikan.example/Home/Bangumi/2353 或 2353"
+                aria-describedby="mikan-fallback-help mikan-fallback-error"
+              >
+              <p id="mikan-fallback-help" class="field-help">
+                仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
+              </p>
+              <p id="mikan-fallback-error" class="field-error" role="alert" hidden></p>
+              <div class="notification-actions">
+                <button id="mikan-fallback-generate" class="secondary-button" type="submit">
+                  使用直连合集生成
+                </button>
+              </div>
+            </form>
           </div>
         </details>
       </section>

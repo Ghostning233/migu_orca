@@ -43,6 +43,10 @@
   const candidateSearchError = document.getElementById("mikan-candidate-search-error");
   const candidateSearchResult = document.getElementById("mikan-candidate-search-result");
   const candidateSearchSubmit = document.getElementById("mikan-candidate-search-submit");
+  const candidateFallbackForm = document.getElementById("mikan-fallback-form");
+  const candidateFallbackInput = document.getElementById("mikan-fallback-bangumi");
+  const candidateFallbackError = document.getElementById("mikan-fallback-error");
+  const candidateFallbackGenerate = document.getElementById("mikan-fallback-generate");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -752,16 +756,74 @@
     candidateSearchResult.textContent = message;
   }
 
-  function setCandidateSearchInFlight(isInFlight) {
-    if (!candidateSearchForm) {
-      return;
+  function candidateAreaControls() {
+    const controls = [];
+    for (const form of [candidateSearchForm, candidateFallbackForm]) {
+      if (!form) {
+        continue;
+      }
+      for (const control of form.querySelectorAll("button, input")) {
+        controls.push(control);
+      }
     }
-    const controls = candidateSearchForm.querySelectorAll("button, input");
-    for (const control of controls) {
+    return controls;
+  }
+
+  function setCandidateSearchInFlight(isInFlight) {
+    for (const control of candidateAreaControls()) {
       control.disabled = isInFlight;
     }
     if (candidateSearchSubmit) {
       candidateSearchSubmit.textContent = isInFlight ? "正在搜索..." : "搜索候选";
+    }
+  }
+
+  function setCandidateFallbackInFlight(isInFlight) {
+    for (const control of candidateAreaControls()) {
+      control.disabled = isInFlight;
+    }
+    if (candidateFallbackGenerate) {
+      candidateFallbackGenerate.textContent = isInFlight
+        ? "正在生成..."
+        : "使用直连合集生成";
+    }
+  }
+
+  function setCandidateFallbackError(message, field) {
+    if (!candidateFallbackError) {
+      return;
+    }
+    candidateFallbackError.textContent = message;
+    candidateFallbackError.hidden = false;
+    for (const input of [
+      candidateFallbackInput,
+      candidateEndpointInput,
+      candidateTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearCandidateFallbackError() {
+    if (!candidateFallbackError) {
+      return;
+    }
+    candidateFallbackError.textContent = "";
+    candidateFallbackError.hidden = true;
+    for (const input of [
+      candidateFallbackInput,
+      candidateEndpointInput,
+      candidateTimeoutInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
     }
   }
 
@@ -921,6 +983,10 @@
     candidateSearchForm.addEventListener("submit", searchMikanCandidates);
   }
 
+  if (candidateFallbackForm) {
+    candidateFallbackForm.addEventListener("submit", generateRequestFromFallback);
+  }
+
   function setCandidateSelectionInFlight(isInFlight) {
     const buttons = document.querySelectorAll(".candidate-select");
     for (const button of buttons) {
@@ -974,6 +1040,105 @@
       notifyApiError("生成失败", error);
     } finally {
       setCandidateSelectionInFlight(false);
+    }
+  }
+
+  async function generateRequestFromFallback(event) {
+    event.preventDefault();
+    clearCandidateFallbackError();
+    const fallbackValue = candidateFallbackInput
+      ? candidateFallbackInput.value.trim()
+      : "";
+    if (!fallbackValue) {
+      setCandidateFallbackError(
+        "生成前必须填写 MiKan 合集 URL 或 ID。",
+        candidateFallbackInput,
+      );
+      return;
+    }
+    // Local sanity check only: the server enforces origin/path/ID rules and
+    // returns the unified sanitized error for wrong-origin or wrong-path URLs.
+    const isBareId = /^[0-9]+$/.test(fallbackValue);
+    const isHttpUrl = /^https?:\/\//i.test(fallbackValue);
+    if (!isBareId && !isHttpUrl) {
+      setCandidateFallbackError(
+        "必须是数字 ID 或 HTTP(S) URL。",
+        candidateFallbackInput,
+      );
+      return;
+    }
+
+    // Reuse the request-scoped MiKan config: prefer the current search form
+    // inputs, falling back to the in-memory config kept after a successful
+    // candidate search (whose sensitive search_endpoint was already cleared).
+    let mikanConfig;
+    const endpoint = candidateEndpointInput
+      ? candidateEndpointInput.value.trim()
+      : "";
+    if (endpoint) {
+      const timeoutText = candidateTimeoutInput
+        ? candidateTimeoutInput.value.trim()
+        : "";
+      const timeoutSeconds = Number(timeoutText);
+      if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
+        setCandidateFallbackError(
+          "生成前 timeout_seconds 必须为正数。",
+          candidateTimeoutInput,
+        );
+        return;
+      }
+      mikanConfig = {
+        search_endpoint: endpoint,
+        timeout_seconds: timeoutSeconds,
+      };
+    } else if (lastCandidateSearchConfig) {
+      mikanConfig = {
+        search_endpoint: lastCandidateSearchConfig.search_endpoint,
+        timeout_seconds: lastCandidateSearchConfig.timeout_seconds,
+      };
+    } else {
+      setCandidateFallbackError(
+        "缺少 MiKan config，请先填写 search_endpoint 或搜索候选。",
+        candidateEndpointInput,
+      );
+      return;
+    }
+
+    const query = candidateQueryInput ? candidateQueryInput.value.trim() : "";
+    hideNotification();
+    setCandidateFallbackInFlight(true);
+    setState(
+      detailContainer,
+      "正在从直连 MiKan 合集生成 Request...",
+      "loading-state",
+    );
+    try {
+      const result = await fetchJson("/api/v1/requests", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          title: query || "MiKan 直连合集",
+          source: "mikan",
+          mikan_config: mikanConfig,
+          mikan_bangumi: fallbackValue,
+          storage_dir: currentStorageDir() || null,
+          save_request: currentSaveRequest(),
+        }),
+      });
+      await finalizeGeneratedRequest(result);
+      clearCandidateSensitiveFields();
+      if (candidateFallbackInput) {
+        candidateFallbackInput.value = "";
+      }
+    } catch (error) {
+      setState(
+        detailContainer,
+        "从直连 MiKan 合集生成 Request 失败。请重试。",
+        "error-state",
+      );
+      notifyApiError("生成失败", error);
+    } finally {
+      setCandidateFallbackInFlight(false);
     }
   }
 

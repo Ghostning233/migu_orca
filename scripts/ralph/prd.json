@@ -96,7 +96,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "这是解决 MiKan 推荐位找不到第一季等场景的 Web UI 兜底。"
     },
     {
