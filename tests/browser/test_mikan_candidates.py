@@ -1268,12 +1268,16 @@ class TestEditablePreviewDraft:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         text = detail.inner_text()
-        # The Filter section and seeds summary reflect the recomputed counts.
+        # The Filter section and the grouped Seeds display reflect the
+        # recomputed counts: effective 1, complete 3, excluded 1.
         assert "有效种子数\n1" in text
         assert "排除种子数\n1" in text
-        assert "查看筛选种子列表 (完整 2 / 有效 1 / 排除 1)" in text
-        # Expand the collapsed seed list to verify the Chinese exclusion reason.
-        detail.locator(".seed-details summary").click()
+        assert "有效种子（当前选中字幕组：Loli）(1)" in text
+        assert "完整种子（按字幕组分组）(3)" in text
+        assert "排除种子 (1)" in text
+        # Expand the collapsed excluded seed list to verify the Chinese
+        # exclusion reason.
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
         text = detail.inner_text()
         assert "命中排除规则：V2" in text
         # The form keeps the applied value after re-render.

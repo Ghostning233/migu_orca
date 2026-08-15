@@ -24,7 +24,7 @@ MVP 聚焦单番剧的订阅闭环：
 - 已提供 Flask Web UI：`/` 重定向到 `/index`，`/index` 是订阅方案工作台，`/settings` 是配置与连接测试页面，`/Settings` 重定向到 `/settings`。
 - `/index` 主流程通过真实 MiKan 候选搜索生成订阅方案，可以搜索/筛选/排序本地 Request、读取 URL 可恢复的分组详情，并执行确认、可见取消表单和受限修改；候选选择与直连 fallback 默认生成可编辑的 `订阅草案（未保存）` 预览，可修改字幕组/筛选规则/文件夹名并重算种子展示，点击 `保存草案` 后才进入待确认流程。
 - 已保存 `ACCEPTED` Request 详情同时展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作；`修改` 复用详情内修改表单并保持 `ACCEPTED` 状态，`删除` 需显式确认并刷新列表、清空详情和移除 URL `request_id`。
-- Request 详情的 Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区展示完整、有效和排除三个列表及数量，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言。
+- Request 详情的 Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区按 有效种子 -> 完整种子（按字幕组分组）-> 排除种子 的顺序展示：有效种子默认可见并标注 `当前选中字幕组`，完整种子按 MiKan 字幕组分组（每组显示字幕组名、种子数量并可展开），完整种子与排除种子默认折叠，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言。
 - 筛选编辑控件使用 `包含规则` / `排除规则` 标签，并提供默认未勾选的 `使用正则` 与 `大小写敏感` 复选框；默认提交发送 `use_regex=false` / `case_sensitive=false`，字面文本 `[`、`[v2]` 不会触发正则错误。
 - `/settings` 可以管理非敏感 Storage 浏览器偏好、直接显示并显式测试 qBittorrent 连接，并在 `/settings?request_id=<id>#auto-bangumi` 中对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交配置。
 - Stage 16 已完成真实 MiKan 合集详情页离线 fixture、结构化详情模型、字幕组级 RSS 优先、direct URL/ID 入口和真实读取错误脱敏；默认流程不连接 qBittorrent，不启动下载，不改变 AB 提交流程。
@@ -107,7 +107,7 @@ uv run flask --app wsgi:app run
 - `GET /Settings`：重定向到 `/settings`。
 - `GET /healthz`、`GET /readiness`：健康检查。
 
-`/index` 页面包含真实 MiKan 候选搜索主表单、可编辑预览订阅草案、本地 Request 列表、URL 可恢复的详情区域、状态历史和 AB 提交结果摘要。页面提供共享顶部导航、运行模式摘要、非空标题浏览器校验、提交中按钮状态、Settings Storage 偏好只读摘要、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、可见取消/修改表单、窄屏单列布局和基础无障碍标记。候选选择与直连 fallback 默认生成 `订阅草案（未保存）` 预览，不展示确认、取消、删除或 Auto Bangumi 提交动作；预览提供可编辑表单（字幕组、包含/排除规则、使用正则、大小写敏感、folder_name），`应用修改` 通过 dry-run 预览修改端点重算当前选中字幕组的有效/排除种子展示，`保存草案` 持久化修改后的订阅方案并同步 `request_id` 到 URL 进入待确认流程。已保存 `ACCEPTED` Request 详情展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作，`删除` 前必须经浏览器确认框确认。Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区展示完整种子、有效种子和排除种子三个列表。`/settings` 页面包含 Storage 偏好、数据源、qBittorrent 和 Auto Bangumi 分区；Storage 偏好只写入浏览器 `localStorage`，qBittorrent 连接测试表单直接显示，Auto Bangumi 按 `request_id` 上下文渐进展示，提交前必须显式确认。页面和 API 都不应展示 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径。
+`/index` 页面包含真实 MiKan 候选搜索主表单、可编辑预览订阅草案、本地 Request 列表、URL 可恢复的详情区域、状态历史和 AB 提交结果摘要。页面提供共享顶部导航、运行模式摘要、非空标题浏览器校验、提交中按钮状态、Settings Storage 偏好只读摘要、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、可见取消/修改表单、窄屏单列布局和基础无障碍标记。候选选择与直连 fallback 默认生成 `订阅草案（未保存）` 预览，不展示确认、取消、删除或 Auto Bangumi 提交动作；预览提供可编辑表单（字幕组、包含/排除规则、使用正则、大小写敏感、folder_name），`应用修改` 通过 dry-run 预览修改端点重算当前选中字幕组的有效/排除种子展示，`保存草案` 持久化修改后的订阅方案并同步 `request_id` 到 URL 进入待确认流程。已保存 `ACCEPTED` Request 详情展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作，`删除` 前必须经浏览器确认框确认。Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区按 有效种子（默认可见并标注当前选中字幕组）-> 完整种子（按字幕组分组，默认折叠）-> 排除种子（默认折叠）的顺序展示。`/settings` 页面包含 Storage 偏好、数据源、qBittorrent 和 Auto Bangumi 分区；Storage 偏好只写入浏览器 `localStorage`，qBittorrent 连接测试表单直接显示，Auto Bangumi 按 `request_id` 上下文渐进展示，提交前必须显式确认。页面和 API 都不应展示 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径。
 
 ### Web API
 
@@ -314,7 +314,7 @@ Stage 17 新增真实 MiKan 候选搜索端点：
 5. 在生成表单中提交空白标题，确认页面在浏览器端提示错误且不会发起生成；再填写标题，确认提交按钮在请求中禁用，完成后通过统一通知展示生成或保存结果。
 6. 验证 Settings Storage 偏好：打开 `/settings`，修改默认 Storage 目录和默认保存 Request 开关后刷新页面，确认浏览器恢复最近偏好；点击 `清除偏好` 后恢复默认 `.migu_orca/storage` 和默认保存状态。该偏好只应存在于浏览器 `localStorage`，不写入 storage JSON 或 API 响应；缺省保存状态表示 `/index` 默认生成并保存 Request。
 7. 验证 Request 列表：刷新列表后使用文本搜索、status 筛选和默认/标题升序/request_id 升序排序，确认匹配计数形如 `显示 2 / 5`，无匹配时显示空状态，清空筛选后列表恢复。
-8. 验证 Request 详情：打开列表项后确认浏览器 URL 同步为 `/index?request_id=<id>`；刷新该 URL 后仍展示同一详情。详情应按 Overview、Source、Filter、Seeds、Audit 分组；request_id 可复制；RSS 只显示是否已选择，不显示完整 RSS URL；Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 可展开查看完整、有效和排除种子标题及数量，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言；缺失 history 或 AB result 时保持非致命提示。
+8. 验证 Request 详情：打开列表项后确认浏览器 URL 同步为 `/index?request_id=<id>`；刷新该 URL 后仍展示同一详情。详情应按 Overview、Source、Filter、Seeds、Audit 分组；request_id 可复制；RSS 只显示是否已选择，不显示完整 RSS URL；Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 按 有效种子 -> 完整种子（按字幕组分组）-> 排除种子 顺序展示：有效种子默认可见并标注当前选中字幕组，完整种子每组显示字幕组名、种子数量并可展开列表，完整种子与排除种子默认折叠，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言；缺失 history 或 AB result 时保持非致命提示。
 9. 验证通知和恢复：列表加载失败时刷新按钮仍可用；详情加载失败时不清空已加载列表；通知可手动关闭，并会在下一次操作时替换旧消息。
 10. 验证 Stage 15 UI 质量门槛：`/index` 标题、运行模式摘要、主操作区、Request 列表和详情区应有清晰阅读顺序；`/settings` Storage、数据源、qBittorrent 和 Auto Bangumi 分区边界清晰；生成、确认、提交使用主按钮，刷新、修改、返回 Settings 使用次按钮，取消、清空、删除和撤销类操作使用危险/警示样式。
 11. 验证响应式和键盘操作：在中屏和移动宽度下 `/index` 与 `/settings` 为单列或低密度布局，不出现横向拥挤导航、过密并排表单或不可读详情表格；Tab 能聚焦主要控件和 Request 列表按钮；焦点样式可见，动态通知/列表/详情区域具备合适的语义标记。

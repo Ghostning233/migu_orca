@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import create_saved_request, set_storage_preferences
 from request_engine.controllers.request_controller import accept_request
@@ -310,7 +310,7 @@ class TestAutoBangumiSubmitEntry:
 
 
 class TestSeedsExpandable:
-    """AC: Seeds 区块可展开查看完整、有效、排除种子标题列表."""
+    """AC: Seeds 区块按 有效种子 -> 完整种子（按字幕组分组）-> 排除种子 展示."""
 
     def test_seeds_section_has_details_element(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -318,8 +318,10 @@ class TestSeedsExpandable:
         create_saved_request(storage_dir, "葬送的芙莉莲", "req-detail-5")
         _open_request_detail(page, live_server_url, storage_dir, "req-detail-5")
 
-        details = page.locator("#request-detail-container details")
-        assert details.count() >= 1, "Seeds section should use <details> element"
+        detail = page.locator("#request-detail-container")
+        assert detail.locator(".effective-seed-group").count() == 1
+        assert detail.locator(".complete-seed-details").count() == 1
+        assert detail.locator(".excluded-seed-details").count() == 1
 
     def test_seeds_label_present(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -328,11 +330,11 @@ class TestSeedsExpandable:
         _open_request_detail(page, live_server_url, storage_dir, "req-detail-5")
 
         detail = page.locator("#request-detail-container")
-        detail.locator(".seed-details").evaluate("element => element.open = true")
         text = detail.inner_text()
-        assert "完整种子" in text
         assert "有效种子" in text
+        assert "完整种子" in text
         assert "排除种子" in text
+        assert "当前选中字幕组" in text
 
     def test_seeds_section_shows_three_title_lists_and_counts(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -341,13 +343,27 @@ class TestSeedsExpandable:
         _open_request_detail(page, live_server_url, storage_dir, "req-detail-seeds")
 
         detail = page.locator("#request-detail-container")
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-
-        assert "查看筛选种子列表 (完整 2 / 有效 2 / 排除 0)" in detail.inner_text()
-        assert "完整种子 (2)" in detail.locator(".seed-group:has-text('完整种子')").inner_text()
-        assert "有效种子 (2)" in detail.locator(".seed-group:has-text('有效种子')").inner_text()
-        assert "排除种子 (0)" in detail.locator(".seed-group:has-text('排除种子')").inner_text()
-        assert "无排除种子标题。" in detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        # Effective seeds are always visible and name the current subtitle group.
+        effective_text = detail.locator(".effective-seed-group").inner_text()
+        assert "有效种子（当前选中字幕组：Loli）(2)" in effective_text
+        assert "[Loli] 咒术回战 第三季 - 01 [1080p][CHS].mkv" in effective_text
+        assert "[Loli] 咒术回战 第三季 - 01 V2 [1080p][CHS].mkv" in effective_text
+        # Complete seeds are grouped by subtitle group with per-group counts.
+        assert "完整种子（按字幕组分组）(3)" in detail.inner_text()
+        detail.locator(".complete-seed-details").evaluate("element => element.open = true")
+        complete_text = detail.locator(".complete-seed-groups").inner_text()
+        assert "Loli (2)" in complete_text
+        assert "喵萌 (1)" in complete_text
+        # Expanding a subgroup reveals its seed list.
+        detail.locator(".subgroup-seed-group").first.evaluate("element => element.open = true")
+        detail.locator(".subgroup-seed-group").last.evaluate("element => element.open = true")
+        complete_text = detail.locator(".complete-seed-groups").inner_text()
+        assert "[Loli] 咒术回战 第三季 - 01 [1080p][CHS].mkv" in complete_text
+        assert "[喵萌] 咒术回战 第三季 - 01 [1080p][CHS].mkv" in complete_text
+        # Excluded seeds render last as a collapsed area.
+        assert "排除种子 (0)" in detail.inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        assert "无排除种子标题。" in detail.locator(".excluded-seed-details").inner_text()
 
     def test_seeds_section_empty_states_are_consistent(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -366,12 +382,19 @@ class TestSeedsExpandable:
         _open_request_detail(page, live_server_url, storage_dir, "req-detail-empty-seeds")
 
         detail = page.locator("#request-detail-container")
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        detail_text = detail.inner_text()
-        assert "查看筛选种子列表 (完整 0 / 有效 0 / 排除 0)" in detail_text
-        assert "无种子标题。" in detail_text
-        assert "无有效种子标题。" in detail_text
-        assert "无排除种子标题。" in detail_text
+        # Effective seeds area is always visible and empty.
+        assert "有效种子（当前选中字幕组：喵萌）(0)" in detail.inner_text()
+        assert "无有效种子标题。" in detail.locator(".effective-seed-group").inner_text()
+        # Complete seed area collapses and shows per-group empty states.
+        assert "完整种子（按字幕组分组）(0)" in detail.inner_text()
+        detail.locator(".complete-seed-details").evaluate("element => element.open = true")
+        detail.locator(".complete-seed-details .subgroup-seed-group").first.evaluate(
+            "element => element.open = true"
+        )
+        assert "无种子标题。" in detail.locator(".complete-seed-groups").inner_text()
+        # Excluded seed area is last and empty.
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        assert "无排除种子标题。" in detail.locator(".excluded-seed-details").inner_text()
 
     def test_seeds_section_does_not_expose_raw_source_values(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -388,6 +411,96 @@ class TestSeedsExpandable:
         assert "hidden-token" not in detail_text
         assert "<rss" not in detail_text
         assert "https://secret.example.invalid" not in detail_text
+
+
+class TestSeedsGroupedBySubtitleGroup:
+    """US-129: Seeds 区展示顺序 有效 -> 完整（按字幕组分组）-> 排除，默认折叠行为正确."""
+
+    def test_seeds_display_order_effective_then_complete_then_excluded(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-seeds-order")
+        _open_request_detail(page, live_server_url, storage_dir, "req-seeds-order")
+
+        seeds_text = page.locator("#request-detail-container .seeds-section").inner_text()
+        assert seeds_text.index("有效种子") < seeds_text.index("完整种子")
+        assert seeds_text.index("完整种子") < seeds_text.index("排除种子")
+
+    def test_complete_seeds_grouped_by_subtitle_group(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-seeds-groups")
+        _open_request_detail(page, live_server_url, storage_dir, "req-seeds-groups")
+
+        detail = page.locator("#request-detail-container")
+        detail.locator(".complete-seed-details").evaluate("element => element.open = true")
+        groups = detail.locator(".subgroup-seed-group")
+        assert groups.count() == 2
+        assert "Loli (2)" in groups.nth(0).locator("summary").inner_text()
+        assert "喵萌 (1)" in groups.nth(1).locator("summary").inner_text()
+        # Each group's list is expandable.
+        groups.nth(0).evaluate("element => element.open = true")
+        groups.nth(1).evaluate("element => element.open = true")
+        group_text = detail.locator(".complete-seed-groups").inner_text()
+        assert "[Loli] 咒术回战 第三季 - 01 V2 [1080p][CHS].mkv" in group_text
+        assert "[喵萌] 咒术回战 第三季 - 01 [1080p][CHS].mkv" in group_text
+
+    def test_effective_seeds_visible_by_default_and_complete_excluded_collapsed(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-seeds-collapse")
+        _open_request_detail(page, live_server_url, storage_dir, "req-seeds-collapse")
+
+        detail = page.locator("#request-detail-container")
+        # Effective seeds are not wrapped in <details> and their list is visible
+        # without any expansion.
+        effective = detail.locator(".effective-seed-group")
+        expect(effective).to_be_visible()
+        assert "[Loli] 咒术回战 第三季 - 01 V2 [1080p][CHS].mkv" in effective.inner_text()
+        # Complete and excluded seeds are collapsed by default.
+        assert detail.locator(".complete-seed-details").get_attribute("open") is None
+        assert detail.locator(".excluded-seed-details").get_attribute("open") is None
+
+    def test_modify_filter_updates_grouped_seeds_display(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "咒术回战第三季", "req-seeds-filter-update")
+        _open_request_detail(page, live_server_url, storage_dir, "req-seeds-filter-update")
+
+        page.locator("#detail-modify-form").evaluate("element => element.hidden = false")
+        page.locator("#modify-must-not-contain").fill("V2")
+        page.locator("#detail-modify-form button:has-text('提交修改')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        detail = page.locator("#request-detail-container")
+        # The always-visible effective area reflects the recomputed valid seeds.
+        effective_text = detail.locator(".effective-seed-group").inner_text()
+        assert "有效种子（当前选中字幕组：Loli）(1)" in effective_text
+        assert "V2" not in effective_text
+        # The excluded area shows the Chinese exclusion reason.
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".excluded-seed-details").inner_text()
+        assert "命中排除规则：V2" in excluded_text
+
+    def test_grouped_seeds_do_not_render_sensitive_values(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        request = create_saved_request(storage_dir, "咒术回战第三季", "req-seeds-sec")
+        for source in request["source_info"]["rss_sources"]:
+            source["rss_url"] = "https://secret.example.invalid/rss.xml?token=hidden-token"
+            source["raw_response_body"] = "<rss><channel>hidden-token</channel></rss>"
+        save_request_snapshot(load_storage_config(storage_dir), request)
+
+        _open_request_detail(page, live_server_url, storage_dir, "req-seeds-sec")
+
+        detail = page.locator("#request-detail-container")
+        detail.locator(".complete-seed-details").evaluate("element => element.open = true")
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        text = detail.inner_text()
+        assert "hidden-token" not in text
+        assert "<rss" not in text
+        assert "token=" not in text
+        assert "https://secret.example.invalid" not in text
 
 
 class TestMissingOptionalData:

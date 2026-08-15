@@ -120,7 +120,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "如果当前 Request snapshot 缺少跨字幕组完整种子结构，需要在不泄露 RSS/magnet 的前提下补足安全展示模型。"
     },
     {

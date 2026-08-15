@@ -382,9 +382,9 @@ class TestModifyFlow:
         assert "有效种子数" in detail_text
         assert "排除种子数" in detail_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        valid_group = detail.locator(".seed-group:has-text('有效种子')")
-        excluded_group = detail.locator(".seed-group:has-text('排除种子')")
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        valid_group = detail.locator(".effective-seed-group")
+        excluded_group = detail.locator(".excluded-seed-details .seed-group")
         assert "V2" not in valid_group.inner_text()
         assert "V2" in excluded_group.inner_text()
         assert "命中排除规则" in excluded_group.inner_text()
@@ -402,11 +402,13 @@ class TestModifyFlow:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         detail = page.locator("#request-detail-container")
-        detail.locator(".seed-details").evaluate("element => element.open = true")
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
         detail_text = detail.inner_text()
-        assert "V2" in detail.locator(".seed-group:has-text('排除种子')").inner_text()
-        assert "V2" not in detail.locator(".seed-group:has-text('有效种子')").inner_text()
-        assert "查看筛选种子列表 (完整 2 / 有效 1 / 排除 1)" in detail_text
+        assert "V2" in detail.locator(".excluded-seed-details").inner_text()
+        assert "V2" not in detail.locator(".effective-seed-group").inner_text()
+        assert "有效种子（当前选中字幕组：Loli）(1)" in detail_text
+        assert "完整种子（按字幕组分组）(3)" in detail_text
+        assert "排除种子 (1)" in detail_text
 
     def test_modify_form_hidden_initially(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -705,9 +707,9 @@ class TestFilterDetailDisplay:
         assert "普通字符" in filter_text
         assert "不区分大小写" in filter_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
-        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".excluded-seed-details .seed-group").inner_text()
+        valid_text = detail.locator(".effective-seed-group").inner_text()
         assert "[v2]" in excluded_text
         assert "命中排除规则：[v2]" in excluded_text
         assert "[v2]" not in valid_text
@@ -729,9 +731,9 @@ class TestFilterDetailDisplay:
         assert "v2" in filter_text
         assert "不区分大小写" in filter_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
-        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        valid_text = detail.locator(".effective-seed-group").inner_text()
+        excluded_text = detail.locator(".excluded-seed-details .seed-group").inner_text()
         # Seed 2 contains "V2"; case-insensitive "v2" must match it.
         assert "V2" in valid_text
         assert "未命中包含规则：v2" in excluded_text
@@ -752,9 +754,9 @@ class TestFilterDetailDisplay:
         filter_text = detail.locator(".filter-section").inner_text()
         assert "区分大小写" in filter_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
-        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        valid_text = detail.locator(".effective-seed-group").inner_text()
+        excluded_text = detail.locator(".excluded-seed-details .seed-group").inner_text()
         # Case-sensitive "v2" must NOT match the uppercase "V2" seed.
         assert "V2" not in valid_text
         assert "V2" in excluded_text
@@ -779,9 +781,9 @@ class TestFilterDetailDisplay:
         # Raw user text is shown as-is, never auto-transformed into a different pattern.
         assert "V2 \\[1080p\\]" in filter_text
 
-        detail.locator(".seed-details").evaluate("element => element.open = true")
-        excluded_text = detail.locator(".seed-group:has-text('排除种子')").inner_text()
-        valid_text = detail.locator(".seed-group:has-text('有效种子')").inner_text()
+        detail.locator(".excluded-seed-details").evaluate("element => element.open = true")
+        excluded_text = detail.locator(".excluded-seed-details .seed-group").inner_text()
+        valid_text = detail.locator(".effective-seed-group").inner_text()
         assert "命中排除规则：V2 \\[1080p\\]" in excluded_text
         assert "V2 \\[1080p\\]" not in valid_text
 

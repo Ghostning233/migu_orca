@@ -2054,8 +2054,26 @@
     var source = selectedRssSource(sourceInfo, config);
     var validSeeds = source.valid_seed_names || config.effective_seed_names || [];
     var excludedSeeds = source.excluded_seed_names || [];
-    var allSeeds = source.seed_names || combinedSeedNames(validSeeds, excludedSeeds);
     var effectiveSeeds = config.effective_seed_names || validSeeds;
+    var rssSources = sourceInfo.rss_sources || [];
+    var selectedGroupName = config.selected_subtitle_group || "未选择字幕组";
+    // Complete seeds grouped by the MiKan subtitle group the detail page
+    // resolved. Each group keeps its own complete seed list (seed_names), with
+    // a fallback to combined valid/excluded titles for older snapshots.
+    var groupedSeeds = [];
+    var totalCompleteCount = 0;
+    for (var rsi = 0; rsi < rssSources.length; rsi++) {
+      var rssSource = rssSources[rsi];
+      var groupName = rssSource.subtitle_group || "未知字幕组";
+      var groupSeedNames =
+        rssSource.seed_names ||
+        combinedSeedNames(
+          rssSource.valid_seed_names || [],
+          rssSource.excluded_seed_names || [],
+        );
+      groupedSeeds.push({subtitleGroup: groupName, seedNames: groupSeedNames});
+      totalCompleteCount += groupSeedNames.length;
+    }
 
     detailContainer.className = "request-detail";
     detailContainer.replaceChildren();
@@ -2217,35 +2235,60 @@
     );
 
     var seedsSection = createDetailSection("Seeds", "seeds-section");
-    var seedDetails = document.createElement("details");
-    seedDetails.className = "seed-details";
-    var seedSummary = document.createElement("summary");
-    seedSummary.textContent =
-      "查看筛选种子列表 (完整 " + allSeeds.length + " / 有效 " +
-      effectiveSeeds.length + " / 排除 " + excludedSeeds.length + ")";
-    var seedsContainer = document.createElement("div");
-    seedsContainer.className = "seed-groups";
-    var allGroup = document.createElement("div");
-    allGroup.className = "seed-group";
-    var allHeading = document.createElement("h5");
-    allHeading.textContent = "完整种子 (" + allSeeds.length + ")";
-    allGroup.appendChild(allHeading);
-    renderSeedList(allGroup, allSeeds, "无种子标题。");
-    var validGroup = document.createElement("div");
-    validGroup.className = "seed-group";
-    var validHeading = document.createElement("h5");
-    validHeading.textContent = "有效种子 (" + effectiveSeeds.length + ")";
-    validGroup.appendChild(validHeading);
-    renderSeedList(validGroup, effectiveSeeds, "无有效种子标题。");
+
+    // Effective seeds come first and are always visible, so the user
+    // immediately sees which subtitle group the valid list belongs to.
+    var effectiveGroup = document.createElement("div");
+    effectiveGroup.className = "seed-group effective-seed-group";
+    var effectiveHeading = document.createElement("h5");
+    effectiveHeading.textContent =
+      "有效种子（当前选中字幕组：" + selectedGroupName + "）(" +
+      effectiveSeeds.length + ")";
+    effectiveGroup.appendChild(effectiveHeading);
+    renderSeedList(effectiveGroup, effectiveSeeds, "无有效种子标题。");
+    seedsSection.appendChild(effectiveGroup);
+
+    // Complete seeds come second, grouped by the MiKan subtitle group that the
+    // detail page resolved. Each group shows its name and seed count with an
+    // expandable seed list; the whole area collapses by default.
+    var completeDetails = document.createElement("details");
+    completeDetails.className = "seed-details complete-seed-details";
+    var completeSummary = document.createElement("summary");
+    completeSummary.textContent =
+      "完整种子（按字幕组分组）(" + totalCompleteCount + ")";
+    var completeGroups = document.createElement("div");
+    completeGroups.className = "seed-groups complete-seed-groups";
+    if (!groupedSeeds.length) {
+      var noComplete = document.createElement("p");
+      noComplete.className = "muted-text";
+      noComplete.textContent = "无种子标题。";
+      completeGroups.appendChild(noComplete);
+    }
+    for (var groupIndex = 0; groupIndex < groupedSeeds.length; groupIndex++) {
+      var groupData = groupedSeeds[groupIndex];
+      var groupDetails = document.createElement("details");
+      groupDetails.className = "subgroup-seed-group";
+      var groupSummary = document.createElement("summary");
+      groupSummary.textContent =
+        groupData.subtitleGroup + " (" + groupData.seedNames.length + ")";
+      groupDetails.appendChild(groupSummary);
+      renderSeedList(groupDetails, groupData.seedNames, "无种子标题。");
+      completeGroups.appendChild(groupDetails);
+    }
+    completeDetails.append(completeSummary, completeGroups);
+    seedsSection.appendChild(completeDetails);
+
+    // Excluded seeds come last, collapsed by default, with Chinese exclusion
+    // reasons rendered beside each seed title.
+    var excludedDetails = document.createElement("details");
+    excludedDetails.className = "seed-details excluded-seed-details";
+    var excludedSummary = document.createElement("summary");
+    excludedSummary.textContent = "排除种子 (" + excludedSeeds.length + ")";
     var excludedGroup = document.createElement("div");
     excludedGroup.className = "seed-group";
-    var excludedHeading = document.createElement("h5");
-    excludedHeading.textContent = "排除种子 (" + excludedSeeds.length + ")";
-    excludedGroup.appendChild(excludedHeading);
     renderExcludedSeedList(excludedGroup, excludedSeeds);
-    seedsContainer.append(allGroup, validGroup, excludedGroup);
-    seedDetails.append(seedSummary, seedsContainer);
-    seedsSection.appendChild(seedDetails);
+    excludedDetails.append(excludedSummary, excludedGroup);
+    seedsSection.appendChild(excludedDetails);
 
     var auditSection = createDetailSection("Audit", "audit-group-section");
     renderHistorySection(auditSection, payload.history);

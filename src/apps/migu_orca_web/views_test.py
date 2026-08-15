@@ -360,7 +360,12 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "复制 request_id" in script
     assert "copyTextToClipboard" in script
     assert "navigator.clipboard.writeText" in script
-    assert "查看筛选种子列表" in script
+    assert "有效种子（当前选中字幕组：" in script
+    assert "完整种子（按字幕组分组）" in script
+    assert "排除种子 (" in script
+    assert "complete-seed-details" in script
+    assert "excluded-seed-details" in script
+    assert "subgroup-seed-group" in script
     assert "seed-details" in script
     assert "modify-filter-use-regex" in script
     assert "modify-filter-case-sensitive" in script
@@ -479,11 +484,15 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert '["folder_name", config.expected_folder_name]' in script
     assert '["有效种子数", effectiveSeeds.length]' in script
     assert '["排除种子数", excludedSeeds.length]' in script
-    assert "source.seed_names || combinedSeedNames(validSeeds, excludedSeeds)" in script
+    assert "rssSource.seed_names ||" in script
+    assert "combinedSeedNames(" in script
+    assert "groupedSeeds.push({subtitleGroup: groupName, seedNames: groupSeedNames})" in script
+    assert "totalCompleteCount" in script
     assert "完整种子" in script
+    assert "有效种子（当前选中字幕组：" in script
     assert "renderExcludedSeedList" in script
     assert "document.createElement(\"details\")" in script
-    assert "seedSummary.textContent" in script
+    assert "completeSummary.textContent" in script
     assert "renderHistorySection(auditSection, payload.history)" in script
     assert "renderAbResultSection(auditSection, payload.ab_result)" in script
     assert "selected_rss_url" in script
