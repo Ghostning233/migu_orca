@@ -3,6 +3,8 @@ from __future__ import annotations
 import pytest
 from playwright.sync_api import Page
 
+from tests.browser.conftest import open_dev_fixture_panel
+
 
 pytestmark = pytest.mark.browser
 
@@ -171,6 +173,9 @@ class TestNoSensitiveContent:
 
     def test_generation_form_descriptions_safe(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
+        # The fixture form is inside the collapsed dev/offline-test disclosure
+        # (US-130), so expand it before asserting its help text is instructional.
+        open_dev_fixture_panel(page)
         body = page.locator("body").inner_text()
         # Form help text should be present and instructional
         assert "至少输入 1 个非空白字符" in body

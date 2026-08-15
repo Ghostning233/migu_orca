@@ -174,7 +174,7 @@ Stage 18 将调整 Web 主流程定位：
 编排规则：
 
 1. Web `/index` 普通主流程以真实 MiKan 候选搜索为入口，不再默认生成 fixture Request。
-2. fixture 生成能力保留给 CLI、API seam、离线开发和回归测试。
+2. fixture 生成能力保留给 CLI、API seam、离线开发和回归测试；Web UI 中的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起（`#dev-fixture-disclosure` 不带 `open`），普通用户路径不会触发 fixture 生成。
 3. Web 候选搜索默认使用系统 MiKan 配置，普通 UI 不要求用户填写 `search_endpoint` 或 `timeout_seconds`。
 4. 直连 URL/ID fallback 必须独立可用，输入 MiKan `Home/Bangumi/<id>` URL 或 bare ID 后直接复用 Stage 16 `mikan_bangumi` 链路。
 5. 候选选择和直连 fallback 默认先生成未保存预览草案，保存动作必须由用户显式触发。

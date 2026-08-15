@@ -161,6 +161,18 @@
         </div>
       </section>
 
+      <section id="request-detail-panel" class="panel request-detail-panel" aria-labelledby="request-detail-heading">
+        <h2 id="request-detail-heading">订阅方案详情</h2>
+        <div
+          id="request-detail-container"
+          class="empty-state"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
+          选择一个订阅方案后查看详情。
+        </div>
+      </section>
+
       <section
         id="dev-fixture-panel"
         class="panel dev-fixture-panel"
@@ -169,11 +181,11 @@
         <div class="panel-heading">
           <h2 id="dev-fixture-heading">开发 / 离线测试</h2>
         </div>
-        <details id="dev-fixture-disclosure" open>
+        <details id="dev-fixture-disclosure">
           <summary>Fixture 生成（开发 / 离线测试路径，不使用真实 MiKan）</summary>
           <div class="dev-fixture-body">
             <p class="field-help">
-              此区域仅供开发与离线测试使用；普通用户请使用上方「真实 MiKan 候选搜索」主流程。
+              此区域仅供开发与离线测试使用，默认收起；普通用户请使用上方「真实 MiKan 候选搜索」主流程。
             </p>
             <form id="request-generate-form" method="post">
               <label for="request-title">标题</label>
@@ -203,18 +215,6 @@
             </form>
           </div>
         </details>
-      </section>
-
-      <section id="request-detail-panel" class="panel request-detail-panel" aria-labelledby="request-detail-heading">
-        <h2 id="request-detail-heading">订阅方案详情</h2>
-        <div
-          id="request-detail-container"
-          class="empty-state"
-          aria-live="polite"
-          aria-relevant="additions text"
-        >
-          选择一个订阅方案后查看详情。
-        </div>
       </section>
 
     </main>

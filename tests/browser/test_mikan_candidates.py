@@ -7,7 +7,11 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.browser.conftest import create_saved_request, set_storage_preferences
+from tests.browser.conftest import (
+    create_saved_request,
+    open_dev_fixture_panel,
+    set_storage_preferences,
+)
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from request_engine.controllers.request_controller import summarize_request
 from shared.models import EntryRequest
@@ -74,6 +78,7 @@ class TestDefaultFixtureDoesNotUseRealMikan:
         page.route("**/api/v1/mikan/candidates", _capture)
         set_storage_preferences(page, storage_dir, save_request=True)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         # The fixture generation form lives in the dev/offline-test area.
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")

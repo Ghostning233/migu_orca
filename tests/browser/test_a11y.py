@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from playwright.sync_api import Page
+from tests.browser.conftest import open_dev_fixture_panel
 
 
 pytestmark = pytest.mark.browser
@@ -51,6 +52,7 @@ class TestKeyboardNavigation:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         page.locator("body").click()
 
         found = False
@@ -66,6 +68,7 @@ class TestKeyboardNavigation:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         page.locator("body").click()
 
         found = False
@@ -115,6 +118,7 @@ class TestFocusStyles:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         title_input = page.locator('input[name="title"]')
         title_input.focus()
@@ -133,6 +137,7 @@ class TestFocusStyles:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         submit = page.locator("#request-generate-submit")
         submit.focus()
@@ -161,6 +166,7 @@ class TestAccessibilityAttributes:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         error = page.locator("#request-form-error")
         assert error.get_attribute("role") == "alert"
 
@@ -184,6 +190,7 @@ class TestAccessibilityAttributes:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         # Trigger form validation error
         page.locator('input[name="title"]').fill(" ")

@@ -139,7 +139,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "不要删除 fixture seam；只是从普通产品主流程降级。"
     },
     {

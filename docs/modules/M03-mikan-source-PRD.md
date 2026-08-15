@@ -151,6 +151,7 @@ Stage 18 将在 Web 主流程中使用系统默认 MiKan 配置：
 5. bare numeric ID 的详情页 URL 可基于默认 MiKan host 派生，不再要求普通 Web 用户提供 search endpoint。
 6. 默认配置不得包含 secret；不得写入 storage JSON、状态历史、browser storage、URL、history、日志、截图或 trace。
 7. M03 仍只负责候选搜索、详情解析、RSS 源输出和安全错误边界，不负责 UI 文案或预览编辑。
+8. fixture 作为 M03 的离线测试 seam 保留：静态 MiKan/RSS fixture 只服务 CLI、单元测试和浏览器离线回归，不参与 Web 普通主流程。
 
 ## 13. 已确认事项与待确认问题
 

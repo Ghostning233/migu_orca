@@ -10,7 +10,11 @@ from playwright.sync_api import Page
 from request_engine.controllers.request_controller import accept_request
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
-from tests.browser.conftest import create_saved_request, set_storage_preferences
+from tests.browser.conftest import (
+    create_saved_request,
+    open_dev_fixture_panel,
+    set_storage_preferences,
+)
 
 
 pytestmark = pytest.mark.browser
@@ -64,6 +68,7 @@ class TestStage11MikanBrowserRegressions:
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         page.fill('input[name="title"]', "葬送的芙莉莲")
 
         assert page.locator('select[name="source"]').count() == 0

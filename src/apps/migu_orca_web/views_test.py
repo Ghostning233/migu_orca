@@ -181,6 +181,8 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="request-detail-panel"' in html
     assert 'id="dev-fixture-panel"' in html
     assert 'id="dev-fixture-disclosure"' in html
+    assert 'id="dev-fixture-disclosure" open' not in html
+    assert "默认收起" in html
     assert 'id="request-generate-form"' in html
     assert 'name="title"' in html
     assert "例如：葬送的芙莉莲" in html

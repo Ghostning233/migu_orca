@@ -7,7 +7,11 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from tests.browser.conftest import create_saved_request, set_storage_preferences
+from tests.browser.conftest import (
+    create_saved_request,
+    open_dev_fixture_panel,
+    set_storage_preferences,
+)
 
 
 pytestmark = pytest.mark.browser
@@ -18,6 +22,7 @@ class TestFormValidation:
 
     def test_blank_title_shows_error(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         # Fill with a space (trims to empty, triggers JS validation like blank input)
         page.locator('input[name="title"]').fill(" ")
@@ -31,6 +36,7 @@ class TestFormValidation:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.locator('input[name="title"]').fill("   ")
         page.locator('input[name="title"]').press("Enter")
@@ -43,6 +49,7 @@ class TestFormValidation:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.locator('input[name="title"]').fill(" ")
         page.locator('input[name="title"]').press("Enter")
@@ -85,6 +92,7 @@ class TestWorkbenchSourceControls:
 
         page.route("**/api/v1/requests", _capture)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         page.fill('input[name="title"]', "葬送的芙莉莲")
 
         page.click("#request-generate-submit")
@@ -101,6 +109,7 @@ class TestGenerateWithoutSave:
     def test_generate_success_notification(self, page: Page, live_server_url: str) -> None:
         set_storage_preferences(page, "/tmp/migu-orca-browser-preview", save_request=False)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
@@ -116,6 +125,7 @@ class TestGenerateWithoutSave:
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
@@ -128,6 +138,7 @@ class TestGenerateWithoutSave:
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
@@ -156,6 +167,7 @@ class TestGenerateWithoutSave:
         page.route("**/api/v1/requests/*/submit-ab**", _capture_saved_action)
 
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         page.fill('input[name="title"]', "咒术回战")
         page.click("#request-generate-submit")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -180,6 +192,7 @@ class TestGenerateWithoutSave:
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.fill('input[name="title"]', "咒术回战")
         page.click("#request-generate-submit")
@@ -208,6 +221,7 @@ class TestGenerateWithSave:
     def test_save_success_notification(self, page: Page, live_server_url: str, storage_dir: Path) -> None:
         set_storage_preferences(page, storage_dir, save_request=True)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
@@ -222,6 +236,7 @@ class TestGenerateWithSave:
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=True)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
@@ -236,6 +251,7 @@ class TestGenerateWithSave:
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=True)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
@@ -263,6 +279,7 @@ class TestDefaultGenerateOperableSavedRequest:
     ) -> str:
         self._seed_storage_dir_only(page, storage_dir)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         page.fill('input[name="title"]', title)
         page.click("#request-generate-submit")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -341,6 +358,7 @@ class TestSubmitButtonState:
     ) -> None:
         set_storage_preferences(page, storage_dir, save_request=True)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
 
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")

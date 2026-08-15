@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from tests.browser.conftest import set_storage_preferences
+from tests.browser.conftest import open_dev_fixture_panel, set_storage_preferences
 
 
 pytestmark = pytest.mark.browser
@@ -57,6 +57,7 @@ class TestQbittorrentNotOnWorkbench:
         page.route("**/api/v1/qbittorrent/test-connection**", _capture_qbt)
         set_storage_preferences(page, storage_dir, save_request=False)
         page.goto(f"{live_server_url}/index")
+        open_dev_fixture_panel(page)
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)

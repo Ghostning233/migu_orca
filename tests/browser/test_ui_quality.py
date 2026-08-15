@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from tests.browser.conftest import create_saved_request, set_storage_preferences
+from tests.browser.conftest import (
+    create_saved_request,
+    open_dev_fixture_panel,
+    set_storage_preferences,
+)
 from request_engine.controllers.request_controller import accept_request
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
@@ -28,6 +32,7 @@ def test_index_uses_stage14_visual_hierarchy_and_button_semantics(
     page: Page, live_server_url: str
 ) -> None:
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
 
     expect(page.locator("#generate-panel")).to_be_visible()
     expect(page.locator("#request-list-panel")).to_be_visible()
@@ -111,6 +116,7 @@ def test_notifications_and_state_feedback_do_not_expose_sensitive_values(
     page: Page, live_server_url: str
 ) -> None:
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
     page.fill("#request-title", " ")
     page.click("#request-generate-submit")
 
@@ -173,6 +179,7 @@ def test_stage14_sensitive_settings_values_do_not_persist_or_leak(
 
     set_storage_preferences(page, storage_dir, save_request=True)
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
     page.fill("#request-title", "咒术回战")
     page.click("#request-generate-submit")
     page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)

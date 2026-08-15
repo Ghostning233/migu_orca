@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page
+from tests.browser.conftest import open_dev_fixture_panel
 
 
 pytestmark = pytest.mark.browser
@@ -128,6 +129,7 @@ def test_no_default_storage_pollution(
 def test_generation_form_present(page: Page, live_server_url: str) -> None:
     """The Request generation form is rendered with all expected controls."""
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
 
     assert page.locator("#request-generate-form").count() >= 1
     assert page.locator('input[name="title"]').count() >= 1
@@ -161,6 +163,7 @@ def test_notification_area_present(page: Page, live_server_url: str) -> None:
 def test_accessibility_landmarks(page: Page, live_server_url: str) -> None:
     """The page has basic semantic landmarks for accessibility."""
     page.goto(f"{live_server_url}/index")
+    open_dev_fixture_panel(page)
 
     # Form error area is an alert region
     assert page.locator('#request-form-error[role="alert"]').count() >= 1
