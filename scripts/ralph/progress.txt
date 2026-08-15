@@ -4,7 +4,7 @@ Started: Fri Aug 14 20:20:45 CST 2026
 ## Codebase Patterns
 - `modify_request` in `request_engine/controllers/request_controller.py` accepts both `PENDING_CONFIRM` and `ACCEPTED` requests and preserves the original status (never resets to `PENDING_CONFIRM`); accept/cancel remain restricted to `PENDING_CONFIRM` only via `_copy_pending_request`.
 - Stage 15 has been completed and merged into `main`; current active work is Stage 16 (`agent/stage16-mikan-bangumi-detail`).
-- Stage 16 is complete; Stage 17 should implement MiKan search candidate cards, manual selection, direct URL/ID fallback in the UI, and cache on top of the Stage 16 parser.
+- Stage 16 is complete and merged; current active work is Stage 17 (`agent/stage17-mikan-candidate-selection`), which should implement MiKan search candidate cards, manual selection, direct URL/ID fallback in the UI, and cache on top of the Stage 16 parser.
 - Stage 16/17 split remains deliberate: Stage 16 owns selected MiKan `Home/Bangumi/<id>` detail parsing plus CLI/API direct URL/ID entry; Stage 17 must reuse `mikan_bangumi` for chosen candidates and must not introduce a second detail parser.
 - Stage 16 MiKan detail-page fixture tests live beside `mikan_client_test.py` under `src/mikan_engine/controllers/fixtures/`; keep real MiKan parser coverage offline and drive it through injected `MikanTransport` instead of live network reads.
 - `MikanClient.get_bangumi_detail(matched_bangumi)` returns the safe structured `MikanBangumiDetail` model (bangumi metadata, page-level RSS, subgroup RSS, episode title/detail URL summaries); do not add magnet attributes or raw HTML/RSS to this public model or Request snapshots.
