@@ -159,8 +159,8 @@ def test_index_serves_web_ui_shell() -> None:
     assert response.status_code == 200
     assert "text/html" in response.content_type
     assert "MiGuOrca" in html
-    assert "<title>MiGuOrca Request 工作台</title>" in html
-    assert "Stage 13 Request 工作台" in html
+    assert "<title>MiGuOrca 订阅方案工作台</title>" in html
+    assert "Stage 13 订阅方案工作台" in html
     assert "Stage 7 Web UI MVP" not in html
     assert "Stage 8 Web UI Usability" not in html
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
@@ -169,12 +169,12 @@ def test_index_serves_web_ui_shell() -> None:
     assert "fixture-backed 生成保留在开发/离线测试区域" in html
     assert "外部数据源、连接测试与提交配置集中在 Settings" in html
     assert "真实 MiKan 候选搜索" in html
-    assert "Request 列表" in html
-    assert "Request 详情" in html
+    assert "订阅方案列表" in html
+    assert "订阅方案详情" in html
     assert 'href="/index"' in html
     assert 'href="/settings"' in html
     assert 'aria-current="page"' in html
-    assert "Request 工作台" in html
+    assert "订阅方案工作台" in html
     assert "Settings" in html
     assert 'id="generate-panel"' in html
     assert 'id="request-list-panel"' in html
@@ -238,7 +238,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="request-list-search"' in html
     assert "标题、request_id、字幕组或 folder_name" in html
     assert 'id="request-list-status-filter"' in html
-    assert "<option value=\"\">All</option>" in html
+    assert "<option value=\"\">全部</option>" in html
     assert 'id="request-list-sort"' in html
     assert '<option value="default">默认顺序</option>' in html
     assert '<option value="title_asc">标题升序</option>' in html
@@ -251,7 +251,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'aria-atomic="true"' in html
     assert 'role="status"' in html
     assert 'aria-describedby="save-request-help"' not in html
-    assert 'aria-label="刷新 Request 列表"' in html
+    assert 'aria-label="刷新订阅方案列表"' in html
     assert 'aria-relevant="additions text"' in html
     assert "/migu-orca-static/app.js" in html
     assert "token" not in html.lower()
@@ -281,7 +281,7 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'href="/index"' in html
     assert 'href="/settings"' in html
     assert 'aria-current="page"' in html
-    assert "Request 工作台" in html
+    assert "订阅方案工作台" in html
     assert "Settings" in html
     assert 'id="storage-settings-panel"' in html
     assert 'id="data-source-settings-panel"' in html
@@ -330,7 +330,7 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'name="ab_submit_fallback_enabled"' in html
     assert 'id="settings-ab-result"' in html
     assert 'id="settings-ab-return-link"' in html
-    assert "仅 ACCEPTED Request 可提交" in html
+    assert "仅已确认订阅方案可提交" in html
     assert "尚未提交 Auto Bangumi" in html
     assert "/migu-orca-static/style.css" in html
     assert "/migu-orca-static/app.js" in html
@@ -380,7 +380,7 @@ def test_static_app_script_wires_request_list_and_detail_interactions() -> None:
     assert "settings-ab-fallback-enabled" in script
     assert "Auto Bangumi 提交" in script
     assert "fallback_enabled" in script
-    assert "window.confirm(\"确认提交此 Request 到 Auto Bangumi？\")" in script
+    assert "window.confirm(\"确认提交此订阅方案到 Auto Bangumi？\")" in script
     assert "storage_dir: currentStorageDir() || null" in script
     assert "requestIdFromLocation" in script
     assert "syncRequestIdToUrl" in script
@@ -466,7 +466,7 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert 'createDetailSection("Seeds", "seeds-section")' in script
     assert 'createDetailSection("Audit", "audit-group-section")' in script
     assert '["request_id", request.request_id]' in script
-    assert '["status", request.status]' in script
+    assert '["状态", statusLabel(request.status)]' in script
     assert '["原始标题", input.raw_title]' in script
     assert '["匹配标题", matched.title]' in script
     assert "copyButton.className = \"secondary-button copy-request-id\"" in script
@@ -488,6 +488,29 @@ def test_static_app_script_groups_request_detail_without_exposing_rss_url() -> N
     assert "renderAbResultSection(auditSection, payload.ab_result)" in script
     assert "selected_rss_url" in script
     assert "addDetailRow(fields, \"selected_rss_url\"" not in script
+
+
+def test_static_app_script_maps_status_codes_to_chinese_labels() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "function statusLabel(status)" in script
+    assert "PENDING_CONFIRM: \"待确认\"" in script
+    assert "ACCEPTED: \"已确认\"" in script
+    assert "CANCELLED: \"已取消\"" in script
+    assert "function actionLabel(action)" in script
+    assert "ACCEPT: \"确认\"" in script
+    assert "CANCEL: \"取消\"" in script
+    assert "MODIFY: \"修改\"" in script
+    assert "statusLabel(summary.status)" in script
+    assert "statusLabel(request.status)" in script
+    assert "option.textContent = statusLabel(status)" in script
+    assert "全部" in script
+    # The raw status codes never render into user-visible strings in the main UI.
+    assert '"待确认"' in script
+    assert '"已确认"' in script
+    assert '"已取消"' in script
 
 
 def test_static_app_script_shows_filter_mode_and_case_status_in_detail() -> None:
@@ -538,11 +561,11 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "关闭" in script
     assert "预览已生成" in script
     assert "保存成功" in script
-    assert "已保存 Request " in script
+    assert "已保存订阅方案 " in script
     assert "刷新列表" in script
     assert "查看详情" in script
-    assert "Request 列表加载失败" in script
-    assert "Request 详情加载失败" in script
+    assert "订阅方案列表加载失败" in script
+    assert "订阅方案详情加载失败" in script
     assert "校验失败" in script
     assert "error.errorData = payload.error_data || null" in script
     assert "summarizeValidationErrors" in script
@@ -626,13 +649,13 @@ def test_static_app_script_wires_request_list_filter_sort_controls() -> None:
     assert "summary.folder_name" in script
     assert "summary.status" in script
     assert "listCount.textContent = \"显示 \"" in script
-    assert "没有匹配的 Request。清空搜索或筛选后可恢复列表。" in script
+    assert "没有匹配的订阅方案。清空搜索或筛选后可恢复列表。" in script
     assert "listSearchInput.addEventListener(\"input\", renderList)" in script
     assert "listStatusFilter.addEventListener(\"change\", renderList)" in script
     assert "listSortSelect.addEventListener(\"change\", renderList)" in script
     assert "document.createElement(\"button\")" in script
     assert "item.type = \"button\"" in script
-    assert 'item.setAttribute("aria-label", "查看 Request 详情：" + requestLabel(summary))' in script
+    assert 'item.setAttribute("aria-label", "查看订阅方案详情：" + requestLabel(summary))' in script
     assert 'item.setAttribute("aria-current", "true")' in script
     assert "fetchJson(apiPath(\"/api/v1/requests\"))" in script
     assert "fetchJson(apiPath(\"/api/v1/requests?search" not in script
@@ -729,7 +752,7 @@ def test_static_app_script_wires_explicit_ab_submit_form() -> None:
     assert "submitSettingsAb" in script
     assert "提交 Auto Bangumi 前必须填写 endpoint。" in script
     assert "提交 Auto Bangumi 前必须填写 token。" in script
-    assert "确认提交此 Request 到 Auto Bangumi？" in script
+    assert "确认提交此订阅方案到 Auto Bangumi？" in script
     assert '"/submit-ab"' in script
     assert "storage_dir: currentStorageDir() || null" in script
     assert "ab_config" in script
@@ -1105,7 +1128,7 @@ def test_get_request_detail_returns_unified_error_for_missing_request(
     assert payload == {
         "ok": False,
         "error_type": "request_not_found",
-        "error_message": "未找到已保存的 Request",
+        "error_message": "未找到已保存的订阅方案",
         "error_data": {
             "failed_step": "load_request_snapshot",
             "details": {"request_id": "missing-request"},
@@ -1195,7 +1218,7 @@ def test_delete_request_removes_saved_request_and_refreshes_list_and_detail(
     assert detail_response.get_json() == {
         "ok": False,
         "error_type": "request_not_found",
-        "error_message": "未找到已保存的 Request",
+        "error_message": "未找到已保存的订阅方案",
         "error_data": {
             "failed_step": "load_request_snapshot",
             "details": {"request_id": "request-1"},
@@ -1217,7 +1240,7 @@ def test_delete_request_returns_unified_error_for_missing_request(
     assert payload == {
         "ok": False,
         "error_type": "request_not_found",
-        "error_message": "未找到已保存的 Request",
+        "error_message": "未找到已保存的订阅方案",
         "error_data": {
             "failed_step": "delete_request_snapshot",
             "details": {"request_id": "missing-request"},
@@ -1255,7 +1278,7 @@ def test_delete_request_returns_unified_error_for_delete_failure(
     def fail_delete(*args: object, **kwargs: object) -> dict[str, object]:
         raise Stage1Error(
             "storage_error",
-            f"删除 Request JSON 失败 {tmp_path}/secret-token",
+            f"删除订阅方案 JSON 失败 {tmp_path}/secret-token",
             "delete_request_snapshot",
             {
                 "request_id": "request-1",
@@ -2507,7 +2530,7 @@ def test_create_request_returns_unified_error_for_save_failure(
             "request": None,
             "error": Stage1Error(
                 "storage_error",
-                "保存 Request JSON 失败",
+                "保存订阅方案 JSON 失败",
                 "save_request_snapshot",
                 {
                     "reason": f"cannot write {tmp_path}/private-token at https://example.test/api",
@@ -2534,7 +2557,7 @@ def test_create_request_returns_unified_error_for_save_failure(
     assert response.status_code == 200
     assert payload["ok"] is False
     assert payload["error_type"] == "storage_error"
-    assert payload["error_message"] == "保存 Request JSON 失败"
+    assert payload["error_message"] == "保存订阅方案 JSON 失败"
     assert payload["error_data"]["failed_step"] == "save_request_snapshot"
     assert payload["error_data"]["details"]["directory"] == "requests"
     assert str(tmp_path) not in str(payload)
@@ -2713,7 +2736,7 @@ def test_submit_ab_rejects_non_accepted_request(tmp_path: Path) -> None:
     assert response.status_code == 200
     assert payload["ok"] is False
     assert payload["error_type"] == "invalid_request_status"
-    assert payload["error_message"] == "只有 ACCEPTED Request 可以提交到 Auto Bangumi"
+    assert payload["error_message"] == "只有已确认订阅方案可以提交到 Auto Bangumi"
     assert payload["error_data"]["failed_step"] == "build_ab_subscription_payload"
     assert "secret-token" not in str(payload)
     assert "auto-bangumi.local" not in str(payload)

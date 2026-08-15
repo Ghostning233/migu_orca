@@ -55,7 +55,7 @@ def test_build_ab_subscription_payload_rejects_non_accepted_request() -> None:
 
     assert error.value.as_dict() == {
         "error_type": "invalid_request_status",
-        "error_message": "只有 ACCEPTED Request 可以提交到 Auto Bangumi",
+        "error_message": "只有已确认订阅方案可以提交到 Auto Bangumi",
         "failed_step": "build_ab_subscription_payload",
         "details": {"status": "PENDING_CONFIRM"},
     }

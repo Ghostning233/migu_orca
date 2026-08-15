@@ -62,7 +62,7 @@ def test_save_ab_submit_result_requires_result_object(tmp_path: Path) -> None:
 
     assert error.value.as_dict() == {
         "error_type": "invalid_ab_submit_result",
-        "error_message": "Request 缺少有效 Auto Bangumi 提交结果",
+        "error_message": "订阅方案缺少有效 Auto Bangumi 提交结果",
         "failed_step": "save_ab_submit_result",
         "details": {"request_id": "request-123", "field": "ab_submit_result"},
     }

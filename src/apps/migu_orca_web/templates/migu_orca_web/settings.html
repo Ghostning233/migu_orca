@@ -13,7 +13,7 @@
         <p class="stage-label">Stage 13 Settings</p>
         <h1>MiGuOrca Settings</h1>
         <p class="mode-summary">
-          配置与连接测试集中在 Settings；敏感外部系统配置保持显式输入，不写入浏览器存储、URL 或本地 Request JSON。
+          配置与连接测试集中在 Settings；敏感外部系统配置保持显式输入，不写入浏览器存储、URL 或本地订阅方案 JSON。
         </p>
       </div>
       {% include "migu_orca_web/_top_nav.html" %}
@@ -48,7 +48,7 @@
             autocomplete="off"
           >
           <p id="settings-storage-dir-help" class="field-help">
-            留空时 Request 工作台使用默认 `.migu_orca/storage`。
+            留空时订阅方案工作台使用默认 `.migu_orca/storage`。
           </p>
 
           <label class="checkbox-row" for="settings-save-request">
@@ -59,10 +59,10 @@
               value="true"
               aria-describedby="settings-save-request-help"
             >
-            默认保存 Request
+            默认保存订阅方案
           </label>
           <p id="settings-save-request-help" class="field-help">
-            开启后 Request 工作台默认写入 Request JSON；关闭时只生成预览。
+            开启后订阅方案工作台默认写入订阅方案 JSON；关闭时只生成预览。
           </p>
 
           <div
@@ -99,7 +99,7 @@
         </div>
         <form id="settings-qbittorrent-test-form" class="settings-form">
           <p class="field-help">
-            配置仅用于本次连接测试；endpoint、username 和 password 不写入浏览器存储、URL 或 Request JSON。
+            配置仅用于本次连接测试；endpoint、username 和 password 不写入浏览器存储、URL 或订阅方案 JSON。
           </p>
 
           <label for="settings-qbittorrent-endpoint">endpoint</label>
@@ -185,11 +185,11 @@
           class="empty-state compact-state"
           aria-live="polite"
         >
-          从 ACCEPTED Request 详情进入后，可在此提交到 Auto Bangumi；token 不会持久化。
+          从已确认订阅方案详情进入后，可在此提交到 Auto Bangumi；token 不会持久化。
         </div>
         <form id="settings-ab-submit-form" class="settings-form" hidden>
           <p class="field-help">
-            当前 request_id：<code id="settings-ab-request-id"></code>。仅 ACCEPTED Request 可提交；endpoint 和 token 只用于本次请求，不写入浏览器存储、URL 或 Request JSON。
+            当前 request_id：<code id="settings-ab-request-id"></code>。仅已确认订阅方案可提交；endpoint 和 token 只用于本次请求，不写入浏览器存储、URL 或订阅方案 JSON。
           </p>
 
           <label for="settings-ab-endpoint">endpoint</label>
@@ -239,7 +239,7 @@
               提交 Auto Bangumi
             </button>
             <a id="settings-ab-return-link" class="secondary-button" href="{{ url_for('migu_orca_web.index') }}">
-              返回 Request 详情
+              返回订阅方案详情
             </a>
           </div>
         </form>

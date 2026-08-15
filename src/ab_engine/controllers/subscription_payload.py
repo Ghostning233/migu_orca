@@ -14,7 +14,7 @@ def build_ab_subscription_payload(request: dict[str, Any]) -> dict[str, Any]:
     if status != ACCEPTED:
         raise Stage1Error(
             "invalid_request_status",
-            "只有 ACCEPTED Request 可以提交到 Auto Bangumi",
+            "只有已确认订阅方案可以提交到 Auto Bangumi",
             "build_ab_subscription_payload",
             {"status": status},
         )

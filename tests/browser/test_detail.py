@@ -121,7 +121,7 @@ class TestRequestDetailUrlState:
         page.wait_for_selector("#request-detail-container.error-state", timeout=5000)
 
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "Request 详情加载失败" in detail_text
+        assert "订阅方案详情加载失败" in detail_text
         assert "req-url-missing" not in detail_text
         page.wait_for_selector("[data-request-id='req-url-existing']", timeout=5000)
 
@@ -255,7 +255,7 @@ class TestAutoBangumiSubmitEntry:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert dialog_messages
-        assert "确认提交此 Request 到 Auto Bangumi" in dialog_messages[0]
+        assert "确认提交此订阅方案到 Auto Bangumi" in dialog_messages[0]
         assert captured["body"]["storage_dir"] == str(storage_dir)
         assert captured["body"]["ab_config"] == {
             "endpoint": "http://auto-bangumi.local/api/subscriptions",
@@ -452,3 +452,62 @@ class TestNotificationAndRecovery:
         refresh = page.locator("#request-list-refresh")
         assert refresh.count() >= 1
         assert refresh.is_enabled()
+
+
+class TestChineseStatusLabels:
+    """US-128: 状态展示映射为中文，不暴露 PENDING_CONFIRM/ACCEPTED/CANCELLED 代码值."""
+
+    def test_pending_confirm_shows_chinese_label_in_list_and_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-status-pending")
+        _open_request_detail(page, live_server_url, storage_dir, "req-status-pending")
+
+        body = page.locator("body").inner_text()
+        assert "待确认" in body
+        assert "PENDING_CONFIRM" not in body
+
+    def test_accepted_shows_chinese_label_in_list_and_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _save_accepted_request(storage_dir, "葬送的芙莉莲", "req-status-accepted")
+        _open_request_detail(page, live_server_url, storage_dir, "req-status-accepted")
+
+        body = page.locator("body").inner_text()
+        assert "已确认" in body
+        assert "ACCEPTED" not in body
+
+    def test_cancelled_shows_chinese_label_in_list_and_detail(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        from request_engine.controllers.request_controller import cancel_request
+
+        request = cancel_request(
+            create_saved_request(storage_dir, "葬送的芙莉莲", "req-status-cancelled"),
+            "不需要了",
+        )
+        save_request_snapshot(load_storage_config(storage_dir), request)
+        _open_request_detail(page, live_server_url, storage_dir, "req-status-cancelled")
+
+        body = page.locator("body").inner_text()
+        assert "已取消" in body
+        assert "CANCELLED" not in body
+
+    def test_status_filter_options_use_chinese_labels(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        _save_accepted_request(storage_dir, "葬送的芙莉莲", "req-status-filter-accepted")
+        create_saved_request(storage_dir, "咒术回战第三季", "req-status-filter-pending")
+        _open_request_detail(page, live_server_url, storage_dir, "req-status-filter-pending")
+
+        options = [
+            opt.inner_text()
+            for opt in page.locator("#request-list-status-filter option").all()
+        ]
+        assert "全部" in options
+        assert "待确认" in options
+        assert "已确认" in options
+        # Raw codes never appear as visible filter options.
+        assert not any(
+            code in o for o in options for code in ("PENDING_CONFIRM", "ACCEPTED", "CANCELLED")
+        )

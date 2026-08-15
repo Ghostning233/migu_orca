@@ -39,14 +39,14 @@ def test_index_loads_stage13_request_workbench(page: Page, live_server_url: str)
 
     assert page.title().startswith("MiGuOrca")
     assert page.locator("text=MiGuOrca").count() >= 1
-    assert page.locator("text=Stage 13 Request 工作台").count() >= 1
+    assert page.locator("text=Stage 13 订阅方案工作台").count() >= 1
 
     # Top navigation anchors
     nav = page.locator(".top-nav")
     assert nav.count() >= 1
     assert nav.locator("a[href='/index']").count() >= 1
     assert nav.locator("a[href='/settings']").count() >= 1
-    assert nav.locator("text=Request 工作台").count() >= 1
+    assert nav.locator("text=订阅方案工作台").count() >= 1
     assert nav.locator("text=Settings").count() >= 1
 
     # Mode hint

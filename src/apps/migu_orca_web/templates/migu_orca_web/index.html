@@ -3,14 +3,14 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>MiGuOrca Request 工作台</title>
+    <title>MiGuOrca 订阅方案工作台</title>
     <link rel="stylesheet" href="{{ url_for('migu_orca_web.static', filename='style.css') }}">
     <script defer src="{{ url_for('migu_orca_web.static', filename='app.js') }}"></script>
   </head>
   <body>
     <header class="app-header">
       <div class="header-copy">
-        <p class="stage-label">Stage 13 Request 工作台</p>
+        <p class="stage-label">Stage 13 订阅方案工作台</p>
         <h1>MiGuOrca</h1>
         <p class="mode-summary">
           运行模式：本地 JSON storage；主流程通过真实 MiKan 候选搜索生成订阅方案，fixture-backed 生成保留在开发/离线测试区域。外部数据源、连接测试与提交配置集中在 Settings。
@@ -41,7 +41,7 @@
         >
           <h3 id="storage-preference-summary-heading">Storage 偏好</h3>
           <p id="storage-preference-summary-text">
-            当前使用默认 `.migu_orca/storage`；默认生成并保存 Request，可在 Settings 修改 storage 与保存行为。
+            当前使用默认 `.migu_orca/storage`；默认生成并保存订阅方案，可在 Settings 修改 storage 与保存行为。
           </p>
           <a class="secondary-link" href="{{ url_for('migu_orca_web.settings') }}#storage-settings-panel">
             前往 Settings
@@ -90,7 +90,7 @@
           搜索无结果时使用直连合集
         </label>
         <p id="mikan-fallback-gate-help" class="field-help">
-          可选：勾选后可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或 Request JSON。
+          可选：勾选后可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或订阅方案 JSON。
         </p>
 
         <form id="mikan-fallback-form" class="candidate-fallback-form" hidden>
@@ -117,17 +117,17 @@
 
       <section id="request-list-panel" class="panel request-list-panel" aria-labelledby="request-list-heading">
         <div class="panel-heading">
-          <h2 id="request-list-heading">Request 列表</h2>
+          <h2 id="request-list-heading">订阅方案列表</h2>
           <button
             id="request-list-refresh"
             class="secondary-button"
             type="button"
-            aria-label="刷新 Request 列表"
+            aria-label="刷新订阅方案列表"
           >
             刷新
           </button>
         </div>
-        <div class="request-list-controls" aria-label="Request 列表筛选和排序">
+        <div class="request-list-controls" aria-label="订阅方案列表筛选和排序">
           <label for="request-list-search">搜索</label>
           <input
             id="request-list-search"
@@ -138,7 +138,7 @@
 
           <label for="request-list-status-filter">状态</label>
           <select id="request-list-status-filter">
-            <option value="">All</option>
+            <option value="">全部</option>
           </select>
 
           <label for="request-list-sort">排序</label>
@@ -157,7 +157,7 @@
           aria-live="polite"
           aria-relevant="additions text"
         >
-          暂无已加载的 Request。
+          暂无已加载的订阅方案。
         </div>
       </section>
 
@@ -206,14 +206,14 @@
       </section>
 
       <section id="request-detail-panel" class="panel request-detail-panel" aria-labelledby="request-detail-heading">
-        <h2 id="request-detail-heading">Request 详情</h2>
+        <h2 id="request-detail-heading">订阅方案详情</h2>
         <div
           id="request-detail-container"
           class="empty-state"
           aria-live="polite"
           aria-relevant="additions text"
         >
-          选择一个 Request 后查看详情。
+          选择一个订阅方案后查看详情。
         </div>
       </section>
 

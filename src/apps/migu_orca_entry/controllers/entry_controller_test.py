@@ -418,7 +418,7 @@ def test_main_load_saved_request_returns_stable_missing_error(
         "request": None,
         "error": {
             "error_type": "request_not_found",
-            "error_message": "未找到已保存的 Request",
+            "error_message": "未找到已保存的订阅方案",
             "failed_step": "load_request_snapshot",
             "details": {"request_id": "missing-request"},
         },
@@ -625,7 +625,7 @@ def test_apply_request_save_action_returns_stable_error(
     def fail_save(*args: object) -> None:
         raise Stage1Error(
             "storage_error",
-            "保存 Request JSON 失败",
+            "保存订阅方案 JSON 失败",
             "save_request_snapshot",
             {"directory": "requests"},
         )
@@ -646,7 +646,7 @@ def test_apply_request_save_action_returns_stable_error(
         "request": None,
         "error": {
             "error_type": "storage_error",
-            "error_message": "保存 Request JSON 失败",
+            "error_message": "保存订阅方案 JSON 失败",
             "failed_step": "save_request_snapshot",
             "details": {"directory": "requests"},
         },
@@ -663,7 +663,7 @@ def test_apply_request_save_action_returns_stable_error_for_history_failure(
     def fail_append_history(*args: object) -> None:
         raise Stage1Error(
             "storage_error",
-            "保存 Request 状态历史失败",
+            "保存订阅方案状态历史失败",
             "append_status_history",
             {"request_id": "stable-id", "directory": "history"},
         )
@@ -693,7 +693,7 @@ def test_apply_request_save_action_returns_stable_error_for_history_failure(
         "request": None,
         "error": {
             "error_type": "storage_error",
-            "error_message": "保存 Request 状态历史失败",
+            "error_message": "保存订阅方案状态历史失败",
             "failed_step": "append_status_history",
             "details": {"request_id": "stable-id", "directory": "history"},
         },

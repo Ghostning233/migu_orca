@@ -177,7 +177,7 @@ class TestAutoBangumiSubmitFlow:
         page.locator("#settings-ab-submit").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
-        assert seen_dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
+        assert seen_dialogs == ["确认提交此订阅方案到 Auto Bangumi？"]
         assert "/api/v1/requests/req-ab-submit/submit-ab" in captured["url"]
         assert "browser-secret-token" not in captured["url"]
         assert "ab-endpoint-value" not in captured["url"]
@@ -224,9 +224,13 @@ class TestConfirmFlow:
         page.wait_for_timeout(1500)
 
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "ACCEPTED" in detail_text
-        # Buttons should be gone after refresh
-        assert page.locator("button:has-text('确认')").count() == 0
+        assert "已确认" in detail_text
+        # Confirm action button should be gone after refresh (list items now show
+        # the Chinese status label "已确认", so scope to the detail action area).
+        assert (
+            page.locator("#request-detail-container .detail-actions button:has-text('确认')").count()
+            == 0
+        )
 
     def test_confirm_updates_list_count(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -289,7 +293,7 @@ class TestCancelFlow:
         page.locator("#detail-cancel-form button:has-text('提交取消')").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
-        assert dialogs == ["确认取消此 Request？"]
+        assert dialogs == ["确认取消此订阅方案？"]
         assert captured["payload"]["cancel_reason"] == "表单取消原因"
 
     def test_cancel_updates_detail_status(
@@ -305,7 +309,7 @@ class TestCancelFlow:
         page.wait_for_timeout(1500)
 
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "CANCELLED" in detail_text
+        assert "已取消" in detail_text
 
 
 class TestModifyFlow:
@@ -355,9 +359,9 @@ class TestModifyFlow:
         notif = page.locator("#page-notification")
         assert "修改成功" in notif.inner_text()
 
-        # Detail should still show PENDING_CONFIRM (modify keeps status)
+        # Detail should still show 待确认 (modify keeps status)
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "PENDING_CONFIRM" in detail_text
+        assert "待确认" in detail_text
 
     def test_modify_literal_v2_exclude_shows_removed_seed_feedback(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -507,7 +511,7 @@ class TestModifyFlow:
         assert page.locator("#detail-modify-form").is_visible()
         assert page.locator("#modify-must-not-contain").input_value() == "V2"
         assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
-        assert "PENDING_CONFIRM" in page.locator("#request-detail-container").inner_text()
+        assert "待确认" in page.locator("#request-detail-container").inner_text()
 
 
 class TestModifyFilterOptions:
@@ -846,7 +850,7 @@ class TestAcceptedRequestManagement:
 
         assert "修改成功" in page.locator("#page-notification").inner_text()
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "ACCEPTED" in detail_text
+        assert "已确认" in detail_text
         assert "ACCEPTED 修改目录" in detail_text
         assert (
             "ACCEPTED"
@@ -868,11 +872,11 @@ class TestAcceptedRequestManagement:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert seen_dialogs
-        assert "确认删除此 Request" in seen_dialogs[0]
+        assert "确认删除此订阅方案" in seen_dialogs[0]
         assert "删除成功" in page.locator("#page-notification").inner_text()
         assert page.locator("[data-request-id='req-accepted-delete']").count() == 0
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "Request 已删除" in detail_text
+        assert "订阅方案已删除" in detail_text
         assert "request_id=" not in page.url
         assert not (storage_dir / "requests" / "req-accepted-delete.json").exists()
 
@@ -920,7 +924,7 @@ class TestAcceptedRequestManagement:
                 json={
                     "ok": False,
                     "error_type": "storage_error",
-                    "error_message": "删除 Request JSON 失败",
+                    "error_message": "删除订阅方案 JSON 失败",
                 },
             )
 
@@ -977,5 +981,5 @@ class TestAcceptedRequestManagement:
         assert page.locator("#detail-modify-form").is_visible()
         assert page.locator("#modify-folder-name").input_value() == "失败后仍保留"
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "ACCEPTED" in detail_text
+        assert "已确认" in detail_text
         assert page.locator("[data-request-id='req-accepted-modify-fail']").count() >= 1

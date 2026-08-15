@@ -253,13 +253,13 @@ def _raise_result_error(result: dict[str, Any]) -> None:
     if not isinstance(error, dict):
         raise Stage1Error(
             "unexpected_error",
-            "Request API 操作失败",
+            "订阅方案 API 操作失败",
             "migu_orca_web_api",
         )
     details = error.get("details")
     raise Stage1Error(
         str(error.get("error_type") or "unexpected_error"),
-        str(error.get("error_message") or "Request API 操作失败"),
+        str(error.get("error_message") or "订阅方案 API 操作失败"),
         str(error.get("failed_step") or "migu_orca_web_api"),
         details if isinstance(details, dict) else None,
     )

@@ -243,7 +243,7 @@ def _copy_pending_request(
     if status != PENDING_CONFIRM:
         raise Stage1Error(
             "invalid_request_status",
-            "只有 PENDING_CONFIRM Request 可以执行确认操作",
+            "只有待确认订阅方案可以执行确认操作",
             failed_step,
             {"status": status},
         )
@@ -258,7 +258,7 @@ def _copy_modifiable_request(
     if status not in MODIFIABLE_STATUSES:
         raise Stage1Error(
             "invalid_request_status",
-            "只有 PENDING_CONFIRM 或 ACCEPTED Request 可以修改",
+            "只有待确认或已确认订阅方案可以修改",
             failed_step,
             {"status": status},
         )

@@ -99,7 +99,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "优先改用户可见文案；不要为了文案强制重命名内部模型。"
     },
     {

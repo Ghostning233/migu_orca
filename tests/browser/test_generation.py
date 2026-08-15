@@ -215,7 +215,7 @@ class TestGenerateWithSave:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         notif = page.locator("#page-notification")
         text = notif.inner_text()
-        assert "保存成功" in text or "已保存 Request" in text
+        assert "保存成功" in text or "已保存订阅方案" in text
 
     def test_storage_contains_saved_request(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -268,8 +268,8 @@ class TestDefaultGenerateOperableSavedRequest:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         text = page.locator("#page-notification").inner_text()
-        assert "保存成功" in text or "已保存 Request" in text
-        assert "未找到已保存的 Request" not in page.locator("body").inner_text()
+        assert "保存成功" in text or "已保存订阅方案" in text
+        assert "未找到已保存的订阅方案" not in page.locator("body").inner_text()
         assert "request_id=" in page.url
         request_id = page.url.split("request_id=", 1)[1].split("&", 1)[0]
         assert request_id
@@ -291,9 +291,9 @@ class TestDefaultGenerateOperableSavedRequest:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert "确认成功" in page.locator("#page-notification").inner_text()
-        assert "ACCEPTED" in page.locator("#request-detail-container").inner_text()
-        assert "ACCEPTED" in page.locator(f"[data-request-id='{request_id}']").inner_text()
-        assert "未找到已保存的 Request" not in page.locator("body").inner_text()
+        assert "已确认" in page.locator("#request-detail-container").inner_text()
+        assert "已确认" in page.locator(f"[data-request-id='{request_id}']").inner_text()
+        assert "未找到已保存的订阅方案" not in page.locator("body").inner_text()
 
     def test_default_generated_request_can_cancel(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -309,9 +309,9 @@ class TestDefaultGenerateOperableSavedRequest:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert "取消成功" in page.locator("#page-notification").inner_text()
-        assert "CANCELLED" in page.locator("#request-detail-container").inner_text()
-        assert "CANCELLED" in page.locator(f"[data-request-id='{request_id}']").inner_text()
-        assert "未找到已保存的 Request" not in page.locator("body").inner_text()
+        assert "已取消" in page.locator("#request-detail-container").inner_text()
+        assert "已取消" in page.locator(f"[data-request-id='{request_id}']").inner_text()
+        assert "未找到已保存的订阅方案" not in page.locator("body").inner_text()
 
     def test_default_generated_request_can_modify(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -327,10 +327,10 @@ class TestDefaultGenerateOperableSavedRequest:
 
         assert "修改成功" in page.locator("#page-notification").inner_text()
         detail_text = page.locator("#request-detail-container").inner_text()
-        assert "PENDING_CONFIRM" in detail_text
+        assert "待确认" in detail_text
         assert "Jujutsu Stage 14" in detail_text
-        assert "PENDING_CONFIRM" in page.locator(f"[data-request-id='{request_id}']").inner_text()
-        assert "未找到已保存的 Request" not in page.locator("body").inner_text()
+        assert "待确认" in page.locator(f"[data-request-id='{request_id}']").inner_text()
+        assert "未找到已保存的订阅方案" not in page.locator("body").inner_text()
 
 
 class TestSubmitButtonState:
@@ -400,7 +400,7 @@ class TestBrowserPreferences:
         summary = page.locator("#storage-preference-summary")
         text = summary.inner_text()
         assert str(storage_dir) in text
-        assert "默认保存 Request JSON" in text
+        assert "默认保存订阅方案 JSON" in text
 
     def test_cleared_settings_preferences_restore_index_defaults(
         self, page: Page, live_server_url: str
@@ -415,4 +415,4 @@ class TestBrowserPreferences:
         summary = page.locator("#storage-preference-summary")
         text = summary.inner_text()
         assert "默认 `.migu_orca/storage`" in text
-        assert "默认保存 Request JSON" in text
+        assert "默认保存订阅方案 JSON" in text

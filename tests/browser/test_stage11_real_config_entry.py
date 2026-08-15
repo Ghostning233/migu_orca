@@ -122,7 +122,7 @@ class TestStage11AutoBangumiBrowserRegressions:
         page.locator("#settings-ab-submit").click()
         page.wait_for_timeout(300)
 
-        assert dialogs == ["确认提交此 Request 到 Auto Bangumi？"]
+        assert dialogs == ["确认提交此订阅方案到 Auto Bangumi？"]
         storage_keys = page.evaluate("Object.keys(window.localStorage)")
         session_keys = page.evaluate("Object.keys(window.sessionStorage)")
         assert all("ab" not in key.lower() for key in storage_keys)
@@ -170,7 +170,7 @@ class TestStage11AutoBangumiBrowserRegressions:
 
         assert "req-stage11-ab-fail" in settings_text
         assert "req-stage11-ab-fail" in detail_text
-        assert "ACCEPTED" in detail_text
+        assert "已确认" in detail_text
         assert "咒术回战 第三季" in list_text
         assert "Auto Bangumi 提交失败" in notification_text
         _assert_sensitive_values_not_rendered(page)

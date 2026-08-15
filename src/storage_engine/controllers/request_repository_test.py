@@ -113,7 +113,7 @@ def test_load_request_snapshot_returns_stable_error_for_missing_request(
 
     assert error.value.as_dict() == {
         "error_type": "request_not_found",
-        "error_message": "未找到已保存的 Request",
+        "error_message": "未找到已保存的订阅方案",
         "failed_step": "load_request_snapshot",
         "details": {"request_id": "missing-request"},
     }
@@ -146,7 +146,7 @@ def test_load_request_snapshot_rejects_non_object_json(tmp_path: Path) -> None:
 
     assert error.value.as_dict() == {
         "error_type": "storage_json_error",
-        "error_message": "Request JSON 必须是对象",
+        "error_message": "订阅方案 JSON 必须是对象",
         "failed_step": "load_request_snapshot",
         "details": {"request_id": "array"},
     }
@@ -176,7 +176,7 @@ def test_save_request_snapshot_returns_stable_error_for_write_failure(
 
     assert error.value.as_dict() == {
         "error_type": "storage_error",
-        "error_message": "保存 Request JSON 失败",
+        "error_message": "保存订阅方案 JSON 失败",
         "failed_step": "save_request_snapshot",
         "details": {
             "request_id": request["request_id"],
@@ -216,7 +216,7 @@ def test_delete_request_snapshot_returns_stable_error_for_missing_request(
 
     assert error.value.as_dict() == {
         "error_type": "request_not_found",
-        "error_message": "未找到已保存的 Request",
+        "error_message": "未找到已保存的订阅方案",
         "failed_step": "delete_request_snapshot",
         "details": {"request_id": "missing-request"},
     }
@@ -273,7 +273,7 @@ def test_delete_request_snapshot_returns_stable_error_for_unlink_failure(
 
     assert error.value.as_dict() == {
         "error_type": "storage_error",
-        "error_message": "删除 Request JSON 失败",
+        "error_message": "删除订阅方案 JSON 失败",
         "failed_step": "delete_request_snapshot",
         "details": {
             "request_id": request["request_id"],

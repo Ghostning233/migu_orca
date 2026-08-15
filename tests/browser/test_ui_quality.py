@@ -287,7 +287,7 @@ def test_stage15_accepted_modify_delete_do_not_leak_sensitive_values(
     assert "修改成功" in page.locator("#page-notification").inner_text()
 
     detail_text = page.locator("#request-detail-container").inner_text()
-    assert "ACCEPTED" in detail_text
+    assert "已确认" in detail_text
     assert "Stage15 脱敏目录" in detail_text
     # RSS is shown only as "已选择"; the raw endpoint URL must never render.
     assert "已选择" in detail_text
@@ -325,7 +325,7 @@ def test_stage15_accepted_modify_delete_do_not_leak_sensitive_values(
 
     assert not (storage_dir / "requests" / "req-stage15-sec.json").exists()
     assert page.locator("[data-request-id='req-stage15-sec']").count() == 0
-    assert "Request 已删除" in post_delete_state["bodyText"]
+    assert "订阅方案已删除" in post_delete_state["bodyText"]
     assert "request_id=" not in post_delete_state["url"]
 
     for state in (browser_state, post_delete_state):

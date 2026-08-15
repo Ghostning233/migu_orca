@@ -105,7 +105,7 @@
       ? "自定义 storage_dir：" + storageDirPreference
       : "默认 `.migu_orca/storage`";
     const saveText = saveRequestPreference
-      ? "默认保存 Request JSON"
+      ? "默认保存订阅方案 JSON"
       : "默认只生成预览";
     storageSummaryText.textContent =
       "当前使用" + storageText + "；" + saveText + "。可在 Settings 修改。";
@@ -166,7 +166,7 @@
     removePreference(preferenceKeys.saveRequest);
     applyPreferenceValues("", true);
     updateStoragePreferencesStatus(
-      "偏好已清除；Request 工作台将使用默认 `.migu_orca/storage` 并保存 Request JSON。",
+      "偏好已清除；订阅方案工作台将使用默认 `.migu_orca/storage` 并保存订阅方案 JSON。",
       "empty-state compact-state",
     );
   }
@@ -339,6 +339,32 @@
       return "[redacted_url]";
     }
     return text;
+  }
+
+  // User-facing Chinese label for a Request status code. Internal/API values
+  // keep their stable English codes; only what is rendered to users is mapped.
+  function statusLabel(status) {
+    const labels = {
+      PENDING_CONFIRM: "待确认",
+      ACCEPTED: "已确认",
+      CANCELLED: "已取消",
+    };
+    const value = fieldValue(status);
+    return Object.prototype.hasOwnProperty.call(labels, value)
+      ? labels[value]
+      : value;
+  }
+
+  function actionLabel(action) {
+    const labels = {
+      ACCEPT: "确认",
+      CANCEL: "取消",
+      MODIFY: "修改",
+    };
+    const value = fieldValue(action);
+    return Object.prototype.hasOwnProperty.call(labels, value)
+      ? labels[value]
+      : value;
   }
 
   function scrubConfig(value) {
@@ -608,7 +634,7 @@
       settingsAbForm.hidden = true;
       if (settingsAbContext) {
         settingsAbContext.textContent =
-          "从 ACCEPTED Request 详情进入后，可在此提交到 Auto Bangumi。";
+          "从已确认订阅方案详情进入后，可在此提交到 Auto Bangumi。";
       }
       return;
     }
@@ -618,7 +644,7 @@
     }
     if (settingsAbContext) {
       settingsAbContext.textContent =
-        "已选择 Request " + requestId + "；请确认该 Request 已 ACCEPTED 后再提交。";
+        "已选择订阅方案 " + requestId + "；请确认该订阅方案已确认后再提交。";
     }
     if (settingsAbReturnLink) {
       settingsAbReturnLink.href = "/index?request_id=" + encodeURIComponent(requestId);
@@ -643,7 +669,7 @@
       setSettingsAbError("提交 Auto Bangumi 前必须填写 token。", settingsAbTokenInput);
       return;
     }
-    if (!window.confirm("确认提交此 Request 到 Auto Bangumi？")) {
+    if (!window.confirm("确认提交此订阅方案到 Auto Bangumi？")) {
       return;
     }
 
@@ -674,7 +700,7 @@
         "Auto Bangumi 提交成功；request_id: " + safeText(requestId) + subscriptionId,
         "success-state compact-state",
       );
-      showNotification("success", "Auto Bangumi 提交成功", "Request " + requestId, {
+      showNotification("success", "Auto Bangumi 提交成功", "订阅方案 " + requestId, {
         actions: settingsAbReturnLink
           ? [
               {
@@ -688,10 +714,10 @@
       });
     } catch (error) {
       setSettingsAbResult(
-        "Auto Bangumi 提交失败。请检查配置与 Request 状态后重试。",
+        "Auto Bangumi 提交失败。请检查配置与订阅方案状态后重试。",
         "error-state compact-state",
       );
-      showNotification("error", "Auto Bangumi 提交失败", "请检查配置与 Request 状态后重试。");
+      showNotification("error", "Auto Bangumi 提交失败", "请检查配置与订阅方案状态后重试。");
     } finally {
       setSettingsAbInFlight(false);
     }
@@ -965,7 +991,7 @@
       showNotification(
         "error",
         "生成失败",
-        "候选合集缺少 MiKan URL，无法生成 Request。",
+        "候选合集缺少 MiKan URL，无法生成订阅方案。",
       );
       return;
     }
@@ -1084,7 +1110,7 @@
       summary.bangumi_title ||
       summary.request_id ||
       summary.selected_subtitle_group ||
-      "未命名 Request"
+      "未命名订阅方案"
     );
   }
 
@@ -1113,13 +1139,13 @@
 
     const allOption = document.createElement("option");
     allOption.value = "";
-    allOption.textContent = "All";
+    allOption.textContent = "全部";
     listStatusFilter.appendChild(allOption);
 
     for (const status of statuses) {
       const option = document.createElement("option");
       option.value = status;
-      option.textContent = status;
+      option.textContent = statusLabel(status);
       listStatusFilter.appendChild(option);
     }
 
@@ -1158,11 +1184,11 @@
     listContainer.className = "request-list";
     listContainer.replaceChildren();
     if (!loadedRequests.length) {
-      setState(listContainer, "暂无已保存的 Request。", "empty-state");
+      setState(listContainer, "暂无已保存的订阅方案。", "empty-state");
       return;
     }
     if (!requests.length) {
-      setState(listContainer, "没有匹配的 Request。清空搜索或筛选后可恢复列表。", "empty-state");
+      setState(listContainer, "没有匹配的订阅方案。清空搜索或筛选后可恢复列表。", "empty-state");
       return;
     }
 
@@ -1171,7 +1197,7 @@
       item.type = "button";
       item.className = "request-list-item";
       item.dataset.requestId = summary.request_id || "";
-      item.setAttribute("aria-label", "查看 Request 详情：" + requestLabel(summary));
+      item.setAttribute("aria-label", "查看订阅方案详情：" + requestLabel(summary));
       if (summary.request_id === selectedRequestId) {
         item.classList.add("is-selected");
         item.setAttribute("aria-current", "true");
@@ -1182,7 +1208,7 @@
 
       const meta = document.createElement("span");
       meta.textContent = [
-        fieldValue(summary.status),
+        statusLabel(summary.status),
         fieldValue(summary.selected_subtitle_group),
         fieldValue(summary.expected_folder_name),
       ].join(" / ");
@@ -1198,7 +1224,7 @@
   async function loadList(options) {
     const detailRequestId = selectedRequestId;
     hideNotification();
-    setState(listContainer, "正在加载 Request 列表...", "loading-state");
+    setState(listContainer, "正在加载订阅方案列表...", "loading-state");
     try {
       const result = await fetchJson(apiPath("/api/v1/requests"));
       loadedRequests = result.requests || [];
@@ -1209,7 +1235,7 @@
       }
     } catch (error) {
       setState(listContainer, error.message, "error-state");
-      notifyApiError("Request 列表加载失败", error);
+      notifyApiError("订阅方案列表加载失败", error);
     }
   }
 
@@ -1346,13 +1372,19 @@
     table.className = "history-table";
     const head = document.createElement("thead");
     head.innerHTML =
-      "<tr><th>action</th><th>previous_status</th><th>next_status</th><th>timestamp</th></tr>";
+      "<tr><th>操作</th><th>前一状态</th><th>后一状态</th><th>时间</th></tr>";
     const body = document.createElement("tbody");
     for (const event of events) {
       const row = document.createElement("tr");
-      for (const key of ["action", "previous_status", "next_status", "timestamp"]) {
+      const columns = [
+        actionLabel(event.action),
+        statusLabel(event.previous_status),
+        statusLabel(event.next_status),
+        displayValue(event.timestamp),
+      ];
+      for (const value of columns) {
         const cell = document.createElement("td");
-        cell.textContent = displayValue(event[key]);
+        cell.textContent = value;
         row.appendChild(cell);
       }
       body.appendChild(row);
@@ -1434,7 +1466,7 @@
       await loadDetail(requestId);
       await loadList({loadSelectedDetail: false});
       showNotification("success", titles[actionType] || "操作成功",
-        "Request " + requestId, {
+        "订阅方案 " + requestId, {
           actions: [
             { label: "刷新列表", handler: loadList },
           ],
@@ -1467,9 +1499,9 @@
       });
       renderList();
       syncRequestIdToUrl(null);
-      setState(detailContainer, "Request 已删除。请选择一个 Request 查看详情。", "empty-state");
+      setState(detailContainer, "订阅方案已删除。请选择一个订阅方案查看详情。", "empty-state");
       await loadList({loadSelectedDetail: false});
-      showNotification("success", "删除成功", "已删除 Request " + requestId, {
+      showNotification("success", "删除成功", "已删除订阅方案 " + requestId, {
         actions: [
           { label: "刷新列表", handler: loadList },
         ],
@@ -1499,7 +1531,7 @@
     container.hidden = true;
 
     var heading = document.createElement("h4");
-    heading.textContent = "修改 Request";
+    heading.textContent = "修改订阅方案";
     container.appendChild(heading);
 
     var groupLabel = document.createElement("label");
@@ -1820,7 +1852,7 @@
     container.hidden = true;
 
     var heading = document.createElement("h4");
-    heading.textContent = "取消 Request";
+    heading.textContent = "取消订阅方案";
     container.appendChild(heading);
 
     var reasonLabel = document.createElement("label");
@@ -1840,7 +1872,7 @@
     submitBtn.className = "danger-button detail-action";
     submitBtn.textContent = "提交取消";
     submitBtn.addEventListener("click", function () {
-      if (!window.confirm("确认取消此 Request？")) {
+      if (!window.confirm("确认取消此订阅方案？")) {
         return;
       }
       var reason = reasonInput.value.trim();
@@ -2029,14 +2061,14 @@
     detailContainer.replaceChildren();
 
     var heading = document.createElement("h3");
-    heading.textContent = input.raw_title || matched.title || "Request";
+    heading.textContent = input.raw_title || matched.title || "订阅方案";
 
     var overviewSection = createDetailSection("Overview", "overview-section");
     var overviewHeader = document.createElement("div");
     overviewHeader.className = "overview-actions";
     var overviewFields = detailList([
       ["request_id", request.request_id],
-      ["status", request.status],
+      ["状态", statusLabel(request.status)],
       ["保存状态", isPreview ? "订阅草案（未保存）" : "已保存"],
       ["原始标题", input.raw_title],
       ["匹配标题", matched.title],
@@ -2087,7 +2119,7 @@
       acceptBtn.className = "primary-button detail-action";
       acceptBtn.textContent = "确认";
       acceptBtn.addEventListener("click", function () {
-        if (window.confirm("确认接受此 Request？")) {
+        if (window.confirm("确认接受此订阅方案？")) {
           performAction(request.request_id, "accept", {});
         }
       });
@@ -2119,7 +2151,7 @@
     } else if (isAccepted) {
       var statusNote = document.createElement("p");
       statusNote.className = "field-help";
-      statusNote.textContent = "此 Request 已" + fieldValue(request.status) + "，可提交到 Auto Bangumi。";
+      statusNote.textContent = "此订阅方案已" + statusLabel(request.status) + "，可提交到 Auto Bangumi。";
       actionsContainer.appendChild(statusNote);
 
       var abSubmitBtn = document.createElement("a");
@@ -2146,7 +2178,7 @@
       deleteBtn.className = "danger-button detail-action";
       deleteBtn.textContent = "删除";
       deleteBtn.addEventListener("click", function () {
-        if (window.confirm("确认删除此 Request？此操作不可恢复。")) {
+        if (window.confirm("确认删除此订阅方案？此操作不可恢复。")) {
           deleteRequest(request.request_id);
         }
       });
@@ -2154,7 +2186,7 @@
     } else {
       var statusNote = document.createElement("p");
       statusNote.className = "field-help";
-      statusNote.textContent = "此 Request 已" + fieldValue(request.status) + "，不可操作。";
+      statusNote.textContent = "此订阅方案已" + statusLabel(request.status) + "，不可操作。";
       actionsContainer.appendChild(statusNote);
     }
 
@@ -2243,21 +2275,21 @@
 
   async function loadDetail(requestId) {
     if (!requestId) {
-      setState(detailContainer, "Request ID 无效。", "error-state");
-      showNotification("error", "详情加载失败", "Request ID 无效。");
+      setState(detailContainer, "订阅方案 ID 无效。", "error-state");
+      showNotification("error", "详情加载失败", "订阅方案 ID 无效。");
       return;
     }
 
     hideNotification();
-    setState(detailContainer, "正在加载 Request 详情...", "loading-state");
+    setState(detailContainer, "正在加载订阅方案详情...", "loading-state");
     try {
       const result = await fetchJson(
         apiPath("/api/v1/requests/" + encodeURIComponent(requestId)),
       );
       renderDetailPayload(result);
     } catch (error) {
-      setState(detailContainer, "Request 详情加载失败。请确认 request_id 是否存在。", "error-state");
-      showNotification("error", "Request 详情加载失败", "请确认 request_id 是否存在。");
+      setState(detailContainer, "订阅方案详情加载失败。请确认 request_id 是否存在。", "error-state");
+      showNotification("error", "订阅方案详情加载失败", "请确认 request_id 是否存在。");
     }
   }
 
@@ -2269,7 +2301,7 @@
     if (result.saved_request) {
       selectedRequestId = generatedRequestId;
       syncRequestIdToUrl(selectedRequestId);
-      showNotification("success", "保存成功", "已保存 Request " + selectedRequestId, {
+      showNotification("success", "保存成功", "已保存订阅方案 " + selectedRequestId, {
         actions: [
           {
             label: "刷新列表",
@@ -2323,8 +2355,8 @@
     try {
       payload = buildCreateRequestPayload(title);
     } catch (validationError) {
-      setFormError(validationError.message || "Request 表单校验失败。", validationError.field);
-      showNotification("error", "校验失败", validationError.message || "Request 表单校验失败。");
+      setFormError(validationError.message || "订阅方案表单校验失败。", validationError.field);
+      showNotification("error", "校验失败", validationError.message || "订阅方案表单校验失败。");
       if (validationError.field && validationError.field.focus) {
         validationError.field.focus();
       }
@@ -2364,7 +2396,7 @@
       loadDetail(requestId);
     } else {
       hideNotification();
-      setState(detailContainer, "选择一个 Request 后查看详情。", "empty-state");
+      setState(detailContainer, "选择一个订阅方案后查看详情。", "empty-state");
     }
   });
   selectedRequestId = requestIdFromLocation() || null;

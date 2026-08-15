@@ -30,7 +30,7 @@ class TestIndexStage13WorkbenchShell:
         page.goto(f"{live_server_url}/index")
 
         assert page.locator("text=MiGuOrca").count() >= 1
-        assert page.locator("text=Stage 13 Request 工作台").count() >= 1
+        assert page.locator("text=Stage 13 订阅方案工作台").count() >= 1
         # Must NOT mention Stage 7
         assert page.locator("text=Stage 7 Web UI MVP").count() == 0
 
@@ -43,7 +43,7 @@ class TestIndexStage13WorkbenchShell:
             assert nav.locator(f"a[href='{href}']").count() >= 1, (
                 f"Missing nav anchor: {href}"
             )
-        assert nav.locator("text=Request 工作台").count() >= 1
+        assert nav.locator("text=订阅方案工作台").count() >= 1
         assert nav.locator("text=Settings").count() >= 1
 
     def test_mode_hint_describes_local_storage(self, page: Page, live_server_url: str) -> None:
@@ -75,8 +75,8 @@ class TestIndexStage13WorkbenchShell:
 
         for heading in (
             "真实 MiKan 候选搜索",
-            "Request 列表",
-            "Request 详情",
+            "订阅方案列表",
+            "订阅方案详情",
         ):
             assert page.locator(f"text={heading}").count() >= 1, (
                 f"Missing heading: {heading}"
@@ -175,7 +175,7 @@ class TestNoSensitiveContent:
         # Form help text should be present and instructional
         assert "至少输入 1 个非空白字符" in body
         assert "当前使用默认 `.migu_orca/storage`" in body
-        assert "默认保存 Request JSON" in body
+        assert "默认保存订阅方案 JSON" in body
         assert "前往 Settings" in body
         assert "search_endpoint" not in body
         assert "timeout_seconds" not in body
