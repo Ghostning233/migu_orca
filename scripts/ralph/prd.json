@@ -151,7 +151,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Stage closeout 后再准备 Stage 18 或后续真实 MiKan 搜索增强。"
     }
   ]
