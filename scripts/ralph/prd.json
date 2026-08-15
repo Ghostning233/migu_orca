@@ -114,7 +114,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "优先做进程内或轻量本地缓存；不要引入数据库。"
     },
     {

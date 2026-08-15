@@ -20,6 +20,11 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     _confirmation_history_details,
 )
 from mikan_engine.controllers import mikan_client as mikan_client_module
+from mikan_engine.controllers.mikan_candidate_cache import (
+    candidate_cache_key,
+    candidate_search_cache,
+)
+from mikan_engine.controllers.mikan_client import MikanCandidate
 from mikan_engine.controllers.mikan_config import MikanConfig
 from qbittorrent_engine.controllers.qbittorrent_controller import (
     test_qbittorrent_connection,
@@ -241,30 +246,39 @@ def _optional_error(error: Stage1Error) -> dict[str, object]:
     }
 
 
+def _serialize_candidate(candidate: MikanCandidate) -> dict[str, object]:
+    return {
+        "bangumi_id": candidate.bangumi_id,
+        "title": candidate.title,
+        "mikan_url": candidate.mikan_url,
+        "poster_url": candidate.poster_url,
+        "source_query": candidate.source_query,
+        "aliases": list(candidate.aliases),
+    }
+
+
 def _search_mikan_candidates(
     query: str,
     mikan_config: MikanConfig,
 ) -> list[dict[str, object]]:
     """Search real MiKan candidates through the existing transport seam.
 
-    Returns only sanitized public candidate metadata: bangumi id, title,
-    normalized bangumi URL, optional poster URL, the source query, and aliases.
-    Raw HTML, raw RSS XML, cookies, tokens, and full failed URLs never appear in
-    the response.
+    Repeated searches for the same query against the same MiKan identity are
+    served from the in-process candidate cache so the transport is not called on
+    a cache hit. Returns (and caches) only sanitized public candidate metadata:
+    bangumi id, title, normalized bangumi URL, optional poster URL, the source
+    query, and aliases. Raw HTML, raw RSS XML, cookies, tokens, and full failed
+    URLs never appear in the response or the cache.
     """
+    cache_key = candidate_cache_key(query, mikan_config)
+    cached = candidate_search_cache.get(cache_key)
+    if cached is not None:
+        return [_serialize_candidate(candidate) for candidate in cached]
+
     client = mikan_client_module.create_mikan_client(mikan_config)
     candidates = client.search_candidates(query)
-    return [
-        {
-            "bangumi_id": candidate.bangumi_id,
-            "title": candidate.title,
-            "mikan_url": candidate.mikan_url,
-            "poster_url": candidate.poster_url,
-            "source_query": candidate.source_query,
-            "aliases": list(candidate.aliases),
-        }
-        for candidate in candidates
-    ]
+    candidate_search_cache.set(cache_key, candidates)
+    return [_serialize_candidate(candidate) for candidate in candidates]
 
 
 def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
