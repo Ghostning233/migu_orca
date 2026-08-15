@@ -140,16 +140,28 @@ AI 番剧名解析不属于 M03 的必需能力。后续可作为独立可选增
 5. 真实 MiKan HTTP 读取失败 details 只允许保留 `category`、`field`、`status_code` 等可处理字段，并由调用方传入稳定 `failed_step`（搜索、详情、RSS 解析等）。
 6. 候选搜索缓存（`MikanCandidateCache`）只能存储公开候选元数据（query、title、bangumi_id、规范化 mikan_url、poster_url、aliases、timestamp），key 不得包含 token、cookie 或完整敏感 endpoint；缓存命中不得写回 storage JSON、history、浏览器 storage、URL、日志、截图或 trace。
 
-## 12. 已确认事项与待确认问题
+## 12. Stage 18 默认 MiKan 配置规划
 
-### 12.1 已确认事项
+Stage 18 将在 Web 主流程中使用系统默认 MiKan 配置：
+
+1. 默认搜索 endpoint 等价于 `https://mikanani.me/Home/Search`，候选搜索时由系统追加 URL 编码后的 `searchstr=<番剧名>`。
+2. 默认 timeout 由系统配置或常量控制，例如 10 或 15 秒，不在普通 `/index` 页面展示。
+3. `POST /api/v1/mikan/candidates` 和 `mikan_bangumi` direct URL/ID fallback 在未传显式 `mikan_config` 时使用默认配置。
+4. 显式 `mikan_config` 继续保留为 CLI、高级 API 和测试 seam。
+5. bare numeric ID 的详情页 URL 可基于默认 MiKan host 派生，不再要求普通 Web 用户提供 search endpoint。
+6. 默认配置不得包含 secret；不得写入 storage JSON、状态历史、browser storage、URL、history、日志、截图或 trace。
+7. M03 仍只负责候选搜索、详情解析、RSS 源输出和安全错误边界，不负责 UI 文案或预览编辑。
+
+## 13. 已确认事项与待确认问题
+
+### 13.1 已确认事项
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
 | D-M03-01 | 第一阶段静态 MiKan/RSS 数据组织方式 | 纳入仓库并作为测试 fixture，保证离线验收可重复 |
 | D-M03-02 | 静态 RSS 内容组织方式 | M03 输出 fixture_path 或等价静态内容标识，M04 负责按路径读取或接收测试传入内容 |
 
-### 12.2 待确认问题
+### 13.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |

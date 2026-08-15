@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.11 |
-| 文档状态 | Stage 17 已完成，后续待办见 `docs/backlog.md` |
+| 当前版本 | v0.12 |
+| 文档状态 | Stage 17 已完成，Stage 18 已规划，后续待办见 `docs/backlog.md` |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -62,7 +62,9 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 3. 系统根据规则和偏好生成可确认 Request。
 4. 用户确认后，系统调用 Auto Bangumi 或生成降级配置。
 
-当前已完成 Stage 17：离线 Request 生成、Request 确认/取消/受限修改、已保存 Request 安全删除、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、Web UI 显式真实配置入口、qBittorrent 显式连接测试入口、Web UI Settings 信息架构拆分、Web UI Request 可操作性修复、Web UI ACCEPTED 管理与筛选语义优化、真实 MiKan 合集详情页解析与直连 URL/ID 入口，以及真实 MiKan 搜索候选合集展示与用户手动选择。CLI 可通过 `--source mikan --mikan-config <path> --mikan-bangumi <url-or-id>` 直接解析已选中 MiKan `Home/Bangumi/<id>` 合集并绕过搜索；Web API `POST /api/v1/requests` 支持 request-scoped `mikan_bangumi` 字段。详情页 parser 会输出安全结构化元数据，优先返回字幕组级 RSS，番剧级 RSS 仅作为 `全部字幕组` fallback。Stage 17 新增 request-scoped 候选搜索 Web API `POST /api/v1/mikan/candidates`，并在 `/index` Request 生成流程中接入候选卡片展示、`选择此合集` 手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签；候选选择与直连 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路，不自动选择、不自动生成，即使只有一个候选也必须用户显式点击。`/index` 当前是 Request 工作台，默认生成并保存可操作 Request；显式 `save_request=false` 偏好进入只读预览，不展示确认、取消、修改、删除或 Auto Bangumi 提交动作。已保存 `ACCEPTED` Request 支持受限修改（状态保持 `ACCEPTED`）与显式删除。筛选规则默认按普通字符（字面文本）匹配且大小写不敏感，可显式勾选 `使用正则` 与 `大小写敏感`。`/settings` 当前承载非敏感 Storage 浏览器偏好、直接显示的 qBittorrent 显式连接测试和 request-scoped Auto Bangumi 提交配置。默认流程仍使用本地 fixture，不隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent；真实外部系统能力必须由用户显式配置和触发。AI 番剧名解析仅作为低优先级可选增强进入 backlog。
+当前已完成 Stage 17：离线 Request 生成、Request 确认/取消/受限修改、已保存 Request 安全删除、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、qBittorrent 显式连接测试入口、Web UI Settings 信息架构拆分、Web UI Request 可操作性修复、Web UI ACCEPTED 管理与筛选语义优化、真实 MiKan 合集详情页解析与直连 URL/ID 入口，以及真实 MiKan 搜索候选合集展示与用户手动选择。CLI 可通过 `--source mikan --mikan-config <path> --mikan-bangumi <url-or-id>` 直接解析已选中 MiKan `Home/Bangumi/<id>` 合集并绕过搜索；Web API `POST /api/v1/requests` 支持 request-scoped `mikan_bangumi` 字段。详情页 parser 会输出安全结构化元数据，优先返回字幕组级 RSS，番剧级 RSS 仅作为 `全部字幕组` fallback。Stage 17 新增 request-scoped 候选搜索 Web API `POST /api/v1/mikan/candidates`，并在 `/index` Request 生成流程中接入候选卡片展示、`选择此合集` 手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签；候选选择与直连 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路，不自动选择、不自动生成，即使只有一个候选也必须用户显式点击。
+
+Stage 18 已规划为真实 MiKan 主流程收敛：普通 Web 用户在 `/index` 只输入番剧标题，系统使用默认 MiKan endpoint 搜索候选合集并展示卡片；选择合集或使用直连 URL/ID fallback 后，默认先生成可编辑订阅草案预览，用户可修改字幕组、筛选规则和文件夹名，再保存为正式订阅方案。fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。Stage 18 还将从普通 UI 移除 `search_endpoint`、`timeout_seconds`、`query` 等技术字段，改用中文业务文案和中文状态展示，并将 Seeds 区调整为有效种子优先、完整种子按字幕组分组、排除种子最后。
 
 ## 4. 第一阶段范围
 
@@ -138,10 +140,10 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 
 | 模块编号 | 模块名称 | 当前状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
-| M00 | 入口与流程编排模块 | Stage 17 已实现 CLI/Web API direct URL/ID 编排与 Web UI 候选选择/fallback 复用 `mikan_bangumi` 链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
+| M00 | 入口与流程编排模块 | Stage 18 已规划真实 MiKan 作为 Web 主流程，fixture 降级为开发/离线测试路径 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
 | M01 | 用户输入与 Request 管理模块 | Stage 15 已实现 CLI/Web 确认、取消、受限修改；`ACCEPTED` Request 支持受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
 | M02 | 番剧搜索与匹配模块 | Stage 1 已确认 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
-| M03 | MiKan 数据源模块 | Stage 17 已实现真实 MiKan 合集详情页解析、direct URL/ID 入口、字幕组级 RSS 优先、搜索候选解析、候选缓存和 display-only 推荐标签，以及安全错误边界 | P0 | docs/modules/M03-mikan-source-PRD.md |
+| M03 | MiKan 数据源模块 | Stage 17 已实现详情页解析、direct URL/ID、候选搜索、候选缓存和推荐标签；Stage 18 规划默认 Web 配置与主流程接入 | P0 | docs/modules/M03-mikan-source-PRD.md |
 | M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
 | M05 | 字幕组评估模块 | Stage 1 已确认 | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
 | M06 | 种子筛选规则模块 | Stage 15 已实现默认字面匹配、大小写不敏感与可选 `use_regex` / `case_sensitive` | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
@@ -151,7 +153,7 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 | M10 | Auto Bangumi 集成模块 | Stage 4 已实现真实 HTTP adapter 与显式 CLI 提交路径 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | Stage 15 已实现本地 JSON Request、历史和 AB 结果存储，以及 path-safe Request 删除 | P2 | docs/modules/M11-storage-state-PRD.md |
 | M12 | 日志与错误处理模块 | Stage 1 最小化 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 17 已实现 `/index` Request 工作台、`/settings` 配置页、浏览器测试、Request 操作、真实配置入口、qBittorrent 连接测试直显、默认保存生成、只读预览、Seeds 三列表、`ACCEPTED` 修改/删除动作、筛选语义控件，以及真实 MiKan 候选搜索、手动选择、直连 URL/ID fallback、候选缓存和推荐标签 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 18 已规划将 `/index` 主流程改为真实 MiKan 候选搜索、直连兜底、可编辑预览、中文状态和 Seeds 分组展示 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 12 已支持显式 AB、MiKan 与 qBittorrent 配置边界 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
@@ -203,6 +205,7 @@ M00 CLI 与流程编排
 | 第十五阶段 | Web UI ACCEPTED 管理与筛选语义优化 | M13、M01、M06、M11 |
 | 第十六阶段 | 真实 MiKan 合集详情页解析与直连 URL/ID 入口（已完成） | M03、M00、M13 |
 | 第十七阶段 | 真实 MiKan 搜索候选合集展示与用户选择（已完成） | M03、M13、M00 |
+| 第十八阶段 | 真实 MiKan 主流程收敛、可编辑预览和 Seeds 展示优化（已规划） | M13、M03、M00、M01、M06 |
 
 ## 10. 主 PRD 已确认事项
 
@@ -246,8 +249,8 @@ M00 CLI 与流程编排
 
 ## 13. 下一步工作
 
-1. Stage 17 已完成真实 MiKan 搜索候选合集展示与用户选择，并复用 Stage 16 `mikan_bangumi` direct-entry 路径作为候选选择结果和直连 fallback。后续优先处理 `docs/backlog.md` 中的 BL-010 / AI 番剧名解析与搜索词增强（低优先级可选增强），并在需要时规划 Stage 18。
-2. 保持真实 MiKan、Auto Bangumi 和 qBittorrent 能力都必须由用户显式配置和触发，默认流程不得访问外部系统。
+1. Stage 18 已规划为真实 MiKan Web 主流程收敛：普通用户只输入番剧标题，默认搜索真实 MiKan 候选合集，选择后先生成可编辑订阅草案，再保存为正式订阅方案。
+2. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 3. 后续若要让 qBittorrent 启动下载、创建任务或绕过 Auto Bangumi 建立订阅，必须先新增独立 Stage 和验收标准；Stage 12 仅完成连接测试。
-4. 后续 Web UI 工作应保持 Stage 15/17 的信息架构边界：`/index` 聚焦 Request 工作台，默认生成并保存可操作 Request，已保存 `ACCEPTED` Request 可受限修改和显式删除；`/settings` 承载配置、偏好和连接测试。Stage 17 的 MiKan 候选选择、直连 fallback 和候选搜索已接入 Request 生成流程，且候选搜索/选择/fallback 的 MiKan config、raw HTML、raw RSS XML、cookie、token 和原始响应体不得写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
+4. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。Stage 18 的 MiKan 候选搜索、直连 fallback 和可编辑预览不得把 MiKan config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
 5. 每次阶段推进继续使用 `uv run pytest` 和 `uv run python -m compileall -q src` 验证；具备浏览器环境时额外执行 `uv run pytest tests/browser`。

@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向动画订阅场景的 RSS 编排工具，目标是在 MiKanProject 与 Auto Bangumi 之间提供一层自动化协作能力。
 
-当前已完成 Stage 17：系统可以基于仓库内静态 MiKan/RSS fixture 生成 Request，支持 CLI 与 Web UI 中确认/修改/取消，已保存 Request 支持安全受限修改与显式删除（含 `ACCEPTED` 状态），并在用户显式确认提交时通过真实 Auto Bangumi HTTP adapter 输出 `ab_submit_result` 或降级 JSON。CLI 可以通过显式配置启用真实 MiKanProject 数据源，并可用 `--mikan-bangumi` 传入 MiKan `Home/Bangumi/<id>` URL 或 bare ID 直接解析已选中合集，绕过不稳定搜索。Web API 的 `POST /api/v1/requests` 同样支持 request-scoped `mikan_bangumi` 字段。Stage 17 已在 Web UI `/index` 的 Request 生成流程中接入真实 MiKan 候选搜索、手动选择、直连 URL/ID fallback、安全候选缓存和 display-only 推荐标签：默认 fixture 生成流程保持不变，只有用户显式展开候选搜索区域并搜索真实 MiKan 时才会调用 `POST /api/v1/mikan/candidates` 候选搜索 API，且候选选择/直连 fallback 最终都复用 Stage 16 `mikan_bangumi` 详情解析链路。Web UI 当前将 `/index` 收敛为 Request 工作台，将 `/settings` 作为配置、偏好和连接测试页面。Settings 页面承载非敏感 Storage 浏览器偏好、直接展示的 qBittorrent 显式连接测试，以及仅在 `request_id` 上下文存在时展示的 Auto Bangumi 提交配置。`/index` 默认生成并保存 Request，使生成后的详情、URL 和列表都可继续确认、取消或修改；只有用户在 Settings 中显式设置 `save_request=false` 时才进入只读预览模式。筛选规则默认按普通字符（字面文本）匹配且大小写不敏感，可显式勾选 `使用正则` 与 `大小写敏感` 选项。默认生成、确认和 Web UI 浏览流程仍不会隐式访问真实 MiKanProject、Auto Bangumi 或 qBittorrent。真实 MiKan、Auto Bangumi 与 qBittorrent 配置在 Web UI 中只用于当前请求或当前提交，不写入 storage JSON、浏览器存储、URL、日志或 API 响应。
+当前已完成 Stage 17，并准备进入 Stage 18。Stage 17 已在 Web UI `/index` 接入真实 MiKan 候选搜索、手动选择、直连 URL/ID fallback、安全候选缓存和 display-only 推荐标签；候选选择和 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路。Stage 18 将把真实 MiKan 搜索收敛为普通 Web 主流程：用户只输入番剧标题，系统默认请求 `https://mikanani.me/Home/Search?searchstr=<番剧名>` 获取候选合集，用户手动选择合集后先生成可编辑订阅草案预览，再确认保存。fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。Stage 18 还会移除普通 UI 中的 `search_endpoint`、`timeout_seconds`、`query` 等技术字段，新增主生成区直连兜底勾选框，支持在预览阶段修改字幕组、筛选规则和文件夹名，并优化中文状态与 Seeds 展示。
 
 ## 项目目标
 
@@ -15,20 +15,20 @@ MVP 聚焦单番剧的订阅闭环：
 
 ## 目前状态
 
-- 默认流程不访问真实 MiKanProject、Auto Bangumi 或 qBittorrent。
+- Stage 18 规划将真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
 - 已建立真实 MiKanProject 数据源 adapter、可注入 HTTP transport、搜索页解析、合集详情页结构化解析、字幕组级 RSS 优先输出、番剧级 RSS fallback、真实 RSS XML 读取和安全错误归一化。
 - 当前 CLI 只有在显式传入 `--source mikan` 和 `--mikan-config` 时才会构造真实 MiKan client；可额外传入 `--mikan-bangumi <url-or-id>` 直接读取指定合集详情页并跳过搜索；只有在显式传入 `--submit-ab` 和 `--ab-config` 时才会构造真实 Auto Bangumi HTTP client；只有在显式传入 `--save-request` 时才会写入本地 JSON 存储。
-- 已提供 Stage 15 Flask Web UI：`/` 重定向到 `/index`，`/index` 是 Request 工作台，`/settings` 是配置与连接测试页面，`/Settings` 重定向到 `/settings`。
+- 已提供 Flask Web UI：`/` 重定向到 `/index`，`/index` 是订阅方案工作台，`/settings` 是配置与连接测试页面，`/Settings` 重定向到 `/settings`。
 - `/index` 默认生成并保存可操作 Request，可以搜索/筛选/排序本地 Request、读取 URL 可恢复的分组详情，并执行确认、可见取消表单和受限修改；显式预览模式会标记 `预览（未保存）`，隐藏持久化动作，并提供 `保存此 Request`。
 - 已保存 `ACCEPTED` Request 详情同时展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作；`修改` 复用详情内修改表单并保持 `ACCEPTED` 状态，`删除` 需显式确认并刷新列表、清空详情和移除 URL `request_id`。
 - Request 详情的 Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区展示完整、有效和排除三个列表及数量，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言。
 - 筛选编辑控件使用 `包含规则` / `排除规则` 标签，并提供默认未勾选的 `使用正则` 与 `大小写敏感` 复选框；默认提交发送 `use_regex=false` / `case_sensitive=false`，字面文本 `[`、`[v2]` 不会触发正则错误。
 - `/settings` 可以管理非敏感 Storage 浏览器偏好、直接显示并显式测试 qBittorrent 连接，并在 `/settings?request_id=<id>#auto-bangumi` 中对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交配置。
 - Stage 16 已完成真实 MiKan 合集详情页离线 fixture、结构化详情模型、字幕组级 RSS 优先、direct URL/ID 入口和真实读取错误脱敏；默认流程不连接 qBittorrent，不启动下载，不改变 AB 提交流程。
-- Stage 17 已完成真实 MiKan 搜索候选合集展示与用户手动选择：`MikanClient.search_candidates` 从搜索页 `相关推荐` 解析候选卡片并规范化为绝对 HTTP(S) `/Home/Bangumi/<numeric-id>`，按页面顺序返回并按 `bangumi_id` 去重；Web API `POST /api/v1/mikan/candidates` 提供 request-scoped 候选搜索（显式 `query` + `mikan_config`），返回只含公开候选元数据和推荐标签的 sanitized envelope；Web UI `/index` 的候选搜索区（默认折叠）支持候选卡片、`选择此合集`、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签，候选选择/fallback 均复用 Stage 16 `mikan_bangumi` 链路，不自动选择、不自动生成。
+- Stage 17 已完成真实 MiKan 搜索候选合集展示与用户手动选择：`MikanClient.search_candidates` 从搜索页 `相关推荐` 解析候选卡片并规范化为绝对 HTTP(S) `/Home/Bangumi/<numeric-id>`，按页面顺序返回并按 `bangumi_id` 去重；Web API `POST /api/v1/mikan/candidates` 提供 request-scoped 候选搜索，返回只含公开候选元数据和推荐标签的 sanitized envelope。Stage 18 将把该能力从折叠的附属入口调整为 `/index` 主流程，并提供默认 MiKan 配置和可编辑预览草案。
 
 ## 关键约定
 
@@ -61,7 +61,7 @@ MVP 聚焦单番剧的订阅闭环：
 - 不要直接使用 `python` 执行测试或脚本。
 - 需要新增依赖时，优先通过 `uv add` 或编辑 `pyproject.toml` 后再执行 `uv sync`。
 - 所有后续自动化、验证和测试步骤都应默认通过 `uv` 完成。
-- `--source` 默认为 `static-fixture`，会继续读取仓库内静态 catalog 和 RSS fixture；只有 `--source mikan --mikan-config <path>` 会访问真实 MiKanProject 页面和 RSS URL。
+- CLI 的 `--source` 默认为 `static-fixture`，会继续读取仓库内静态 catalog 和 RSS fixture；只有 `--source mikan --mikan-config <path>` 会访问真实 MiKanProject 页面和 RSS URL。Web UI 的普通主流程将在 Stage 18 切换为真实 MiKan 候选搜索，fixture 只作为开发/离线测试路径保留。
 - `--save-request` 默认为关闭；未传该参数时，CLI 只输出 JSON，不会创建或写入本地存储目录。
 - `--storage-dir <path>` 用于覆盖本地 JSON 存储根目录；未传时，显式保存或查询命令使用项目下 `.migu_orca/storage`。
 - 本地 JSON 存储目录结构：
@@ -69,12 +69,12 @@ MVP 聚焦单番剧的订阅闭环：
   - `history/`：按 `request_id` 保存确认、取消和修改等状态历史。
   - `ab_results/`：仅在显式 `--submit-ab` 产生 `ab_submit_result` 且同时 `--save-request` 时保存 AB 提交结果。
 - `.migu_orca/storage` 是运行数据目录，不应提交到 Git；如需长期保留，请由部署方在仓库外指定 `--storage-dir`。
-- MiKan config JSON 字段为 `search_endpoint`、`timeout_seconds`：
+- CLI 和高级 API 的 MiKan config JSON 字段为 `search_endpoint`、`timeout_seconds`：
   - `search_endpoint`：MiKanProject 搜索页 endpoint，由调用方显式提供；程序会追加 URL 编码后的 `searchstr` 查询参数。
   - `timeout_seconds`：真实 MiKan 搜索页、番剧页和 RSS XML 读取的超时时间，必须为正数。
 - 当前真实 MiKan adapter 会从搜索结果中解析包含 `/Home/Bangumi/` 的候选番剧链接；也可以通过 `--mikan-bangumi` 或 Web API `mikan_bangumi` 直接读取指定合集。详情页 parser 会输出安全结构化元数据（bangumi id、标题、规范化详情 URL、可选播出/海报、番剧级 RSS、字幕组条目和单集标题/详情链接摘要），并优先把字幕组级 RSS 转换为 `mikan_http` `RssSource`。存在字幕组级 RSS 时不混入番剧级 RSS；没有字幕组级 RSS 但有番剧级 RSS 时使用 `全部字幕组` fallback。
 - MiKan direct entry 接受同源 HTTP(S) `/Home/Bangumi/<numeric-id>` URL 或 bare numeric ID；bare ID 的 host 从显式 MiKan config 的 `search_endpoint` 派生。空值、非 HTTP(S)、跨源 URL、非 Bangumi path、路径穿越和非数字 ID 都会返回脱敏错误。Stage 17 已在 Web UI `/index` 的候选搜索区中接入直连 URL/ID fallback，候选选择和 fallback 都复用 Stage 16 `mikan_bangumi` direct-entry 链路。
-- Stage 17 候选搜索 Web API 为 `POST /api/v1/mikan/candidates`，请求体必须包含 `query` 和显式 `mikan_config`（`search_endpoint`、`timeout_seconds`）；响应只返回 sanitized 公开候选元数据（`bangumi_id`、`title`、`mikan_url`、`poster_url`、`source_query`、`aliases`）和 display-only `recommendation` 标签。进程内候选缓存 key 使用 `mikan-candidates:<sha256[:32] of search_endpoint>:<normalized query>`，只缓存公开候选元数据并带 TTL，命中时不调用 transport；候选搜索、选择、fallback 的 MiKan config 都是 request-scoped，不写入 storage JSON、浏览器 storage、URL、history、日志或截图。
+- Stage 17 候选搜索 Web API 为 `POST /api/v1/mikan/candidates`，当前请求体支持 `query` 和显式 `mikan_config`（`search_endpoint`、`timeout_seconds`）；响应只返回 sanitized 公开候选元数据（`bangumi_id`、`title`、`mikan_url`、`poster_url`、`source_query`、`aliases`）和 display-only `recommendation` 标签。Stage 18 将允许 Web API 使用系统默认 MiKan 配置，从普通 UI 移除 `search_endpoint`、`timeout_seconds` 和 `query` 技术字段。进程内候选缓存 key 使用 `mikan-candidates:<sha256[:32] of search_endpoint>:<normalized query>`，只缓存公开候选元数据并带 TTL，命中时不调用 transport；候选搜索、选择、fallback 的 MiKan config 都是 request-scoped，不写入 storage JSON、浏览器 storage、URL、history、日志或截图。
 - 错误 details、日志、fixture 和示例配置不得包含原始 HTML、原始 RSS XML、完整 endpoint URL、cookie、token 或其他敏感配置值。
 - `--submit-ab` 必须和 `--action accept`、`--ab-config <path>` 显式组合使用；未传 `--submit-ab` 时不会触发 Auto Bangumi 提交流程，也不会实例化真实 HTTP client。
 - AB config JSON 字段为 `endpoint`、`token`、`fallback_enabled`：

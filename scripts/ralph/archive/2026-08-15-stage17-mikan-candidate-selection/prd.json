@@ -1,0 +1,158 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage17-mikan-candidate-selection",
+  "description": "MiGuOrca Stage 17：在 Stage 16 真实 MiKan 合集详情页解析与直连入口完成后，实现真实 MiKan 搜索候选合集展示、用户手动选择、直连 URL/ID fallback、候选缓存和安全回归。Stage 17 必须复用 Stage 16 的 `mikan_bangumi` 详情解析入口，不实现 AI 番剧名解析，不自动选择合集，不新增 qBittorrent 下载或 Auto Bangumi 自动提交。",
+  "userStories": [
+    {
+      "id": "US-116",
+      "title": "解析 MiKan 搜索候选合集",
+      "description": "As a real MiKan user, I want MiGuOrca to parse visible bangumi collection candidates from a MiKan search page so that I can choose the correct collection manually.",
+      "acceptanceCriteria": [
+        "新增 MiKan 搜索候选模型，至少包含 `bangumi_id`、`title`、`mikan_url`、可选 `poster_url`、`source_query` 和可选 `aliases`",
+        "新增搜索页 parser，能从离线 fixture 中解析 `相关推荐` 区域的 `/Home/Bangumi/<id>` 候选卡片",
+        "候选 URL 必须规范化为绝对 HTTP(S) URL，并拒绝非 bangumi path、空 ID、路径穿越和非 HTTP(S) 链接",
+        "候选列表必须按 MiKan 页面展示顺序返回并按 `bangumi_id` 去重",
+        "当页面没有候选时返回空列表或稳定脱敏错误，行为需在测试中固定",
+        "parser 测试必须使用离线 HTML fixture，不访问实时 MiKan",
+        "错误、断言和 fixture 不得包含 cookie、token、原始 HTML 全文、原始 RSS XML、完整失败 URL 或本地绝对路径",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "先建立候选发现基础能力；不要在本 story 接 UI。"
+    },
+    {
+      "id": "US-117",
+      "title": "新增 request-scoped 候选搜索 API",
+      "description": "As a Web UI caller, I want an explicit API to search MiKan candidates so that the browser can display collection cards without handling raw MiKan HTML.",
+      "acceptanceCriteria": [
+        "新增 Web API endpoint，例如 `POST /api/v1/mikan/candidates` 或等价路由，用于搜索候选合集",
+        "API payload 必须包含 `query` 和显式 `mikan_config`；缺少 query 或真实 MiKan config 时返回校验错误",
+        "API 必须通过现有 `MikanClient` / transport seam 读取搜索页并返回 sanitized candidate metadata",
+        "API response 只能包含候选公开元数据和安全摘要，不包含 raw HTML、raw RSS XML、cookie、token、完整失败 URL 或原始响应体",
+        "默认 `POST /api/v1/requests` fixture 生成路径不得调用候选搜索 API 或真实 MiKan",
+        "单元测试覆盖成功、多候选、空 query、缺少 config、MiKan HTTP/timeout/parse error 和安全脱敏",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "API 是 Stage 17 UI 的依赖；候选搜索必须保持显式和 request-scoped。"
+    },
+    {
+      "id": "US-118",
+      "title": "新增 Web UI 候选搜索控件",
+      "description": "As a Web UI user, I want to search real MiKan candidates from the workbench so that I can inspect available collections before generating a Request.",
+      "acceptanceCriteria": [
+        "`/index` 默认 fixture 生成流程保持不变，不展示或触发真实 MiKan 搜索，除非用户显式进入真实 MiKan 候选搜索模式",
+        "Web UI 提供明确的真实 MiKan 候选搜索入口，包含 query 输入和 request-scoped MiKan config 输入",
+        "点击搜索时调用候选搜索 API，渲染候选卡片列表；每张卡片展示标题、MiKan ID、可用封面和来源 query",
+        "候选搜索 loading、空结果、失败和重试状态必须使用现有通知/空状态风格",
+        "搜索结果展示不得自动选择候选，即使只有一个候选",
+        "敏感字段提交成功后不得写入 localStorage、sessionStorage、URL query、Request snapshot 或 history",
+        "浏览器测试覆盖默认 fixture 不调用 MiKan、候选搜索成功、空结果、失败恢复和敏感信息不落盘",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "保持 Stage 15/16 信息架构边界；真实 MiKan 配置仍是临时输入。"
+    },
+    {
+      "id": "US-119",
+      "title": "支持手动选择候选生成 Request",
+      "description": "As a Web UI user, I want to choose one candidate collection manually so that MiGuOrca generates a Request from the selected MiKan detail page.",
+      "acceptanceCriteria": [
+        "每个候选卡片提供显式 `选择此合集` 或等价动作，不允许自动选中",
+        "选择候选后，Request 生成必须复用 Stage 16 `mikan_bangumi` payload 字段，把候选 `mikan_url` 传给现有详情页解析链路",
+        "生成成功后复用现有 Request 详情、列表刷新、URL `request_id` 同步和默认保存行为",
+        "生成失败时保留候选列表和用户输入，展示统一脱敏错误",
+        "候选选择不得把 MiKan config、raw HTML、raw RSS XML、cookie、token 或原始响应体写入 storage、browser storage、URL 或 history",
+        "浏览器测试覆盖多候选手动选择、单候选仍需点击选择、生成成功详情展示和失败恢复",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "这是 Stage 17 的主交互闭环；必须复用 Stage 16 parser，不要复制 detail parser。"
+    },
+    {
+      "id": "US-120",
+      "title": "在 Web UI 增加直连 URL 或 ID fallback",
+      "description": "As a Web UI user, I want to paste a MiKan bangumi URL or ID when search misses the target so that I can still generate a Request.",
+      "acceptanceCriteria": [
+        "真实 MiKan 候选区域提供 `MiKan 合集 URL 或 ID` fallback 输入",
+        "fallback 生成必须调用现有 `POST /api/v1/requests` 的 `mikan_bangumi` 字段，不新增第二套 direct-entry API",
+        "接受 URL 和 bare numeric ID 的行为必须与 Stage 16 CLI/API direct-entry 一致",
+        "无效 URL、无效 ID、wrong origin、wrong path 和空值必须展示统一脱敏错误",
+        "fallback 成功后复用现有 Request 详情、列表刷新和 URL `request_id` 同步",
+        "fallback 输入不得写入 browser storage、URL query、Request snapshot、history 或日志",
+        "浏览器测试覆盖 URL fallback、ID fallback、无效输入、搜索无结果后 fallback 和敏感信息边界",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "这是解决 MiKan 推荐位找不到第一季等场景的 Web UI 兜底。"
+    },
+    {
+      "id": "US-121",
+      "title": "新增安全候选搜索缓存",
+      "description": "As a Web UI user, I want repeated candidate searches to avoid unnecessary network requests so that the candidate flow is faster and more stable.",
+      "acceptanceCriteria": [
+        "新增候选搜索缓存，key 至少包含 normalized query 和 MiKan host/config identity 的安全摘要，不能包含 token、cookie 或完整敏感 endpoint",
+        "缓存内容只能包含公开候选元数据：query、candidate title、bangumi ID、normalized mikan_url、poster_url、aliases 和 timestamp",
+        "缓存必须有 TTL 或明确失效策略，并提供清空当前缓存的安全函数或测试 seam",
+        "候选搜索 API 在缓存命中时不调用 transport，并返回与实时搜索相同的 sanitized shape",
+        "缓存不得写入 Request snapshot、history、browser storage、URL、日志或截图",
+        "单元测试覆盖缓存命中、缓存 miss、TTL 失效、不同 query 隔离、不同 host 隔离和安全字段过滤",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "优先做进程内或轻量本地缓存；不要引入数据库。"
+    },
+    {
+      "id": "US-122",
+      "title": "增加候选推荐标签但不自动选择",
+      "description": "As a Web UI user, I want lightweight recommendation labels on candidate cards so that I can inspect likely matches without losing final control.",
+      "acceptanceCriteria": [
+        "候选搜索结果可以基于 query/title 相似度、季数词或别名信号增加 display-only recommendation label",
+        "推荐标签必须只影响显示文案或排序提示，不得自动选择候选或直接生成 Request",
+        "如果排序发生变化，UI 必须保留清晰的推荐原因或原始展示来源，避免让用户误以为 MiKan 只返回一个结果",
+        "推荐逻辑必须对 `第一季`、`第二季`、`第三季`、`S1/S2/S3`、`I/II/III` 等基础季数词有测试覆盖",
+        "低置信度或冲突季数时不得显示强推荐文案",
+        "浏览器或单元测试覆盖推荐标签、冲突季数、单候选仍需手动选择和不自动生成",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "此 story 是体验增强；不要引入 AI title normalization。"
+    },
+    {
+      "id": "US-123",
+      "title": "补齐 Stage 17 文档与回归收尾",
+      "description": "As a maintainer, I want Stage 17 behavior documented and tested so that MiKan candidate selection remains safe and stable.",
+      "acceptanceCriteria": [
+        "README 记录真实 MiKan 候选搜索、手动选择、直连 fallback、缓存行为、推荐标签和安全边界",
+        "主 PRD、Stage 17 PRD、M00、M03、M13 和 backlog 更新 Stage 17 完成状态与后续事项",
+        "`scripts/ralph/progress.txt` 记录 Stage 17 完成摘要、测试结果、风险和后续事项",
+        "安全回归确认 MiKan endpoint、raw HTML、raw RSS XML、cookie、token、原始响应体不会进入 storage JSON、history、browser storage、URL、日志、截图或 trace",
+        "`uv run pytest -q` 通过",
+        "`uv run python -m compileall -q src` 通过",
+        "`uv run pytest tests/browser/ -v` 通过；如果浏览器不可用，必须记录明确 skip 原因",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Stage closeout 后再准备 Stage 18 或后续真实 MiKan 搜索增强。"
+    }
+  ]
+}
