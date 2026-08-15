@@ -8,7 +8,7 @@
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
 | 当前版本 | v0.9 |
-| 文档状态 | Stage 15 已完成，后续待办见 `docs/backlog.md` |
+| 文档状态 | Stage 15 已完成，Stage 16 已规划，后续待办见 `docs/backlog.md` |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -62,7 +62,7 @@ MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
 3. 系统根据规则和偏好生成可确认 Request。
 4. 用户确认后，系统调用 Auto Bangumi 或生成降级配置。
 
-当前已完成 Stage 15：离线 Request 生成、Request 确认/取消/受限修改、已保存 Request 安全删除、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、Web UI 显式真实配置入口、qBittorrent 显式连接测试入口、Web UI Settings 信息架构拆分、Web UI Request 可操作性修复，以及 Web UI ACCEPTED 管理与筛选语义优化。`/index` 当前是 Request 工作台，默认生成并保存可操作 Request；显式 `save_request=false` 偏好进入只读预览，不展示确认、取消、修改、删除或 Auto Bangumi 提交动作。已保存 `ACCEPTED` Request 支持受限修改（状态保持 `ACCEPTED`）与显式删除。筛选规则默认按普通字符（字面文本）匹配且大小写不敏感，可显式勾选 `使用正则` 与 `大小写敏感`。`/settings` 当前承载非敏感 Storage 浏览器偏好、直接显示的 qBittorrent 显式连接测试和 request-scoped Auto Bangumi 提交配置。默认流程仍使用本地 fixture，不隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent；真实外部系统能力必须由用户显式配置和触发。
+当前已完成 Stage 15：离线 Request 生成、Request 确认/取消/受限修改、已保存 Request 安全删除、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、Web UI 显式真实配置入口、qBittorrent 显式连接测试入口、Web UI Settings 信息架构拆分、Web UI Request 可操作性修复，以及 Web UI ACCEPTED 管理与筛选语义优化。`/index` 当前是 Request 工作台，默认生成并保存可操作 Request；显式 `save_request=false` 偏好进入只读预览，不展示确认、取消、修改、删除或 Auto Bangumi 提交动作。已保存 `ACCEPTED` Request 支持受限修改（状态保持 `ACCEPTED`）与显式删除。筛选规则默认按普通字符（字面文本）匹配且大小写不敏感，可显式勾选 `使用正则` 与 `大小写敏感`。`/settings` 当前承载非敏感 Storage 浏览器偏好、直接显示的 qBittorrent 显式连接测试和 request-scoped Auto Bangumi 提交配置。默认流程仍使用本地 fixture，不隐式访问真实 MiKan、Auto Bangumi 或 qBittorrent；真实外部系统能力必须由用户显式配置和触发。Stage 16 已规划为真实 MiKan 合集详情页解析与直连入口，Stage 17 已规划为真实 MiKan 搜索候选展示与用户选择；AI 番剧名解析仅作为低优先级可选增强进入 backlog。
 
 ## 4. 第一阶段范围
 
@@ -201,6 +201,8 @@ M00 CLI 与流程编排
 | 第十三阶段 | Web UI Settings 信息架构拆分与界面质量收敛 | M13、M11、M10、qBittorrent 集成边界 |
 | 第十四阶段 | Web UI Request 可操作性与筛选可视化修复 | M13、M01、M11、qBittorrent 集成边界 |
 | 第十五阶段 | Web UI ACCEPTED 管理与筛选语义优化 | M13、M01、M06、M11 |
+| 第十六阶段 | 真实 MiKan 合集详情页解析与直连 URL/ID 入口 | M03、M00、M13 |
+| 第十七阶段 | 真实 MiKan 搜索候选合集展示与用户选择 | M03、M13、M00 |
 
 ## 10. 主 PRD 已确认事项
 
@@ -244,7 +246,7 @@ M00 CLI 与流程编排
 
 ## 13. 下一步工作
 
-1. 优先处理 `docs/backlog.md` 中的 BL-001：优化真实 MiKan 番剧搜索和 RSS 源解析兼容性。
+1. 优先处理 `docs/backlog.md` 中的 BL-009 / Stage 16：真实 MiKan 合集详情页解析与直连 URL/ID 入口。
 2. 保持真实 MiKan、Auto Bangumi 和 qBittorrent 能力都必须由用户显式配置和触发，默认流程不得访问外部系统。
 3. 后续若要让 qBittorrent 启动下载、创建任务或绕过 Auto Bangumi 建立订阅，必须先新增独立 Stage 和验收标准；Stage 12 仅完成连接测试。
 4. 后续 Web UI 工作应保持 Stage 15 的信息架构边界：`/index` 聚焦 Request 工作台，默认生成并保存可操作 Request，已保存 `ACCEPTED` Request 可受限修改和显式删除；`/settings` 承载配置、偏好和连接测试。

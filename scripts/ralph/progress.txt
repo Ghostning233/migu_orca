@@ -3,7 +3,9 @@ Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
 - `modify_request` in `request_engine/controllers/request_controller.py` accepts both `PENDING_CONFIRM` and `ACCEPTED` requests and preserves the original status (never resets to `PENDING_CONFIRM`); accept/cancel remain restricted to `PENDING_CONFIRM` only via `_copy_pending_request`.
-- Stage 14 has been completed and merged into `main`; current active work is Stage 15.
+- Stage 15 has been completed and merged into `main`; current active work is Stage 16 (`agent/stage16-mikan-bangumi-detail`).
+- Stage 16 and Stage 17 are split deliberately: Stage 16 implements selected MiKan `Home/Bangumi/<id>` detail parsing plus direct URL/ID entry; Stage 17 implements MiKan search candidate cards, manual selection, and cache on top of the Stage 16 parser.
+- AI title normalization/search-query enhancement is a low-priority optional backlog item, not a dependency for Stage 16/17 and never a replacement for explicit user collection selection.
 - `/index` remains the Request workbench and `/settings` remains the configuration/connection-test page.
 - Saved-by-default generation is the normal Web UI contract; explicit `miguOrca.web.saveRequest = "false"` remains read-only preview mode.
 - Preview Requests must not expose delete, confirm, cancel, modify, or Auto Bangumi submit actions.
