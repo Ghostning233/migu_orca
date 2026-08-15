@@ -15,22 +15,16 @@ pytestmark = pytest.mark.browser
 
 
 def _open_candidate_search(page: Page, live_server_url: str) -> None:
-    """Load /index and expand the explicit real MiKan candidate search section."""
+    """Load /index; the real MiKan candidate search is the main generation flow."""
     page.goto(f"{live_server_url}/index")
-    page.locator("#mikan-candidate-search summary").click()
-    page.wait_for_selector("#mikan-candidate-search-form", timeout=5000)
 
 
 def _fill_candidate_search(
     page: Page,
     *,
     query: str,
-    endpoint: str,
-    timeout_seconds: str = "5",
 ) -> None:
     page.fill("#mikan-candidate-query", query)
-    page.fill("#mikan-candidate-search-endpoint", endpoint)
-    page.fill("#mikan-candidate-timeout-seconds", timeout_seconds)
 
 
 def _candidate_result_json(query: str, candidates: list[dict[str, Any]]) -> str:
@@ -41,18 +35,20 @@ def _candidate_result_json(query: str, candidates: list[dict[str, Any]]) -> str:
 
 
 class TestDefaultFixtureDoesNotUseRealMikan:
-    """AC: /index 默认 fixture 生成流程不展示或触发真实 MiKan 候选搜索."""
+    """AC: /index 主流程是真实 MiKan 候选搜索；fixture 生成保留在开发/离线测试区域."""
 
-    def test_candidate_search_collapsed_by_default(
+    def test_candidate_search_is_the_main_flow(
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
 
-        details = page.locator("#mikan-candidate-search")
-        expect(details).to_be_visible()
-        # Closed by default: no `open` attribute and the form fields are hidden.
-        assert details.get_attribute("open") is None
-        expect(page.locator("#mikan-candidate-query")).to_be_hidden()
+        # The main generate panel hosts the candidate search form directly (no
+        # hidden disclosure), and its user-facing heading is the MiKan title.
+        expect(page.locator("#mikan-candidate-search-form")).to_be_visible()
+        expect(page.locator("#mikan-candidate-query")).to_be_visible()
+        assert page.locator("#mikan-candidate-search").count() == 0
+        heading = page.locator("#generate-heading").inner_text()
+        assert "真实 MiKan 候选搜索" in heading
 
     def test_default_generation_never_calls_candidate_search(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -70,6 +66,7 @@ class TestDefaultFixtureDoesNotUseRealMikan:
         page.route("**/api/v1/mikan/candidates", _capture)
         set_storage_preferences(page, storage_dir, save_request=True)
         page.goto(f"{live_server_url}/index")
+        # The fixture generation form lives in the dev/offline-test area.
         page.fill('input[name="title"]', "葬送的芙莉莲")
         page.click("#request-generate-submit")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -79,7 +76,7 @@ class TestDefaultFixtureDoesNotUseRealMikan:
 
 
 class TestCandidateSearchStates:
-    """AC: 候选搜索 loading、成功、空结果、失败和重试状态."""
+    """AC: 主搜索 loading、成功、空结果、失败和重试状态均使用中文文案."""
 
     def test_candidate_search_success_renders_cards(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -111,11 +108,7 @@ class TestCandidateSearchStates:
 
         page.route("**/api/v1/mikan/candidates", _fulfill)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
 
         expect(page.locator(".candidate-card")).to_have_count(2)
@@ -124,7 +117,7 @@ class TestCandidateSearchStates:
         assert "咒术回战 第三季" in text
         assert "MiKan ID: 2353" in text
         assert "MiKan ID: 3072" in text
-        assert "来源 query: 芙莉莲" in text
+        assert "搜索词：芙莉莲" in text
         expect(
             page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
         ).to_have_attribute(
@@ -134,8 +127,7 @@ class TestCandidateSearchStates:
             page.locator(".candidate-card").nth(1).locator("img.candidate-poster")
         ).to_have_count(0)
 
-        # The sensitive search_endpoint is cleared after success; query is kept.
-        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
+        # The query input is preserved after a successful search.
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
 
     def test_candidate_search_empty_result(
@@ -150,11 +142,7 @@ class TestCandidateSearchStates:
 
         page.route("**/api/v1/mikan/candidates", _fulfill)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="ghost",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="ghost")
         page.click("#mikan-candidate-search-submit")
 
         result = page.locator("#mikan-candidate-search-result")
@@ -204,30 +192,20 @@ class TestCandidateSearchStates:
 
         page.route("**/api/v1/mikan/candidates", _flaky)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
 
         result = page.locator("#mikan-candidate-search-result")
         expect(result).to_contain_text("候选搜索失败")
         assert "error-state" in (result.get_attribute("class") or "")
 
-        # Failure preserves inputs so the user can retry.
-        assert (
-            page.locator("#mikan-candidate-search-endpoint").input_value()
-            == "https://mikan.example/Home/Search"
-        )
+        # Failure preserves the query so the user can retry.
+        assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
 
         fail[0] = False
         page.click("#mikan-candidate-search-submit")
         expect(page.locator(".candidate-card")).to_have_count(1)
         assert "葬送的芙莉莲" in result.inner_text()
-        assert (
-            page.locator("#mikan-candidate-search-endpoint").input_value() == ""
-        )
 
 
 class TestCandidateSearchNoAutoSelection:
@@ -258,11 +236,7 @@ class TestCandidateSearchNoAutoSelection:
         page.route("**/api/v1/mikan/candidates", _fulfill)
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
 
         expect(page.locator(".candidate-card")).to_have_count(1)
@@ -277,18 +251,17 @@ class TestCandidateSearchNoAutoSelection:
 
 
 class TestCandidateSearchSensitiveBoundary:
-    """AC: 敏感字段提交成功后不得写入 browser storage、URL、Request snapshot 或 history."""
+    """AC: 候选搜索不把 raw HTML、raw RSS、cookie、token 写入 browser storage、URL 或 Request snapshot."""
 
     def test_candidate_search_does_not_persist_or_leak_sensitive_values(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         sensitive_values = (
-            "http://private-mikan.stage17.local/Home/Search",
-            "stage17-candidate-token",
-            "stage17-candidate-cookie",
-            "<html>stage17 raw html</html>",
-            "<rss version='2.0'>stage17 raw rss</rss>",
-            "stage17 raw response body",
+            "stage18-candidate-token",
+            "stage18-candidate-cookie",
+            "<html>stage18 raw html</html>",
+            "<rss version='2.0'>stage18 raw rss</rss>",
+            "stage18 raw response body",
         )
 
         def _fulfill(route: Any, request: Any) -> None:
@@ -308,11 +281,11 @@ class TestCandidateSearchSensitiveBoundary:
                                     "poster_url": None,
                                     "source_query": "芙莉莲",
                                     "aliases": [],
-                                    "token": sensitive_values[1],
-                                    "cookie": sensitive_values[2],
-                                    "raw_html": sensitive_values[3],
-                                    "raw_rss_xml": sensitive_values[4],
-                                    "raw_response_body": sensitive_values[5],
+                                    "token": sensitive_values[0],
+                                    "cookie": sensitive_values[1],
+                                    "raw_html": sensitive_values[2],
+                                    "raw_rss_xml": sensitive_values[3],
+                                    "raw_response_body": sensitive_values[4],
                                 }
                             ],
                         },
@@ -324,16 +297,9 @@ class TestCandidateSearchSensitiveBoundary:
         page.route("**/api/v1/mikan/candidates", _fulfill)
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint=sensitive_values[0],
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
         expect(page.locator(".candidate-card")).to_have_count(1)
-
-        # The sensitive endpoint input is cleared after success.
-        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
 
         browser_state = page.evaluate(
             """() => ({
@@ -457,11 +423,7 @@ class TestCandidateRecommendationLabels:
             ),
         )
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲 第二季",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲 第二季")
         page.click("#mikan-candidate-search-submit")
 
         expect(page.locator(".candidate-card")).to_have_count(2)
@@ -498,11 +460,7 @@ class TestCandidateRecommendationLabels:
             ),
         )
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
 
         expect(page.locator(".candidate-card")).to_have_count(1)
@@ -533,11 +491,7 @@ class TestCandidateRecommendationLabels:
         )
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲 第二季",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲 第二季")
         page.click("#mikan-candidate-search-submit")
 
         expect(page.locator(".candidate-card")).to_have_count(1)
@@ -582,11 +536,7 @@ class TestCandidateRecommendationLabels:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲 第二季",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲 第二季")
         page.click("#mikan-candidate-search-submit")
 
         expect(page.locator(".candidate-card")).to_have_count(1)
@@ -602,6 +552,8 @@ class TestCandidateRecommendationLabels:
         assert captured
         assert captured[0]["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/3072"
         assert captured[0]["title"] == "葬送的芙莉莲 第二季"
+        # The main flow relies on the server-side default MiKan config.
+        assert "mikan_config" not in captured[0]
 
 
 class TestCandidateManualSelection:
@@ -640,11 +592,7 @@ class TestCandidateManualSelection:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
         expect(page.locator(".candidate-card")).to_have_count(2)
 
@@ -658,10 +606,10 @@ class TestCandidateManualSelection:
         payload = captured[0]
         assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
-        assert payload["mikan_config"]["search_endpoint"] == "https://mikan.example/Home/Search"
-        assert payload["mikan_config"]["timeout_seconds"] == 5
         assert payload["title"] == "葬送的芙莉莲"
         assert payload["save_request"] is True
+        # The main flow relies on the server-side default MiKan config.
+        assert "mikan_config" not in payload
 
         # Success flow reuses the existing detail/list/URL-sync behavior.
         assert "保存成功" in page.locator("#page-notification").inner_text()
@@ -697,11 +645,7 @@ class TestCandidateManualSelection:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
         expect(page.locator(".candidate-card")).to_have_count(1)
 
@@ -713,6 +657,7 @@ class TestCandidateManualSelection:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         assert captured
         assert captured[0]["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/42"
+        assert "mikan_config" not in captured[0]
 
     def test_generation_failure_preserves_candidates_and_inputs(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -758,11 +703,7 @@ class TestCandidateManualSelection:
         page.route("**/api/v1/requests", _fail_generation)
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
         expect(page.locator(".candidate-card")).to_have_count(1)
 
@@ -774,27 +715,23 @@ class TestCandidateManualSelection:
         assert "生成失败" in notif
         assert "MiKan 番剧页解析失败" in notif
 
-        # Candidate list and the search inputs are preserved for retry.
+        # Candidate list and the search input are preserved for retry.
         expect(page.locator(".candidate-card")).to_have_count(1)
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
-        # The endpoint input was cleared by the earlier successful search; the
-        # in-memory config still allowed generation, and failure keeps it usable.
-        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
 
 
 class TestCandidateSelectionSensitiveBoundary:
-    """AC: 候选选择不得把 MiKan config、raw HTML、raw RSS、cookie、token 写入任何持久面."""
+    """AC: 候选选择不得把 raw HTML、raw RSS、cookie、token 写入任何持久面."""
 
     def test_candidate_selection_does_not_leak_sensitive_values(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         sensitive_values = (
-            "http://private-mikan.stage17.local/Home/Search",
-            "stage17-select-token",
-            "stage17-select-cookie",
-            "<html>stage17 select raw html</html>",
-            "<rss version='2.0'>stage17 select raw rss</rss>",
-            "stage17 select raw response body",
+            "stage18-select-token",
+            "stage18-select-cookie",
+            "<html>stage18 select raw html</html>",
+            "<rss version='2.0'>stage18 select raw rss</rss>",
+            "stage18 select raw response body",
         )
 
         def _fulfill_candidates(route: Any, request: Any) -> None:
@@ -813,11 +750,11 @@ class TestCandidateSelectionSensitiveBoundary:
                                         title="葬送的芙莉莲",
                                         mikan_url="https://mikan.example/Home/Bangumi/42",
                                     ),
-                                    "token": sensitive_values[1],
-                                    "cookie": sensitive_values[2],
-                                    "raw_html": sensitive_values[3],
-                                    "raw_rss_xml": sensitive_values[4],
-                                    "raw_response_body": sensitive_values[5],
+                                    "token": sensitive_values[0],
+                                    "cookie": sensitive_values[1],
+                                    "raw_html": sensitive_values[2],
+                                    "raw_rss_xml": sensitive_values[3],
+                                    "raw_response_body": sensitive_values[4],
                                 }
                             ],
                         },
@@ -835,11 +772,7 @@ class TestCandidateSelectionSensitiveBoundary:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint=sensitive_values[0],
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
         expect(page.locator(".candidate-card")).to_have_count(1)
 
@@ -847,8 +780,9 @@ class TestCandidateSelectionSensitiveBoundary:
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
         assert captured
 
-        # The generation payload carries the request-scoped MiKan config, but
-        # no sensitive surface may retain it.
+        # No request-scoped MiKan config is sent; the server applies defaults.
+        assert "mikan_config" not in captured[0]
+
         browser_state = page.evaluate(
             """() => ({
                 url: window.location.href,
@@ -911,11 +845,7 @@ class TestCandidateFallbackDirectEntry:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.fill(
             "#mikan-fallback-bangumi",
             "https://mikan.example/Home/Bangumi/2353",
@@ -927,10 +857,10 @@ class TestCandidateFallbackDirectEntry:
         payload = captured[0]
         assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/2353"
-        assert payload["mikan_config"]["search_endpoint"] == "https://mikan.example/Home/Search"
-        assert payload["mikan_config"]["timeout_seconds"] == 5
         assert payload["title"] == "芙莉莲"
         assert payload["save_request"] is True
+        # The fallback works without a user-supplied endpoint (server default).
+        assert "mikan_config" not in payload
 
         # Success reuses the existing detail/list/URL-sync behavior.
         assert "保存成功" in page.locator("#page-notification").inner_text()
@@ -938,8 +868,7 @@ class TestCandidateFallbackDirectEntry:
         detail_text = page.locator("#request-detail-container").inner_text()
         assert "葬送的芙莉莲" in detail_text
 
-        # The sensitive endpoint and the fallback value are cleared after success.
-        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
+        # The fallback value is cleared after success.
         assert page.locator("#mikan-fallback-bangumi").input_value() == ""
 
     def test_id_fallback_generates_request(
@@ -953,11 +882,7 @@ class TestCandidateFallbackDirectEntry:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.fill("#mikan-fallback-bangumi", "2353")
         page.click("#mikan-fallback-generate")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -966,7 +891,7 @@ class TestCandidateFallbackDirectEntry:
         payload = captured[0]
         assert payload["source"] == "mikan"
         assert payload["mikan_bangumi"] == "2353"
-        assert payload["mikan_config"]["search_endpoint"] == "https://mikan.example/Home/Search"
+        assert "mikan_config" not in payload
         assert "request_id=req-fb-id" in page.url
 
     def test_empty_fallback_shows_validation_error_without_calling_api(
@@ -977,11 +902,7 @@ class TestCandidateFallbackDirectEntry:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-fallback-generate")
 
         expect(page.locator("#mikan-fallback-error")).to_contain_text(
@@ -998,11 +919,7 @@ class TestCandidateFallbackDirectEntry:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.fill("#mikan-fallback-bangumi", "not a url or id")
         page.click("#mikan-fallback-generate")
 
@@ -1031,18 +948,11 @@ class TestCandidateFallbackDirectEntry:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="ghost",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="ghost")
         page.click("#mikan-candidate-search-submit")
         expect(page.locator("#mikan-candidate-search-result")).to_contain_text(
             "未找到候选合集"
         )
-        # A successful (empty) search clears the sensitive endpoint input but
-        # keeps the request-scoped config in memory for the fallback.
-        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
 
         page.fill("#mikan-fallback-bangumi", "https://mikan.example/Home/Bangumi/42")
         page.click("#mikan-fallback-generate")
@@ -1051,8 +961,7 @@ class TestCandidateFallbackDirectEntry:
         assert captured
         payload = captured[0]
         assert payload["mikan_bangumi"] == "https://mikan.example/Home/Bangumi/42"
-        assert payload["mikan_config"]["search_endpoint"] == "https://mikan.example/Home/Search"
-        assert payload["mikan_config"]["timeout_seconds"] == 5
+        assert "mikan_config" not in payload
         assert "request_id=req-fb-empty" in page.url
 
     def test_fallback_failure_preserves_inputs_and_shows_sanitized_error(
@@ -1061,11 +970,7 @@ class TestCandidateFallbackDirectEntry:
         _register_generation_failure(page)
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint="https://mikan.example/Home/Search",
-        )
+        _fill_candidate_search(page, query="芙莉莲")
         page.fill("#mikan-fallback-bangumi", "https://mikan.example/Home/Bangumi/42")
         page.click("#mikan-fallback-generate")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -1079,10 +984,7 @@ class TestCandidateFallbackDirectEntry:
             page.locator("#mikan-fallback-bangumi").input_value()
             == "https://mikan.example/Home/Bangumi/42"
         )
-        assert (
-            page.locator("#mikan-candidate-search-endpoint").input_value()
-            == "https://mikan.example/Home/Search"
-        )
+        assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
 
 
 class TestCandidateFallbackSensitiveBoundary:
@@ -1092,8 +994,7 @@ class TestCandidateFallbackSensitiveBoundary:
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         sensitive_values = (
-            "http://private-mikan.stage17.local/Home/Search",
-            "https://private-mikan.stage17.local/Home/Bangumi/42",
+            "https://private-mikan.stage18.local/Home/Bangumi/42",
         )
         saved = create_saved_request(storage_dir, "葬送的芙莉莲", "req-fb-sec")
         captured: list[dict[str, Any]] = []
@@ -1103,21 +1004,16 @@ class TestCandidateFallbackSensitiveBoundary:
 
         set_storage_preferences(page, storage_dir, save_request=True)
         _open_candidate_search(page, live_server_url)
-        _fill_candidate_search(
-            page,
-            query="芙莉莲",
-            endpoint=sensitive_values[0],
-        )
-        page.fill("#mikan-fallback-bangumi", sensitive_values[1])
+        _fill_candidate_search(page, query="芙莉莲")
+        page.fill("#mikan-fallback-bangumi", sensitive_values[0])
         page.click("#mikan-fallback-generate")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         assert captured
-        assert captured[0]["mikan_config"]["search_endpoint"] == sensitive_values[0]
-        assert captured[0]["mikan_bangumi"] == sensitive_values[1]
+        assert captured[0]["mikan_bangumi"] == sensitive_values[0]
+        assert "mikan_config" not in captured[0]
 
-        # The sensitive endpoint and fallback inputs are cleared after success.
-        assert page.locator("#mikan-candidate-search-endpoint").input_value() == ""
+        # The fallback input is cleared after success.
         assert page.locator("#mikan-fallback-bangumi").input_value() == ""
 
         browser_state = page.evaluate(

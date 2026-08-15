@@ -38,8 +38,6 @@
   const settingsAbReturnLink = document.getElementById("settings-ab-return-link");
   const candidateSearchForm = document.getElementById("mikan-candidate-search-form");
   const candidateQueryInput = document.getElementById("mikan-candidate-query");
-  const candidateEndpointInput = document.getElementById("mikan-candidate-search-endpoint");
-  const candidateTimeoutInput = document.getElementById("mikan-candidate-timeout-seconds");
   const candidateSearchError = document.getElementById("mikan-candidate-search-error");
   const candidateSearchResult = document.getElementById("mikan-candidate-search-result");
   const candidateSearchSubmit = document.getElementById("mikan-candidate-search-submit");
@@ -57,7 +55,6 @@
   let currentDetailPayload = null;
   let storageDirPreference = "";
   let saveRequestPreference = true;
-  let lastCandidateSearchConfig = null;
 
   function readPreference(key) {
     try {
@@ -715,14 +712,8 @@
     }
     candidateSearchError.textContent = message;
     candidateSearchError.hidden = false;
-    for (const input of [
-      candidateQueryInput,
-      candidateEndpointInput,
-      candidateTimeoutInput,
-    ]) {
-      if (input) {
-        input.removeAttribute("aria-invalid");
-      }
+    if (candidateQueryInput) {
+      candidateQueryInput.removeAttribute("aria-invalid");
     }
     if (field) {
       field.setAttribute("aria-invalid", "true");
@@ -736,14 +727,8 @@
     }
     candidateSearchError.textContent = "";
     candidateSearchError.hidden = true;
-    for (const input of [
-      candidateQueryInput,
-      candidateEndpointInput,
-      candidateTimeoutInput,
-    ]) {
-      if (input) {
-        input.removeAttribute("aria-invalid");
-      }
+    if (candidateQueryInput) {
+      candidateQueryInput.removeAttribute("aria-invalid");
     }
   }
 
@@ -795,14 +780,8 @@
     }
     candidateFallbackError.textContent = message;
     candidateFallbackError.hidden = false;
-    for (const input of [
-      candidateFallbackInput,
-      candidateEndpointInput,
-      candidateTimeoutInput,
-    ]) {
-      if (input) {
-        input.removeAttribute("aria-invalid");
-      }
+    if (candidateFallbackInput) {
+      candidateFallbackInput.removeAttribute("aria-invalid");
     }
     if (field) {
       field.setAttribute("aria-invalid", "true");
@@ -816,59 +795,28 @@
     }
     candidateFallbackError.textContent = "";
     candidateFallbackError.hidden = true;
-    for (const input of [
-      candidateFallbackInput,
-      candidateEndpointInput,
-      candidateTimeoutInput,
-    ]) {
-      if (input) {
-        input.removeAttribute("aria-invalid");
-      }
+    if (candidateFallbackInput) {
+      candidateFallbackInput.removeAttribute("aria-invalid");
     }
   }
 
   function buildCandidateSearchPayload() {
     const query = candidateQueryInput ? candidateQueryInput.value.trim() : "";
-    const endpoint = candidateEndpointInput
-      ? candidateEndpointInput.value.trim()
-      : "";
-    const timeoutText = candidateTimeoutInput ? candidateTimeoutInput.value.trim() : "";
-    const timeoutSeconds = Number(timeoutText);
     if (!query) {
-      const error = new Error("搜索 MiKan 候选前必须填写 query。");
+      const error = new Error("搜索 MiKan 候选前必须填写番剧标题。");
       error.field = candidateQueryInput;
       throw error;
     }
-    if (!endpoint) {
-      const error = new Error("搜索 MiKan 候选前必须填写 search_endpoint。");
-      error.field = candidateEndpointInput;
-      throw error;
-    }
-    if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
-      const error = new Error("搜索 MiKan 候选前 timeout_seconds 必须为正数。");
-      error.field = candidateTimeoutInput;
-      throw error;
-    }
-    return {
-      query: query,
-      mikan_config: {
-        search_endpoint: endpoint,
-        timeout_seconds: timeoutSeconds,
-      },
-    };
-  }
-
-  function clearCandidateSensitiveFields() {
-    if (candidateEndpointInput) {
-      candidateEndpointInput.value = "";
-    }
+    // The Web API falls back to the system-default MiKan config when no
+    // request-scoped config is sent, so the UI only needs the anime title.
+    return {query: query};
   }
 
   function renderCandidateCards(candidates, query) {
     const cards = Array.isArray(candidates) ? candidates : [];
     if (!cards.length) {
       setCandidateSearchResult(
-        "未找到候选合集。可调整 query 或 MiKan config 后重试。",
+        "未找到候选合集。可调整番剧标题后重试。",
         "empty-state compact-state",
       );
       return;
@@ -912,8 +860,7 @@
 
       const source = document.createElement("div");
       source.className = "candidate-source";
-      source.textContent =
-        "来源 query: " + safeText(candidate.source_query || query);
+      source.textContent = "搜索词：" + safeText(candidate.source_query || query);
       item.appendChild(source);
 
       const chooseButton = document.createElement("button");
@@ -961,18 +908,6 @@
       });
       const candidates = (result && result.candidates) || [];
       renderCandidateCards(candidates, result.query || payload.query);
-      // Keep the request-scoped MiKan config in memory so selecting a
-      // candidate can reuse the same explicit config for Request generation.
-      // Read the inputs before clearCandidateSensitiveFields() wipes them.
-      lastCandidateSearchConfig = {
-        search_endpoint: candidateEndpointInput
-          ? candidateEndpointInput.value.trim()
-          : "",
-        timeout_seconds: Number(
-          candidateTimeoutInput ? candidateTimeoutInput.value.trim() : 0
-        ),
-      };
-      clearCandidateSensitiveFields();
       showNotification(
         "success",
         "候选搜索完成",
@@ -980,7 +915,7 @@
       );
     } catch (error) {
       setCandidateSearchResult(
-        "候选搜索失败。请检查 query 与 MiKan config 后重试。",
+        "候选搜索失败。请稍后重试。",
         "error-state compact-state",
       );
       notifyApiError("候选搜索失败", error);
@@ -1013,28 +948,19 @@
       );
       return;
     }
-    if (!lastCandidateSearchConfig) {
-      showNotification(
-        "error",
-        "生成失败",
-        "缺少 MiKan config，请先重新搜索候选。",
-      );
-      return;
-    }
     hideNotification();
     setCandidateSelectionInFlight(true);
-    setState(detailContainer, "正在从候选生成 Request...", "loading-state");
+    setState(detailContainer, "正在从候选生成订阅草案...", "loading-state");
     try {
+      // The server resolves the system-default MiKan config when no
+      // request-scoped config is sent, so candidate generation only needs the
+      // selected candidate's normalized bangumi URL.
       const result = await fetchJson("/api/v1/requests", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           title: candidate.title || "未命名合集",
           source: "mikan",
-          mikan_config: {
-            search_endpoint: lastCandidateSearchConfig.search_endpoint,
-            timeout_seconds: lastCandidateSearchConfig.timeout_seconds,
-          },
           mikan_bangumi: candidate.mikan_url,
           storage_dir: currentStorageDir() || null,
           save_request: currentSaveRequest(),
@@ -1044,7 +970,7 @@
     } catch (error) {
       setState(
         detailContainer,
-        "从候选生成 Request 失败。请重试。",
+        "从候选生成订阅草案失败。请重试。",
         "error-state",
       );
       notifyApiError("生成失败", error);
@@ -1078,72 +1004,36 @@
       return;
     }
 
-    // Reuse the request-scoped MiKan config: prefer the current search form
-    // inputs, falling back to the in-memory config kept after a successful
-    // candidate search (whose sensitive search_endpoint was already cleared).
-    let mikanConfig;
-    const endpoint = candidateEndpointInput
-      ? candidateEndpointInput.value.trim()
-      : "";
-    if (endpoint) {
-      const timeoutText = candidateTimeoutInput
-        ? candidateTimeoutInput.value.trim()
-        : "";
-      const timeoutSeconds = Number(timeoutText);
-      if (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0) {
-        setCandidateFallbackError(
-          "生成前 timeout_seconds 必须为正数。",
-          candidateTimeoutInput,
-        );
-        return;
-      }
-      mikanConfig = {
-        search_endpoint: endpoint,
-        timeout_seconds: timeoutSeconds,
-      };
-    } else if (lastCandidateSearchConfig) {
-      mikanConfig = {
-        search_endpoint: lastCandidateSearchConfig.search_endpoint,
-        timeout_seconds: lastCandidateSearchConfig.timeout_seconds,
-      };
-    } else {
-      setCandidateFallbackError(
-        "缺少 MiKan config，请先填写 search_endpoint 或搜索候选。",
-        candidateEndpointInput,
-      );
-      return;
-    }
-
     const query = candidateQueryInput ? candidateQueryInput.value.trim() : "";
     hideNotification();
     setCandidateFallbackInFlight(true);
     setState(
       detailContainer,
-      "正在从直连 MiKan 合集生成 Request...",
+      "正在从直连 MiKan 合集生成订阅草案...",
       "loading-state",
     );
     try {
+      // No request-scoped MiKan config is sent: the server falls back to the
+      // system default, so the fallback works without a user-supplied endpoint.
       const result = await fetchJson("/api/v1/requests", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           title: query || "MiKan 直连合集",
           source: "mikan",
-          mikan_config: mikanConfig,
           mikan_bangumi: fallbackValue,
           storage_dir: currentStorageDir() || null,
           save_request: currentSaveRequest(),
         }),
       });
       await finalizeGeneratedRequest(result);
-      clearCandidateSensitiveFields();
       if (candidateFallbackInput) {
         candidateFallbackInput.value = "";
       }
     } catch (error) {
       setState(
         detailContainer,
-        "从直连 MiKan 合集生成 Request 失败。请重试。",
+        "从直连 MiKan 合集生成订阅草案失败。请重试。",
         "error-state",
       );
       notifyApiError("生成失败", error);

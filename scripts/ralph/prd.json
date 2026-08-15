@@ -38,7 +38,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "这是 Stage 18 的主交互切换；fixture 入口若保留，应转入开发/离线测试区域。"
     },
     {

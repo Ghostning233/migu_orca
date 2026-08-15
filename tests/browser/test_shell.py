@@ -74,7 +74,7 @@ class TestIndexStage13WorkbenchShell:
         page.goto(f"{live_server_url}/index")
 
         for heading in (
-            "Request 生成",
+            "真实 MiKan 候选搜索",
             "Request 列表",
             "Request 详情",
         ):

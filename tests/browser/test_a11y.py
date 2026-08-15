@@ -54,7 +54,7 @@ class TestKeyboardNavigation:
         page.locator("body").click()
 
         found = False
-        for _ in range(10):
+        for _ in range(20):
             page.keyboard.press("Tab")
             name = page.evaluate("() => document.activeElement?.name || ''")
             if name == "title":

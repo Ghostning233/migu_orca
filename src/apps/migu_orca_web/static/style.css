@@ -162,27 +162,27 @@ h2 {
   grid-column: 1 / -1;
 }
 
-.candidate-search-panel {
+.dev-fixture-panel {
   grid-column: 1 / -1;
 }
 
-.candidate-search-disclosure {
+.dev-fixture-disclosure {
   border: 1px solid #d8dde5;
   border-radius: 6px;
   padding: 12px;
 }
 
-.candidate-search-disclosure summary {
+.dev-fixture-disclosure summary {
   color: #22577a;
   cursor: pointer;
   font-weight: 700;
 }
 
-.candidate-search-disclosure[open] summary {
+.dev-fixture-disclosure[open] summary {
   margin-bottom: 12px;
 }
 
-.candidate-search-body {
+.dev-fixture-body {
   margin-top: 12px;
 }
 

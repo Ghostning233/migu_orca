@@ -165,9 +165,10 @@ def test_index_serves_web_ui_shell() -> None:
     assert "Stage 8 Web UI Usability" not in html
     assert '<meta name="viewport" content="width=device-width, initial-scale=1">' in html
     assert "运行模式：本地 JSON storage" in html
-    assert "Request 生成默认使用仓库 fixture-backed 数据" in html
+    assert "主流程通过真实 MiKan 候选搜索" in html
+    assert "fixture-backed 生成保留在开发/离线测试区域" in html
     assert "外部数据源、连接测试与提交配置集中在 Settings" in html
-    assert "Request 生成" in html
+    assert "真实 MiKan 候选搜索" in html
     assert "Request 列表" in html
     assert "Request 详情" in html
     assert 'href="/index"' in html
@@ -178,6 +179,8 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="generate-panel"' in html
     assert 'id="request-list-panel"' in html
     assert 'id="request-detail-panel"' in html
+    assert 'id="dev-fixture-panel"' in html
+    assert 'id="dev-fixture-disclosure"' in html
     assert 'id="request-generate-form"' in html
     assert 'name="title"' in html
     assert "例如：葬送的芙莉莲" in html
@@ -188,17 +191,17 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-config-fields"' not in html
     assert 'name="mikan_search_endpoint"' not in html
     assert 'name="mikan_timeout_seconds"' not in html
-    assert 'id="mikan-candidate-panel"' in html
-    assert 'id="mikan-candidate-search"' in html
+    assert 'id="mikan-candidate-search-form"' in html
     assert 'id="mikan-candidate-query"' in html
-    assert 'id="mikan-candidate-search-endpoint"' in html
-    assert 'id="mikan-candidate-timeout-seconds"' in html
-    assert 'name="mikan_candidate_search_endpoint"' in html
-    assert 'name="mikan_candidate_timeout_seconds"' in html
+    assert 'name="mikan_candidate_title"' in html
+    assert 'id="mikan-candidate-search-endpoint"' not in html
+    assert 'id="mikan-candidate-timeout-seconds"' not in html
+    assert 'name="mikan_candidate_search_endpoint"' not in html
+    assert 'name="mikan_candidate_timeout_seconds"' not in html
     assert 'id="mikan-candidate-search-submit"' in html
     assert 'id="mikan-candidate-search-result"' in html
-    assert "search_endpoint" in html
-    assert "timeout_seconds" in html
+    assert "search_endpoint" not in html
+    assert "timeout_seconds" not in html
     assert 'id="mikan-fallback-form"' in html
     assert 'id="mikan-fallback-bangumi"' in html
     assert 'name="mikan_fallback_bangumi"' in html
@@ -214,6 +217,8 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'role="alert"' in html
     assert 'id="request-generate-submit"' in html
     assert 'data-default-label="生成"' in html
+    assert "开发 / 离线测试" in html
+    assert "Fixture 生成（开发 / 离线测试路径，不使用真实 MiKan）" in html
     assert 'id="clear-web-preferences"' not in html
     assert 'id="qbittorrent-config-toggle"' not in html
     assert 'id="qbittorrent-test-form"' not in html
@@ -392,19 +397,19 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "/api/v1/mikan/candidates" in script
     assert "mikan-candidate-search-form" in script
     assert "mikan-candidate-query" in script
-    assert "mikan-candidate-search-endpoint" in script
-    assert "mikan-candidate-timeout-seconds" in script
+    assert "mikan-candidate-search-endpoint" not in script
+    assert "mikan-candidate-timeout-seconds" not in script
     assert "mikan-candidate-search-submit" in script
     assert "mikan-candidate-search-result" in script
     assert "mikan-candidate-search-error" in script
-    assert "mikan_config" in script
+    assert "mikan_config" not in script
     assert "searchMikanCandidates" in script
-    assert "clearCandidateSensitiveFields" in script
+    assert "clearCandidateSensitiveFields" not in script
     assert "正在搜索 MiKan 候选" in script
     assert "候选搜索失败" in script
     assert "未找到候选合集" in script
     assert "MiKan ID" in script
-    assert "来源 query" in script
+    assert "搜索词：" in script
     assert "candidate.recommendation" in script
     assert "candidate-recommendation" in script
     assert "搜索结果不会自动选择合集" not in script
@@ -412,7 +417,7 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "generateRequestFromCandidate" in script
     assert "finalizeGeneratedRequest" in script
     assert "mikan_bangumi" in script
-    assert "lastCandidateSearchConfig" in script
+    assert "lastCandidateSearchConfig" not in script
     assert "mikan-fallback-form" in script
     assert "mikan-fallback-bangumi" in script
     assert "mikan-fallback-error" in script
