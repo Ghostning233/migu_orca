@@ -329,14 +329,16 @@ def _recompute_source_seed_filter(
 ) -> None:
     must_contain = filter_rule.get("must_contain", "")
     must_not_contain = filter_rule.get("must_not_contain", "")
+    must_contain_terms = _split_filter_terms(must_contain)
+    must_not_contain_terms = _split_filter_terms(must_not_contain)
     use_regex = filter_rule.get("use_regex", False)
     case_sensitive = filter_rule.get("case_sensitive", False)
     seed_names = _source_seed_names(source)
     valid: list[str] = []
     excluded: list[dict[str, str]] = []
     for seed_name in seed_names:
-        if must_not_contain and _filter_rule_matches(
-            must_not_contain,
+        if must_not_contain_terms and _filter_rule_matches_any(
+            must_not_contain_terms,
             seed_name,
             field="must_not_contain",
             use_regex=use_regex,
@@ -349,8 +351,8 @@ def _recompute_source_seed_filter(
                     "rule": "must_not_contain",
                 }
             )
-        elif must_contain and not _filter_rule_matches(
-            must_contain,
+        elif must_contain_terms and not _filter_rule_matches_all(
+            must_contain_terms,
             seed_name,
             field="must_contain",
             use_regex=use_regex,
@@ -418,6 +420,50 @@ def _filter_rule_matches(
     if case_sensitive:
         return value in seed_name
     return value.lower() in seed_name.lower()
+
+
+def _split_filter_terms(value: str) -> list[str]:
+    return [term.strip() for term in value.split("|") if term.strip()]
+
+
+def _filter_rule_matches_any(
+    values: list[str],
+    seed_name: str,
+    *,
+    field: str,
+    use_regex: bool,
+    case_sensitive: bool,
+) -> bool:
+    return any(
+        _filter_rule_matches(
+            value,
+            seed_name,
+            field=field,
+            use_regex=use_regex,
+            case_sensitive=case_sensitive,
+        )
+        for value in values
+    )
+
+
+def _filter_rule_matches_all(
+    values: list[str],
+    seed_name: str,
+    *,
+    field: str,
+    use_regex: bool,
+    case_sensitive: bool,
+) -> bool:
+    return all(
+        _filter_rule_matches(
+            value,
+            seed_name,
+            field=field,
+            use_regex=use_regex,
+            case_sensitive=case_sensitive,
+        )
+        for value in values
+    )
 
 
 def _rss_result_to_dict(result: FilteredRss) -> dict[str, Any]:

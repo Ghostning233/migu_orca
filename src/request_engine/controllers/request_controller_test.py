@@ -313,6 +313,56 @@ def test_modify_request_recomputes_filter_rule_from_existing_source_info() -> No
     ]
 
 
+def test_modify_request_must_contain_splits_pipe_terms() -> None:
+    request = _pending_request_with_sources()
+    request["source_info"]["rss_sources"][0]["seed_names"] = [
+        "[Loli] 番剧 - 01 720p 繁体",
+        "[Loli] 番剧 - 02 720p 简体",
+        "[Loli] 番剧 - 03 1080p 繁体",
+    ]
+    request["source_info"]["rss_sources"][0]["valid_seed_names"] = []
+    request["source_info"]["rss_sources"][0]["excluded_seed_names"] = []
+
+    modified = modify_request(
+        request,
+        {"filter_rule": {"must_contain": "720p | 繁体", "must_not_contain": ""}},
+    )
+
+    loli_source = modified["source_info"]["rss_sources"][0]
+    assert modified["confirmable_config"]["effective_seed_names"] == [
+        "[Loli] 番剧 - 01 720p 繁体"
+    ]
+    assert [seed["name"] for seed in loli_source["excluded_seed_names"]] == [
+        "[Loli] 番剧 - 02 720p 简体",
+        "[Loli] 番剧 - 03 1080p 繁体",
+    ]
+
+
+def test_modify_request_must_not_contain_splits_pipe_terms() -> None:
+    request = _pending_request_with_sources()
+    request["source_info"]["rss_sources"][0]["seed_names"] = [
+        "[Loli] 番剧 - 01 1080p",
+        "[Loli] 番剧 - 02 1080p v2",
+        "[Loli] 番剧 - SP 1080p",
+    ]
+    request["source_info"]["rss_sources"][0]["valid_seed_names"] = []
+    request["source_info"]["rss_sources"][0]["excluded_seed_names"] = []
+
+    modified = modify_request(
+        request,
+        {"filter_rule": {"must_not_contain": "v2 | SP"}},
+    )
+
+    loli_source = modified["source_info"]["rss_sources"][0]
+    assert modified["confirmable_config"]["effective_seed_names"] == [
+        "[Loli] 番剧 - 01 1080p"
+    ]
+    assert [seed["name"] for seed in loli_source["excluded_seed_names"]] == [
+        "[Loli] 番剧 - 02 1080p v2",
+        "[Loli] 番剧 - SP 1080p",
+    ]
+
+
 def test_modify_request_literal_default_accepts_brackets_without_regex_error() -> None:
     request = _pending_request_with_sources()
 

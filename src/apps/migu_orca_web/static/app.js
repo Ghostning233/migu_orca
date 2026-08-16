@@ -1539,10 +1539,6 @@
     groupLabel.htmlFor = "modify-subtitle-group";
     var groupSelect = document.createElement("select");
     groupSelect.id = "modify-subtitle-group";
-    var emptyOpt = document.createElement("option");
-    emptyOpt.value = "";
-    emptyOpt.textContent = "不修改";
-    groupSelect.appendChild(emptyOpt);
     for (var i = 0; i < rssSources.length; i++) {
       var src = rssSources[i];
       var opt = document.createElement("option");
@@ -1550,6 +1546,7 @@
       opt.textContent = src.subtitle_group || "未知字幕组";
       groupSelect.appendChild(opt);
     }
+    groupSelect.value = originalGroup;
     container.appendChild(groupLabel);
     container.appendChild(groupSelect);
 
@@ -1659,7 +1656,7 @@
       formError.hidden = true;
       formError.textContent = "";
       var patch = {};
-      if (groupSelect.value && groupSelect.value !== originalGroup) {
+      if (groupSelect.value !== originalGroup) {
         patch.selected_subtitle_group = groupSelect.value;
       }
       var mcVal = mcInput.value.trim();
@@ -2236,11 +2233,12 @@
 
     var seedsSection = createDetailSection("Seeds", "seeds-section");
 
-    // Effective seeds come first and are always visible, so the user
-    // immediately sees which subtitle group the valid list belongs to.
-    var effectiveGroup = document.createElement("div");
-    effectiveGroup.className = "seed-group effective-seed-group";
-    var effectiveHeading = document.createElement("h5");
+    // Effective seeds come first and are expanded by default, while still
+    // allowing the user to collapse the section when scanning long lists.
+    var effectiveGroup = document.createElement("details");
+    effectiveGroup.className = "seed-details seed-group effective-seed-group";
+    effectiveGroup.open = true;
+    var effectiveHeading = document.createElement("summary");
     effectiveHeading.textContent =
       "有效种子（当前选中字幕组：" + selectedGroupName + "）(" +
       effectiveSeeds.length + ")";
