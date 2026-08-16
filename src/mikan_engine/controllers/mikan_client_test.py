@@ -8,7 +8,9 @@ import pytest
 import mikan_engine.controllers.mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import (
     MIKAN_READ_CHUNK_BYTES,
+    MAX_MIKAN_STREAM_SECONDS,
     MAX_MIKAN_RESPONSE_BYTES,
+    MikanPartialResponseError,
     _MikanBangumiPageParser,
     _MikanCandidatePageParser,
     UrlopenMikanTransport,
@@ -65,6 +67,39 @@ class _FakeUrlopenResponse:
         chunk = self.body[self.offset : self.offset + size]
         self.offset += len(chunk)
         return chunk
+
+
+class _ChunkedFakeUrlopenResponse:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+        self.read_sizes: list[int] = []
+
+    def __enter__(self) -> "_ChunkedFakeUrlopenResponse":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        if not self.chunks:
+            return b""
+        return self.chunks.pop(0)
+
+
+class _Read1FakeUrlopenResponse(_ChunkedFakeUrlopenResponse):
+    def __init__(self, chunks: list[bytes]) -> None:
+        super().__init__(chunks)
+        self.read_calls = 0
+        self.read1_calls = 0
+
+    def read(self, size: int = -1) -> bytes:
+        self.read_calls += 1
+        return super().read(size)
+
+    def read1(self, size: int = -1) -> bytes:
+        self.read1_calls += 1
+        return super().read(size)
 
 
 def test_create_mikan_client_keeps_explicit_config_and_transport() -> None:
@@ -328,6 +363,73 @@ def test_mikan_urlopen_transport_uses_bounded_read_and_timeout(
     assert text == "ok"
     assert response.read_sizes == [MIKAN_READ_CHUNK_BYTES, MIKAN_READ_CHUNK_BYTES]
     assert timeouts == [3]
+
+
+def test_mikan_urlopen_transport_extends_deadline_when_chunks_arrive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _ChunkedFakeUrlopenResponse([b"he", b"ll", b"o", b""])
+    clock_values = iter([0.0, 0.0, 14.0, 16.0, 28.0, 30.0, 44.0, 45.0])
+
+    def fake_urlopen(request: object, *, timeout: float) -> _ChunkedFakeUrlopenResponse:
+        return response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mikan_client_module, "monotonic", lambda: next(clock_values))
+
+    text = UrlopenMikanTransport().get_text("https://mikan.example/Home/Search", timeout=15)
+
+    assert text == "hello"
+    assert response.read_sizes == [
+        MIKAN_READ_CHUNK_BYTES,
+        MIKAN_READ_CHUNK_BYTES,
+        MIKAN_READ_CHUNK_BYTES,
+        MIKAN_READ_CHUNK_BYTES,
+    ]
+
+
+def test_mikan_urlopen_transport_prefers_read1_for_streaming_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _Read1FakeUrlopenResponse([b"partial", b""])
+
+    def fake_urlopen(request: object, *, timeout: float) -> _Read1FakeUrlopenResponse:
+        return response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+
+    text = UrlopenMikanTransport().get_text("https://mikan.example/Home/Search", timeout=15)
+
+    assert text == "partial"
+    assert response.read1_calls == 2
+    assert response.read_calls == 0
+
+
+def test_mikan_urlopen_transport_stops_at_stream_hard_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    response = _ChunkedFakeUrlopenResponse([b"a", b"b", b""])
+    clock_values = iter(
+        [
+            0.0,
+            0.0,
+            50.0,
+            59.0,
+            MAX_MIKAN_STREAM_SECONDS - 0.1,
+            MAX_MIKAN_STREAM_SECONDS + 0.1,
+        ]
+    )
+
+    def fake_urlopen(request: object, *, timeout: float) -> _ChunkedFakeUrlopenResponse:
+        return response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mikan_client_module, "monotonic", lambda: next(clock_values))
+
+    with pytest.raises(MikanPartialResponseError) as error:
+        UrlopenMikanTransport().get_text("https://mikan.example/Home/Search", timeout=15)
+
+    assert error.value.body == b"ab"
 
 
 def test_mikan_urlopen_oversized_response_is_sanitized_by_call_site(
@@ -969,6 +1071,61 @@ def test_mikan_bangumi_page_http_failure_uses_rss_listing_step() -> None:
         "details": {"category": "timeout"},
     }
     assert "secret-token" not in str(error.value.as_dict())
+
+
+def test_mikan_search_candidates_can_use_partial_html_after_stream_timeout() -> None:
+    partial_html = b"""
+    <ul class="list-inline an-ul">
+      <li>
+        <a href="/Home/Bangumi/3074" target="_blank">
+          <div class="an-info">
+            <div class="an-info-group">
+              <div class="an-text" title="\xe5\x92\x92\xe6\x9c\xaf\xe5\x9b\x9e\xe6\x88\x98 \xe7\xac\xac\xe4\xba\x8c\xe5\xad\xa3">\xe5\x92\x92\xe6\x9c\xaf\xe5\x9b\x9e\xe6\x88\x98 \xe7\xac\xac\xe4\xba\x8c\xe5\xad\xa3</div>
+            </div>
+          </div>
+        </a>
+      </li>
+    </ul>
+    """
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikanani.me/Home/Search",
+            timeout_seconds=15,
+        ),
+        transport=ErrorTransport(MikanPartialResponseError(partial_html)),
+    )
+
+    candidates = client.search_candidates("咒术回战")
+
+    assert [(candidate.bangumi_id, candidate.title) for candidate in candidates] == [
+        ("3074", "咒术回战 第二季")
+    ]
+
+
+def test_mikan_detail_rejects_partial_html_after_stream_timeout() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikanani.me/Home/Search",
+            timeout_seconds=15,
+        ),
+        transport=ErrorTransport(MikanPartialResponseError(b"<p class='bangumi-title'>x")),
+    )
+    matched = MatchedBangumi(
+        title="咒术回战",
+        aliases=[],
+        mikan_url="https://mikanani.me/Home/Bangumi/2283",
+        match_score=1,
+    )
+
+    with pytest.raises(Stage1Error) as error:
+        client.get_bangumi_detail(matched)
+
+    assert error.value.as_dict() == {
+        "error_type": "mikan_timeout",
+        "error_message": "MiKan HTTP 请求超时",
+        "failed_step": "mikan_bangumi_detail",
+        "details": {"category": "timeout"},
+    }
 
 
 def test_mikan_bangumi_detail_http_failure_uses_detail_step() -> None:

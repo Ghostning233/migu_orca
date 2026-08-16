@@ -13,12 +13,22 @@ from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, MatchedBangumi, RssSource
 
 
-MAX_MIKAN_RESPONSE_BYTES = 2_000_000
+# MiKan search pages can include large episode result tables in addition to
+# bangumi candidates. Keep a bounded read, but allow broad queries to finish.
+MAX_MIKAN_RESPONSE_BYTES = 8_000_000
 MIKAN_READ_CHUNK_BYTES = 64 * 1024
+MAX_MIKAN_STREAM_SECONDS = 60.0
 
 
 class MikanResponseTooLargeError(Exception):
     """Raised when a MiKan response exceeds the bounded read limit."""
+
+
+class MikanPartialResponseError(Exception):
+    """Raised when a MiKan read times out after receiving partial content."""
+
+    def __init__(self, body: bytes) -> None:
+        self.body = body
 
 
 @dataclass(frozen=True)
@@ -74,7 +84,9 @@ class UrlopenMikanTransport:
     """urllib-backed transport for real MiKanProject page reads."""
 
     def get_text(self, url: str, *, timeout: float) -> str:
-        deadline = monotonic() + timeout
+        started_at = monotonic()
+        max_deadline = started_at + MAX_MIKAN_STREAM_SECONDS
+        deadline = min(started_at + timeout, max_deadline)
         request = Request(
             url,
             headers={
@@ -89,20 +101,29 @@ class UrlopenMikanTransport:
             while True:
                 remaining = deadline - monotonic()
                 if remaining <= 0:
+                    if chunks:
+                        raise MikanPartialResponseError(b"".join(chunks))
                     raise TimeoutError
                 _set_response_timeout(response, remaining)
-                chunk = response.read(
-                    min(
-                        MIKAN_READ_CHUNK_BYTES,
-                        MAX_MIKAN_RESPONSE_BYTES + 1 - total,
+                try:
+                    chunk = _read_response_chunk(
+                        response,
+                        min(
+                            MIKAN_READ_CHUNK_BYTES,
+                            MAX_MIKAN_RESPONSE_BYTES + 1 - total,
+                        ),
                     )
-                )
+                except TimeoutError:
+                    if chunks:
+                        raise MikanPartialResponseError(b"".join(chunks)) from None
+                    raise
                 if not chunk:
                     break
                 chunks.append(chunk)
                 total += len(chunk)
                 if total > MAX_MIKAN_RESPONSE_BYTES:
                     raise MikanResponseTooLargeError
+                deadline = min(monotonic() + timeout, max_deadline)
             body = b"".join(chunks)
         if len(body) > MAX_MIKAN_RESPONSE_BYTES:
             raise MikanResponseTooLargeError
@@ -115,6 +136,14 @@ def _set_response_timeout(response: object, timeout: float) -> None:
     sock = getattr(raw, "_sock", None)
     if sock is not None:
         sock.settimeout(timeout)
+
+
+def _read_response_chunk(response: object, size: int) -> bytes:
+    read1 = getattr(response, "read1", None)
+    if callable(read1):
+        return read1(size)
+    read = getattr(response, "read")
+    return read(size)
 
 
 class MikanClient:
@@ -356,6 +385,13 @@ def _read_mikan_text(
         raise _mikan_parse_failed(failed_step, "encoding") from exc
     except MikanResponseTooLargeError as exc:
         raise _mikan_parse_failed(failed_step, "response_too_large") from exc
+    except MikanPartialResponseError as exc:
+        if failed_step == "mikan_search":
+            try:
+                return exc.body.decode("utf-8")
+            except UnicodeDecodeError as decode_error:
+                raise _mikan_parse_failed(failed_step, "encoding") from decode_error
+        raise _mikan_timeout(failed_step) from exc
     except Stage1Error as exc:
         raise _sanitize_mikan_stage_error(exc, failed_step) from exc
 
