@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from time import monotonic
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
@@ -13,6 +14,7 @@ from shared.models import BangumiCandidate, MatchedBangumi, RssSource
 
 
 MAX_MIKAN_RESPONSE_BYTES = 2_000_000
+MIKAN_READ_CHUNK_BYTES = 64 * 1024
 
 
 class MikanResponseTooLargeError(Exception):
@@ -72,6 +74,7 @@ class UrlopenMikanTransport:
     """urllib-backed transport for real MiKanProject page reads."""
 
     def get_text(self, url: str, *, timeout: float) -> str:
+        deadline = monotonic() + timeout
         request = Request(
             url,
             headers={
@@ -81,10 +84,37 @@ class UrlopenMikanTransport:
             method="GET",
         )
         with urlopen(request, timeout=timeout) as response:
-            body = response.read(MAX_MIKAN_RESPONSE_BYTES + 1)
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise TimeoutError
+                _set_response_timeout(response, remaining)
+                chunk = response.read(
+                    min(
+                        MIKAN_READ_CHUNK_BYTES,
+                        MAX_MIKAN_RESPONSE_BYTES + 1 - total,
+                    )
+                )
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > MAX_MIKAN_RESPONSE_BYTES:
+                    raise MikanResponseTooLargeError
+            body = b"".join(chunks)
         if len(body) > MAX_MIKAN_RESPONSE_BYTES:
             raise MikanResponseTooLargeError
         return body.decode("utf-8")
+
+
+def _set_response_timeout(response: object, timeout: float) -> None:
+    fp = getattr(response, "fp", None)
+    raw = getattr(fp, "raw", None)
+    sock = getattr(raw, "_sock", None)
+    if sock is not None:
+        sock.settimeout(timeout)
 
 
 class MikanClient:
@@ -603,15 +633,18 @@ class _MikanCandidatePageParser(HTMLParser):
         attr_map = {name.lower(): value for name, value in attrs if value is not None}
         classes = set(attr_map.get("class", "").split())
 
-        if self._card_depth and tag_name == "a":
+        if tag_name == "a":
             normalized = _candidate_bangumi_url(attr_map.get("href", ""), self._base_url)
             if normalized is not None:
+                if self._card_depth == 0:
+                    self._current_card = _MikanCandidateCard()
+                    self._current_card.href = normalized
                 if self._current_card is not None and self._current_card.href is None:
                     self._current_card.href = normalized
                 self._active_href = normalized
                 self._active_title_attr = attr_map.get("title")
                 self._active_text = []
-        elif self._card_depth and tag_name == "img":
+        elif self._current_card is not None and tag_name in {"img", "span"}:
             if self._current_card is not None and self._current_card.poster_url is None:
                 poster_url = _poster_url_from_attrs(attr_map, self._base_url)
                 if poster_url is not None:
@@ -642,6 +675,11 @@ class _MikanCandidatePageParser(HTMLParser):
             self._active_href = None
             self._active_title_attr = None
             self._active_text = []
+            if self._card_depth == 0 and self._current_card is not None:
+                card = self._current_card
+                self._current_card = None
+                if card.href is not None:
+                    self._cards.append(card)
 
         if self._tag_stack and self._tag_stack[-1][0] == tag_name:
             _, is_container = self._tag_stack.pop()
@@ -709,8 +747,12 @@ class _MikanBangumiPageParser(HTMLParser):
         self._title_parts: list[str] = []
         self._subgroup_depth = 0
         self._subgroup_parts: list[str] = []
+        self._subgroup_section_parts: list[str] = []
+        self._active_subgroup_anchor_id: str | None = None
+        self._subgroup_names_by_id: dict[str, str] = {}
         self._subgroup_names: list[str] = []
         self._subgroup_section_depth = 0
+        self._current_subgroup_section_id: str | None = None
         self._current_subgroup_name: str | None = None
         self._anchors: list[_MikanPageAnchor] = []
         self._broadcast_depth = 0
@@ -738,12 +780,20 @@ class _MikanBangumiPageParser(HTMLParser):
         if "bangumi-title" in classes:
             self._title_depth = 1
             self._title_parts = []
-        if "subgroup-section" in classes:
+        if classes.intersection({"subgroup-section", "subgroup-text"}):
             self._subgroup_section_depth = 1
-            self._current_subgroup_name = None
+            self._current_subgroup_section_id = attr_map.get("id")
+            self._current_subgroup_name = self._subgroup_names_by_id.get(
+                self._current_subgroup_section_id or ""
+            )
+            self._subgroup_section_parts = []
         if "subgroup-name" in classes:
             self._subgroup_depth = 1
             self._subgroup_parts = []
+            data_anchor = attr_map.get("data-anchor", "").strip()
+            self._active_subgroup_anchor_id = (
+                data_anchor.lstrip("#") if data_anchor.startswith("#") else None
+            )
         if classes.intersection({"broadcast-start", "broadcast-date", "air-date"}):
             self._broadcast_depth = 1
             self._broadcast_parts = []
@@ -763,6 +813,12 @@ class _MikanBangumiPageParser(HTMLParser):
             self._title_parts.append(data)
         if self._subgroup_depth:
             self._subgroup_parts.append(data)
+        if (
+            self._subgroup_section_depth
+            and self._current_subgroup_name is None
+            and self._active_anchor is None
+        ):
+            self._subgroup_section_parts.append(data)
         if self._broadcast_depth:
             self._broadcast_parts.append(data)
         if self._active_anchor is not None:
@@ -773,6 +829,16 @@ class _MikanBangumiPageParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         tag_name = tag.lower()
         if tag_name == "a" and self._active_anchor is not None:
+            if (
+                self._active_anchor.subgroup_name is None
+                and self._subgroup_section_depth
+            ):
+                section_name = _clean_title(" ".join(self._subgroup_section_parts))
+                if section_name:
+                    self._current_subgroup_name = section_name
+                    self._active_anchor.subgroup_name = section_name
+                    if section_name not in self._subgroup_names:
+                        self._subgroup_names.append(section_name)
             if self._current_row is not None:
                 self._current_row.anchors.append(self._active_anchor)
             else:
@@ -788,8 +854,13 @@ class _MikanBangumiPageParser(HTMLParser):
                 subgroup_name = _clean_title(" ".join(self._subgroup_parts))
                 if subgroup_name:
                     self._subgroup_names.append(subgroup_name)
+                    if self._active_subgroup_anchor_id:
+                        self._subgroup_names_by_id[
+                            self._active_subgroup_anchor_id
+                        ] = subgroup_name
                     if self._subgroup_section_depth:
                         self._current_subgroup_name = subgroup_name
+                self._active_subgroup_anchor_id = None
                 self._subgroup_parts = []
         if self._broadcast_depth:
             self._broadcast_depth -= 1
@@ -797,6 +868,8 @@ class _MikanBangumiPageParser(HTMLParser):
             self._subgroup_section_depth -= 1
             if self._subgroup_section_depth == 0:
                 self._current_subgroup_name = None
+                self._current_subgroup_section_id = None
+                self._subgroup_section_parts = []
 
         if tag_name == "tr" and self._row_depth:
             self._row_depth -= 1
@@ -1040,9 +1113,9 @@ def _episode_url_from_href(href: str, base_url: str) -> str | None:
 
 def _poster_url_from_attrs(attrs: dict[str, str], base_url: str) -> str | None:
     classes = set(attrs.get("class", "").split())
-    if not classes.intersection({"bangumi-poster", "poster", "cover"}):
+    if not classes.intersection({"bangumi-poster", "poster", "cover", "b-lazy"}):
         return None
-    src = attrs.get("src", "").strip()
+    src = attrs.get("src", "").strip() or attrs.get("data-src", "").strip()
     if not src:
         return None
     absolute_url = urljoin(base_url, src)

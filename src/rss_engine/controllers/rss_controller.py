@@ -139,11 +139,13 @@ def _text(element: ElementTree.Element | None) -> str | None:
 def filter_seeds(parsed: ParsedRss, rule: FilterRule) -> FilteredRss:
     must_contain = rule.must_contain
     must_not_contain = rule.must_not_contain
+    must_contain_terms = _split_rule_terms(must_contain)
+    must_not_contain_terms = _split_rule_terms(must_not_contain)
     valid: list[RssSeed] = []
     excluded: list[ExcludedSeed] = []
     for seed in parsed.seeds:
-        if must_not_contain and _rule_matches(
-            must_not_contain,
+        if must_not_contain_terms and _rule_matches_any(
+            must_not_contain_terms,
             seed.title,
             rule=rule,
             name="must_not_contain",
@@ -155,8 +157,8 @@ def filter_seeds(parsed: ParsedRss, rule: FilterRule) -> FilteredRss:
                     rule="must_not_contain",
                 )
             )
-        elif must_contain and not _rule_matches(
-            must_contain,
+        elif must_contain_terms and not _rule_matches_all(
+            must_contain_terms,
             seed.title,
             rule=rule,
             name="must_contain",
@@ -208,3 +210,27 @@ def _rule_matches(
     if rule.case_sensitive:
         return value in seed_name
     return value.lower() in seed_name.lower()
+
+
+def _split_rule_terms(value: str) -> list[str]:
+    return [term.strip() for term in value.split("|") if term.strip()]
+
+
+def _rule_matches_any(
+    values: list[str],
+    seed_name: str,
+    *,
+    rule: FilterRule,
+    name: str,
+) -> bool:
+    return any(_rule_matches(value, seed_name, rule=rule, name=name) for value in values)
+
+
+def _rule_matches_all(
+    values: list[str],
+    seed_name: str,
+    *,
+    rule: FilterRule,
+    name: str,
+) -> bool:
+    return all(_rule_matches(value, seed_name, rule=rule, name=name) for value in values)

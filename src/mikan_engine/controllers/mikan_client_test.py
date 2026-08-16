@@ -7,6 +7,7 @@ import pytest
 
 import mikan_engine.controllers.mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import (
+    MIKAN_READ_CHUNK_BYTES,
     MAX_MIKAN_RESPONSE_BYTES,
     _MikanBangumiPageParser,
     _MikanCandidatePageParser,
@@ -46,6 +47,7 @@ class ErrorTransport:
 class _FakeUrlopenResponse:
     def __init__(self, body: bytes) -> None:
         self.body = body
+        self.offset = 0
         self.read_sizes: list[int] = []
 
     def __enter__(self) -> "_FakeUrlopenResponse":
@@ -57,8 +59,12 @@ class _FakeUrlopenResponse:
     def read(self, size: int = -1) -> bytes:
         self.read_sizes.append(size)
         if size < 0:
-            return self.body
-        return self.body[:size]
+            chunk = self.body[self.offset :]
+            self.offset = len(self.body)
+            return chunk
+        chunk = self.body[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
 
 
 def test_create_mikan_client_keeps_explicit_config_and_transport() -> None:
@@ -320,7 +326,7 @@ def test_mikan_urlopen_transport_uses_bounded_read_and_timeout(
     text = UrlopenMikanTransport().get_text("https://mikan.example/Home/Search", timeout=3)
 
     assert text == "ok"
-    assert response.read_sizes == [MAX_MIKAN_RESPONSE_BYTES + 1]
+    assert response.read_sizes == [MIKAN_READ_CHUNK_BYTES, MIKAN_READ_CHUNK_BYTES]
     assert timeouts == [3]
 
 
@@ -551,6 +557,50 @@ def test_mikan_client_list_rss_sources_prefers_subgroups_over_bangumi_rss() -> N
     ]
     assert all(source.source_type == "mikan_http" for source in sources)
     assert all(source.fixture_path == "" for source in sources)
+
+
+def test_mikan_client_list_rss_sources_parses_current_subgroup_text_sections() -> None:
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikanani.me/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=FakeTransport(
+            """
+            <p class="bangumi-title">
+              咒术回战
+              <a href="/RSS/Bangumi?bangumiId=2283" class="mikan-rss">RSS</a>
+            </p>
+            <a class="subgroup-name subgroup-552" data-anchor="#552">Lilith-Raws</a>
+            <a class="subgroup-name subgroup-562" data-anchor="#562">NC-Raws</a>
+            <div class="subgroup-text" id="552">
+              <a href="/RSS/Bangumi?bangumiId=2283&subgroupid=552" class="mikan-rss">RSS</a>
+              <div class="episode-table">
+                <a class="magnet-link-wrap" href="/Home/Episode/SANITIZED1">
+                  [Lilith-Raws] 咒术回战 - 24 [1080p]
+                </a>
+              </div>
+            </div>
+            <div class="subgroup-text" id="562">
+              <a href="/RSS/Bangumi?bangumiId=2283&subgroupid=562" class="mikan-rss">RSS</a>
+            </div>
+            """
+        ),
+    )
+    matched = MatchedBangumi(
+        title="咒术回战",
+        aliases=[],
+        mikan_url="https://mikanani.me/Home/Bangumi/2283",
+        match_score=1,
+    )
+
+    sources = client.list_rss_sources(matched)
+
+    assert [source.subtitle_group for source in sources] == ["Lilith-Raws", "NC-Raws"]
+    assert [source.rss_url for source in sources] == [
+        "https://mikanani.me/RSS/Bangumi?bangumiId=2283&subgroupid=552",
+        "https://mikanani.me/RSS/Bangumi?bangumiId=2283&subgroupid=562",
+    ]
 
 
 def test_mikan_client_list_rss_sources_deduplicates_subgroup_rss_urls() -> None:
@@ -986,6 +1036,49 @@ def test_mikan_client_parses_candidate_fixture_with_posters_and_order() -> None:
     assert candidates[0].aliases == ["Mushoku Tensei: Jobless Reincarnation"]
     assert candidates[1].aliases == []
     assert candidates[2].aliases == []
+
+
+def test_mikan_candidate_search_parses_current_mikan_recommendation_links() -> None:
+    transport = FakeTransport(
+        """
+        <ul class="list-inline an-ul">
+          <li>
+            <a href="/Home/Bangumi/3074" target="_blank">
+              <span data-src="/images/Bangumi/202307/SANITIZED.jpg?width=400" class="b-lazy"></span>
+              <div class="an-info">
+                <div class="an-info-group">
+                  <div class="an-text" title="咒术回战 第二季">咒术回战 第二季</div>
+                </div>
+              </div>
+            </a>
+          </li>
+          <li>
+            <a href="/Home/Bangumi/2283" target="_blank">
+              <div class="an-info">
+                <div class="an-info-group">
+                  <div class="an-text" title="咒术回战">咒术回战</div>
+                </div>
+              </div>
+            </a>
+          </li>
+        </ul>
+        """
+    )
+    client = create_mikan_client(
+        MikanConfig(
+            search_endpoint="https://mikanani.me/Home/Search",
+            timeout_seconds=5,
+        ),
+        transport=transport,
+    )
+
+    candidates = client.search_candidates("咒术回战")
+
+    assert [candidate.bangumi_id for candidate in candidates] == ["3074", "2283"]
+    assert [candidate.title for candidate in candidates] == ["咒术回战 第二季", "咒术回战"]
+    assert candidates[0].poster_url == (
+        "https://mikanani.me/images/Bangumi/202307/SANITIZED.jpg?width=400"
+    )
 
 
 def test_mikan_candidate_search_rejects_unsafe_hrefs() -> None:

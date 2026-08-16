@@ -208,6 +208,48 @@ def test_filter_uses_must_not_contain_before_must_contain() -> None:
     ]
 
 
+def test_filter_must_contain_splits_pipe_terms_and_requires_all_matches() -> None:
+    source = RssSource("组", "url", "static_fixture", "feed.xml")
+    parsed = ParsedRss(
+        source=source,
+        seeds=[
+            RssSeed("番剧 01 720p 繁体", "1"),
+            RssSeed("番剧 02 720p 简体", "2"),
+            RssSeed("番剧 03 1080p 繁体", "3"),
+        ],
+    )
+
+    result = filter_seeds(parsed, FilterRule(must_contain="720p | 繁体"))
+
+    assert [seed.title for seed in result.valid_seeds] == ["番剧 01 720p 繁体"]
+    assert [item.name for item in result.excluded_seeds] == [
+        "番剧 02 720p 简体",
+        "番剧 03 1080p 繁体",
+    ]
+    assert result.excluded_seeds[0].reason == "未命中包含规则：720p | 繁体"
+
+
+def test_filter_must_not_contain_splits_pipe_terms_and_excludes_any_match() -> None:
+    source = RssSource("组", "url", "static_fixture", "feed.xml")
+    parsed = ParsedRss(
+        source=source,
+        seeds=[
+            RssSeed("番剧 01 1080p", "1"),
+            RssSeed("番剧 02 1080p v2", "2"),
+            RssSeed("番剧 SP 1080p", "3"),
+        ],
+    )
+
+    result = filter_seeds(parsed, FilterRule(must_not_contain="v2 | SP"))
+
+    assert [seed.title for seed in result.valid_seeds] == ["番剧 01 1080p"]
+    assert [item.name for item in result.excluded_seeds] == [
+        "番剧 02 1080p v2",
+        "番剧 SP 1080p",
+    ]
+    assert all(item.rule == "must_not_contain" for item in result.excluded_seeds)
+
+
 def test_invalid_regex_is_config_error_when_use_regex_enabled() -> None:
     source = RssSource("组", "url", "static_fixture", "feed.xml")
     parsed = ParsedRss(source=source, seeds=[RssSeed("条目", "1")])
