@@ -57,6 +57,7 @@ SUBMIT_OUTCOME_SKIPPED = "skipped"
 #: Per-item outcome statuses returned by the batch recovery orchestration.
 RECOVER_OUTCOME_SUCCEEDED = "succeeded"
 RECOVER_OUTCOME_FAILED = "failed"
+RECOVER_OUTCOME_RETRYABLE = "retryable"
 RECOVER_OUTCOME_SKIPPED = "skipped"
 RECOVER_OUTCOME_NEEDS_MANUAL = "needs_manual"
 
@@ -467,7 +468,16 @@ def _recover_auto(
     now_factory: NowFactory | None,
     persist_queue: PersistQueue | None,
 ) -> BatchSubmitResult:
-    """Auto-recover a SUBMITTING item whose AB result was already persisted."""
+    """Auto-recover a SUBMITTING item whose AB result was already persisted.
+
+    The persisted result decides the recovery: a ``success: true`` result is
+    finalized as SUCCEEDED; a ``success: false`` result is finalized as
+    RETRYABLE (transient AB errors) or FAILED (terminal errors) using the same
+    retryable classification as a live submit, keeping the sanitized error
+    summary. Anything without a clear result (missing, non-dict, or lacking a
+    ``success`` key) falls back to manual verification — a failure result must
+    never be auto-marked SUCCEEDED.
+    """
     if item.status != BATCH_QUEUE_STATUS_SUBMITTING:
         return _recover_needs_manual(
             batch_id,
@@ -479,20 +489,55 @@ def _recover_auto(
 
     request = _safe_load_request(load_request, item.request_id)
     ab_result = (request or {}).get("ab_submit_result")
-    if not isinstance(ab_result, dict):
+    if not isinstance(ab_result, dict) or "success" not in ab_result:
         return _recover_needs_manual(
             batch_id,
             queue,
             item,
-            "未找到已保存的提交结果，请人工核验 Auto Bangumi 是否已创建订阅",
+            "未找到明确的提交结果，请人工核验 Auto Bangumi 是否已创建订阅",
             "requires_manual_recovery",
         )
 
+    if _is_success(ab_result):
+        next_queue = complete_queue_item_submit(
+            queue,
+            item.request_id,
+            BATCH_QUEUE_STATUS_SUCCEEDED,
+            ab_result_summary=_success_summary(ab_result),
+            now_factory=now_factory,
+        )
+        if persist_queue is not None:
+            persist_queue(next_queue)
+        return BatchSubmitResult(
+            batch_id=batch_id,
+            queue=next_queue,
+            items=[
+                BatchSubmitItemResult(
+                    item_id=item.item_id,
+                    request_id=item.request_id,
+                    title=item.title,
+                    status=RECOVER_OUTCOME_SUCCEEDED,
+                    reason="已根据保存的提交结果恢复为提交成功",
+                    attempts=item.attempts,
+                )
+            ],
+        )
+
+    # A persisted failure result: never mark it SUCCEEDED. Recover to
+    # RETRYABLE for transient AB errors, otherwise FAILED, keeping the
+    # sanitized one-line error summary on the queue item.
+    error = _result_error(ab_result)
+    error_type = str(error.get("error_type") or "ab_submit_failed")
+    retryable = _is_retryable_error_type(error_type)
+    queue_status = (
+        BATCH_QUEUE_STATUS_RETRYABLE if retryable else BATCH_QUEUE_STATUS_FAILED
+    )
+    reason = str(error.get("error_message") or "Auto Bangumi 提交失败")
     next_queue = complete_queue_item_submit(
         queue,
         item.request_id,
-        BATCH_QUEUE_STATUS_SUCCEEDED,
-        ab_result_summary=_success_summary(ab_result),
+        queue_status,
+        last_error={"error_type": error_type, "error_message": reason},
         now_factory=now_factory,
     )
     if persist_queue is not None:
@@ -505,8 +550,11 @@ def _recover_auto(
                 item_id=item.item_id,
                 request_id=item.request_id,
                 title=item.title,
-                status=RECOVER_OUTCOME_SUCCEEDED,
-                reason="已根据保存的提交结果恢复为提交成功",
+                status=(
+                    RECOVER_OUTCOME_RETRYABLE if retryable else RECOVER_OUTCOME_FAILED
+                ),
+                reason=reason,
+                error_type=error_type,
                 attempts=item.attempts,
             )
         ],
@@ -1063,6 +1111,7 @@ __all__ = [
     "RECOVER_ACTION_SUCCEEDED",
     "RECOVER_OUTCOME_FAILED",
     "RECOVER_OUTCOME_NEEDS_MANUAL",
+    "RECOVER_OUTCOME_RETRYABLE",
     "RECOVER_OUTCOME_SKIPPED",
     "RECOVER_OUTCOME_SUCCEEDED",
     "SUBMIT_OUTCOME_FAILED",

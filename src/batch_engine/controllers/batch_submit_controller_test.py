@@ -19,6 +19,7 @@ from batch_engine.controllers.batch_submit_controller import (
     RECOVER_ACTION_SUCCEEDED,
     RECOVER_OUTCOME_FAILED,
     RECOVER_OUTCOME_NEEDS_MANUAL,
+    RECOVER_OUTCOME_RETRYABLE,
     RECOVER_OUTCOME_SKIPPED,
     RECOVER_OUTCOME_SUCCEEDED,
     SUBMIT_OUTCOME_FAILED,
@@ -912,6 +913,157 @@ class TestRecoverBatchQueueItem:
         assert result.items[0].error_type == "requires_manual_recovery"
         # The queue is unchanged and stays SUBMITTING.
         assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
+
+    def test_auto_persisted_failure_never_marks_succeeded(self) -> None:
+        """Regression: a persisted FAILED result must never be auto-recovered
+        to SUCCEEDED (Auto Bangumi may not have created the subscription)."""
+        request = _accepted_request(request_id="req-1")
+        request["ab_submit_result"] = {
+            "success": False,
+            "ab_subscription_id": None,
+            "ab_response": None,
+            "fallback_config": None,
+            "error": {
+                "error_type": "ab_auth_failed",
+                "error_message": "Auto Bangumi 认证失败",
+                "failed_step": "submit_ab_subscription",
+                "details": {},
+            },
+        }
+        store = FakeRequestStore([request])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_AUTO)
+
+        assert result.items[0].status != RECOVER_OUTCOME_SUCCEEDED
+        assert result.items[0].status == RECOVER_OUTCOME_FAILED
+        assert result.items[0].error_type == "ab_auth_failed"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert result.queue.items[0].ab_result_summary is None
+
+    def test_auto_persisted_retryable_failure_recovers_to_retryable(self) -> None:
+        request = _accepted_request(request_id="req-1")
+        request["ab_submit_result"] = {
+            "success": False,
+            "ab_subscription_id": None,
+            "ab_response": None,
+            "fallback_config": None,
+            "error": {
+                "error_type": "ab_timeout",
+                "error_message": "Auto Bangumi 请求超时",
+                "failed_step": "submit_ab_subscription",
+                "details": {},
+            },
+        }
+        store = FakeRequestStore([request])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_AUTO)
+
+        assert result.items[0].status == RECOVER_OUTCOME_RETRYABLE
+        assert result.items[0].error_type == "ab_timeout"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_RETRYABLE
+        # The sanitized error summary is kept on the item.
+        assert "Auto Bangumi 请求超时" in (result.queue.items[0].last_error or "")
+
+    def test_auto_persisted_terminal_failure_recovers_to_failed(self) -> None:
+        request = _accepted_request(request_id="req-1")
+        request["ab_submit_result"] = {
+            "success": False,
+            "ab_subscription_id": None,
+            "ab_response": None,
+            "fallback_config": None,
+            "error": {
+                "error_type": "ab_submit_failed",
+                "error_message": "Auto Bangumi 提交失败",
+                "failed_step": "submit_ab_subscription",
+                "details": {},
+            },
+        }
+        store = FakeRequestStore([request])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_AUTO)
+
+        assert result.items[0].status == RECOVER_OUTCOME_FAILED
+        assert result.items[0].error_type == "ab_submit_failed"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+
+    def test_auto_result_without_success_key_needs_manual(self) -> None:
+        """A dict-shaped result without a clear success flag is not a legal
+        result object: fall back to manual verification, never SUCCEEDED."""
+        request = _accepted_request(request_id="req-1")
+        request["ab_submit_result"] = {"unexpected": "shape"}
+        store = FakeRequestStore([request])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_AUTO)
+
+        assert result.items[0].status == RECOVER_OUTCOME_NEEDS_MANUAL
+        assert result.items[0].error_type == "requires_manual_recovery"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
+
+    def test_auto_recovery_never_calls_auto_bangumi(self) -> None:
+        """Recovery is purely local queue finalization: no submit call exists
+        in the path and the queue is only updated through complete+persist."""
+        request = _accepted_request(request_id="req-1")
+        request["ab_submit_result"] = {
+            "success": True,
+            "ab_subscription_id": "ab-req-1",
+            "ab_response": {"id": "ab-req-1"},
+            "fallback_config": None,
+            "error": None,
+        }
+        store = FakeRequestStore([request])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+        persisted: list[BatchSubmissionQueue] = []
+
+        def persist_queue(q: BatchSubmissionQueue) -> None:
+            persisted.append(deepcopy(q))
+
+        result = recover_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            action=RECOVER_ACTION_AUTO,
+            load_request=store.load,
+            persist_queue=persist_queue,
+        )
+
+        assert result.items[0].status == RECOVER_OUTCOME_SUCCEEDED
+        assert len(persisted) == 1
+        assert persisted[0].items[0].status == BATCH_QUEUE_STATUS_SUCCEEDED
+        assert persisted[0].items[0].ab_result_summary is not None
+
+    def test_auto_recovered_error_summary_stays_sanitized(self) -> None:
+        """The recovered FAILED/RETRYABLE item keeps a sanitized error summary:
+        secrets inside the persisted result must never reach the queue."""
+        request = _accepted_request(request_id="req-1")
+        request["ab_submit_result"] = {
+            "success": False,
+            "ab_subscription_id": None,
+            "ab_response": None,
+            "fallback_config": None,
+            "error": {
+                "error_type": "ab_submit_failed",
+                "error_message": (
+                    "Auto Bangumi 提交失败 endpoint=https://ab.example.com "
+                    "token=secret-token"
+                ),
+                "failed_step": "submit_ab_subscription",
+                "details": {},
+            },
+        }
+        store = FakeRequestStore([request])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_AUTO)
+
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        last_error = result.queue.items[0].last_error or ""
+        assert "secret-token" not in last_error
+        assert "ab.example.com" not in last_error
+        assert "Auto Bangumi 提交失败" in last_error
 
     def test_manual_succeeded_resolves_result_persist_failed(self) -> None:
         store = FakeRequestStore([_accepted_request(request_id="req-1")])
