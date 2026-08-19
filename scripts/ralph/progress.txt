@@ -2,6 +2,7 @@
 Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
+- Stage 19 batch draft primitives live in `src/batch_engine`: `create_batch_draft(raw_input)` preserves each non-empty input line as `BatchDraftItem.raw_title`, assigns independent `item-*` IDs, defaults item status to `RAW`, and `update_batch_item_status` returns a new `BatchDraft` with only the matched item changed.
 - Stage 18 is complete and archived; active Ralph work is now `agent/stage19-batch-draft-workbench`. Stage 19 product direction is a batch seasonal-anime draft workbench: parse multiple shorthand titles, generate reviewable per-item cards, support single-card edit/accept, and keep Auto Bangumi/qBittorrent as execution systems rather than replacing them.
 - Stage 19 AI title parsing is a provider seam plus fake provider first: AI may generate candidate official titles/search queries/confidence/review flags, but must never silently select the final MiKan collection or accept a card. Manual candidate review and direct MiKan URL/ID fallback remain required safety paths.
 - The Request detail Seeds section renders 有效种子 (always-visible `.effective-seed-group` whose heading names the current selected subtitle group) -> 完整种子 (`<details class="complete-seed-details">`, grouped per-subtitle-group as `<details class="subgroup-seed-group">` with summary `<group> (N)`, collapsed by default, complete count derived client-side from each source's `seed_names` with a `combinedSeedNames(valid, excluded)` fallback) -> 排除种子 (`<details class="excluded-seed-details">`, collapsed by default). There are now TWO `.seed-details` elements, so browser assertions must scope to `.complete-seed-details` / `.excluded-seed-details` / `.effective-seed-group` / `.subgroup-seed-group`; collapsed `<details>` `inner_text()` only includes the summary, so expand a subgroup (`evaluate("element => element.open = true")`) before asserting seed titles or `无种子标题。`.
@@ -517,4 +518,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Gotcha encountered: the `**/api/v1/requests` route glob matches the generation POST but NOT `/api/v1/requests/preview-modify` or `/api/v1/requests/preview-save`, so the mocked generation handler must `route.continue_()` non-POST requests while the preview-modify/preview-save calls pass through to the real Flask backend (same gotcha as US-127).
   - Gotcha encountered: after the Stage 18 Chinese-ization, the README manual verification item 4 still said `Request 工作台`; it now reads `订阅方案工作台`. Doc sweeps must check the manual-verification checklist, not just the prose sections.
   - Useful context: with US-131 done all Stage 18 stories in `scripts/ralph/prd.json` are `passes: true`; the next backlog priority is BL-010 (AI 番剧名解析与搜索词增强), which must remain an optional enhancement that never auto-selects a candidate.
+---
+## 2026-08-19 15:25:55 CST - US-132
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added the Stage 19 batch draft data contract: immutable `BatchDraft` and `BatchDraftItem` dataclasses with `batch_id`, `raw_input`, `items`, `item_id`, `raw_title`, and `status` fields; new items default to `RAW`.
+- Added `create_batch_draft(raw_input)` to split multiline input, ignore empty/whitespace-only lines, preserve every non-empty line exactly as typed, and assign independent `item-*` IDs; injectable ID factories keep tests deterministic.
+- Added `update_batch_item_status(batch, item_id, status)` as the single-item state-change helper; it returns a new batch and changes only the matched item, leaving other items and the original batch unchanged.
+- Files changed: `src/batch_engine/__init__.py`, `src/batch_engine/controllers/__init__.py`, `src/batch_engine/controllers/batch_draft_controller.py`, `src/batch_engine/controllers/batch_draft_controller_test.py`, `src/batch_engine/models/__init__.py`, `pyproject.toml`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src tests` passed; `uv run pytest src/batch_engine/controllers/batch_draft_controller_test.py -q` passed with 7 tests; `uv run pytest -q` passed with 441 tests and 202 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: not applicable for US-132 because it is model/controller-only and has no Web UI behavior.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep Stage 19 batch-workbench primitives in `batch_engine` so later AI parsing, API, and UI stories can reuse the same line-splitting and per-item identity contract without depending on MiKan or Web modules.
+  - Pattern discovered: injectable ID factories make batch parsing tests deterministic while production still uses UUID-backed `batch-*` and `item-*` IDs.
+  - Gotcha encountered: item lookup must track "found" separately from equality of the returned list, because setting an item to its existing status should still be treated as a valid update.
+  - Useful context: US-133 should build its AI title parsing seam on top of `BatchDraftItem.raw_title` and leave final MiKan candidate selection manual/reviewable.
 ---

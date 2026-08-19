@@ -16,7 +16,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先建立 batch/item 原子数据契约；不要在本 story 接入 Web UI 或 MiKan 搜索。"
     },
     {
