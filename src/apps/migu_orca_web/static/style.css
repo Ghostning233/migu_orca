@@ -186,6 +186,64 @@ h2 {
   margin-top: 12px;
 }
 
+.batch-workbench-entry {
+  border-bottom: 1px solid #d8dde5;
+  display: grid;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+}
+
+.section-heading h3 {
+  font-size: 0.98rem;
+  margin: 0;
+}
+
+textarea {
+  min-height: 140px;
+  resize: vertical;
+}
+
+.batch-result-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.batch-result-item {
+  align-items: start;
+  background: #ffffff;
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  display: grid;
+  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+
+.batch-result-item strong {
+  overflow-wrap: anywhere;
+}
+
+.batch-status {
+  background: #edf3f7;
+  border: 1px solid #c8d5df;
+  border-radius: 12px;
+  color: #22577a;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.batch-result-meta {
+  color: #586273;
+  font-size: 0.86rem;
+  grid-column: 1 / -1;
+}
+
 .candidate-list {
   display: grid;
   gap: 12px;

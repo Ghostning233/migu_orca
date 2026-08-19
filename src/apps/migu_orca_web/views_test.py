@@ -215,6 +215,18 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-candidate-search-form"' in html
     assert 'id="mikan-candidate-query"' in html
     assert 'name="mikan_candidate_title"' in html
+    assert 'id="batch-workbench-entry"' in html
+    assert 'id="batch-parse-form"' in html
+    assert 'id="batch-raw-input"' in html
+    assert 'name="batch_raw_input"' in html
+    assert "批量新番草案" in html
+    assert "萌王S4" in html
+    assert "路哥S4" in html
+    assert "杖剑谭S2" in html
+    assert "邻家天使S2" in html
+    assert 'id="batch-parse-submit"' in html
+    assert 'id="batch-parse-result"' in html
+    assert 'id="batch-parse-error"' in html
     assert 'id="mikan-candidate-search-endpoint"' not in html
     assert 'id="mikan-candidate-timeout-seconds"' not in html
     assert 'name="mikan_candidate_search_endpoint"' not in html
@@ -462,6 +474,27 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "save_request: false" in script
     assert "http://" not in script
     assert "https://" not in script
+
+
+def test_static_app_script_wires_batch_parse_entry() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "/api/v1/batches/parse" in script
+    assert "batch-parse-form" in script
+    assert "batch-raw-input" in script
+    assert "batch-parse-submit" in script
+    assert "batch-parse-result" in script
+    assert "batch-parse-error" in script
+    assert "parseBatchDraft" in script
+    assert "raw_input: rawInput" in script
+    assert "批量获取前必须输入至少一个番剧名称" in script
+    assert "正在解析批量番剧名称" in script
+    assert "解析状态：" in script
+    assert "batchStatusLabel" in script
+    assert "已解析" in script
+    assert "解析失败" in script
 
 
 def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:

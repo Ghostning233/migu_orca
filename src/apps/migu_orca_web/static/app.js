@@ -46,6 +46,11 @@
   const candidateFallbackInput = document.getElementById("mikan-fallback-bangumi");
   const candidateFallbackError = document.getElementById("mikan-fallback-error");
   const candidateFallbackGenerate = document.getElementById("mikan-fallback-generate");
+  const batchParseForm = document.getElementById("batch-parse-form");
+  const batchRawInput = document.getElementById("batch-raw-input");
+  const batchParseError = document.getElementById("batch-parse-error");
+  const batchParseResult = document.getElementById("batch-parse-result");
+  const batchParseSubmit = document.getElementById("batch-parse-submit");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -731,6 +736,166 @@
 
   if (!form) {
     return;
+  }
+
+  function batchStatusLabel(status) {
+    const labels = {
+      RAW: "待解析",
+      PARSED: "已解析",
+      FAILED: "解析失败",
+      NEEDS_REVIEW: "待确认",
+      DRAFT: "草案",
+      READY: "待接受",
+      ACCEPTED: "已接受",
+    };
+    const value = fieldValue(status);
+    return Object.prototype.hasOwnProperty.call(labels, value)
+      ? labels[value]
+      : value;
+  }
+
+  function setBatchParseError(message, field) {
+    if (!batchParseError) {
+      return;
+    }
+    batchParseError.textContent = message;
+    batchParseError.hidden = false;
+    if (batchRawInput) {
+      batchRawInput.removeAttribute("aria-invalid");
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearBatchParseError() {
+    if (!batchParseError) {
+      return;
+    }
+    batchParseError.textContent = "";
+    batchParseError.hidden = true;
+    if (batchRawInput) {
+      batchRawInput.removeAttribute("aria-invalid");
+    }
+  }
+
+  function setBatchParseResult(message, className) {
+    if (!batchParseResult) {
+      return;
+    }
+    batchParseResult.className = className || "empty-state compact-state";
+    batchParseResult.replaceChildren();
+    batchParseResult.textContent = message;
+  }
+
+  function setBatchParseInFlight(isInFlight) {
+    if (batchRawInput) {
+      batchRawInput.disabled = isInFlight;
+    }
+    if (batchParseSubmit) {
+      batchParseSubmit.disabled = isInFlight;
+      batchParseSubmit.textContent = isInFlight
+        ? "正在获取..."
+        : "获取批量草案";
+    }
+  }
+
+  function buildBatchParsePayload() {
+    const rawInput = batchRawInput ? batchRawInput.value : "";
+    if (!rawInput.trim()) {
+      const error = new Error("批量获取前必须输入至少一个番剧名称。");
+      error.field = batchRawInput;
+      throw error;
+    }
+    return {raw_input: rawInput};
+  }
+
+  function renderBatchParseItems(items) {
+    const rows = Array.isArray(items) ? items : [];
+    if (!rows.length) {
+      setBatchParseResult(
+        "没有可展示的批量解析结果。",
+        "empty-state compact-state",
+      );
+      return;
+    }
+
+    batchParseResult.className = "batch-result-list-wrapper";
+    batchParseResult.replaceChildren();
+
+    const list = document.createElement("ul");
+    list.className = "batch-result-list";
+    for (const row of rows) {
+      const item = document.createElement("li");
+      item.className = "batch-result-item";
+
+      const title = document.createElement("strong");
+      title.textContent = safeText(row.raw_title) || "未命名条目";
+
+      const status = document.createElement("span");
+      status.className = "batch-status";
+      status.textContent = batchStatusLabel(row.status);
+
+      const meta = document.createElement("div");
+      meta.className = "batch-result-meta";
+      meta.textContent = "解析状态：" + batchStatusLabel(row.status);
+
+      item.append(title, status, meta);
+      list.appendChild(item);
+    }
+    batchParseResult.appendChild(list);
+  }
+
+  async function parseBatchDraft(event) {
+    event.preventDefault();
+    clearBatchParseError();
+    let payload;
+    try {
+      payload = buildBatchParsePayload();
+    } catch (validationError) {
+      setBatchParseError(
+        validationError.message || "批量草案表单校验失败。",
+        validationError.field,
+      );
+      setBatchParseResult(
+        "请修正批量输入后再获取草案。",
+        "error-state compact-state",
+      );
+      return;
+    }
+
+    setBatchParseInFlight(true);
+    setBatchParseResult(
+      "正在解析批量番剧名称...",
+      "loading-state compact-state",
+    );
+    try {
+      const result = await fetchJson("/api/v1/batches/parse", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      const items = (result && result.items) || [];
+      renderBatchParseItems(items);
+      showNotification(
+        "success",
+        "批量草案已获取",
+        "已返回 " + items.length + " 个条目的解析状态。",
+      );
+    } catch (error) {
+      setBatchParseResult(
+        "批量草案获取失败。请稍后重试。",
+        "error-state compact-state",
+      );
+      notifyApiError("批量草案获取失败", error);
+    } finally {
+      setBatchParseInFlight(false);
+    }
+  }
+
+  if (batchParseForm) {
+    batchParseForm.addEventListener("submit", parseBatchDraft);
   }
 
   function setCandidateSearchError(message, field) {

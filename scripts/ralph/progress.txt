@@ -2,6 +2,7 @@
 Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
+- Stage 19 batch UI starts with a lightweight `/index` entry that posts only `{raw_input}` to `POST /api/v1/batches/parse`, preserves the multiline text in the request body, and renders per-item `raw_title` plus Chinese status labels; full card grids, deletion, expand/modify, and accept actions belong to later stories.
 - Stage 19 batch candidate orchestration stays in `POST /api/v1/batches/parse`: after `parse_anime_title`, call the shared `_search_mikan_candidates(query, config)` for each normalized `search_queries` entry, dedupe candidates per item by `(bangumi_id, mikan_url)`, serialize only public candidate fields, and represent MiKan failures as per-item `FAILED` results with sanitized errors.
 - Stage 19 AI title parsing lives in `src/batch_engine/controllers/anime_title_parser.py`: inject an `AnimeTitleParsingProvider`, use `parse_anime_title(raw_title, provider)` for normalized `AnimeTitleParseResult`, and keep provider failures as sanitized recoverable `Stage1Error(failed_step="ai_title_parse")`; fake mappings are deterministic and never call a real LLM.
 - Stage 19 batch draft primitives live in `src/batch_engine`: `create_batch_draft(raw_input)` preserves each non-empty input line as `BatchDraftItem.raw_title`, assigns independent `item-*` IDs, defaults item status to `RAW`, and `update_batch_item_status` returns a new `BatchDraft` with only the matched item changed.
@@ -577,4 +578,18 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: candidate-search failures belong to the affected item, not the top-level batch response; preserving parsed metadata on a `FAILED` item gives later UI cards enough context to show what needs review.
   - Gotcha encountered: once batch parsing calls MiKan search, parse-only tests must stub `_search_batch_item_candidates` or fake `create_mikan_client`; otherwise they would attempt the default real MiKan path.
   - Useful context: item-level error serialization now runs `sanitize_error_data` plus the local sensitive-field stripper, including `magnet:?` value redaction, before embedding details in a successful response envelope.
+---
+## 2026-08-19 15:50:40 CST - US-136
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added the `/index` Stage 19 batch input entry inside the existing generate panel: a multiline `#batch-raw-input` textarea with examples `萌王S4` / `路哥S4` / `杖剑谭S2` / `邻家天使S2`, local empty-input validation, a `获取批量草案` submit action, and an aria-live result area.
+- Wired `app.js` to submit only `{raw_input}` to `POST /api/v1/batches/parse`, preserve multiline input exactly in the payload, show Chinese loading/failure/success states, and render each returned item as a simple row with `raw_title` plus Chinese parse status (`已解析` / `解析失败` / etc.).
+- Added focused CSS for the batch entry and result rows, plus static and Playwright browser tests covering visibility, multiline examples, empty-input validation without API calls, loading/result states, raw payload shape, and raw title/status rendering.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src tests` passed; `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed with 95 tests; `uv run pytest -q` passed with 457 tests and 205 skipped browser tests; `uv run pytest tests/browser/ -q` collected 205 browser tests and skipped them because Chromium is not available in this environment.
+- Browser verification note: `dev-browser` verification was attempted through the project's Playwright suite, but Chromium is unavailable here, so all browser tests skipped with the suite's "Browser not available" message. Manual verification can use `uv run flask --app wsgi:app run` and `/index` if a browser is available.
+- **Learnings for future iterations:**
+  - Pattern discovered: Stage 19's first batch UI should stay parse-result-only and avoid introducing card behavior early; later stories can replace or extend `.batch-result-item` rendering into real cards while keeping the same `POST /api/v1/batches/parse` contract.
+  - Pattern discovered: batch status values should be mapped with a dedicated UI helper (`batchStatusLabel`) instead of rendering internal status codes directly.
+  - Gotcha encountered: adding controls before the dev fixture panel can affect browser keyboard-navigation order; the current 20-Tab limit still appears sufficient, but future always-visible fields before the fixture form may need another a11y test adjustment.
+  - Useful context: browser tests are present in `tests/browser/test_batch_workbench.py`, but this environment skipped them because Chromium is not installed/available.
 ---

@@ -85,7 +85,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "只展示解析结果，不要求本 story 生成完整订阅草案卡片。"
     },
     {
