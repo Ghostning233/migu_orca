@@ -34,7 +34,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "只做后端接受和队列入列；不要在本 story 实现批量提交。"
     },
     {
