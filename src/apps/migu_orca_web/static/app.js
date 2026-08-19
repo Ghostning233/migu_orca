@@ -888,6 +888,10 @@
     return canExpandBatchCard(row) && Boolean(batchCardRequest(row));
   }
 
+  function canAcceptBatchCard(row) {
+    return canExpandBatchCard(row) && Boolean(batchCardRequest(row));
+  }
+
   function updateBatchCardRequest(itemId, modified) {
     if (!itemId || !modified) {
       return;
@@ -909,6 +913,85 @@
       return next;
     });
     renderBatchParseItems(batchDraftCards);
+  }
+
+  function markBatchCardAccepted(itemId, acceptedRequest) {
+    if (!itemId || !acceptedRequest) {
+      return;
+    }
+    batchDraftCards = batchDraftCards.map((row) => {
+      if (row.item_id !== itemId) {
+        return row;
+      }
+      const next = Object.assign({}, row);
+      next.status = "ACCEPTED";
+      next.request = acceptedRequest;
+      delete next.preview_request;
+      delete next.draft_request;
+      next.confirmable_config =
+        acceptedRequest.confirmable_config || row.confirmable_config;
+      next.source_info = acceptedRequest.source_info || row.source_info;
+      return next;
+    });
+    renderBatchParseItems(batchDraftCards);
+  }
+
+  async function savePreviewDraftRequest(request) {
+    const result = await fetchJson("/api/v1/requests/preview-save", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        request: request,
+        storage_dir: currentStorageDir() || null,
+      }),
+    });
+    return result && result.request;
+  }
+
+  async function acceptSavedRequest(requestId) {
+    if (!requestId) {
+      throw new Error("订阅草案缺少 request_id。");
+    }
+    const result = await fetchJson(
+      apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/accept"),
+      {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({storage_dir: currentStorageDir() || null}),
+      },
+    );
+    return result && result.request;
+  }
+
+  async function acceptBatchCard(row) {
+    const request = batchCardRequest(row);
+    if (!request) {
+      showNotification(
+        "error",
+        "接受失败",
+        "当前卡片缺少订阅草案，无法接受。",
+      );
+      return;
+    }
+    hideNotification();
+    setBatchParseInFlight(true);
+    try {
+      const savedRequest = row.request
+        ? request
+        : await savePreviewDraftRequest(request);
+      const acceptedRequest = await acceptSavedRequest(savedRequest.request_id);
+      markBatchCardAccepted(row.item_id, acceptedRequest);
+      await loadList({loadSelectedDetail: false});
+      showNotification(
+        "success",
+        "接受成功",
+        "当前批量卡片已标记为已接受，其他卡片保持不变。",
+      );
+    } catch (error) {
+      notifyApiError("接受失败", error);
+    } finally {
+      setBatchParseInFlight(false);
+    }
   }
 
   function setPreviewEditError(message) {
@@ -1005,6 +1088,21 @@
     });
     actions.appendChild(modifyButton);
 
+    const acceptButton = document.createElement("button");
+    acceptButton.type = "button";
+    acceptButton.className = "primary-button batch-card-accept";
+    acceptButton.textContent = "接受";
+    acceptButton.disabled = !canAcceptBatchCard(row);
+    if (acceptButton.disabled) {
+      acceptButton.title = "生成订阅草案后可接受";
+    }
+    acceptButton.addEventListener("click", function () {
+      if (window.confirm("确认接受当前批量卡片？")) {
+        acceptBatchCard(row);
+      }
+    });
+    actions.appendChild(acceptButton);
+
     panel.append(filterBlock, seedsBlock, actions);
     return panel;
   }
@@ -1025,6 +1123,9 @@
     removeButton.setAttribute("aria-label", "删除 " + (safeText(row.raw_title) || "批量条目"));
     removeButton.title = "删除";
     removeButton.textContent = "×";
+    if (fieldValue(row.status) === "ACCEPTED") {
+      removeButton.hidden = true;
+    }
     removeButton.addEventListener("click", () => {
       deleteBatchCard(row.item_id);
     });
@@ -2343,17 +2444,10 @@
       // accepts PENDING_CONFIRM drafts, so the saved object enters the existing
       // confirmation flow and can then be confirmed, cancelled, modified, or
       // deleted like any other saved Request.
-      const result = await fetchJson("/api/v1/requests/preview-save", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          request: request,
-          storage_dir: currentStorageDir() || null,
-        }),
-      });
-      const generatedRequestId = result.request && result.request.request_id;
+      const savedRequest = await savePreviewDraftRequest(request);
+      const generatedRequestId = savedRequest && savedRequest.request_id;
       selectedRequestId = generatedRequestId;
-      renderDetailPayload(result);
+      renderDetailPayload({request: savedRequest, summary: null});
       await loadList({loadSelectedDetail: false});
       syncRequestIdToUrl(selectedRequestId);
       showNotification("success", "保存成功", "已保存订阅草案 " + selectedRequestId, {

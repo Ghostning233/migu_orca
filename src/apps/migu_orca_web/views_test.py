@@ -498,6 +498,10 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "batchCardRequest" in script
     assert "openBatchCardModify" in script
     assert "updateBatchCardRequest" in script
+    assert "acceptBatchCard" in script
+    assert "markBatchCardAccepted" in script
+    assert "savePreviewDraftRequest" in script
+    assert "acceptSavedRequest" in script
     assert "renderBatchCardReviewPanel" in script
     assert "canExpandBatchCard" in script
     assert "deleteBatchCard" in script
@@ -505,7 +509,10 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "batch-card-grid" in script
     assert "batch-card-review" in script
     assert "batch-card-modify" in script
+    assert "batch-card-accept" in script
     assert "当前批量卡片已回流最新订阅草案" in script
+    assert "当前批量卡片已标记为已接受，其他卡片保持不变" in script
+    assert "确认接受当前批量卡片" in script
     assert "当前字幕组" in script
     assert "有效种子（当前选中字幕组：" in script
     assert "排除种子 (" in script

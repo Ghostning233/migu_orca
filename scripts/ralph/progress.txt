@@ -2,6 +2,7 @@
 Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
+- Stage 19 batch card accept keeps Request state transitions centralized: for preview/draft cards, first persist the in-memory PENDING_CONFIRM Request through `/api/v1/requests/preview-save`, then call the existing `/api/v1/requests/<request_id>/accept`; update only the matching `batchDraftCards` item by `item_id`, set card status to `ACCEPTED`, and hide unconfirmed delete on accepted cards.
 - Stage 19 batch card modification reuses the unsaved preview detail flow: attach a request object on the card (`request`/`preview_request`/`draft_request`), open `renderDetailPayload(..., {preview: true, batchItemId})`, let `/api/v1/requests/preview-modify` recompute filters/seeds, then merge only the returned request data back into the matching `batchDraftCards` entry.
 - Stage 19 batch UI posts only `{raw_input}` to `POST /api/v1/batches/parse`, preserves multiline input exactly, keeps returned items in front-end memory as `batchDraftCards`, renders public API fields into `.batch-draft-card` entries in a scrollable `.batch-card-grid`, filters delete client-side by `item_id`, and expands only `DRAFT`/`READY` cards to show whitelisted `confirmable_config`/`source_info` filter and seed summaries.
 - Stage 19 batch candidate orchestration stays in `POST /api/v1/batches/parse`: after `parse_anime_title`, call the shared `_search_mikan_candidates(query, config)` for each normalized `search_queries` entry, dedupe candidates per item by `(bangumi_id, mikan_url)`, serialize only public candidate fields, and represent MiKan failures as per-item `FAILED` results with sanitized errors.
@@ -634,4 +635,18 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: card-local updates should map over `batchDraftCards` by `item_id` and replace only the request-bearing field (`request`, `draft_request`, or `preview_request`) plus whitelisted `confirmable_config`/`source_info` mirrors, so sibling card status/content stays stable.
   - Gotcha encountered: failure handling for batch-card preview edits must not replace the detail container with a terminal error state; re-render the existing preview form and set `#preview-edit-error` so the user can retry without losing the card context.
   - Useful context: browser tests for this story are present in `tests/browser/test_batch_workbench.py`, but this environment still skips them because Chromium is not installed/available.
+---
+## 2026-08-19 16:13:57 CST - US-140
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added a per-card `接受` action for DRAFT/READY batch cards that carry a Request object. Preview/draft cards are saved through the existing preview-save endpoint before calling the existing Request accept endpoint, so confirmation/history behavior stays on the shared Request path.
+- Successful accept updates only the matching `batchDraftCards` item by `item_id`, changes its status to `ACCEPTED`, stores the accepted Request, refreshes the saved list, and leaves sibling card state unchanged.
+- Accepted batch cards display the Chinese status `已接受`, disable expansion under the current DRAFT/READY-only review rule, and hide the previous no-confirm delete button.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src tests` passed; focused `uv run pytest src/apps/migu_orca_web/views_test.py tests/browser/test_batch_workbench.py -q` passed with 95 tests and 11 skipped browser tests; full `uv run pytest -q` passed with 457 tests and 213 skipped browser tests; `uv run pytest tests/browser/ -q` collected 213 browser tests and skipped them because Chromium is not available in this environment.
+- Browser verification note: used the `dev-browser` skill path. Real Chromium verification could not execute here because Chromium is unavailable; manual fallback is `uv run flask --app wsgi:app run` then verify `/index` batch card expansion -> 接受 in an environment with a browser.
+- **Learnings for future iterations:**
+  - Pattern discovered: accept a batch preview card by composing preview-save and the existing Request accept endpoint; do not add a batch-only accept state machine.
+  - Pattern discovered: card-local status transitions should replace only the matched `item_id` and keep the full accepted Request on `row.request`, clearing preview/draft fields so later UI reads the accepted source of truth.
+  - Gotcha encountered: accepted batch cards should not keep a no-confirm delete affordance; hiding the delete button is the simplest current fit because Stage 19 does not require accepted-card deletion.
+  - Useful context: browser coverage for this story lives in `tests/browser/test_batch_workbench.py`, but this environment still skips Playwright execution because Chromium is not installed/available.
 ---

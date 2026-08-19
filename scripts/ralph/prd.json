@@ -158,7 +158,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Stage 20 再做批量接受和 AB 提交队列。"
     },
     {

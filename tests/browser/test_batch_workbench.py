@@ -437,6 +437,96 @@ class TestBatchWorkbenchEntry:
         assert after == before
         assert calls and calls[0]["request"]["request_id"] == "req-batch-fail"
 
+    def test_batch_card_accept_updates_only_current_card(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        first_preview = _preview_request("咒术回战", "req-batch-accept")
+        second_preview = _preview_request("咒术回战", "req-batch-other")
+        saved_calls: list[dict[str, Any]] = []
+        accept_calls: list[dict[str, Any]] = []
+
+        def _fulfill_batch(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        _reviewable_batch_item(
+                            item_id="item-accept", preview_request=first_preview
+                        ),
+                        _batch_item(
+                            "item-other",
+                            "路哥S4",
+                            status="DRAFT",
+                            canonical_title="实力至上主义教室 第四季",
+                            preview_request=second_preview,
+                        ),
+                    ]
+                ),
+            )
+
+        def _save_preview(route: Any, request: Any) -> None:
+            payload = json.loads(request.post_data or "{}")
+            saved_calls.append(payload)
+            saved = dict(payload["request"])
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "request": saved,
+                            "summary": {"request_id": saved["request_id"]},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        def _accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            accepted = dict(first_preview)
+            accepted["status"] = "ACCEPTED"
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "request": accepted,
+                            "summary": {"request_id": accepted["request_id"]},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill_batch)
+        page.route("**/api/v1/requests/preview-save", _save_preview)
+        page.route("**/api/v1/requests/req-batch-accept/accept", _accept)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4\n路哥S4")
+        page.click("#batch-parse-submit")
+
+        first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+        second_card = page.locator(".batch-draft-card", has_text="路哥S4")
+        first_card.locator(".batch-card-expand").click()
+        page.once("dialog", lambda dialog: dialog.accept())
+        first_card.locator(".batch-card-accept").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+        second_card = page.locator(".batch-draft-card", has_text="路哥S4")
+        expect(first_card.locator(".batch-card-status")).to_contain_text("已接受")
+        expect(first_card.locator(".batch-card-delete")).to_be_hidden()
+        expect(first_card.locator(".batch-card-expand")).to_be_disabled()
+        expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
+        expect(second_card.locator(".batch-card-delete")).to_be_visible()
+        assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-batch-accept"
+        assert accept_calls and accept_calls[0]["storage_dir"] is None
+
     def test_batch_card_grid_uses_single_column_on_narrow_screen(
         self, page: Page, live_server_url: str
     ) -> None:
