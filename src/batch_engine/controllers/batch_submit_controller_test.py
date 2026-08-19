@@ -14,6 +14,13 @@ from batch_engine.controllers.batch_queue_controller import (
     start_queue_item_submit,
 )
 from batch_engine.controllers.batch_submit_controller import (
+    RECOVER_ACTION_AUTO,
+    RECOVER_ACTION_FAILED,
+    RECOVER_ACTION_SUCCEEDED,
+    RECOVER_OUTCOME_FAILED,
+    RECOVER_OUTCOME_NEEDS_MANUAL,
+    RECOVER_OUTCOME_SKIPPED,
+    RECOVER_OUTCOME_SUCCEEDED,
     SUBMIT_OUTCOME_FAILED,
     SUBMIT_OUTCOME_RETRYABLE,
     SUBMIT_OUTCOME_SKIPPED,
@@ -21,6 +28,7 @@ from batch_engine.controllers.batch_submit_controller import (
     SUBMIT_PERSIST_ERROR_TYPE,
     BatchSubmitItemResult,
     compose_ab_submit_one,
+    recover_batch_queue_item,
     retry_batch_queue_item,
     serialize_batch_submit_result,
     submit_batch_queue_items,
@@ -28,6 +36,7 @@ from batch_engine.controllers.batch_submit_controller import (
 from batch_engine.models import (
     BATCH_QUEUE_STATUS_FAILED,
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+    BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED,
     BATCH_QUEUE_STATUS_RETRYABLE,
     BATCH_QUEUE_STATUS_SUBMITTING,
     BATCH_QUEUE_STATUS_SUCCEEDED,
@@ -613,6 +622,28 @@ def _submitting_queue_item(request_id: str = "req-1") -> BatchQueueItem:
     return queue.items[0]
 
 
+def _result_persist_failed_item(request_id: str = "req-1") -> BatchQueueItem:
+    """Build a RESULT_PERSIST_FAILED queue item (AB call happened, local result
+    persistence failed — the ambiguous, non-retryable state)."""
+    queue = _queue(request_ids=[request_id])
+    queue = start_queue_item_submit(
+        queue,
+        request_id,
+        now_factory=lambda: "2026-08-19T00:01:00+00:00",
+    )
+    queue = complete_queue_item_submit(
+        queue,
+        request_id,
+        BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED,
+        last_error={
+            "error_type": SUBMIT_PERSIST_ERROR_TYPE,
+            "error_message": "保存 Auto Bangumi 提交结果失败",
+        },
+        now_factory=lambda: "2026-08-19T00:02:00+00:00",
+    )
+    return queue.items[0]
+
+
 class TestPersistHooks:
     """Reliability hooks: SUBMITTING flush before submit, final status after,
     and per-item AB-result persistence into Request/ab_results."""
@@ -760,11 +791,16 @@ class TestPersistHooks:
             persist_submit_result=persist_submit_result,
         )
 
-        # req-1: AB succeeded but persistence failed -> FAILED, not retryable.
+        # req-1: AB succeeded but persistence failed -> RESULT_PERSIST_FAILED,
+        # a dedicated non-retryable state (never a normal FAILED that can be
+        # blindly retried into a duplicate subscription).
         assert result.items[0].status == SUBMIT_OUTCOME_FAILED
         assert result.items[0].error_type == SUBMIT_PERSIST_ERROR_TYPE
         assert result.items[0].reason == "保存 Auto Bangumi 提交结果失败"
-        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert (
+            result.queue.items[0].status
+            == BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED
+        )
         # req-2 keeps processing and succeeds.
         assert result.items[1].status == SUBMIT_OUTCOME_SUCCEEDED
         assert result.queue.items[1].status == BATCH_QUEUE_STATUS_SUCCEEDED
@@ -825,6 +861,160 @@ class TestPersistHooks:
         assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
         assert result.items[0].reason == "提交中，跳过本次提交"
         assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
+
+
+class TestRecoverBatchQueueItem:
+    """Explicit recovery for stuck states (SUBMITTING / RESULT_PERSIST_FAILED)."""
+
+    def _recover(
+        self,
+        queue,
+        store,
+        request_id: str = "req-1",
+        action: str = "auto",
+    ):
+        return recover_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id=request_id,
+            action=action,
+            load_request=store.load,
+        )
+
+    def test_auto_recovers_submitting_with_persisted_result(self) -> None:
+        request = _accepted_request(request_id="req-1")
+        request["ab_submit_result"] = {
+            "success": True,
+            "ab_subscription_id": "ab-req-1",
+            "ab_response": {"id": "ab-req-1"},
+            "fallback_config": None,
+            "error": None,
+        }
+        store = FakeRequestStore([request])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_AUTO)
+
+        assert result.items[0].status == RECOVER_OUTCOME_SUCCEEDED
+        assert result.items[0].reason == "已根据保存的提交结果恢复为提交成功"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUCCEEDED
+        assert "ab_subscription_id=ab-req-1" in (
+            result.queue.items[0].ab_result_summary or ""
+        )
+
+    def test_auto_needs_manual_without_persisted_result(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_AUTO)
+
+        assert result.items[0].status == RECOVER_OUTCOME_NEEDS_MANUAL
+        assert result.items[0].error_type == "requires_manual_recovery"
+        # The queue is unchanged and stays SUBMITTING.
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
+
+    def test_manual_succeeded_resolves_result_persist_failed(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue_with_item(_result_persist_failed_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_SUCCEEDED)
+
+        assert result.items[0].status == RECOVER_OUTCOME_SUCCEEDED
+        assert result.items[0].reason == "人工核验确认 Auto Bangumi 已创建订阅，标记为提交成功"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUCCEEDED
+
+    def test_manual_failed_resolves_submitting_to_retryable_failed(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_FAILED)
+
+        assert result.items[0].status == RECOVER_OUTCOME_FAILED
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert result.queue.items[0].last_error == (
+            "error_message=人工核验：Auto Bangumi 未创建订阅，标记为可重试失败; "
+            "error_type=manual_recovery_failed"
+        )
+
+    def test_recover_skips_non_stuck_statuses(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue_with_item(_succeeded_queue_item("req-1"))
+
+        result = self._recover(queue, store, action=RECOVER_ACTION_SUCCEEDED)
+
+        assert result.items[0].status == RECOVER_OUTCOME_SKIPPED
+        assert result.items[0].reason == "已提交成功，无需恢复"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUCCEEDED
+
+    def test_recover_unknown_request_raises(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        with pytest.raises(ValueError):
+            self._recover(queue, store, request_id="req-unknown")
+
+    def test_recover_invalid_action_raises(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue_with_item(_submitting_queue_item("req-1"))
+
+        with pytest.raises(ValueError):
+            self._recover(queue, store, action="invalid")
+
+    def test_result_persist_failed_cannot_be_retried(self) -> None:
+        """High-priority regression: RESULT_PERSIST_FAILED must never share the
+        normal FAILED retry path (a retry could re-create the subscription)."""
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue_with_item(_result_persist_failed_item("req-1"))
+        submit_calls: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            submit_calls.append(request["request_id"])
+            return _success_submit(request, ab_config)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        assert submit_calls == []
+        assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
+        assert (
+            result.items[0].reason
+            == "结果保存失败，需人工核验后恢复，不可直接重试"
+        )
+        assert (
+            result.queue.items[0].status == BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED
+        )
+
+    def test_result_persist_failed_item_skipped_in_batch_submit(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue_with_item(_result_persist_failed_item("req-1"))
+        submit_calls: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            submit_calls.append(request["request_id"])
+            return _success_submit(request, ab_config)
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        assert submit_calls == []
+        assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
+        assert (
+            result.items[0].reason == "结果保存失败，跳过本次提交，请先恢复"
+        )
+        assert (
+            result.queue.items[0].status == BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED
+        )
 
 
 class TestEmptyAndValidation:
@@ -1220,7 +1410,7 @@ class TestRetryBatchQueueItem:
         )
 
         assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
-        assert result.items[0].reason == "提交中，请稍后再试"
+        assert result.items[0].reason == "提交中，请先恢复或稍后再试"
         assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
 
     def test_retry_missing_request_marks_failed_without_attempt_increment(self) -> None:

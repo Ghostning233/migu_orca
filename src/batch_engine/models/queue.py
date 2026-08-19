@@ -17,6 +17,7 @@ BATCH_QUEUE_STATUS_SUBMITTING = "SUBMITTING"
 BATCH_QUEUE_STATUS_SUCCEEDED = "SUCCEEDED"
 BATCH_QUEUE_STATUS_FAILED = "FAILED"
 BATCH_QUEUE_STATUS_RETRYABLE = "RETRYABLE"
+BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED = "RESULT_PERSIST_FAILED"
 
 #: Chinese display labels for the supported queue statuses.
 BATCH_QUEUE_STATUS_LABELS: dict[str, str] = {
@@ -25,11 +26,18 @@ BATCH_QUEUE_STATUS_LABELS: dict[str, str] = {
     BATCH_QUEUE_STATUS_SUCCEEDED: "提交成功",
     BATCH_QUEUE_STATUS_FAILED: "提交失败",
     BATCH_QUEUE_STATUS_RETRYABLE: "可重试",
+    BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED: "结果保存失败",
 }
 
 #: Allowed status transitions. SUCCEEDED is terminal; FAILED/RETRYABLE can be
 #: retried (back to SUBMITTING); a READY item can be marked FAILED/RETRYABLE
 #: directly when pre-submit validation rejects it before any submit attempt.
+#: RESULT_PERSIST_FAILED is the ambiguous state after an Auto Bangumi call whose
+#: local result persistence failed — it is never retried automatically and can
+#: only be resolved through explicit recovery (to SUCCEEDED after manual
+#: verification that the subscription was created, or to FAILED when it was
+#: not). SUBMITTING can likewise be recovered to SUCCEEDED/FAILED/RETRYABLE
+#: after an interruption.
 BATCH_QUEUE_TRANSITIONS: dict[str, frozenset[str]] = {
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT: frozenset(
         {
@@ -43,10 +51,17 @@ BATCH_QUEUE_TRANSITIONS: dict[str, frozenset[str]] = {
             BATCH_QUEUE_STATUS_SUCCEEDED,
             BATCH_QUEUE_STATUS_FAILED,
             BATCH_QUEUE_STATUS_RETRYABLE,
+            BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED,
         }
     ),
     BATCH_QUEUE_STATUS_FAILED: frozenset({BATCH_QUEUE_STATUS_SUBMITTING}),
     BATCH_QUEUE_STATUS_RETRYABLE: frozenset({BATCH_QUEUE_STATUS_SUBMITTING}),
+    BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED: frozenset(
+        {
+            BATCH_QUEUE_STATUS_SUCCEEDED,
+            BATCH_QUEUE_STATUS_FAILED,
+        }
+    ),
     BATCH_QUEUE_STATUS_SUCCEEDED: frozenset(),
 }
 
@@ -88,6 +103,7 @@ __all__ = [
     "BATCH_QUEUE_STATUS_FAILED",
     "BATCH_QUEUE_STATUS_LABELS",
     "BATCH_QUEUE_STATUS_READY_TO_SUBMIT",
+    "BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED",
     "BATCH_QUEUE_STATUS_RETRYABLE",
     "BATCH_QUEUE_STATUS_SUBMITTING",
     "BATCH_QUEUE_STATUS_SUCCEEDED",

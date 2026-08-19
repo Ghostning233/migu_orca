@@ -11,6 +11,12 @@ from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
+from batch_engine.controllers.batch_queue_controller import (
+    complete_queue_item_submit,
+    create_submission_queue,
+    enqueue_item,
+    start_queue_item_submit,
+)
 from batch_engine.models import (
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_PARSED,
@@ -46,6 +52,10 @@ from storage_engine.controllers.request_repository import (
     delete_request_snapshot,
     load_request_snapshot,
     save_request_snapshot,
+)
+from storage_engine.controllers.queue_repository import (
+    load_submission_queue,
+    save_submission_queue,
 )
 from storage_engine.controllers.storage_config import load_storage_config
 
@@ -609,9 +619,15 @@ def test_static_app_script_wires_batch_queue_result_panel() -> None:
     assert "showBatchQueueSubmitNotification" in script
     assert "retryBatchQueueItem" in script
     assert "batch-queue-item-retry" in script
+    assert "recoverBatchQueueItem" in script
+    assert "batch-queue-item-recover" in script
+    assert "RESULT_PERSIST_FAILED" in script
+    assert "结果保存失败" in script
     assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/queue" in script
     assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/submit" in script
     assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/retry" in script
+    assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/recover" in script
+    assert "无法自动判断 Auto Bangumi 是否已创建订阅" in script
     assert "batch-queue-submit-form" in script
     assert "batch-queue-ab-endpoint" in script
     assert "batch-queue-ab-token" in script
@@ -4664,3 +4680,224 @@ def test_batch_retry_api_does_not_leak_sensitive_values(
     assert "auto-bangumi.local" not in body
     assert "Authorization" not in body
     assert "<rss" not in body
+
+
+def _submitting_queue_json(
+    storage_dir: Path,
+    *,
+    batch_id: str = "batch-1",
+    request_id: str = "request-a",
+    item_id: str = "item-a",
+    title: str = "芙莉莲",
+) -> None:
+    """Persist a queue whose item is stuck SUBMITTING (as after an interrupt)."""
+    queue = create_submission_queue(
+        batch_id,
+        queue_id_factory=lambda: "queue-1",
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    queue = enqueue_item(
+        queue,
+        item_id=item_id,
+        request_id=request_id,
+        title=title,
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    queue = start_queue_item_submit(
+        queue,
+        request_id,
+        now_factory=lambda: "2026-08-19T00:01:00+00:00",
+    )
+    save_submission_queue(load_storage_config(storage_dir), queue)
+
+
+def _result_persist_failed_queue_json(
+    storage_dir: Path,
+    *,
+    batch_id: str = "batch-1",
+    request_id: str = "request-a",
+    item_id: str = "item-a",
+    title: str = "芙莉莲",
+) -> None:
+    """Persist a queue whose item is stuck RESULT_PERSIST_FAILED."""
+    queue = create_submission_queue(
+        batch_id,
+        queue_id_factory=lambda: "queue-1",
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    queue = enqueue_item(
+        queue,
+        item_id=item_id,
+        request_id=request_id,
+        title=title,
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    queue = start_queue_item_submit(
+        queue,
+        request_id,
+        now_factory=lambda: "2026-08-19T00:01:00+00:00",
+    )
+    queue = complete_queue_item_submit(
+        queue,
+        request_id,
+        "RESULT_PERSIST_FAILED",
+        last_error={"error_type": "result_persist_failed", "error_message": "保存失败"},
+        now_factory=lambda: "2026-08-19T00:02:00+00:00",
+    )
+    save_submission_queue(load_storage_config(storage_dir), queue)
+
+
+def _saved_request_with_ab_result(
+    tmp_path: Path,
+    title: str,
+    request_id: str,
+) -> None:
+    """Save an ACCEPTED Request snapshot that already carries an AB result."""
+    request = _saved_accepted_request(tmp_path, title, request_id)
+    request["ab_submit_result"] = {
+        "success": True,
+        "ab_subscription_id": "fake-ab-subscription",
+        "ab_response": {"id": "fake-ab-subscription"},
+        "fallback_config": None,
+        "error": None,
+    }
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+
+
+def test_batch_recover_api_auto_recovers_submitting_to_succeeded(
+    tmp_path: Path,
+) -> None:
+    """auto recovery: SUBMITTING item whose Request already has a persisted AB
+    result is finalized to SUCCEEDED (interruption-safe queue recovery)."""
+    _saved_request_with_ab_result(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _submitting_queue_json(storage_dir)
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/recover",
+        json={
+            "storage_dir": str(storage_dir),
+            "request_id": "request-a",
+            "action": "auto",
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["items"][0]["status"] == "succeeded"
+    assert (
+        payload["result"]["items"][0]["reason"]
+        == "已根据保存的提交结果恢复为提交成功"
+    )
+    queue_item = payload["result"]["queue"]["items"][0]
+    assert queue_item["status"] == "SUCCEEDED"
+    # The recovered queue is persisted.
+    persisted = load_submission_queue(load_storage_config(storage_dir), "batch-1")
+    assert persisted.items[0].status == "SUCCEEDED"
+
+
+def test_batch_recover_api_auto_returns_needs_manual_without_result(
+    tmp_path: Path,
+) -> None:
+    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _submitting_queue_json(storage_dir)
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/recover",
+        json={
+            "storage_dir": str(storage_dir),
+            "request_id": "request-a",
+            "action": "auto",
+        },
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is True
+    item = payload["result"]["items"][0]
+    assert item["status"] == "needs_manual"
+    assert item["error_type"] == "requires_manual_recovery"
+    assert payload["result"]["queue"]["items"][0]["status"] == "SUBMITTING"
+
+
+def test_batch_recover_api_manual_succeeded_requires_confirm(
+    tmp_path: Path,
+) -> None:
+    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _result_persist_failed_queue_json(storage_dir)
+
+    # Without confirm the manual action is rejected.
+    response = _client().post(
+        "/api/v1/batches/batch-1/recover",
+        json={
+            "storage_dir": str(storage_dir),
+            "request_id": "request-a",
+            "action": "succeeded",
+        },
+    )
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "请确认人工核验结果后再恢复"
+
+    # With confirm the item is resolved to SUCCEEDED.
+    response = _client().post(
+        "/api/v1/batches/batch-1/recover",
+        json={
+            "storage_dir": str(storage_dir),
+            "request_id": "request-a",
+            "action": "succeeded",
+            "confirm": True,
+        },
+    )
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["result"]["items"][0]["status"] == "succeeded"
+    assert payload["result"]["queue"]["items"][0]["status"] == "SUCCEEDED"
+
+
+def test_batch_recover_api_manual_failed_resolves_result_persist_failed(
+    tmp_path: Path,
+) -> None:
+    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _result_persist_failed_queue_json(storage_dir)
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/recover",
+        json={
+            "storage_dir": str(storage_dir),
+            "request_id": "request-a",
+            "action": "failed",
+            "confirm": True,
+        },
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["result"]["items"][0]["status"] == "failed"
+    assert payload["result"]["queue"]["items"][0]["status"] == "FAILED"
+    # The recovered FAILED item is a normal retryable failure now.
+    persisted = load_submission_queue(load_storage_config(storage_dir), "batch-1")
+    assert persisted.items[0].status == "FAILED"
+    assert "manual_recovery_failed" in (persisted.items[0].last_error or "")
+
+
+def test_batch_recover_api_rejects_invalid_action(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/recover",
+        json={
+            "storage_dir": str(storage_dir),
+            "request_id": "request-a",
+            "action": "invalid",
+        },
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "恢复动作必须是 auto、succeeded 或 failed"

@@ -21,6 +21,7 @@ from batch_engine.models.queue import (
     BATCH_QUEUE_STATUS_FAILED,
     BATCH_QUEUE_STATUS_LABELS,
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+    BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED,
     BATCH_QUEUE_STATUS_RETRYABLE,
     BATCH_QUEUE_STATUS_SUBMITTING,
     BATCH_QUEUE_STATUS_SUCCEEDED,
@@ -149,15 +150,17 @@ def complete_queue_item_submit(
 ) -> BatchSubmissionQueue:
     """Finish a submit attempt with a terminal-or-retryable result.
 
-    ``status`` must be SUCCEEDED, FAILED, or RETRYABLE and the item must be
-    SUBMITTING. On SUCCEEDED the sanitized ``ab_result_summary`` is stored and
-    ``last_error`` is cleared; on FAILED/RETRYABLE the sanitized ``last_error``
-    is stored and ``ab_result_summary`` is cleared.
+    ``status`` must be SUCCEEDED, FAILED, RETRYABLE, or
+    RESULT_PERSIST_FAILED and the item must be SUBMITTING. On SUCCEEDED the
+    sanitized ``ab_result_summary`` is stored and ``last_error`` is cleared; on
+    FAILED/RETRYABLE/RESULT_PERSIST_FAILED the sanitized ``last_error`` is
+    stored and ``ab_result_summary`` is cleared.
     """
     if status not in {
         BATCH_QUEUE_STATUS_SUCCEEDED,
         BATCH_QUEUE_STATUS_FAILED,
         BATCH_QUEUE_STATUS_RETRYABLE,
+        BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED,
     }:
         raise ValueError(f"invalid queue result status: {status}")
     item = _required_item(queue, request_id)
