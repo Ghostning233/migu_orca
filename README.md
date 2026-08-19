@@ -378,8 +378,9 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 ## Ralph 开发流
 
-- 当前活跃 Ralph PRD：Stage 18，真实 MiKan 主流程与预览优化 PRD（已完成）
-- 最近完成阶段：Stage 17，真实 MiKan 搜索候选合集展示与用户选择 PRD
+- 当前活跃 Ralph PRD：Stage 19，批量新番订阅草案工作台 PRD（已完成）
+- 最近完成阶段：Stage 18，真实 MiKan 主流程与预览优化 PRD
+- 前一完成阶段：Stage 17，真实 MiKan 搜索候选合集展示与用户选择 PRD
 - 前一完成阶段：Stage 16，真实 MiKan 合集详情页解析与直连 URL/ID 入口 PRD
 - 前一完成阶段：Stage 15，Web UI ACCEPTED 管理与筛选语义优化 PRD
 - 前一完成阶段：Stage 14，Web UI Request 可操作性修复 PRD
