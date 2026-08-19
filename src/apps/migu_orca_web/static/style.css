@@ -470,6 +470,12 @@ textarea {
   color: #7a5200;
 }
 
+.batch-queue-status-result-persist-failed {
+  background: #fdeef2;
+  border: 1px solid #ecc0cd;
+  color: #8d2140;
+}
+
 .batch-queue-item-retry {
   margin-left: auto;
   min-height: 28px;

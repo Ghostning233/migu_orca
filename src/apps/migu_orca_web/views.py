@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +40,7 @@ from batch_engine.controllers.batch_draft_controller import (
 from batch_engine.controllers.batch_queue_controller import serialize_queue
 from batch_engine.controllers.batch_submit_controller import (
     compose_ab_submit_one,
+    recover_batch_queue_item,
     retry_batch_queue_item,
     serialize_batch_submit_result,
     submit_batch_queue_items,
@@ -73,8 +76,12 @@ from storage_engine.controllers.request_repository import (
     delete_request_snapshot,
     list_request_snapshots,
     load_request_snapshot,
+    save_request_snapshot,
 )
-from storage_engine.controllers.ab_result_repository import load_ab_submit_result
+from storage_engine.controllers.ab_result_repository import (
+    load_ab_submit_result,
+    save_ab_submit_result,
+)
 from storage_engine.controllers.history_repository import load_status_history
 from storage_engine.controllers.queue_repository import (
     load_submission_queue,
@@ -215,6 +222,24 @@ class BatchRetryPayload(BatchSubmitPayload):
     """
 
     request_id: str
+
+
+class BatchRecoverPayload(BaseModel):
+    """Recover a stuck queue item (SUBMITTING / RESULT_PERSIST_FAILED).
+
+    ``action`` selects the recovery mode: ``auto`` (only for SUBMITTING, uses a
+    previously persisted AB result to finalize SUCCEEDED), ``succeeded``
+    (manual confirmation that Auto Bangumi created the subscription), or
+    ``failed`` (manual confirmation that it did not, turning the item into a
+    normal retryable FAILED). Manual actions require ``confirm=True`` so a
+    wrong click cannot silently mark a subscription as created.
+    """
+
+    batch_id: str
+    request_id: str
+    action: str
+    confirm: bool = False
+    storage_dir: str | None = None
 
 
 class RequestCreatePayload(BaseModel):
@@ -571,6 +596,51 @@ def _build_batch_accept_one(storage_dir: Path | None) -> AcceptOne:
         return result["request"]
 
     return accept_one
+
+
+def _build_batch_persist_submit_result(storage_dir: Path | None):
+    """Build the injected per-item AB-result persister for batch submit/retry.
+
+    Mirrors the single-item submit-ab storage contract
+    (``RequestAbSubmitView.save`` + ``apply_request_save_action``): sanitize the
+    AB result, attach it to the Request snapshot, persist the snapshot, and
+    write ``ab_results/<request_id>.json`` so the Request detail API can read
+    and show the result. Auto Bangumi secrets (endpoint/token/cookie/raw
+    response) never reach the persisted data because the result was already
+    normalized by the AB submit contract and is sanitized again here.
+    """
+    config = load_storage_config(storage_dir)
+
+    def persist_submit_result(
+        request: dict[str, Any],
+        ab_submit_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        sanitized = _sanitize_ab_submit_result(ab_submit_result)
+        updated = deepcopy(request)
+        updated["ab_submit_result"] = sanitized
+        updated["updated_at"] = datetime.now(UTC).isoformat()
+        save_request_snapshot(config, updated)
+        save_ab_submit_result(config, updated)
+        return updated
+
+    return persist_submit_result
+
+
+def _build_batch_persist_queue(config: StorageConfig):
+    """Build the injected per-item queue persister for batch submit/retry.
+
+    The submit service flushes each item's SUBMITTING status before the Auto
+    Bangumi call and its final status after the attempt; persisting through the
+    existing queue repository means an interruption between the external submit
+    and the final queue save can never leave READY_TO_SUBMIT on disk for an
+    item that already reached Auto Bangumi. The queue only holds non-sensitive
+    public fields, so writing it never stores Auto Bangumi secrets.
+    """
+
+    def persist_queue(queue: BatchSubmissionQueue) -> None:
+        save_submission_queue(config, queue)
+
+    return persist_queue
 
 
 def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -1008,9 +1078,13 @@ class BatchSubmitView(PostView):
             ab_config=ab_config,
             load_request=_build_batch_load_request(storage_dir),
             submit_one=compose_ab_submit_one(),
+            persist_queue=_build_batch_persist_queue(config),
+            persist_submit_result=_build_batch_persist_submit_result(storage_dir),
         )
         # Persist the updated queue so retries and queue reads observe the new
-        # statuses/summaries. The request-scoped ab_config is never stored.
+        # statuses/summaries. The request-scoped ab_config is never stored; the
+        # service already flushed each item's SUBMITTING and final status before
+        # returning, so a crash mid-batch cannot resurrect READY_TO_SUBMIT.
         save_submission_queue(config, result.queue)
         return serialize_batch_submit_result(result)
 
@@ -1049,6 +1123,8 @@ class BatchRetryView(PostView):
                 ab_config=ab_config,
                 load_request=_build_batch_load_request(storage_dir),
                 submit_one=compose_ab_submit_one(),
+                persist_queue=_build_batch_persist_queue(config),
+                persist_submit_result=_build_batch_persist_submit_result(storage_dir),
             )
         except ValueError as exc:
             raise Stage1Error(
@@ -1059,6 +1135,52 @@ class BatchRetryView(PostView):
             ) from exc
         # Persist the updated queue so queue reads observe the retried status.
         # The request-scoped ab_config is never stored.
+        save_submission_queue(config, result.queue)
+        return serialize_batch_submit_result(result)
+
+
+@class_route(api_blueprint, "/api/v1/batches/<batch_id>/recover", methods=["POST"])
+class BatchRecoverView(PostView):
+    request_validator_model = BatchRecoverPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchRecoverPayload)
+        payload = self.request_validator_model
+        if payload.action not in {"auto", "succeeded", "failed"}:
+            raise Stage1Error(
+                "validation_error",
+                "恢复动作必须是 auto、succeeded 或 failed",
+                "batch_recover",
+                {"field": "action"},
+            )
+        if payload.action != "auto" and not payload.confirm:
+            raise Stage1Error(
+                "validation_error",
+                "请确认人工核验结果后再恢复",
+                "batch_recover",
+                {"field": "confirm"},
+            )
+
+        storage_dir = _storage_dir(payload.storage_dir)
+        config = load_storage_config(storage_dir)
+        queue = load_submission_queue(config, payload.batch_id)
+        try:
+            result = recover_batch_queue_item(
+                batch_id=payload.batch_id,
+                queue=queue,
+                request_id=payload.request_id,
+                action=payload.action,
+                load_request=_build_batch_load_request(storage_dir),
+                persist_queue=_build_batch_persist_queue(config),
+            )
+        except ValueError as exc:
+            raise Stage1Error(
+                "queue_item_not_found",
+                "队列中不存在该订阅方案项目",
+                "batch_recover",
+                {"field": "request_id", "batch_id": payload.batch_id},
+            ) from exc
+        # Persist the recovered queue so queue reads observe the new status.
         save_submission_queue(config, result.queue)
         return serialize_batch_submit_result(result)
 

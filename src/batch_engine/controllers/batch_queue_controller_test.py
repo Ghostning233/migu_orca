@@ -20,6 +20,7 @@ from batch_engine.models import (
     BATCH_QUEUE_STATUS_FAILED,
     BATCH_QUEUE_STATUS_LABELS,
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+    BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED,
     BATCH_QUEUE_STATUS_RETRYABLE,
     BATCH_QUEUE_STATUS_SUBMITTING,
     BATCH_QUEUE_STATUS_SUCCEEDED,
@@ -443,6 +444,7 @@ class TestStatusLabels:
             BATCH_QUEUE_STATUS_SUCCEEDED: "提交成功",
             BATCH_QUEUE_STATUS_FAILED: "提交失败",
             BATCH_QUEUE_STATUS_RETRYABLE: "可重试",
+            BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED: "结果保存失败",
         }
 
     def test_transition_table_allows_retry_and_blocks_succeeded(self) -> None:
@@ -458,11 +460,26 @@ class TestStatusLabels:
         assert BATCH_QUEUE_STATUS_SUCCEEDED in BATCH_QUEUE_TRANSITIONS[
             BATCH_QUEUE_STATUS_SUBMITTING
         ]
+        assert BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED in BATCH_QUEUE_TRANSITIONS[
+            BATCH_QUEUE_STATUS_SUBMITTING
+        ]
         assert BATCH_QUEUE_STATUS_SUBMITTING in BATCH_QUEUE_TRANSITIONS[
             BATCH_QUEUE_STATUS_FAILED
         ]
         assert BATCH_QUEUE_STATUS_SUBMITTING in BATCH_QUEUE_TRANSITIONS[
             BATCH_QUEUE_STATUS_RETRYABLE
+        ]
+        # RESULT_PERSIST_FAILED is never auto-retried; it can only be resolved
+        # through explicit recovery (SUCCEEDED after manual verification, FAILED
+        # when Auto Bangumi did not create the subscription).
+        assert BATCH_QUEUE_STATUS_SUBMITTING not in BATCH_QUEUE_TRANSITIONS[
+            BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED
+        ]
+        assert BATCH_QUEUE_STATUS_SUCCEEDED in BATCH_QUEUE_TRANSITIONS[
+            BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED
+        ]
+        assert BATCH_QUEUE_STATUS_FAILED in BATCH_QUEUE_TRANSITIONS[
+            BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED
         ]
         assert BATCH_QUEUE_TRANSITIONS[BATCH_QUEUE_STATUS_SUCCEEDED] == frozenset()
 

@@ -301,12 +301,19 @@ Stage 19 新增批量解析端点：
 
 Stage 20 新增批量接受、队列、提交与重试端点（`batch_id` 来自 URL 路径，payload 模型仍声明 `batch_id`）：
 
-- `POST /api/v1/batches/<batch_id>/accept`：批量接受或全接受。payload 为 `{items: [{item_id, request_id, title}], storage_dir, item_ids?}`；`item_ids` 存在时只接受选中的 item（按 batch 顺序），省略时全接受当前批次中所有可接受项目。每个成功接受的项目进入队列 `READY_TO_SUBMIT`；已 `ACCEPTED` 的项目幂等返回，不重复写入确认历史或队列；不可接受项目（缺少 request_id/snapshot、CANCELLED、其他状态）逐项返回中文原因；单项失败不阻塞其他项。响应包含 `batch_id`、逐项状态、队列项目和不可接受原因。
+- `POST /api/v1/batches/<batch_id>/accept`：批量接受或全接受。payload 为 `{items: [{item_id, request_id, title}], storage_dir, item_ids?}`；`item_ids` 存在时只接受选中的 item（按 batch 顺序），省略时全接受当前批次中所有可接受项目。每个成功接受的项目进入队列 `READY_TO_SUBMIT`；已 `ACCEPTED` 的项目幂等返回，不重复写入确认历史或队列——若该 `request_id` 已存在于当前批次队列则保持幂等，若队列中缺失（队列保存失败、被删除或损坏）则补建 `READY_TO_SUBMIT` 队列项目以便恢复提交；不可接受项目（缺少 request_id/snapshot、CANCELLED、其他状态）逐项返回中文原因；单项失败不阻塞其他项。响应包含 `batch_id`、逐项状态、队列项目和不可接受原因。
 - `GET /api/v1/batches/<batch_id>/queue`：读取脱敏队列。返回队列项目（标题、状态、尝试次数、时间、脱敏结果摘要）；队列不存在时返回 `{batch_id, queue: None}`。响应只包含非敏感字段，不包含 endpoint、token、cookie、Authorization header、原始响应体、完整 RSS URL、magnet 或本地绝对路径。
-- `POST /api/v1/batches/<batch_id>/submit`：批量顺序提交 Auto Bangumi。payload 为 `{storage_dir, ab_config: {endpoint, token, fallback_enabled}, confirm}`；缺少 `ab_config` 或 `confirm` 时返回中文 `validation_error` envelope。端点按队列顺序处理 `READY_TO_SUBMIT` 项目，复用现有 payload builder、Auto Bangumi client 和脱敏结果契约；提交前校验对应 Request 仍为 `ACCEPTED`。响应逐项返回成功或失败结果，不因一项失败而中断其余项目；已成功项目不会被重复提交。
-- `POST /api/v1/batches/<batch_id>/retry`：失败项独立重试。payload 为 `BatchSubmitPayload` + `request_id`；只有 `FAILED`/`RETRYABLE` 项目可重试，成功项返回 `skipped` 且不会再次提交。重试重新加载最新保存的 `ACCEPTED` Request 快照，从不用队列中复制的完整 RSS、token、cookie、magnet 或原始响应；成功后更新为 `SUCCEEDED`，失败后保留可重试状态并递增 `attempts`。
+- `POST /api/v1/batches/<batch_id>/submit`：批量顺序提交 Auto Bangumi。payload 为 `{storage_dir, ab_config: {endpoint, token, fallback_enabled}, confirm}`；缺少 `ab_config` 或 `confirm` 时返回中文 `validation_error` envelope。端点按队列顺序处理 `READY_TO_SUBMIT` 项目，复用现有 payload builder、Auto Bangumi client 和脱敏结果契约；提交前校验对应 Request 仍为 `ACCEPTED`。**可靠性边界**：每个项目在实际调用 Auto Bangumi 前先把 `SUBMITTING` 状态持久化到队列 JSON，调用后立即持久化最终 `SUCCEEDED`/`FAILED`/`RETRYABLE`/`RESULT_PERSIST_FAILED` 状态，因此进程在外部提交后、最终保存前中断时，磁盘队列保持 `SUBMITTING`（后续 submit/retry 会跳过该项目），不会把已到达 Auto Bangumi 的项目错误恢复成可重复提交的 `READY_TO_SUBMIT`；每个项目的脱敏提交结果（成功或失败）会按单项 submit-ab 契约写入对应 Request snapshot 的 `ab_submit_result` 字段和 `ab_results/<request_id>.json`，Request 详情 API 可直接读取展示。**单项结果持久化失败**时（Auto Bangumi 调用已发生、结果无法落盘），该项目进入独立的 `RESULT_PERSIST_FAILED`（结果保存失败）状态并继续处理其他项目——该状态**不可直接重试**（重试可能重复创建订阅），只能通过 `recover` 端点人工核验后恢复。响应逐项返回成功或失败结果，不因一项失败而中断其余项目；已成功项目不会被重复提交。
+- `POST /api/v1/batches/<batch_id>/retry`：失败项独立重试。payload 为 `BatchSubmitPayload` + `request_id`；只有 `FAILED`/`RETRYABLE` 项目可重试，`SUCCEEDED`/`SUBMITTING`/`RESULT_PERSIST_FAILED` 项目返回 `skipped` 且不会再次提交。重试重新加载最新保存的 `ACCEPTED` Request 快照，从不用队列中复制的完整 RSS、token、cookie、magnet 或原始响应；提交前同样先持久化 `SUBMITTING` 再调用 Auto Bangumi，并写入脱敏提交结果；成功后更新为 `SUCCEEDED`，失败后保留可重试状态并递增 `attempts`。
+- `POST /api/v1/batches/<batch_id>/recover`：恢复「卡住」的队列项目（`SUBMITTING` / `RESULT_PERSIST_FAILED`）。payload 为 `{storage_dir, request_id, action, confirm}`：
+  - `action=auto`：自动恢复——仅对 `SUBMITTING` 生效，若对应 Request 已保存 `ab_submit_result`（结果已持久化、仅队列未收尾），直接恢复为 `SUCCEEDED`；否则返回 `needs_manual`（需人工核验）。
+  - `action=succeeded`（需 `confirm=true`）：人工核验确认 Auto Bangumi 已创建订阅，恢复为 `SUCCEEDED`。
+  - `action=failed`（需 `confirm=true`）：人工核验确认 Auto Bangumi 未创建订阅，恢复为普通 `FAILED`（之后可安全重试）。
+  - 非卡住状态（`READY_TO_SUBMIT`/`SUCCEEDED`/`FAILED`/`RETRYABLE`）返回 `skipped` 且不改变状态。
 
 Stage 20 批量 API 遵循与单请求 AB 提交一致的安全边界：endpoint、token、Authorization header、cookie、原始响应体、完整失败 URL、magnet 和本地绝对路径不会出现在 API 响应、错误 details、日志、队列 JSON、Request snapshot 或浏览器 storage 中；提交配置只存在于当前 POST body，不写入 URL、localStorage、sessionStorage 或持久化配置。
+
+**外部 Auto Bangumi 幂等性限制（剩余风险）**：MiGuOrca 的批量提交通过「提交前持久化 `SUBMITTING` + 成功后标记 `SUCCEEDED`」避免已到达 Auto Bangumi 的项目被自动重试，并通过 `recover` 端点提供人工核验恢复；但 Auto Bangumi 自身不提供幂等创建订阅语义，以下场景仍可能产生重复订阅，需人工核对：1) 进程在 Auto Bangumi 已成功创建订阅、但 MiGuOrca 尚未把结果写入 Request/ab_results 前中断——磁盘队列停留在 `SUBMITTING`，不会被自动重试，也无法自动得知外部是否已创建；用户在 `recover` 的核验弹窗中选择「已创建订阅」即标记成功，选择「未创建订阅」才转为可重试的失败；2) 单项结果持久化失败进入 `RESULT_PERSIST_FAILED`，用户在 `recover` 中核验 Auto Bangumi 侧状态后选择「已创建/未创建」恢复，**不可**直接点重试。除此之外，`SUCCEEDED` 项目在任何路径下都不会再次调用 Auto Bangumi，`RESULT_PERSIST_FAILED` 与 `SUBMITTING` 项目永远不会被自动重试。
 
 ### 本地验收流程
 

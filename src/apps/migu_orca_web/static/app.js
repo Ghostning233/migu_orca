@@ -1676,6 +1676,7 @@
       SUCCEEDED: "提交成功",
       FAILED: "提交失败",
       RETRYABLE: "可重试",
+      RESULT_PERSIST_FAILED: "结果保存失败",
     };
     const value = fieldValue(status);
     return Object.prototype.hasOwnProperty.call(labels, value)
@@ -1690,6 +1691,7 @@
       SUCCEEDED: "succeeded",
       FAILED: "failed",
       RETRYABLE: "retryable",
+      RESULT_PERSIST_FAILED: "result-persist-failed",
     };
     return Object.prototype.hasOwnProperty.call(classes, status)
       ? classes[status]
@@ -1719,7 +1721,8 @@
       batchQueueStatusClass(item.status);
     status.textContent = batchQueueStatusLabel(item.status);
     statusRow.appendChild(status);
-    // SUCCEEDED / READY / SUBMITTING 项目不提供重试入口（单项重试是 US-148）。
+    // SUCCEEDED / READY 项目不提供操作入口；FAILED / RETRYABLE 提供重试；
+    // SUBMITTING / RESULT_PERSIST_FAILED 提供恢复（人工核验或自动恢复）。
     if (item.status === "FAILED" || item.status === "RETRYABLE") {
       const retryButton = document.createElement("button");
       retryButton.className = "secondary-button batch-queue-item-retry";
@@ -1730,6 +1733,20 @@
         retryBatchQueueItem(item);
       });
       statusRow.appendChild(retryButton);
+    }
+    if (
+      item.status === "SUBMITTING" ||
+      item.status === "RESULT_PERSIST_FAILED"
+    ) {
+      const recoverButton = document.createElement("button");
+      recoverButton.className = "secondary-button batch-queue-item-recover";
+      recoverButton.type = "button";
+      recoverButton.textContent = "恢复";
+      recoverButton.setAttribute("data-request-id", safeText(item.request_id));
+      recoverButton.addEventListener("click", function () {
+        recoverBatchQueueItem(item);
+      });
+      statusRow.appendChild(recoverButton);
     }
     row.appendChild(statusRow);
 
@@ -2062,6 +2079,75 @@
         "error-state compact-state",
       );
       notifyApiError("单项重试失败", error);
+    } finally {
+      setBatchQueueInFlight(false);
+    }
+  }
+
+  async function recoverBatchQueueItem(item) {
+    clearBatchQueueSubmitError();
+    if (!currentBatchId) {
+      setBatchQueueSubmitError("缺少批次标识，无法恢复。");
+      return;
+    }
+    setBatchQueueInFlight(true);
+    setBatchQueueSubmitResult("正在恢复队列项目...", "loading-state compact-state");
+    try {
+      // 先尝试自动恢复（仅 SUBMITTING 且 Request 已保存结果时生效）。
+      let result = await fetchJson(
+        apiPath("/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/recover"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            storage_dir: currentStorageDir() || null,
+            request_id: item.request_id,
+            action: "auto",
+          }),
+        },
+      );
+      let outcome = result && result.items && result.items[0];
+      if (outcome && outcome.status === "needs_manual") {
+        // 自动恢复无法判定：请用户人工核验 Auto Bangumi 是否已创建订阅。
+        const created = window.confirm(
+          "该订阅方案处于「" + batchQueueStatusLabel(item.status) +
+          "」，无法自动判断 Auto Bangumi 是否已创建订阅。\n\n" +
+          "请前往 Auto Bangumi 核对后选择：\n" +
+          "点击「确定」= 已创建订阅（标记为提交成功）\n" +
+          "点击「取消」= 未创建订阅（标记为失败，可重试）",
+        );
+        result = await fetchJson(
+          apiPath("/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/recover"),
+          {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+              storage_dir: currentStorageDir() || null,
+              request_id: item.request_id,
+              action: created ? "succeeded" : "failed",
+              confirm: true,
+            }),
+          },
+        );
+        outcome = result && result.items && result.items[0];
+      }
+      const summary = (result && result.summary) || {};
+      applyQueueResult(result && result.queue);
+      syncQueueStatusToCards(batchQueueItems);
+      if (batchDraftCards.length) {
+        renderBatchParseItems(batchDraftCards);
+      }
+      setBatchQueueSubmitResult(
+        batchQueueSummaryMessage(summary),
+        "success-state compact-state",
+      );
+      showBatchQueueSubmitNotification(summary);
+    } catch (error) {
+      setBatchQueueSubmitResult(
+        "队列项目恢复失败。请核对 Auto Bangumi 状态后重试。",
+        "error-state compact-state",
+      );
+      notifyApiError("恢复失败", error);
     } finally {
       setBatchQueueInFlight(false);
     }
