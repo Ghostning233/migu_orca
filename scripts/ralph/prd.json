@@ -174,7 +174,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Stage closeout story；所有功能 story 完成后再执行。"
     }
   ]

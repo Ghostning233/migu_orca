@@ -650,3 +650,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Gotcha encountered: accepted batch cards should not keep a no-confirm delete affordance; hiding the delete button is the simplest current fit because Stage 19 does not require accepted-card deletion.
   - Useful context: browser coverage for this story lives in `tests/browser/test_batch_workbench.py`, but this environment still skips Playwright execution because Chromium is not installed/available.
 ---
+## 2026-08-19 16:23:17 CST - US-141
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Completed Stage 19 closeout documentation and safety regression coverage. README, main PRD, Stage 19 PRD, future stages, M00, M13, and backlog now mark Stage 19 complete and hand off batch accept / Auto Bangumi queue work to Stage 20.
+- Added a Stage 19 browser security regression that injects sensitive AI/provider, MiKan candidate, source-info, card-display, and single-card accept fields, then asserts URL, localStorage, sessionStorage, visible body text, mocked accept/save payloads, and storage JSON remain clean.
+- Files changed: `README.md`, `docs/backlog.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_future_stages.md`, `docs/MiGuOrca_stage19_batch_draft_workbench_PRD.md`, `docs/modules/M00-entry-orchestration-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src tests` passed; `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run pytest -q` passed with 457 passed and 214 skipped; `uv run pytest tests/browser/ -q` skipped 214 browser tests because Chromium is not available in this environment.
+- **Learnings for future iterations:**
+  - Patterns discovered: Stage closeout docs for Stage 19 must synchronize README, backlog, main PRD, the stage PRD, future stages, and module PRDs M00/M13.
+  - Patterns discovered: Stage 19 security regression should inject sensitive fields into mocked batch/API responses and verify all browser surfaces plus persisted JSON stay clean after parse, expand, and single-card accept.
+  - Gotcha encountered: this environment has no browser binary, so browser tests collect but skip; record the explicit skip count from both full pytest and `tests/browser/`.
+  - Useful context: all Stage 19 stories are now marked passing; Stage 20 should start from BL-013 batch accept and Auto Bangumi submit queue.
+---
