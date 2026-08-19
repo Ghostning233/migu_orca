@@ -1101,7 +1101,7 @@
       error.field = batchRawInput;
       throw error;
     }
-    return {raw_input: rawInput};
+    return {raw_input: rawInput, storage_dir: currentStorageDir() || null};
   }
 
   function batchCardTitle(row) {

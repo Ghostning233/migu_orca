@@ -71,7 +71,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "复用 M05/M06/M07 和 Stage 19 批量链路，不创建第二套筛选或命名实现。"
     },
     {

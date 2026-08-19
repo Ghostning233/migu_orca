@@ -39,7 +39,17 @@ from request_engine.controllers.request_controller import (
     summarize_request,
 )
 from shared.errors import Stage1Error
-from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
+from shared.models import (
+    BangumiCandidate,
+    EntryRequest,
+    FilterDefaults,
+    MatchedBangumi,
+    NamingPreference,
+    RssSource,
+    SubtitleGroupPreference,
+    VersionedUserPreference,
+)
+from storage_engine.controllers.preference_repository import save_user_preferences
 from storage_engine.controllers.ab_result_repository import (
     load_ab_submit_result,
     save_ab_submit_result,
@@ -2569,6 +2579,27 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
     assert items[0]["candidates"] == []
     assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
     assert items[1]["needs_user_review"] is False
+    # Stage 21: every item carries applied_preferences + preference_warnings.
+    assert items[0]["applied_preferences"] == {
+        "subtitle_groups": {
+            "preferred": [],
+            "excluded": [],
+            "fallback": "next_preferred",
+        },
+        "filter_rule": {
+            "must_contain": "",
+            "must_not_contain": "",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
+        "naming": {"strategy": "official_title_season", "template": "{title}"},
+        "expected_folder_name": "关于我转生变成史莱姆这档事 第四季",
+    }
+    assert items[0]["preference_warnings"] == []
+    assert items[1]["applied_preferences"]["expected_folder_name"] == (
+        "欢迎来到实力至上主义的教室 第四季"
+    )
+    assert items[1]["preference_warnings"] == []
 
 
 def test_batch_parse_api_rejects_empty_input_with_chinese_validation_error() -> None:
@@ -2664,6 +2695,195 @@ def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
     assert "llm.example" not in body
     assert "session-id" not in body
     assert "/home/ghostning" not in body
+
+
+def test_batch_parse_api_applies_saved_preferences_from_storage_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    save_user_preferences(
+        load_storage_config(storage_dir),
+        VersionedUserPreference(
+            version=1,
+            subtitle_groups=SubtitleGroupPreference(
+                preferred=["Loli"],
+                excluded=["示例组"],
+                fallback="next_preferred",
+            ),
+            filter_defaults=FilterDefaults(
+                must_contain="1080p",
+                must_not_contain="合集版",
+                use_regex=True,
+                case_sensitive=True,
+            ),
+            naming=NamingPreference(strategy="raw_title", template="{title}"),
+        ),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+    )
+
+    item = response.get_json()["result"]["items"][0]
+    assert response.status_code == 200
+    assert item["applied_preferences"] == {
+        "subtitle_groups": {
+            "preferred": ["Loli"],
+            "excluded": ["示例组"],
+            "fallback": "next_preferred",
+        },
+        "filter_rule": {
+            "must_contain": "1080p",
+            "must_not_contain": "合集版",
+            "use_regex": True,
+            "case_sensitive": True,
+        },
+        "naming": {"strategy": "raw_title", "template": "{title}"},
+        "expected_folder_name": "萌王S4",
+    }
+    assert item["preference_warnings"] == []
+
+
+def test_batch_parse_api_falls_back_when_preference_file_is_damaged(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    config = load_storage_config(storage_dir)
+    config.preferences_dir.mkdir(parents=True, exist_ok=True)
+    (config.preferences_dir / "user_preferences.json").write_text(
+        "{not valid json", encoding="utf-8"
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert len(items) == 2
+    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert all(item["applied_preferences"] is None for item in items)
+    assert all(item["preference_warnings"] == ["偏好读取失败，已回退默认流程"] for item in items)
+    assert items[0]["canonical_title_candidates"]
+    assert items[1]["canonical_title_candidates"]
+
+
+def test_batch_parse_api_failed_item_keeps_applied_preferences_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def provider() -> FakeAnimeTitleParsingProvider:
+        return FakeAnimeTitleParsingProvider(fail_titles={"杖剑谭S2"})
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        provider,
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    save_user_preferences(
+        load_storage_config(storage_dir),
+        VersionedUserPreference(
+            version=1,
+            subtitle_groups=SubtitleGroupPreference(preferred=["Loli"]),
+            naming=NamingPreference(strategy="raw_title", template="{title}"),
+        ),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n杖剑谭S2", "storage_dir": str(storage_dir)},
+    )
+
+    items = response.get_json()["result"]["items"]
+    failed = next(item for item in items if item["status"] == BATCH_ITEM_STATUS_FAILED)
+    parsed = next(item for item in items if item["status"] == BATCH_ITEM_STATUS_PARSED)
+    assert failed["applied_preferences"]["expected_folder_name"] is None
+    assert "该条目解析失败，命名默认值不可用" in failed["preference_warnings"]
+    assert failed["applied_preferences"]["subtitle_groups"] == {
+        "preferred": ["Loli"],
+        "excluded": [],
+        "fallback": "next_preferred",
+    }
+    assert parsed["applied_preferences"]["expected_folder_name"] == "萌王S4"
+    assert parsed["preference_warnings"] == []
+
+
+def test_batch_parse_api_preference_response_never_leaks_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    config = load_storage_config(storage_dir)
+    config.preferences_dir.mkdir(parents=True, exist_ok=True)
+    # A hand-edited/legacy file carrying extra sensitive keys alongside the
+    # defined contract fields: the repository strips unknown keys on load, so
+    # the batch parse response must never echo them back.
+    (config.preferences_dir / "user_preferences.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "subtitle_groups": {
+                    "preferred": ["Loli"],
+                    "excluded": [],
+                    "fallback": "next_preferred",
+                },
+                "filter_defaults": {
+                    "must_contain": "1080p",
+                    "must_not_contain": "",
+                    "use_regex": False,
+                    "case_sensitive": False,
+                },
+                "naming": {"strategy": "raw_title", "template": "{title}"},
+                "search": {"reuse_explicit_corrections": True},
+                "token": "secret-token",
+                "endpoint": "https://llm.example/api",
+                "cookie": "session-id",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    body = response.get_data(as_text=True)
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    applied = item["applied_preferences"]
+    assert applied is not None
+    assert "token" not in applied
+    assert "endpoint" not in applied
+    assert "cookie" not in applied
+    assert "secret-token" not in body
+    assert "llm.example" not in body
+    assert "session-id" not in body
 
 
 def test_batch_parse_api_searches_candidates_for_each_item_query(

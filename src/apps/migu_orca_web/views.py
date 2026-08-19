@@ -45,6 +45,7 @@ from batch_engine.controllers.batch_submit_controller import (
     serialize_batch_submit_result,
     submit_batch_queue_items,
 )
+from batch_engine.controllers.preference_applicator import apply_preferences_to_item
 from batch_engine.models import (
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_PARSED,
@@ -71,7 +72,7 @@ from request_engine.controllers.request_controller import (
     summarize_request,
 )
 from shared.errors import Stage1Error
-from shared.models import EntryRequest
+from shared.models import EntryRequest, VersionedUserPreference
 from storage_engine.controllers.request_repository import (
     delete_request_snapshot,
     list_request_snapshots,
@@ -149,6 +150,7 @@ class BatchParsePayload(BaseModel):
         default=None,
         validate_default=True,
     )
+    storage_dir: str | None = None
 
 
 class BatchItemDescriptorPayload(BaseModel):
@@ -431,6 +433,8 @@ def _serialize_batch_parse_result(
     *,
     candidates: list[dict[str, object]] | None = None,
     error: Stage1Error | None = None,
+    applied_preferences: dict[str, object] | None = None,
+    preference_warnings: list[str] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "item_id": item.item_id,
@@ -443,6 +447,8 @@ def _serialize_batch_parse_result(
         "needs_user_review": parse_result.needs_user_review,
         "source": parse_result.source,
         "candidates": candidates or [],
+        "applied_preferences": applied_preferences,
+        "preference_warnings": list(preference_warnings or []),
     }
     if error is not None:
         result["error"] = _optional_error(error)
@@ -452,6 +458,9 @@ def _serialize_batch_parse_result(
 def _serialize_failed_batch_item(
     item: BatchDraftItem,
     error: Stage1Error,
+    *,
+    applied_preferences: dict[str, object] | None = None,
+    preference_warnings: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "item_id": item.item_id,
@@ -464,6 +473,8 @@ def _serialize_failed_batch_item(
         "needs_user_review": True,
         "source": "unknown",
         "candidates": [],
+        "applied_preferences": applied_preferences,
+        "preference_warnings": list(preference_warnings or []),
         "error": _optional_error(error),
     }
 
@@ -553,6 +564,41 @@ def _search_batch_item_candidates(
             seen.add(key)
             candidates.append(candidate)
     return candidates
+
+
+def _load_preferences_for_batch(
+    config: StorageConfig,
+) -> VersionedUserPreference | None:
+    """Load saved user preferences for batch parsing.
+
+    Returns ``None`` when the preference file is damaged or unreadable, so batch
+    parsing falls back to the Stage 19 default flow and one item's missing
+    preferences never block the rest of the batch.
+    """
+    try:
+        return load_user_preferences(config)
+    except Stage1Error:
+        return None
+
+
+def _preference_application_for_item(
+    raw_title: str,
+    parse_result: AnimeTitleParseResult | None,
+    preferences: VersionedUserPreference | None,
+) -> tuple[dict[str, object] | None, list[str]]:
+    """Build the per-item applied-preferences metadata for a batch draft.
+
+    Returns ``(None, [fallback warning])`` when preferences are unavailable or
+    application fails, keeping the Stage 19 default flow intact for that item
+    while every other item is unaffected.
+    """
+    if preferences is None:
+        return None, ["偏好读取失败，已回退默认流程"]
+    try:
+        applied = apply_preferences_to_item(raw_title, parse_result, preferences)
+    except Exception:
+        return None, ["偏好应用失败，已回退默认流程"]
+    return applied.to_dict(), list(applied.warnings)
 
 
 def _load_batch_queue_or_none(
@@ -993,6 +1039,10 @@ class BatchParseView(PostView):
 
         provider = _batch_title_parsing_provider()
         mikan_config = _resolve_mikan_config(self.request_validator_model.mikan_config)
+        config = load_storage_config(
+            _storage_dir(self.request_validator_model.storage_dir)
+        )
+        preferences = _load_preferences_for_batch(config)
         serialized_items: list[dict[str, object]] = []
         for item in batch.items:
             try:
@@ -1008,7 +1058,17 @@ class BatchParseView(PostView):
                     for updated in failed_batch.items
                     if updated.item_id == item.item_id
                 )
-                serialized_items.append(_serialize_failed_batch_item(failed_item, exc))
+                applied, warnings = _preference_application_for_item(
+                    item.raw_title, None, preferences
+                )
+                serialized_items.append(
+                    _serialize_failed_batch_item(
+                        failed_item,
+                        exc,
+                        applied_preferences=applied,
+                        preference_warnings=warnings,
+                    )
+                )
                 continue
 
             try:
@@ -1027,12 +1087,17 @@ class BatchParseView(PostView):
                     for updated in failed_batch.items
                     if updated.item_id == item.item_id
                 )
+                applied, warnings = _preference_application_for_item(
+                    item.raw_title, parse_result, preferences
+                )
                 serialized_items.append(
                     _serialize_batch_parse_result(
                         failed_item,
                         parse_result,
                         candidates=[],
                         error=exc,
+                        applied_preferences=applied,
+                        preference_warnings=warnings,
                     )
                 )
                 continue
@@ -1047,11 +1112,16 @@ class BatchParseView(PostView):
                 for updated in parsed_batch.items
                 if updated.item_id == item.item_id
             )
+            applied, warnings = _preference_application_for_item(
+                item.raw_title, parse_result, preferences
+            )
             serialized_items.append(
                 _serialize_batch_parse_result(
                     parsed_item,
                     parse_result,
                     candidates=candidates,
+                    applied_preferences=applied,
+                    preference_warnings=warnings,
                 )
             )
 

@@ -34,5 +34,50 @@ def test_all_empty_returns_no_selection_with_warning() -> None:
     assert selection.warnings
 
 
+def test_excluded_group_is_never_selected_even_when_preferred() -> None:
+    selection = select_subtitle_group(
+        [_result("Loli", 1), _result("喵萌", 1)],
+        ["Loli", "喵萌"],
+        excluded=["Loli"],
+    )
+
+    assert selection.subtitle_group == "喵萌"
+    assert selection.warnings == []
+
+
+def test_all_excluded_groups_return_no_selection_with_warning() -> None:
+    selection = select_subtitle_group(
+        [_result("Loli", 1), _result("喵萌", 1)],
+        ["Loli", "喵萌"],
+        excluded=["Loli", "喵萌"],
+    )
+
+    assert selection.subtitle_group is None
+    assert selection.rss_url is None
+    assert "被排除" in selection.warnings[0]
+
+
+def test_excluded_group_with_no_valid_seed_is_not_counted_as_usable() -> None:
+    selection = select_subtitle_group(
+        [_result("Loli", 0), _result("喵萌", 1)],
+        ["Loli"],
+        excluded=["喵萌"],
+    )
+
+    assert selection.subtitle_group is None
+    assert selection.warnings
+
+
+def test_priority_miss_falls_back_to_first_valid_non_excluded_group() -> None:
+    selection = select_subtitle_group(
+        [_result("Loli", 1), _result("喵萌", 1), _result("示例组", 1)],
+        ["不存在组"],
+        excluded=["示例组"],
+    )
+
+    assert selection.subtitle_group == "Loli"
+    assert selection.warnings
+
+
 def test_folder_name_replaces_dangerous_characters() -> None:
     assert generate_folder_name("  A/B\\C\x00  ") == "A_B_C_"

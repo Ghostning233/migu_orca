@@ -399,7 +399,9 @@ class TestBatchWorkbenchEntry:
         expect(page.locator(".batch-card-poster img")).to_have_count(1)
         expect(page.locator(".batch-card-expand")).to_have_count(2)
         expect(page.locator("#page-notification")).to_contain_text("批量草案已获取")
-        assert captured_payloads == [{"raw_input": "萌王S4\n\n路哥S4"}]
+        assert captured_payloads == [
+            {"raw_input": "萌王S4\n\n路哥S4", "storage_dir": None}
+        ]
 
     def test_batch_card_delete_removes_only_selected_card(
         self, page: Page, live_server_url: str
