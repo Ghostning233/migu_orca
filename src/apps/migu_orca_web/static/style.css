@@ -298,6 +298,44 @@ textarea {
   justify-self: start;
 }
 
+.batch-card-review {
+  border-top: 1px solid #d8dde5;
+  display: grid;
+  gap: 12px;
+  padding-top: 10px;
+}
+
+.batch-card-review[hidden] {
+  display: none;
+}
+
+.batch-card-review-block {
+  display: grid;
+  gap: 8px;
+}
+
+.batch-card-review-block h4,
+.batch-card-review-block h5 {
+  font-size: 0.86rem;
+  margin: 0;
+}
+
+.batch-card-review .detail-grid {
+  gap: 4px 8px;
+  grid-template-columns: minmax(72px, max-content) minmax(0, 1fr);
+}
+
+.batch-card-review .detail-grid dt,
+.batch-card-review .detail-grid dd,
+.batch-card-review .seed-list {
+  font-size: 0.8rem;
+}
+
+.batch-card-review .seed-group {
+  display: grid;
+  gap: 6px;
+}
+
 .batch-status {
   background: #edf3f7;
   border: 1px solid #c8d5df;

@@ -494,9 +494,16 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "batchDraftCards" in script
     assert "batchCardTitle" in script
     assert "batchCardSourceName" in script
+    assert "batchCardReviewData" in script
+    assert "renderBatchCardReviewPanel" in script
+    assert "canExpandBatchCard" in script
     assert "deleteBatchCard" in script
     assert "batch-draft-card" in script
     assert "batch-card-grid" in script
+    assert "batch-card-review" in script
+    assert "当前字幕组" in script
+    assert "有效种子（当前选中字幕组：" in script
+    assert "排除种子 (" in script
     assert "有效种子数：" in script
     assert "batchStatusLabel" in script
     assert "已解析" in script
@@ -986,6 +993,8 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".seed-details summary" in css
     assert ".seed-groups" in css
     assert ".seed-exclude-reason" in css
+    assert ".batch-card-review" in css
+    assert ".batch-card-review[hidden]" in css
     assert "overflow-wrap" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css

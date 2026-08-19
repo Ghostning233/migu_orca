@@ -841,11 +841,94 @@
   }
 
   function batchCardSeedSummary(row) {
-    const value = row.valid_seed_count;
+    const review = batchCardReviewData(row);
+    const value = review.effectiveSeeds.length || row.valid_seed_count;
     if (Number.isInteger(value) && value >= 0) {
       return String(value);
     }
     return "待展开";
+  }
+
+  function batchCardReviewData(row) {
+    const request = row.request || row.preview_request || row.draft_request || row;
+    const config = request.confirmable_config || row.confirmable_config || {};
+    const sourceInfo = request.source_info || row.source_info || {};
+    const filterRule = config.filter_rule || row.filter_rule || {};
+    const source = selectedRssSource(sourceInfo, config);
+    const validSeeds = source.valid_seed_names || row.valid_seed_names || [];
+    const excludedSeeds = source.excluded_seed_names || row.excluded_seed_names || [];
+    const effectiveSeeds =
+      config.effective_seed_names ||
+      row.effective_seed_names ||
+      validSeeds;
+    const selectedGroupName =
+      config.selected_subtitle_group ||
+      row.selected_subtitle_group ||
+      source.subtitle_group ||
+      "未选择字幕组";
+    return {
+      config: config,
+      filterRule: filterRule,
+      effectiveSeeds: Array.isArray(effectiveSeeds) ? effectiveSeeds : [],
+      excludedSeeds: Array.isArray(excludedSeeds) ? excludedSeeds : [],
+      selectedGroupName: selectedGroupName,
+    };
+  }
+
+  function canExpandBatchCard(row) {
+    return ["DRAFT", "READY"].indexOf(fieldValue(row.status)) !== -1;
+  }
+
+  function renderBatchCardReviewPanel(row) {
+    const review = batchCardReviewData(row);
+    const filterRule = review.filterRule;
+    const matchMode = filterRule.use_regex === true ? "正则" : "普通字符";
+    const caseMode = filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写";
+    const panel = document.createElement("div");
+    panel.className = "batch-card-review";
+    panel.hidden = true;
+
+    const filterBlock = document.createElement("div");
+    filterBlock.className = "batch-card-review-block";
+    const filterHeading = document.createElement("h4");
+    filterHeading.textContent = "过滤器";
+    filterBlock.appendChild(filterHeading);
+    filterBlock.appendChild(
+      detailList([
+        ["当前字幕组", review.selectedGroupName],
+        ["包含规则", filterRule.must_contain],
+        ["排除规则", filterRule.must_not_contain],
+        ["匹配模式", matchMode],
+        ["大小写", caseMode],
+      ]),
+    );
+
+    const seedsBlock = document.createElement("div");
+    seedsBlock.className = "batch-card-review-block batch-card-seed-summary";
+    const seedsHeading = document.createElement("h4");
+    seedsHeading.textContent = "种子摘要";
+    seedsBlock.appendChild(seedsHeading);
+
+    const effectiveGroup = document.createElement("div");
+    effectiveGroup.className = "seed-group batch-effective-seeds";
+    const effectiveHeading = document.createElement("h5");
+    effectiveHeading.textContent =
+      "有效种子（当前选中字幕组：" + review.selectedGroupName + "）(" +
+      review.effectiveSeeds.length + ")";
+    effectiveGroup.appendChild(effectiveHeading);
+    renderSeedList(effectiveGroup, review.effectiveSeeds, "无有效种子标题。");
+    seedsBlock.appendChild(effectiveGroup);
+
+    const excludedGroup = document.createElement("div");
+    excludedGroup.className = "seed-group batch-excluded-seeds";
+    const excludedHeading = document.createElement("h5");
+    excludedHeading.textContent = "排除种子 (" + review.excludedSeeds.length + ")";
+    excludedGroup.appendChild(excludedHeading);
+    renderExcludedSeedList(excludedGroup, review.excludedSeeds);
+    seedsBlock.appendChild(excludedGroup);
+
+    panel.append(filterBlock, seedsBlock);
+    return panel;
   }
 
   function deleteBatchCard(itemId) {
@@ -906,6 +989,21 @@
     expandButton.className = "secondary-button batch-card-expand";
     expandButton.textContent = "展开";
     expandButton.setAttribute("aria-label", "展开 " + (safeText(row.raw_title) || "批量条目"));
+    const reviewPanel = renderBatchCardReviewPanel(row);
+    if (!canExpandBatchCard(row)) {
+      expandButton.disabled = true;
+      expandButton.title = "生成草案后可展开查看";
+    }
+    expandButton.addEventListener("click", () => {
+      const isOpening = reviewPanel.hidden;
+      reviewPanel.hidden = !isOpening;
+      expandButton.textContent = isOpening ? "收起" : "展开";
+      expandButton.setAttribute(
+        "aria-expanded",
+        isOpening ? "true" : "false",
+      );
+    });
+    expandButton.setAttribute("aria-expanded", "false");
 
     item.append(
       removeButton,
@@ -916,6 +1014,7 @@
       source,
       seeds,
       expandButton,
+      reviewPanel,
     );
     return item;
   }

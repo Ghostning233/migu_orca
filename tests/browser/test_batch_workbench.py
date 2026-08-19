@@ -34,6 +34,8 @@ def _batch_item(
     candidate_title: str | None = None,
     poster_url: str | None = None,
     source_query: str | None = None,
+    confirmable_config: dict[str, Any] | None = None,
+    source_info: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     title = canonical_title or candidate_title or raw_title
     candidates = []
@@ -60,7 +62,54 @@ def _batch_item(
         "needs_user_review": False,
         "source": "fake",
         "candidates": candidates,
+        "confirmable_config": confirmable_config,
+        "source_info": source_info,
     }
+
+
+def _reviewable_batch_item() -> dict[str, Any]:
+    return _batch_item(
+        "item-review",
+        "萌王S4",
+        status="DRAFT",
+        canonical_title="关于我转生变成史莱姆这档事 第四季",
+        candidate_title="关于我转生变成史莱姆这档事 第四季",
+        source_query="转生史莱姆 第四季",
+        confirmable_config={
+            "selected_subtitle_group": "桜都字幕组",
+            "selected_rss_url": "https://mikan.example/RSS/Bangumi?token=secret-token",
+            "filter_rule": {
+                "must_contain": "1080p",
+                "must_not_contain": "V2",
+                "use_regex": False,
+                "case_sensitive": False,
+            },
+            "effective_seed_names": ["史莱姆 S4 01 [1080p]"],
+        },
+        source_info={
+            "raw_rss_xml": "<rss>secret-token</rss>",
+            "cookie": "session-cookie",
+            "token": "secret-token",
+            "raw_response_body": "raw-body-secret",
+            "rss_sources": [
+                {
+                    "subtitle_group": "桜都字幕组",
+                    "rss_url": "https://mikan.example/RSS/Bangumi?token=secret-token",
+                    "seed_names": [
+                        "史莱姆 S4 01 [1080p]",
+                        "史莱姆 S4 01 V2 [1080p]",
+                    ],
+                    "valid_seed_names": ["史莱姆 S4 01 [1080p]"],
+                    "excluded_seed_names": [
+                        {
+                            "name": "史莱姆 S4 01 V2 [1080p]",
+                            "reason": "命中排除规则：V2",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
 
 
 class TestBatchWorkbenchEntry:
@@ -191,6 +240,72 @@ class TestBatchWorkbenchEntry:
         assert "路哥S4" not in cards_text
         assert "史莱姆 第四季" in cards_text
         assert "邻家天使 第二季" in cards_text
+
+    def test_batch_draft_card_expands_filter_and_seed_summary(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([_reviewable_batch_item()]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+
+        card = page.locator(".batch-draft-card")
+        panel = card.locator(".batch-card-review")
+        expect(card.locator(".batch-card-status")).to_contain_text("草案")
+        expect(panel).to_be_hidden()
+
+        card.locator(".batch-card-expand").click()
+
+        expect(panel).to_be_visible()
+        expanded_text = panel.inner_text()
+        assert "当前字幕组" in expanded_text
+        assert "桜都字幕组" in expanded_text
+        assert "包含规则" in expanded_text
+        assert "1080p" in expanded_text
+        assert "排除规则" in expanded_text
+        assert "V2" in expanded_text
+        assert "匹配模式" in expanded_text
+        assert "普通字符" in expanded_text
+        assert "大小写" in expanded_text
+        assert "不区分大小写" in expanded_text
+        assert "有效种子（当前选中字幕组：桜都字幕组）(1)" in expanded_text
+        assert "史莱姆 S4 01 [1080p]" in expanded_text
+        assert "排除种子 (1)" in expanded_text
+        assert "史莱姆 S4 01 V2 [1080p]" in expanded_text
+        assert "命中排除规则：V2" in expanded_text
+
+        card.locator(".batch-card-expand").click()
+        expect(panel).to_be_hidden()
+
+    def test_batch_expanded_card_ignores_sensitive_fields(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([_reviewable_batch_item()]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+        page.locator(".batch-draft-card .batch-card-expand").click()
+
+        body_text = page.locator("body").inner_text()
+        assert "secret-token" not in body_text
+        assert "session-cookie" not in body_text
+        assert "<rss>" not in body_text
+        assert "raw-body-secret" not in body_text
+        assert "https://mikan.example/RSS/Bangumi" not in body_text
 
     def test_batch_card_grid_uses_single_column_on_narrow_screen(
         self, page: Page, live_server_url: str
