@@ -685,3 +685,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Pattern discovered: Chromium browser tests auto-skip when `is_browser_available()` fails (`tests/browser/conftest.py`), which can silently hide real failures in committed code; after any environment move run `script/setup-browser-deps.sh` and confirm the browser suite actually executes (214 tests, not skipped).
   - Gotcha encountered: `[hidden]` on `.icon-button`-styled elements needs an explicit `.<class>[hidden] { display: none }` rule; hidden-in-DOM-but-visible is a recurring failure mode for this codebase's button controls.
 ---
+
+## 2026-08-19 18:26:00 CST - Stage 20 Start
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Stage 20 开始：批量接受与 Auto Bangumi 提交前队列（backlog BL-013）。Stage 19 已归档到 `archive/2026-08-19-stage19-batch-draft-workbench/`。
+- 本 Stage 范围（prd.json US-142..US-149，branchName `agent/stage20-batch-ab-queue`）：
+  - US-142 批量提交前队列数据契约（先建契约与存储边界，不接 Web UI / 真实 AB）
+  - US-143 批量接受与全接受编排（后端接受 + 队列入列，不实现批量提交）
+  - US-144 批量 Auto Bangumi 顺序提交服务（前台顺序编排，不引入线程/后台 worker）
+  - US-145 批量队列与提交 Web API（只编排现有 service；敏感配置不入队列 storage）
+  - US-146 批量接受与全接受 Web UI 操作（复用 Stage 19 卡片工作区）
+  - US-147 提交前队列结果界面（提交配置仅当前页面请求上下文）
+  - US-148 失败项独立重试与安全回归（复用 Stage 15 安全回归模式）
+  - US-149 Stage 20 文档与收尾回归
+- 约束：AI 不静默接受；外部配置 request-scoped；批量提交前台顺序执行；README Ralph 规范要求每轮以完成全部 story 为目标、收尾归档 + 全量验证。
+---

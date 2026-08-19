@@ -1,180 +1,147 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage19-batch-draft-workbench",
-  "description": "MiGuOrca Stage 19：将 Stage 18 的单番剧真实 MiKan 主流程扩展为批量新番订阅草案工作台。用户可以按行输入多个番剧简称或不完整标题，系统通过 AI 名称解析 seam 生成候选官方标题和搜索词，逐项搜索 MiKan 候选合集，并为每个条目生成可审核订阅草案卡片。卡片支持删除、展开查看过滤器和有效种子、进入现有详情修改流程并回流到当前卡片、单卡接受。Stage 19 不实现 qBittorrent 下载任务创建、不绕过 Auto Bangumi 建长期订阅状态机、不让 AI 静默接受最终合集，也不实现全接受后的并发 Auto Bangumi 提交队列。",
+  "branchName": "agent/stage20-batch-ab-queue",
+  "description": "MiGuOrca Stage 20：将 Stage 19 的批量订阅草案工作台扩展为批量接受与 Auto Bangumi 提交前队列。用户可以单卡、批量或全量确认审核完成的卡片，查看独立队列状态，显式提供 Auto Bangumi 配置后顺序提交；单项失败可独立重试。MiGuOrca 不创建 qBittorrent 下载任务、不绕过 Auto Bangumi、不引入后台常驻 worker，敏感配置只保留在 request-scoped 上下文。",
   "userStories": [
     {
-      "id": "US-132",
-      "title": "新增批量草案数据模型与分行解析",
-      "description": "As a developer, I need a safe batch draft data contract so that multiple raw anime inputs can be tracked independently.",
+      "id": "US-142",
+      "title": "新增批量提交前队列数据契约",
+      "description": "As a developer, I need a queue contract that tracks each accepted batch item independently without persisting Auto Bangumi secrets.",
       "acceptanceCriteria": [
-        "新增批量草案和批量条目的内部模型或等价数据结构，包含 batch_id、raw_input、items、item_id、raw_title、status 字段",
-        "批量输入解析会按行拆分文本，忽略空行和纯空白行，并保留每个非空行的原始文本",
-        "每个条目拥有独立 item_id，单个条目状态变化不影响其他条目",
-        "单元测试覆盖多行输入、空行忽略、原始文本保留和 item_id 唯一性",
+        "新增 queue_id、batch_id、item_id、request_id、title、status、attempts、last_error、ab_result_summary 等非敏感字段的数据模型或等价结构",
+        "队列状态至少支持 READY_TO_SUBMIT、SUBMITTING、SUCCEEDED、FAILED、RETRYABLE，并提供中文展示映射",
+        "队列序列化只保留 request_id、item_id、公开标题、状态、次数、时间和脱敏摘要，不保存 endpoint、token、cookie、Authorization header、原始响应体、完整 RSS URL 或 magnet",
+        "同一 request_id 在同一 queue 中幂等，不会因重复批量接受创建重复队列项目",
+        "单元测试覆盖状态转换、重复项目、失败摘要脱敏和序列化字段边界",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "先建立 batch/item 原子数据契约；不要在本 story 接入 Web UI 或 MiKan 搜索。"
+      "passes": false,
+      "notes": "先建立队列契约和存储边界，不接入 Web UI 或真实 AB 调用。"
     },
     {
-      "id": "US-133",
-      "title": "新增 AI 名称解析 seam 与 fake provider",
-      "description": "As a developer, I need an injectable anime-title parsing provider so that shorthand names can be converted into searchable candidates without calling a real LLM in tests.",
+      "id": "US-143",
+      "title": "实现批量接受与全接受编排",
+      "description": "As a user, I want to accept selected or all reviewable cards so that they enter a submission queue together.",
       "acceptanceCriteria": [
-        "新增 AI 名称解析 provider seam，输入为 raw_title，输出包含 raw_title、canonical_title_candidates、season_hint、search_queries、confidence、needs_user_review、source",
-        "新增 fake provider，用固定映射支持 `萌王S4`、`路哥S4`、`杖剑谭S2`、`邻家天使S2` 的测试解析",
-        "AI provider 失败时返回可恢复的安全错误，不包含 token、endpoint、cookie、本地路径或原始外部响应",
-        "低置信度或多候选结果会设置 needs_user_review=true",
-        "单元测试覆盖成功解析、低置信度、多候选和 provider 失败场景",
+        "批量接受能力接收 batch_id 和 item_id 列表，并复用现有 Request accept 能力",
+        "全接受只处理当前批次中有有效 request_id 且处于 PENDING_CONFIRM 的项目，FAILED、删除、缺少候选和其他不可接受项目逐项返回原因",
+        "已处于 ACCEPTED 的项目幂等返回，不重复写入确认历史或队列项目",
+        "每个成功接受的项目进入 READY_TO_SUBMIT，批次内一项失败不阻塞其他项",
+        "API 单元测试覆盖选中接受、全接受、不可接受项目、幂等重复和单项失败不阻塞",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "只做 seam 和 fake provider；不要接真实 LLM API。"
+      "passes": false,
+      "notes": "只做后端接受和队列入列；不要在本 story 实现批量提交。"
     },
     {
-      "id": "US-134",
-      "title": "新增批量解析 Web API",
-      "description": "As a Web UI caller, I want to submit multiple raw titles and receive per-item parsed metadata so that the batch workbench can render reviewable entries.",
+      "id": "US-144",
+      "title": "实现批量 Auto Bangumi 顺序提交服务",
+      "description": "As a user, I want accepted queue items submitted independently to Auto Bangumi so that one failure does not cancel the rest of my batch.",
       "acceptanceCriteria": [
-        "新增批量解析 API 端点，接收 raw_input 多行文本并返回 batch_id、raw_input、items",
-        "每个返回 item 包含 raw_title、解析候选标题、season_hint、search_queries、confidence、needs_user_review 和 status",
-        "空输入返回统一 validation_error envelope，错误消息为中文且不泄露本地路径",
-        "provider 单项失败只标记该 item 为 FAILED，不阻塞其他 item 返回",
-        "Web API 单元测试覆盖成功、多行、空输入和单项失败",
+        "新增批量提交 service，使用 request-scoped ab_config 顺序处理 READY_TO_SUBMIT 项目",
+        "每个项目复用现有 build_ab_subscription_payload、Auto Bangumi client、apply_ab_submit_action 和脱敏结果契约",
+        "提交前校验项目对应 Request 仍为 ACCEPTED；不满足条件的项目标记为 FAILED 或 RETRYABLE 并继续处理其他项目",
+        "单项 Auto Bangumi 成功标记 SUCCEEDED，单项失败标记 FAILED 或 RETRYABLE，并保留可读的脱敏错误摘要",
+        "一次批量提交不会重复提交已经 SUCCEEDED 的项目",
+        "单元测试覆盖多项成功、单项失败继续、非 ACCEPTED 项目和成功项目跳过",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "API 应复用 US-132/US-133 的模型和 provider seam；不要在本 story 做卡片 UI。"
+      "passes": false,
+      "notes": "本阶段采用前台顺序编排，不引入线程、后台 worker 或复杂调度器。"
     },
     {
-      "id": "US-135",
-      "title": "新增批量 MiKan 候选搜索编排",
-      "description": "As a user, I want each parsed batch item to search MiKan independently so that one bad shorthand does not block the rest of the list.",
+      "id": "US-145",
+      "title": "新增批量队列与提交 Web API",
+      "description": "As a Web UI caller, I want APIs for accepting cards, reading the queue, and explicitly submitting a batch.",
       "acceptanceCriteria": [
-        "批量候选搜索会对每个 item 使用 search_queries 中的查询词逐项调用现有 MiKan candidate search 能力",
-        "每个 item 的候选结果彼此独立，单项搜索失败只将该 item 标记为 FAILED 或 NEEDS_REVIEW",
-        "候选结果只返回 bangumi_id、title、mikan_url、poster_url、source_query、aliases、recommendation 等公开元数据",
-        "响应和日志不得包含 raw HTML、raw RSS XML、完整失败 URL、cookie、token、magnet 或原始响应体",
-        "单元测试覆盖多 item 成功、单 item 失败不阻塞、公开字段序列化和敏感字段过滤",
+        "新增批量接受或全接受 API，返回 batch_id、逐项状态、队列项目和不可接受原因",
+        "新增队列读取 API，只返回脱敏队列项目、状态、尝试次数、时间和结果摘要",
+        "新增批量提交 API，要求 request-scoped ab_config 和显式确认字段，缺失配置或确认时返回中文 validation_error envelope",
+        "批量提交响应逐项返回成功或失败结果，不因一项失败而返回整体成功或中断其余项目",
+        "API 响应、错误 details 和日志不得包含 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL 或本地绝对路径",
+        "Web API 测试覆盖成功、空选择、缺失确认、单项失败、队列读取和敏感字段过滤",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "优先复用现有 `/api/v1/mikan/candidates` 逻辑或其内部函数，避免第二套 MiKan parser。"
+      "passes": false,
+      "notes": "API 层只编排现有 service；敏感配置不得传入队列 storage。"
     },
     {
-      "id": "US-136",
-      "title": "新增批量输入 Web UI 入口",
-      "description": "As a user, I want a batch input area on the workbench so that I can paste multiple seasonal anime shorthand names at once.",
+      "id": "US-146",
+      "title": "新增批量接受与全接受 Web UI 操作",
+      "description": "As a user, I want to accept one, selected, or all reviewable cards directly from the batch workbench.",
       "acceptanceCriteria": [
-        "`/index` 提供明确的批量获取入口或面板，包含多行输入框和提交按钮",
-        "输入框示例文案包含 `萌王S4`、`路哥S4`、`杖剑谭S2`、`邻家天使S2`",
-        "提交空输入时前端显示中文校验错误且不调用批量 API",
-        "提交有效多行输入时调用批量解析 API，并展示每个条目的 raw_title 和解析状态",
-        "浏览器测试覆盖入口可见、多行输入、空输入校验和提交 loading/结果状态",
+        "批量卡片提供单卡接受、可勾选选择、批量接受和全接受入口",
+        "页面明确显示选中数量，并对 FAILED、已删除、缺少候选等不可接受项目显示中文原因",
+        "批量接受成功后，成功卡片显示已接受/待提交并保持其他卡片状态不变",
+        "提交过程中接受按钮和重复提交入口进入 loading/disabled 状态，失败后恢复可操作",
+        "浏览器测试覆盖单卡接受、选中批量接受、全接受、部分失败和其他卡片不变",
         "Tests pass",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "只展示解析结果，不要求本 story 生成完整订阅草案卡片。"
+      "passes": false,
+      "notes": "复用 Stage 19 卡片工作区；不要在本 story 实现队列结果面板。"
     },
     {
-      "id": "US-137",
-      "title": "渲染批量订阅草案卡片网格",
-      "description": "As a user, I want parsed and generated batch items shown as cards so that I can review many anime subscriptions quickly.",
+      "id": "US-147",
+      "title": "新增提交前队列结果界面",
+      "description": "As a user, I want to inspect queue status and sanitized Auto Bangumi results before retrying failed items.",
       "acceptanceCriteria": [
-        "批量工作区以卡片网格展示条目，桌面端通常一行 4 个，窄屏最低一行 1 个",
-        "每张卡片初始展示封面占位或 poster、番剧全名或候选标题、源名称、有效种子数、状态和展开控件",
-        "每张卡片右上角有删除按钮，删除只移除当前卡片",
-        "卡片区域支持长列表滚动，删除一个卡片后其他卡片内容和状态保持不变",
-        "浏览器测试覆盖卡片布局、删除单卡、窄屏布局和长列表可滚动",
+        "工作台或独立区域展示队列项目标题、状态、尝试次数、脱敏结果摘要和最后更新时间",
+        "状态文案覆盖待提交、提交中、提交成功、提交失败、可重试，并使用中文业务词",
+        "提交前表单包含 endpoint、token、fallback 选项和显式确认；提交完成后清空 endpoint/token 输入",
+        "提交中按钮禁用，批量响应结束后各项目状态独立刷新，成功项目不会显示重试按钮",
+        "刷新页面后可以从队列/Request/AB result storage 恢复已记录的结果摘要",
+        "浏览器测试覆盖队列展示、提交成功、部分失败、敏感输入清理和刷新后状态展示",
         "Tests pass",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "可以先使用 API 返回的公开候选/草案摘要渲染；不要在卡片中暴露 raw RSS 或敏感外部配置。"
+      "passes": false,
+      "notes": "提交配置只存在当前页面请求上下文，不得写入 URL、localStorage、sessionStorage 或队列 JSON。"
     },
     {
-      "id": "US-138",
-      "title": "卡片展开显示过滤器与种子摘要",
-      "description": "As a user, I want to expand a batch card to inspect filter rules and seed results before accepting it.",
+      "id": "US-148",
+      "title": "实现失败项独立重试与安全回归",
+      "description": "As a user, I want to retry only failed queue items without resubmitting successful subscriptions or exposing sensitive data.",
       "acceptanceCriteria": [
-        "每张 DRAFT/READY 卡片可展开和收起",
-        "展开区展示当前字幕组、包含规则、排除规则、匹配模式、大小写状态、有效种子摘要和排除种子摘要",
-        "有效种子摘要优先展示当前选中字幕组的有效种子，排除种子展示中文排除原因",
-        "展开区不得渲染 raw RSS XML、magnet、cookie、token、完整 endpoint 或原始响应体",
-        "浏览器测试覆盖展开/收起、过滤器文案、有效/排除种子摘要和敏感字段不展示",
+        "只有 FAILED 或 RETRYABLE 项目显示单项重试，重试使用最新保存的 ACCEPTED Request",
+        "单项重试成功后更新为 SUCCEEDED，失败后保留可重试状态和递增 attempts，其他项目不变",
+        "重试不会使用队列中复制的完整 RSS、token、cookie、magnet 或原始响应",
+        "新增端到端安全回归，断言 endpoint、token、Authorization header、cookie、raw HTML、raw RSS XML、原始响应体、完整失败 URL 和本地绝对路径不出现在 API 响应、页面、URL、浏览器 storage、队列 JSON、Request JSON、日志或 trace 中",
+        "测试覆盖成功项不可重复提交、失败项单独重试、重试失败和异常恢复",
         "Tests pass",
         "Typecheck passes",
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "展示规则应复用 Stage 18 详情页的中文状态和 Seeds 语义。"
+      "passes": false,
+      "notes": "优先复用现有 Stage 15 安全回归模式和 AB result sanitization。"
     },
     {
-      "id": "US-139",
-      "title": "单卡详情修改并回流当前卡片",
-      "description": "As a user, I want to modify one batch card through the existing subscription detail flow so that other cards remain unchanged.",
+      "id": "US-149",
+      "title": "Stage 20 文档与收尾回归",
+      "description": "As a maintainer, I want Stage 20 behavior and its Auto Bangumi boundary documented so that later stages do not turn the queue into a download executor.",
       "acceptanceCriteria": [
-        "卡片展开区提供 `修改` 按钮，点击后进入或打开现有订阅方案详情修改流程",
-        "保存修改后只更新当前卡片的 selected_subtitle_group、filter_rule、expected_folder_name、有效种子数和种子摘要",
-        "同一批次中的其他卡片 request snapshot、状态和展示内容保持不变",
-        "修改失败时当前卡片保留原状态并显示中文错误",
-        "浏览器测试覆盖修改当前卡片、其他卡片不变和修改失败恢复",
-        "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 8,
-      "passes": true,
-      "notes": "必须复用现有 preview-modify/modify 逻辑；不要为批量卡片实现第二套筛选规则计算。"
-    },
-    {
-      "id": "US-140",
-      "title": "单卡接受状态流转",
-      "description": "As a user, I want to accept a reviewed batch card so that it can later enter the Auto Bangumi submission queue.",
-      "acceptanceCriteria": [
-        "每张 DRAFT/READY 卡片提供单独 `接受` 动作",
-        "接受动作复用现有 Request accept 能力或等价状态转换，成功后当前卡片状态显示为 `已接受`",
-        "已接受卡片不再展示删除前无需确认的危险操作；如仍允许删除，必须经显式确认",
-        "接受某一卡片不改变同批次其他卡片状态",
-        "本 story 不实现全接受、批量接受或并发 Auto Bangumi 提交队列",
-        "浏览器测试覆盖单卡接受、状态中文展示和其他卡片不变",
-        "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 9,
-      "passes": true,
-      "notes": "Stage 20 再做批量接受和 AB 提交队列。"
-    },
-    {
-      "id": "US-141",
-      "title": "Stage 19 文档与安全回归收尾",
-      "description": "As a maintainer, I want Stage 19 behavior documented and security-tested so that future iterations preserve the new product direction.",
-      "acceptanceCriteria": [
-        "README、主 PRD、Stage 19 PRD、future stages 文档、M00、M13、backlog 同步 Stage 19 完成状态和后续 Stage 20 handoff",
-        "新增或更新安全回归，覆盖 AI 输入输出、批量解析、MiKan 候选、卡片展示和单卡接受不泄露 raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体或本地绝对路径",
+        "README、docs/backlog.md、主 PRD、future stages、M00、M13 和 Stage 20 PRD 同步 Stage 20 完成状态及 Stage 21 handoff",
+        "文档明确批量接受、提交前队列、显式 AB 配置、单项失败重试和不创建 qBittorrent 下载任务的边界",
         "`uv run python -m compileall -q src tests` 通过",
         "`uv run pytest -q` 通过",
         "`uv run pytest tests/browser/ -q` 通过；如果浏览器不可用，必须记录明确 skip 原因",
         "Typecheck passes"
       ],
-      "priority": 10,
-      "passes": true,
+      "priority": 8,
+      "passes": false,
       "notes": "Stage closeout story；所有功能 story 完成后再执行。"
     }
   ]
