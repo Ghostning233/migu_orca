@@ -51,6 +51,22 @@
   const batchParseError = document.getElementById("batch-parse-error");
   const batchParseResult = document.getElementById("batch-parse-result");
   const batchParseSubmit = document.getElementById("batch-parse-submit");
+  const batchAcceptToolbar = document.getElementById("batch-accept-toolbar");
+  const batchSelectAllCheckbox = document.getElementById("batch-select-all-checkbox");
+  const batchAcceptSelectedCount = document.getElementById("batch-accept-selected-count");
+  const batchAcceptSubmit = document.getElementById("batch-accept-submit");
+  const batchAcceptAll = document.getElementById("batch-accept-all");
+  const batchQueueRefresh = document.getElementById("batch-queue-refresh");
+  const batchQueueCount = document.getElementById("batch-queue-count");
+  const batchQueueList = document.getElementById("batch-queue-list");
+  const batchQueueSubmitForm = document.getElementById("batch-queue-submit-form");
+  const batchQueueAbEndpointInput = document.getElementById("batch-queue-ab-endpoint");
+  const batchQueueAbTokenInput = document.getElementById("batch-queue-ab-token");
+  const batchQueueAbFallbackInput = document.getElementById("batch-queue-ab-fallback-enabled");
+  const batchQueueAbConfirmInput = document.getElementById("batch-queue-ab-confirm");
+  const batchQueueAbError = document.getElementById("batch-queue-ab-error");
+  const batchQueueSubmitResult = document.getElementById("batch-queue-submit-result");
+  const batchQueueSubmitButton = document.getElementById("batch-queue-submit-button");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -61,6 +77,10 @@
   let currentDetailPayload = null;
   let currentBatchEditItemId = null;
   let batchDraftCards = [];
+  let currentBatchId = null;
+  let selectedBatchItemIds = new Set();
+  let batchAcceptInFlight = false;
+  let batchQueueItems = [];
   let storageDirPreference = "";
   let saveRequestPreference = true;
 
@@ -915,7 +935,8 @@
     renderBatchParseItems(batchDraftCards);
   }
 
-  function markBatchCardAccepted(itemId, acceptedRequest) {
+  function markBatchCardAccepted(itemId, acceptedRequest, options) {
+    const opts = options || {};
     if (!itemId || !acceptedRequest) {
       return;
     }
@@ -931,9 +952,14 @@
       next.confirmable_config =
         acceptedRequest.confirmable_config || row.confirmable_config;
       next.source_info = acceptedRequest.source_info || row.source_info;
+      if (opts.queued) {
+        next.queue_status = "READY_TO_SUBMIT";
+      }
       return next;
     });
-    renderBatchParseItems(batchDraftCards);
+    if (opts.render !== false) {
+      renderBatchParseItems(batchDraftCards);
+    }
   }
 
   async function savePreviewDraftRequest(request) {
@@ -948,50 +974,310 @@
     return result && result.request;
   }
 
-  async function acceptSavedRequest(requestId) {
-    if (!requestId) {
-      throw new Error("订阅草案缺少 request_id。");
+  function batchCardSavedRequest(row) {
+    return (row && row.request) || null;
+  }
+
+  function batchCardPreviewRequest(row) {
+    return (row && (row.preview_request || row.draft_request)) || null;
+  }
+
+  function batchCardIsSelectable(row) {
+    return fieldValue(row.status) !== "ACCEPTED";
+  }
+
+  function updateBatchAcceptToolbar() {
+    if (!batchAcceptToolbar) {
+      return;
     }
-    const result = await fetchJson(
-      apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/accept"),
+    const selectable = batchDraftCards.filter(batchCardIsSelectable);
+    const selectedCount = batchDraftCards.filter(
+      (row) =>
+        selectedBatchItemIds.has(row.item_id) && batchCardIsSelectable(row),
+    ).length;
+    if (batchAcceptSelectedCount) {
+      batchAcceptSelectedCount.textContent = "已选择 " + selectedCount + " 项";
+    }
+    if (batchSelectAllCheckbox) {
+      batchSelectAllCheckbox.checked =
+        selectable.length > 0 &&
+        selectable.every((row) => selectedBatchItemIds.has(row.item_id));
+      batchSelectAllCheckbox.indeterminate =
+        selectedCount > 0 && selectedCount < selectable.length;
+    }
+    if (batchAcceptSubmit) {
+      batchAcceptSubmit.disabled =
+        selectedCount === 0 || batchAcceptInFlight;
+    }
+    if (batchAcceptAll) {
+      batchAcceptAll.disabled =
+        batchAcceptInFlight || selectable.length === 0;
+    }
+  }
+
+  function toggleBatchItemSelection(itemId, selected) {
+    if (selected) {
+      selectedBatchItemIds.add(itemId);
+    } else {
+      selectedBatchItemIds.delete(itemId);
+    }
+    updateBatchAcceptToolbar();
+  }
+
+  function setAllBatchItemsSelected(selected) {
+    selectedBatchItemIds = new Set();
+    if (selected) {
+      for (const row of batchDraftCards) {
+        if (batchCardIsSelectable(row)) {
+          selectedBatchItemIds.add(row.item_id);
+        }
+      }
+    }
+    renderBatchParseItems(batchDraftCards);
+  }
+
+  function setBatchAcceptInFlight(isInFlight) {
+    batchAcceptInFlight = isInFlight;
+    if (batchAcceptSubmit) {
+      batchAcceptSubmit.textContent = isInFlight ? "正在接受..." : "批量接受";
+    }
+    if (batchAcceptAll) {
+      batchAcceptAll.textContent = isInFlight ? "正在接受..." : "全接受";
+    }
+    if (batchDraftCards.length) {
+      renderBatchParseItems(batchDraftCards);
+    } else {
+      updateBatchAcceptToolbar();
+    }
+  }
+
+  function setBatchCardAcceptFeedback(itemId, status, reason) {
+    batchDraftCards = batchDraftCards.map((row) => {
+      if (row.item_id !== itemId) {
+        return row;
+      }
+      const next = Object.assign({}, row);
+      next.accept_feedback = {
+        status: status,
+        reason: reason || "接受失败",
+      };
+      return next;
+    });
+  }
+
+  function applyBatchAcceptResult(result, pendingSavedRequests) {
+    const saved = pendingSavedRequests || new Map();
+    const outcomeCounts = {};
+    const items = Array.isArray(result && result.items) ? result.items : [];
+    for (const item of items) {
+      outcomeCounts[item.status] = (outcomeCounts[item.status] || 0) + 1;
+      batchDraftCards = batchDraftCards.map((row) => {
+        if (row.item_id !== item.item_id) {
+          return row;
+        }
+        const next = Object.assign({}, row);
+        delete next.accept_feedback;
+        if (item.status === "accepted" || item.status === "already_accepted") {
+          const savedRequest =
+            saved.get(item.item_id) ||
+            row.request ||
+            row.preview_request ||
+            row.draft_request ||
+            {};
+          next.status = "ACCEPTED";
+          next.request = Object.assign({}, savedRequest, {status: "ACCEPTED"});
+          delete next.preview_request;
+          delete next.draft_request;
+          next.confirmable_config =
+            next.request.confirmable_config || row.confirmable_config;
+          next.source_info = next.request.source_info || row.source_info;
+          if (item.status === "accepted") {
+            next.queue_status = "READY_TO_SUBMIT";
+          }
+          selectedBatchItemIds.delete(item.item_id);
+        } else {
+          next.accept_feedback = {
+            status: item.status,
+            reason: item.reason || "接受失败",
+          };
+        }
+        return next;
+      });
+    }
+    // Sync the authoritative queue statuses onto matching accepted cards so a
+    // re-accept (already_accepted) still reflects the persisted queue.
+    const queue = result && result.queue;
+    const queueItems = queue && Array.isArray(queue.items) ? queue.items : [];
+    for (const qItem of queueItems) {
+      batchDraftCards = batchDraftCards.map((row) => {
+        if (row.item_id !== qItem.item_id || row.status !== "ACCEPTED") {
+          return row;
+        }
+        const next = Object.assign({}, row);
+        next.queue_status = qItem.status;
+        return next;
+      });
+    }
+    return outcomeCounts;
+  }
+
+  function showBatchAcceptNotification(outcomeCounts, isSingle) {
+    const accepted = outcomeCounts.accepted || 0;
+    const already = outcomeCounts.already_accepted || 0;
+    const bad = (outcomeCounts.unacceptable || 0) + (outcomeCounts.failed || 0);
+    let message = "已接受 " + accepted + " 项";
+    if (already) {
+      message += "；已确认跳过 " + already + " 项";
+    }
+    if (bad) {
+      message += "；" + bad + " 项无法接受";
+    }
+    if (isSingle) {
+      if (bad > 0 && accepted === 0) {
+        showNotification("error", "接受失败", message);
+      } else if (accepted > 0) {
+        showNotification(
+          "success",
+          "接受成功",
+          "当前批量卡片已标记为已接受并待提交，其他卡片保持不变。",
+        );
+      } else if (already > 0) {
+        showNotification(
+          "success",
+          "接受成功",
+          "当前批量卡片已确认，跳过重复接受。",
+        );
+      } else {
+        showNotification("success", "接受成功", message);
+      }
+      return;
+    }
+    if (bad > 0 && accepted === 0) {
+      showNotification("error", "批量接受失败", message);
+    } else if (bad > 0) {
+      showNotification("success", "批量接受完成", message);
+    } else {
+      showNotification("success", "批量接受成功", message);
+    }
+  }
+
+  async function resolveBatchAcceptDescriptors(rows) {
+    const descriptors = [];
+    const pendingSavedRequests = new Map();
+    const localFailures = [];
+    for (const row of rows) {
+      const saved = batchCardSavedRequest(row);
+      if (saved && saved.request_id) {
+        descriptors.push({
+          item_id: row.item_id,
+          request_id: saved.request_id,
+          title: batchCardTitle(row),
+        });
+        pendingSavedRequests.set(row.item_id, saved);
+        continue;
+      }
+      const preview = batchCardPreviewRequest(row);
+      if (preview && preview.request_id) {
+        try {
+          const savedRequest = await savePreviewDraftRequest(preview);
+          if (!savedRequest || !savedRequest.request_id) {
+            throw new Error("preview-save returned no request_id");
+          }
+          descriptors.push({
+            item_id: row.item_id,
+            request_id: savedRequest.request_id,
+            title: batchCardTitle(row),
+          });
+          pendingSavedRequests.set(row.item_id, savedRequest);
+        } catch (error) {
+          localFailures.push({
+            item_id: row.item_id,
+            title: batchCardTitle(row),
+            reason: "订阅草案保存失败，无法接受",
+          });
+        }
+        continue;
+      }
+      descriptors.push({
+        item_id: row.item_id,
+        request_id: null,
+        title: batchCardTitle(row),
+      });
+    }
+    return {descriptors: descriptors, pendingSavedRequests: pendingSavedRequests, localFailures: localFailures};
+  }
+
+  function postBatchAccept(descriptors, itemIds) {
+    const payload = {
+      items: descriptors,
+      storage_dir: currentStorageDir() || null,
+    };
+    if (itemIds) {
+      payload.item_ids = itemIds;
+    }
+    return fetchJson(
+      apiPath("/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/accept"),
       {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({storage_dir: currentStorageDir() || null}),
+        body: JSON.stringify(payload),
       },
     );
-    return result && result.request;
   }
 
-  async function acceptBatchCard(row) {
-    const request = batchCardRequest(row);
-    if (!request) {
+  async function submitBatchAccept(rows, options) {
+    const opts = options || {};
+    if (!currentBatchId) {
       showNotification(
         "error",
         "接受失败",
-        "当前卡片缺少订阅草案，无法接受。",
+        "缺少批次标识，请重新获取批量草案。",
       );
       return;
     }
     hideNotification();
-    setBatchParseInFlight(true);
+    setBatchAcceptInFlight(true);
     try {
-      const savedRequest = row.request
-        ? request
-        : await savePreviewDraftRequest(request);
-      const acceptedRequest = await acceptSavedRequest(savedRequest.request_id);
-      markBatchCardAccepted(row.item_id, acceptedRequest);
-      await loadList({loadSelectedDetail: false});
-      showNotification(
-        "success",
-        "接受成功",
-        "当前批量卡片已标记为已接受，其他卡片保持不变。",
+      const resolved = await resolveBatchAcceptDescriptors(rows);
+      if (!resolved.descriptors.length) {
+        for (const failure of resolved.localFailures) {
+          setBatchCardAcceptFeedback(failure.item_id, "failed", failure.reason);
+        }
+        renderBatchParseItems(batchDraftCards);
+        showNotification(
+          "error",
+          "接受失败",
+          resolved.localFailures.length
+            ? resolved.localFailures[0].reason
+            : "没有可接受的批量卡片。",
+        );
+        return;
+      }
+      const result = await postBatchAccept(
+        resolved.descriptors,
+        opts.itemIds || null,
       );
+      const outcomeCounts = applyBatchAcceptResult(
+        result,
+        resolved.pendingSavedRequests,
+      );
+      for (const failure of resolved.localFailures) {
+        setBatchCardAcceptFeedback(failure.item_id, "failed", failure.reason);
+        outcomeCounts.failed = (outcomeCounts.failed || 0) + 1;
+      }
+      renderBatchParseItems(batchDraftCards);
+      applyQueueResult(result && result.queue);
+      await loadList({loadSelectedDetail: false});
+      showBatchAcceptNotification(outcomeCounts, opts.single);
     } catch (error) {
       notifyApiError("接受失败", error);
     } finally {
-      setBatchParseInFlight(false);
+      setBatchAcceptInFlight(false);
     }
+  }
+
+  async function acceptBatchCard(row) {
+    await submitBatchAccept([row], {single: true});
   }
 
   function setPreviewEditError(message) {
@@ -1092,8 +1378,8 @@
     acceptButton.type = "button";
     acceptButton.className = "primary-button batch-card-accept";
     acceptButton.textContent = "接受";
-    acceptButton.disabled = !canAcceptBatchCard(row);
-    if (acceptButton.disabled) {
+    acceptButton.disabled = !canAcceptBatchCard(row) || batchAcceptInFlight;
+    if (!canAcceptBatchCard(row)) {
       acceptButton.title = "生成订阅草案后可接受";
     }
     acceptButton.addEventListener("click", function () {
@@ -1108,6 +1394,7 @@
   }
 
   function deleteBatchCard(itemId) {
+    selectedBatchItemIds.delete(itemId);
     batchDraftCards = batchDraftCards.filter((row) => row.item_id !== itemId);
     renderBatchParseItems(batchDraftCards);
   }
@@ -1116,6 +1403,21 @@
     const item = document.createElement("article");
     item.className = "batch-draft-card";
     item.dataset.itemId = safeText(row.item_id);
+
+    const selectCheckbox = document.createElement("input");
+    selectCheckbox.type = "checkbox";
+    selectCheckbox.className = "batch-card-checkbox";
+    selectCheckbox.dataset.itemId = safeText(row.item_id);
+    selectCheckbox.setAttribute(
+      "aria-label",
+      "选择 " + (safeText(row.raw_title) || "批量条目"),
+    );
+    selectCheckbox.checked = selectedBatchItemIds.has(row.item_id);
+    selectCheckbox.disabled =
+      fieldValue(row.status) === "ACCEPTED" || batchAcceptInFlight;
+    selectCheckbox.addEventListener("change", function () {
+      toggleBatchItemSelection(row.item_id, selectCheckbox.checked);
+    });
 
     const removeButton = document.createElement("button");
     removeButton.type = "button";
@@ -1126,6 +1428,7 @@
     if (fieldValue(row.status) === "ACCEPTED") {
       removeButton.hidden = true;
     }
+    removeButton.disabled = batchAcceptInFlight;
     removeButton.addEventListener("click", () => {
       deleteBatchCard(row.item_id);
     });
@@ -1143,9 +1446,20 @@
       posterWrap.textContent = "订阅草案";
     }
 
+    const statusRow = document.createElement("div");
+    statusRow.className = "batch-card-status-row";
     const status = document.createElement("span");
     status.className = "batch-status batch-card-status";
     status.textContent = batchStatusLabel(row.status);
+    statusRow.appendChild(status);
+    if (row.queue_status) {
+      const queueStatus = document.createElement("span");
+      queueStatus.className =
+        "batch-status batch-card-queue-status batch-card-queue-status-" +
+        batchQueueStatusClass(row.queue_status);
+      queueStatus.textContent = batchQueueStatusLabel(row.queue_status);
+      statusRow.appendChild(queueStatus);
+    }
 
     const title = document.createElement("strong");
     title.className = "batch-card-title";
@@ -1184,17 +1498,27 @@
     });
     expandButton.setAttribute("aria-expanded", "false");
 
-    item.append(
+    const children = [
+      selectCheckbox,
       removeButton,
       posterWrap,
-      status,
+      statusRow,
       title,
       rawTitle,
       source,
       seeds,
-      expandButton,
-      reviewPanel,
-    );
+    ];
+    if (row.accept_feedback && row.accept_feedback.reason) {
+      const reason = document.createElement("div");
+      reason.className = "batch-card-reason";
+      const prefix =
+        row.accept_feedback.status === "failed" ? "接受失败：" : "无法接受：";
+      reason.textContent =
+        prefix + safeText(row.accept_feedback.reason);
+      children.push(reason);
+    }
+    children.push(expandButton, reviewPanel);
+    item.append.apply(item, children);
     return item;
   }
 
@@ -1205,6 +1529,9 @@
         "没有可展示的批量解析结果。",
         "empty-state compact-state",
       );
+      if (batchAcceptToolbar) {
+        batchAcceptToolbar.hidden = true;
+      }
       return;
     }
 
@@ -1217,6 +1544,11 @@
       list.appendChild(renderBatchCard(row));
     }
     batchParseResult.appendChild(list);
+
+    if (batchAcceptToolbar) {
+      batchAcceptToolbar.hidden = false;
+    }
+    updateBatchAcceptToolbar();
   }
 
   async function parseBatchDraft(event) {
@@ -1249,8 +1581,13 @@
         body: JSON.stringify(payload),
       });
       const items = (result && result.items) || [];
+      currentBatchId = (result && result.batch_id) || null;
+      syncBatchIdToUrl(currentBatchId);
+      selectedBatchItemIds = new Set();
+      batchAcceptInFlight = false;
       batchDraftCards = Array.isArray(items) ? items.slice() : [];
       renderBatchParseItems(batchDraftCards);
+      await loadBatchQueue();
       showNotification(
         "success",
         "批量草案已获取",
@@ -1269,6 +1606,480 @@
 
   if (batchParseForm) {
     batchParseForm.addEventListener("submit", parseBatchDraft);
+  }
+
+  if (batchSelectAllCheckbox) {
+    batchSelectAllCheckbox.addEventListener("change", function () {
+      setAllBatchItemsSelected(batchSelectAllCheckbox.checked);
+    });
+  }
+
+  if (batchAcceptSubmit) {
+    batchAcceptSubmit.addEventListener("click", function () {
+      const selectedRows = batchDraftCards.filter((row) =>
+        selectedBatchItemIds.has(row.item_id),
+      );
+      if (!selectedRows.length || batchAcceptInFlight) {
+        return;
+      }
+      if (
+        window.confirm(
+          "确认接受选中的 " + selectedRows.length + " 个批量卡片？",
+        )
+      ) {
+        submitBatchAccept(selectedRows, {itemIds: Array.from(selectedBatchItemIds)});
+      }
+    });
+  }
+
+  if (batchAcceptAll) {
+    batchAcceptAll.addEventListener("click", function () {
+      const selectable = batchDraftCards.filter(batchCardIsSelectable);
+      if (!selectable.length || batchAcceptInFlight) {
+        return;
+      }
+      if (window.confirm("确认接受全部批量卡片？")) {
+        submitBatchAccept(batchDraftCards, {});
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------
+  // Stage 20 batch pre-submission queue result panel (US-147)
+  // ---------------------------------------------------------------------
+
+  function batchIdFromLocation() {
+    const params = new URLSearchParams(window.location.search);
+    return (params.get("batch_id") || "").trim();
+  }
+
+  function syncBatchIdToUrl(batchId) {
+    if (!window.history || !window.history.pushState) {
+      return;
+    }
+    const url = new URL(window.location.href);
+    if (batchId) {
+      url.searchParams.set("batch_id", batchId);
+    } else {
+      url.searchParams.delete("batch_id");
+    }
+    if (url.href === window.location.href) {
+      return;
+    }
+    window.history.pushState({batch_id: batchId || null}, "", url);
+  }
+
+  function batchQueueStatusLabel(status) {
+    const labels = {
+      READY_TO_SUBMIT: "待提交",
+      SUBMITTING: "提交中",
+      SUCCEEDED: "提交成功",
+      FAILED: "提交失败",
+      RETRYABLE: "可重试",
+    };
+    const value = fieldValue(status);
+    return Object.prototype.hasOwnProperty.call(labels, value)
+      ? labels[value]
+      : value;
+  }
+
+  function batchQueueStatusClass(status) {
+    const classes = {
+      READY_TO_SUBMIT: "ready",
+      SUBMITTING: "submitting",
+      SUCCEEDED: "succeeded",
+      FAILED: "failed",
+      RETRYABLE: "retryable",
+    };
+    return Object.prototype.hasOwnProperty.call(classes, status)
+      ? classes[status]
+      : "ready";
+  }
+
+  function batchQueueItemSummary(item) {
+    if (item.ab_result_summary) {
+      return "结果：" + safeText(item.ab_result_summary);
+    }
+    if (item.last_error) {
+      return "错误：" + safeText(item.last_error);
+    }
+    return "尚无结果摘要";
+  }
+
+  function renderBatchQueueItem(item) {
+    const row = document.createElement("div");
+    row.className = "batch-queue-item";
+    row.dataset.itemId = safeText(item.item_id);
+
+    const statusRow = document.createElement("div");
+    statusRow.className = "batch-queue-item-status-row";
+    const status = document.createElement("span");
+    status.className =
+      "batch-status batch-queue-status batch-queue-status-" +
+      batchQueueStatusClass(item.status);
+    status.textContent = batchQueueStatusLabel(item.status);
+    statusRow.appendChild(status);
+    // SUCCEEDED / READY / SUBMITTING 项目不提供重试入口（单项重试是 US-148）。
+    if (item.status === "FAILED" || item.status === "RETRYABLE") {
+      const retryButton = document.createElement("button");
+      retryButton.className = "secondary-button batch-queue-item-retry";
+      retryButton.type = "button";
+      retryButton.textContent = "重试";
+      retryButton.setAttribute("data-request-id", safeText(item.request_id));
+      retryButton.addEventListener("click", function () {
+        retryBatchQueueItem(item);
+      });
+      statusRow.appendChild(retryButton);
+    }
+    row.appendChild(statusRow);
+
+    const title = document.createElement("strong");
+    title.className = "batch-queue-item-title";
+    title.textContent = safeText(item.title || "未命名订阅方案");
+    row.appendChild(title);
+
+    const meta = document.createElement("div");
+    meta.className = "batch-queue-item-meta";
+    meta.textContent =
+      "尝试次数：" + safeText(item.attempts) +
+      "；更新于：" + safeText(item.updated_at || "未记录");
+    row.appendChild(meta);
+
+    const summary = document.createElement("div");
+    summary.className = "batch-queue-item-summary";
+    summary.textContent = batchQueueItemSummary(item);
+    row.appendChild(summary);
+
+    return row;
+  }
+
+  function renderBatchQueuePanel() {
+    if (!batchQueueList) {
+      return;
+    }
+    const items = Array.isArray(batchQueueItems) ? batchQueueItems : [];
+    if (batchQueueCount) {
+      batchQueueCount.textContent = "队列中 " + items.length + " 项";
+    }
+    if (batchQueueRefresh) {
+      batchQueueRefresh.disabled = !currentBatchId;
+    }
+    if (!items.length) {
+      batchQueueList.className = "empty-state";
+      batchQueueList.replaceChildren();
+      batchQueueList.textContent =
+        "暂无队列项目。接受批量卡片后，此处会显示提交前队列。";
+      if (batchQueueSubmitForm) {
+        batchQueueSubmitForm.hidden = true;
+      }
+      return;
+    }
+    batchQueueList.className = "batch-queue-list";
+    batchQueueList.replaceChildren();
+    const list = document.createElement("div");
+    list.className = "batch-queue-grid";
+    for (const item of items) {
+      list.appendChild(renderBatchQueueItem(item));
+    }
+    batchQueueList.appendChild(list);
+    if (batchQueueSubmitForm) {
+      batchQueueSubmitForm.hidden = false;
+    }
+  }
+
+  async function loadBatchQueue() {
+    if (!currentBatchId) {
+      batchQueueItems = [];
+      renderBatchQueuePanel();
+      return;
+    }
+    try {
+      const result = await fetchJson(
+        apiPath("/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/queue"),
+      );
+      const queue = result && result.queue;
+      batchQueueItems = queue && Array.isArray(queue.items) ? queue.items.slice() : [];
+    } catch (error) {
+      batchQueueItems = [];
+      setBatchQueueSubmitResult("队列读取失败。请稍后重试。", "error-state compact-state");
+    }
+    renderBatchQueuePanel();
+  }
+
+  function applyQueueResult(queue) {
+    const items = queue && Array.isArray(queue.items) ? queue.items.slice() : [];
+    batchQueueItems = items;
+    renderBatchQueuePanel();
+  }
+
+  function syncQueueStatusToCards(queueItems) {
+    for (const qItem of queueItems) {
+      batchDraftCards = batchDraftCards.map((row) => {
+        if (row.item_id !== qItem.item_id || row.status !== "ACCEPTED") {
+          return row;
+        }
+        const next = Object.assign({}, row);
+        next.queue_status = qItem.status;
+        return next;
+      });
+    }
+  }
+
+  function setBatchQueueSubmitError(message, field) {
+    if (!batchQueueAbError) {
+      return;
+    }
+    batchQueueAbError.textContent = message;
+    batchQueueAbError.hidden = false;
+    for (const input of [
+      batchQueueAbEndpointInput,
+      batchQueueAbTokenInput,
+      batchQueueAbConfirmInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearBatchQueueSubmitError() {
+    if (!batchQueueAbError) {
+      return;
+    }
+    batchQueueAbError.textContent = "";
+    batchQueueAbError.hidden = true;
+    for (const input of [
+      batchQueueAbEndpointInput,
+      batchQueueAbTokenInput,
+      batchQueueAbConfirmInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setBatchQueueSubmitResult(message, className) {
+    if (!batchQueueSubmitResult) {
+      return;
+    }
+    batchQueueSubmitResult.className = className || "empty-state compact-state";
+    batchQueueSubmitResult.replaceChildren();
+    batchQueueSubmitResult.textContent = message;
+  }
+
+  function clearBatchQueueSensitiveFields() {
+    if (batchQueueAbEndpointInput) {
+      batchQueueAbEndpointInput.value = "";
+    }
+    if (batchQueueAbTokenInput) {
+      batchQueueAbTokenInput.value = "";
+    }
+    if (batchQueueAbConfirmInput) {
+      batchQueueAbConfirmInput.checked = false;
+    }
+  }
+
+  function setBatchQueueInFlight(isInFlight) {
+    if (batchQueueSubmitForm) {
+      for (const control of batchQueueSubmitForm.querySelectorAll("button, input")) {
+        control.disabled = isInFlight;
+      }
+    }
+    if (batchQueueList) {
+      for (const button of batchQueueList.querySelectorAll(".batch-queue-item-retry")) {
+        button.disabled = isInFlight;
+      }
+    }
+    if (batchQueueSubmitButton) {
+      batchQueueSubmitButton.textContent = isInFlight ? "正在提交..." : "提交队列";
+    }
+  }
+
+  function batchQueueSummaryMessage(summary) {
+    const succeeded = summary.succeeded || 0;
+    const failed = summary.failed || 0;
+    const retryable = summary.retryable || 0;
+    const skipped = summary.skipped || 0;
+    let message = "提交成功 " + succeeded + " 项";
+    if (failed) {
+      message += "；提交失败 " + failed + " 项";
+    }
+    if (retryable) {
+      message += "；可重试 " + retryable + " 项";
+    }
+    if (skipped) {
+      message += "；跳过 " + skipped + " 项";
+    }
+    return message;
+  }
+
+  function showBatchQueueSubmitNotification(summary) {
+    const message = batchQueueSummaryMessage(summary);
+    const succeeded = summary.succeeded || 0;
+    const failed = summary.failed || 0;
+    const retryable = summary.retryable || 0;
+    if (succeeded === 0 && (failed > 0 || retryable > 0)) {
+      showNotification("error", "批量提交失败", message);
+    } else if (failed > 0 || retryable > 0) {
+      showNotification("success", "批量提交完成", message);
+    } else {
+      showNotification("success", "批量提交成功", message);
+    }
+  }
+
+  async function submitBatchQueue(event) {
+    event.preventDefault();
+    clearBatchQueueSubmitError();
+    if (!currentBatchId) {
+      setBatchQueueSubmitError("缺少批次标识，无法提交队列。");
+      return;
+    }
+    const endpoint = batchQueueAbEndpointInput ? batchQueueAbEndpointInput.value.trim() : "";
+    const token = batchQueueAbTokenInput ? batchQueueAbTokenInput.value.trim() : "";
+    const fallbackEnabled = batchQueueAbFallbackInput ? batchQueueAbFallbackInput.checked : false;
+    const confirm = batchQueueAbConfirmInput ? batchQueueAbConfirmInput.checked : false;
+    if (!endpoint) {
+      setBatchQueueSubmitError("提交前必须填写 endpoint。", batchQueueAbEndpointInput);
+      return;
+    }
+    if (!token) {
+      setBatchQueueSubmitError("提交前必须填写 token。", batchQueueAbTokenInput);
+      return;
+    }
+    if (!confirm) {
+      setBatchQueueSubmitError("请勾选确认后再提交到 Auto Bangumi。", batchQueueAbConfirmInput);
+      return;
+    }
+
+    setBatchQueueInFlight(true);
+    setBatchQueueSubmitResult("正在提交队列到 Auto Bangumi...", "loading-state compact-state");
+    try {
+      const result = await fetchJson(
+        apiPath("/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/submit"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            storage_dir: currentStorageDir() || null,
+            ab_config: {
+              endpoint: endpoint,
+              token: token,
+              fallback_enabled: fallbackEnabled,
+            },
+            confirm: true,
+          }),
+        },
+      );
+      const summary = (result && result.summary) || {};
+      clearBatchQueueSensitiveFields();
+      applyQueueResult(result && result.queue);
+      syncQueueStatusToCards(batchQueueItems);
+      if (batchDraftCards.length) {
+        renderBatchParseItems(batchDraftCards);
+      }
+      setBatchQueueSubmitResult(
+        batchQueueSummaryMessage(summary),
+        "success-state compact-state",
+      );
+      showBatchQueueSubmitNotification(summary);
+    } catch (error) {
+      setBatchQueueSubmitResult(
+        "Auto Bangumi 批量提交失败。请检查配置与订阅方案状态后重试。",
+        "error-state compact-state",
+      );
+      notifyApiError("批量提交失败", error);
+    } finally {
+      setBatchQueueInFlight(false);
+    }
+  }
+
+  async function retryBatchQueueItem(item) {
+    clearBatchQueueSubmitError();
+    if (!currentBatchId) {
+      setBatchQueueSubmitError("缺少批次标识，无法重试。");
+      return;
+    }
+    const endpoint = batchQueueAbEndpointInput ? batchQueueAbEndpointInput.value.trim() : "";
+    const token = batchQueueAbTokenInput ? batchQueueAbTokenInput.value.trim() : "";
+    const fallbackEnabled = batchQueueAbFallbackInput ? batchQueueAbFallbackInput.checked : false;
+    const confirm = batchQueueAbConfirmInput ? batchQueueAbConfirmInput.checked : false;
+    if (!endpoint) {
+      setBatchQueueSubmitError("提交前必须填写 endpoint。", batchQueueAbEndpointInput);
+      return;
+    }
+    if (!token) {
+      setBatchQueueSubmitError("提交前必须填写 token。", batchQueueAbTokenInput);
+      return;
+    }
+    if (!confirm) {
+      setBatchQueueSubmitError("请勾选确认后再提交到 Auto Bangumi。", batchQueueAbConfirmInput);
+      return;
+    }
+
+    setBatchQueueInFlight(true);
+    setBatchQueueSubmitResult(
+      "正在重试到 Auto Bangumi...",
+      "loading-state compact-state",
+    );
+    try {
+      const result = await fetchJson(
+        apiPath("/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/retry"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            storage_dir: currentStorageDir() || null,
+            request_id: item.request_id,
+            ab_config: {
+              endpoint: endpoint,
+              token: token,
+              fallback_enabled: fallbackEnabled,
+            },
+            confirm: true,
+          }),
+        },
+      );
+      const summary = (result && result.summary) || {};
+      clearBatchQueueSensitiveFields();
+      applyQueueResult(result && result.queue);
+      syncQueueStatusToCards(batchQueueItems);
+      if (batchDraftCards.length) {
+        renderBatchParseItems(batchDraftCards);
+      }
+      setBatchQueueSubmitResult(
+        batchQueueSummaryMessage(summary),
+        "success-state compact-state",
+      );
+      showBatchQueueSubmitNotification(summary);
+    } catch (error) {
+      setBatchQueueSubmitResult(
+        "Auto Bangumi 单项重试失败。请检查配置与订阅方案状态后重试。",
+        "error-state compact-state",
+      );
+      notifyApiError("单项重试失败", error);
+    } finally {
+      setBatchQueueInFlight(false);
+    }
+  }
+
+  if (batchQueueSubmitForm) {
+    batchQueueSubmitForm.addEventListener("submit", submitBatchQueue);
+  }
+  if (batchQueueRefresh) {
+    batchQueueRefresh.addEventListener("click", function () {
+      loadBatchQueue();
+    });
+  }
+  if (batchIdFromLocation()) {
+    currentBatchId = batchIdFromLocation();
+    loadBatchQueue();
+  } else {
+    renderBatchQueuePanel();
   }
 
   function setCandidateSearchError(message, field) {

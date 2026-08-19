@@ -10,7 +10,14 @@ from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
-from batch_engine.models import BATCH_ITEM_STATUS_FAILED, BATCH_ITEM_STATUS_PARSED
+from batch_engine.models import (
+    BATCH_ITEM_STATUS_FAILED,
+    BATCH_ITEM_STATUS_PARSED,
+    BATCH_QUEUE_STATUS_FAILED,
+    BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+    BATCH_QUEUE_STATUS_RETRYABLE,
+    BATCH_QUEUE_STATUS_SUCCEEDED,
+)
 from mikan_engine.controllers.mikan_client import MikanCandidate, create_mikan_client
 from mikan_engine.controllers.mikan_config import (
     DEFAULT_MIKAN_SEARCH_ENDPOINT,
@@ -27,8 +34,15 @@ from request_engine.controllers.request_controller import (
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
 from storage_engine.controllers.ab_result_repository import save_ab_submit_result
-from storage_engine.controllers.history_repository import append_status_history
-from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.history_repository import (
+    append_status_history,
+    load_status_history,
+)
+from storage_engine.controllers.request_repository import (
+    delete_request_snapshot,
+    load_request_snapshot,
+    save_request_snapshot,
+)
 from storage_engine.controllers.storage_config import load_storage_config
 
 
@@ -227,6 +241,28 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="batch-parse-submit"' in html
     assert 'id="batch-parse-result"' in html
     assert 'id="batch-parse-error"' in html
+    assert 'id="batch-accept-toolbar"' in html
+    assert 'id="batch-select-all-checkbox"' in html
+    assert 'id="batch-accept-selected-count"' in html
+    assert 'id="batch-accept-submit"' in html
+    assert 'id="batch-accept-all"' in html
+    assert "已选择 0 项" in html
+    assert "批量接受" in html
+    assert "全接受" in html
+    assert 'id="batch-queue-panel"' in html
+    assert 'id="batch-queue-heading"' in html
+    assert "提交前队列" in html
+    assert 'id="batch-queue-refresh"' in html
+    assert 'id="batch-queue-count"' in html
+    assert 'id="batch-queue-list"' in html
+    assert 'id="batch-queue-submit-form"' in html
+    assert '<form id="batch-queue-submit-form" method="post" hidden>' in html
+    assert 'id="batch-queue-ab-fallback-enabled"' in html
+    assert 'id="batch-queue-ab-confirm"' in html
+    assert "我已确认将这些订阅方案提交到 Auto Bangumi" in html
+    assert 'id="batch-queue-submit-result"' in html
+    assert 'id="batch-queue-submit-button"' in html
+    assert "提交队列" in html
     assert 'id="mikan-candidate-search-endpoint"' not in html
     assert 'id="mikan-candidate-timeout-seconds"' not in html
     assert 'name="mikan_candidate_search_endpoint"' not in html
@@ -287,7 +323,14 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'aria-label="刷新订阅方案列表"' in html
     assert 'aria-relevant="additions text"' in html
     assert "/migu-orca-static/app.js" in html
-    assert "token" not in html.lower()
+    # Stage 20 (US-147) adds an explicit request-scoped Auto Bangumi submit form
+    # to the batch pre-submission queue panel, so endpoint/token field names are
+    # legitimately present on /index (mirroring the Settings pattern). The
+    # general generate flow and the settings-specific ids still stay off /index.
+    assert 'id="batch-queue-ab-endpoint"' in html
+    assert 'id="batch-queue-ab-token"' in html
+    assert 'type="password"' in html
+    assert 'id="settings-ab-token"' not in html
     assert "localStorage" not in html
     assert "sessionStorage" not in html
     assert "http://" not in html
@@ -499,20 +542,38 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "openBatchCardModify" in script
     assert "updateBatchCardRequest" in script
     assert "acceptBatchCard" in script
+    assert "submitBatchAccept" in script
+    assert "resolveBatchAcceptDescriptors" in script
+    assert "applyBatchAcceptResult" in script
     assert "markBatchCardAccepted" in script
     assert "savePreviewDraftRequest" in script
-    assert "acceptSavedRequest" in script
     assert "renderBatchCardReviewPanel" in script
     assert "canExpandBatchCard" in script
+    assert "batchCardIsSelectable" in script
+    assert "toggleBatchItemSelection" in script
+    assert "setAllBatchItemsSelected" in script
+    assert "updateBatchAcceptToolbar" in script
+    assert "setBatchAcceptInFlight" in script
+    assert "postBatchAccept" in script
     assert "deleteBatchCard" in script
     assert "batch-draft-card" in script
     assert "batch-card-grid" in script
     assert "batch-card-review" in script
     assert "batch-card-modify" in script
     assert "batch-card-accept" in script
+    assert "batch-card-checkbox" in script
+    assert "batch-card-queue-status" in script
+    assert "batch-card-reason" in script
+    assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/accept" in script
+    assert "已选择 " in script
+    assert "确认接受选中的 " in script
+    assert "确认接受全部批量卡片" in script
+    assert "缺少批次标识，请重新获取批量草案" in script
+    assert "当前批量卡片已标记为已接受并待提交，其他卡片保持不变" in script
     assert "当前批量卡片已回流最新订阅草案" in script
-    assert "当前批量卡片已标记为已接受，其他卡片保持不变" in script
-    assert "确认接受当前批量卡片" in script
+    assert "无法接受：" in script
+    assert "接受失败：" in script
+    assert "待提交" in script
     assert "当前字幕组" in script
     assert "有效种子（当前选中字幕组：" in script
     assert "排除种子 (" in script
@@ -520,6 +581,52 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "batchStatusLabel" in script
     assert "已解析" in script
     assert "解析失败" in script
+
+
+def test_static_app_script_wires_batch_queue_result_panel() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "batchQueueItems" in script
+    assert "batchIdFromLocation" in script
+    assert "syncBatchIdToUrl" in script
+    assert "batchQueueStatusLabel" in script
+    assert "batchQueueStatusClass" in script
+    assert "renderBatchQueueItem" in script
+    assert "renderBatchQueuePanel" in script
+    assert "loadBatchQueue" in script
+    assert "applyQueueResult" in script
+    assert "syncQueueStatusToCards" in script
+    assert "submitBatchQueue" in script
+    assert "setBatchQueueInFlight" in script
+    assert "clearBatchQueueSensitiveFields" in script
+    assert "batchQueueSummaryMessage" in script
+    assert "showBatchQueueSubmitNotification" in script
+    assert "retryBatchQueueItem" in script
+    assert "batch-queue-item-retry" in script
+    assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/queue" in script
+    assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/submit" in script
+    assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/retry" in script
+    assert "batch-queue-submit-form" in script
+    assert "batch-queue-ab-endpoint" in script
+    assert "batch-queue-ab-token" in script
+    assert "batch-queue-ab-confirm" in script
+    assert "batch-queue-submit-button" in script
+    assert "batch-queue-refresh" in script
+    assert "提交前必须填写 endpoint" in script
+    assert "提交前必须填写 token" in script
+    assert "请勾选确认后再提交到 Auto Bangumi" in script
+    assert "提交前必须填写 endpoint" in script
+    assert "正在提交队列到 Auto Bangumi" in script
+    assert "Auto Bangumi 批量提交失败" in script
+    assert "Auto Bangumi 单项重试失败" in script
+    assert "正在重试到 Auto Bangumi" in script
+    assert "队列读取失败" in script
+    assert "尚无结果摘要" in script
+    assert "尝试次数：" in script
+    assert "更新于：" in script
+    assert "暂无队列项目" in script
 
 
 def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:
@@ -1007,6 +1114,21 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".seed-exclude-reason" in css
     assert ".batch-card-review" in css
     assert ".batch-card-review[hidden]" in css
+    assert ".batch-accept-toolbar" in css
+    assert ".batch-accept-toolbar[hidden]" in css
+    assert ".batch-card-checkbox" in css
+    assert ".batch-card-status-row" in css
+    assert ".batch-card-queue-status" in css
+    assert ".batch-card-reason" in css
+    assert ".batch-queue-item" in css
+    assert ".batch-queue-item-title" in css
+    assert ".batch-queue-item-meta" in css
+    assert ".batch-queue-item-summary" in css
+    assert ".batch-queue-status-ready" in css
+    assert ".batch-queue-status-succeeded" in css
+    assert ".batch-queue-status-failed" in css
+    assert ".batch-queue-status-retryable" in css
+    assert "#batch-queue-submit-form[hidden]" in css
     assert "overflow-wrap" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css
@@ -3454,3 +3576,934 @@ def test_qbittorrent_test_connection_rejects_missing_config_object() -> None:
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert payload["error_data"]["errors"][0]["field"] == "qbittorrent_config"
+
+
+def _batch_accept(
+    client: FlaskClient,
+    batch_id: str,
+    storage_dir: Path,
+    items: list[dict[str, Any]],
+    item_ids: list[str] | None = None,
+) -> Any:
+    """POST the batch accept endpoint and return the raw test response."""
+    payload: dict[str, Any] = {
+        "items": items,
+        "storage_dir": str(storage_dir),
+    }
+    if item_ids is not None:
+        payload["item_ids"] = item_ids
+    return client.post(f"/api/v1/batches/{batch_id}/accept", json=payload)
+
+
+def _batch_submit_payload(storage_dir: Path) -> dict[str, Any]:
+    return {
+        "storage_dir": str(storage_dir),
+        "confirm": True,
+        "ab_config": {
+            "endpoint": "http://auto-bangumi.local/api",
+            "token": "secret-token",
+            "fallback_enabled": False,
+        },
+    }
+
+
+def test_batch_accept_api_accepts_selected_items_and_returns_queue(
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    _saved_request(tmp_path, "咒术回战第三季", "request-b")
+    storage_dir = tmp_path / "storage"
+
+    response = _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
+            {
+                "item_id": "item-b",
+                "request_id": "request-b",
+                "title": "咒术回战第三季",
+            },
+        ],
+        item_ids=["item-a"],
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["batch_id"] == "batch-1"
+    assert result["summary"] == {
+        "accepted": 1,
+        "already_accepted": 0,
+        "unacceptable": 0,
+        "failed": 0,
+    }
+    assert result["items"] == [
+        {
+            "item_id": "item-a",
+            "request_id": "request-a",
+            "title": "芙莉莲",
+            "status": "accepted",
+            "reason": None,
+            "error_type": None,
+            "queued": True,
+        }
+    ]
+    queue_items = result["queue"]["items"]
+    assert len(queue_items) == 1
+    assert queue_items[0]["item_id"] == "item-a"
+    assert queue_items[0]["request_id"] == "request-a"
+    assert queue_items[0]["status"] == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
+    assert queue_items[0]["status_label"] == "待提交"
+    assert queue_items[0]["attempts"] == 0
+    assert queue_items[0]["last_error"] is None
+    assert queue_items[0]["ab_result_summary"] is None
+
+    # The accepted request is persisted as ACCEPTED with an ACCEPT history event.
+    config = load_storage_config(storage_dir)
+    saved = load_request_snapshot(config, "request-a")
+    assert saved["status"] == "ACCEPTED"
+    history = load_status_history(config, "request-a")
+    assert history[-1]["action"] == "ACCEPT"
+
+
+def test_batch_accept_api_accepts_all_when_item_ids_omitted(tmp_path: Path) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    _saved_request(tmp_path, "咒术回战第三季", "request-b")
+    storage_dir = tmp_path / "storage"
+
+    response = _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
+            {
+                "item_id": "item-b",
+                "request_id": "request-b",
+                "title": "咒术回战第三季",
+            },
+        ],
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert payload["ok"] is True
+    assert [item["status"] for item in result["items"]] == ["accepted", "accepted"]
+    assert [item["queued"] for item in result["items"]] == [True, True]
+    assert [item["item_id"] for item in result["queue"]["items"]] == [
+        "item-a",
+        "item-b",
+    ]
+    assert result["summary"]["accepted"] == 2
+
+
+def test_batch_accept_api_marks_unacceptable_items_with_chinese_reason(
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+
+    response = _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
+            {"item_id": "item-b", "request_id": "missing-request", "title": "不存在"},
+            {"item_id": "item-c", "title": "无草案"},
+        ],
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert payload["ok"] is True
+    assert [(item["status"], item["queued"]) for item in items] == [
+        ("accepted", True),
+        ("unacceptable", False),
+        ("unacceptable", False),
+    ]
+    assert items[1]["reason"] == "订阅方案不存在或已删除"
+    assert items[2]["reason"] == "卡片缺少订阅草案，无法接受"
+    assert payload["result"]["summary"]["unacceptable"] == 2
+    assert len(payload["result"]["queue"]["items"]) == 1
+
+
+def test_batch_accept_api_is_idempotent_for_already_accepted_items(
+    tmp_path: Path,
+) -> None:
+    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+
+    response = _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert payload["ok"] is True
+    assert item["status"] == "already_accepted"
+    assert item["reason"] == "该订阅方案已确认，跳过重复接受"
+    assert item["queued"] is False
+    assert payload["result"]["queue"]["items"] == []
+    assert payload["result"]["summary"]["already_accepted"] == 1
+
+
+def test_batch_accept_api_accepts_empty_selection(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _batch_accept(_client(), "batch-1", storage_dir, items=[])
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["batch_id"] == "batch-1"
+    assert result["items"] == []
+    assert result["queue"]["items"] == []
+    assert result["summary"] == {
+        "accepted": 0,
+        "already_accepted": 0,
+        "unacceptable": 0,
+        "failed": 0,
+    }
+
+
+def test_batch_accept_api_single_failure_does_not_block_others(
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    _saved_cancelled_request(tmp_path, "咒术回战", "request-b")
+    storage_dir = tmp_path / "storage"
+
+    response = _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
+            {"item_id": "item-b", "request_id": "request-b", "title": "咒术回战"},
+        ],
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert payload["ok"] is True
+    assert items[0]["status"] == "accepted"
+    assert items[1]["status"] == "unacceptable"
+    assert items[1]["error_type"] == "request_cancelled"
+    assert len(payload["result"]["queue"]["items"]) == 1
+
+
+def test_batch_accept_api_redacts_sensitive_item_title(tmp_path: Path) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    malicious_title = "芙莉莲 https://ab.example.com/api token=secret-token"
+
+    response = _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {
+                "item_id": "item-a",
+                "request_id": "request-a",
+                "title": malicious_title,
+            }
+        ],
+    )
+
+    payload = response.get_json()
+    body = response.get_data(as_text=True)
+    assert payload["ok"] is True
+    assert (
+        payload["result"]["items"][0]["title"]
+        == "芙莉莲 [redacted-url] [redacted]"
+    )
+    assert (
+        payload["result"]["queue"]["items"][0]["title"]
+        == "芙莉莲 [redacted-url] [redacted]"
+    )
+    assert "ab.example.com" not in body
+    assert "secret-token" not in body
+
+
+def test_batch_queue_api_returns_sanitized_queue(tmp_path: Path) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    response = _client().get(
+        "/api/v1/batches/batch-1/queue",
+        query_string={"storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["batch_id"] == "batch-1"
+    assert result["queue"]["batch_id"] == "batch-1"
+    assert result["queue"]["queue_id"]
+    assert len(result["queue"]["items"]) == 1
+    item = result["queue"]["items"][0]
+    assert item["request_id"] == "request-a"
+    assert item["status"] == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
+    assert item["status_label"] == "待提交"
+    assert item["attempts"] == 0
+    assert item["last_error"] is None
+    assert item["ab_result_summary"] is None
+
+
+def test_batch_queue_api_returns_none_when_queue_missing(tmp_path: Path) -> None:
+    response = _client().get(
+        "/api/v1/batches/batch-missing/queue",
+        query_string={"storage_dir": str(tmp_path / "storage")},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": True,
+        "result": {"batch_id": "batch-missing", "queue": None},
+    }
+
+
+def test_batch_queue_api_does_not_leak_sensitive_values(tmp_path: Path) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {
+                "item_id": "item-a",
+                "request_id": "request-a",
+                "title": "芙莉莲 https://ab.example.com/api token=secret-token",
+            }
+        ],
+    )
+
+    response = _client().get(
+        "/api/v1/batches/batch-1/queue",
+        query_string={"storage_dir": str(storage_dir)},
+    )
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "ab.example.com" not in body
+    assert "secret-token" not in body
+    assert "Authorization" not in body
+
+
+def test_batch_submit_api_requires_confirmation(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json={
+            "storage_dir": str(storage_dir),
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "token": "secret-token",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "validation_error",
+        "error_message": "请确认提交到 Auto Bangumi",
+        "error_data": {
+            "failed_step": "batch_submit",
+            "details": {"field": "confirm"},
+        },
+    }
+    assert "secret-token" not in str(payload)
+
+
+def test_batch_submit_api_requires_ab_config(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json={"storage_dir": str(storage_dir), "confirm": True},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "validation_error",
+        "error_message": "请提供 Auto Bangumi 配置",
+        "error_data": {
+            "failed_step": "batch_submit",
+            "details": {"field": "ab_config"},
+        },
+    }
+
+
+def test_batch_submit_api_submits_queue_items_successfully(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    client = FakeAutoBangumiClient()
+    received_configs = []
+
+    def build_client(ab_config):
+        received_configs.append(ab_config)
+        return client
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        build_client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["batch_id"] == "batch-1"
+    assert result["summary"] == {
+        "succeeded": 1,
+        "failed": 0,
+        "retryable": 0,
+        "skipped": 0,
+    }
+    assert result["items"] == [
+        {
+            "item_id": "item-a",
+            "request_id": "request-a",
+            "title": "芙莉莲",
+            "status": "succeeded",
+            "reason": None,
+            "error_type": None,
+            "attempts": 1,
+        }
+    ]
+    queue_item = result["queue"]["items"][0]
+    assert queue_item["status"] == BATCH_QUEUE_STATUS_SUCCEEDED
+    assert queue_item["status_label"] == "提交成功"
+    assert queue_item["attempts"] == 1
+    assert (
+        queue_item["ab_result_summary"]
+        == "ab_subscription_id=fake-ab-subscription; success=True"
+    )
+    assert len(client.calls) == 1
+    assert received_configs[0].endpoint == "http://auto-bangumi.local/api"
+    assert received_configs[0].token == "secret-token"
+
+    # The request-scoped ab_config is never persisted into the queue storage.
+    queue_body = (
+        load_storage_config(storage_dir).queue_dir / "batch-1.json"
+    ).read_text(encoding="utf-8")
+    assert "secret-token" not in queue_body
+    assert "auto-bangumi.local" not in queue_body
+
+
+def test_batch_submit_api_single_failure_does_not_block_others(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    _saved_request(tmp_path, "咒术回战第三季", "request-b")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"},
+            {
+                "item_id": "item-b",
+                "request_id": "request-b",
+                "title": "咒术回战第三季",
+            },
+        ],
+    )
+    # Remove request-b's snapshot so pre-submit validation rejects that item.
+    delete_request_snapshot(load_storage_config(storage_dir), "request-b")
+
+    client = FakeAutoBangumiClient()
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert payload["ok"] is True
+    assert result["summary"] == {
+        "succeeded": 1,
+        "failed": 1,
+        "retryable": 0,
+        "skipped": 0,
+    }
+    assert result["items"][0]["status"] == "succeeded"
+    assert result["items"][1]["status"] == "failed"
+    assert result["items"][1]["error_type"] == "request_not_found"
+    assert result["items"][1]["reason"] == "订阅方案不存在或已删除，无法提交"
+    # Only the surviving item was submitted to Auto Bangumi.
+    assert len(client.calls) == 1
+
+
+def test_batch_submit_api_skips_already_succeeded_items(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    client = FakeAutoBangumiClient()
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: client,
+    )
+
+    submit_payload = _batch_submit_payload(storage_dir)
+    first = _client().post("/api/v1/batches/batch-1/submit", json=submit_payload)
+    second = _client().post("/api/v1/batches/batch-1/submit", json=submit_payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    second_payload = second.get_json()
+    assert second_payload["ok"] is True
+    assert second_payload["result"]["summary"] == {
+        "succeeded": 0,
+        "failed": 0,
+        "retryable": 0,
+        "skipped": 1,
+    }
+    assert second_payload["result"]["items"][0]["status"] == "skipped"
+    assert (
+        second_payload["result"]["items"][0]["reason"]
+        == "已提交成功，跳过重复提交"
+    )
+    # The already-succeeded item is never re-submitted.
+    assert len(client.calls) == 1
+
+
+def test_batch_submit_api_returns_queue_not_found_for_missing_queue(
+    tmp_path: Path,
+) -> None:
+    response = _client().post(
+        "/api/v1/batches/batch-missing/submit",
+        json=_batch_submit_payload(tmp_path / "storage"),
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "queue_not_found",
+        "error_message": "未找到该批次的提交队列",
+        "error_data": {
+            "failed_step": "load_submission_queue",
+            "details": {"batch_id": "batch-missing"},
+        },
+    }
+
+
+def test_batch_submit_api_does_not_leak_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {
+                "item_id": "item-a",
+                "request_id": "request-a",
+                "title": "芙莉莲 https://ab.example.com/api token=secret-token",
+            }
+        ],
+    )
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: FakeAutoBangumiClient(),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "ab.example.com" not in body
+    assert "secret-token" not in body
+    assert "auto-bangumi.local" not in body
+    assert "Authorization" not in body
+
+
+def test_batch_retry_api_requires_ab_config(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/retry",
+        json={
+            "storage_dir": str(storage_dir),
+            "request_id": "request-a",
+            "confirm": True,
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "validation_error",
+        "error_message": "请提供 Auto Bangumi 配置",
+        "error_data": {
+            "failed_step": "batch_retry",
+            "details": {"field": "ab_config"},
+        },
+    }
+
+
+def test_batch_retry_api_requires_confirmation(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/retry",
+        json={
+            "storage_dir": str(storage_dir),
+            "request_id": "request-a",
+            "ab_config": {
+                "endpoint": "http://auto-bangumi.local/api",
+                "token": "secret-token",
+                "fallback_enabled": False,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "validation_error",
+        "error_message": "请确认提交到 Auto Bangumi",
+        "error_data": {
+            "failed_step": "batch_retry",
+            "details": {"field": "confirm"},
+        },
+    }
+    assert "secret-token" not in str(payload)
+
+
+def test_batch_retry_api_retries_failed_item_successfully(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    failing_client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "离线模拟失败",
+            "create_ab_subscription",
+            {"status_code": 503},
+        )
+    )
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: failing_client,
+    )
+    first = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+    first_result = first.get_json()["result"]
+    assert first_result["items"][0]["status"] == "failed"
+    assert first_result["items"][0]["attempts"] == 1
+
+    success_client = FakeAutoBangumiClient()
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: success_client,
+    )
+    response = _client().post(
+        "/api/v1/batches/batch-1/retry",
+        json={**_batch_submit_payload(storage_dir), "request_id": "request-a"},
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["batch_id"] == "batch-1"
+    assert result["summary"] == {
+        "succeeded": 1,
+        "failed": 0,
+        "retryable": 0,
+        "skipped": 0,
+    }
+    assert result["items"] == [
+        {
+            "item_id": "item-a",
+            "request_id": "request-a",
+            "title": "芙莉莲",
+            "status": "succeeded",
+            "reason": None,
+            "error_type": None,
+            "attempts": 2,
+        }
+    ]
+    queue_item = result["queue"]["items"][0]
+    assert queue_item["status"] == BATCH_QUEUE_STATUS_SUCCEEDED
+    assert queue_item["status_label"] == "提交成功"
+    assert queue_item["attempts"] == 2
+    # The retry submitted exactly one more Auto Bangumi request.
+    assert len(success_client.calls) == 1
+    assert len(failing_client.calls) == 1
+
+    # The request-scoped ab_config is never persisted into the queue storage.
+    queue_body = (
+        load_storage_config(storage_dir).queue_dir / "batch-1.json"
+    ).read_text(encoding="utf-8")
+    assert "secret-token" not in queue_body
+    assert "auto-bangumi.local" not in queue_body
+
+
+def test_batch_retry_api_failure_keeps_retryable_status_and_increments_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    timeout_client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_timeout",
+            "请求超时",
+            "create_ab_subscription",
+            {"category": "timeout"},
+        )
+    )
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: timeout_client,
+    )
+    first = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+    assert first.get_json()["result"]["items"][0]["status"] == "retryable"
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/retry",
+        json={**_batch_submit_payload(storage_dir), "request_id": "request-a"},
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert payload["ok"] is True
+    assert result["summary"] == {
+        "succeeded": 0,
+        "failed": 0,
+        "retryable": 1,
+        "skipped": 0,
+    }
+    item = result["items"][0]
+    assert item["status"] == "retryable"
+    assert item["error_type"] == "ab_timeout"
+    assert item["reason"] == "请求超时"
+    assert item["attempts"] == 2
+    queue_item = result["queue"]["items"][0]
+    assert queue_item["status"] == BATCH_QUEUE_STATUS_RETRYABLE
+    assert queue_item["status_label"] == "可重试"
+    assert queue_item["attempts"] == 2
+    assert len(timeout_client.calls) == 2
+
+
+def test_batch_retry_api_skips_succeeded_items_without_resubmit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    success_client = FakeAutoBangumiClient()
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: success_client,
+    )
+    first = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+    assert first.get_json()["result"]["items"][0]["status"] == "succeeded"
+
+    retry_client = FakeAutoBangumiClient()
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: retry_client,
+    )
+    response = _client().post(
+        "/api/v1/batches/batch-1/retry",
+        json={**_batch_submit_payload(storage_dir), "request_id": "request-a"},
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    assert payload["ok"] is True
+    assert result["summary"] == {
+        "succeeded": 0,
+        "failed": 0,
+        "retryable": 0,
+        "skipped": 1,
+    }
+    assert result["items"][0]["status"] == "skipped"
+    assert result["items"][0]["reason"] == "已提交成功，不可重复提交"
+    assert result["items"][0]["attempts"] == 1
+    assert result["queue"]["items"][0]["status"] == BATCH_QUEUE_STATUS_SUCCEEDED
+    # The already-succeeded item is never re-submitted.
+    assert len(retry_client.calls) == 0
+
+
+def test_batch_retry_api_returns_queue_item_not_found_for_unknown_request_id(
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/retry",
+        json={**_batch_submit_payload(storage_dir), "request_id": "request-missing"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {
+        "ok": False,
+        "error_type": "queue_item_not_found",
+        "error_message": "队列中不存在该订阅方案项目",
+        "error_data": {
+            "failed_step": "batch_retry",
+            "details": {"field": "request_id", "batch_id": "batch-1"},
+        },
+    }
+
+
+def test_batch_retry_api_does_not_leak_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[
+            {
+                "item_id": "item-a",
+                "request_id": "request-a",
+                "title": "芙莉莲 https://ab.example.com/api token=secret-token",
+            }
+        ],
+    )
+
+    failing_client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_submit_failed",
+            "离线模拟失败",
+            "create_ab_subscription",
+            {"status_code": 503},
+        )
+    )
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: failing_client,
+    )
+    first = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+    assert first.get_json()["result"]["items"][0]["status"] == "failed"
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: FakeAutoBangumiClient(),
+    )
+    response = _client().post(
+        "/api/v1/batches/batch-1/retry",
+        json={**_batch_submit_payload(storage_dir), "request_id": "request-a"},
+    )
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "ab.example.com" not in body
+    assert "secret-token" not in body
+    assert "auto-bangumi.local" not in body
+    assert "Authorization" not in body
+    assert "<rss" not in body

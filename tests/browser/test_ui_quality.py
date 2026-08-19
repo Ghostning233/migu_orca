@@ -13,8 +13,16 @@ from tests.browser.conftest import (
     set_storage_preferences,
 )
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from batch_engine.controllers.batch_queue_controller import (
+    complete_queue_item_submit,
+    create_submission_queue,
+    enqueue_item,
+    start_queue_item_submit,
+)
+from batch_engine.models import BATCH_QUEUE_STATUS_FAILED
 from request_engine.controllers.request_controller import accept_request, summarize_request
 from shared.models import EntryRequest
+from storage_engine.controllers.queue_repository import save_submission_queue
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
 
@@ -674,9 +682,10 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
         )
 
     def _accept(route: Any, request: Request) -> None:
+        # US-146：单卡接受与批量接受统一走批次接受 API（POST
+        # /api/v1/batches/<batch_id>/accept）。响应只包含公开字段，绝不回传
+        # endpoint/token/cookie/raw response 等敏感配置。
         accept_calls.append(json.loads(request.post_data or "{}"))
-        accepted = dict(first_preview)
-        accepted["status"] = "ACCEPTED"
         route.fulfill(
             status=200,
             content_type="application/json",
@@ -684,8 +693,46 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
                 {
                     "ok": True,
                     "result": {
-                        "request": accepted,
-                        "summary": {"request_id": accepted["request_id"]},
+                        "batch_id": "batch-stage19-sec",
+                        "queue": {
+                            "queue_id": "queue-stage19-sec",
+                            "batch_id": "batch-stage19-sec",
+                            "created_at": "2026-08-19T00:00:00+00:00",
+                            "updated_at": "2026-08-19T00:00:00+00:00",
+                            "items": [
+                                {
+                                    "queue_id": "queue-stage19-sec",
+                                    "batch_id": "batch-stage19-sec",
+                                    "item_id": "item-sec",
+                                    "request_id": "req-stage19-sec",
+                                    "title": "关于我转生变成史莱姆这档事 第四季",
+                                    "status": "READY_TO_SUBMIT",
+                                    "status_label": "待提交",
+                                    "attempts": 0,
+                                    "last_error": None,
+                                    "ab_result_summary": None,
+                                    "created_at": "2026-08-19T00:00:00+00:00",
+                                    "updated_at": "2026-08-19T00:00:00+00:00",
+                                }
+                            ],
+                        },
+                        "items": [
+                            {
+                                "item_id": "item-sec",
+                                "request_id": "req-stage19-sec",
+                                "title": "关于我转生变成史莱姆这档事 第四季",
+                                "status": "accepted",
+                                "reason": None,
+                                "error_type": None,
+                                "queued": True,
+                            }
+                        ],
+                        "summary": {
+                            "accepted": 1,
+                            "already_accepted": 0,
+                            "unacceptable": 0,
+                            "failed": 0,
+                        },
                     },
                 },
                 ensure_ascii=False,
@@ -694,9 +741,9 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
 
     page.route("**/api/v1/batches/parse", _fulfill_batch)
     page.route("**/api/v1/requests/preview-save", _save_preview)
-    # acceptSavedRequest 用 apiPath() 拼 URL，设置 storage 偏好后 URL 会带
+    # postBatchAccept 用 apiPath() 拼 URL，设置 storage 偏好后 URL 会带
     # ?storage_dir= query；Playwright glob 不匹配 query，必须加 * 通配。
-    page.route("**/api/v1/requests/req-stage19-sec/accept*", _accept)
+    page.route("**/api/v1/batches/batch-stage19-sec/accept*", _accept)
 
     set_storage_preferences(page, storage_dir, save_request=False)
     page.goto(f"{live_server_url}/index")
@@ -719,10 +766,14 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
     expect(first_card.locator(".batch-card-delete")).to_be_hidden()
     expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
     assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-stage19-sec"
-    # 设置了 storage 偏好时，accept 请求体按 RequestActionPayload 契约携带
-    # storage_dir（URL query 经 apiPath 同样携带）；storage_dir 是功能参数，
-    # 不属于 sensitive_values。无偏好分支（null）由 accept 测试覆盖。
-    assert accept_calls and accept_calls[0]["storage_dir"] == str(storage_dir)
+    # US-146：accept 请求体按 BatchAcceptPayload 契约携带 items（含
+    # item_id/request_id/title，均为公开字段）与 storage_dir；设置了 storage
+    # 偏好时 storage_dir 为路径值（URL query 经 apiPath 同样携带），属于功能
+    # 参数，不属于 sensitive_values。
+    assert accept_calls
+    assert accept_calls[0]["items"][0]["item_id"] == "item-sec"
+    assert accept_calls[0]["items"][0]["request_id"] == "req-stage19-sec"
+    assert accept_calls[0]["storage_dir"] == str(storage_dir)
 
     browser_state = page.evaluate(
         """() => ({
@@ -757,3 +808,467 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
         "miguOrca.web.storageDir": str(storage_dir),
         "miguOrca.web.saveRequest": "false",
     }
+
+
+def test_stage20_batch_retry_does_not_leak_sensitive_values(
+    page: Page, live_server_url: str, storage_dir: Path
+) -> None:
+    """US-148: failed-item single retry end-to-end security regression.
+
+    Feeds endpoint / token / Authorization header / cookie / raw HTML / raw RSS
+    XML / raw response body / full failed URL / local absolute path through a
+    poisoned preview and a poisoned failed queue item, then runs the full
+    parse -> accept -> submit-failure -> single-item retry flow. Asserts the
+    values never reach the page, URL, browser storage, API request bodies, the
+    persisted queue JSON, or the Request JSON.
+    """
+    sensitive_values = (
+        "http://private-llm.stage20.local/v1/chat/completions",
+        "stage20-provider-token",
+        "Bearer stage20-authorization-token",
+        "stage20-cookie",
+        "<html>stage20 raw html</html>",
+        "<rss version='2.0'>stage20 raw rss</rss>",
+        "stage20 raw response body",
+        "https://mikan.example/Home/Search?searchstr=stage20-secret",
+        "/home/ghostning/stage20-secret.xml",
+        "magnet:?xt=urn:btih:stage20sensitivehash",
+    )
+    first_preview = {
+        # 标题必须命中 static fixture catalog（config/system/static_mikan_sources.json
+        # 仅含「咒术回战 第三季」「葬送的芙莉莲」），否则 generate_request 返回 None。
+        **generate_request(EntryRequest(raw_title="咒术回战"))["request"],
+        "request_id": "req-stage20-sec",
+    }
+    second_preview = {
+        **generate_request(EntryRequest(raw_title="葬送的芙莉莲"))["request"],
+        "request_id": "req-stage20-other",
+    }
+
+    batch_body = json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "batch_id": "batch-stage20-sec",
+                "raw_input": "萌王S4\n路哥S4",
+                "items": [
+                    {
+                        "item_id": "item-sec",
+                        "raw_title": "萌王S4",
+                        "status": "DRAFT",
+                        "canonical_title_candidates": [
+                            "关于我转生变成史莱姆这档事 第四季"
+                        ],
+                        "season_hint": "S4",
+                        "search_queries": ["转生史莱姆 第四季"],
+                        "confidence": 0.9,
+                        "needs_user_review": False,
+                        "source": "fake",
+                        "candidates": [
+                            {
+                                "bangumi_id": "42",
+                                "title": "关于我转生变成史莱姆这档事 第四季",
+                                "mikan_url": "https://mikan.example/Home/Bangumi/42",
+                                "poster_url": None,
+                                "source_query": "转生史莱姆 第四季",
+                                "aliases": [],
+                                "recommendation": None,
+                                "raw_html": sensitive_values[4],
+                                "raw_rss_xml": sensitive_values[5],
+                                "cookie": sensitive_values[3],
+                                "token": sensitive_values[1],
+                                "magnet": sensitive_values[9],
+                                "failed_url": sensitive_values[7],
+                            }
+                        ],
+                        "confirmable_config": {
+                            "selected_subtitle_group": "桜都字幕组",
+                            "selected_rss_url": sensitive_values[7],
+                            "filter_rule": {
+                                "must_contain": "1080p",
+                                "must_not_contain": "V2",
+                                "use_regex": False,
+                                "case_sensitive": False,
+                            },
+                            "effective_seed_names": ["史莱姆 S4 01 [1080p]"],
+                        },
+                        "source_info": {
+                            "matched_bangumi": {
+                                "title": "关于我转生变成史莱姆这档事 第四季"
+                            },
+                            "raw_html": sensitive_values[4],
+                            "raw_rss_xml": sensitive_values[5],
+                            "cookie": sensitive_values[3],
+                            "token": sensitive_values[1],
+                            "authorization": sensitive_values[2],
+                            "raw_response_body": sensitive_values[6],
+                            "local_path": sensitive_values[8],
+                            "magnet": sensitive_values[9],
+                            "rss_sources": [
+                                {
+                                    "subtitle_group": "桜都字幕组",
+                                    "rss_url": sensitive_values[7],
+                                    "seed_names": [
+                                        "史莱姆 S4 01 [1080p]",
+                                        "史莱姆 S4 01 V2 [1080p]",
+                                    ],
+                                    "valid_seed_names": ["史莱姆 S4 01 [1080p]"],
+                                    "excluded_seed_names": [
+                                        {
+                                            "name": "史莱姆 S4 01 V2 [1080p]",
+                                            "reason": "命中排除规则：V2",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                        "preview_request": first_preview,
+                        # provider_response 是 LLM 提供商的响应，包含全部敏感值；
+                        # 它们只允许存在于预览/请求快照，绝不能进入任何响应边界。
+                        "provider_response": {
+                            "endpoint": sensitive_values[0],
+                            "token": sensitive_values[1],
+                            "authorization": sensitive_values[2],
+                            "raw_response_body": sensitive_values[6],
+                            "magnet": sensitive_values[9],
+                        },
+                    },
+                    {
+                        "item_id": "item-other",
+                        "raw_title": "路哥S4",
+                        "status": "DRAFT",
+                        "canonical_title_candidates": ["实力至上主义教室 第四季"],
+                        "season_hint": "S4",
+                        "search_queries": ["实力至上主义教室 第四季"],
+                        "confidence": 0.8,
+                        "needs_user_review": False,
+                        "source": "fake",
+                        "candidates": [],
+                        "confirmable_config": None,
+                        "source_info": None,
+                        "preview_request": second_preview,
+                    },
+                ],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    # 真实的请求快照（retry 从磁盘重新读取它）；source_info/匹配数据来自
+    # generate_request 的静态 fixture，不含上述敏感值。
+    saved_request = create_saved_request(storage_dir, "咒术回战", "req-stage20-sec")
+    save_request_snapshot(load_storage_config(storage_dir), saved_request)
+
+    # 真实的队列 JSON 落盘：用真实控制器写入一个 FAILED 项，其 last_error 注入
+    # 完整失败 URL 与 token —— 队列控制器必须在写盘前脱敏。
+    queue = create_submission_queue(
+        "batch-stage20-sec",
+        queue_id_factory=lambda: "queue-stage20-sec",
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    queue = enqueue_item(
+        queue,
+        item_id="item-sec",
+        request_id="req-stage20-sec",
+        title="关于我转生变成史莱姆这档事 第四季",
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    queue = start_queue_item_submit(
+        queue,
+        "req-stage20-sec",
+        now_factory=lambda: "2026-08-19T00:01:00+00:00",
+    )
+    queue = complete_queue_item_submit(
+        queue,
+        "req-stage20-sec",
+        BATCH_QUEUE_STATUS_FAILED,
+        last_error={
+            "failed_url": sensitive_values[7],
+            "token": sensitive_values[1],
+            "error_message": "Auto Bangumi HTTP 提交失败",
+        },
+        now_factory=lambda: "2026-08-19T00:02:00+00:00",
+    )
+    save_submission_queue(load_storage_config(storage_dir), queue)
+
+    saved_calls: list[dict[str, Any]] = []
+    accept_calls: list[dict[str, Any]] = []
+    submit_calls: list[dict[str, Any]] = []
+    retry_calls: list[dict[str, Any]] = []
+
+    def _fulfill_batch(route: Any, request: Request) -> None:
+        route.fulfill(status=200, content_type="application/json", body=batch_body)
+
+    def _save_preview(route: Any, request: Request) -> None:
+        payload = json.loads(request.post_data or "{}")
+        saved_calls.append(payload)
+        saved = dict(payload["request"])
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "request": saved,
+                        "summary": {"request_id": saved["request_id"]},
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    def _queue_item_payload(
+        *,
+        status: str,
+        attempts: int,
+        title: str,
+        last_error: str | None = None,
+        ab_result_summary: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "queue_id": "queue-stage20-sec",
+            "batch_id": "batch-stage20-sec",
+            "item_id": "item-sec",
+            "request_id": "req-stage20-sec",
+            "title": title,
+            "status": status,
+            "status_label": {
+                "READY_TO_SUBMIT": "待提交",
+                "SUBMITTING": "提交中",
+                "SUCCEEDED": "提交成功",
+                "FAILED": "提交失败",
+                "RETRYABLE": "可重试",
+            }[status],
+            "attempts": attempts,
+            "last_error": last_error,
+            "ab_result_summary": ab_result_summary,
+            "created_at": "2026-08-19T00:00:00+00:00",
+            "updated_at": "2026-08-19T00:02:00+00:00",
+        }
+
+    def _accept(route: Any, request: Request) -> None:
+        accept_calls.append(json.loads(request.post_data or "{}"))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "batch_id": "batch-stage20-sec",
+                        "queue": {
+                            "queue_id": "queue-stage20-sec",
+                            "batch_id": "batch-stage20-sec",
+                            "created_at": "2026-08-19T00:00:00+00:00",
+                            "updated_at": "2026-08-19T00:00:00+00:00",
+                            "items": [
+                                _queue_item_payload(
+                                    status="READY_TO_SUBMIT",
+                                    attempts=0,
+                                    title="关于我转生变成史莱姆这档事 第四季",
+                                )
+                            ],
+                        },
+                        "items": [
+                            {
+                                "item_id": "item-sec",
+                                "request_id": "req-stage20-sec",
+                                "title": "关于我转生变成史莱姆这档事 第四季",
+                                "status": "accepted",
+                                "reason": None,
+                                "error_type": None,
+                                "queued": True,
+                            }
+                        ],
+                        "summary": {
+                            "accepted": 1,
+                            "already_accepted": 0,
+                            "unacceptable": 0,
+                            "failed": 0,
+                        },
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    def _submit(route: Any, request: Request) -> None:
+        submit_calls.append(json.loads(request.post_data or "{}"))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "batch_id": "batch-stage20-sec",
+                        "queue": {
+                            "queue_id": "queue-stage20-sec",
+                            "batch_id": "batch-stage20-sec",
+                            "created_at": "2026-08-19T00:00:00+00:00",
+                            "updated_at": "2026-08-19T00:02:00+00:00",
+                            "items": [
+                                _queue_item_payload(
+                                    status="FAILED",
+                                    attempts=1,
+                                    title="关于我转生变成史莱姆这档事 第四季",
+                                    last_error="error_type=ab_submit_failed; error_message=Auto Bangumi HTTP 提交失败",
+                                )
+                            ],
+                        },
+                        "items": [
+                            {
+                                "item_id": "item-sec",
+                                "request_id": "req-stage20-sec",
+                                "title": "关于我转生变成史莱姆这档事 第四季",
+                                "status": "failed",
+                                "reason": "Auto Bangumi HTTP 提交失败",
+                                "error_type": "ab_submit_failed",
+                                "attempts": 1,
+                            }
+                        ],
+                        "summary": {
+                            "succeeded": 0,
+                            "failed": 1,
+                            "retryable": 0,
+                            "skipped": 0,
+                        },
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    def _retry(route: Any, request: Request) -> None:
+        retry_calls.append(json.loads(request.post_data or "{}"))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "batch_id": "batch-stage20-sec",
+                        "queue": {
+                            "queue_id": "queue-stage20-sec",
+                            "batch_id": "batch-stage20-sec",
+                            "created_at": "2026-08-19T00:00:00+00:00",
+                            "updated_at": "2026-08-19T00:05:00+00:00",
+                            "items": [
+                                _queue_item_payload(
+                                    status="SUCCEEDED",
+                                    attempts=2,
+                                    title="关于我转生变成史莱姆这档事 第四季",
+                                    ab_result_summary="ab_subscription_id=ab-stage20; success=True",
+                                )
+                            ],
+                        },
+                        "items": [
+                            {
+                                "item_id": "item-sec",
+                                "request_id": "req-stage20-sec",
+                                "title": "关于我转生变成史莱姆这档事 第四季",
+                                "status": "succeeded",
+                                "reason": None,
+                                "error_type": None,
+                                "attempts": 2,
+                            }
+                        ],
+                        "summary": {
+                            "succeeded": 1,
+                            "failed": 0,
+                            "retryable": 0,
+                            "skipped": 0,
+                        },
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    page.route("**/api/v1/batches/parse", _fulfill_batch)
+    page.route("**/api/v1/requests/preview-save", _save_preview)
+    page.route("**/api/v1/batches/batch-stage20-sec/accept*", _accept)
+    page.route("**/api/v1/batches/batch-stage20-sec/submit*", _submit)
+    page.route("**/api/v1/batches/batch-stage20-sec/retry*", _retry)
+
+    set_storage_preferences(page, storage_dir, save_request=False)
+    page.goto(f"{live_server_url}/index")
+    page.fill("#batch-raw-input", "萌王S4\n路哥S4")
+    page.click("#batch-parse-submit")
+    expect(page.locator(".batch-draft-card")).to_have_count(2)
+    page.locator(".batch-draft-card", has_text="萌王S4").locator(
+        ".batch-card-expand"
+    ).click()
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator(".batch-draft-card", has_text="萌王S4").locator(
+        ".batch-card-accept"
+    ).click()
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+    # 批量提交 → 单项失败，出现单项重试按钮
+    page.fill("#batch-queue-ab-endpoint", "https://ab.example.invalid/api")
+    page.fill("#batch-queue-ab-token", "stage20-user-typed-token")
+    page.check("#batch-queue-ab-confirm")
+    page.click("#batch-queue-submit-button")
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+    item = page.locator('.batch-queue-item[data-item-id="item-sec"]')
+    expect(item.locator(".batch-queue-status")).to_contain_text("提交失败")
+    expect(item.locator(".batch-queue-item-retry")).to_have_count(1)
+
+    # 单项重试成功 → SUCCEEDED，按钮消失，敏感输入清空。
+    # 批量提交成功后敏感输入已被清空，重试前重新填写公开的 AB 配置。
+    page.fill("#batch-queue-ab-endpoint", "https://ab.example.invalid/api")
+    page.fill("#batch-queue-ab-token", "stage20-user-typed-token")
+    page.check("#batch-queue-ab-confirm")
+    page.click('.batch-queue-item[data-item-id="item-sec"] .batch-queue-item-retry')
+    expect(item.locator(".batch-queue-status")).to_contain_text("提交成功")
+    expect(item.locator(".batch-queue-item-retry")).to_have_count(0)
+    expect(page.locator("#batch-queue-ab-endpoint")).to_have_value("")
+    expect(page.locator("#batch-queue-ab-token")).to_have_value("")
+
+    # 单项重试请求体只携带公开 request_id 与用户填写的 ab_config，绝不携带
+    # 队列中复制的完整 RSS/token/cookie/magnet/原始响应。
+    assert retry_calls
+    retry_payload = retry_calls[0]
+    assert retry_payload["request_id"] == "req-stage20-sec"
+    assert retry_payload["ab_config"]["endpoint"] == "https://ab.example.invalid/api"
+    assert retry_payload["ab_config"]["token"] == "stage20-user-typed-token"
+    assert retry_payload["confirm"] is True
+    for value in sensitive_values:
+        assert value not in json.dumps(retry_payload, ensure_ascii=False)
+
+    browser_state = page.evaluate(
+        """() => ({
+            url: window.location.href,
+            localStorage: JSON.stringify(window.localStorage),
+            sessionStorage: JSON.stringify(window.sessionStorage),
+            bodyText: document.body.innerText,
+        })"""
+    )
+    serialized_calls = json.dumps(
+        saved_calls + accept_calls + submit_calls + retry_calls,
+        ensure_ascii=False,
+    )
+    storage_json = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in storage_dir.rglob("*.json")
+    )
+    for value in sensitive_values:
+        assert value not in browser_state["url"]
+        assert value not in browser_state["localStorage"]
+        assert value not in browser_state["sessionStorage"]
+        assert value not in browser_state["bodyText"]
+        assert value not in serialized_calls
+        assert value not in storage_json
+
+    # 真实队列 JSON 的 last_error 在写盘前已被脱敏，不包含失败 URL 与 token。
+    queue_body = (storage_dir / "queue" / "batch-stage20-sec.json").read_text(
+        encoding="utf-8"
+    )
+    assert "Auto Bangumi HTTP 提交失败" in queue_body
+    assert sensitive_values[7] not in queue_body
+    assert sensitive_values[1] not in queue_body
+    assert "stage20-secret" not in queue_body

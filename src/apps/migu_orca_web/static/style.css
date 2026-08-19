@@ -266,6 +266,57 @@ textarea {
   justify-self: start;
 }
 
+.batch-card-status-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.batch-card-queue-status {
+  background: #e7f4e9;
+  border: 1px solid #abd3b6;
+  color: #1f5f34;
+}
+
+.batch-card-reason {
+  color: #8d2f20;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.batch-card-checkbox {
+  justify-self: start;
+}
+
+.batch-accept-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.batch-accept-toolbar[hidden] {
+  display: none;
+}
+
+.batch-select-all {
+  align-items: center;
+  display: inline-flex;
+  font-size: 0.9rem;
+  gap: 6px;
+}
+
+.batch-selected-count {
+  color: #586273;
+  font-size: 0.84rem;
+}
+
+.batch-accept-actions {
+  margin-left: auto;
+}
+
 .batch-card-delete {
   min-height: 30px;
   min-width: 30px;
@@ -349,6 +400,104 @@ textarea {
   font-weight: 700;
   padding: 2px 8px;
   white-space: nowrap;
+}
+
+.batch-queue-list {
+  display: grid;
+  gap: 12px;
+}
+
+.batch-queue-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.batch-queue-item {
+  background: #ffffff;
+  border: 1px solid #d8dde5;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.batch-queue-item-title {
+  overflow-wrap: anywhere;
+}
+
+.batch-queue-item-meta,
+.batch-queue-item-summary {
+  color: #586273;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.batch-queue-item-status-row {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.batch-queue-status-ready {
+  background: #edf3f7;
+  border: 1px solid #c8d5df;
+  color: #22577a;
+}
+
+.batch-queue-status-submitting {
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
+}
+
+.batch-queue-status-succeeded {
+  background: #e7f4e9;
+  border: 1px solid #abd3b6;
+  color: #1f5f34;
+}
+
+.batch-queue-status-failed {
+  background: #fdecec;
+  border: 1px solid #eab8b8;
+  color: #8d2f20;
+}
+
+.batch-queue-status-retryable {
+  background: #fdf6e8;
+  border: 1px solid #ecd9a8;
+  color: #7a5200;
+}
+
+.batch-queue-item-retry {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 2px 12px;
+}
+
+.batch-card-queue-status-succeeded {
+  background: #e7f4e9;
+  border: 1px solid #abd3b6;
+  color: #1f5f34;
+}
+
+.batch-card-queue-status-failed,
+.batch-card-queue-status-retryable {
+  background: #fdecec;
+  border: 1px solid #eab8b8;
+  color: #8d2f20;
+}
+
+.batch-queue-panel .panel-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+}
+
+#batch-queue-submit-form[hidden] {
+  display: none;
 }
 
 .candidate-list {

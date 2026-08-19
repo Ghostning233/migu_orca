@@ -214,15 +214,42 @@ AI 名称解析 provider seam 生成候选标题、季数提示和搜索词
 6. 单卡接受先持久化未保存预览，再复用现有 Request accept 能力；接受后只更新当前卡片。
 7. 批量接受、全接受和 Auto Bangumi 提交队列不是 Stage 19 范围，应由 Stage 20 在该单卡接受能力上继续编排。
 
-## 14. 已确认事项与待确认问题
+## 14. Stage 20 批量接受与提交前队列编排状态（已完成）
 
-### 14.1 已确认事项
+Stage 20 已在 Stage 19 单卡接受基础上增加批量接受和 Auto Bangumi 提交前队列编排：
+
+```text
+用户审核批量草案卡片
+  ↓
+单卡接受 / 勾选批量接受 / 全接受
+  ↓
+复用现有 Request accept 能力，已接受项目入队 READY_TO_SUBMIT
+  ↓
+用户打开提交前队列，显式提供 AB config 并确认
+  ↓
+按队列顺序复用现有 build_ab_subscription_payload + AB client + 脱敏结果契约逐项提交
+  ↓
+单项成功/失败/可重试独立记录，失败项可独立重试
+```
+
+编排规则（Stage 20 已落地）：
+
+1. 批量接受能力（`src/batch_engine/controllers/batch_accept_controller.py` 的 `accept_batch_items`）接收 `batch_id` 和 item 列表，通过注入的 `load_request`/`accept_one` 复用现有 Request 接受能力；已 `ACCEPTED` 项目幂等返回，不重复写入确认历史或队列；不可接受项目逐项返回中文原因；单项失败不阻塞其他项。
+2. 提交前队列（`src/batch_engine/controllers/batch_queue_controller.py`）按 `request_id` 幂等入队，每个 item 独立记录状态、尝试次数、脱敏错误和脱敏结果摘要；队列只保存非敏感元数据，AB 配置永远不入队。
+3. 批量顺序提交（`src/batch_engine/controllers/batch_submit_controller.py` 的 `submit_batch_queue_items`）使用 request-scoped `ab_config` 处理 `READY_TO_SUBMIT` 项目；提交前校验对应 Request 仍为 `ACCEPTED`，不满足条件标记 `FAILED`/`RETRYABLE` 并继续；单项成功/失败独立记录，成功项不会被重复提交；失败项通过 `retry_batch_queue_item` 独立重试，重试使用最新保存的 `ACCEPTED` Request 快照。
+4. 队列持久化（`src/storage_engine/controllers/queue_repository.py`）写入 `<queue_dir>/<batch_id>.json`，只保留非敏感字段；`queue_dir` 是 `StorageConfig` 新字段，由 `ensure_storage_layout` 创建。
+5. Web 层（`src/apps/migu_orca_web/views.py`）新增 `POST /api/v1/batches/<batch_id>/accept`、`GET /api/v1/batches/<batch_id>/queue`、`POST /api/v1/batches/<batch_id>/submit`、`POST /api/v1/batches/<batch_id>/retry`，把批量编排接到现有 Request 快照与接受流程。
+6. 批量提交采用前台顺序编排，不创建 qBittorrent 下载任务，不绕过 Auto Bangumi，不引入后台常驻 worker 或复杂调度器。
+
+## 15. 已确认事项与待确认问题
+
+### 15.1 已确认事项
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
 | D-M00-03 | 所有字幕组有效种子数为 0 时是否仍生成 Request | 仍生成；默认字幕组和 RSS 为 null，并增加提示 |
 
-### 14.2 待确认问题
+### 15.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |

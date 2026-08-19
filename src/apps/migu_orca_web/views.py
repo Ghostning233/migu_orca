@@ -24,15 +24,30 @@ from batch_engine.controllers.anime_title_parser import (
     FakeAnimeTitleParsingProvider,
     parse_anime_title,
 )
+from batch_engine.controllers.batch_accept_controller import (
+    AcceptOne,
+    BatchAcceptItem,
+    LoadRequest,
+    accept_batch_items,
+    serialize_batch_accept_result,
+)
 from batch_engine.controllers.batch_draft_controller import (
     create_batch_draft,
     update_batch_item_status,
+)
+from batch_engine.controllers.batch_queue_controller import serialize_queue
+from batch_engine.controllers.batch_submit_controller import (
+    compose_ab_submit_one,
+    retry_batch_queue_item,
+    serialize_batch_submit_result,
+    submit_batch_queue_items,
 )
 from batch_engine.models import (
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_PARSED,
     AnimeTitleParseResult,
     BatchDraftItem,
+    BatchSubmissionQueue,
 )
 from mikan_engine.controllers import mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_candidate_cache import (
@@ -61,6 +76,10 @@ from storage_engine.controllers.request_repository import (
 )
 from storage_engine.controllers.ab_result_repository import load_ab_submit_result
 from storage_engine.controllers.history_repository import load_status_history
+from storage_engine.controllers.queue_repository import (
+    load_submission_queue,
+    save_submission_queue,
+)
 from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
 
 api_blueprint = Blueprint("migu_orca_web_api", __name__)
@@ -117,6 +136,85 @@ class BatchParsePayload(BaseModel):
         default=None,
         validate_default=True,
     )
+
+
+class BatchItemDescriptorPayload(BaseModel):
+    """One batch card descriptor for the accept endpoint.
+
+    ``request_id`` is present only when the card already has a saved Request
+    (unsaved preview drafts are persisted through preview-save before accept).
+    """
+
+    item_id: str
+    request_id: str | None = None
+    title: str | None = None
+
+    @field_validator("item_id")
+    @classmethod
+    def validate_item_id(cls, value: str) -> str:
+        item_id = value.strip()
+        if not item_id:
+            raise ValueError("item_id cannot be empty")
+        return item_id
+
+    @field_validator("request_id")
+    @classmethod
+    def validate_request_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        request_id = value.strip()
+        if not request_id:
+            raise ValueError("request_id cannot be empty")
+        return request_id
+
+
+class BatchAcceptPayload(BaseModel):
+    """Accept selected or all batch cards into the pre-submission queue.
+
+    ``batch_id`` comes from the URL path; ``items`` describes the batch cards
+    (the server never persists the parsed batch, so the client sends the cards
+    it currently holds). ``item_ids`` optionally filters which cards are
+    accepted (omit for accept-all, preserving batch order).
+    """
+
+    batch_id: str
+    items: list[BatchItemDescriptorPayload]
+    item_ids: list[str] | None = None
+    storage_dir: str | None = None
+
+
+class BatchQueueQuery(BaseModel):
+    """Read a batch pre-submission queue (URL path + query args only)."""
+
+    batch_id: str
+    storage_dir: str | None = None
+
+
+class BatchSubmitPayload(BaseModel):
+    """Submit a batch queue to Auto Bangumi with explicit request-scoped config.
+
+    ``ab_config`` is optional in the payload so the view can raise a Chinese
+    ``validation_error`` envelope when it is missing (instead of the default
+    English pydantic envelope); ``confirm`` is the explicit user confirmation
+    field. Neither value is ever persisted into the queue storage.
+    """
+
+    batch_id: str
+    ab_config: RequestAbConfigPayload | None = Field(default=None)
+    confirm: bool = False
+    storage_dir: str | None = None
+
+
+class BatchRetryPayload(BatchSubmitPayload):
+    """Retry a single FAILED/RETRYABLE queue item with explicit AB config.
+
+    ``request_id`` selects the queue item to retry; only FAILED/RETRYABLE items
+    are retried (already-SUCCEEDED items are skipped server-side). The request-
+    scoped ``ab_config``/``confirm`` contract matches ``BatchSubmitPayload`` and
+    is never persisted into the queue storage.
+    """
+
+    request_id: str
 
 
 class RequestCreatePayload(BaseModel):
@@ -403,6 +501,76 @@ def _search_batch_item_candidates(
             seen.add(key)
             candidates.append(candidate)
     return candidates
+
+
+def _load_batch_queue_or_none(
+    config: StorageConfig,
+    batch_id: str,
+) -> BatchSubmissionQueue | None:
+    """Load a batch pre-submission queue, returning None when absent.
+
+    Only ``queue_not_found`` is mapped to None; storage/invalid-id errors
+    propagate so the caller never silently ignores a real read failure.
+    """
+    try:
+        return load_submission_queue(config, batch_id)
+    except Stage1Error as exc:
+        if exc.error_type == "queue_not_found":
+            return None
+        raise
+
+
+def _build_batch_load_request(storage_dir: Path | None) -> LoadRequest:
+    """Build the injected ``load_request`` for batch accept/submit services.
+
+    Resolves a request_id to its current snapshot, or None when the snapshot is
+    missing/deleted, so the batch services can classify items without coupling
+    to the storage layer.
+    """
+    config = load_storage_config(storage_dir)
+
+    def load_request(request_id: str) -> dict[str, Any] | None:
+        try:
+            return load_request_snapshot(config, request_id)
+        except Stage1Error:
+            return None
+
+    return load_request
+
+
+def _build_batch_accept_one(storage_dir: Path | None) -> AcceptOne:
+    """Build the injected ``accept_one`` for the batch accept service.
+
+    Mirrors ``RequestAcceptView.save``: load the PENDING_CONFIRM snapshot,
+    apply the shared accept action, record an ACCEPT history event, and persist
+    the updated ACCEPTED request. Auto Bangumi secrets never pass through here.
+    """
+    config = load_storage_config(storage_dir)
+
+    def accept_one(request_id: str) -> dict[str, Any]:
+        request = load_request_snapshot(config, request_id)
+        result = apply_confirmation_action(
+            {"success": True, "request": request, "error": None},
+            "accept",
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        history_event = _build_history_event(
+            request,
+            result["request"],
+            action="ACCEPT",
+        )
+        result = apply_request_save_action(
+            result,
+            True,
+            storage_dir=storage_dir,
+            history_events=[history_event],
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        return result["request"]
+
+    return accept_one
 
 
 def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -757,6 +925,142 @@ class BatchParseView(PostView):
             "raw_input": batch.raw_input,
             "items": serialized_items,
         }
+
+
+@class_route(api_blueprint, "/api/v1/batches/<batch_id>/accept", methods=["POST"])
+class BatchAcceptView(PostView):
+    request_validator_model = BatchAcceptPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchAcceptPayload)
+        payload = self.request_validator_model
+        storage_dir = _storage_dir(payload.storage_dir)
+        config = load_storage_config(storage_dir)
+
+        existing_queue = _load_batch_queue_or_none(config, payload.batch_id)
+        items = [
+            BatchAcceptItem(
+                item_id=item.item_id,
+                request_id=item.request_id,
+                title=item.title,
+            )
+            for item in payload.items
+        ]
+        result = accept_batch_items(
+            batch_id=payload.batch_id,
+            items=items,
+            load_request=_build_batch_load_request(storage_dir),
+            accept_one=_build_batch_accept_one(storage_dir),
+            item_ids=payload.item_ids,
+            queue=existing_queue,
+        )
+        # Persist the (possibly extended) queue so later queue-read/submit calls
+        # observe the same items. The queue only holds non-sensitive public
+        # fields, so writing it never stores Auto Bangumi secrets.
+        save_submission_queue(config, result.queue)
+        return serialize_batch_accept_result(result)
+
+
+@class_route(api_blueprint, "/api/v1/batches/<batch_id>/queue", methods=["GET"])
+class BatchQueueView(GetView):
+    request_validator_model = BatchQueueQuery
+
+    def get_object(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchQueueQuery)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        queue = _load_batch_queue_or_none(config, payload.batch_id)
+        return {
+            "batch_id": payload.batch_id,
+            "queue": serialize_queue(queue) if queue is not None else None,
+        }
+
+
+@class_route(api_blueprint, "/api/v1/batches/<batch_id>/submit", methods=["POST"])
+class BatchSubmitView(PostView):
+    request_validator_model = BatchSubmitPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchSubmitPayload)
+        payload = self.request_validator_model
+        if payload.ab_config is None:
+            raise Stage1Error(
+                "validation_error",
+                "请提供 Auto Bangumi 配置",
+                "batch_submit",
+                {"field": "ab_config"},
+            )
+        if not payload.confirm:
+            raise Stage1Error(
+                "validation_error",
+                "请确认提交到 Auto Bangumi",
+                "batch_submit",
+                {"field": "confirm"},
+            )
+
+        storage_dir = _storage_dir(payload.storage_dir)
+        config = load_storage_config(storage_dir)
+        queue = load_submission_queue(config, payload.batch_id)
+        ab_config = build_ab_config(payload.ab_config.model_dump())
+        result = submit_batch_queue_items(
+            batch_id=payload.batch_id,
+            queue=queue,
+            ab_config=ab_config,
+            load_request=_build_batch_load_request(storage_dir),
+            submit_one=compose_ab_submit_one(),
+        )
+        # Persist the updated queue so retries and queue reads observe the new
+        # statuses/summaries. The request-scoped ab_config is never stored.
+        save_submission_queue(config, result.queue)
+        return serialize_batch_submit_result(result)
+
+
+@class_route(api_blueprint, "/api/v1/batches/<batch_id>/retry", methods=["POST"])
+class BatchRetryView(PostView):
+    request_validator_model = BatchRetryPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchRetryPayload)
+        payload = self.request_validator_model
+        if payload.ab_config is None:
+            raise Stage1Error(
+                "validation_error",
+                "请提供 Auto Bangumi 配置",
+                "batch_retry",
+                {"field": "ab_config"},
+            )
+        if not payload.confirm:
+            raise Stage1Error(
+                "validation_error",
+                "请确认提交到 Auto Bangumi",
+                "batch_retry",
+                {"field": "confirm"},
+            )
+
+        storage_dir = _storage_dir(payload.storage_dir)
+        config = load_storage_config(storage_dir)
+        queue = load_submission_queue(config, payload.batch_id)
+        ab_config = build_ab_config(payload.ab_config.model_dump())
+        try:
+            result = retry_batch_queue_item(
+                batch_id=payload.batch_id,
+                queue=queue,
+                request_id=payload.request_id,
+                ab_config=ab_config,
+                load_request=_build_batch_load_request(storage_dir),
+                submit_one=compose_ab_submit_one(),
+            )
+        except ValueError as exc:
+            raise Stage1Error(
+                "queue_item_not_found",
+                "队列中不存在该订阅方案项目",
+                "batch_retry",
+                {"field": "request_id", "batch_id": payload.batch_id},
+            ) from exc
+        # Persist the updated queue so queue reads observe the retried status.
+        # The request-scoped ab_config is never stored.
+        save_submission_queue(config, result.queue)
+        return serialize_batch_submit_result(result)
 
 
 @class_route(api_blueprint, "/api/v1/requests/<path:request_id>/accept", methods=["POST"])

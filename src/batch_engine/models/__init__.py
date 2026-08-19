@@ -2,6 +2,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from batch_engine.models.queue import (
+    BATCH_QUEUE_STATUS_FAILED,
+    BATCH_QUEUE_STATUS_LABELS,
+    BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+    BATCH_QUEUE_STATUS_RETRYABLE,
+    BATCH_QUEUE_STATUS_SUBMITTING,
+    BATCH_QUEUE_STATUS_SUCCEEDED,
+    BATCH_QUEUE_TRANSITIONS,
+    BatchQueueItem,
+    BatchSubmissionQueue,
+)
 
 BATCH_ITEM_STATUS_RAW = "RAW"
 BATCH_ITEM_STATUS_PARSED = "PARSED"
@@ -40,6 +51,15 @@ __all__ = [
     "BATCH_ITEM_STATUS_FAILED",
     "BATCH_ITEM_STATUS_PARSED",
     "BATCH_ITEM_STATUS_RAW",
+    "BATCH_QUEUE_STATUS_FAILED",
+    "BATCH_QUEUE_STATUS_LABELS",
+    "BATCH_QUEUE_STATUS_READY_TO_SUBMIT",
+    "BATCH_QUEUE_STATUS_RETRYABLE",
+    "BATCH_QUEUE_STATUS_SUBMITTING",
+    "BATCH_QUEUE_STATUS_SUCCEEDED",
+    "BATCH_QUEUE_TRANSITIONS",
     "BatchDraft",
     "BatchDraftItem",
+    "BatchQueueItem",
+    "BatchSubmissionQueue",
 ]

@@ -168,8 +168,20 @@ class TestNoSensitiveContent:
 
     def test_no_token_exposed(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")
-        text = page.content().lower()
-        assert "token" not in text
+        # 提交前队列表单（US-147）合法包含空 token 输入框；安全契约是不得携带
+        # 任何实际 token 值，而不是“token”这个词永远不出现。
+        token_input = page.locator("#batch-queue-ab-token")
+        assert token_input.count() >= 1
+        assert token_input.get_attribute("type") == "password"
+        assert token_input.input_value() == ""
+        # 初始状态下所有文本/密码输入均为空，避免预填秘密值进入 DOM
+        for element in page.locator(
+            "input[type=text], input[type=password], input[type=search], "
+            "input[type=url], input:not([type]), textarea"
+        ).all():
+            assert element.input_value() == "", (
+                f"input #{element.get_attribute('id')} has a prefilled value"
+            )
 
     def test_generation_form_descriptions_safe(self, page: Page, live_server_url: str) -> None:
         page.goto(f"{live_server_url}/index")

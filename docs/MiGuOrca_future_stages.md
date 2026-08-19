@@ -55,33 +55,35 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 2. 真实 LLM provider 的完整生产配置。
 3. 部署 Auto Bangumi 或 qBittorrent。
 
-## 3. Stage 20: 批量接受与 Auto Bangumi 提交前队列
+## 3. Stage 20: 批量接受与 Auto Bangumi 提交前队列（已完成）
 
 目标：
 
 把 Stage 19 的单卡接受扩展为批量接受和 Auto Bangumi 提交前队列。
 
-主要功能：
+已完成功能：
 
-1. 支持单个接受、批量接受和全接受。
-2. 接受后的卡片进入提交前队列。
-3. 队列展示待提交、提交中、成功、失败、可重试状态。
-4. 继续要求用户显式配置或确认 Auto Bangumi endpoint/token/fallback。
-5. 单个提交失败不影响其他卡片。
-6. 提交结果写入现有 Request/AB result 存储。
-7. 提交队列和结果展示保持脱敏。
+1. 支持单个接受、批量接受和全接受；工具栏显示选中数量，不可接受项目逐项返回中文原因，单项失败不阻塞其他项。
+2. 接受后的卡片进入独立追踪的提交前队列（`READY_TO_SUBMIT`/`SUBMITTING`/`SUCCEEDED`/`FAILED`/`RETRYABLE`），队列只保存非敏感元数据，endpoint/token/cookie/Authorization header/原始响应体/完整 RSS URL/magnet/本地绝对路径从不写入队列。
+3. 队列面板展示待提交、提交中、提交成功、提交失败、可重试状态、尝试次数和脱敏结果摘要；刷新页面后通过 URL `batch_id` 恢复队列状态。
+4. 继续要求用户显式配置或确认 Auto Bangumi endpoint/token/fallback；提交成功后清空敏感输入。
+5. 单个提交失败不影响其他卡片；失败项可独立重试，成功项不会被重复提交。
+6. 提交结果以脱敏形式写入现有 Request/AB result 存储。
+7. 端到端安全回归覆盖 API 响应、页面、URL、浏览器 storage、队列 JSON、Request JSON、日志和 trace 的敏感值过滤。
 
-完成标志：
+完成标志（已达成）：
 
-用户可以审核一批卡片，并将确认无误的多个订阅方案提交到 Auto Bangumi；失败项可独立重试。
+用户可以审核一批卡片，批量确认若干项目，查看提交前队列，显式配置并顺序提交 Auto Bangumi；成功和失败项目独立展示，失败项可独立重试，且所有外部敏感值都没有进入持久化或展示面。
 
-不包含：
+不包含（仍成立）：
 
 1. qBittorrent 下载任务创建。
 2. 自动绕过 Auto Bangumi 的订阅执行。
-3. 复杂调度器或后台常驻 worker。
+3. 复杂调度器或后台常驻 worker；批量提交采用前台顺序编排。
 
 ## 4. Stage 21: 用户偏好与智能推荐闭环
+
+前置条件（Stage 20 handoff）：Stage 20 已完成批量接受、提交前队列、Auto Bangumi 顺序提交和失败项独立重试（详见 `docs/MiGuOrca_stage20_batch_ab_queue_PRD.md` 的 Stage 21 handoff）。Stage 21 应在此之上把批量草案结果从“可审核”提升到“大部分可直接接受”，并保持 AI 只生成候选、不自动选择最终合集的边界。
 
 目标：
 
@@ -135,12 +137,12 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 
 新方向的核心产品闭环需要 3 个主要 Stage：
 
-1. Stage 19：批量输入与订阅草案卡片工作台。
-2. Stage 20：批量接受与 Auto Bangumi 提交前队列。
-3. Stage 21：用户偏好与智能推荐闭环。
+1. Stage 19：批量输入与订阅草案卡片工作台（已完成）。
+2. Stage 20：批量接受与 Auto Bangumi 提交前队列（已完成）。
+3. Stage 21：用户偏好与智能推荐闭环（下一个阶段）。
 
 如果要覆盖“降低 Auto Bangumi/qBittorrent 配置门槛”，再增加 1 个远期可选 Stage：
 
 1. Stage 22：部署/配置向导可行性验证。
 
-因此，最小可用新方向需要 Stage 19 到 Stage 21，共 3 个 Stage；完整覆盖配置痛点则需要 Stage 19 到 Stage 22，共 4 个 Stage。
+因此，最小可用新方向需要 Stage 19 到 Stage 21，共 3 个 Stage；完整覆盖配置痛点则需要 Stage 19 到 Stage 22，共 4 个 Stage。当前 Stage 19 与 Stage 20 均已完成并归档，下一步为 Stage 21。
