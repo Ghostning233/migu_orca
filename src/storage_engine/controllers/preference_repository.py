@@ -25,6 +25,25 @@ from storage_engine.controllers.storage_config import (
 PREFERENCES_FILENAME = "user_preferences.json"
 PREFERENCES_VERSION = 1
 
+#: Maximum lengths for user-supplied preference strings. These keep the saved
+#: JSON bounded and are enforced by ``validate_preferences`` on both save and
+#: load, so an oversized value can never round-trip through the Web API.
+MAX_SUBTITLE_GROUP_NAME_LENGTH = 100
+MAX_FILTER_RULE_LENGTH = 500
+MAX_NAMING_TEMPLATE_LENGTH = 200
+
+#: Allowed keys in a Web API save payload. Unknown fields are rejected so the
+#: API only ever accepts the defined non-sensitive preference contract.
+_PREFERENCE_TOP_LEVEL_FIELDS = frozenset(
+    {"version", "subtitle_groups", "filter_defaults", "naming", "search"}
+)
+_SUBTITLE_GROUP_FIELDS = frozenset({"preferred", "excluded", "fallback"})
+_FILTER_DEFAULT_FIELDS = frozenset(
+    {"must_contain", "must_not_contain", "use_regex", "case_sensitive"}
+)
+_NAMING_FIELDS = frozenset({"strategy", "template"})
+_SEARCH_FIELDS = frozenset({"reuse_explicit_corrections"})
+
 # Sensitive-content markers. A preference field may never hold an endpoint,
 # token, cookie, Authorization header, magnet, raw HTML/RSS, raw response
 # body, or local absolute path. Word-boundary keywords follow the queue
@@ -87,7 +106,9 @@ def validate_preferences(
     """Validate that a preference set is legal and non-sensitive.
 
     Raises a Chinese ``validation_error`` when a field has the wrong type,
-    uses an unsupported enum value, or contains a sensitive external value.
+    uses an unsupported enum value, contains a sensitive external value, holds
+    an empty subtitle-group entry, repeats a subtitle group, or exceeds the
+    bounded string length.
     """
     if not isinstance(preferences.version, int) or preferences.version < 1:
         _raise_validation(
@@ -101,11 +122,13 @@ def validate_preferences(
         subtitle_groups.preferred,
         "subtitle_groups.preferred",
         failed_step,
+        max_length=MAX_SUBTITLE_GROUP_NAME_LENGTH,
     )
     _validate_string_list(
         subtitle_groups.excluded,
         "subtitle_groups.excluded",
         failed_step,
+        max_length=MAX_SUBTITLE_GROUP_NAME_LENGTH,
     )
     _validate_enum(
         subtitle_groups.fallback,
@@ -113,15 +136,32 @@ def validate_preferences(
         "subtitle_groups.fallback",
         failed_step,
     )
+    _validate_no_duplicates(
+        subtitle_groups.preferred, "subtitle_groups.preferred", failed_step
+    )
+    _validate_no_duplicates(
+        subtitle_groups.excluded, "subtitle_groups.excluded", failed_step
+    )
+    _validate_no_overlap(
+        subtitle_groups.preferred,
+        subtitle_groups.excluded,
+        failed_step,
+    )
 
     filter_defaults = preferences.filter_defaults
     if not isinstance(filter_defaults, FilterDefaults):
         _raise_validation(failed_step, "filter_defaults", "filter_defaults 结构无效")
-    _validate_string(filter_defaults.must_contain, "filter_defaults.must_contain", failed_step)
+    _validate_string(
+        filter_defaults.must_contain,
+        "filter_defaults.must_contain",
+        failed_step,
+        max_length=MAX_FILTER_RULE_LENGTH,
+    )
     _validate_string(
         filter_defaults.must_not_contain,
         "filter_defaults.must_not_contain",
         failed_step,
+        max_length=MAX_FILTER_RULE_LENGTH,
     )
     _validate_bool(filter_defaults.use_regex, "filter_defaults.use_regex", failed_step)
     _validate_bool(
@@ -134,7 +174,12 @@ def validate_preferences(
     if not isinstance(naming, NamingPreference):
         _raise_validation(failed_step, "naming", "naming 结构无效")
     _validate_enum(naming.strategy, NAMING_STRATEGIES, "naming.strategy", failed_step)
-    _validate_string(naming.template, "naming.template", failed_step)
+    _validate_string(
+        naming.template,
+        "naming.template",
+        failed_step,
+        max_length=MAX_NAMING_TEMPLATE_LENGTH,
+    )
 
     search = preferences.search
     if not isinstance(search, SearchPreference):
@@ -224,6 +269,114 @@ def save_user_preferences(
         "filename": preferences_path.name,
         "version": preferences.version,
     }
+
+
+def serialize_preferences(preferences: VersionedUserPreference) -> dict[str, Any]:
+    """Return the public API-safe preference dict.
+
+    Mirrors the persisted JSON shape exactly and only ever carries the defined
+    non-sensitive preference fields; endpoint/token/cookie/Authorization/raw
+    HTML-RSS/magnet values are rejected before save and re-validated on load.
+    """
+    return _preferences_to_dict(preferences)
+
+
+def build_preferences_from_api(
+    data: Any,
+    *,
+    failed_step: str = "save_user_preferences",
+) -> VersionedUserPreference:
+    """Build a preference model from a Web API save payload.
+
+    Only the defined non-sensitive fields are accepted: unknown top-level or
+    section keys raise a Chinese ``validation_error``. Missing sections default
+    (so a partial save or an explicit ``{}`` reset-to-defaults is legal), and
+    the built model is passed through ``validate_preferences`` so wrong types,
+    illegal enums, empty/duplicate subtitle groups, sensitive values, and
+    oversized strings are all rejected with the same Chinese envelope.
+    """
+    if not isinstance(data, dict):
+        _raise_validation(failed_step, "preferences", "偏好配置必须是对象")
+    _reject_unknown_fields(
+        data, _PREFERENCE_TOP_LEVEL_FIELDS, "preferences", failed_step
+    )
+
+    version = data.get("version", PREFERENCES_VERSION)
+
+    subtitle_groups_data = data.get("subtitle_groups")
+    if subtitle_groups_data is None:
+        subtitle_groups = SubtitleGroupPreference()
+    else:
+        if not isinstance(subtitle_groups_data, dict):
+            _raise_validation(
+                failed_step, "subtitle_groups", "subtitle_groups 必须是对象"
+            )
+        _reject_unknown_fields(
+            subtitle_groups_data,
+            _SUBTITLE_GROUP_FIELDS,
+            "subtitle_groups",
+            failed_step,
+        )
+        subtitle_groups = SubtitleGroupPreference(
+            preferred=subtitle_groups_data.get("preferred", []),
+            excluded=subtitle_groups_data.get("excluded", []),
+            fallback=subtitle_groups_data.get("fallback", "next_preferred"),
+        )
+
+    filter_data = data.get("filter_defaults")
+    if filter_data is None:
+        filter_defaults = FilterDefaults()
+    else:
+        if not isinstance(filter_data, dict):
+            _raise_validation(
+                failed_step, "filter_defaults", "filter_defaults 必须是对象"
+            )
+        _reject_unknown_fields(
+            filter_data, _FILTER_DEFAULT_FIELDS, "filter_defaults", failed_step
+        )
+        filter_defaults = FilterDefaults(
+            must_contain=filter_data.get("must_contain", ""),
+            must_not_contain=filter_data.get("must_not_contain", ""),
+            use_regex=filter_data.get("use_regex", False),
+            case_sensitive=filter_data.get("case_sensitive", False),
+        )
+
+    naming_data = data.get("naming")
+    if naming_data is None:
+        naming = NamingPreference()
+    else:
+        if not isinstance(naming_data, dict):
+            _raise_validation(failed_step, "naming", "naming 必须是对象")
+        _reject_unknown_fields(naming_data, _NAMING_FIELDS, "naming", failed_step)
+        naming = NamingPreference(
+            strategy=naming_data.get("strategy", "official_title_season"),
+            template=naming_data.get("template", "{title}"),
+        )
+
+    search_data = data.get("search")
+    if search_data is None:
+        search = SearchPreference()
+    else:
+        if not isinstance(search_data, dict):
+            _raise_validation(failed_step, "search", "search 必须是对象")
+        _reject_unknown_fields(
+            search_data, _SEARCH_FIELDS, "search", failed_step
+        )
+        search = SearchPreference(
+            reuse_explicit_corrections=search_data.get(
+                "reuse_explicit_corrections", True
+            )
+        )
+
+    preferences = VersionedUserPreference(
+        version=version,
+        subtitle_groups=subtitle_groups,
+        filter_defaults=filter_defaults,
+        naming=naming,
+        search=search,
+    )
+    validate_preferences(preferences, failed_step=failed_step)
+    return preferences
 
 
 def _preferences_to_dict(preferences: VersionedUserPreference) -> dict[str, Any]:
@@ -401,19 +554,41 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
         return False
 
 
-def _validate_string(value: Any, field: str, failed_step: str) -> None:
+def _validate_string(
+    value: Any,
+    field: str,
+    failed_step: str,
+    *,
+    max_length: int | None = None,
+) -> None:
     if not isinstance(value, str):
         _raise_validation(failed_step, field, f"{field} 必须是字符串")
     if contains_sensitive_value(value):
         _raise_validation(failed_step, field, f"{field} 包含不允许的敏感内容")
+    if max_length is not None and len(value) > max_length:
+        _raise_validation(
+            failed_step, field, f"{field} 长度不能超过 {max_length} 个字符"
+        )
 
 
-def _validate_string_list(value: Any, field: str, failed_step: str) -> None:
+def _validate_string_list(
+    value: Any,
+    field: str,
+    failed_step: str,
+    *,
+    max_length: int | None = None,
+) -> None:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         _raise_validation(failed_step, field, f"{field} 必须是字符串数组")
     for item in value:
+        if not item.strip():
+            _raise_validation(failed_step, field, f"{field} 不能包含空字符串")
         if contains_sensitive_value(item):
             _raise_validation(failed_step, field, f"{field} 包含不允许的敏感内容")
+        if max_length is not None and len(item) > max_length:
+            _raise_validation(
+                failed_step, field, f"{field} 长度不能超过 {max_length} 个字符"
+            )
 
 
 def _validate_bool(value: Any, field: str, failed_step: str) -> None:
@@ -424,6 +599,39 @@ def _validate_bool(value: Any, field: str, failed_step: str) -> None:
 def _validate_enum(value: Any, allowed: tuple[str, ...], field: str, failed_step: str) -> None:
     if not isinstance(value, str) or value not in allowed:
         _raise_validation(failed_step, field, f"{field} 不是合法枚举值")
+
+
+def _validate_no_duplicates(items: list[str], field: str, failed_step: str) -> None:
+    seen: set[str] = set()
+    for item in items:
+        if item in seen:
+            _raise_validation(failed_step, field, f"{field} 不能包含重复字幕组")
+        seen.add(item)
+
+
+def _validate_no_overlap(
+    preferred: list[str],
+    excluded: list[str],
+    failed_step: str,
+) -> None:
+    overlap = set(preferred) & set(excluded)
+    if overlap:
+        _raise_validation(
+            failed_step,
+            "subtitle_groups",
+            "字幕组不能同时出现在偏好与排除列表",
+        )
+
+
+def _reject_unknown_fields(
+    data: dict[str, Any],
+    allowed: frozenset[str],
+    field: str,
+    failed_step: str,
+) -> None:
+    unknown = sorted(set(data.keys()) - allowed)
+    if unknown:
+        _raise_validation(failed_step, field, f"{field} 包含未定义字段")
 
 
 def _raise_validation(failed_step: str, field: str, message: str) -> None:
@@ -438,9 +646,14 @@ def _raise_validation(failed_step: str, field: str, message: str) -> None:
 __all__ = [
     "PREFERENCES_FILENAME",
     "PREFERENCES_VERSION",
+    "MAX_SUBTITLE_GROUP_NAME_LENGTH",
+    "MAX_FILTER_RULE_LENGTH",
+    "MAX_NAMING_TEMPLATE_LENGTH",
+    "build_preferences_from_api",
     "contains_sensitive_value",
     "default_user_preferences",
     "load_user_preferences",
     "save_user_preferences",
+    "serialize_preferences",
     "validate_preferences",
 ]

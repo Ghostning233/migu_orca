@@ -4901,3 +4901,404 @@ def test_batch_recover_api_rejects_invalid_action(tmp_path: Path) -> None:
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "恢复动作必须是 auto、succeeded 或 failed"
+
+
+def _preferences_save_body(
+    storage_dir: Path,
+    preferences: dict[str, Any] | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"storage_dir": str(storage_dir)}
+    if preferences is not None:
+        body["preferences"] = preferences
+    return body
+
+
+def _full_preferences_payload() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "subtitle_groups": {
+            "preferred": ["Loli", "喵萌"],
+            "excluded": ["示例组"],
+            "fallback": "next_preferred",
+        },
+        "filter_defaults": {
+            "must_contain": "1080p",
+            "must_not_contain": "合集版",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
+        "naming": {"strategy": "official_title_season", "template": "{title}"},
+        "search": {"reuse_explicit_corrections": True},
+    }
+
+
+def test_preference_api_reads_defaults_when_missing(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().get(
+        f"/api/v1/preferences?storage_dir={storage_dir}"
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"] == {
+        "version": 1,
+        "subtitle_groups": {
+            "preferred": [],
+            "excluded": [],
+            "fallback": "next_preferred",
+        },
+        "filter_defaults": {
+            "must_contain": "",
+            "must_not_contain": "",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
+        "naming": {"strategy": "official_title_season", "template": "{title}"},
+        "search": {"reuse_explicit_corrections": True},
+    }
+
+
+def test_preference_api_reads_saved_preferences(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+    )
+
+    response = _client().get(
+        f"/api/v1/preferences?storage_dir={storage_dir}"
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["result"] == _full_preferences_payload()
+
+
+def test_preference_api_save_returns_normalized_preferences_and_persists(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    payload = _full_preferences_payload()
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, payload),
+    )
+
+    result = response.get_json()
+    assert response.status_code == 200
+    assert result["ok"] is True
+    assert result["result"] == payload
+
+    # The saved JSON on disk carries only the defined non-sensitive fields.
+    config = load_storage_config(storage_dir)
+    written = json.loads(
+        (config.preferences_dir / "user_preferences.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert written == payload
+
+
+def test_preference_api_save_accepts_empty_payload_as_reset(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+    )
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, {}),
+    )
+
+    result = response.get_json()
+    assert result["ok"] is True
+    assert result["result"]["subtitle_groups"]["preferred"] == []
+    assert result["result"]["subtitle_groups"]["excluded"] == []
+    assert result["result"]["filter_defaults"]["must_contain"] == ""
+
+
+def test_preference_api_save_rejects_missing_preferences(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, None),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "请提供偏好配置"
+    assert payload["error_data"]["details"] == {"field": "preferences"}
+
+
+def test_preference_api_save_rejects_non_object_payload(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, ["Loli"]),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "偏好配置必须是对象"
+
+
+def test_preference_api_save_rejects_unknown_field_without_leaking(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {
+                "subtitle_groups": {"preferred": ["Loli"]},
+                "endpoint": "https://secret-endpoint.example/api",
+            },
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "preferences 包含未定义字段"
+    assert "secret-endpoint" not in str(payload)
+
+
+def test_preference_api_save_rejects_empty_string_list_item(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"preferred": [""]}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {
+        "field": "subtitle_groups.preferred"
+    }
+    assert "空字符串" in payload["error_message"]
+
+
+def test_preference_api_save_rejects_duplicate_subtitle_groups(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"preferred": ["Loli", "Loli"]}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {
+        "field": "subtitle_groups.preferred"
+    }
+    assert "重复" in payload["error_message"]
+
+
+def test_preference_api_save_rejects_group_in_both_lists(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {
+                "subtitle_groups": {
+                    "preferred": ["Loli"],
+                    "excluded": ["Loli"],
+                }
+            },
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {"field": "subtitle_groups"}
+    assert "不能同时出现" in payload["error_message"]
+
+
+def test_preference_api_save_rejects_invalid_fallback_enum(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"fallback": "auto"}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {
+        "field": "subtitle_groups.fallback"
+    }
+
+
+def test_preference_api_save_rejects_invalid_naming_strategy(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"naming": {"strategy": "random"}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {"field": "naming.strategy"}
+
+
+def test_preference_api_save_rejects_non_boolean_filter_flag(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"filter_defaults": {"use_regex": "yes"}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {
+        "field": "filter_defaults.use_regex"
+    }
+
+
+def test_preference_api_save_rejects_overlong_string(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"preferred": ["长" * 101]}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert "长度不能超过" in payload["error_message"]
+
+
+def test_preference_api_save_rejects_sensitive_values(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"preferred": ["https://mikan.example/Home/Search"]}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert "敏感内容" in payload["error_message"]
+    assert "https://mikan.example" not in str(payload)
+    # No preference file is written for an illegal save.
+    config = load_storage_config(storage_dir)
+    assert not (config.preferences_dir / "user_preferences.json").exists()
+
+
+def test_preference_api_save_does_not_leak_sensitive_values(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+    )
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    for marker in (
+        "http://",
+        "https://",
+        "magnet:",
+        "token",
+        "secret",
+        "cookie",
+        "Authorization",
+        "raw_html",
+        "raw_rss",
+        "<html",
+        "<rss",
+    ):
+        assert marker not in body.lower()
+
+
+def test_preference_api_save_storage_failure_returns_chinese_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    def fail_save(*args: object, **kwargs: object) -> dict[str, Any]:
+        raise Stage1Error(
+            "storage_error",
+            "保存用户偏好 JSON 失败",
+            "save_user_preferences",
+            {
+                "reason": f"cannot write {tmp_path}/private-token at https://example.test/api",
+                "directory": "preferences",
+            },
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.save_user_preferences",
+        fail_save,
+    )
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "storage_error"
+    assert payload["error_message"] == "保存用户偏好 JSON 失败"
+    assert payload["error_data"]["failed_step"] == "save_user_preferences"
+    assert str(tmp_path) not in str(payload)
+    assert "https://example.test/api" not in str(payload)
+    assert "token" not in str(payload).lower()

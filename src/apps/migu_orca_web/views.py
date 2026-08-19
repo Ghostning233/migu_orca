@@ -83,6 +83,12 @@ from storage_engine.controllers.ab_result_repository import (
     save_ab_submit_result,
 )
 from storage_engine.controllers.history_repository import load_status_history
+from storage_engine.controllers.preference_repository import (
+    build_preferences_from_api,
+    load_user_preferences,
+    save_user_preferences,
+    serialize_preferences,
+)
 from storage_engine.controllers.queue_repository import (
     load_submission_queue,
     save_submission_queue,
@@ -240,6 +246,27 @@ class BatchRecoverPayload(BaseModel):
     action: str
     confirm: bool = False
     storage_dir: str | None = None
+
+
+class PreferenceQuery(BaseModel):
+    """Read the saved non-sensitive user preferences (query args only)."""
+
+    storage_dir: str | None = None
+
+
+class PreferenceSavePayload(BaseModel):
+    """Save the non-sensitive user preferences.
+
+    ``preferences`` is typed loosely (``Any``) so the view can convert the raw
+    payload through ``build_preferences_from_api`` and raise a Chinese
+    ``validation_error`` envelope for every shape/type/enum/sensitive-value
+    problem — pydantic's default English ``data_validation_errors`` envelope
+    cannot express the business messages, mirroring the batch submit/retry
+    validation pattern.
+    """
+
+    storage_dir: str | None = None
+    preferences: Any = None
 
 
 class RequestCreatePayload(BaseModel):
@@ -909,6 +936,44 @@ class MikanCandidateSearchView(PostView):
             "query": payload.query,
             "candidates": candidates,
         }
+
+
+@class_route(api_blueprint, "/api/v1/preferences", methods=["GET"])
+class PreferenceView(GetView):
+    """Read the saved non-sensitive user preferences (defaults when absent)."""
+
+    request_validator_model = PreferenceQuery
+
+    def get_object(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, PreferenceQuery)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        preferences = load_user_preferences(config)
+        return serialize_preferences(preferences)
+
+
+@class_route(api_blueprint, "/api/v1/preferences", methods=["POST"])
+class PreferenceSaveView(PostView):
+    """Save non-sensitive user preferences and return the normalized result."""
+
+    request_validator_model = PreferenceSavePayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, PreferenceSavePayload)
+        payload = self.request_validator_model
+        if payload.preferences is None:
+            raise Stage1Error(
+                "validation_error",
+                "请提供偏好配置",
+                "save_user_preferences",
+                {"field": "preferences"},
+            )
+        preferences = build_preferences_from_api(payload.preferences)
+        save_user_preferences(
+            load_storage_config(_storage_dir(payload.storage_dir)),
+            preferences,
+        )
+        return serialize_preferences(preferences)
 
 
 @class_route(api_blueprint, "/api/v1/batches/parse", methods=["POST"])

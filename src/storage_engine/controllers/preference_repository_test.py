@@ -16,11 +16,16 @@ from shared.models import (
     VersionedUserPreference,
 )
 from storage_engine.controllers.preference_repository import (
+    MAX_FILTER_RULE_LENGTH,
+    MAX_NAMING_TEMPLATE_LENGTH,
+    MAX_SUBTITLE_GROUP_NAME_LENGTH,
     PREFERENCES_FILENAME,
+    build_preferences_from_api,
     contains_sensitive_value,
     default_user_preferences,
     load_user_preferences,
     save_user_preferences,
+    serialize_preferences,
     validate_preferences,
 )
 from storage_engine.controllers.storage_config import load_storage_config
@@ -437,6 +442,203 @@ class TestContainsSensitiveValue:
     def test_sid_word_is_detected_but_side_is_not(self) -> None:
         assert contains_sensitive_value("sid=abc")
         assert not contains_sensitive_value("side")
+
+
+class TestBuildPreferencesFromApi:
+    def test_build_full_payload_round_trips(self) -> None:
+        prefs = build_preferences_from_api(
+            {
+                "version": 1,
+                "subtitle_groups": {
+                    "preferred": ["Loli", "喵萌"],
+                    "excluded": ["示例组"],
+                    "fallback": "next_preferred",
+                },
+                "filter_defaults": {
+                    "must_contain": "1080p",
+                    "must_not_contain": "合集版",
+                    "use_regex": False,
+                    "case_sensitive": False,
+                },
+                "naming": {"strategy": "official_title_season", "template": "{title}"},
+                "search": {"reuse_explicit_corrections": True},
+            }
+        )
+
+        assert prefs == _full_preferences()
+        assert serialize_preferences(prefs)["subtitle_groups"]["preferred"] == [
+            "Loli",
+            "喵萌",
+        ]
+
+    def test_build_empty_payload_returns_safe_defaults(self) -> None:
+        prefs = build_preferences_from_api({})
+
+        assert prefs == default_user_preferences()
+
+    def test_build_partial_payload_fills_default_sections(self) -> None:
+        prefs = build_preferences_from_api(
+            {"subtitle_groups": {"preferred": ["喵萌"]}}
+        )
+
+        assert prefs.subtitle_groups.preferred == ["喵萌"]
+        assert prefs.filter_defaults.must_contain == ""
+        assert prefs.naming.strategy == "official_title_season"
+
+    def test_build_rejects_non_object_payload(self) -> None:
+        with pytest.raises(Stage1Error) as error:
+            build_preferences_from_api(["Loli"])
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "preferences"}
+        assert "对象" in error.value.message
+
+    def test_build_rejects_unknown_top_level_field(self) -> None:
+        with pytest.raises(Stage1Error) as error:
+            build_preferences_from_api({"endpoint": "https://example.test/api"})
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "preferences"}
+        assert "未定义字段" in error.value.message
+
+    def test_build_rejects_unknown_section_field(self) -> None:
+        with pytest.raises(Stage1Error) as error:
+            build_preferences_from_api(
+                {"subtitle_groups": {"preferred": [], "token": "secret"}}
+            )
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "subtitle_groups"}
+
+    def test_build_rejects_non_object_section(self) -> None:
+        with pytest.raises(Stage1Error) as error:
+            build_preferences_from_api({"naming": "official_title"})
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "naming"}
+
+    def test_build_rejects_invalid_enum_through_validate(self) -> None:
+        with pytest.raises(Stage1Error) as error:
+            build_preferences_from_api(
+                {"subtitle_groups": {"fallback": "auto"}}
+            )
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "subtitle_groups.fallback"}
+
+    def test_build_rejects_non_boolean_filter_flag(self) -> None:
+        with pytest.raises(Stage1Error) as error:
+            build_preferences_from_api(
+                {"filter_defaults": {"use_regex": "yes"}}
+            )
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "filter_defaults.use_regex"}
+
+
+class TestStricterSaveValidation:
+    def test_validate_rejects_empty_string_list_item(self) -> None:
+        prefs = VersionedUserPreference(
+            subtitle_groups=SubtitleGroupPreference(preferred=[""])
+        )
+
+        with pytest.raises(Stage1Error) as error:
+            validate_preferences(prefs)
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "subtitle_groups.preferred"}
+        assert "空字符串" in error.value.message
+
+    def test_validate_rejects_duplicate_preferred_group(self) -> None:
+        prefs = VersionedUserPreference(
+            subtitle_groups=SubtitleGroupPreference(preferred=["Loli", "Loli"])
+        )
+
+        with pytest.raises(Stage1Error) as error:
+            validate_preferences(prefs)
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "subtitle_groups.preferred"}
+        assert "重复" in error.value.message
+
+    def test_validate_rejects_duplicate_excluded_group(self) -> None:
+        prefs = VersionedUserPreference(
+            subtitle_groups=SubtitleGroupPreference(excluded=["喵萌", "喵萌"])
+        )
+
+        with pytest.raises(Stage1Error) as error:
+            validate_preferences(prefs)
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "subtitle_groups.excluded"}
+
+    def test_validate_rejects_group_in_both_lists(self) -> None:
+        prefs = VersionedUserPreference(
+            subtitle_groups=SubtitleGroupPreference(
+                preferred=["Loli"], excluded=["Loli"]
+            )
+        )
+
+        with pytest.raises(Stage1Error) as error:
+            validate_preferences(prefs)
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "subtitle_groups"}
+        assert "不能同时出现" in error.value.message
+
+    def test_validate_accepts_empty_lists(self) -> None:
+        validate_preferences(default_user_preferences())
+
+    def test_validate_rejects_overlong_group_name(self) -> None:
+        prefs = VersionedUserPreference(
+            subtitle_groups=SubtitleGroupPreference(
+                preferred=["长" * (MAX_SUBTITLE_GROUP_NAME_LENGTH + 1)]
+            )
+        )
+
+        with pytest.raises(Stage1Error) as error:
+            validate_preferences(prefs)
+
+        assert error.value.error_type == "validation_error"
+        assert "长度不能超过" in error.value.message
+
+    def test_validate_rejects_overlong_filter_rule(self) -> None:
+        prefs = VersionedUserPreference(
+            filter_defaults=FilterDefaults(
+                must_contain="a" * (MAX_FILTER_RULE_LENGTH + 1)
+            )
+        )
+
+        with pytest.raises(Stage1Error) as error:
+            validate_preferences(prefs)
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "filter_defaults.must_contain"}
+
+    def test_validate_rejects_overlong_naming_template(self) -> None:
+        prefs = VersionedUserPreference(
+            naming=NamingPreference(template="x" * (MAX_NAMING_TEMPLATE_LENGTH + 1))
+        )
+
+        with pytest.raises(Stage1Error) as error:
+            validate_preferences(prefs)
+
+        assert error.value.error_type == "validation_error"
+        assert error.value.details == {"field": "naming.template"}
+
+    def test_save_rejects_duplicate_groups_without_writing(
+        self, tmp_path: Path
+    ) -> None:
+        config = _config(tmp_path)
+        prefs = VersionedUserPreference(
+            subtitle_groups=SubtitleGroupPreference(preferred=["Loli", "Loli"])
+        )
+
+        with pytest.raises(Stage1Error) as error:
+            save_user_preferences(config, prefs)
+
+        assert error.value.error_type == "validation_error"
+        assert not (config.preferences_dir / PREFERENCES_FILENAME).exists()
 
 
 def _with_field(

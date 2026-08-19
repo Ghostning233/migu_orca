@@ -34,7 +34,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "API 复用 US-150 repository；不在本 story 应用偏好到批量草案。"
     },
     {
