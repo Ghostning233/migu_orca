@@ -7,8 +7,9 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 21 PRD: 用户偏好与智能推荐闭环 |
 | 文档类型 | Stage PRD |
-| 当前状态 | Planned |
+| 当前状态 | 已完成 |
 | 创建日期 | 2026-08-19 |
+| 完成日期 | 2026-08-20 |
 | 依赖阶段 | Stage 19、Stage 20 |
 
 ## 2. 背景
@@ -111,4 +112,49 @@ Stage 21 的目标不是让 AI 自动替用户做最终决定，而是把用户�
 实现必须按 `scripts/ralph/prd.json` 的优先级逐个完成 user story。每个 story 必须能在一次 Ralph 迭代内完成，验收条件必须可检查，并以 `Typecheck passes` 收尾；涉及 Web UI 的 story 还必须执行项目 Playwright 浏览器测试，并遵循 `.agents/skills/dev-browser/SKILL.md` 的验证要求。
 
 Stage 21 完成标志：用户可以显式保存非敏感偏好；下一次批量输入会应用字幕组、筛选和命名默认值，展示低置信度与偏好来源；用户修正能形成安全的搜索词增强记录；无偏好或增强失败时旧的手动审核流程仍然可用。
+
+## 11. 完成状态（2026-08-20）
+
+Stage 21 的全部 8 个 user story（US-150..US-157）已完成并通过：
+
+| Story | 内容 | 状态 |
+| --- | --- | --- |
+| US-150 | 新增非敏感用户偏好数据契约与存储 | 完成 |
+| US-151 | 新增用户偏好 Web API | 完成 |
+| US-152 | 新增偏好管理 Web UI | 完成 |
+| US-153 | 将用户偏好应用到批量草案生成 | 完成 |
+| US-154 | 增加偏好命中与低置信度审核元数据 | 完成 |
+| US-155 | 记录用户修正并增强搜索词 | 完成 |
+| US-156 | 在批量工作台展示偏好与修正结果 | 完成 |
+| US-157 | Stage 21 文档与安全回归收尾 | 完成 |
+
+### 实现要点
+
+1. **偏好契约与存储边界**：`VersionedUserPreference`（`src/shared/models.py`）只允许非敏感的字幕组、筛选、命名和搜索修正字段；`preference_repository.py` 以固定文件名 `<storage>/preferences/user_preferences.json` 原子写入，`build_preferences_from_api` 拒绝未知键和敏感值，`load_user_preferences` 在读取时剥离未知键，因此手工编辑或旧版本文件中夹带的 endpoint/token/cookie 等敏感键永远不会进入应用或 API 响应。
+2. **偏好 Web API 与 Web UI**：`GET/POST /api/v1/preferences` 读取/保存规范化非敏感偏好；`/settings` 新增 `#preference-settings-panel` 偏好面板，支持保存、恢复默认（`POST {preferences:{}}`），恢复默认只写偏好文件，不触碰 Stage 20 队列、Request 或 AB result 存储。偏好表单是纯非敏感表面，被拒绝的敏感输入会回退到上次有效值，不会残留或回显。
+3. **偏好应用到批量草案**：`POST /api/v1/batches/parse` 每个 item 返回 `applied_preferences`（字幕组/筛选/命名字段默认配置）、`preference_hits`（偏好命中规则摘要）和 `preference_warnings`（偏好冲突/回退警告）。偏好读取或应用失败时当前 item 单独回退 Stage 19 默认流程，不阻塞同批次其他 item；字幕组偏好只作为单卡可编辑默认值，真实种子校验的 M05 `select_subtitle_group` 排除列表在应用时生效。
+4. **低置信度审核元数据**：`build_review_metadata` 为低置信度、多候选、无候选、搜索回退、搜索失败、解析失败和偏好冲突 item 设置 `needs_user_review=true` 并生成中文 `review_hints`。审核元数据只注释卡片，绝不自动选择候选合集、绝不自动接受卡片。
+5. **用户修正与搜索词增强**：`correction_repository.py` 保存非敏感 `TitleCorrection`（`raw_title`、公开 `canonical_title`、`season_hint`、公开 bangumi 元数据和 `query_correction`），采用同 raw_title 最新版本策略 + 全局 `MAX_STORED_CORRECTIONS=500` 上限；`search_enhancer.py` 纯函数把修正展开为可审核的 `{query, original_query, source}` 增强搜索词（`correction:query`/`correction:canonical`），保留原始 query 与来源标记。增强失败或修正为空时回退原 `search_queries`。
+6. **批量工作台展示**：批量卡片展示偏好命中摘要、低置信度/多候选/冲突审核提示、当前默认配置和搜索词来源；单卡修改只更新当前卡片，其他卡片偏好/审核文本保持不变；所有渲染只读公开非敏感字段。
+7. **安全回归**：单元测试、Web API 测试和端到端浏览器回归断言 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径不出现在偏好 JSON、API 响应、页面、URL、浏览器 storage、日志或 trace 中。
+
+### 边界确认
+
+- 偏好只保存非敏感字段：字幕组、筛选、命名和搜索修正开关；**不保存** endpoint、token、cookie、Authorization header、magnet、raw HTML、raw RSS XML、原始响应体或本地绝对路径。
+- AI 只生成候选标题、搜索词和置信度，**不自动选择最终 MiKan 合集**；即使只有一个候选，也必须由用户显式点击选择。
+- 用户仍需逐卡审核并显式接受；偏好命中、低置信度和审核提示**不会**改变候选合集，也**不会**自动把卡片标记为已接受。
+- 无偏好、偏好读取失败或搜索增强失败时，回退到 Stage 19 默认流程：fake provider、手动候选选择和直连 URL/ID fallback 仍然可用。
+- 批量提交继续复用 Stage 20 的前台顺序编排，不创建 qBittorrent 下载任务，不绕过 Auto Bangumi，不引入后台常驻 worker。
+
+## 12. Stage 22 handoff
+
+下一阶段为「部署/配置向导可行性验证」（见 `docs/MiGuOrca_future_stages.md`）。建议方向：
+
+1. 配置检查清单：检测 AB / qB / MiGuOrca 的连接配置是否完整。
+2. 连接诊断：复用现有 qBittorrent test-connection 和 Auto Bangumi submit seam，输出脱敏诊断。
+3. 教程式向导：按步骤引导用户填写 endpoint、token、qB 地址和认证信息。
+4. Docker Compose 模板：提供可读模板和安全说明，用户自行部署。
+5. 配置导入/导出：只处理非敏感配置或明确脱敏后的示例。
+
+Stage 22 是远期可选能力，不阻塞批量订阅工作台；如果实施，必须继续遵守 Stage 21 的敏感值边界（偏好与配置只保存非敏感字段，外部 endpoint/token 只存在于请求上下文）。
 

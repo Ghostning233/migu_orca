@@ -19,9 +19,10 @@
 | 8 | BL-001 | 优化真实 MiKan 番剧搜索和 RSS 源解析 | 完成 |
 | 9 | BL-011 | 真实 MiKan Web 主流程收敛与预览优化 | 完成 |
 | 10 | BL-012 | 批量番剧输入与订阅草案卡片工作台 | 完成 |
-| 11 | BL-010 | AI 番剧名解析与搜索词增强 | 完成（provider seam + fake provider；Stage 21 扩展为智能推荐闭环） |
+| 11 | BL-010 | AI 番剧名解析与搜索词增强 | 完成（provider seam + fake provider；Stage 21 已闭环为用户修正驱动的搜索词增强） |
 | 12 | BL-013 | 批量接受与 Auto Bangumi 提交前队列管理 | 完成 (Stage 20, 2026-08-19) |
-| 13 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
+| 13 | BL-015 | 用户偏好与智能推荐闭环 | 完成 (Stage 21, 2026-08-20) |
+| 14 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
 认证、权限模块当前优先级最低，现阶段无明确需求，默认不纳入后续开发计划。除非之后出现部署暴露、多人使用或远程访问场景，否则不为其单独规划 Stage。
 
@@ -271,6 +272,12 @@ Stage 拆分结论：
 - 无 API key、无付费能力或 LLM 失败时，系统仍必须可以使用 Stage 17 的手动搜索候选选择和 Stage 16 的直连 URL/ID 入口。
 - LLM 输出不能自动决定最终合集；最终仍必须经过用户确认或选择。
 
+Stage 21 闭环情况（2026-08-20）：
+
+- 搜索词增强已闭环为用户修正驱动：`correction_repository.py` 保存非敏感 `TitleCorrection`（raw_title、公开 canonical title、season_hint、公开 bangumi 元数据、query_correction），同 raw_title 最新版本 + 全局 500 条上限；`search_enhancer.py` 纯函数把修正展开为 `{query, original_query, source}` 可审核增强搜索词。
+- 增强失败、修正为空或修正文件损坏时回退原 `search_queries`；真实 LLM provider 仍不是必需条件。
+- 用户修正记录只包含显式保存的非敏感字段，不包含完整 MiKan 页面、RSS URL、响应体或外部配置。
+
 ### BL-013: 批量接受与 Auto Bangumi 提交前队列管理
 
 - 状态：完成 (Stage 20, 2026-08-19)
@@ -294,6 +301,30 @@ Stage 拆分结论：
 - 不把“确认后自动提交并下载”作为核心卖点；核心卖点是批量订阅前审核与提交辅助。
 
 Stage 21 handoff：在 Stage 19/20 批量草案基础上记录用户偏好（字幕组、筛选、文件夹命名）并闭环搜索词增强，减少逐卡修改次数。具体执行拆分见 `docs/MiGuOrca_stage21_preference_recommendation_PRD.md`。
+
+### BL-015: 用户偏好与智能推荐闭环
+
+- 状态：完成 (Stage 21, 2026-08-20)
+- 来源：BL-013 Stage 21 handoff、BL-010 搜索词增强闭环需求
+- 优先级：13
+- 阻塞：减少批量草案逐卡修改次数
+
+完成情况（Stage 21）：
+
+- `/settings` 偏好面板管理非敏感偏好：偏好字幕组/排除字幕组、fallback 规则、筛选包含/排除规则、正则/大小写敏感选项、文件夹命名策略与命名模板、搜索增强开关；保存成功刷新规范化值，清空/恢复默认需显式确认。
+- 批量草案生成时把偏好作为单卡可编辑默认值：字幕组偏好经 M05 `select_subtitle_group` 先排除、再优先、最后 fallback；筛选偏好复用 M06 语义；命名偏好生成 `expected_folder_name` 默认值。
+- 搜索词增强闭环：`correction_repository.py` 保存非敏感 `TitleCorrection`（同 raw_title 最新版本 + 全局 500 条上限），`search_enhancer.py` 纯函数展开为 `{query, original_query, source}` 可审核增强搜索词；增强失败或修正为空时回退原 `search_queries`。
+- 批量卡片展示偏好命中摘要、低置信度/多候选/冲突等 `needs_user_review` 审核提示和搜索词来源，帮助用户快速核对；单卡修改只更新当前卡片。
+- 安全边界：偏好与修正只保存非敏感字段；endpoint、token、cookie、Authorization header、magnet、raw HTML、raw RSS XML、原始响应体和本地绝对路径从偏好 JSON、API 响应、页面、URL、浏览器 storage、日志和 trace 中被拒绝或剥离；端到端安全回归已覆盖。
+
+约束（仍成立）：
+
+- AI 只生成候选，不自动选择最终 MiKan 合集，不自动接受卡片。
+- 无偏好、偏好读取失败或增强失败时回退 Stage 19 默认流程。
+- 偏好不隐式追踪用户观看行为或下载内容。
+- 不引入复杂账号体系，除非出现多人使用或远程部署需求。
+
+Stage 22 handoff：核心产品闭环（批量输入 → 偏好默认值 → 审核 → 批量接受 → 提交前队列 → Auto Bangumi 顺序提交）已完成；后续可选方向为部署/配置向导可行性验证（`docs/MiGuOrca_future_stages.md` 第 5 节），不阻塞批量订阅工作台。
 
 ### BL-014: 部署/配置向导可行性验证
 

@@ -81,30 +81,26 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 2. 自动绕过 Auto Bangumi 的订阅执行。
 3. 复杂调度器或后台常驻 worker；批量提交采用前台顺序编排。
 
-## 4. Stage 21: 用户偏好与智能推荐闭环（PRD 已编写，待开发）
+## 4. Stage 21: 用户偏好与智能推荐闭环（已完成）
 
-前置条件（Stage 20 handoff）：Stage 20 已完成批量接受、提交前队列、Auto Bangumi 顺序提交和失败项独立重试（详见 `docs/MiGuOrca_stage20_batch_ab_queue_PRD.md` 的 Stage 21 handoff）。Stage 21 执行 PRD 见 `docs/MiGuOrca_stage21_preference_recommendation_PRD.md`，应在此之上把批量草案结果从“可审核”提升到“大部分可直接接受”，并保持 AI 只生成候选、不自动选择最终合集的边界。
+前置条件（Stage 20 handoff）：Stage 20 已完成批量接受、提交前队列、Auto Bangumi 顺序提交和失败项独立重试（详见 `docs/MiGuOrca_stage20_batch_ab_queue_PRD.md` 的 Stage 21 handoff）。Stage 21 执行 PRD 见 `docs/MiGuOrca_stage21_preference_recommendation_PRD.md`，在 Stage 19/20 批量草案之上把批量草案结果从“可审核”提升到“大部分可直接接受”，并保持 AI 只生成候选、不自动选择最终合集的边界。
 
-目标：
+已完成功能：
 
-让批量生成结果从“可审核”提升到“大部分可直接接受”。
+1. 字幕组偏好：`/settings` 偏好面板记录用户偏好的字幕组、排除字幕组和 fallback 规则；批量草案生成时作为可编辑默认值，真实种子校验的 M05 `select_subtitle_group` 先排除、再优先、最后 fallback。
+2. 筛选偏好：默认 `filter_rule`（包含/排除规则、使用正则、大小写敏感）作为单卡可编辑默认值，复用 M06 语义。
+3. 文件夹命名偏好：命名策略（official_title_season/official_title/raw_title）和命名模板生成 `expected_folder_name` 默认值，用户仍可逐卡修改。
+4. 搜索词增强闭环：用户明确提交的非敏感修正（raw_title、公开 canonical title、season_hint、公开 bangumi 元数据、query_correction）有界存储（同 raw_title 最新版本 + 全局 500 条上限），后续批量输入复用增强搜索词并保留原始 query 与来源标记。
+5. AI 解析质量回看：批量卡片展示低置信度、多候选、偏好冲突、搜索回退/失败等 `needs_user_review` 审核提示，允许用户修正并复用。
+6. 安全存储偏好：偏好与修正只保存非敏感字段；endpoint、token、cookie、Authorization header、magnet、raw HTML、raw RSS XML、原始响应体和本地绝对路径从偏好 JSON、API 响应、页面、URL、浏览器 storage、日志和 trace 中被拒绝或剥离。
 
-主要功能：
+完成标志（已达成）：
 
-1. 字幕组偏好：记录用户偏好的字幕组、排除字幕组和 fallback 规则。
-2. 筛选偏好：按常见分辨率、字幕语言、简繁、合集/单集等维度生成默认规则。
-3. 文件夹命名偏好：支持季度、官方译名、用户别名等命名策略。
-4. 搜索词增强闭环：基于用户修正记录改进候选搜索词。
-5. AI 解析质量回看：展示低置信度和多义结果，允许用户修正并复用。
-6. 安全存储偏好：只保存非敏感偏好，不保存外部服务 secret。
+用户每季度批量输入后，系统能根据偏好生成更接近最终配置的订阅草案，减少逐卡修改次数；偏好命中、低置信度和审核提示保持可审核性，无偏好或增强失败时回退 Stage 19 默认流程。
 
-完成标志：
+不包含（仍成立）：
 
-用户每季度批量输入后，系统能根据偏好生成更接近最终配置的订阅草案，减少逐卡修改次数。
-
-不包含：
-
-1. AI 自动接受合集。
+1. AI 自动接受合集；偏好只生成可编辑默认值，不自动选择最终 MiKan 合集，不自动接受卡片。
 2. 对用户观看行为或下载内容做隐式追踪。
 3. 复杂账号体系，除非后续出现多人使用或远程部署需求。
 
@@ -139,10 +135,10 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 
 1. Stage 19：批量输入与订阅草案卡片工作台（已完成）。
 2. Stage 20：批量接受与 Auto Bangumi 提交前队列（已完成）。
-3. Stage 21：用户偏好与智能推荐闭环（PRD 已编写，下一阶段）。
+3. Stage 21：用户偏好与智能推荐闭环（已完成）。
 
 如果要覆盖“降低 Auto Bangumi/qBittorrent 配置门槛”，再增加 1 个远期可选 Stage：
 
 1. Stage 22：部署/配置向导可行性验证。
 
-因此，最小可用新方向需要 Stage 19 到 Stage 21，共 3 个 Stage；完整覆盖配置痛点则需要 Stage 19 到 Stage 22，共 4 个 Stage。当前 Stage 19 与 Stage 20 均已完成并归档，下一步为 Stage 21。
+因此，最小可用新方向需要 Stage 19 到 Stage 21，共 3 个 Stage，当前均已完成并归档；完整覆盖配置痛点则需要 Stage 19 到 Stage 22，共 4 个 Stage。下一步为 Stage 22 部署/配置向导可行性验证（远期可选能力）。

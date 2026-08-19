@@ -1272,3 +1272,408 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
     assert sensitive_values[7] not in queue_body
     assert sensitive_values[1] not in queue_body
     assert "stage20-secret" not in queue_body
+
+
+def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
+    page: Page, live_server_url: str, storage_dir: Path
+) -> None:
+    """US-157: Stage 21 preference/correction end-to-end security regression.
+
+    Feeds endpoint / token / Authorization header / cookie / raw HTML / raw RSS
+    XML / raw response body / full failed URL / local absolute path through (a) a
+    poisoned preference save on ``/settings``, (b) poisoned correction saves via
+    the real corrections API, and (c) a poisoned batch parse response whose
+    preference/review/search-source metadata carries the values as extra ignored
+    keys. Asserts the values never reach the preference/correction JSON, the API
+    responses, the page, the URL, browser storage, console logs, or the persisted
+    storage JSON — while the public preference/review/search-source content still
+    renders (proving the whitelist boundary works, not just that the values are
+    absent).
+    """
+    sensitive_values = (
+        "http://private-llm.stage21.local/v1/chat/completions",
+        "stage21-provider-token",
+        "Bearer stage21-authorization-token",
+        "stage21-cookie",
+        "<html>stage21 raw html</html>",
+        "<rss version='2.0'>stage21 raw rss</rss>",
+        "stage21 raw response body",
+        "https://mikan.example/Home/Search?searchstr=stage21-secret",
+        "/home/ghostning/stage21-secret.xml",
+        "magnet:?xt=urn:btih:stage21sensitivehash",
+    )
+
+    console_messages: list[str] = []
+    page.on("console", lambda msg: console_messages.append(msg.text))
+    page.on("pageerror", lambda exc: console_messages.append(str(exc)))
+
+    # ------------------------------------------------------------------
+    # Part A: /settings 偏好保存流程（真实后端）。被拒绝的敏感输入回退到
+    # 上次有效值且不回显；合法非敏感偏好可保存、持久化并重新渲染。
+    # ------------------------------------------------------------------
+    set_storage_preferences(page, storage_dir)
+    page.goto(f"{live_server_url}/settings")
+    expect(page.locator("#preference-settings-status")).to_contain_text(
+        "已读取偏好默认值", timeout=5000
+    )
+
+    page.fill("#preference-preferred-groups", sensitive_values[0])
+    page.click("#preference-settings-save")
+    expect(page.locator("#preference-settings-error")).to_contain_text(
+        "敏感内容", timeout=5000
+    )
+    expect(page.locator("#preference-settings-status")).to_contain_text(
+        "保存偏好默认值失败", timeout=5000
+    )
+    # 被拒绝的敏感输入不会残留在表单控件中。
+    assert page.locator("#preference-preferred-groups").input_value() == ""
+
+    page.fill("#preference-preferred-groups", "喵萌字幕组\nLoli字幕组")
+    page.fill("#preference-excluded-groups", "其他")
+    page.fill("#preference-filter-must-contain", "1080p")
+    page.fill("#preference-filter-must-not-contain", "V2")
+    page.locator("#preference-naming-template").fill("[{title}]")
+    page.click("#preference-settings-save")
+    expect(page.locator("#preference-settings-status")).to_contain_text(
+        "偏好默认值已保存", timeout=5000
+    )
+    assert page.locator("#preference-preferred-groups").input_value() == (
+        "喵萌字幕组\nLoli字幕组"
+    )
+
+    preferences_json = (storage_dir / "preferences" / "user_preferences.json")
+    assert preferences_json.exists()
+    preferences_body = preferences_json.read_text(encoding="utf-8")
+    assert "喵萌字幕组" in preferences_body
+    assert "[{title}]" in preferences_body
+
+    # ------------------------------------------------------------------
+    # Part B: 修正 API 流程（真实后端）。被拒绝的敏感修正不回显、不落盘；
+    # 合法非敏感修正保存后可通过 GET 读取，且只含公开非敏感字段。
+    # ------------------------------------------------------------------
+    def _post_corrections(correction: dict[str, Any]):
+        return page.request.post(
+            f"{live_server_url}/api/v1/corrections",
+            data=json.dumps(
+                {"storage_dir": str(storage_dir), "correction": correction},
+                ensure_ascii=False,
+            ),
+            headers={"Content-Type": "application/json"},
+        )
+
+    poisoned = _post_corrections(
+        {
+            "raw_title": sensitive_values[0],
+            "canonical_title": "关于我转生变成史莱姆这档事 第四季",
+            "query_correction": "转生史莱姆 第四季",
+        }
+    )
+    poisoned_body = poisoned.text()
+    # 业务错误统一走 HTTP 200 + ok:false envelope，被拒绝的敏感修正不回显。
+    assert json.loads(poisoned_body)["ok"] is False
+    assert "validation_error" in poisoned_body
+    for value in sensitive_values:
+        assert value not in poisoned_body
+
+    ok = _post_corrections(
+        {
+            "raw_title": "萌王S4",
+            "canonical_title": "关于我转生变成史莱姆这档事 第四季",
+            "season_hint": "S4",
+            "query_correction": "转生史莱姆 第四季",
+        }
+    )
+    assert ok.status == 200
+    ok_body = ok.text()
+    ok_corrections = json.loads(ok_body)["result"]["corrections"]
+    assert ok_corrections[0]["raw_title"] == "萌王S4"
+    assert ok_corrections[0]["query_correction"] == "转生史莱姆 第四季"
+    for value in sensitive_values:
+        assert value not in ok_body
+
+    get_body = page.request.get(
+        f"{live_server_url}/api/v1/corrections",
+        params={"storage_dir": str(storage_dir)},
+    ).text()
+    get_corrections = json.loads(get_body)["result"]["corrections"]
+    assert get_corrections[0]["raw_title"] == "萌王S4"
+    assert get_corrections[0]["query_correction"] == "转生史莱姆 第四季"
+    for value in sensitive_values:
+        assert value not in get_body
+
+    corrections_json = storage_dir / "corrections" / "corrections.json"
+    assert corrections_json.exists()
+    corrections_body = corrections_json.read_text(encoding="utf-8")
+    assert "萌王S4" in corrections_body
+    for value in sensitive_values:
+        assert value not in corrections_body
+
+    # ------------------------------------------------------------------
+    # Part C: 批量解析渲染边界（前端渲染器 + 真实后端，parse 端点 mock）。
+    # 中毒的 preference/review/search-source 元数据把全部敏感值作为额外被
+    # 忽略的键携带，前端渲染器必须只渲染白名单公开字段。
+    # ------------------------------------------------------------------
+    first_preview = {
+        # 标题必须命中 static fixture catalog（config/system/static_mikan_sources.json
+        # 仅含「咒术回战 第三季」「葬送的芙莉莲」），否则 generate_request 返回 None。
+        **generate_request(EntryRequest(raw_title="咒术回战"))["request"],
+        "request_id": "req-stage21-sec",
+    }
+    second_preview = {
+        **generate_request(EntryRequest(raw_title="葬送的芙莉莲"))["request"],
+        "request_id": "req-stage21-other",
+    }
+
+    batch_body = json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "batch_id": "batch-stage21-sec",
+                "raw_input": "萌王S4\n路哥S4",
+                "items": [
+                    {
+                        "item_id": "item-sec",
+                        "raw_title": "萌王S4",
+                        "status": "DRAFT",
+                        "canonical_title_candidates": [
+                            "关于我转生变成史莱姆这档事 第四季"
+                        ],
+                        "season_hint": "S4",
+                        "search_queries": ["转生史莱姆 第四季"],
+                        "confidence": 0.6,
+                        "needs_user_review": True,
+                        "source": "fake",
+                        # 公开命中摘要正常渲染，敏感值作为额外被忽略的键。
+                        "preference_hits": [
+                            {
+                                "field": "subtitle_groups",
+                                "applied": True,
+                                "summary": "字幕组偏好已作为可编辑默认值",
+                                "token": sensitive_values[1],
+                            },
+                            {
+                                "field": "filter_rule",
+                                "applied": True,
+                                "summary": "筛选默认值已作为可编辑默认规则",
+                            },
+                            {
+                                "field": "naming",
+                                "applied": True,
+                                "summary": "命名偏好已作为可编辑默认值",
+                            },
+                        ],
+                        "preference_warnings": ["字幕组偏好未命中，使用默认流程"],
+                        "review_hints": [
+                            "低置信度，请核对候选标题",
+                            "存在多个候选，请确认选择",
+                        ],
+                        "enhanced_search_queries": [
+                            {
+                                "query": "转生史莱姆 第四季",
+                                "original_query": "转生史莱姆",
+                                "source": "correction:canonical",
+                                "token": sensitive_values[1],
+                            }
+                        ],
+                        # 公开默认配置字段渲染；endpoint/token/cookie/raw 等
+                        # 额外键必须被渲染器忽略。
+                        "applied_preferences": {
+                            "subtitle_groups": {
+                                "preferred": ["喵萌字幕组"],
+                                "excluded": [],
+                                "fallback": "next_preferred",
+                                "endpoint": sensitive_values[0],
+                            },
+                            "filter_rule": {
+                                "must_contain": "1080p",
+                                "must_not_contain": "V2",
+                                "use_regex": False,
+                                "case_sensitive": False,
+                                "token": sensitive_values[1],
+                            },
+                            "naming": {
+                                "strategy": "official_title_season",
+                                "template": "[{title}]",
+                                "raw_rss_xml": sensitive_values[5],
+                            },
+                            "expected_folder_name": "关于我转生变成史莱姆这档事 第四季",
+                            "authorization": sensitive_values[2],
+                            "raw_html": sensitive_values[4],
+                            "cookie": sensitive_values[3],
+                            "magnet": sensitive_values[9],
+                            "failed_url": sensitive_values[7],
+                            "local_path": sensitive_values[8],
+                            "raw_response_body": sensitive_values[6],
+                        },
+                        "candidates": [
+                            {
+                                "bangumi_id": "42",
+                                "title": "关于我转生变成史莱姆这档事 第四季",
+                                "mikan_url": "https://mikan.example/Home/Bangumi/42",
+                                "poster_url": None,
+                                "source_query": "转生史莱姆 第四季",
+                                "aliases": [],
+                                "recommendation": None,
+                                "raw_html": sensitive_values[4],
+                                "raw_rss_xml": sensitive_values[5],
+                                "cookie": sensitive_values[3],
+                                "token": sensitive_values[1],
+                                "magnet": sensitive_values[9],
+                                "failed_url": sensitive_values[7],
+                            }
+                        ],
+                        "confirmable_config": {
+                            "selected_subtitle_group": "喵萌字幕组",
+                            "selected_rss_url": sensitive_values[7],
+                            "filter_rule": {
+                                "must_contain": "1080p",
+                                "must_not_contain": "V2",
+                                "use_regex": False,
+                                "case_sensitive": False,
+                            },
+                            "effective_seed_names": ["史莱姆 S4 01 [1080p]"],
+                        },
+                        "source_info": {
+                            "matched_bangumi": {
+                                "title": "关于我转生变成史莱姆这档事 第四季"
+                            },
+                            "raw_html": sensitive_values[4],
+                            "raw_rss_xml": sensitive_values[5],
+                            "cookie": sensitive_values[3],
+                            "token": sensitive_values[1],
+                            "authorization": sensitive_values[2],
+                            "raw_response_body": sensitive_values[6],
+                            "local_path": sensitive_values[8],
+                            "magnet": sensitive_values[9],
+                            "rss_sources": [
+                                {
+                                    "subtitle_group": "喵萌字幕组",
+                                    "rss_url": sensitive_values[7],
+                                    "seed_names": [
+                                        "史莱姆 S4 01 [1080p]",
+                                        "史莱姆 S4 01 V2 [1080p]",
+                                    ],
+                                    "valid_seed_names": ["史莱姆 S4 01 [1080p]"],
+                                    "excluded_seed_names": [
+                                        {
+                                            "name": "史莱姆 S4 01 V2 [1080p]",
+                                            "reason": "命中排除规则：V2",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                        "preview_request": first_preview,
+                        # provider_response 是 LLM 提供商的响应，包含全部敏感值；
+                        # 它们只允许存在于预览/请求快照，绝不能进入任何响应边界。
+                        "provider_response": {
+                            "endpoint": sensitive_values[0],
+                            "token": sensitive_values[1],
+                            "authorization": sensitive_values[2],
+                            "raw_response_body": sensitive_values[6],
+                            "magnet": sensitive_values[9],
+                        },
+                    },
+                    {
+                        # 无偏好/偏好读取失败场景：applied_preferences 与
+                        # preference_hits 为 null，警告提示回退默认流程。
+                        "item_id": "item-other",
+                        "raw_title": "路哥S4",
+                        "status": "DRAFT",
+                        "canonical_title_candidates": ["实力至上主义教室 第四季"],
+                        "season_hint": "S4",
+                        "search_queries": ["实力至上主义教室 第四季"],
+                        "confidence": 0.8,
+                        "needs_user_review": True,
+                        "source": "fake",
+                        "preference_hits": None,
+                        "preference_warnings": ["偏好读取失败，已回退默认流程"],
+                        "review_hints": ["偏好不可用，请使用默认流程核对"],
+                        "enhanced_search_queries": [],
+                        "applied_preferences": None,
+                        "candidates": [],
+                        "confirmable_config": None,
+                        "source_info": None,
+                        "preview_request": second_preview,
+                    },
+                ],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    parse_calls: list[dict[str, Any]] = []
+
+    def _fulfill_batch(route: Any, request: Request) -> None:
+        parse_calls.append(json.loads(request.post_data or "{}"))
+        route.fulfill(status=200, content_type="application/json", body=batch_body)
+
+    page.route("**/api/v1/batches/parse", _fulfill_batch)
+
+    page.goto(f"{live_server_url}/index")
+    page.fill("#batch-raw-input", "萌王S4\n路哥S4")
+    page.click("#batch-parse-submit")
+    expect(page.locator(".batch-draft-card")).to_have_count(2, timeout=5000)
+
+    first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+    second_card = page.locator(".batch-draft-card", has_text="路哥S4")
+    # 公开偏好命中摘要与回退提示正常渲染（白名单边界生效，而非只做断言）。
+    expect(first_card.locator(".batch-card-preference")).to_contain_text(
+        "偏好命中：字幕组、筛选、命名"
+    )
+    expect(first_card.locator(".batch-card-review-status")).to_contain_text(
+        "需人工核对"
+    )
+    expect(second_card.locator(".batch-card-preference")).to_contain_text(
+        "偏好不可用，已回退默认流程"
+    )
+
+    # 展开卡片查看偏好与审核面板、当前默认配置和搜索词来源。
+    first_card.locator(".batch-card-expand").click()
+    review_text = first_card.locator(".batch-card-review").inner_text()
+    assert "偏好与审核" in review_text
+    assert "偏好命中摘要" in review_text
+    assert "字幕组偏好已作为可编辑默认值" in review_text
+    assert "当前默认配置" in review_text
+    assert "喵萌字幕组" in review_text
+    assert "[{title}]" in review_text
+    assert "搜索词来源" in review_text
+    assert "修正增强搜索词" in review_text
+    assert "转生史莱姆 第四季（来源：correction:canonical）" in review_text
+    assert "原始搜索词" in review_text
+
+    # parse 请求体只携带用户输入与 storage 上下文，绝不携带敏感值。
+    assert parse_calls and parse_calls[0]["raw_input"] == "萌王S4\n路哥S4"
+    for value in sensitive_values:
+        assert value not in json.dumps(parse_calls, ensure_ascii=False)
+
+    browser_state = page.evaluate(
+        """() => ({
+            url: window.location.href,
+            localStorage: JSON.stringify(window.localStorage),
+            sessionStorage: JSON.stringify(window.sessionStorage),
+            bodyText: document.body.innerText,
+        })"""
+    )
+    storage_json = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in storage_dir.rglob("*.json")
+    )
+    serialized_api = "\n".join(
+        [poisoned_body, ok_body, get_body, batch_body]
+    )
+    for value in sensitive_values:
+        assert value not in browser_state["url"]
+        assert value not in browser_state["localStorage"]
+        assert value not in browser_state["sessionStorage"]
+        assert value not in browser_state["bodyText"]
+        assert value not in storage_json
+        assert value not in preferences_body
+        assert value not in corrections_body
+    # 浏览器 console / pageerror 也不得包含敏感值（日志/trace 表面）。
+    for message in console_messages:
+        for value in sensitive_values:
+            assert value not in message
+    # 中毒 batch 响应只在 mock 层出现（serialized_api 是测试自身的输入），
+    # 但它证明前端渲染器没有把任何敏感值带进页面/存储表面。
+    assert sensitive_values[0] in serialized_api

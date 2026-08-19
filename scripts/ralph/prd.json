@@ -140,8 +140,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "Stage closeout story；所有功能 story 完成后再执行。"
+      "passes": true,
+      "notes": "Stage closeout story；所有功能 story 完成后再执行。已完成：README、主 PRD、future stages、backlog、M08、M00、M13、Stage 21 PRD 同步完成状态与 Stage 22 handoff；新增端到端安全回归 test_stage21_preferences_corrections_do_not_leak_sensitive_values。"
     }
   ]
 }

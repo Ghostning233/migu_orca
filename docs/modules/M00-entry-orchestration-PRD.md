@@ -214,7 +214,7 @@ AI 名称解析 provider seam 生成候选标题、季数提示和搜索词
 6. 单卡接受先持久化未保存预览，再复用现有 Request accept 能力；接受后只更新当前卡片。
 7. 批量接受、全接受和 Auto Bangumi 提交队列不是 Stage 19 范围，已由 Stage 20 在单卡接受能力上完成编排。
 
-Stage 21 handoff：M00 继续作为单条订阅草案生成原子能力，接收 M08 生成的非敏感偏好结果（字幕组、筛选和命名默认值），并将其应用到每个批量条目。M00 不保存 LLM secret，不自动选择最终 MiKan 合集，也不自动接受批量卡片。
+Stage 21 handoff（已完成）：M00 继续作为单条订阅草案生成原子能力，接收 M08 生成的非敏感偏好结果（字幕组、筛选和命名默认值），并将其应用到每个批量条目。M00 不保存 LLM secret，不自动选择最终 MiKan 合集，也不自动接受批量卡片。具体编排状态见第 15 节。
 
 ## 14. Stage 20 批量接受与提交前队列编排状态（已完成）
 
@@ -243,15 +243,45 @@ Stage 20 已在 Stage 19 单卡接受基础上增加批量接受和 Auto Bangumi
 5. Web 层（`src/apps/migu_orca_web/views.py`）新增 `POST /api/v1/batches/<batch_id>/accept`、`GET /api/v1/batches/<batch_id>/queue`、`POST /api/v1/batches/<batch_id>/submit`、`POST /api/v1/batches/<batch_id>/retry`，把批量编排接到现有 Request 快照与接受流程。
 6. 批量提交采用前台顺序编排，不创建 qBittorrent 下载任务，不绕过 Auto Bangumi，不引入后台常驻 worker 或复杂调度器。
 
-## 15. 已确认事项与待确认问题
+## 15. Stage 21 偏好应用与搜索增强编排状态（已完成）
 
-### 15.1 已确认事项
+Stage 21 在 Stage 19/20 批量编排之上增加偏好应用、审核元数据和搜索词增强：
+
+```text
+用户显式保存非敏感偏好（字幕组/筛选/命名/搜索修正开关）
+  ↓
+批量输入多个简称
+  ↓
+每个 item 解析标题（AI 只生成候选）
+  ↓
+应用偏好生成默认配置（applied_preferences + preference_warnings）
+  ↓
+基于用户修正记录增强搜索词（enhanced_search_queries，失败回退原 search_queries）
+  ↓
+逐项搜索 MiKan 候选
+  ↓
+生成偏好命中摘要、低置信度/多候选/冲突审核提示（needs_user_review）
+  ↓
+用户逐卡审核、修改、接受（Stage 20 队列/提交语义不变）
+```
+
+编排规则（Stage 21 已落地）：
+
+1. `POST /api/v1/batches/parse` 对每个 item（解析成功、搜索失败或解析失败）都返回 `applied_preferences`、`preference_hits`、`preference_warnings`、`review_hints` 和 `enhanced_search_queries` 公开字段；偏好读取或应用失败时当前 item 单独回退 Stage 19 默认流程，不阻塞同批次其他 item（`_load_preferences_for_batch` 损坏文件返回 `None`，`_load_corrections_for_batch` 损坏文件返回 `[]`）。
+2. 偏好应用通过 `src/batch_engine/controllers/preference_applicator.py` 的纯函数完成：`build_preference_config` 生成 item 无关的非敏感默认配置，`apply_preferences_to_item` 附加命名默认目录名和 item 级警告，`build_review_metadata` 根据低置信度/多候选/无候选/搜索回退/搜索失败/解析失败/偏好冲突生成 `needs_user_review` 和中文 `review_hints`。审核元数据只注释卡片，绝不改变候选合集，绝不自动接受。
+3. 字幕组偏好只作为单卡可编辑默认值；真实种子校验的字幕组选择仍在应用时由 M05 `select_subtitle_group(rss_results, priority, excluded=None)` 完成（排除列表先过滤、再按优先列表、最后 fallback）。
+4. 搜索词增强通过 `src/batch_engine/controllers/search_enhancer.py` 纯函数把非敏感修正展开为 `{query, original_query, source}` 可审核条目，先用增强 query 搜索、失败再回退原 `search_queries`。
+5. M00 不保存 LLM secret，不自动选择最终 MiKan 合集，不自动接受批量卡片，不引入后台 worker。
+
+## 16. 已确认事项与待确认问题
+
+### 16.1 已确认事项
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
 | D-M00-03 | 所有字幕组有效种子数为 0 时是否仍生成 Request | 仍生成；默认字幕组和 RSS 为 null，并增加提示 |
 
-### 15.2 待确认问题
+### 16.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
