@@ -59,6 +59,7 @@
   let selectedRequestId = null;
   let loadedRequests = [];
   let currentDetailPayload = null;
+  let currentBatchEditItemId = null;
   let batchDraftCards = [];
   let storageDirPreference = "";
   let saveRequestPreference = true;
@@ -879,6 +880,68 @@
     return ["DRAFT", "READY"].indexOf(fieldValue(row.status)) !== -1;
   }
 
+  function batchCardRequest(row) {
+    return row.request || row.preview_request || row.draft_request || null;
+  }
+
+  function canModifyBatchCard(row) {
+    return canExpandBatchCard(row) && Boolean(batchCardRequest(row));
+  }
+
+  function updateBatchCardRequest(itemId, modified) {
+    if (!itemId || !modified) {
+      return;
+    }
+    batchDraftCards = batchDraftCards.map((row) => {
+      if (row.item_id !== itemId) {
+        return row;
+      }
+      const next = Object.assign({}, row);
+      if (row.request) {
+        next.request = modified;
+      } else if (row.draft_request) {
+        next.draft_request = modified;
+      } else {
+        next.preview_request = modified;
+      }
+      next.confirmable_config = modified.confirmable_config || row.confirmable_config;
+      next.source_info = modified.source_info || row.source_info;
+      return next;
+    });
+    renderBatchParseItems(batchDraftCards);
+  }
+
+  function setPreviewEditError(message) {
+    const formError = document.getElementById("preview-edit-error");
+    if (!formError) {
+      return;
+    }
+    formError.textContent = message || "订阅草案修改失败。请重试。";
+    formError.hidden = false;
+  }
+
+  function openBatchCardModify(row) {
+    const request = batchCardRequest(row);
+    if (!request) {
+      showNotification(
+        "error",
+        "修改失败",
+        "当前卡片缺少订阅草案，无法进入修改流程。",
+      );
+      return;
+    }
+    currentBatchEditItemId = row.item_id || null;
+    renderDetailPayload({request: request}, {preview: true, batchItemId: row.item_id});
+    if (detailContainer && detailContainer.scrollIntoView) {
+      detailContainer.scrollIntoView({behavior: "smooth", block: "start"});
+    }
+    showNotification(
+      "success",
+      "正在修改当前卡片",
+      "已打开订阅草案修改流程；应用修改后只会回流当前批量卡片。",
+    );
+  }
+
   function renderBatchCardReviewPanel(row) {
     const review = batchCardReviewData(row);
     const filterRule = review.filterRule;
@@ -927,7 +990,22 @@
     renderExcludedSeedList(excludedGroup, review.excludedSeeds);
     seedsBlock.appendChild(excludedGroup);
 
-    panel.append(filterBlock, seedsBlock);
+    const actions = document.createElement("div");
+    actions.className = "notification-actions batch-card-actions";
+    const modifyButton = document.createElement("button");
+    modifyButton.type = "button";
+    modifyButton.className = "secondary-button batch-card-modify";
+    modifyButton.textContent = "修改";
+    modifyButton.disabled = !canModifyBatchCard(row);
+    if (modifyButton.disabled) {
+      modifyButton.title = "生成订阅草案后可修改";
+    }
+    modifyButton.addEventListener("click", function () {
+      openBatchCardModify(row);
+    });
+    actions.appendChild(modifyButton);
+
+    panel.append(filterBlock, seedsBlock, actions);
     return panel;
   }
 
@@ -2379,16 +2457,37 @@
     hideNotification();
     setActionInFlight(true);
     setState(detailContainer, "正在重新计算订阅草案...", "loading-state");
+    const batchItemId = currentBatchEditItemId;
     try {
       const modified = await previewModify(request, patch);
       if (!modified) {
         throw new Error("订阅草案修改失败。");
       }
       updateCurrentPreviewRequest(modified);
-      renderDetailPayload(currentDetailPayload, {preview: true});
-      showNotification("success", "已应用修改", "订阅草案种子展示已重新计算。");
+      if (batchItemId) {
+        updateBatchCardRequest(batchItemId, modified);
+      }
+      renderDetailPayload(currentDetailPayload, {
+        preview: true,
+        batchItemId: batchItemId,
+      });
+      showNotification(
+        "success",
+        "已应用修改",
+        batchItemId
+          ? "当前批量卡片已回流最新订阅草案。"
+          : "订阅草案种子展示已重新计算。",
+      );
     } catch (error) {
-      setState(detailContainer, "订阅草案修改失败。请重试。", "error-state");
+      if (batchItemId && currentDetailPayload) {
+        renderDetailPayload(currentDetailPayload, {
+          preview: true,
+          batchItemId: batchItemId,
+        });
+        setPreviewEditError(error.message || "订阅草案修改失败。请重试。");
+      } else {
+        setState(detailContainer, "订阅草案修改失败。请重试。", "error-state");
+      }
       notifyApiError("修改失败", error);
     } finally {
       setActionInFlight(false);
@@ -2397,6 +2496,8 @@
 
   function renderDetailPayload(payload, options) {
     currentDetailPayload = payload;
+    currentBatchEditItemId =
+      options && options.batchItemId ? options.batchItemId : null;
     var request = payload.request || payload;
     var isPreview = Boolean(
       (options && options.preview) ||

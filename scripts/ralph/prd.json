@@ -139,7 +139,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "必须复用现有 preview-modify/modify 逻辑；不要为批量卡片实现第二套筛选规则计算。"
     },
     {

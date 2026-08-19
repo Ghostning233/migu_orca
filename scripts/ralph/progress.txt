@@ -2,6 +2,7 @@
 Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
+- Stage 19 batch card modification reuses the unsaved preview detail flow: attach a request object on the card (`request`/`preview_request`/`draft_request`), open `renderDetailPayload(..., {preview: true, batchItemId})`, let `/api/v1/requests/preview-modify` recompute filters/seeds, then merge only the returned request data back into the matching `batchDraftCards` entry.
 - Stage 19 batch UI posts only `{raw_input}` to `POST /api/v1/batches/parse`, preserves multiline input exactly, keeps returned items in front-end memory as `batchDraftCards`, renders public API fields into `.batch-draft-card` entries in a scrollable `.batch-card-grid`, filters delete client-side by `item_id`, and expands only `DRAFT`/`READY` cards to show whitelisted `confirmable_config`/`source_info` filter and seed summaries.
 - Stage 19 batch candidate orchestration stays in `POST /api/v1/batches/parse`: after `parse_anime_title`, call the shared `_search_mikan_candidates(query, config)` for each normalized `search_queries` entry, dedupe candidates per item by `(bangumi_id, mikan_url)`, serialize only public candidate fields, and represent MiKan failures as per-item `FAILED` results with sanitized errors.
 - Stage 19 AI title parsing lives in `src/batch_engine/controllers/anime_title_parser.py`: inject an `AnimeTitleParsingProvider`, use `parse_anime_title(raw_title, provider)` for normalized `AnimeTitleParseResult`, and keep provider failures as sanitized recoverable `Stage1Error(failed_step="ai_title_parse")`; fake mappings are deterministic and never call a real LLM.
@@ -619,4 +620,18 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: keep the expanded-card panel whitelisted to filter fields, selected subtitle group, seed titles, and exclusion reasons; ignore candidate/raw response fields entirely so endpoint/cookie/token/raw RSS/body data cannot become visible text.
   - Gotcha encountered: DRAFT/READY expansion can be tested with mocked batch items even before the API creates those statuses; existing PARSED/FAILED cards still render an expand control for layout continuity, but it is disabled with helper text.
   - Useful context: the environment still lacks Chromium, so browser tests are collected/skipped; future UI iterations should record both full pytest and explicit `tests/browser/` results.
+---
+## 2026-08-19 16:09:02 CST - US-139
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added per-card `修改` action for reviewable Stage 19 batch cards that carry a request/preview_request/draft_request; clicking it opens the existing editable preview detail flow for that card rather than creating a separate batch-specific filter editor.
+- Wired successful preview-modify responses back into only the matching `batchDraftCards` item, refreshing that card's selected subtitle group, filter rule, folder/seed summary source data, and expanded review content while leaving sibling cards unchanged.
+- Preserved current-card state on preview-modify failure and surfaced the Chinese API error in the existing preview edit form plus page notification.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src tests` passed; focused `uv run pytest src/apps/migu_orca_web/views_test.py tests/browser/test_batch_workbench.py -q` passed with 95 tests and 10 skipped browser tests; `uv run pytest -q` passed with 457 tests and 212 skipped browser tests; `uv run pytest tests/browser/ -q` collected 212 browser tests and skipped them because Chromium is not available in this environment.
+- Browser verification note: used the `dev-browser` skill path. Real Chromium verification could not execute here because Chromium is unavailable; manual fallback is `uv run flask --app wsgi:app run` then verify `/index` batch card expansion -> 修改 -> 应用修改 in an environment with a browser.
+- **Learnings for future iterations:**
+  - Pattern discovered: a batch card can reuse `renderDetailPayload` preview mode by carrying a full preview Request and passing `batchItemId`; this keeps preview-modify as the single source of filter and seed recomputation.
+  - Pattern discovered: card-local updates should map over `batchDraftCards` by `item_id` and replace only the request-bearing field (`request`, `draft_request`, or `preview_request`) plus whitelisted `confirmable_config`/`source_info` mirrors, so sibling card status/content stays stable.
+  - Gotcha encountered: failure handling for batch-card preview edits must not replace the detail container with a terminal error state; re-render the existing preview form and set `#preview-edit-error` so the user can retry without losing the card context.
+  - Useful context: browser tests for this story are present in `tests/browser/test_batch_workbench.py`, but this environment still skips them because Chromium is not installed/available.
 ---

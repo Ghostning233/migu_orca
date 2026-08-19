@@ -7,6 +7,9 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
+from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from shared.models import EntryRequest
+
 
 pytestmark = pytest.mark.browser
 
@@ -36,6 +39,7 @@ def _batch_item(
     source_query: str | None = None,
     confirmable_config: dict[str, Any] | None = None,
     source_info: dict[str, Any] | None = None,
+    preview_request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     title = canonical_title or candidate_title or raw_title
     candidates = []
@@ -64,12 +68,22 @@ def _batch_item(
         "candidates": candidates,
         "confirmable_config": confirmable_config,
         "source_info": source_info,
+        "preview_request": preview_request,
     }
 
 
-def _reviewable_batch_item() -> dict[str, Any]:
+def _preview_request(title: str, request_id: str) -> dict[str, Any]:
+    return {
+        **generate_request(EntryRequest(raw_title=title))["request"],
+        "request_id": request_id,
+    }
+
+
+def _reviewable_batch_item(
+    *, item_id: str = "item-review", preview_request: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return _batch_item(
-        "item-review",
+        item_id,
         "萌王S4",
         status="DRAFT",
         canonical_title="关于我转生变成史莱姆这档事 第四季",
@@ -109,6 +123,7 @@ def _reviewable_batch_item() -> dict[str, Any]:
                 }
             ],
         },
+        preview_request=preview_request,
     )
 
 
@@ -306,6 +321,121 @@ class TestBatchWorkbenchEntry:
         assert "<rss>" not in body_text
         assert "raw-body-secret" not in body_text
         assert "https://mikan.example/RSS/Bangumi" not in body_text
+
+    def test_batch_card_modify_updates_only_current_card(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        first_preview = _preview_request("咒术回战", "req-batch-first")
+        second_preview = _preview_request("咒术回战", "req-batch-second")
+
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        _reviewable_batch_item(
+                            item_id="item-first", preview_request=first_preview
+                        ),
+                        _batch_item(
+                            "item-second",
+                            "路哥S4",
+                            status="DRAFT",
+                            canonical_title="实力至上主义教室 第四季",
+                            preview_request=second_preview,
+                        ),
+                    ]
+                ),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4\n路哥S4")
+        page.click("#batch-parse-submit")
+
+        first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+        second_card = page.locator(".batch-draft-card", has_text="路哥S4")
+        first_card.locator(".batch-card-expand").click()
+        first_card.locator(".batch-card-modify").click()
+
+        expect(page.locator("#detail-preview-edit-form")).to_be_visible()
+        page.select_option("#preview-subtitle-group", value="喵萌")
+        page.fill("#preview-must-not-contain", "V2")
+        page.fill("#preview-folder-name", "BatchCustomFolder")
+        page.click("button:has-text('应用修改')")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        expect(page.locator("#page-notification")).to_contain_text(
+            "当前批量卡片已回流最新订阅草案"
+        )
+        first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+        second_card = page.locator(".batch-draft-card", has_text="路哥S4")
+        expect(first_card.locator(".batch-card-seeds")).to_contain_text("1")
+        first_card.locator(".batch-card-expand").click()
+        first_text = first_card.locator(".batch-card-review").inner_text()
+        assert "当前字幕组" in first_text
+        assert "喵萌" in first_text
+        assert "排除规则" in first_text
+        assert "V2" in first_text
+        assert "有效种子（当前选中字幕组：喵萌）(1)" in first_text
+
+        second_card.locator(".batch-card-expand").click()
+        second_text = second_card.locator(".batch-card-review").inner_text()
+        assert "喵萌" not in second_text
+        assert "V2" not in second_text
+        expect(second_card.locator(".batch-card-seeds")).to_contain_text("2")
+
+    def test_batch_card_modify_failure_preserves_card_state(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        preview = _preview_request("咒术回战", "req-batch-fail")
+        calls: list[dict[str, Any]] = []
+
+        def _fulfill_batch(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [_reviewable_batch_item(preview_request=preview)]
+                ),
+            )
+
+        def _fail_preview_modify(route: Any, request: Any) -> None:
+            calls.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=400,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": False,
+                        "error_message": "不是合法正则",
+                        "error_type": "invalid_filter_rule",
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill_batch)
+        page.route("**/api/v1/requests/preview-modify", _fail_preview_modify)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+
+        card = page.locator(".batch-draft-card")
+        card.locator(".batch-card-expand").click()
+        before = card.locator(".batch-card-review").inner_text()
+        card.locator(".batch-card-modify").click()
+
+        page.check("#preview-filter-use-regex")
+        page.fill("#preview-must-not-contain", "[")
+        page.click("button:has-text('应用修改')")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        expect(page.locator("#preview-edit-error")).to_contain_text("不是合法正则")
+        expect(page.locator("#page-notification")).to_contain_text("修改失败")
+        after = card.locator(".batch-card-review").inner_text()
+        assert after == before
+        assert calls and calls[0]["request"]["request_id"] == "req-batch-fail"
 
     def test_batch_card_grid_uses_single_column_on_narrow_screen(
         self, page: Page, live_server_url: str
