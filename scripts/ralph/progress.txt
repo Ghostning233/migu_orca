@@ -854,3 +854,18 @@ Thread: https://ampcode.com/threads/US-149-stage20-docs-closeout
   - Gotcha encountered: the M00 section 14 (已确认事项) becomes section 15 after inserting the Stage 20 section; check no cross-references point at the old `14.1`/`14.2` anchors.
   - Useful context: all Stage 20 stories are now `passes: true`; next Ralph stage is Stage 21 用户偏好与智能推荐闭环 (BL-010 extension + future preference work), to be documented as the active `prd.json` when Stage 21 starts.
 ---
+
+## 2026-08-19 22:00:00 CST - Stage 21 Start
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Stage 21 开始：非敏感用户偏好与推荐（backlog BL-010/BL-012 关联）。Stage 20 已归档到 `archive/2026-08-19-stage20-batch-ab-queue/`。
+- 本 Stage 范围（prd.json US-150..US-157，branchName `agent/stage21-preference-recommendation`）：
+  - US-150 非敏感用户偏好数据契约与存储（收藏字幕组/目录习惯等，只存非敏感字段，不存 token/endpoint/cookie）
+  - US-151 用户偏好 Web API
+  - US-152 偏好管理 Web UI
+  - US-153 将用户偏好应用到批量草案生成（AI 名称解析/候选搜索时优先偏好字幕组等）
+  - US-154 偏好命中与低置信度审核元数据
+  - US-155 记录用户修正并增强搜索词
+  - US-156 在批量工作台展示偏好与修正结果
+  - US-157 Stage 21 文档与安全回归收尾
+- 约束：偏好只含非敏感用户选择；AI 不静默选择；外部配置仍 request-scoped；Ralph 规范每轮以完成全部 story 为目标。
+---
