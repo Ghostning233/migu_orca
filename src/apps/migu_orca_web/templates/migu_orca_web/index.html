@@ -241,6 +241,107 @@
       </section>
 
       <section
+        id="batch-queue-panel"
+        class="panel batch-queue-panel"
+        aria-labelledby="batch-queue-heading"
+      >
+        <div class="panel-heading">
+          <h2 id="batch-queue-heading">提交前队列</h2>
+          <button
+            id="batch-queue-refresh"
+            class="secondary-button"
+            type="button"
+            aria-label="刷新提交前队列"
+            disabled
+          >
+            刷新
+          </button>
+        </div>
+        <p id="batch-queue-context" class="field-help">
+          接受后的批量卡片进入提交前队列；在此显式配置 Auto Bangumi 并顺序提交。队列只保留公开字段与脱敏结果摘要。
+        </p>
+        <p id="batch-queue-count" class="request-list-count" aria-live="polite">
+          队列中 0 项
+        </p>
+        <div
+          id="batch-queue-list"
+          class="empty-state"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
+          暂无队列项目。接受批量卡片后，此处会显示提交前队列。
+        </div>
+
+        <form id="batch-queue-submit-form" method="post" hidden>
+          <h3>提交到 Auto Bangumi</h3>
+          <p class="field-help">
+            endpoint 和 token 只用于本次请求，不写入浏览器存储、URL、history 或队列 JSON；提交成功后清空。已提交成功的项目会跳过重复提交。
+          </p>
+
+          <label for="batch-queue-ab-endpoint">endpoint</label>
+          <input
+            id="batch-queue-ab-endpoint"
+            name="ab_submit_endpoint"
+            type="text"
+            autocomplete="off"
+            placeholder="Auto Bangumi API 地址"
+            aria-describedby="batch-queue-ab-help batch-queue-ab-error"
+          >
+
+          <label for="batch-queue-ab-token">token</label>
+          <input
+            id="batch-queue-ab-token"
+            name="ab_submit_token"
+            type="password"
+            autocomplete="off"
+            placeholder="Auto Bangumi Token"
+            aria-describedby="batch-queue-ab-help batch-queue-ab-error"
+          >
+
+          <label class="checkbox-row" for="batch-queue-ab-fallback-enabled">
+            <input
+              id="batch-queue-ab-fallback-enabled"
+              name="ab_submit_fallback_enabled"
+              type="checkbox"
+              value="true"
+            >
+            fallback_enabled
+          </label>
+
+          <label class="checkbox-row" for="batch-queue-ab-confirm">
+            <input
+              id="batch-queue-ab-confirm"
+              name="ab_submit_confirm"
+              type="checkbox"
+            >
+            我已确认将这些订阅方案提交到 Auto Bangumi
+          </label>
+          <p id="batch-queue-ab-help" class="field-help">
+            提交前需要勾选确认；失败时保留输入便于重试，成功后清空 endpoint 和 token。
+          </p>
+          <p id="batch-queue-ab-error" class="field-error" role="alert" hidden></p>
+
+          <div
+            id="batch-queue-submit-result"
+            class="empty-state compact-state"
+            aria-live="polite"
+          >
+            尚未提交 Auto Bangumi。
+          </div>
+
+          <div class="notification-actions">
+            <button
+              id="batch-queue-submit-button"
+              class="primary-button"
+              type="submit"
+            >
+              提交队列
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section
         id="dev-fixture-panel"
         class="panel dev-fixture-panel"
         aria-labelledby="dev-fixture-heading"

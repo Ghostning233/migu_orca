@@ -162,6 +162,20 @@ def _register_test_routes(app: Any) -> None:
             400,
         )
 
+    @app.route("/api/v1/batches/test-slow-submit/submit", methods=["POST"])
+    def _slow_batch_submit() -> tuple[Any, int]:
+        # 让提交请求保持 ~1.5s，浏览器测试可稳定观察提交中的 loading/disabled 状态。
+        # 返回 400，同时覆盖“失败保留输入便于重试”的断言。永不触碰敏感配置。
+        time.sleep(1.5)
+        return (
+            {
+                "ok": False,
+                "error_message": "Auto Bangumi 批量提交失败：连接超时",
+                "error_type": "ab_connection_failed",
+            },
+            400,
+        )
+
 
 @pytest.fixture(scope="session")
 def live_server_url(app: Any) -> Generator[str, None, None]:

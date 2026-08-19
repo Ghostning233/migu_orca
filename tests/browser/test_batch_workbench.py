@@ -127,31 +127,99 @@ def _reviewable_batch_item(
     )
 
 
+_QUEUE_STATUS_LABELS = {
+    "READY_TO_SUBMIT": "待提交",
+    "SUBMITTING": "提交中",
+    "SUCCEEDED": "提交成功",
+    "FAILED": "提交失败",
+    "RETRYABLE": "可重试",
+}
+
+
 def _queue_item(
     item_id: str,
     request_id: str,
     title: str,
     status: str = "READY_TO_SUBMIT",
+    *,
+    attempts: int = 0,
+    last_error: str | None = None,
+    ab_result_summary: str | None = None,
+    updated_at: str = "2026-08-19T00:00:00+00:00",
+    batch_id: str = "batch-browser",
 ) -> dict[str, Any]:
     return {
-        "queue_id": "queue-browser",
-        "batch_id": "batch-browser",
+        "queue_id": f"queue-{batch_id}",
+        "batch_id": batch_id,
         "item_id": item_id,
         "request_id": request_id,
         "title": title,
         "status": status,
-        "status_label": "待提交" if status == "READY_TO_SUBMIT" else status,
-        "attempts": 0,
-        "last_error": None,
-        "ab_result_summary": None,
+        "status_label": _QUEUE_STATUS_LABELS.get(status, status),
+        "attempts": attempts,
+        "last_error": last_error,
+        "ab_result_summary": ab_result_summary,
         "created_at": "2026-08-19T00:00:00+00:00",
-        "updated_at": "2026-08-19T00:00:00+00:00",
+        "updated_at": updated_at,
     }
+
+
+def _batch_submit_result(
+    queue_items: list[dict[str, Any]],
+    *,
+    batch_id: str = "batch-browser",
+) -> str:
+    """Build a serialized batch submit response from post-submit queue items.
+
+    Queue item ``status`` values (READY_TO_SUBMIT/SUBMITTING/SUCCEEDED/FAILED/
+    RETRYABLE) are mapped to submit outcomes (succeeded/failed/retryable/skipped)
+    the same way ``serialize_batch_submit_result`` counts them.
+    """
+    status_counts = {"succeeded": 0, "failed": 0, "retryable": 0, "skipped": 0}
+    item_results = []
+    for item in queue_items:
+        outcome = {
+            "SUCCEEDED": "succeeded",
+            "FAILED": "failed",
+            "RETRYABLE": "retryable",
+        }.get(item["status"], "skipped")
+        status_counts[outcome] += 1
+        item_results.append(
+            {
+                "item_id": item["item_id"],
+                "request_id": item["request_id"],
+                "title": item["title"],
+                "status": outcome,
+                "reason": None,
+                "error_type": None,
+                "attempts": item["attempts"],
+            }
+        )
+    return json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "batch_id": batch_id,
+                "queue": {
+                    "queue_id": f"queue-{batch_id}",
+                    "batch_id": batch_id,
+                    "created_at": "2026-08-19T00:00:00+00:00",
+                    "updated_at": "2026-08-19T00:00:00+00:00",
+                    "items": queue_items,
+                },
+                "items": item_results,
+                "summary": status_counts,
+            },
+        },
+        ensure_ascii=False,
+    )
 
 
 def _batch_accept_result(
     items: list[dict[str, Any]],
     queue_items: list[dict[str, Any]] | None = None,
+    *,
+    batch_id: str = "batch-browser",
 ) -> str:
     queue_items = queue_items or []
     summary = {
@@ -168,10 +236,10 @@ def _batch_accept_result(
         {
             "ok": True,
             "result": {
-                "batch_id": "batch-browser",
+                "batch_id": batch_id,
                 "queue": {
-                    "queue_id": "queue-browser",
-                    "batch_id": "batch-browser",
+                    "queue_id": f"queue-{batch_id}",
+                    "batch_id": batch_id,
                     "created_at": "2026-08-19T00:00:00+00:00",
                     "updated_at": "2026-08-19T00:00:00+00:00",
                     "items": queue_items,
@@ -184,7 +252,7 @@ def _batch_accept_result(
     )
 
 
-def _accept_route_handler(accepted_ids: set[str]):
+def _accept_route_handler(accepted_ids: set[str], *, batch_id: str = "batch-browser"):
     """Build a Playwright route handler for the batch accept endpoint.
 
     Items whose ``item_id`` is in ``accepted_ids`` become ``accepted`` and are
@@ -211,7 +279,9 @@ def _accept_route_handler(accepted_ids: set[str]):
                         "queued": True,
                     }
                 )
-                queue_items.append(_queue_item(item_id, request_id, title))
+                queue_items.append(
+                    _queue_item(item_id, request_id, title, batch_id=batch_id)
+                )
             else:
                 results.append(
                     {
@@ -227,7 +297,7 @@ def _accept_route_handler(accepted_ids: set[str]):
         route.fulfill(
             status=200,
             content_type="application/json",
-            body=_batch_accept_result(results, queue_items),
+            body=_batch_accept_result(results, queue_items, batch_id=batch_id),
         )
 
     return _handler
@@ -1030,3 +1100,426 @@ class TestBatchAcceptWorkbench:
             "无法接受：卡片缺少订阅草案，无法接受"
         )
         expect(fail_card.locator(".batch-card-expand")).to_be_enabled()
+
+
+def _accept_all_reviewable(
+    page: Page,
+    live_server_url: str,
+    item_ids: list[str],
+    *,
+    batch_id: str = "batch-browser",
+) -> None:
+    """Load one reviewable card per item id and accept all via the accept API.
+
+    The accept endpoint enqueues every accepted card, so after this helper
+    returns the queue panel is populated with READY_TO_SUBMIT items. The
+    queue GET is mocked to ``queue: None`` because the accept response itself
+    carries the enqueued items (the real storage has no queue to read).
+    """
+    previews = {
+        item_id: _preview_request("咒术回战", f"req-{item_id}")
+        for item_id in item_ids
+    }
+    parse_items = [
+        _reviewable_batch_item(item_id=item_id, preview_request=previews[item_id])
+        for item_id in item_ids
+    ]
+
+    def _fulfill_batch(route: Any, request: Any) -> None:
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=_batch_parse_result(parse_items, batch_id=batch_id),
+        )
+
+    def _save_preview(route: Any, request: Any) -> None:
+        payload = json.loads(request.post_data or "{}")
+        saved = dict(payload["request"])
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "request": saved,
+                        "summary": {"request_id": saved["request_id"]},
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    def _queue_get(route: Any, request: Any) -> None:
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "batch_id": batch_id,
+                        "queue": None,
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    page.route("**/api/v1/batches/parse", _fulfill_batch)
+    page.route("**/api/v1/requests/preview-save", _save_preview)
+    page.route(
+        f"**/api/v1/batches/{batch_id}/accept*",
+        _accept_route_handler(set(item_ids), batch_id=batch_id),
+    )
+    page.route(f"**/api/v1/batches/{batch_id}/queue*", _queue_get)
+    page.goto(f"{live_server_url}/index")
+    page.fill(
+        "#batch-raw-input",
+        "\n".join(f"番剧{index}" for index in range(1, len(item_ids) + 1)),
+    )
+    page.click("#batch-parse-submit")
+    page.wait_for_selector(".batch-card-accept", state="attached", timeout=5000)
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.click("#batch-accept-all")
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+
+class TestBatchQueuePanel:
+    """Stage 20 pre-submission queue result panel (US-147).
+
+    Covers queue display after accept, submit success / partial failure with
+    per-item status refresh, sensitive input clearing, and refresh recovery
+    of recorded result summaries.
+    """
+
+    def test_batch_queue_panel_shows_items_after_accept(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _accept_all_reviewable(page, live_server_url, ["item-queue"])
+
+        expect(page.locator("#batch-queue-panel")).to_be_visible()
+        expect(page.locator("#batch-queue-count")).to_contain_text("队列中 1 项")
+        expect(page.locator(".batch-queue-item")).to_have_count(1)
+        item = page.locator('.batch-queue-item[data-item-id="item-queue"]')
+        expect(item.locator(".batch-queue-item-title")).to_contain_text(
+            "关于我转生变成史莱姆这档事 第四季"
+        )
+        expect(item.locator(".batch-queue-status")).to_contain_text("待提交")
+        expect(item.locator(".batch-queue-item-meta")).to_contain_text(
+            "尝试次数：0"
+        )
+        expect(item.locator(".batch-queue-item-summary")).to_contain_text(
+            "尚无结果摘要"
+        )
+        expect(page.locator("#batch-queue-refresh")).to_be_enabled()
+        expect(page.locator("#batch-queue-submit-form")).to_be_visible()
+        # 接受后 URL 携带公开的 batch_id，供刷新恢复使用
+        assert "batch_id=batch-browser" in page.url
+
+    def test_batch_queue_submit_success_clears_sensitive_inputs(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        submitted: list[dict[str, Any]] = []
+        succeeded = _queue_item(
+            "item-queue",
+            "req-item-queue",
+            "关于我转生变成史莱姆这档事 第四季",
+            status="SUCCEEDED",
+            attempts=1,
+            ab_result_summary="Auto Bangumi 已接受该订阅方案",
+            updated_at="2026-08-19T00:01:00+00:00",
+        )
+
+        def _submit(route: Any, request: Any) -> None:
+            submitted.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_submit_result([succeeded]),
+            )
+
+        page.route("**/api/v1/batches/batch-browser/submit*", _submit)
+        _accept_all_reviewable(page, live_server_url, ["item-queue"])
+
+        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        page.check("#batch-queue-ab-fallback-enabled")
+        page.check("#batch-queue-ab-confirm")
+        page.click("#batch-queue-submit-button")
+
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        expect(page.locator("#page-notification")).to_contain_text("批量提交成功")
+        expect(page.locator("#batch-queue-submit-button")).to_contain_text("提交队列")
+        expect(page.locator("#batch-queue-submit-button")).to_be_enabled()
+
+        # 成功后清空敏感输入与确认；fallback 是公开非敏感偏好，保持勾选
+        expect(page.locator("#batch-queue-ab-endpoint")).to_have_value("")
+        expect(page.locator("#batch-queue-ab-token")).to_have_value("")
+        expect(page.locator("#batch-queue-ab-confirm")).not_to_be_checked()
+        expect(page.locator("#batch-queue-ab-fallback-enabled")).to_be_checked()
+
+        item = page.locator('.batch-queue-item[data-item-id="item-queue"]')
+        expect(item.locator(".batch-queue-status")).to_contain_text("提交成功")
+        expect(item.locator(".batch-queue-item-meta")).to_contain_text(
+            "尝试次数：1"
+        )
+        expect(item.locator(".batch-queue-item-summary")).to_contain_text(
+            "结果：Auto Bangumi 已接受该订阅方案"
+        )
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "提交成功 1 项"
+        )
+        # 成功项目不显示重试按钮（单项重试是 US-148）
+        expect(page.locator(".batch-queue-item-retry")).to_have_count(0)
+        expect(page.locator(".batch-queue-retry")).to_have_count(0)
+        # 批量卡片 chip 同步为提交成功
+        card = page.locator(
+            ".batch-draft-card", has_text="关于我转生变成史莱姆这档事 第四季"
+        )
+        expect(card.locator(".batch-card-queue-status")).to_contain_text("提交成功")
+
+        payload = submitted[0]
+        assert payload["ab_config"]["endpoint"] == "https://ab.example/api"
+        assert payload["ab_config"]["token"] == "ab-secret-token"
+        assert payload["ab_config"]["fallback_enabled"] is True
+        assert payload["confirm"] is True
+        # 敏感配置不进入 DOM
+        body_text = page.locator("body").inner_text()
+        assert "ab-secret-token" not in body_text
+
+    def test_batch_queue_submit_partial_failure_refreshes_each_item(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        ok_item = _queue_item(
+            "item-ok",
+            "req-item-ok",
+            "关于我转生变成史莱姆这档事 第四季",
+            status="SUCCEEDED",
+            attempts=1,
+            ab_result_summary="Auto Bangumi 已接受该订阅方案",
+        )
+        fail_item = _queue_item(
+            "item-fail",
+            "req-item-fail",
+            "实力至上主义教室 第四季",
+            status="FAILED",
+            attempts=1,
+            last_error="订阅方案已不存在，跳过提交",
+        )
+        retryable_item = _queue_item(
+            "item-retry",
+            "req-item-retry",
+            "邻家天使 第二季",
+            status="RETRYABLE",
+            attempts=2,
+            last_error="Auto Bangumi 暂时不可用，稍后重试",
+        )
+
+        def _submit(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_submit_result([ok_item, fail_item, retryable_item]),
+            )
+
+        page.route("**/api/v1/batches/batch-browser/submit*", _submit)
+        _accept_all_reviewable(
+            page, live_server_url, ["item-ok", "item-fail", "item-retry"]
+        )
+        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        page.check("#batch-queue-ab-confirm")
+        page.click("#batch-queue-submit-button")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        # 每项状态独立刷新
+        ok = page.locator('.batch-queue-item[data-item-id="item-ok"]')
+        fail = page.locator('.batch-queue-item[data-item-id="item-fail"]')
+        retryable = page.locator('.batch-queue-item[data-item-id="item-retry"]')
+        expect(ok.locator(".batch-queue-status")).to_contain_text("提交成功")
+        expect(fail.locator(".batch-queue-status")).to_contain_text("提交失败")
+        expect(retryable.locator(".batch-queue-status")).to_contain_text("可重试")
+        # 成功项显示结果摘要，失败项显示脱敏错误摘要
+        expect(ok.locator(".batch-queue-item-summary")).to_contain_text(
+            "结果：Auto Bangumi 已接受该订阅方案"
+        )
+        expect(fail.locator(".batch-queue-item-summary")).to_contain_text(
+            "错误：订阅方案已不存在，跳过提交"
+        )
+        expect(retryable.locator(".batch-queue-item-summary")).to_contain_text(
+            "错误：Auto Bangumi 暂时不可用，稍后重试"
+        )
+        expect(retryable.locator(".batch-queue-item-meta")).to_contain_text(
+            "尝试次数：2"
+        )
+        # 成功项不显示重试按钮
+        expect(ok.locator(".batch-queue-item-retry")).to_have_count(0)
+        expect(page.locator(".batch-queue-retry")).to_have_count(0)
+        # 结果与通知反映成功 + 失败 + 可重试计数
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "提交成功 1 项"
+        )
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "提交失败 1 项"
+        )
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "可重试 1 项"
+        )
+        expect(page.locator("#page-notification")).to_contain_text("批量提交完成")
+        # 批量卡片 chip 独立同步
+        ok_card = page.locator('.batch-draft-card[data-item-id="item-ok"]')
+        expect(ok_card.locator(".batch-card-queue-status")).to_contain_text(
+            "提交成功"
+        )
+
+    def test_batch_queue_submit_failure_preserves_inputs_for_retry(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        def _submit_fail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=400,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": False,
+                        "error_message": "Auto Bangumi 连接失败",
+                        "error_type": "ab_connection_failed",
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/batches/batch-browser/submit*", _submit_fail)
+        _accept_all_reviewable(page, live_server_url, ["item-queue"])
+        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        page.check("#batch-queue-ab-confirm")
+        page.click("#batch-queue-submit-button")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        # HTTP 级失败：保留敏感输入与确认，便于重试
+        expect(page.locator("#batch-queue-ab-endpoint")).to_have_value(
+            "https://ab.example/api"
+        )
+        expect(page.locator("#batch-queue-ab-token")).to_have_value(
+            "ab-secret-token"
+        )
+        expect(page.locator("#batch-queue-ab-confirm")).to_be_checked()
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "Auto Bangumi 批量提交失败"
+        )
+        expect(page.locator("#page-notification")).to_contain_text("批量提交失败")
+        # 队列项目保持待提交
+        item = page.locator('.batch-queue-item[data-item-id="item-queue"]')
+        expect(item.locator(".batch-queue-status")).to_contain_text("待提交")
+        # 敏感值不进入 DOM
+        body_text = page.locator("body").inner_text()
+        assert "ab-secret-token" not in body_text
+
+    def test_batch_queue_submit_disables_controls_while_in_flight(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        # 提交端点不 mock：由 conftest 的 test-slow-submit 延迟路由真实返回 400，
+        # 让浏览器 fetch 保持 ~1.5s，从而稳定观察 in-flight 的 loading/disabled 状态。
+        _accept_all_reviewable(
+            page, live_server_url, ["item-queue"], batch_id="test-slow-submit"
+        )
+        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        page.check("#batch-queue-ab-confirm")
+        page.click("#batch-queue-submit-button")
+
+        # 提交中：提交按钮与表单输入全部禁用
+        expect(page.locator("#batch-queue-submit-button")).to_contain_text(
+            "正在提交..."
+        )
+        expect(page.locator("#batch-queue-submit-button")).to_be_disabled()
+        expect(page.locator("#batch-queue-ab-endpoint")).to_be_disabled()
+        expect(page.locator("#batch-queue-ab-token")).to_be_disabled()
+        expect(page.locator("#batch-queue-ab-confirm")).to_be_disabled()
+
+        # 失败后恢复可操作，保留输入便于重试；队列保持待提交
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        expect(page.locator("#page-notification")).to_contain_text("批量提交失败")
+        expect(page.locator("#batch-queue-submit-button")).to_contain_text("提交队列")
+        expect(page.locator("#batch-queue-submit-button")).to_be_enabled()
+        expect(page.locator("#batch-queue-ab-endpoint")).to_have_value(
+            "https://ab.example/api"
+        )
+        expect(page.locator("#batch-queue-ab-token")).to_have_value(
+            "ab-secret-token"
+        )
+        item = page.locator('.batch-queue-item[data-item-id="item-queue"]')
+        expect(item.locator(".batch-queue-status")).to_contain_text("待提交")
+        # 敏感值不进入 DOM
+        body_text = page.locator("body").inner_text()
+        assert "ab-secret-token" not in body_text
+
+    def test_batch_queue_refresh_restores_recorded_results(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        persisted = [
+            _queue_item(
+                "item-1",
+                "req-item-1",
+                "关于我转生变成史莱姆这档事 第四季",
+                status="SUCCEEDED",
+                attempts=1,
+                ab_result_summary="Auto Bangumi 已接受该订阅方案",
+                updated_at="2026-08-19T00:05:00+00:00",
+            ),
+            _queue_item(
+                "item-2",
+                "req-item-2",
+                "实力至上主义教室 第四季",
+                status="FAILED",
+                attempts=2,
+                last_error="订阅方案已不存在，跳过提交",
+                updated_at="2026-08-19T00:05:30+00:00",
+            ),
+        ]
+
+        def _queue_get(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "batch_id": "batch-browser",
+                            "queue": {
+                                "queue_id": "queue-browser",
+                                "batch_id": "batch-browser",
+                                "created_at": "2026-08-19T00:00:00+00:00",
+                                "updated_at": "2026-08-19T00:05:30+00:00",
+                                "items": persisted,
+                            },
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/batches/batch-browser/queue*", _queue_get)
+        # 刷新恢复：URL 直接携带 batch_id，页面加载后从队列/结果存储读取
+        page.goto(f"{live_server_url}/index?batch_id=batch-browser")
+
+        expect(page.locator("#batch-queue-count")).to_contain_text("队列中 2 项")
+        expect(page.locator(".batch-queue-item")).to_have_count(2)
+        first = page.locator('.batch-queue-item[data-item-id="item-1"]')
+        second = page.locator('.batch-queue-item[data-item-id="item-2"]')
+        expect(first.locator(".batch-queue-status")).to_contain_text("提交成功")
+        expect(first.locator(".batch-queue-item-summary")).to_contain_text(
+            "结果：Auto Bangumi 已接受该订阅方案"
+        )
+        expect(first.locator(".batch-queue-item-meta")).to_contain_text(
+            "更新于：2026-08-19T00:05:00+00:00"
+        )
+        expect(second.locator(".batch-queue-status")).to_contain_text("提交失败")
+        expect(second.locator(".batch-queue-item-summary")).to_contain_text(
+            "错误：订阅方案已不存在，跳过提交"
+        )
+        expect(page.locator("#batch-queue-refresh")).to_be_enabled()
+        expect(page.locator("#batch-queue-submit-form")).to_be_visible()

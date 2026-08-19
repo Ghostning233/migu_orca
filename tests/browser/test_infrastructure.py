@@ -10,13 +10,25 @@ from tests.browser.conftest import open_dev_fixture_panel
 pytestmark = pytest.mark.browser
 
 
-def _check_no_sensitive_content(text: str) -> None:
-    """Verify that rendered content does not expose tokens, URLs, or raw data."""
-    lowered = text.lower()
+def _check_no_sensitive_content(page: Page) -> None:
+    """Verify that rendered content does not expose tokens, URLs, or raw data.
+
+    The pre-submission queue form (US-147) legitimately renders an empty
+    ``token`` password field for user input; the security contract is that no
+    actual secret *value* is present, not that the word never appears.
+    """
+    lowered = page.content().lower()
     assert "http://" not in lowered
     assert "https://" not in lowered
     assert "<rss" not in lowered
-    assert "token" not in lowered
+    # 初始状态下所有文本/密码输入均为空，避免任何预填的秘密值进入 DOM
+    for element in page.locator(
+        "input[type=text], input[type=password], input[type=search], "
+        "input[type=url], input:not([type]), textarea"
+    ).all():
+        assert element.input_value() == "", (
+            f"input #{element.get_attribute('id')} has a prefilled value"
+        )
 
 
 def test_server_reachable(page: Page, live_server_url: str) -> None:
@@ -64,7 +76,7 @@ def test_index_loads_stage13_request_workbench(page: Page, live_server_url: str)
     assert page.locator("#qbittorrent-panel").count() == 0
     assert page.locator("#acceptance-panel").count() == 0
 
-    _check_no_sensitive_content(page.content())
+    _check_no_sensitive_content(page)
 
 
 def test_settings_loads_placeholder_shell(page: Page, live_server_url: str) -> None:

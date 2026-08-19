@@ -248,6 +248,20 @@ def test_index_serves_web_ui_shell() -> None:
     assert "已选择 0 项" in html
     assert "批量接受" in html
     assert "全接受" in html
+    assert 'id="batch-queue-panel"' in html
+    assert 'id="batch-queue-heading"' in html
+    assert "提交前队列" in html
+    assert 'id="batch-queue-refresh"' in html
+    assert 'id="batch-queue-count"' in html
+    assert 'id="batch-queue-list"' in html
+    assert 'id="batch-queue-submit-form"' in html
+    assert '<form id="batch-queue-submit-form" method="post" hidden>' in html
+    assert 'id="batch-queue-ab-fallback-enabled"' in html
+    assert 'id="batch-queue-ab-confirm"' in html
+    assert "我已确认将这些订阅方案提交到 Auto Bangumi" in html
+    assert 'id="batch-queue-submit-result"' in html
+    assert 'id="batch-queue-submit-button"' in html
+    assert "提交队列" in html
     assert 'id="mikan-candidate-search-endpoint"' not in html
     assert 'id="mikan-candidate-timeout-seconds"' not in html
     assert 'name="mikan_candidate_search_endpoint"' not in html
@@ -308,7 +322,14 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'aria-label="刷新订阅方案列表"' in html
     assert 'aria-relevant="additions text"' in html
     assert "/migu-orca-static/app.js" in html
-    assert "token" not in html.lower()
+    # Stage 20 (US-147) adds an explicit request-scoped Auto Bangumi submit form
+    # to the batch pre-submission queue panel, so endpoint/token field names are
+    # legitimately present on /index (mirroring the Settings pattern). The
+    # general generate flow and the settings-specific ids still stay off /index.
+    assert 'id="batch-queue-ab-endpoint"' in html
+    assert 'id="batch-queue-ab-token"' in html
+    assert 'type="password"' in html
+    assert 'id="settings-ab-token"' not in html
     assert "localStorage" not in html
     assert "sessionStorage" not in html
     assert "http://" not in html
@@ -559,6 +580,47 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "batchStatusLabel" in script
     assert "已解析" in script
     assert "解析失败" in script
+
+
+def test_static_app_script_wires_batch_queue_result_panel() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "batchQueueItems" in script
+    assert "batchIdFromLocation" in script
+    assert "syncBatchIdToUrl" in script
+    assert "batchQueueStatusLabel" in script
+    assert "batchQueueStatusClass" in script
+    assert "renderBatchQueueItem" in script
+    assert "renderBatchQueuePanel" in script
+    assert "loadBatchQueue" in script
+    assert "applyQueueResult" in script
+    assert "syncQueueStatusToCards" in script
+    assert "submitBatchQueue" in script
+    assert "setBatchQueueInFlight" in script
+    assert "clearBatchQueueSensitiveFields" in script
+    assert "batchQueueSummaryMessage" in script
+    assert "showBatchQueueSubmitNotification" in script
+    assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/queue" in script
+    assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/submit" in script
+    assert "batch-queue-submit-form" in script
+    assert "batch-queue-ab-endpoint" in script
+    assert "batch-queue-ab-token" in script
+    assert "batch-queue-ab-confirm" in script
+    assert "batch-queue-submit-button" in script
+    assert "batch-queue-refresh" in script
+    assert "提交前必须填写 endpoint" in script
+    assert "提交前必须填写 token" in script
+    assert "请勾选确认后再提交到 Auto Bangumi" in script
+    assert "提交前必须填写 endpoint" in script
+    assert "正在提交队列到 Auto Bangumi" in script
+    assert "Auto Bangumi 批量提交失败" in script
+    assert "队列读取失败" in script
+    assert "尚无结果摘要" in script
+    assert "尝试次数：" in script
+    assert "更新于：" in script
+    assert "暂无队列项目" in script
 
 
 def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:
@@ -1052,6 +1114,15 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".batch-card-status-row" in css
     assert ".batch-card-queue-status" in css
     assert ".batch-card-reason" in css
+    assert ".batch-queue-item" in css
+    assert ".batch-queue-item-title" in css
+    assert ".batch-queue-item-meta" in css
+    assert ".batch-queue-item-summary" in css
+    assert ".batch-queue-status-ready" in css
+    assert ".batch-queue-status-succeeded" in css
+    assert ".batch-queue-status-failed" in css
+    assert ".batch-queue-status-retryable" in css
+    assert "#batch-queue-submit-form[hidden]" in css
     assert "overflow-wrap" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css

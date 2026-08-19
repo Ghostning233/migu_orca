@@ -107,7 +107,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "提交配置只存在当前页面请求上下文，不得写入 URL、localStorage、sessionStorage 或队列 JSON。"
     },
     {
