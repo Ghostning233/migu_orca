@@ -17,6 +17,7 @@ class StorageConfig:
     history_dir: Path
     ab_results_dir: Path
     queue_dir: Path
+    preferences_dir: Path
 
 
 def load_storage_config(storage_dir: Path | None = None) -> StorageConfig:
@@ -27,6 +28,7 @@ def load_storage_config(storage_dir: Path | None = None) -> StorageConfig:
         history_dir=root / "history",
         ab_results_dir=root / "ab_results",
         queue_dir=root / "queue",
+        preferences_dir=root / "preferences",
     )
 
 
@@ -37,6 +39,7 @@ def ensure_storage_layout(config: StorageConfig) -> StorageConfig:
         config.history_dir,
         config.ab_results_dir,
         config.queue_dir,
+        config.preferences_dir,
     ):
         try:
             directory.mkdir(parents=True, exist_ok=True)

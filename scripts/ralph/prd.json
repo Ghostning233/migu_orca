@@ -17,7 +17,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先建立 M08 偏好契约和存储边界，不接入批量解析或 Web UI。"
     },
     {

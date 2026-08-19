@@ -293,7 +293,7 @@ Stage 拆分结论：
 - 不引入后台常驻 worker 或复杂调度器；批量提交采用前台顺序编排。
 - 不把“确认后自动提交并下载”作为核心卖点；核心卖点是批量订阅前审核与提交辅助。
 
-Stage 21 handoff：在 Stage 19/20 批量草案基础上记录用户偏好（字幕组、筛选、文件夹命名）并闭环搜索词增强，减少逐卡修改次数（见 `docs/MiGuOrca_future_stages.md` 与 `docs/MiGuOrca_stage20_batch_ab_queue_PRD.md`）。
+Stage 21 handoff：在 Stage 19/20 批量草案基础上记录用户偏好（字幕组、筛选、文件夹命名）并闭环搜索词增强，减少逐卡修改次数。具体执行拆分见 `docs/MiGuOrca_stage21_preference_recommendation_PRD.md`。
 
 ### BL-014: 部署/配置向导可行性验证
 

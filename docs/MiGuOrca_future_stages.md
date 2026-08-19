@@ -81,9 +81,9 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 2. 自动绕过 Auto Bangumi 的订阅执行。
 3. 复杂调度器或后台常驻 worker；批量提交采用前台顺序编排。
 
-## 4. Stage 21: 用户偏好与智能推荐闭环
+## 4. Stage 21: 用户偏好与智能推荐闭环（PRD 已编写，待开发）
 
-前置条件（Stage 20 handoff）：Stage 20 已完成批量接受、提交前队列、Auto Bangumi 顺序提交和失败项独立重试（详见 `docs/MiGuOrca_stage20_batch_ab_queue_PRD.md` 的 Stage 21 handoff）。Stage 21 应在此之上把批量草案结果从“可审核”提升到“大部分可直接接受”，并保持 AI 只生成候选、不自动选择最终合集的边界。
+前置条件（Stage 20 handoff）：Stage 20 已完成批量接受、提交前队列、Auto Bangumi 顺序提交和失败项独立重试（详见 `docs/MiGuOrca_stage20_batch_ab_queue_PRD.md` 的 Stage 21 handoff）。Stage 21 执行 PRD 见 `docs/MiGuOrca_stage21_preference_recommendation_PRD.md`，应在此之上把批量草案结果从“可审核”提升到“大部分可直接接受”，并保持 AI 只生成候选、不自动选择最终合集的边界。
 
 目标：
 
@@ -139,7 +139,7 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 
 1. Stage 19：批量输入与订阅草案卡片工作台（已完成）。
 2. Stage 20：批量接受与 Auto Bangumi 提交前队列（已完成）。
-3. Stage 21：用户偏好与智能推荐闭环（下一个阶段）。
+3. Stage 21：用户偏好与智能推荐闭环（PRD 已编写，下一阶段）。
 
 如果要覆盖“降低 Auto Bangumi/qBittorrent 配置门槛”，再增加 1 个远期可选 Stage：
 

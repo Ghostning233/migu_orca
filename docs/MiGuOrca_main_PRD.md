@@ -8,7 +8,7 @@
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
 | 当前版本 | v0.16 |
-| 文档状态 | Stage 20 已完成；下一阶段为用户偏好与智能推荐闭环 |
+| 文档状态 | Stage 20 已完成；Stage 21 用户偏好与智能推荐闭环 PRD 已编写，待开发 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -265,7 +265,7 @@ M00 CLI 与流程编排
 
 ## 13. 下一步工作
 
-1. Stage 21 建议聚焦用户偏好与智能推荐闭环：在 Stage 19/20 批量草案基础上记录字幕组、筛选和文件夹命名偏好，改进搜索词增强，减少逐卡修改次数；AI 名称解析仍只生成候选，不自动选择最终合集。
+1. Stage 21 聚焦用户偏好与智能推荐闭环：在 Stage 19/20 批量草案基础上记录字幕组、筛选和文件夹命名偏好，改进搜索词增强，减少逐卡修改次数；AI 名称解析仍只生成候选，不自动选择最终合集。执行 PRD 见 `docs/MiGuOrca_stage21_preference_recommendation_PRD.md`。
 2. AI 番剧名解析与搜索词增强保持为可审核增强能力；无论偏好闭环是否落地，都必须保留手动搜索、候选选择和 MiKan URL/ID 直连兜底。
 3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。

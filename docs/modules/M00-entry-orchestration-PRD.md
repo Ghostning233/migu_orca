@@ -212,7 +212,9 @@ AI 名称解析 provider seam 生成候选标题、季数提示和搜索词
 4. 批量候选搜索复用 Web API 内部的 `_search_mikan_candidates`，避免第二套 MiKan parser。
 5. 单卡修改复用现有 `preview-modify` dry-run 详情流程，并只回流匹配 `item_id` 的卡片。
 6. 单卡接受先持久化未保存预览，再复用现有 Request accept 能力；接受后只更新当前卡片。
-7. 批量接受、全接受和 Auto Bangumi 提交队列不是 Stage 19 范围，应由 Stage 20 在该单卡接受能力上继续编排。
+7. 批量接受、全接受和 Auto Bangumi 提交队列不是 Stage 19 范围，已由 Stage 20 在单卡接受能力上完成编排。
+
+Stage 21 handoff：M00 继续作为单条订阅草案生成原子能力，接收 M08 生成的非敏感偏好结果（字幕组、筛选和命名默认值），并将其应用到每个批量条目。M00 不保存 LLM secret，不自动选择最终 MiKan 合集，也不自动接受批量卡片。
 
 ## 14. Stage 20 批量接受与提交前队列编排状态（已完成）
 

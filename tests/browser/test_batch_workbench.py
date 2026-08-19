@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
 from typing import Any
 
 import pytest
@@ -350,31 +349,13 @@ class TestBatchWorkbenchEntry:
         self, page: Page, live_server_url: str
     ) -> None:
         captured_payloads: list[dict[str, Any]] = []
+        pending_routes: list[Any] = []
 
         def _fulfill(route: Any, request: Any) -> None:
             captured_payloads.append(json.loads(request.post_data or "{}"))
-            time.sleep(0.2)
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=_batch_parse_result(
-                    [
-                        _batch_item(
-                            "item-1",
-                            "萌王S4",
-                            canonical_title="关于我转生变成史莱姆这档事 第四季",
-                            candidate_title="关于我转生变成史莱姆这档事 第四季",
-                            poster_url="https://mikan.example/poster.jpg",
-                            source_query="萌王 第四季",
-                        ),
-                        _batch_item(
-                            "item-2",
-                            "路哥S4",
-                            status="FAILED",
-                        ),
-                    ]
-                ),
-            )
+            # 保持请求挂起，由测试线程稍后 fulfill，从而稳定观察 transient
+            # loading 状态（route handler 内 sleep 会阻塞 dispatcher，无法可靠观察）。
+            pending_routes.append(route)
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
@@ -383,6 +364,28 @@ class TestBatchWorkbenchEntry:
 
         expect(page.locator("#batch-parse-result")).to_contain_text(
             "正在解析批量番剧名称"
+        )
+        assert pending_routes
+        pending_routes[0].fulfill(
+            status=200,
+            content_type="application/json",
+            body=_batch_parse_result(
+                [
+                    _batch_item(
+                        "item-1",
+                        "萌王S4",
+                        canonical_title="关于我转生变成史莱姆这档事 第四季",
+                        candidate_title="关于我转生变成史莱姆这档事 第四季",
+                        poster_url="https://mikan.example/poster.jpg",
+                        source_query="萌王 第四季",
+                    ),
+                    _batch_item(
+                        "item-2",
+                        "路哥S4",
+                        status="FAILED",
+                    ),
+                ]
+            ),
         )
         expect(page.locator(".batch-draft-card")).to_have_count(2)
         result_text = page.locator("#batch-parse-result").inner_text()
