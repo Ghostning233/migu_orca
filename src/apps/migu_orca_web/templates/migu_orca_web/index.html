@@ -48,6 +48,46 @@
           </a>
         </section>
 
+        <section
+          id="batch-workbench-entry"
+          class="batch-workbench-entry"
+          aria-labelledby="batch-workbench-heading"
+        >
+          <div class="section-heading">
+            <h3 id="batch-workbench-heading">批量新番草案</h3>
+          </div>
+          <form id="batch-parse-form" method="post">
+            <label for="batch-raw-input">批量番剧名称</label>
+            <textarea
+              id="batch-raw-input"
+              name="batch_raw_input"
+              rows="6"
+              autocomplete="off"
+              placeholder="萌王S4&#10;路哥S4&#10;杖剑谭S2&#10;邻家天使S2"
+              aria-describedby="batch-parse-help batch-parse-error"
+            ></textarea>
+            <p id="batch-parse-help" class="field-help">
+              每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。
+            </p>
+            <p id="batch-parse-error" class="field-error" role="alert" hidden></p>
+
+            <div
+              id="batch-parse-result"
+              class="empty-state compact-state"
+              aria-live="polite"
+              aria-relevant="additions text"
+            >
+              粘贴多行番剧名称后获取解析结果。
+            </div>
+
+            <div class="notification-actions">
+              <button id="batch-parse-submit" class="primary-button" type="submit">
+                获取批量草案
+              </button>
+            </div>
+          </form>
+        </section>
+
         <form id="mikan-candidate-search-form" method="post">
           <label for="mikan-candidate-query">番剧标题</label>
           <input

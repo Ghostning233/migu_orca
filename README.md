@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台，目标是在 MiKanProject 与 Auto Bangumi 之间提供 MiKan 订阅源发现、筛选预览、批量草案审核与提交辅助能力。
 
-当前已完成 Stage 18。Stage 18 已把真实 MiKan 搜索收敛为普通 Web 主流程：用户只输入番剧标题，系统使用默认 MiKan 配置请求 `https://mikanani.me/Home/Search?searchstr=<番剧名>` 获取候选合集，用户手动选择合集后先生成可编辑订阅草案预览，再确认保存。普通 UI 已移除 `search_endpoint`、`timeout_seconds`、`query` 等技术字段，主生成区提供「搜索无结果时使用直连合集」勾选框和 MiKan 合集 URL/ID 输入，预览阶段可修改字幕组、筛选规则和文件夹名并重算种子展示，用户态文案中文化（订阅方案/订阅草案/待确认/已确认/已取消），Seeds 区按 有效种子 -> 完整种子（按字幕组分组）-> 排除种子 顺序展示。fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。Stage 17 已在 Web UI `/index` 接入真实 MiKan 候选搜索、手动选择、直连 URL/ID fallback、安全候选缓存和 display-only 推荐标签；候选选择和 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路。
+当前已完成 Stage 19。Stage 19 在 Stage 18 的单番剧真实 MiKan 主流程上新增批量新番订阅草案工作台：用户可在 `/index` 按行输入 `萌王S4`、`路哥S4`、`杖剑谭S2`、`邻家天使S2` 等简称，系统通过 AI 名称解析 provider seam 生成候选标题和搜索词，逐项复用 MiKan candidate search 能力生成可审核卡片。卡片支持删除、展开查看过滤器和有效/排除种子摘要、进入现有预览详情修改流程并只回流当前卡片，以及单卡接受。Stage 19 不实现批量接受、全接受或 Auto Bangumi 并发提交队列；这些能力交给 Stage 20。
 
 ## 项目目标
 
@@ -18,8 +18,9 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 
 ## 目前状态
 
+- Stage 19 已把批量新番订阅前置工作台接入 `/index`：批量输入按非空行生成独立条目，AI 名称解析 fake provider 和 provider seam 输出候选标题/搜索词，批量 API 对每个条目独立搜索 MiKan 候选，卡片网格支持删除、展开、单卡修改回流和单卡接受。
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
-- 项目方向已调整为批量新番订阅前置工作台。下一阶段应围绕批量输入、AI 番剧名解析、订阅草案卡片、单卡修改、单个/批量接受和 Auto Bangumi 提交前审核展开，而不是扩展为 qBittorrent 下载器或 Auto Bangumi 替代执行系统。
+- 下一阶段应围绕批量接受、全接受和 Auto Bangumi 提交前队列展开，而不是扩展为 qBittorrent 下载器或 Auto Bangumi 替代执行系统。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
@@ -32,7 +33,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - 筛选编辑控件使用 `包含规则` / `排除规则` 标签，并提供默认未勾选的 `使用正则` 与 `大小写敏感` 复选框；默认提交发送 `use_regex=false` / `case_sensitive=false`，字面文本 `[`、`[v2]` 不会触发正则错误。
 - `/settings` 可以管理非敏感 Storage 浏览器偏好、直接显示并显式测试 qBittorrent 连接，并在 `/settings?request_id=<id>#auto-bangumi` 中对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交配置。
 - Stage 16 已完成真实 MiKan 合集详情页离线 fixture、结构化详情模型、字幕组级 RSS 优先、direct URL/ID 入口和真实读取错误脱敏；默认流程不连接 qBittorrent，不启动下载，不改变 AB 提交流程。
-- Stage 17 已完成真实 MiKan 搜索候选合集展示与用户手动选择：`MikanClient.search_candidates` 从搜索页 `相关推荐` 解析候选卡片并规范化为绝对 HTTP(S) `/Home/Bangumi/<numeric-id>`，按页面顺序返回并按 `bangumi_id` 去重；Web API `POST /api/v1/mikan/candidates` 提供 request-scoped 候选搜索，返回只含公开候选元数据和推荐标签的 sanitized envelope。Stage 18 已把该能力从折叠的附属入口调整为 `/index` 普通 Web 主流程，并提供系统默认 MiKan 配置和可编辑预览草案。
+- Stage 17 已完成真实 MiKan 搜索候选合集展示与用户手动选择：`MikanClient.search_candidates` 从搜索页 `相关推荐` 解析候选卡片并规范化为绝对 HTTP(S) `/Home/Bangumi/<numeric-id>`，按页面顺序返回并按 `bangumi_id` 去重；Web API `POST /api/v1/mikan/candidates` 提供 request-scoped 候选搜索，返回只含公开候选元数据和推荐标签的 sanitized envelope。Stage 18 已把该能力从折叠的附属入口调整为 `/index` 普通 Web 主流程，并提供系统默认 MiKan 配置和可编辑预览草案。Stage 19 已在此基础上新增 `POST /api/v1/batches/parse` 和批量卡片工作区。
 
 ## 关键约定
 
@@ -90,7 +91,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - qBittorrent 配置同样必须保持 request-scoped：endpoint、username、password、cookie、SID、敏感路径和原始响应体不能写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图、测试 trace 或 API 响应。
 - Stage 15 允许 Settings 将非敏感 Storage 偏好写入浏览器 `localStorage`，键名为 `miguOrca.web.storageDir` 和 `miguOrca.web.saveRequest`；URL query 只能携带 `request_id` 等非敏感上下文。缺省 `saveRequest` 表示开发/离线 fixture 生成默认保存，显式 `"false"` 表示预览模式；真实 MiKan 候选选择与直连 fallback 始终生成可编辑预览草案，与 `saveRequest` 偏好无关。
 - 筛选规则默认按普通字符匹配：规则文本以字面子串（substring）形式出现在种子名中才算命中，大小写不敏感；`use_regex=true` 才按正则编译，`case_sensitive=true` 才区分大小写。筛选规则是用户输入的非密文字符串，允许写入 saved Request，但错误消息不得包含本地存储路径或原始外部响应。
-- 真实 MiKan 合集详情页解析和 direct URL/ID 入口已在 Stage 16 完成；搜索候选展示、手动选择、候选缓存和推荐标签已在 Stage 17 完成；真实 MiKan 搜索收敛为 Web 主流程、默认 MiKan 配置、直连兜底勾选框、可编辑预览订阅草案、中文状态和 Seeds 分组展示已在 Stage 18 完成；可选搜索词增强 / AI 番剧名解析仍在 [backlog](docs/backlog.md) 跟踪。
+- 真实 MiKan 合集详情页解析和 direct URL/ID 入口已在 Stage 16 完成；搜索候选展示、手动选择、候选缓存和推荐标签已在 Stage 17 完成；真实 MiKan 搜索收敛为 Web 主流程、默认 MiKan 配置、直连兜底勾选框、可编辑预览订阅草案、中文状态和 Seeds 分组展示已在 Stage 18 完成；批量输入、AI 名称解析 seam、批量候选搜索、订阅草案卡片、单卡修改回流和单卡接受已在 Stage 19 完成。批量接受和 Auto Bangumi 提交前队列仍在 [backlog](docs/backlog.md) 跟踪。
 
 ## Stage 15 Flask Web UI
 
@@ -293,6 +294,10 @@ Stage 17 新增真实 MiKan 候选搜索端点：
 
 失败时继续使用统一错误 envelope，只保留 `category`、`field`、`status_code` 等可处理字段。候选搜索、候选选择和直连 fallback 的 MiKan config 都是 request-scoped，不写入 storage JSON、浏览器 storage、URL、history、日志或截图。
 
+Stage 19 新增批量解析端点：
+
+- `POST /api/v1/batches/parse`：接收 `raw_input` 多行文本，忽略空行并为每个非空行生成独立 item。端点先通过 AI 名称解析 provider seam 生成候选标题、季数提示、搜索词、置信度和审核标记，再对每个 search query 复用 MiKan candidate search。单个 provider 或 MiKan 搜索失败只标记当前 item 为 `FAILED`，不阻塞同批次其他 item。响应只包含 batch/item 状态、解析元数据、公开候选字段和卡片展示所需的订阅草案摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径不会进入响应、浏览器 storage、URL 或 Request snapshot。
+
 ### 本地验收流程
 
 1. 运行质量检查：
@@ -336,8 +341,9 @@ Stage 17 新增真实 MiKan 候选搜索端点：
    ```
 
 19. 验证 Stage 18 真实 MiKan 主流程：打开 `/index` 主生成区（标题为「真实 MiKan 候选搜索」），确认只要求输入番剧标题，普通可见 UI 不出现 `search_endpoint`、`timeout_seconds` 或 `query` 字样。输入标题后搜索，确认候选卡片展示标题、MiKan ID、封面（如有）和推荐标签；即使只有一个候选也必须点击「选择此合集」才能生成草案，不会自动生成。搜索无结果时勾选「搜索无结果时使用直连合集」，输入 MiKan `Home/Bangumi/<id>` URL 或 bare ID 可直接生成预览草案。候选选择和直连 fallback 都先生成「订阅草案（未保存）」预览，不展示确认、取消、删除或 Auto Bangumi 提交动作；预览提供可编辑表单（字幕组、包含/排除规则、使用正则、大小写敏感、folder_name），点击「应用修改」后 Filter 与 Seeds 同步重算，点击「保存草案」后进入待确认流程并同步 URL `request_id`。页面底部「开发 / 离线测试」面板中的 `Fixture 生成` 默认收起，普通路径不会触发 fixture 生成。页面使用中文业务文案（订阅方案/订阅草案/待确认/已确认/已取消），Seeds 区按 有效种子（当前选中字幕组，默认可见）-> 完整种子（按字幕组分组，默认折叠）-> 排除种子（默认折叠）顺序展示。
+20. 验证 Stage 19 批量工作台：在 `/index` 批量获取区域输入多行简称，确认空输入不会调用 `/api/v1/batches/parse`，有效输入会展示每行 raw_title、解析状态和卡片网格。卡片应展示封面或占位、番剧标题、源名称、有效种子数和中文状态；删除只移除当前卡片，窄屏为单列，长列表区域可滚动。展开 DRAFT/READY 卡片后确认展示当前字幕组、包含/排除规则、匹配模式、大小写、有效种子和排除种子摘要；点击单卡「修改」应进入现有订阅草案详情修改流程并只回流当前卡片；点击单卡「接受」应只把当前卡片显示为「已接受」，其他卡片状态不变。页面、URL、browser storage、storage JSON、截图和 trace 不得包含 raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体或本地绝对路径。
 
-Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 下载/订阅动作。本阶段已完成真实 MiKan 合集详情页离线 fixture、结构化详情解析、字幕组级 RSS 优先输出、番剧级 RSS fallback、CLI/API direct URL/ID 入口和真实读取错误脱敏；Stage 17 已在该基础上完成 Web UI direct-entry fallback 与搜索候选选择。Stage 18 已把真实 MiKan 候选搜索收敛为 `/index` 普通 Web 主流程，并提供系统默认 MiKan 配置、直连兜底勾选框、可编辑预览订阅草案、中文状态与 Seeds 分组展示。Stage 18 仍不实现 AI 番剧名解析、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 下载/订阅动作。
+Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统、复杂配置管理、前端构建链、批量季度订阅或 qBittorrent 下载/订阅动作。本阶段已完成真实 MiKan 合集详情页离线 fixture、结构化详情解析、字幕组级 RSS 优先输出、番剧级 RSS fallback、CLI/API direct URL/ID 入口和真实读取错误脱敏；Stage 17 已在该基础上完成 Web UI direct-entry fallback 与搜索候选选择。Stage 18 已把真实 MiKan 候选搜索收敛为 `/index` 普通 Web 主流程，并提供系统默认 MiKan 配置、直连兜底勾选框、可编辑预览订阅草案、中文状态与 Seeds 分组展示。Stage 19 已完成批量输入、AI 名称解析 seam、批量候选搜索、卡片网格、单卡修改和单卡接受。Stage 19 仍不实现真实 LLM provider 生产配置、批量接受、全接受、Auto Bangumi 提交队列、认证系统、复杂配置管理、前端构建链或 qBittorrent 下载/订阅动作。
 
 示例 AB 配置：
 
@@ -372,8 +378,9 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 ## Ralph 开发流
 
-- 当前活跃 Ralph PRD：Stage 18，真实 MiKan 主流程与预览优化 PRD（已完成）
-- 最近完成阶段：Stage 17，真实 MiKan 搜索候选合集展示与用户选择 PRD
+- 当前活跃 Ralph PRD：Stage 19，批量新番订阅草案工作台 PRD（已完成）
+- 最近完成阶段：Stage 18，真实 MiKan 主流程与预览优化 PRD
+- 前一完成阶段：Stage 17，真实 MiKan 搜索候选合集展示与用户选择 PRD
 - 前一完成阶段：Stage 16，真实 MiKan 合集详情页解析与直连 URL/ID 入口 PRD
 - 前一完成阶段：Stage 15，Web UI ACCEPTED 管理与筛选语义优化 PRD
 - 前一完成阶段：Stage 14，Web UI Request 可操作性修复 PRD
@@ -383,7 +390,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- 后续待办：`docs/backlog.md`，当前优先项为 BL-010 / AI 番剧名解析与搜索词增强（低优先级）
+- 后续待办：`docs/backlog.md`，当前优先项为 BL-013 / 批量接受与 Auto Bangumi 提交前队列管理
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
 - Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`

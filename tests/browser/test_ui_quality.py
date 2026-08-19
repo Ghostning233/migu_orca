@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from playwright.sync_api import Page, Request, expect
@@ -505,6 +506,244 @@ def test_stage18_mikan_primary_flow_does_not_leak_sensitive_values(
         for path in history_root.glob("*.json"):
             for value in sensitive_values:
                 assert value not in path.read_text(encoding="utf-8")
+
+    local_storage = page.evaluate(
+        """() => Object.fromEntries(
+            Array.from({ length: window.localStorage.length }, (_, index) => {
+                const key = window.localStorage.key(index);
+                return [key, window.localStorage.getItem(key)];
+            })
+        )"""
+    )
+    assert local_storage == {
+        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.saveRequest": "false",
+    }
+
+
+def test_stage19_batch_workbench_does_not_leak_sensitive_values(
+    page: Page, live_server_url: str, storage_dir: Path
+) -> None:
+    """US-141: Batch parse, card display, and single-card accept stay sanitized."""
+
+    sensitive_values = (
+        "http://private-llm.stage19.local/v1/chat/completions",
+        "stage19-provider-token",
+        "stage19-cookie",
+        "<html>stage19 raw html</html>",
+        "<rss version='2.0'>stage19 raw rss</rss>",
+        "stage19 raw response body",
+        "magnet:?xt=urn:btih:stage19sensitivehash",
+        "https://mikan.example/Home/Search?searchstr=secret-token",
+        "/home/ghostning/stage19-secret.xml",
+    )
+    first_preview = {
+        # 标题必须命中 static fixture catalog（config/system/static_mikan_sources.json
+        # 仅含「咒术回战 第三季」「葬送的芙莉莲」），否则 generate_request 返回 None。
+        **generate_request(EntryRequest(raw_title="咒术回战"))["request"],
+        "request_id": "req-stage19-sec",
+    }
+    second_preview = {
+        **generate_request(EntryRequest(raw_title="葬送的芙莉莲"))["request"],
+        "request_id": "req-stage19-other",
+    }
+
+    batch_body = json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "batch_id": "batch-stage19-sec",
+                "raw_input": "萌王S4\n路哥S4",
+                "items": [
+                    {
+                        "item_id": "item-sec",
+                        "raw_title": "萌王S4",
+                        "status": "DRAFT",
+                        "canonical_title_candidates": [
+                            "关于我转生变成史莱姆这档事 第四季"
+                        ],
+                        "season_hint": "S4",
+                        "search_queries": ["转生史莱姆 第四季"],
+                        "confidence": 0.9,
+                        "needs_user_review": False,
+                        "source": "fake",
+                        "candidates": [
+                            {
+                                "bangumi_id": "42",
+                                "title": "关于我转生变成史莱姆这档事 第四季",
+                                "mikan_url": "https://mikan.example/Home/Bangumi/42",
+                                "poster_url": None,
+                                "source_query": "转生史莱姆 第四季",
+                                "aliases": [],
+                                "recommendation": None,
+                                "raw_html": sensitive_values[3],
+                                "raw_rss_xml": sensitive_values[4],
+                                "cookie": sensitive_values[2],
+                                "token": sensitive_values[1],
+                                "magnet": sensitive_values[6],
+                                "failed_url": sensitive_values[7],
+                            }
+                        ],
+                        "confirmable_config": {
+                            "selected_subtitle_group": "桜都字幕组",
+                            "selected_rss_url": sensitive_values[7],
+                            "filter_rule": {
+                                "must_contain": "1080p",
+                                "must_not_contain": "V2",
+                                "use_regex": False,
+                                "case_sensitive": False,
+                            },
+                            "effective_seed_names": ["史莱姆 S4 01 [1080p]"],
+                        },
+                        "source_info": {
+                            "raw_html": sensitive_values[3],
+                            "raw_rss_xml": sensitive_values[4],
+                            "cookie": sensitive_values[2],
+                            "token": sensitive_values[1],
+                            "raw_response_body": sensitive_values[5],
+                            "local_path": sensitive_values[8],
+                            "rss_sources": [
+                                {
+                                    "subtitle_group": "桜都字幕组",
+                                    "rss_url": sensitive_values[7],
+                                    "seed_names": [
+                                        "史莱姆 S4 01 [1080p]",
+                                        "史莱姆 S4 01 V2 [1080p]",
+                                    ],
+                                    "valid_seed_names": ["史莱姆 S4 01 [1080p]"],
+                                    "excluded_seed_names": [
+                                        {
+                                            "name": "史莱姆 S4 01 V2 [1080p]",
+                                            "reason": "命中排除规则：V2",
+                                        }
+                                    ],
+                                }
+                            ],
+                        },
+                        "preview_request": first_preview,
+                        "provider_response": {
+                            "endpoint": sensitive_values[0],
+                            "token": sensitive_values[1],
+                            "raw_response_body": sensitive_values[5],
+                        },
+                    },
+                    {
+                        "item_id": "item-other",
+                        "raw_title": "路哥S4",
+                        "status": "DRAFT",
+                        "canonical_title_candidates": ["实力至上主义教室 第四季"],
+                        "season_hint": "S4",
+                        "search_queries": ["实力至上主义教室 第四季"],
+                        "confidence": 0.8,
+                        "needs_user_review": False,
+                        "source": "fake",
+                        "candidates": [],
+                        "confirmable_config": None,
+                        "source_info": None,
+                        "preview_request": second_preview,
+                    },
+                ],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+    saved_calls: list[dict[str, Any]] = []
+    accept_calls: list[dict[str, Any]] = []
+
+    def _fulfill_batch(route: Any, request: Request) -> None:
+        route.fulfill(status=200, content_type="application/json", body=batch_body)
+
+    def _save_preview(route: Any, request: Request) -> None:
+        payload = json.loads(request.post_data or "{}")
+        saved_calls.append(payload)
+        saved = dict(payload["request"])
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "request": saved,
+                        "summary": {"request_id": saved["request_id"]},
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    def _accept(route: Any, request: Request) -> None:
+        accept_calls.append(json.loads(request.post_data or "{}"))
+        accepted = dict(first_preview)
+        accepted["status"] = "ACCEPTED"
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "request": accepted,
+                        "summary": {"request_id": accepted["request_id"]},
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    page.route("**/api/v1/batches/parse", _fulfill_batch)
+    page.route("**/api/v1/requests/preview-save", _save_preview)
+    # acceptSavedRequest 用 apiPath() 拼 URL，设置 storage 偏好后 URL 会带
+    # ?storage_dir= query；Playwright glob 不匹配 query，必须加 * 通配。
+    page.route("**/api/v1/requests/req-stage19-sec/accept*", _accept)
+
+    set_storage_preferences(page, storage_dir, save_request=False)
+    page.goto(f"{live_server_url}/index")
+    page.fill("#batch-raw-input", "萌王S4\n路哥S4")
+    page.click("#batch-parse-submit")
+    expect(page.locator(".batch-draft-card")).to_have_count(2)
+    page.locator(".batch-draft-card", has_text="萌王S4").locator(
+        ".batch-card-expand"
+    ).click()
+
+    page.once("dialog", lambda dialog: dialog.accept())
+    page.locator(".batch-draft-card", has_text="萌王S4").locator(
+        ".batch-card-accept"
+    ).click()
+    page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+    first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+    second_card = page.locator(".batch-draft-card", has_text="路哥S4")
+    expect(first_card.locator(".batch-card-status")).to_contain_text("已接受")
+    expect(first_card.locator(".batch-card-delete")).to_be_hidden()
+    expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
+    assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-stage19-sec"
+    # 设置了 storage 偏好时，accept 请求体按 RequestActionPayload 契约携带
+    # storage_dir（URL query 经 apiPath 同样携带）；storage_dir 是功能参数，
+    # 不属于 sensitive_values。无偏好分支（null）由 accept 测试覆盖。
+    assert accept_calls and accept_calls[0]["storage_dir"] == str(storage_dir)
+
+    browser_state = page.evaluate(
+        """() => ({
+            url: window.location.href,
+            localStorage: JSON.stringify(window.localStorage),
+            sessionStorage: JSON.stringify(window.sessionStorage),
+            bodyText: document.body.innerText,
+        })"""
+    )
+    serialized_calls = json.dumps(saved_calls + accept_calls, ensure_ascii=False)
+    storage_json = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in storage_dir.rglob("*.json")
+    )
+    for value in sensitive_values:
+        assert value not in browser_state["url"]
+        assert value not in browser_state["localStorage"]
+        assert value not in browser_state["sessionStorage"]
+        assert value not in browser_state["bodyText"]
+        assert value not in serialized_calls
+        assert value not in storage_json
 
     local_storage = page.evaluate(
         """() => Object.fromEntries(

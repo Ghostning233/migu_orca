@@ -16,7 +16,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先建立 batch/item 原子数据契约；不要在本 story 接入 Web UI 或 MiKan 搜索。"
     },
     {
@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "只做 seam 和 fake provider；不要接真实 LLM API。"
     },
     {
@@ -50,7 +50,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "API 应复用 US-132/US-133 的模型和 provider seam；不要在本 story 做卡片 UI。"
     },
     {
@@ -67,7 +67,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "优先复用现有 `/api/v1/mikan/candidates` 逻辑或其内部函数，避免第二套 MiKan parser。"
     },
     {
@@ -85,7 +85,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "只展示解析结果，不要求本 story 生成完整订阅草案卡片。"
     },
     {
@@ -103,7 +103,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "可以先使用 API 返回的公开候选/草案摘要渲染；不要在卡片中暴露 raw RSS 或敏感外部配置。"
     },
     {
@@ -121,7 +121,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "展示规则应复用 Stage 18 详情页的中文状态和 Seeds 语义。"
     },
     {
@@ -139,7 +139,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "必须复用现有 preview-modify/modify 逻辑；不要为批量卡片实现第二套筛选规则计算。"
     },
     {
@@ -158,7 +158,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Stage 20 再做批量接受和 AB 提交队列。"
     },
     {
@@ -174,7 +174,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Stage closeout story；所有功能 story 完成后再执行。"
     }
   ]

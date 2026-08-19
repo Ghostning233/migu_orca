@@ -7,7 +7,7 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 19 PRD: Batch Draft Workbench |
 | 文档类型 | Stage PRD |
-| 当前状态 | Draft |
+| 当前状态 | Completed |
 | 创建日期 | 2026-08-19 |
 | 依赖阶段 | Stage 16、Stage 17、Stage 18 |
 
@@ -278,7 +278,25 @@ Stage 19 的 Ralph 执行队列见 `scripts/ralph/prd.json`。每个 story 必�
 4. 批量草案中可保存用户输入的番剧名、公开候选元数据、筛选规则和 Request snapshot。
 5. Auto Bangumi endpoint/token 仍只在显式提交时 request-scoped 使用，不进入批量草案或浏览器 storage。
 
-## 10. 验收汇总
+## 10. 完成情况
+
+Stage 19 已完成批量新番订阅草案工作台的最小闭环：
+
+1. `POST /api/v1/batches/parse` 支持多行输入解析，每个非空行作为独立 batch item。
+2. AI 名称解析已提供 provider seam 和 fake provider，输出候选标题、季数提示、搜索词、置信度和人工审核标记；provider 或单项 MiKan 搜索失败只影响当前 item。
+3. 批量 API 复用现有 MiKan candidate search 能力逐项搜索候选，响应只序列化公开候选元数据。
+4. `/index` 已提供批量获取入口、示例输入、空输入前端校验、loading 状态和解析结果展示。
+5. 批量工作区以可滚动卡片网格展示条目，支持删除单卡、窄屏单列、展开查看过滤器/种子摘要、进入现有预览详情修改并回流当前卡片。
+6. 单卡接受已复用现有 Request 接受能力：未保存预览先通过 `preview-save` 持久化，再调用 Request accept；接受只更新当前卡片，已接受卡片隐藏无确认删除动作。
+7. 安全回归覆盖 AI/批量解析/MiKan 候选/卡片展示/单卡接受链路，确保 raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径不进入 UI、浏览器 storage、URL 或持久化 JSON。
+
+Stage 20 handoff：
+
+1. 在 Stage 19 单卡接受基础上实现批量接受、全接受和提交前队列。
+2. 队列应展示待提交、提交中、成功、失败、可重试状态，并复用现有 Auto Bangumi submit 能力。
+3. Auto Bangumi endpoint/token/fallback 仍必须显式确认且 request-scoped；提交结果和错误继续保持脱敏。
+
+## 11. 验收汇总
 
 Stage 19 完成后，用户应可以：
 

@@ -19,6 +19,21 @@ from apps.migu_orca_entry.controllers.entry_controller import (
     _build_history_event,
     _confirmation_history_details,
 )
+from batch_engine.controllers.anime_title_parser import (
+    AnimeTitleParsingProvider,
+    FakeAnimeTitleParsingProvider,
+    parse_anime_title,
+)
+from batch_engine.controllers.batch_draft_controller import (
+    create_batch_draft,
+    update_batch_item_status,
+)
+from batch_engine.models import (
+    BATCH_ITEM_STATUS_FAILED,
+    BATCH_ITEM_STATUS_PARSED,
+    AnimeTitleParseResult,
+    BatchDraftItem,
+)
 from mikan_engine.controllers import mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_candidate_cache import (
     candidate_cache_key,
@@ -94,6 +109,14 @@ class MikanCandidateSearchPayload(BaseModel):
         if not query:
             raise ValueError("query cannot be empty")
         return query
+
+
+class BatchParsePayload(BaseModel):
+    raw_input: str
+    mikan_config: RequestMikanConfigPayload | None = Field(
+        default=None,
+        validate_default=True,
+    )
 
 
 class RequestCreatePayload(BaseModel):
@@ -248,6 +271,53 @@ def _resolve_mikan_config(explicit: RequestMikanConfigPayload | None) -> MikanCo
     return default_mikan_config()
 
 
+def _batch_title_parsing_provider() -> AnimeTitleParsingProvider:
+    return FakeAnimeTitleParsingProvider()
+
+
+def _serialize_batch_parse_result(
+    item: BatchDraftItem,
+    parse_result: AnimeTitleParseResult,
+    *,
+    candidates: list[dict[str, object]] | None = None,
+    error: Stage1Error | None = None,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "item_id": item.item_id,
+        "raw_title": item.raw_title,
+        "status": item.status,
+        "canonical_title_candidates": list(parse_result.canonical_title_candidates),
+        "season_hint": parse_result.season_hint,
+        "search_queries": list(parse_result.search_queries),
+        "confidence": parse_result.confidence,
+        "needs_user_review": parse_result.needs_user_review,
+        "source": parse_result.source,
+        "candidates": candidates or [],
+    }
+    if error is not None:
+        result["error"] = _optional_error(error)
+    return result
+
+
+def _serialize_failed_batch_item(
+    item: BatchDraftItem,
+    error: Stage1Error,
+) -> dict[str, object]:
+    return {
+        "item_id": item.item_id,
+        "raw_title": item.raw_title,
+        "status": item.status,
+        "canonical_title_candidates": [],
+        "season_hint": None,
+        "search_queries": [],
+        "confidence": 0.0,
+        "needs_user_review": True,
+        "source": "unknown",
+        "candidates": [],
+        "error": _optional_error(error),
+    }
+
+
 def _raise_result_error(result: dict[str, Any]) -> None:
     error = result.get("error")
     if not isinstance(error, dict):
@@ -266,11 +336,13 @@ def _raise_result_error(result: dict[str, Any]) -> None:
 
 
 def _optional_error(error: Stage1Error) -> dict[str, object]:
+    details = _strip_sensitive_result_fields(sanitize_error_data(error.details or {}))
+    assert isinstance(details, dict)
     return {
         "error_type": error.error_type,
         "error_message": error.message,
         "failed_step": error.failed_step,
-        "details": error.details or {},
+        "details": details,
     }
 
 
@@ -315,6 +387,22 @@ def _search_mikan_candidates(
     candidates = client.search_candidates(query)
     candidate_search_cache.set(cache_key, candidates)
     return [_serialize_candidate(candidate, query) for candidate in candidates]
+
+
+def _search_batch_item_candidates(
+    search_queries: list[str],
+    mikan_config: MikanConfig,
+) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    seen: set[tuple[object, object]] = set()
+    for query in search_queries:
+        for candidate in _search_mikan_candidates(query, mikan_config):
+            key = (candidate.get("bangumi_id"), candidate.get("mikan_url"))
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(candidate)
+    return candidates
 
 
 def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
@@ -378,7 +466,16 @@ def _qbittorrent_error_message(error_type: str, fallback: str) -> str:
 
 
 def _strip_sensitive_result_fields(value: Any) -> Any:
-    blocked = ("token", "secret", "cookie", "authorization", "password", "passwd", "bearer")
+    blocked = (
+        "token",
+        "secret",
+        "cookie",
+        "authorization",
+        "password",
+        "passwd",
+        "bearer",
+        "magnet",
+    )
     if isinstance(value, dict):
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
@@ -390,6 +487,8 @@ def _strip_sensitive_result_fields(value: Any) -> Any:
         return sanitized
     if isinstance(value, list):
         return [_strip_sensitive_result_fields(item) for item in value]
+    if isinstance(value, str) and "magnet:?" in value.lower():
+        return "[redacted]"
     return value
 
 
@@ -571,6 +670,92 @@ class MikanCandidateSearchView(PostView):
         return {
             "query": payload.query,
             "candidates": candidates,
+        }
+
+
+@class_route(api_blueprint, "/api/v1/batches/parse", methods=["POST"])
+class BatchParseView(PostView):
+    request_validator_model = BatchParsePayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchParsePayload)
+        batch = create_batch_draft(self.request_validator_model.raw_input)
+        if not batch.items:
+            raise Stage1Error(
+                "validation_error",
+                "请至少输入一个番剧名称",
+                "batch_parse",
+                {"field": "raw_input"},
+            )
+
+        provider = _batch_title_parsing_provider()
+        mikan_config = _resolve_mikan_config(self.request_validator_model.mikan_config)
+        serialized_items: list[dict[str, object]] = []
+        for item in batch.items:
+            try:
+                parse_result = parse_anime_title(item.raw_title, provider)
+            except Stage1Error as exc:
+                failed_batch = update_batch_item_status(
+                    batch,
+                    item.item_id,
+                    BATCH_ITEM_STATUS_FAILED,
+                )
+                failed_item = next(
+                    updated
+                    for updated in failed_batch.items
+                    if updated.item_id == item.item_id
+                )
+                serialized_items.append(_serialize_failed_batch_item(failed_item, exc))
+                continue
+
+            try:
+                candidates = _search_batch_item_candidates(
+                    parse_result.search_queries,
+                    mikan_config,
+                )
+            except Stage1Error as exc:
+                failed_batch = update_batch_item_status(
+                    batch,
+                    item.item_id,
+                    BATCH_ITEM_STATUS_FAILED,
+                )
+                failed_item = next(
+                    updated
+                    for updated in failed_batch.items
+                    if updated.item_id == item.item_id
+                )
+                serialized_items.append(
+                    _serialize_batch_parse_result(
+                        failed_item,
+                        parse_result,
+                        candidates=[],
+                        error=exc,
+                    )
+                )
+                continue
+
+            parsed_batch = update_batch_item_status(
+                batch,
+                item.item_id,
+                BATCH_ITEM_STATUS_PARSED,
+            )
+            parsed_item = next(
+                updated
+                for updated in parsed_batch.items
+                if updated.item_id == item.item_id
+            )
+            serialized_items.append(
+                _serialize_batch_parse_result(
+                    parsed_item,
+                    parse_result,
+                    candidates=candidates,
+                )
+            )
+
+        return {
+            "batch_id": batch.batch_id,
+            "raw_input": batch.raw_input,
+            "items": serialized_items,
         }
 
 

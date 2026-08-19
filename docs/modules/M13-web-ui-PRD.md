@@ -46,9 +46,9 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 16 | 真实 MiKan direct URL/ID 入口 | API-only | CLI/API 支持 `mikan_bangumi` request-scoped direct entry；Web UI 暂不展示直连输入控件 |
 | Stage 17 | 真实 MiKan 候选搜索、手动选择与直连 fallback | 已接入 | `/index` 默认折叠的候选搜索区支持候选卡片、`选择此合集` 手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签；全部复用 `mikan_bangumi` 生成链路，不自动选择、不自动生成 |
 | Stage 18 | 真实 MiKan 主流程、可编辑预览与 Seeds 优化 | 已接入 | `/index` 主生成区默认搜索真实 MiKan 候选；普通 UI 移除 `search_endpoint`、`timeout_seconds`、`query`；候选选择和直连 fallback 默认生成可编辑订阅草案（`preview-modify` dry-run + `preview-save`）；Seeds 改为有效、完整、排除顺序并按字幕组分组；fixture 入口放入底部「开发 / 离线测试」面板并默认收起 |
-| Stage 19 | 批量输入与订阅草案卡片工作台 | 待规划 | 用户批量输入简称或口语番名；AI 解析为候选官方标题和搜索词；每个条目生成可审核卡片，支持删除、展开、进入详情修改和单卡接受 |
+| Stage 19 | 批量输入与订阅草案卡片工作台 | 已接入 | `/index` 批量工作区支持多行简称输入、AI 名称解析 seam、逐项 MiKan 候选搜索、订阅草案卡片网格、删除、展开、详情修改回流和单卡接受 |
 
-以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。
+以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。
 
 Stage 15 UI 质量要求：
 
@@ -73,18 +73,26 @@ Stage 18 UI 调整要求（Stage 18 已落地）：
 7. Seeds 展示顺序必须为有效种子、完整种子、排除种子；完整种子按字幕组分组并可展开/收起。
 8. fixture 入口如果仍在 Web 中保留，必须标注为开发/离线测试并默认隐藏或低优先级展示。Stage 18 实现为 `/index` 底部「开发 / 离线测试」面板中的 `Fixture 生成` 折叠区，`<details id="dev-fixture-disclosure">` 默认不带 `open`（收起），普通用户路径不会触发 fixture 生成；只有开发者手动展开后才能使用。
 
+Stage 19 UI 调整要求（Stage 19 已落地）：
+
+1. `/index` 提供批量获取入口，包含多行输入框、示例简称和提交按钮；空输入在前端以中文错误拦截，不调用批量 API。
+2. 批量结果以 `.batch-card-grid` 卡片网格展示，桌面端通常一行 4 个，窄屏最低一行 1 个，长列表外层可滚动。
+3. 每张卡片展示封面或占位、番剧标题、源名称、有效种子数、中文状态和可用动作；删除只移除当前卡片。
+4. DRAFT/READY 卡片可展开查看当前字幕组、包含规则、排除规则、匹配模式、大小写、有效种子和排除种子摘要。
+5. 单卡 `修改` 复用现有未保存预览详情修改流程，保存后只更新当前卡片。
+6. 单卡 `接受` 复用现有 Request accept 能力，成功后当前卡片状态显示为「已接受」，同批次其他卡片不变。
+7. 已接受卡片不得展示无需确认的危险删除动作；Stage 19 不提供批量接受、全接受或 Auto Bangumi 提交队列。
+
 ## 4. 后续能力规划
 
 Web UI 后续可以支持：
 
-1. Stage 19 批量番剧输入、AI 名称解析和订阅草案卡片工作台。
-2. 单个卡片删除、展开查看、进入详情修改和单卡接受。
-3. 批量接受、全接受和 Auto Bangumi 提交前队列管理。
-4. 字幕组和 RSS 源候选的更细粒度人工选择。
-5. 降级 JSON 下载或复制入口。
-6. 更多用户偏好、字幕组偏好和规则配置管理。
-7. 部署/配置向导仅作为远期辅助能力，不作为 qBittorrent 下载或 Auto Bangumi 替代执行系统。
-8. 认证、权限或远程部署保护，仅在出现多人使用或公网暴露场景后实现。
+1. 批量接受、全接受和 Auto Bangumi 提交前队列管理。
+2. 字幕组和 RSS 源候选的更细粒度人工选择。
+3. 降级 JSON 下载或复制入口。
+4. 更多用户偏好、字幕组偏好和规则配置管理。
+5. 部署/配置向导仅作为远期辅助能力，不作为 qBittorrent 下载或 Auto Bangumi 替代执行系统。
+6. 认证、权限或远程部署保护，仅在出现多人使用或公网暴露场景后实现。
 
 ## 5. 待确认问题
 

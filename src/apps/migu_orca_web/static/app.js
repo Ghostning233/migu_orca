@@ -46,6 +46,11 @@
   const candidateFallbackInput = document.getElementById("mikan-fallback-bangumi");
   const candidateFallbackError = document.getElementById("mikan-fallback-error");
   const candidateFallbackGenerate = document.getElementById("mikan-fallback-generate");
+  const batchParseForm = document.getElementById("batch-parse-form");
+  const batchRawInput = document.getElementById("batch-raw-input");
+  const batchParseError = document.getElementById("batch-parse-error");
+  const batchParseResult = document.getElementById("batch-parse-result");
+  const batchParseSubmit = document.getElementById("batch-parse-submit");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -54,6 +59,8 @@
   let selectedRequestId = null;
   let loadedRequests = [];
   let currentDetailPayload = null;
+  let currentBatchEditItemId = null;
+  let batchDraftCards = [];
   let storageDirPreference = "";
   let saveRequestPreference = true;
 
@@ -731,6 +738,537 @@
 
   if (!form) {
     return;
+  }
+
+  function batchStatusLabel(status) {
+    const labels = {
+      RAW: "待解析",
+      PARSED: "已解析",
+      FAILED: "解析失败",
+      NEEDS_REVIEW: "待确认",
+      DRAFT: "草案",
+      READY: "待接受",
+      ACCEPTED: "已接受",
+    };
+    const value = fieldValue(status);
+    return Object.prototype.hasOwnProperty.call(labels, value)
+      ? labels[value]
+      : value;
+  }
+
+  function setBatchParseError(message, field) {
+    if (!batchParseError) {
+      return;
+    }
+    batchParseError.textContent = message;
+    batchParseError.hidden = false;
+    if (batchRawInput) {
+      batchRawInput.removeAttribute("aria-invalid");
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearBatchParseError() {
+    if (!batchParseError) {
+      return;
+    }
+    batchParseError.textContent = "";
+    batchParseError.hidden = true;
+    if (batchRawInput) {
+      batchRawInput.removeAttribute("aria-invalid");
+    }
+  }
+
+  function setBatchParseResult(message, className) {
+    if (!batchParseResult) {
+      return;
+    }
+    batchParseResult.className = className || "empty-state compact-state";
+    batchParseResult.replaceChildren();
+    batchParseResult.textContent = message;
+  }
+
+  function setBatchParseInFlight(isInFlight) {
+    if (batchRawInput) {
+      batchRawInput.disabled = isInFlight;
+    }
+    if (batchParseSubmit) {
+      batchParseSubmit.disabled = isInFlight;
+      batchParseSubmit.textContent = isInFlight
+        ? "正在获取..."
+        : "获取批量草案";
+    }
+  }
+
+  function buildBatchParsePayload() {
+    const rawInput = batchRawInput ? batchRawInput.value : "";
+    if (!rawInput.trim()) {
+      const error = new Error("批量获取前必须输入至少一个番剧名称。");
+      error.field = batchRawInput;
+      throw error;
+    }
+    return {raw_input: rawInput};
+  }
+
+  function batchCardTitle(row) {
+    const canonicalTitles = Array.isArray(row.canonical_title_candidates)
+      ? row.canonical_title_candidates
+      : [];
+    if (canonicalTitles.length) {
+      return safeText(canonicalTitles[0]) || "未命名条目";
+    }
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    if (candidates.length) {
+      return safeText(candidates[0].title) || "未命名条目";
+    }
+    return safeText(row.raw_title) || "未命名条目";
+  }
+
+  function batchCardSourceName(row) {
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    if (candidates.length) {
+      const candidate = candidates[0];
+      const source = safeText(candidate.source_query || candidate.bangumi_id);
+      return source ? "MiKan：" + source : "MiKan 候选";
+    }
+    const queries = Array.isArray(row.search_queries) ? row.search_queries : [];
+    if (queries.length) {
+      return "搜索词：" + safeText(queries[0]);
+    }
+    return safeText(row.source) || "待解析";
+  }
+
+  function batchCardSeedSummary(row) {
+    const review = batchCardReviewData(row);
+    const value = review.effectiveSeeds.length || row.valid_seed_count;
+    if (Number.isInteger(value) && value >= 0) {
+      return String(value);
+    }
+    return "待展开";
+  }
+
+  function batchCardReviewData(row) {
+    const request = row.request || row.preview_request || row.draft_request || row;
+    const config = request.confirmable_config || row.confirmable_config || {};
+    const sourceInfo = request.source_info || row.source_info || {};
+    const filterRule = config.filter_rule || row.filter_rule || {};
+    const source = selectedRssSource(sourceInfo, config);
+    const validSeeds = source.valid_seed_names || row.valid_seed_names || [];
+    const excludedSeeds = source.excluded_seed_names || row.excluded_seed_names || [];
+    const effectiveSeeds =
+      config.effective_seed_names ||
+      row.effective_seed_names ||
+      validSeeds;
+    const selectedGroupName =
+      config.selected_subtitle_group ||
+      row.selected_subtitle_group ||
+      source.subtitle_group ||
+      "未选择字幕组";
+    return {
+      config: config,
+      filterRule: filterRule,
+      effectiveSeeds: Array.isArray(effectiveSeeds) ? effectiveSeeds : [],
+      excludedSeeds: Array.isArray(excludedSeeds) ? excludedSeeds : [],
+      selectedGroupName: selectedGroupName,
+    };
+  }
+
+  function canExpandBatchCard(row) {
+    return ["DRAFT", "READY"].indexOf(fieldValue(row.status)) !== -1;
+  }
+
+  function batchCardRequest(row) {
+    return row.request || row.preview_request || row.draft_request || null;
+  }
+
+  function canModifyBatchCard(row) {
+    return canExpandBatchCard(row) && Boolean(batchCardRequest(row));
+  }
+
+  function canAcceptBatchCard(row) {
+    return canExpandBatchCard(row) && Boolean(batchCardRequest(row));
+  }
+
+  function updateBatchCardRequest(itemId, modified) {
+    if (!itemId || !modified) {
+      return;
+    }
+    batchDraftCards = batchDraftCards.map((row) => {
+      if (row.item_id !== itemId) {
+        return row;
+      }
+      const next = Object.assign({}, row);
+      if (row.request) {
+        next.request = modified;
+      } else if (row.draft_request) {
+        next.draft_request = modified;
+      } else {
+        next.preview_request = modified;
+      }
+      next.confirmable_config = modified.confirmable_config || row.confirmable_config;
+      next.source_info = modified.source_info || row.source_info;
+      return next;
+    });
+    renderBatchParseItems(batchDraftCards);
+  }
+
+  function markBatchCardAccepted(itemId, acceptedRequest) {
+    if (!itemId || !acceptedRequest) {
+      return;
+    }
+    batchDraftCards = batchDraftCards.map((row) => {
+      if (row.item_id !== itemId) {
+        return row;
+      }
+      const next = Object.assign({}, row);
+      next.status = "ACCEPTED";
+      next.request = acceptedRequest;
+      delete next.preview_request;
+      delete next.draft_request;
+      next.confirmable_config =
+        acceptedRequest.confirmable_config || row.confirmable_config;
+      next.source_info = acceptedRequest.source_info || row.source_info;
+      return next;
+    });
+    renderBatchParseItems(batchDraftCards);
+  }
+
+  async function savePreviewDraftRequest(request) {
+    const result = await fetchJson("/api/v1/requests/preview-save", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        request: request,
+        storage_dir: currentStorageDir() || null,
+      }),
+    });
+    return result && result.request;
+  }
+
+  async function acceptSavedRequest(requestId) {
+    if (!requestId) {
+      throw new Error("订阅草案缺少 request_id。");
+    }
+    const result = await fetchJson(
+      apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/accept"),
+      {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({storage_dir: currentStorageDir() || null}),
+      },
+    );
+    return result && result.request;
+  }
+
+  async function acceptBatchCard(row) {
+    const request = batchCardRequest(row);
+    if (!request) {
+      showNotification(
+        "error",
+        "接受失败",
+        "当前卡片缺少订阅草案，无法接受。",
+      );
+      return;
+    }
+    hideNotification();
+    setBatchParseInFlight(true);
+    try {
+      const savedRequest = row.request
+        ? request
+        : await savePreviewDraftRequest(request);
+      const acceptedRequest = await acceptSavedRequest(savedRequest.request_id);
+      markBatchCardAccepted(row.item_id, acceptedRequest);
+      await loadList({loadSelectedDetail: false});
+      showNotification(
+        "success",
+        "接受成功",
+        "当前批量卡片已标记为已接受，其他卡片保持不变。",
+      );
+    } catch (error) {
+      notifyApiError("接受失败", error);
+    } finally {
+      setBatchParseInFlight(false);
+    }
+  }
+
+  function setPreviewEditError(message) {
+    const formError = document.getElementById("preview-edit-error");
+    if (!formError) {
+      return;
+    }
+    formError.textContent = message || "订阅草案修改失败。请重试。";
+    formError.hidden = false;
+  }
+
+  function openBatchCardModify(row) {
+    const request = batchCardRequest(row);
+    if (!request) {
+      showNotification(
+        "error",
+        "修改失败",
+        "当前卡片缺少订阅草案，无法进入修改流程。",
+      );
+      return;
+    }
+    currentBatchEditItemId = row.item_id || null;
+    renderDetailPayload({request: request}, {preview: true, batchItemId: row.item_id});
+    if (detailContainer && detailContainer.scrollIntoView) {
+      detailContainer.scrollIntoView({behavior: "smooth", block: "start"});
+    }
+    showNotification(
+      "success",
+      "正在修改当前卡片",
+      "已打开订阅草案修改流程；应用修改后只会回流当前批量卡片。",
+    );
+  }
+
+  function renderBatchCardReviewPanel(row) {
+    const review = batchCardReviewData(row);
+    const filterRule = review.filterRule;
+    const matchMode = filterRule.use_regex === true ? "正则" : "普通字符";
+    const caseMode = filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写";
+    const panel = document.createElement("div");
+    panel.className = "batch-card-review";
+    panel.hidden = true;
+
+    const filterBlock = document.createElement("div");
+    filterBlock.className = "batch-card-review-block";
+    const filterHeading = document.createElement("h4");
+    filterHeading.textContent = "过滤器";
+    filterBlock.appendChild(filterHeading);
+    filterBlock.appendChild(
+      detailList([
+        ["当前字幕组", review.selectedGroupName],
+        ["包含规则", filterRule.must_contain],
+        ["排除规则", filterRule.must_not_contain],
+        ["匹配模式", matchMode],
+        ["大小写", caseMode],
+      ]),
+    );
+
+    const seedsBlock = document.createElement("div");
+    seedsBlock.className = "batch-card-review-block batch-card-seed-summary";
+    const seedsHeading = document.createElement("h4");
+    seedsHeading.textContent = "种子摘要";
+    seedsBlock.appendChild(seedsHeading);
+
+    const effectiveGroup = document.createElement("div");
+    effectiveGroup.className = "seed-group batch-effective-seeds";
+    const effectiveHeading = document.createElement("h5");
+    effectiveHeading.textContent =
+      "有效种子（当前选中字幕组：" + review.selectedGroupName + "）(" +
+      review.effectiveSeeds.length + ")";
+    effectiveGroup.appendChild(effectiveHeading);
+    renderSeedList(effectiveGroup, review.effectiveSeeds, "无有效种子标题。");
+    seedsBlock.appendChild(effectiveGroup);
+
+    const excludedGroup = document.createElement("div");
+    excludedGroup.className = "seed-group batch-excluded-seeds";
+    const excludedHeading = document.createElement("h5");
+    excludedHeading.textContent = "排除种子 (" + review.excludedSeeds.length + ")";
+    excludedGroup.appendChild(excludedHeading);
+    renderExcludedSeedList(excludedGroup, review.excludedSeeds);
+    seedsBlock.appendChild(excludedGroup);
+
+    const actions = document.createElement("div");
+    actions.className = "notification-actions batch-card-actions";
+    const modifyButton = document.createElement("button");
+    modifyButton.type = "button";
+    modifyButton.className = "secondary-button batch-card-modify";
+    modifyButton.textContent = "修改";
+    modifyButton.disabled = !canModifyBatchCard(row);
+    if (modifyButton.disabled) {
+      modifyButton.title = "生成订阅草案后可修改";
+    }
+    modifyButton.addEventListener("click", function () {
+      openBatchCardModify(row);
+    });
+    actions.appendChild(modifyButton);
+
+    const acceptButton = document.createElement("button");
+    acceptButton.type = "button";
+    acceptButton.className = "primary-button batch-card-accept";
+    acceptButton.textContent = "接受";
+    acceptButton.disabled = !canAcceptBatchCard(row);
+    if (acceptButton.disabled) {
+      acceptButton.title = "生成订阅草案后可接受";
+    }
+    acceptButton.addEventListener("click", function () {
+      if (window.confirm("确认接受当前批量卡片？")) {
+        acceptBatchCard(row);
+      }
+    });
+    actions.appendChild(acceptButton);
+
+    panel.append(filterBlock, seedsBlock, actions);
+    return panel;
+  }
+
+  function deleteBatchCard(itemId) {
+    batchDraftCards = batchDraftCards.filter((row) => row.item_id !== itemId);
+    renderBatchParseItems(batchDraftCards);
+  }
+
+  function renderBatchCard(row) {
+    const item = document.createElement("article");
+    item.className = "batch-draft-card";
+    item.dataset.itemId = safeText(row.item_id);
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "icon-button batch-card-delete";
+    removeButton.setAttribute("aria-label", "删除 " + (safeText(row.raw_title) || "批量条目"));
+    removeButton.title = "删除";
+    removeButton.textContent = "×";
+    if (fieldValue(row.status) === "ACCEPTED") {
+      removeButton.hidden = true;
+    }
+    removeButton.addEventListener("click", () => {
+      deleteBatchCard(row.item_id);
+    });
+
+    const posterWrap = document.createElement("div");
+    posterWrap.className = "batch-card-poster";
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    const posterUrl = candidates.length ? safeText(candidates[0].poster_url) : "";
+    if (posterUrl) {
+      const poster = document.createElement("img");
+      poster.alt = "";
+      poster.src = posterUrl;
+      posterWrap.appendChild(poster);
+    } else {
+      posterWrap.textContent = "订阅草案";
+    }
+
+    const status = document.createElement("span");
+    status.className = "batch-status batch-card-status";
+    status.textContent = batchStatusLabel(row.status);
+
+    const title = document.createElement("strong");
+    title.className = "batch-card-title";
+    title.textContent = batchCardTitle(row);
+
+    const rawTitle = document.createElement("div");
+    rawTitle.className = "batch-card-raw-title";
+    rawTitle.textContent = "输入：" + (safeText(row.raw_title) || "未命名条目");
+
+    const source = document.createElement("div");
+    source.className = "batch-card-source";
+    source.textContent = "源名称：" + batchCardSourceName(row);
+
+    const seeds = document.createElement("div");
+    seeds.className = "batch-card-seeds";
+    seeds.textContent = "有效种子数：" + batchCardSeedSummary(row);
+
+    const expandButton = document.createElement("button");
+    expandButton.type = "button";
+    expandButton.className = "secondary-button batch-card-expand";
+    expandButton.textContent = "展开";
+    expandButton.setAttribute("aria-label", "展开 " + (safeText(row.raw_title) || "批量条目"));
+    const reviewPanel = renderBatchCardReviewPanel(row);
+    if (!canExpandBatchCard(row)) {
+      expandButton.disabled = true;
+      expandButton.title = "生成草案后可展开查看";
+    }
+    expandButton.addEventListener("click", () => {
+      const isOpening = reviewPanel.hidden;
+      reviewPanel.hidden = !isOpening;
+      expandButton.textContent = isOpening ? "收起" : "展开";
+      expandButton.setAttribute(
+        "aria-expanded",
+        isOpening ? "true" : "false",
+      );
+    });
+    expandButton.setAttribute("aria-expanded", "false");
+
+    item.append(
+      removeButton,
+      posterWrap,
+      status,
+      title,
+      rawTitle,
+      source,
+      seeds,
+      expandButton,
+      reviewPanel,
+    );
+    return item;
+  }
+
+  function renderBatchParseItems(items) {
+    const rows = Array.isArray(items) ? items : [];
+    if (!rows.length) {
+      setBatchParseResult(
+        "没有可展示的批量解析结果。",
+        "empty-state compact-state",
+      );
+      return;
+    }
+
+    batchParseResult.className = "batch-card-grid-wrapper";
+    batchParseResult.replaceChildren();
+
+    const list = document.createElement("div");
+    list.className = "batch-card-grid";
+    for (const row of rows) {
+      list.appendChild(renderBatchCard(row));
+    }
+    batchParseResult.appendChild(list);
+  }
+
+  async function parseBatchDraft(event) {
+    event.preventDefault();
+    clearBatchParseError();
+    let payload;
+    try {
+      payload = buildBatchParsePayload();
+    } catch (validationError) {
+      setBatchParseError(
+        validationError.message || "批量草案表单校验失败。",
+        validationError.field,
+      );
+      setBatchParseResult(
+        "请修正批量输入后再获取草案。",
+        "error-state compact-state",
+      );
+      return;
+    }
+
+    setBatchParseInFlight(true);
+    setBatchParseResult(
+      "正在解析批量番剧名称...",
+      "loading-state compact-state",
+    );
+    try {
+      const result = await fetchJson("/api/v1/batches/parse", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      const items = (result && result.items) || [];
+      batchDraftCards = Array.isArray(items) ? items.slice() : [];
+      renderBatchParseItems(batchDraftCards);
+      showNotification(
+        "success",
+        "批量草案已获取",
+        "已返回 " + items.length + " 个条目的解析状态。",
+      );
+    } catch (error) {
+      setBatchParseResult(
+        "批量草案获取失败。请稍后重试。",
+        "error-state compact-state",
+      );
+      notifyApiError("批量草案获取失败", error);
+    } finally {
+      setBatchParseInFlight(false);
+    }
+  }
+
+  if (batchParseForm) {
+    batchParseForm.addEventListener("submit", parseBatchDraft);
   }
 
   function setCandidateSearchError(message, field) {
@@ -1906,17 +2444,10 @@
       // accepts PENDING_CONFIRM drafts, so the saved object enters the existing
       // confirmation flow and can then be confirmed, cancelled, modified, or
       // deleted like any other saved Request.
-      const result = await fetchJson("/api/v1/requests/preview-save", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          request: request,
-          storage_dir: currentStorageDir() || null,
-        }),
-      });
-      const generatedRequestId = result.request && result.request.request_id;
+      const savedRequest = await savePreviewDraftRequest(request);
+      const generatedRequestId = savedRequest && savedRequest.request_id;
       selectedRequestId = generatedRequestId;
-      renderDetailPayload(result);
+      renderDetailPayload({request: savedRequest, summary: null});
       await loadList({loadSelectedDetail: false});
       syncRequestIdToUrl(selectedRequestId);
       showNotification("success", "保存成功", "已保存订阅草案 " + selectedRequestId, {
@@ -2020,16 +2551,37 @@
     hideNotification();
     setActionInFlight(true);
     setState(detailContainer, "正在重新计算订阅草案...", "loading-state");
+    const batchItemId = currentBatchEditItemId;
     try {
       const modified = await previewModify(request, patch);
       if (!modified) {
         throw new Error("订阅草案修改失败。");
       }
       updateCurrentPreviewRequest(modified);
-      renderDetailPayload(currentDetailPayload, {preview: true});
-      showNotification("success", "已应用修改", "订阅草案种子展示已重新计算。");
+      if (batchItemId) {
+        updateBatchCardRequest(batchItemId, modified);
+      }
+      renderDetailPayload(currentDetailPayload, {
+        preview: true,
+        batchItemId: batchItemId,
+      });
+      showNotification(
+        "success",
+        "已应用修改",
+        batchItemId
+          ? "当前批量卡片已回流最新订阅草案。"
+          : "订阅草案种子展示已重新计算。",
+      );
     } catch (error) {
-      setState(detailContainer, "订阅草案修改失败。请重试。", "error-state");
+      if (batchItemId && currentDetailPayload) {
+        renderDetailPayload(currentDetailPayload, {
+          preview: true,
+          batchItemId: batchItemId,
+        });
+        setPreviewEditError(error.message || "订阅草案修改失败。请重试。");
+      } else {
+        setState(detailContainer, "订阅草案修改失败。请重试。", "error-state");
+      }
       notifyApiError("修改失败", error);
     } finally {
       setActionInFlight(false);
@@ -2038,6 +2590,8 @@
 
   function renderDetailPayload(payload, options) {
     currentDetailPayload = payload;
+    currentBatchEditItemId =
+      options && options.batchItemId ? options.batchItemId : null;
     var request = payload.request || payload;
     var isPreview = Boolean(
       (options && options.preview) ||

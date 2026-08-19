@@ -9,6 +9,8 @@ import pytest
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
+from batch_engine.models import BATCH_ITEM_STATUS_FAILED, BATCH_ITEM_STATUS_PARSED
 from mikan_engine.controllers.mikan_client import MikanCandidate, create_mikan_client
 from mikan_engine.controllers.mikan_config import (
     DEFAULT_MIKAN_SEARCH_ENDPOINT,
@@ -145,6 +147,23 @@ class _FakeCandidateSearchClient:
         return self.candidates
 
 
+class _MappedCandidateSearchClient:
+    def __init__(
+        self,
+        responses: dict[str, list[MikanCandidate]] | None = None,
+        errors: dict[str, Stage1Error] | None = None,
+    ) -> None:
+        self.responses = responses or {}
+        self.errors = errors or {}
+        self.searches: list[str] = []
+
+    def search_candidates(self, raw_title: str) -> list[MikanCandidate]:
+        self.searches.append(raw_title)
+        if raw_title in self.errors:
+            raise self.errors[raw_title]
+        return self.responses.get(raw_title, [])
+
+
 def test_root_redirects_to_index() -> None:
     response = _client().get("/")
 
@@ -196,6 +215,18 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-candidate-search-form"' in html
     assert 'id="mikan-candidate-query"' in html
     assert 'name="mikan_candidate_title"' in html
+    assert 'id="batch-workbench-entry"' in html
+    assert 'id="batch-parse-form"' in html
+    assert 'id="batch-raw-input"' in html
+    assert 'name="batch_raw_input"' in html
+    assert "批量新番草案" in html
+    assert "萌王S4" in html
+    assert "路哥S4" in html
+    assert "杖剑谭S2" in html
+    assert "邻家天使S2" in html
+    assert 'id="batch-parse-submit"' in html
+    assert 'id="batch-parse-result"' in html
+    assert 'id="batch-parse-error"' in html
     assert 'id="mikan-candidate-search-endpoint"' not in html
     assert 'id="mikan-candidate-timeout-seconds"' not in html
     assert 'name="mikan_candidate_search_endpoint"' not in html
@@ -443,6 +474,52 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "save_request: false" in script
     assert "http://" not in script
     assert "https://" not in script
+
+
+def test_static_app_script_wires_batch_parse_entry() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "/api/v1/batches/parse" in script
+    assert "batch-parse-form" in script
+    assert "batch-raw-input" in script
+    assert "batch-parse-submit" in script
+    assert "batch-parse-result" in script
+    assert "batch-parse-error" in script
+    assert "parseBatchDraft" in script
+    assert "raw_input: rawInput" in script
+    assert "批量获取前必须输入至少一个番剧名称" in script
+    assert "正在解析批量番剧名称" in script
+    assert "batchDraftCards" in script
+    assert "batchCardTitle" in script
+    assert "batchCardSourceName" in script
+    assert "batchCardReviewData" in script
+    assert "batchCardRequest" in script
+    assert "openBatchCardModify" in script
+    assert "updateBatchCardRequest" in script
+    assert "acceptBatchCard" in script
+    assert "markBatchCardAccepted" in script
+    assert "savePreviewDraftRequest" in script
+    assert "acceptSavedRequest" in script
+    assert "renderBatchCardReviewPanel" in script
+    assert "canExpandBatchCard" in script
+    assert "deleteBatchCard" in script
+    assert "batch-draft-card" in script
+    assert "batch-card-grid" in script
+    assert "batch-card-review" in script
+    assert "batch-card-modify" in script
+    assert "batch-card-accept" in script
+    assert "当前批量卡片已回流最新订阅草案" in script
+    assert "当前批量卡片已标记为已接受，其他卡片保持不变" in script
+    assert "确认接受当前批量卡片" in script
+    assert "当前字幕组" in script
+    assert "有效种子（当前选中字幕组：" in script
+    assert "排除种子 (" in script
+    assert "有效种子数：" in script
+    assert "batchStatusLabel" in script
+    assert "已解析" in script
+    assert "解析失败" in script
 
 
 def test_static_app_script_wires_auto_bangumi_submit_controls() -> None:
@@ -928,6 +1005,8 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".seed-details summary" in css
     assert ".seed-groups" in css
     assert ".seed-exclude-reason" in css
+    assert ".batch-card-review" in css
+    assert ".batch-card-review[hidden]" in css
     assert "overflow-wrap" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css
@@ -2256,6 +2335,364 @@ def test_candidate_search_api_cache_isolates_different_hosts(
     assert first.get_json()["result"]["candidates"][0]["bangumi_id"] == "100"
     assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "200"
     assert len(transport.requests) == 2
+
+
+def test_batch_parse_api_returns_per_item_parsed_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    raw_input = "\n萌王S4\n  \n路哥S4\n邻家天使S2\n"
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": raw_input},
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    items = result["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["batch_id"].startswith("batch-")
+    assert result["raw_input"] == raw_input
+    assert [item["raw_title"] for item in items] == [
+        "萌王S4",
+        "路哥S4",
+        "邻家天使S2",
+    ]
+    assert len({item["item_id"] for item in items}) == 3
+    assert all(item["item_id"].startswith("item-") for item in items)
+    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert items[0]["canonical_title_candidates"] == [
+        "关于我转生变成史莱姆这档事 第四季",
+        "关于我转生变成史莱姆这档事 第4季",
+    ]
+    assert items[0]["season_hint"] == "S4"
+    assert "转生史莱姆 第四季" in items[0]["search_queries"]
+    assert items[0]["confidence"] == 0.86
+    assert items[0]["needs_user_review"] is True
+    assert items[0]["candidates"] == []
+    assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
+    assert items[1]["needs_user_review"] is False
+
+
+def test_batch_parse_api_rejects_empty_input_with_chinese_validation_error() -> None:
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "\n \t\n"},
+    )
+
+    payload = response.get_json()
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "请至少输入一个番剧名称"
+    assert payload["error_data"]["failed_step"] == "batch_parse"
+    assert payload["error_data"]["details"] == {"field": "raw_input"}
+    assert "/home/" not in body
+
+
+def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def provider() -> FakeAnimeTitleParsingProvider:
+        return FakeAnimeTitleParsingProvider(fail_titles={"杖剑谭S2"})
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        provider,
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n杖剑谭S2\n路哥S4"},
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert [item["status"] for item in items] == [
+        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_FAILED,
+        BATCH_ITEM_STATUS_PARSED,
+    ]
+    assert items[1]["raw_title"] == "杖剑谭S2"
+    assert items[1]["canonical_title_candidates"] == []
+    assert items[1]["search_queries"] == []
+    assert items[1]["candidates"] == []
+    assert items[1]["needs_user_review"] is True
+    assert items[1]["error"]["error_type"] == "ai_title_parse_failed"
+    assert items[1]["error"]["failed_step"] == "ai_title_parse"
+    assert items[0]["canonical_title_candidates"]
+    assert items[2]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
+
+
+def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SensitiveProvider:
+        def parse(self, raw_title: str):
+            raise RuntimeError(
+                "token=secret-token endpoint=https://llm.example/api "
+                "cookie=session-id path=/home/ghostning/raw.html <html>raw</html>"
+            )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        lambda: SensitiveProvider(),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "敏感测试"},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_FAILED
+    assert item["error"]["error_message"] == "AI 名称解析失败，请检查该条目后重试"
+    assert item["error"]["details"] == {
+        "raw_title_length": 4,
+        "provider_source": "fake",
+        "recoverable": True,
+    }
+    assert "secret-token" not in body
+    assert "llm.example" not in body
+    assert "session-id" not in body
+    assert "/home/ghostning" not in body
+
+
+def test_batch_parse_api_searches_candidates_for_each_item_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _MappedCandidateSearchClient(
+        responses={
+            "欢迎来到实力至上主义的教室 第四季": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="欢迎来到实力至上主义的教室 第四季",
+                    aliases=["路哥 S4"],
+                )
+            ],
+            "实力至上主义教室 S4": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="实力至上主义教室 S4",
+                    aliases=["路哥 S4"],
+                )
+            ],
+            "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季": [
+                MikanCandidate(
+                    bangumi_id="2002",
+                    title="关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+                    mikan_url="https://mikan.example/Home/Bangumi/2002",
+                    source_query="关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+                    poster_url="https://mikan.example/images/2002.jpg",
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={
+            "raw_input": "路哥S4\n邻家天使S2",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert [item["status"] for item in items] == [
+        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_PARSED,
+    ]
+    assert client.searches == [
+        "欢迎来到实力至上主义的教室 第四季",
+        "实力至上主义教室 S4",
+        "路哥 S4",
+        "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+        "邻家的天使大人 第二季",
+        "邻家天使 S2",
+    ]
+    assert items[0]["candidates"] == [
+        {
+            "bangumi_id": "4001",
+            "title": "欢迎来到实力至上主义的教室 第四季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/4001",
+            "poster_url": None,
+            "source_query": "欢迎来到实力至上主义的教室 第四季",
+            "aliases": ["路哥 S4"],
+            "recommendation": "推荐：第 4 季",
+        }
+    ]
+    assert items[1]["candidates"] == [
+        {
+            "bangumi_id": "2002",
+            "title": "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/2002",
+            "poster_url": "https://mikan.example/images/2002.jpg",
+            "source_query": "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+            "aliases": [],
+            "recommendation": "推荐：第 2 季",
+        }
+    ]
+
+
+def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_others(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _MappedCandidateSearchClient(
+        responses={
+            "欢迎来到实力至上主义的教室 第四季": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="欢迎来到实力至上主义的教室 第四季",
+                )
+            ]
+        },
+        errors={
+            "杖与剑的魔剑谭 第二季": Stage1Error(
+                "mikan_timeout",
+                "MiKan HTTP 请求超时",
+                "mikan_search",
+                {
+                    "url": "https://mikan.example/Home/Search?searchstr=secret-token",
+                    "cookie": "session-cookie",
+                },
+            )
+        },
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={
+            "raw_input": "路哥S4\n杖剑谭S2",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert [item["status"] for item in items] == [
+        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_FAILED,
+    ]
+    assert items[0]["candidates"][0]["bangumi_id"] == "4001"
+    assert items[1]["raw_title"] == "杖剑谭S2"
+    assert items[1]["canonical_title_candidates"] == ["杖与剑的魔剑谭 第二季"]
+    assert items[1]["candidates"] == []
+    assert items[1]["error"]["error_type"] == "mikan_timeout"
+    assert items[1]["error"]["failed_step"] == "mikan_search"
+    assert items[1]["error"]["details"] == {
+        "url": "[redacted-url]",
+        "[redacted]": "[redacted]",
+    }
+    assert "secret-token" not in body
+    assert "session-cookie" not in body
+    assert "https://mikan.example/Home/Search" not in body
+
+
+def test_batch_parse_api_candidate_results_only_serialize_public_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SensitiveCandidate(MikanCandidate):
+        def __init__(self) -> None:
+            super().__init__(
+                bangumi_id="9001",
+                title="测试番剧",
+                mikan_url="https://mikan.example/Home/Bangumi/9001",
+                source_query="测试番剧",
+                poster_url="https://mikan.example/public/poster.jpg",
+                aliases=["公开别名"],
+            )
+            self.raw_html = "<html>secret-token</html>"
+            self.raw_rss_xml = "<rss>raw</rss>"
+            self.cookie = "session-cookie"
+            self.token = "secret-token"
+            self.magnet = "magnet:?xt=urn:btih:secret"
+
+    client = _MappedCandidateSearchClient(
+        responses={"测试番剧": [SensitiveCandidate()]}
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={
+            "raw_input": "测试番剧",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    candidates = payload["result"]["items"][0]["candidates"]
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert candidates == [
+        {
+            "bangumi_id": "9001",
+            "title": "测试番剧",
+            "mikan_url": "https://mikan.example/Home/Bangumi/9001",
+            "poster_url": "https://mikan.example/public/poster.jpg",
+            "source_query": "测试番剧",
+            "aliases": ["公开别名"],
+            "recommendation": "可能匹配",
+        }
+    ]
+    assert "raw_html" not in body
+    assert "raw_rss_xml" not in body
+    assert "session-cookie" not in body
+    assert "secret-token" not in body
+    assert "magnet:?" not in body
+    assert "<html" not in body
 
 
 def test_candidate_search_api_cache_expires_after_ttl(
