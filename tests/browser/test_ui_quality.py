@@ -674,9 +674,10 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
         )
 
     def _accept(route: Any, request: Request) -> None:
+        # US-146：单卡接受与批量接受统一走批次接受 API（POST
+        # /api/v1/batches/<batch_id>/accept）。响应只包含公开字段，绝不回传
+        # endpoint/token/cookie/raw response 等敏感配置。
         accept_calls.append(json.loads(request.post_data or "{}"))
-        accepted = dict(first_preview)
-        accepted["status"] = "ACCEPTED"
         route.fulfill(
             status=200,
             content_type="application/json",
@@ -684,8 +685,46 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
                 {
                     "ok": True,
                     "result": {
-                        "request": accepted,
-                        "summary": {"request_id": accepted["request_id"]},
+                        "batch_id": "batch-stage19-sec",
+                        "queue": {
+                            "queue_id": "queue-stage19-sec",
+                            "batch_id": "batch-stage19-sec",
+                            "created_at": "2026-08-19T00:00:00+00:00",
+                            "updated_at": "2026-08-19T00:00:00+00:00",
+                            "items": [
+                                {
+                                    "queue_id": "queue-stage19-sec",
+                                    "batch_id": "batch-stage19-sec",
+                                    "item_id": "item-sec",
+                                    "request_id": "req-stage19-sec",
+                                    "title": "关于我转生变成史莱姆这档事 第四季",
+                                    "status": "READY_TO_SUBMIT",
+                                    "status_label": "待提交",
+                                    "attempts": 0,
+                                    "last_error": None,
+                                    "ab_result_summary": None,
+                                    "created_at": "2026-08-19T00:00:00+00:00",
+                                    "updated_at": "2026-08-19T00:00:00+00:00",
+                                }
+                            ],
+                        },
+                        "items": [
+                            {
+                                "item_id": "item-sec",
+                                "request_id": "req-stage19-sec",
+                                "title": "关于我转生变成史莱姆这档事 第四季",
+                                "status": "accepted",
+                                "reason": None,
+                                "error_type": None,
+                                "queued": True,
+                            }
+                        ],
+                        "summary": {
+                            "accepted": 1,
+                            "already_accepted": 0,
+                            "unacceptable": 0,
+                            "failed": 0,
+                        },
                     },
                 },
                 ensure_ascii=False,
@@ -694,9 +733,9 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
 
     page.route("**/api/v1/batches/parse", _fulfill_batch)
     page.route("**/api/v1/requests/preview-save", _save_preview)
-    # acceptSavedRequest 用 apiPath() 拼 URL，设置 storage 偏好后 URL 会带
+    # postBatchAccept 用 apiPath() 拼 URL，设置 storage 偏好后 URL 会带
     # ?storage_dir= query；Playwright glob 不匹配 query，必须加 * 通配。
-    page.route("**/api/v1/requests/req-stage19-sec/accept*", _accept)
+    page.route("**/api/v1/batches/batch-stage19-sec/accept*", _accept)
 
     set_storage_preferences(page, storage_dir, save_request=False)
     page.goto(f"{live_server_url}/index")
@@ -719,10 +758,14 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
     expect(first_card.locator(".batch-card-delete")).to_be_hidden()
     expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
     assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-stage19-sec"
-    # 设置了 storage 偏好时，accept 请求体按 RequestActionPayload 契约携带
-    # storage_dir（URL query 经 apiPath 同样携带）；storage_dir 是功能参数，
-    # 不属于 sensitive_values。无偏好分支（null）由 accept 测试覆盖。
-    assert accept_calls and accept_calls[0]["storage_dir"] == str(storage_dir)
+    # US-146：accept 请求体按 BatchAcceptPayload 契约携带 items（含
+    # item_id/request_id/title，均为公开字段）与 storage_dir；设置了 storage
+    # 偏好时 storage_dir 为路径值（URL query 经 apiPath 同样携带），属于功能
+    # 参数，不属于 sensitive_values。
+    assert accept_calls
+    assert accept_calls[0]["items"][0]["item_id"] == "item-sec"
+    assert accept_calls[0]["items"][0]["request_id"] == "req-stage19-sec"
+    assert accept_calls[0]["storage_dir"] == str(storage_dir)
 
     browser_state = page.evaluate(
         """() => ({

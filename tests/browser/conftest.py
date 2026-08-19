@@ -136,7 +136,31 @@ def pytest_collection_modifyitems(
 
 @pytest.fixture(scope="session")
 def app() -> Any:
-    return create_app("testing")
+    app = create_app("testing")
+    _register_test_routes(app)
+    return app
+
+
+def _register_test_routes(app: Any) -> None:
+    """Register browser-test-only routes on the shared Flask app.
+
+    These routes exist only for the test session and never touch sensitive
+    config: they return fixed Chinese error payloads and a controlled delay,
+    so browser tests can observe transient UI states deterministically.
+    """
+
+    @app.route("/api/v1/batches/test-slow-accept/accept", methods=["POST"])
+    def _slow_batch_accept() -> tuple[Any, int]:
+        # 让接受请求保持 ~1.5s，浏览器测试可稳定观察 in-flight 的 loading/disabled 状态。
+        time.sleep(1.5)
+        return (
+            {
+                "ok": False,
+                "error_message": "批量接受失败：服务器内部错误",
+                "error_type": "batch_accept_failed",
+            },
+            400,
+        )
 
 
 @pytest.fixture(scope="session")

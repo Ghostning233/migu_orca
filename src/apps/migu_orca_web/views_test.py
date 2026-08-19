@@ -240,6 +240,14 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="batch-parse-submit"' in html
     assert 'id="batch-parse-result"' in html
     assert 'id="batch-parse-error"' in html
+    assert 'id="batch-accept-toolbar"' in html
+    assert 'id="batch-select-all-checkbox"' in html
+    assert 'id="batch-accept-selected-count"' in html
+    assert 'id="batch-accept-submit"' in html
+    assert 'id="batch-accept-all"' in html
+    assert "已选择 0 项" in html
+    assert "批量接受" in html
+    assert "全接受" in html
     assert 'id="mikan-candidate-search-endpoint"' not in html
     assert 'id="mikan-candidate-timeout-seconds"' not in html
     assert 'name="mikan_candidate_search_endpoint"' not in html
@@ -512,20 +520,38 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "openBatchCardModify" in script
     assert "updateBatchCardRequest" in script
     assert "acceptBatchCard" in script
+    assert "submitBatchAccept" in script
+    assert "resolveBatchAcceptDescriptors" in script
+    assert "applyBatchAcceptResult" in script
     assert "markBatchCardAccepted" in script
     assert "savePreviewDraftRequest" in script
-    assert "acceptSavedRequest" in script
     assert "renderBatchCardReviewPanel" in script
     assert "canExpandBatchCard" in script
+    assert "batchCardIsSelectable" in script
+    assert "toggleBatchItemSelection" in script
+    assert "setAllBatchItemsSelected" in script
+    assert "updateBatchAcceptToolbar" in script
+    assert "setBatchAcceptInFlight" in script
+    assert "postBatchAccept" in script
     assert "deleteBatchCard" in script
     assert "batch-draft-card" in script
     assert "batch-card-grid" in script
     assert "batch-card-review" in script
     assert "batch-card-modify" in script
     assert "batch-card-accept" in script
+    assert "batch-card-checkbox" in script
+    assert "batch-card-queue-status" in script
+    assert "batch-card-reason" in script
+    assert "/api/v1/batches/\" + encodeURIComponent(currentBatchId) + \"/accept" in script
+    assert "已选择 " in script
+    assert "确认接受选中的 " in script
+    assert "确认接受全部批量卡片" in script
+    assert "缺少批次标识，请重新获取批量草案" in script
+    assert "当前批量卡片已标记为已接受并待提交，其他卡片保持不变" in script
     assert "当前批量卡片已回流最新订阅草案" in script
-    assert "当前批量卡片已标记为已接受，其他卡片保持不变" in script
-    assert "确认接受当前批量卡片" in script
+    assert "无法接受：" in script
+    assert "接受失败：" in script
+    assert "待提交" in script
     assert "当前字幕组" in script
     assert "有效种子（当前选中字幕组：" in script
     assert "排除种子 (" in script
@@ -1020,6 +1046,12 @@ def test_static_style_defines_request_detail_sections() -> None:
     assert ".seed-exclude-reason" in css
     assert ".batch-card-review" in css
     assert ".batch-card-review[hidden]" in css
+    assert ".batch-accept-toolbar" in css
+    assert ".batch-accept-toolbar[hidden]" in css
+    assert ".batch-card-checkbox" in css
+    assert ".batch-card-status-row" in css
+    assert ".batch-card-queue-status" in css
+    assert ".batch-card-reason" in css
     assert "overflow-wrap" in css
     assert ".audit-section" in css
     assert ".fallback-config" in css

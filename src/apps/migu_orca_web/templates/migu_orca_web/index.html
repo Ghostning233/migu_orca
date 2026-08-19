@@ -80,6 +80,33 @@
               粘贴多行番剧名称后获取解析结果。
             </div>
 
+            <div id="batch-accept-toolbar" class="batch-accept-toolbar" hidden>
+              <label class="batch-select-all">
+                <input type="checkbox" id="batch-select-all-checkbox">
+                <span>全选</span>
+              </label>
+              <span id="batch-accept-selected-count" class="batch-selected-count">
+                已选择 0 项
+              </span>
+              <div class="notification-actions batch-accept-actions">
+                <button
+                  id="batch-accept-submit"
+                  class="primary-button"
+                  type="button"
+                  disabled
+                >
+                  批量接受
+                </button>
+                <button
+                  id="batch-accept-all"
+                  class="secondary-button"
+                  type="button"
+                >
+                  全接受
+                </button>
+              </div>
+            </div>
+
             <div class="notification-actions">
               <button id="batch-parse-submit" class="primary-button" type="submit">
                 获取批量草案

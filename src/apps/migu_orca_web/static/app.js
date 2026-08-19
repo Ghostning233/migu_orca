@@ -51,6 +51,11 @@
   const batchParseError = document.getElementById("batch-parse-error");
   const batchParseResult = document.getElementById("batch-parse-result");
   const batchParseSubmit = document.getElementById("batch-parse-submit");
+  const batchAcceptToolbar = document.getElementById("batch-accept-toolbar");
+  const batchSelectAllCheckbox = document.getElementById("batch-select-all-checkbox");
+  const batchAcceptSelectedCount = document.getElementById("batch-accept-selected-count");
+  const batchAcceptSubmit = document.getElementById("batch-accept-submit");
+  const batchAcceptAll = document.getElementById("batch-accept-all");
   const preferenceKeys = {
     storageDir: "miguOrca.web.storageDir",
     saveRequest: "miguOrca.web.saveRequest",
@@ -61,6 +66,9 @@
   let currentDetailPayload = null;
   let currentBatchEditItemId = null;
   let batchDraftCards = [];
+  let currentBatchId = null;
+  let selectedBatchItemIds = new Set();
+  let batchAcceptInFlight = false;
   let storageDirPreference = "";
   let saveRequestPreference = true;
 
@@ -915,7 +923,8 @@
     renderBatchParseItems(batchDraftCards);
   }
 
-  function markBatchCardAccepted(itemId, acceptedRequest) {
+  function markBatchCardAccepted(itemId, acceptedRequest, options) {
+    const opts = options || {};
     if (!itemId || !acceptedRequest) {
       return;
     }
@@ -931,9 +940,14 @@
       next.confirmable_config =
         acceptedRequest.confirmable_config || row.confirmable_config;
       next.source_info = acceptedRequest.source_info || row.source_info;
+      if (opts.queued) {
+        next.queue_status = "READY_TO_SUBMIT";
+      }
       return next;
     });
-    renderBatchParseItems(batchDraftCards);
+    if (opts.render !== false) {
+      renderBatchParseItems(batchDraftCards);
+    }
   }
 
   async function savePreviewDraftRequest(request) {
@@ -948,50 +962,309 @@
     return result && result.request;
   }
 
-  async function acceptSavedRequest(requestId) {
-    if (!requestId) {
-      throw new Error("订阅草案缺少 request_id。");
+  function batchCardSavedRequest(row) {
+    return (row && row.request) || null;
+  }
+
+  function batchCardPreviewRequest(row) {
+    return (row && (row.preview_request || row.draft_request)) || null;
+  }
+
+  function batchCardIsSelectable(row) {
+    return fieldValue(row.status) !== "ACCEPTED";
+  }
+
+  function updateBatchAcceptToolbar() {
+    if (!batchAcceptToolbar) {
+      return;
     }
-    const result = await fetchJson(
-      apiPath("/api/v1/requests/" + encodeURIComponent(requestId) + "/accept"),
+    const selectable = batchDraftCards.filter(batchCardIsSelectable);
+    const selectedCount = batchDraftCards.filter(
+      (row) =>
+        selectedBatchItemIds.has(row.item_id) && batchCardIsSelectable(row),
+    ).length;
+    if (batchAcceptSelectedCount) {
+      batchAcceptSelectedCount.textContent = "已选择 " + selectedCount + " 项";
+    }
+    if (batchSelectAllCheckbox) {
+      batchSelectAllCheckbox.checked =
+        selectable.length > 0 &&
+        selectable.every((row) => selectedBatchItemIds.has(row.item_id));
+      batchSelectAllCheckbox.indeterminate =
+        selectedCount > 0 && selectedCount < selectable.length;
+    }
+    if (batchAcceptSubmit) {
+      batchAcceptSubmit.disabled =
+        selectedCount === 0 || batchAcceptInFlight;
+    }
+    if (batchAcceptAll) {
+      batchAcceptAll.disabled =
+        batchAcceptInFlight || selectable.length === 0;
+    }
+  }
+
+  function toggleBatchItemSelection(itemId, selected) {
+    if (selected) {
+      selectedBatchItemIds.add(itemId);
+    } else {
+      selectedBatchItemIds.delete(itemId);
+    }
+    updateBatchAcceptToolbar();
+  }
+
+  function setAllBatchItemsSelected(selected) {
+    selectedBatchItemIds = new Set();
+    if (selected) {
+      for (const row of batchDraftCards) {
+        if (batchCardIsSelectable(row)) {
+          selectedBatchItemIds.add(row.item_id);
+        }
+      }
+    }
+    renderBatchParseItems(batchDraftCards);
+  }
+
+  function setBatchAcceptInFlight(isInFlight) {
+    batchAcceptInFlight = isInFlight;
+    if (batchAcceptSubmit) {
+      batchAcceptSubmit.textContent = isInFlight ? "正在接受..." : "批量接受";
+    }
+    if (batchAcceptAll) {
+      batchAcceptAll.textContent = isInFlight ? "正在接受..." : "全接受";
+    }
+    if (batchDraftCards.length) {
+      renderBatchParseItems(batchDraftCards);
+    } else {
+      updateBatchAcceptToolbar();
+    }
+  }
+
+  function setBatchCardAcceptFeedback(itemId, status, reason) {
+    batchDraftCards = batchDraftCards.map((row) => {
+      if (row.item_id !== itemId) {
+        return row;
+      }
+      const next = Object.assign({}, row);
+      next.accept_feedback = {
+        status: status,
+        reason: reason || "接受失败",
+      };
+      return next;
+    });
+  }
+
+  function applyBatchAcceptResult(result, pendingSavedRequests) {
+    const saved = pendingSavedRequests || new Map();
+    const outcomeCounts = {};
+    const items = Array.isArray(result && result.items) ? result.items : [];
+    for (const item of items) {
+      outcomeCounts[item.status] = (outcomeCounts[item.status] || 0) + 1;
+      batchDraftCards = batchDraftCards.map((row) => {
+        if (row.item_id !== item.item_id) {
+          return row;
+        }
+        const next = Object.assign({}, row);
+        delete next.accept_feedback;
+        if (item.status === "accepted" || item.status === "already_accepted") {
+          const savedRequest =
+            saved.get(item.item_id) ||
+            row.request ||
+            row.preview_request ||
+            row.draft_request ||
+            {};
+          next.status = "ACCEPTED";
+          next.request = Object.assign({}, savedRequest, {status: "ACCEPTED"});
+          delete next.preview_request;
+          delete next.draft_request;
+          next.confirmable_config =
+            next.request.confirmable_config || row.confirmable_config;
+          next.source_info = next.request.source_info || row.source_info;
+          if (item.status === "accepted") {
+            next.queue_status = "READY_TO_SUBMIT";
+          }
+          selectedBatchItemIds.delete(item.item_id);
+        } else {
+          next.accept_feedback = {
+            status: item.status,
+            reason: item.reason || "接受失败",
+          };
+        }
+        return next;
+      });
+    }
+    // Sync the authoritative queue statuses onto matching accepted cards so a
+    // re-accept (already_accepted) still reflects the persisted queue.
+    const queue = result && result.queue;
+    const queueItems = queue && Array.isArray(queue.items) ? queue.items : [];
+    for (const qItem of queueItems) {
+      batchDraftCards = batchDraftCards.map((row) => {
+        if (row.item_id !== qItem.item_id || row.status !== "ACCEPTED") {
+          return row;
+        }
+        const next = Object.assign({}, row);
+        next.queue_status = qItem.status;
+        return next;
+      });
+    }
+    return outcomeCounts;
+  }
+
+  function showBatchAcceptNotification(outcomeCounts, isSingle) {
+    const accepted = outcomeCounts.accepted || 0;
+    const already = outcomeCounts.already_accepted || 0;
+    const bad = (outcomeCounts.unacceptable || 0) + (outcomeCounts.failed || 0);
+    let message = "已接受 " + accepted + " 项";
+    if (already) {
+      message += "；已确认跳过 " + already + " 项";
+    }
+    if (bad) {
+      message += "；" + bad + " 项无法接受";
+    }
+    if (isSingle) {
+      if (bad > 0 && accepted === 0) {
+        showNotification("error", "接受失败", message);
+      } else if (accepted > 0) {
+        showNotification(
+          "success",
+          "接受成功",
+          "当前批量卡片已标记为已接受并待提交，其他卡片保持不变。",
+        );
+      } else if (already > 0) {
+        showNotification(
+          "success",
+          "接受成功",
+          "当前批量卡片已确认，跳过重复接受。",
+        );
+      } else {
+        showNotification("success", "接受成功", message);
+      }
+      return;
+    }
+    if (bad > 0 && accepted === 0) {
+      showNotification("error", "批量接受失败", message);
+    } else if (bad > 0) {
+      showNotification("success", "批量接受完成", message);
+    } else {
+      showNotification("success", "批量接受成功", message);
+    }
+  }
+
+  async function resolveBatchAcceptDescriptors(rows) {
+    const descriptors = [];
+    const pendingSavedRequests = new Map();
+    const localFailures = [];
+    for (const row of rows) {
+      const saved = batchCardSavedRequest(row);
+      if (saved && saved.request_id) {
+        descriptors.push({
+          item_id: row.item_id,
+          request_id: saved.request_id,
+          title: batchCardTitle(row),
+        });
+        pendingSavedRequests.set(row.item_id, saved);
+        continue;
+      }
+      const preview = batchCardPreviewRequest(row);
+      if (preview && preview.request_id) {
+        try {
+          const savedRequest = await savePreviewDraftRequest(preview);
+          if (!savedRequest || !savedRequest.request_id) {
+            throw new Error("preview-save returned no request_id");
+          }
+          descriptors.push({
+            item_id: row.item_id,
+            request_id: savedRequest.request_id,
+            title: batchCardTitle(row),
+          });
+          pendingSavedRequests.set(row.item_id, savedRequest);
+        } catch (error) {
+          localFailures.push({
+            item_id: row.item_id,
+            title: batchCardTitle(row),
+            reason: "订阅草案保存失败，无法接受",
+          });
+        }
+        continue;
+      }
+      descriptors.push({
+        item_id: row.item_id,
+        request_id: null,
+        title: batchCardTitle(row),
+      });
+    }
+    return {descriptors: descriptors, pendingSavedRequests: pendingSavedRequests, localFailures: localFailures};
+  }
+
+  function postBatchAccept(descriptors, itemIds) {
+    const payload = {
+      items: descriptors,
+      storage_dir: currentStorageDir() || null,
+    };
+    if (itemIds) {
+      payload.item_ids = itemIds;
+    }
+    return fetchJson(
+      apiPath("/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/accept"),
       {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({storage_dir: currentStorageDir() || null}),
+        body: JSON.stringify(payload),
       },
     );
-    return result && result.request;
   }
 
-  async function acceptBatchCard(row) {
-    const request = batchCardRequest(row);
-    if (!request) {
+  async function submitBatchAccept(rows, options) {
+    const opts = options || {};
+    if (!currentBatchId) {
       showNotification(
         "error",
         "接受失败",
-        "当前卡片缺少订阅草案，无法接受。",
+        "缺少批次标识，请重新获取批量草案。",
       );
       return;
     }
     hideNotification();
-    setBatchParseInFlight(true);
+    setBatchAcceptInFlight(true);
     try {
-      const savedRequest = row.request
-        ? request
-        : await savePreviewDraftRequest(request);
-      const acceptedRequest = await acceptSavedRequest(savedRequest.request_id);
-      markBatchCardAccepted(row.item_id, acceptedRequest);
-      await loadList({loadSelectedDetail: false});
-      showNotification(
-        "success",
-        "接受成功",
-        "当前批量卡片已标记为已接受，其他卡片保持不变。",
+      const resolved = await resolveBatchAcceptDescriptors(rows);
+      if (!resolved.descriptors.length) {
+        for (const failure of resolved.localFailures) {
+          setBatchCardAcceptFeedback(failure.item_id, "failed", failure.reason);
+        }
+        renderBatchParseItems(batchDraftCards);
+        showNotification(
+          "error",
+          "接受失败",
+          resolved.localFailures.length
+            ? resolved.localFailures[0].reason
+            : "没有可接受的批量卡片。",
+        );
+        return;
+      }
+      const result = await postBatchAccept(
+        resolved.descriptors,
+        opts.itemIds || null,
       );
+      const outcomeCounts = applyBatchAcceptResult(
+        result,
+        resolved.pendingSavedRequests,
+      );
+      for (const failure of resolved.localFailures) {
+        setBatchCardAcceptFeedback(failure.item_id, "failed", failure.reason);
+        outcomeCounts.failed = (outcomeCounts.failed || 0) + 1;
+      }
+      renderBatchParseItems(batchDraftCards);
+      await loadList({loadSelectedDetail: false});
+      showBatchAcceptNotification(outcomeCounts, opts.single);
     } catch (error) {
       notifyApiError("接受失败", error);
     } finally {
-      setBatchParseInFlight(false);
+      setBatchAcceptInFlight(false);
     }
+  }
+
+  async function acceptBatchCard(row) {
+    await submitBatchAccept([row], {single: true});
   }
 
   function setPreviewEditError(message) {
@@ -1092,8 +1365,8 @@
     acceptButton.type = "button";
     acceptButton.className = "primary-button batch-card-accept";
     acceptButton.textContent = "接受";
-    acceptButton.disabled = !canAcceptBatchCard(row);
-    if (acceptButton.disabled) {
+    acceptButton.disabled = !canAcceptBatchCard(row) || batchAcceptInFlight;
+    if (!canAcceptBatchCard(row)) {
       acceptButton.title = "生成订阅草案后可接受";
     }
     acceptButton.addEventListener("click", function () {
@@ -1108,6 +1381,7 @@
   }
 
   function deleteBatchCard(itemId) {
+    selectedBatchItemIds.delete(itemId);
     batchDraftCards = batchDraftCards.filter((row) => row.item_id !== itemId);
     renderBatchParseItems(batchDraftCards);
   }
@@ -1116,6 +1390,21 @@
     const item = document.createElement("article");
     item.className = "batch-draft-card";
     item.dataset.itemId = safeText(row.item_id);
+
+    const selectCheckbox = document.createElement("input");
+    selectCheckbox.type = "checkbox";
+    selectCheckbox.className = "batch-card-checkbox";
+    selectCheckbox.dataset.itemId = safeText(row.item_id);
+    selectCheckbox.setAttribute(
+      "aria-label",
+      "选择 " + (safeText(row.raw_title) || "批量条目"),
+    );
+    selectCheckbox.checked = selectedBatchItemIds.has(row.item_id);
+    selectCheckbox.disabled =
+      fieldValue(row.status) === "ACCEPTED" || batchAcceptInFlight;
+    selectCheckbox.addEventListener("change", function () {
+      toggleBatchItemSelection(row.item_id, selectCheckbox.checked);
+    });
 
     const removeButton = document.createElement("button");
     removeButton.type = "button";
@@ -1126,6 +1415,7 @@
     if (fieldValue(row.status) === "ACCEPTED") {
       removeButton.hidden = true;
     }
+    removeButton.disabled = batchAcceptInFlight;
     removeButton.addEventListener("click", () => {
       deleteBatchCard(row.item_id);
     });
@@ -1143,9 +1433,18 @@
       posterWrap.textContent = "订阅草案";
     }
 
+    const statusRow = document.createElement("div");
+    statusRow.className = "batch-card-status-row";
     const status = document.createElement("span");
     status.className = "batch-status batch-card-status";
     status.textContent = batchStatusLabel(row.status);
+    statusRow.appendChild(status);
+    if (row.queue_status === "READY_TO_SUBMIT") {
+      const queueStatus = document.createElement("span");
+      queueStatus.className = "batch-status batch-card-queue-status";
+      queueStatus.textContent = "待提交";
+      statusRow.appendChild(queueStatus);
+    }
 
     const title = document.createElement("strong");
     title.className = "batch-card-title";
@@ -1184,17 +1483,27 @@
     });
     expandButton.setAttribute("aria-expanded", "false");
 
-    item.append(
+    const children = [
+      selectCheckbox,
       removeButton,
       posterWrap,
-      status,
+      statusRow,
       title,
       rawTitle,
       source,
       seeds,
-      expandButton,
-      reviewPanel,
-    );
+    ];
+    if (row.accept_feedback && row.accept_feedback.reason) {
+      const reason = document.createElement("div");
+      reason.className = "batch-card-reason";
+      const prefix =
+        row.accept_feedback.status === "failed" ? "接受失败：" : "无法接受：";
+      reason.textContent =
+        prefix + safeText(row.accept_feedback.reason);
+      children.push(reason);
+    }
+    children.push(expandButton, reviewPanel);
+    item.append.apply(item, children);
     return item;
   }
 
@@ -1205,6 +1514,9 @@
         "没有可展示的批量解析结果。",
         "empty-state compact-state",
       );
+      if (batchAcceptToolbar) {
+        batchAcceptToolbar.hidden = true;
+      }
       return;
     }
 
@@ -1217,6 +1529,11 @@
       list.appendChild(renderBatchCard(row));
     }
     batchParseResult.appendChild(list);
+
+    if (batchAcceptToolbar) {
+      batchAcceptToolbar.hidden = false;
+    }
+    updateBatchAcceptToolbar();
   }
 
   async function parseBatchDraft(event) {
@@ -1249,6 +1566,9 @@
         body: JSON.stringify(payload),
       });
       const items = (result && result.items) || [];
+      currentBatchId = (result && result.batch_id) || null;
+      selectedBatchItemIds = new Set();
+      batchAcceptInFlight = false;
       batchDraftCards = Array.isArray(items) ? items.slice() : [];
       renderBatchParseItems(batchDraftCards);
       showNotification(
@@ -1269,6 +1589,42 @@
 
   if (batchParseForm) {
     batchParseForm.addEventListener("submit", parseBatchDraft);
+  }
+
+  if (batchSelectAllCheckbox) {
+    batchSelectAllCheckbox.addEventListener("change", function () {
+      setAllBatchItemsSelected(batchSelectAllCheckbox.checked);
+    });
+  }
+
+  if (batchAcceptSubmit) {
+    batchAcceptSubmit.addEventListener("click", function () {
+      const selectedRows = batchDraftCards.filter((row) =>
+        selectedBatchItemIds.has(row.item_id),
+      );
+      if (!selectedRows.length || batchAcceptInFlight) {
+        return;
+      }
+      if (
+        window.confirm(
+          "确认接受选中的 " + selectedRows.length + " 个批量卡片？",
+        )
+      ) {
+        submitBatchAccept(selectedRows, {itemIds: Array.from(selectedBatchItemIds)});
+      }
+    });
+  }
+
+  if (batchAcceptAll) {
+    batchAcceptAll.addEventListener("click", function () {
+      const selectable = batchDraftCards.filter(batchCardIsSelectable);
+      if (!selectable.length || batchAcceptInFlight) {
+        return;
+      }
+      if (window.confirm("确认接受全部批量卡片？")) {
+        submitBatchAccept(batchDraftCards, {});
+      }
+    });
   }
 
   function setCandidateSearchError(message, field) {

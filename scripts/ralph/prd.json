@@ -88,7 +88,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "复用 Stage 19 卡片工作区；不要在本 story 实现队列结果面板。"
     },
     {
