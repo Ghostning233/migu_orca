@@ -252,6 +252,78 @@ def serialize_queue_item(item: BatchQueueItem) -> dict[str, Any]:
     }
 
 
+def queue_to_storage_dict(queue: BatchSubmissionQueue) -> dict[str, Any]:
+    """Lossless round-trip serialization used for queue persistence.
+
+    Unlike ``serialize_queue`` (the public API boundary), this keeps the raw
+    queue fields so a persisted queue can be reconstructed exactly. The queue
+    dataclass only holds non-sensitive public fields, and ``last_error`` /
+    ``ab_result_summary`` are already sanitized one-line summaries, so writing
+    the full queue never persists Auto Bangumi secrets.
+    """
+    return {
+        "queue_id": queue.queue_id,
+        "batch_id": queue.batch_id,
+        "created_at": queue.created_at,
+        "updated_at": queue.updated_at,
+        "items": [queue_item_to_storage_dict(item) for item in queue.items],
+    }
+
+
+def queue_item_to_storage_dict(item: BatchQueueItem) -> dict[str, Any]:
+    return {
+        "queue_id": item.queue_id,
+        "batch_id": item.batch_id,
+        "item_id": item.item_id,
+        "request_id": item.request_id,
+        "title": item.title,
+        "status": item.status,
+        "attempts": item.attempts,
+        "last_error": item.last_error,
+        "ab_result_summary": item.ab_result_summary,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+
+def queue_from_storage_dict(data: Any) -> BatchSubmissionQueue:
+    """Reconstruct a queue from a storage dict written by ``queue_to_storage_dict``.
+
+    Invalid shapes raise ``ValueError`` so callers can map them to a stable
+    storage error (the queue repository does this on load).
+    """
+    if not isinstance(data, dict):
+        raise ValueError("queue storage JSON must be an object")
+    items_data = data.get("items")
+    if not isinstance(items_data, list):
+        raise ValueError("queue storage items must be a list")
+    return BatchSubmissionQueue(
+        queue_id=str(data.get("queue_id") or ""),
+        batch_id=str(data.get("batch_id") or ""),
+        items=[queue_item_from_storage_dict(item) for item in items_data],
+        created_at=data.get("created_at"),
+        updated_at=data.get("updated_at"),
+    )
+
+
+def queue_item_from_storage_dict(data: Any) -> BatchQueueItem:
+    if not isinstance(data, dict):
+        raise ValueError("queue item storage JSON must be an object")
+    return BatchQueueItem(
+        queue_id=str(data.get("queue_id") or ""),
+        batch_id=str(data.get("batch_id") or ""),
+        item_id=str(data.get("item_id") or ""),
+        request_id=str(data.get("request_id") or ""),
+        title=str(data.get("title") or ""),
+        status=str(data.get("status") or BATCH_QUEUE_STATUS_READY_TO_SUBMIT),
+        attempts=int(data.get("attempts") or 0),
+        last_error=_optional_str(data.get("last_error")),
+        ab_result_summary=_optional_str(data.get("ab_result_summary")),
+        created_at=data.get("created_at"),
+        updated_at=data.get("updated_at"),
+    )
+
+
 def sanitize_queue_summary(value: Any, *, fallback: str | None = None) -> str | None:
     """Convert a raw result/error value into a sanitized one-line summary.
 
@@ -295,6 +367,12 @@ def _strip_sensitive(value: Any) -> Any:
     if value is None:
         return None
     return value
+
+
+def _optional_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _sanitize_string_value(value: str) -> str:
@@ -395,6 +473,10 @@ __all__ = [
     "create_submission_queue",
     "enqueue_item",
     "mark_queue_item_failed",
+    "queue_from_storage_dict",
+    "queue_item_from_storage_dict",
+    "queue_item_to_storage_dict",
+    "queue_to_storage_dict",
     "sanitize_queue_summary",
     "serialize_queue",
     "serialize_queue_item",

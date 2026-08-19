@@ -70,7 +70,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "API 层只编排现有 service；敏感配置不得传入队列 storage。"
     },
     {

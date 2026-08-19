@@ -131,7 +131,7 @@ def serialize_batch_accept_item(item: BatchAcceptItemResult) -> dict[str, Any]:
     return {
         "item_id": item.item_id,
         "request_id": item.request_id,
-        "title": item.title,
+        "title": sanitize_queue_summary(item.title) or item.title,
         "status": item.status,
         "reason": item.reason,
         "error_type": item.error_type,
