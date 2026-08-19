@@ -2,7 +2,7 @@
 
 ## 1. 模块目标
 
-M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7 已实现 Flask Web UI MVP，Stage 8 补强可用性，Stage 9 增加浏览器自动化测试，Stage 10 增加确认、取消和受限修改操作入口，Stage 11 增加显式真实 MiKan / Auto Bangumi 配置入口，Stage 12 增加 qBittorrent 显式连接测试入口，Stage 13 将配置相关能力迁移到独立 Settings 页面并收敛 Request 工作台，Stage 14 修复默认生成后的 Request 可操作性、未保存预览契约、Seeds 三列表和 qBittorrent Settings 直显，Stage 15 增加 `ACCEPTED` Request 的修改与删除动作，并将筛选规则默认语义改为大小写不敏感的字面匹配，同时提供 `使用正则` 与 `大小写敏感` 选项。Stage 16 在 CLI/API 层完成真实 MiKan direct URL/ID 入口，但没有新增 Web UI 控件。Stage 17 已在 `/index` Request 生成流程中接入真实 MiKan 候选搜索、候选卡片手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签。Stage 18 已把真实 MiKan 候选搜索调整为 `/index` 普通 Web 主流程，并将 fixture 降级为开发/离线测试路径。Stage 19 后，M13 的主方向调整为批量新番订阅前置工作台：批量输入番剧简称，生成可审核订阅草案卡片，并支持单卡展开、删除、修改和接受。Stage 20 已在此基础上接入批量接受、全接受、提交前队列面板和失败项独立重试，完成批量确认与 Auto Bangumi 提交辅助闭环。
+M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7 已实现 Flask Web UI MVP，Stage 8 补强可用性，Stage 9 增加浏览器自动化测试，Stage 10 增加确认、取消和受限修改操作入口，Stage 11 增加显式真实 MiKan / Auto Bangumi 配置入口，Stage 12 增加 qBittorrent 显式连接测试入口，Stage 13 将配置相关能力迁移到独立 Settings 页面并收敛 Request 工作台，Stage 14 修复默认生成后的 Request 可操作性、未保存预览契约、Seeds 三列表和 qBittorrent Settings 直显，Stage 15 增加 `ACCEPTED` Request 的修改与删除动作，并将筛选规则默认语义改为大小写不敏感的字面匹配，同时提供 `使用正则` 与 `大小写敏感` 选项。Stage 16 在 CLI/API 层完成真实 MiKan direct URL/ID 入口，但没有新增 Web UI 控件。Stage 17 已在 `/index` Request 生成流程中接入真实 MiKan 候选搜索、候选卡片手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签。Stage 18 已把真实 MiKan 候选搜索调整为 `/index` 普通 Web 主流程，并将 fixture 降级为开发/离线测试路径。Stage 19 后，M13 的主方向调整为批量新番订阅前置工作台：批量输入番剧简称，生成可审核订阅草案卡片，并支持单卡展开、删除、修改和接受。Stage 20 已在此基础上接入批量接受、全接受、提交前队列面板和失败项独立重试，完成批量确认与 Auto Bangumi 提交辅助闭环。Stage 21 已在 `/settings` 接入偏好管理面板，并在批量卡片上展示偏好命中、低置信度/多候选/冲突审核提示、当前默认配置和搜索词来源。
 
 ## 2. 模块边界
 
@@ -48,8 +48,9 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 18 | 真实 MiKan 主流程、可编辑预览与 Seeds 优化 | 已接入 | `/index` 主生成区默认搜索真实 MiKan 候选；普通 UI 移除 `search_endpoint`、`timeout_seconds`、`query`；候选选择和直连 fallback 默认生成可编辑订阅草案（`preview-modify` dry-run + `preview-save`）；Seeds 改为有效、完整、排除顺序并按字幕组分组；fixture 入口放入底部「开发 / 离线测试」面板并默认收起 |
 | Stage 19 | 批量输入与订阅草案卡片工作台 | 已接入 | `/index` 批量工作区支持多行简称输入、AI 名称解析 seam、逐项 MiKan 候选搜索、订阅草案卡片网格、删除、展开、详情修改回流和单卡接受 |
 | Stage 20 | 批量接受、提交前队列与失败项重试 | 已接入 | `/index` 批量工作台提供单卡接受、勾选批量接受和全接受；`#batch-queue-panel` 展示提交前队列（中文状态、尝试次数、脱敏结果摘要）并提供显式 AB 提交；失败项可独立重试，成功项不显示重试 |
+| Stage 21 | 偏好管理面板与批量卡片偏好/修正展示 | 已接入 | `/settings` 的 `#preference-settings-panel` 管理非敏感偏好（字幕组、筛选、命名、搜索增强开关），支持保存与显式恢复默认；批量卡片展示偏好命中摘要、需人工核对 chip、偏好与审核面板（偏好命中/警告/审核提示/当前默认配置）和搜索词来源面板（修正增强搜索词/原始搜索词） |
 
-以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 20 的提交前队列只展示队列项目标题、状态、尝试次数、时间和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径必须被忽略或脱敏，AB 配置只存在于当前提交 POST body，不写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot。
+以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 20 的提交前队列只展示队列项目标题、状态、尝试次数、时间和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径必须被忽略或脱敏，AB 配置只存在于当前提交 POST body，不写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot。Stage 21 的偏好表单是非敏感表面，只提交已定义的非敏感偏好字段，拒绝的敏感输入回退到上次有效值；批量卡片只渲染 `preference_hits`/`preference_warnings`/`review_hints`/`applied_preferences`/`enhanced_search_queries` 中的公开规则摘要和中文提示，endpoint、token、cookie、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。
 
 Stage 15 UI 质量要求：
 
@@ -82,7 +83,7 @@ Stage 19 UI 调整要求（Stage 19 已落地）：
 4. DRAFT/READY 卡片可展开查看当前字幕组、包含规则、排除规则、匹配模式、大小写、有效种子和排除种子摘要。
 5. 单卡 `修改` 复用现有未保存预览详情修改流程，保存后只更新当前卡片。
 6. 单卡 `接受` 复用现有 Request accept 能力，成功后当前卡片状态显示为「已接受」，同批次其他卡片不变。
-7. 已接受卡片不得展示无需确认的危险删除动作；Stage 19 不提供批量接受、全接受或 Auto Bangumi 提交队列。
+7. 已接受卡片不得展示无需确认的危险删除动作；Stage 19 不提供批量接受、全接受或 Auto Bangumi 提交队列，Stage 20 已补齐该能力。
 
 Stage 20 UI 调整要求（Stage 20 已落地）：
 
@@ -94,15 +95,24 @@ Stage 20 UI 调整要求（Stage 20 已落地）：
 6. 单项重试按钮只出现在 FAILED/RETRYABLE 项目上；点击重试后使用最新保存的 `ACCEPTED` Request 重新提交，成功项永远不会显示重试按钮。
 7. endpoint、token 只存在于提交 POST body；不得写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot；页面和 API 不得展示 token、完整 endpoint、cookie、原始响应体、magnet、raw RSS XML 或本地绝对路径。
 
+Stage 21 UI 调整要求（Stage 21 已落地）：
+
+1. `/settings` 提供 `#preference-settings-panel` 偏好面板：偏好字幕组/排除字幕组文本域、fallback 下拉、包含/排除规则、使用正则/大小写敏感复选框、命名策略下拉与命名模板、搜索增强开关；页面加载时展示已保存偏好，保存成功后展示中文成功反馈并刷新规范化值。
+2. 偏好表单是非敏感表面：只提交已定义的非敏感字段；被拒绝的敏感输入回退到上次有效值，不会残留在表单控件中，也不回显外部 endpoint/token/cookie/raw 响应。
+3. 清空或恢复默认偏好必须显式触发（`window.confirm`），且只写 `<storage>/preferences/user_preferences.json`，不会清除 Stage 20 队列、Request 或 AB result 存储。
+4. 批量卡片展示偏好命中摘要行（偏好命中：字幕组、筛选、命名 / 偏好不可用，已回退默认流程 / 未配置偏好，使用默认流程）和需人工核对 chip（`needs_user_review` 且未接受时）。
+5. 展开的 `.batch-card-review` 面板展示偏好与审核块（偏好命中摘要、偏好警告、审核提示、当前默认配置）和搜索词来源块（修正增强搜索词及来源、原始搜索词）。
+6. 单卡修改只更新当前卡片，其他卡片的偏好命中/审核提示文本保持不变；偏好提示不覆盖现有卡片修改、候选选择、批量接受和 Stage 20 队列状态。
+7. 偏好/审核展示只读公开非敏感字段；无偏好、偏好读取失败或增强失败时展示明确的默认流程状态，不阻塞手动候选选择和直连 fallback。
+
 ## 4. 后续能力规划
 
 Web UI 后续可以支持：
 
 1. 字幕组和 RSS 源候选的更细粒度人工选择。
 2. 降级 JSON 下载或复制入口。
-3. 更多用户偏好、字幕组偏好和规则配置管理。
-4. 部署/配置向导仅作为远期辅助能力，不作为 qBittorrent 下载或 Auto Bangumi 替代执行系统。
-5. 认证、权限或远程部署保护，仅在出现多人使用或公网暴露场景后实现。
+3. 部署/配置向导仅作为远期辅助能力，不作为 qBittorrent 下载或 Auto Bangumi 替代执行系统。
+4. 认证、权限或远程部署保护，仅在出现多人使用或公网暴露场景后实现。
 
 ## 5. 待确认问题
 

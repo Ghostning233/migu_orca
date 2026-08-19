@@ -36,6 +36,21 @@
   const settingsAbResult = document.getElementById("settings-ab-result");
   const settingsAbSubmitButton = document.getElementById("settings-ab-submit");
   const settingsAbReturnLink = document.getElementById("settings-ab-return-link");
+  const preferenceSettingsForm = document.getElementById("preference-settings-form");
+  const preferencePreferredInput = document.getElementById("preference-preferred-groups");
+  const preferenceExcludedInput = document.getElementById("preference-excluded-groups");
+  const preferenceFallbackSelect = document.getElementById("preference-fallback");
+  const preferenceFilterContainInput = document.getElementById("preference-filter-must-contain");
+  const preferenceFilterNotContainInput = document.getElementById("preference-filter-must-not-contain");
+  const preferenceFilterUseRegexInput = document.getElementById("preference-filter-use-regex");
+  const preferenceFilterCaseSensitiveInput = document.getElementById("preference-filter-case-sensitive");
+  const preferenceNamingStrategySelect = document.getElementById("preference-naming-strategy");
+  const preferenceNamingTemplateInput = document.getElementById("preference-naming-template");
+  const preferenceSearchReuseInput = document.getElementById("preference-search-reuse-corrections");
+  const preferenceSettingsError = document.getElementById("preference-settings-error");
+  const preferenceSettingsStatus = document.getElementById("preference-settings-status");
+  const preferenceSettingsSaveButton = document.getElementById("preference-settings-save");
+  const preferenceSettingsResetButton = document.getElementById("preference-settings-reset");
   const candidateSearchForm = document.getElementById("mikan-candidate-search-form");
   const candidateQueryInput = document.getElementById("mikan-candidate-query");
   const candidateSearchError = document.getElementById("mikan-candidate-search-error");
@@ -83,6 +98,7 @@
   let batchQueueItems = [];
   let storageDirPreference = "";
   let saveRequestPreference = true;
+  let currentPreferenceValues = null;
 
   function readPreference(key) {
     try {
@@ -756,6 +772,261 @@
     settingsAbForm.addEventListener("submit", submitSettingsAb);
   }
 
+  function setPreferenceSettingsError(message, field) {
+    if (!preferenceSettingsError) {
+      return;
+    }
+    preferenceSettingsError.textContent = message;
+    preferenceSettingsError.hidden = false;
+    for (const input of [
+      preferencePreferredInput,
+      preferenceExcludedInput,
+      preferenceFallbackSelect,
+      preferenceFilterContainInput,
+      preferenceFilterNotContainInput,
+      preferenceFilterUseRegexInput,
+      preferenceFilterCaseSensitiveInput,
+      preferenceNamingStrategySelect,
+      preferenceNamingTemplateInput,
+      preferenceSearchReuseInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearPreferenceSettingsError() {
+    if (!preferenceSettingsError) {
+      return;
+    }
+    preferenceSettingsError.textContent = "";
+    preferenceSettingsError.hidden = true;
+    for (const input of [
+      preferencePreferredInput,
+      preferenceExcludedInput,
+      preferenceFallbackSelect,
+      preferenceFilterContainInput,
+      preferenceFilterNotContainInput,
+      preferenceFilterUseRegexInput,
+      preferenceFilterCaseSensitiveInput,
+      preferenceNamingStrategySelect,
+      preferenceNamingTemplateInput,
+      preferenceSearchReuseInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setPreferenceSettingsStatus(message, className) {
+    if (!preferenceSettingsStatus) {
+      return;
+    }
+    preferenceSettingsStatus.className = className || "empty-state compact-state";
+    preferenceSettingsStatus.textContent = message;
+  }
+
+  function setPreferenceSettingsInFlight(isInFlight) {
+    if (!preferenceSettingsForm) {
+      return;
+    }
+    const controls = preferenceSettingsForm.querySelectorAll("button, input, select, textarea");
+    for (const control of controls) {
+      control.disabled = isInFlight;
+    }
+    if (preferenceSettingsSaveButton) {
+      preferenceSettingsSaveButton.textContent = isInFlight
+        ? "正在保存..."
+        : "保存偏好默认值";
+    }
+  }
+
+  function preferenceListToText(value) {
+    if (!Array.isArray(value)) {
+      return "";
+    }
+    return value.join("\n");
+  }
+
+  function preferenceTextToArray(value) {
+    const text = value || "";
+    return text
+      .split("\n")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  function renderPreferenceSettings(preferences) {
+    if (!preferenceSettingsForm) {
+      return;
+    }
+    currentPreferenceValues = preferences;
+    const subtitleGroups = preferences && preferences.subtitle_groups
+      ? preferences.subtitle_groups
+      : {};
+    const filterDefaults = preferences && preferences.filter_defaults
+      ? preferences.filter_defaults
+      : {};
+    const naming = preferences && preferences.naming ? preferences.naming : {};
+    const search = preferences && preferences.search ? preferences.search : {};
+
+    if (preferencePreferredInput) {
+      preferencePreferredInput.value = preferenceListToText(subtitleGroups.preferred);
+    }
+    if (preferenceExcludedInput) {
+      preferenceExcludedInput.value = preferenceListToText(subtitleGroups.excluded);
+    }
+    if (preferenceFallbackSelect) {
+      preferenceFallbackSelect.value = subtitleGroups.fallback || "next_preferred";
+    }
+    if (preferenceFilterContainInput) {
+      preferenceFilterContainInput.value = filterDefaults.must_contain || "";
+    }
+    if (preferenceFilterNotContainInput) {
+      preferenceFilterNotContainInput.value = filterDefaults.must_not_contain || "";
+    }
+    if (preferenceFilterUseRegexInput) {
+      preferenceFilterUseRegexInput.checked = filterDefaults.use_regex === true;
+    }
+    if (preferenceFilterCaseSensitiveInput) {
+      preferenceFilterCaseSensitiveInput.checked = filterDefaults.case_sensitive === true;
+    }
+    if (preferenceNamingStrategySelect) {
+      preferenceNamingStrategySelect.value = naming.strategy || "official_title_season";
+    }
+    if (preferenceNamingTemplateInput) {
+      preferenceNamingTemplateInput.value = naming.template || "{title}";
+    }
+    if (preferenceSearchReuseInput) {
+      preferenceSearchReuseInput.checked = search.reuse_explicit_corrections !== false;
+    }
+  }
+
+  function buildPreferenceSettingsPayload() {
+    const payload = {
+      preferences: {
+        subtitle_groups: {
+          preferred: preferenceTextToArray(preferencePreferredInput.value),
+          excluded: preferenceTextToArray(preferenceExcludedInput.value),
+          fallback: preferenceFallbackSelect ? preferenceFallbackSelect.value : "next_preferred",
+        },
+        filter_defaults: {
+          must_contain: preferenceFilterContainInput ? preferenceFilterContainInput.value.trim() : "",
+          must_not_contain: preferenceFilterNotContainInput ? preferenceFilterNotContainInput.value.trim() : "",
+          use_regex: preferenceFilterUseRegexInput ? preferenceFilterUseRegexInput.checked : false,
+          case_sensitive: preferenceFilterCaseSensitiveInput ? preferenceFilterCaseSensitiveInput.checked : false,
+        },
+        naming: {
+          strategy: preferenceNamingStrategySelect ? preferenceNamingStrategySelect.value : "official_title_season",
+          template: preferenceNamingTemplateInput ? preferenceNamingTemplateInput.value.trim() : "{title}",
+        },
+        search: {
+          reuse_explicit_corrections: preferenceSearchReuseInput ? preferenceSearchReuseInput.checked : true,
+        },
+      },
+    };
+    const storageDir = currentStorageDir();
+    if (storageDir) {
+      payload.storage_dir = storageDir;
+    }
+    return payload;
+  }
+
+  async function loadPreferenceSettings() {
+    if (!preferenceSettingsForm) {
+      return;
+    }
+    clearPreferenceSettingsError();
+    setPreferenceSettingsStatus("正在读取偏好默认值...", "loading-state compact-state");
+    try {
+      const preferences = await fetchJson(apiPath("/api/v1/preferences"));
+      renderPreferenceSettings(preferences);
+      setPreferenceSettingsStatus("已读取偏好默认值。", "empty-state compact-state");
+    } catch (error) {
+      renderPreferenceSettings(currentPreferenceValues || {});
+      setPreferenceSettingsStatus(
+        "读取偏好默认值失败。请检查存储目录后重试。",
+        "error-state compact-state",
+      );
+    }
+  }
+
+  async function savePreferenceSettings(event) {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+    clearPreferenceSettingsError();
+    setPreferenceSettingsInFlight(true);
+    setPreferenceSettingsStatus("正在保存偏好默认值...", "loading-state compact-state");
+    try {
+      const payload = buildPreferenceSettingsPayload();
+      const preferences = await fetchJson("/api/v1/preferences", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      renderPreferenceSettings(preferences);
+      setPreferenceSettingsStatus("偏好默认值已保存。", "success-state compact-state");
+      showNotification("success", "偏好默认值已保存", "后续批量订阅草案将使用这些默认值。");
+    } catch (error) {
+      // 回退到上次已成功加载/保存的偏好，保证被拒绝的敏感输入不会残留在表单中。
+      renderPreferenceSettings(currentPreferenceValues || {});
+      setPreferenceSettingsStatus("保存偏好默认值失败。请修正后重试。", "error-state compact-state");
+      setPreferenceSettingsError(error.message || "保存失败", null);
+      notifyApiError("保存偏好默认值失败", error);
+    } finally {
+      setPreferenceSettingsInFlight(false);
+    }
+  }
+
+  async function resetPreferenceSettings() {
+    if (!window.confirm(
+      "确认恢复所有偏好为默认值？此操作不会清除订阅方案、批量提交队列或 Auto Bangumi 结果存储。"
+    )) {
+      return;
+    }
+    clearPreferenceSettingsError();
+    setPreferenceSettingsInFlight(true);
+    setPreferenceSettingsStatus("正在恢复默认偏好...", "loading-state compact-state");
+    try {
+      const payload = {preferences: {}};
+      const storageDir = currentStorageDir();
+      if (storageDir) {
+        payload.storage_dir = storageDir;
+      }
+      const preferences = await fetchJson("/api/v1/preferences", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      renderPreferenceSettings(preferences);
+      setPreferenceSettingsStatus("已恢复默认偏好。", "success-state compact-state");
+      showNotification("success", "已恢复默认偏好", "偏好默认值已清空，订阅方案与队列不受影响。");
+    } catch (error) {
+      renderPreferenceSettings(currentPreferenceValues || {});
+      setPreferenceSettingsStatus("恢复默认偏好失败。请重试。", "error-state compact-state");
+      notifyApiError("恢复默认偏好失败", error);
+    } finally {
+      setPreferenceSettingsInFlight(false);
+    }
+  }
+
+  if (preferenceSettingsForm) {
+    preferenceSettingsForm.addEventListener("submit", savePreferenceSettings);
+  }
+  if (preferenceSettingsResetButton) {
+    preferenceSettingsResetButton.addEventListener("click", resetPreferenceSettings);
+  }
+  if (preferenceSettingsForm) {
+    loadPreferenceSettings();
+  }
+
   if (!form) {
     return;
   }
@@ -830,7 +1101,7 @@
       error.field = batchRawInput;
       throw error;
     }
-    return {raw_input: rawInput};
+    return {raw_input: rawInput, storage_dir: currentStorageDir() || null};
   }
 
   function batchCardTitle(row) {
@@ -894,6 +1165,279 @@
       excludedSeeds: Array.isArray(excludedSeeds) ? excludedSeeds : [],
       selectedGroupName: selectedGroupName,
     };
+  }
+
+  // Stage 21 (US-156): the batch card exposes the parse-time preference/review
+  // metadata (preference hits, preference warnings, review hints, search-query
+  // source) plus the preference default config. These helpers only read the
+  // public non-sensitive fields the batch parse API already returns, so no
+  // endpoint/token/cookie/raw response ever reaches the rendered card.
+
+  function batchCardPreferenceHits(row) {
+    return Array.isArray(row.preference_hits) ? row.preference_hits : [];
+  }
+
+  function batchCardPreferenceWarnings(row) {
+    return Array.isArray(row.preference_warnings) ? row.preference_warnings : [];
+  }
+
+  function batchCardReviewHints(row) {
+    return Array.isArray(row.review_hints) ? row.review_hints : [];
+  }
+
+  function batchCardEnhancedQueries(row) {
+    return Array.isArray(row.enhanced_search_queries) ? row.enhanced_search_queries : [];
+  }
+
+  function batchCardAppliedPreferences(row) {
+    const applied = row.applied_preferences;
+    return applied && typeof applied === "object" ? applied : null;
+  }
+
+  function batchCardPreferenceFallback(row) {
+    const warnings = batchCardPreferenceWarnings(row);
+    for (const warning of warnings) {
+      const text = String(warning || "");
+      if (text.indexOf("偏好读取失败") !== -1 || text.indexOf("偏好应用失败") !== -1) {
+        return text;
+      }
+    }
+    return null;
+  }
+
+  function batchCardPreferenceHitLabel(field) {
+    const labels = {
+      subtitle_groups: "字幕组",
+      filter_rule: "筛选",
+      naming: "命名",
+    };
+    return Object.prototype.hasOwnProperty.call(labels, field)
+      ? labels[field]
+      : safeText(field);
+  }
+
+  function batchCardPreferenceSummary(row) {
+    if (batchCardPreferenceFallback(row)) {
+      return "偏好不可用，已回退默认流程";
+    }
+    const hits = batchCardPreferenceHits(row);
+    const appliedFields = hits
+      .filter((hit) => hit && hit.applied === true)
+      .map((hit) => batchCardPreferenceHitLabel(hit.field));
+    if (appliedFields.length) {
+      return "偏好命中：" + appliedFields.join("、");
+    }
+    return "未配置偏好，使用默认流程";
+  }
+
+  function batchCardNeedsReview(row) {
+    return row.needs_user_review === true && fieldValue(row.status) !== "ACCEPTED";
+  }
+
+  function batchCardFallbackLabel(fallback) {
+    const labels = {
+      next_preferred: "偏好字幕组优先",
+      none: "不自动选择",
+    };
+    return Object.prototype.hasOwnProperty.call(labels, fallback)
+      ? labels[fallback]
+      : safeText(fallback);
+  }
+
+  function batchCardNamingStrategyLabel(strategy) {
+    const labels = {
+      official_title_season: "官方标题+季",
+      official_title: "官方标题",
+      raw_title: "原始标题",
+    };
+    return Object.prototype.hasOwnProperty.call(labels, strategy)
+      ? labels[strategy]
+      : safeText(strategy);
+  }
+
+  function buildBatchCardPreferenceBlock(row) {
+    const block = document.createElement("div");
+    block.className = "batch-card-review-block batch-card-preference-block";
+    const heading = document.createElement("h4");
+    heading.textContent = "偏好与审核";
+    block.appendChild(heading);
+
+    const fallback = batchCardPreferenceFallback(row);
+    if (fallback) {
+      const fallbackNote = document.createElement("p");
+      fallbackNote.className = "batch-card-preference-note";
+      fallbackNote.textContent = safeText(fallback);
+      block.appendChild(fallbackNote);
+    }
+
+    const hits = batchCardPreferenceHits(row);
+    if (hits.length) {
+      const hitsHeading = document.createElement("h5");
+      hitsHeading.textContent = "偏好命中摘要";
+      block.appendChild(hitsHeading);
+      const hitsList = document.createElement("ul");
+      hitsList.className = "batch-card-preference-list";
+      for (const hit of hits) {
+        if (!hit) {
+          continue;
+        }
+        const item = document.createElement("li");
+        item.textContent =
+          batchCardPreferenceHitLabel(hit.field) +
+          "：" +
+          safeText(hit.summary);
+        hitsList.appendChild(item);
+      }
+      block.appendChild(hitsList);
+    } else if (!fallback) {
+      const note = document.createElement("p");
+      note.className = "muted-text";
+      note.textContent = "未配置偏好默认值。";
+      block.appendChild(note);
+    }
+
+    const warnings = batchCardPreferenceWarnings(row).filter(
+      (warning) => String(warning || "").trim() !== "",
+    );
+    if (warnings.length) {
+      const warningsHeading = document.createElement("h5");
+      warningsHeading.textContent = "偏好警告";
+      block.appendChild(warningsHeading);
+      const warningsList = document.createElement("ul");
+      warningsList.className = "batch-card-preference-list";
+      for (const warning of warnings) {
+        const item = document.createElement("li");
+        item.textContent = safeText(warning);
+        warningsList.appendChild(item);
+      }
+      block.appendChild(warningsList);
+    }
+
+    const reviewHeading = document.createElement("h5");
+    reviewHeading.textContent = "审核提示";
+    block.appendChild(reviewHeading);
+    const reviewHints = batchCardReviewHints(row);
+    if (reviewHints.length) {
+      const hintsList = document.createElement("ul");
+      hintsList.className = "batch-card-preference-list";
+      for (const hint of reviewHints) {
+        const item = document.createElement("li");
+        item.textContent = safeText(hint);
+        hintsList.appendChild(item);
+      }
+      block.appendChild(hintsList);
+    } else {
+      const note = document.createElement("p");
+      note.className = "muted-text";
+      note.textContent = "无需人工核对。";
+      block.appendChild(note);
+    }
+
+    const applied = batchCardAppliedPreferences(row);
+    if (applied) {
+      const configHeading = document.createElement("h5");
+      configHeading.textContent = "当前默认配置";
+      block.appendChild(configHeading);
+      const subtitleGroups =
+        applied.subtitle_groups && typeof applied.subtitle_groups === "object"
+          ? applied.subtitle_groups
+          : {};
+      const filterRule =
+        applied.filter_rule && typeof applied.filter_rule === "object"
+          ? applied.filter_rule
+          : {};
+      const naming =
+        applied.naming && typeof applied.naming === "object"
+          ? applied.naming
+          : {};
+      const preferred = Array.isArray(subtitleGroups.preferred)
+        ? subtitleGroups.preferred
+        : [];
+      const excluded = Array.isArray(subtitleGroups.excluded)
+        ? subtitleGroups.excluded
+        : [];
+      const filterParts = [filterRule.must_contain, filterRule.must_not_contain]
+        .map((part) => String(part || "").trim())
+        .filter((part) => part !== "");
+      const configRows = [
+        ["偏好字幕组", safeText(preferred.join("、") || "未配置")],
+        ["排除字幕组", safeText(excluded.join("、") || "未配置")],
+        ["Fallback", batchCardFallbackLabel(subtitleGroups.fallback)],
+        ["默认筛选", filterParts.length ? safeText(filterParts.join(" / ")) : "无"],
+        ["匹配模式", filterRule.use_regex === true ? "正则" : "普通字符"],
+        ["大小写", filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写"],
+        ["命名策略", batchCardNamingStrategyLabel(naming.strategy)],
+        ["命名模板", safeText(naming.template || "{title}")],
+      ];
+      if (applied.expected_folder_name) {
+        configRows.push(["默认目录名", safeText(applied.expected_folder_name)]);
+      }
+      block.appendChild(detailList(configRows));
+    }
+
+    return block;
+  }
+
+  function buildBatchCardSearchSourceBlock(row) {
+    const block = document.createElement("div");
+    block.className = "batch-card-review-block batch-card-search-source-block";
+    const heading = document.createElement("h4");
+    heading.textContent = "搜索词来源";
+    block.appendChild(heading);
+
+    const enhanced = batchCardEnhancedQueries(row);
+    if (enhanced.length) {
+      const sourceLabel = document.createElement("h5");
+      sourceLabel.textContent = "修正增强搜索词";
+      block.appendChild(sourceLabel);
+      const list = document.createElement("ul");
+      list.className = "batch-card-preference-list";
+      for (const entry of enhanced) {
+        if (!entry) {
+          continue;
+        }
+        const item = document.createElement("li");
+        item.textContent = safeText(entry.query) + "（来源：" + safeText(entry.source) + "）";
+        list.appendChild(item);
+      }
+      block.appendChild(list);
+      const originalHeading = document.createElement("h5");
+      originalHeading.textContent = "原始搜索词";
+      block.appendChild(originalHeading);
+      const originalList = document.createElement("ul");
+      originalList.className = "batch-card-preference-list";
+      const originalQueries = Array.isArray(row.search_queries)
+        ? row.search_queries
+        : [];
+      for (const query of originalQueries) {
+        const item = document.createElement("li");
+        item.textContent = safeText(query);
+        originalList.appendChild(item);
+      }
+      block.appendChild(originalList);
+      return block;
+    }
+
+    const queries = Array.isArray(row.search_queries) ? row.search_queries : [];
+    if (queries.length) {
+      const defaultLabel = document.createElement("h5");
+      defaultLabel.textContent = "默认解析搜索词";
+      block.appendChild(defaultLabel);
+      const list = document.createElement("ul");
+      list.className = "batch-card-preference-list";
+      for (const query of queries) {
+        const item = document.createElement("li");
+        item.textContent = safeText(query);
+        list.appendChild(item);
+      }
+      block.appendChild(list);
+    } else {
+      const note = document.createElement("p");
+      note.className = "muted-text";
+      note.textContent = "无搜索词，已回退默认流程。";
+      block.appendChild(note);
+    }
+    return block;
   }
 
   function canExpandBatchCard(row) {
@@ -1389,7 +1933,13 @@
     });
     actions.appendChild(acceptButton);
 
-    panel.append(filterBlock, seedsBlock, actions);
+    panel.append(
+      buildBatchCardPreferenceBlock(row),
+      buildBatchCardSearchSourceBlock(row),
+      filterBlock,
+      seedsBlock,
+      actions,
+    );
     return panel;
   }
 
@@ -1460,6 +2010,12 @@
       queueStatus.textContent = batchQueueStatusLabel(row.queue_status);
       statusRow.appendChild(queueStatus);
     }
+    if (batchCardNeedsReview(row)) {
+      const reviewStatus = document.createElement("span");
+      reviewStatus.className = "batch-status batch-card-review-status";
+      reviewStatus.textContent = "需人工核对";
+      statusRow.appendChild(reviewStatus);
+    }
 
     const title = document.createElement("strong");
     title.className = "batch-card-title";
@@ -1472,6 +2028,10 @@
     const source = document.createElement("div");
     source.className = "batch-card-source";
     source.textContent = "源名称：" + batchCardSourceName(row);
+
+    const preference = document.createElement("div");
+    preference.className = "batch-card-preference";
+    preference.textContent = batchCardPreferenceSummary(row);
 
     const seeds = document.createElement("div");
     seeds.className = "batch-card-seeds";
@@ -1506,6 +2066,7 @@
       title,
       rawTitle,
       source,
+      preference,
       seeds,
     ];
     if (row.accept_feedback && row.accept_feedback.reason) {

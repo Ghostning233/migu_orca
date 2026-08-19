@@ -39,7 +39,18 @@ from request_engine.controllers.request_controller import (
     summarize_request,
 )
 from shared.errors import Stage1Error
-from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
+from shared.models import (
+    BangumiCandidate,
+    EntryRequest,
+    FilterDefaults,
+    MatchedBangumi,
+    NamingPreference,
+    RssSource,
+    SearchPreference,
+    SubtitleGroupPreference,
+    VersionedUserPreference,
+)
+from storage_engine.controllers.preference_repository import save_user_preferences
 from storage_engine.controllers.ab_result_repository import (
     load_ab_submit_result,
     save_ab_submit_result,
@@ -374,14 +385,16 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert "订阅方案工作台" in html
     assert "Settings" in html
     assert 'id="storage-settings-panel"' in html
+    assert 'id="preference-settings-panel"' in html
     assert 'id="data-source-settings-panel"' in html
     assert 'id="qbittorrent-settings-panel"' in html
     assert 'id="auto-bangumi-settings-panel"' in html
     assert "Storage 偏好" in html
+    assert "偏好默认值" in html
     assert "数据源" in html
     assert "qBittorrent" in html
     assert "Auto Bangumi" in html
-    assert html.count('class="panel settings-panel"') == 4
+    assert html.count('class="panel settings-panel"') == 5
     assert "empty-state" in html
     assert 'id="storage-preferences-form"' in html
     assert 'id="settings-storage-dir"' in html
@@ -392,6 +405,23 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'id="storage-preferences-clear"' in html
     assert "非敏感浏览器偏好" in html
     assert "localStorage" in html
+    assert 'id="preference-settings-form"' in html
+    assert 'id="preference-preferred-groups"' in html
+    assert 'id="preference-excluded-groups"' in html
+    assert 'id="preference-fallback"' in html
+    assert 'id="preference-filter-must-contain"' in html
+    assert 'id="preference-filter-must-not-contain"' in html
+    assert 'id="preference-filter-use-regex"' in html
+    assert 'id="preference-filter-case-sensitive"' in html
+    assert 'id="preference-naming-strategy"' in html
+    assert 'id="preference-naming-template"' in html
+    assert 'id="preference-search-reuse-corrections"' in html
+    assert 'id="preference-settings-save"' in html
+    assert 'id="preference-settings-reset"' in html
+    assert "偏好字幕组" in html
+    assert "排除字幕组" in html
+    assert "命名策略" in html
+    assert "不会保存 endpoint、token、cookie" in html
     qbittorrent_panel_html = html[
         html.index('id="qbittorrent-settings-panel"') : html.index('id="auto-bangumi-settings-panel"')
     ]
@@ -595,6 +625,45 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "batchStatusLabel" in script
     assert "已解析" in script
     assert "解析失败" in script
+
+
+def test_static_app_script_wires_batch_preference_display() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    # US-156 preference/review metadata helpers wired into the batch cards.
+    assert "batchCardPreferenceHits" in script
+    assert "batchCardPreferenceWarnings" in script
+    assert "batchCardReviewHints" in script
+    assert "batchCardEnhancedQueries" in script
+    assert "batchCardAppliedPreferences" in script
+    assert "batchCardPreferenceFallback" in script
+    assert "batchCardPreferenceSummary" in script
+    assert "batchCardNeedsReview" in script
+    assert "buildBatchCardPreferenceBlock" in script
+    assert "buildBatchCardSearchSourceBlock" in script
+    assert "batch-card-preference" in script
+    assert "batch-card-preference-block" in script
+    assert "batch-card-search-source-block" in script
+    assert "batch-card-preference-list" in script
+    assert "batch-card-review-status" in script
+    assert "偏好与审核" in script
+    assert "偏好命中摘要" in script
+    assert "偏好警告" in script
+    assert "审核提示" in script
+    assert "当前默认配置" in script
+    assert "偏好字幕组" in script
+    assert "排除字幕组" in script
+    assert "搜索词来源" in script
+    assert "修正增强搜索词" in script
+    assert "原始搜索词" in script
+    assert "偏好不可用，已回退默认流程" in script
+    assert "未配置偏好，使用默认流程" in script
+    assert "偏好命中：" in script
+    assert "需人工核对" in script
+    assert "无需人工核对。" in script
+    assert "无搜索词，已回退默认流程。" in script
 
 
 def test_static_app_script_wires_batch_queue_result_panel() -> None:
@@ -950,6 +1019,37 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert "storagePreferencesForm.addEventListener(\"submit\", persistWebPreferences)" in script
     assert script.index("restoreWebPreferences()") < script.index("loadList()")
     assert "currentSaveRequest()" in script
+
+
+def test_static_app_script_wires_preference_settings_form() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "preference-settings-form" in script
+    assert "preference-preferred-groups" in script
+    assert "preference-excluded-groups" in script
+    assert "preference-fallback" in script
+    assert "preference-filter-must-contain" in script
+    assert "preference-filter-must-not-contain" in script
+    assert "preference-filter-use-regex" in script
+    assert "preference-filter-case-sensitive" in script
+    assert "preference-naming-strategy" in script
+    assert "preference-naming-template" in script
+    assert "preference-search-reuse-corrections" in script
+    assert "loadPreferenceSettings" in script
+    assert "savePreferenceSettings" in script
+    assert "resetPreferenceSettings" in script
+    assert "buildPreferenceSettingsPayload" in script
+    assert "renderPreferenceSettings" in script
+    assert "setPreferenceSettingsInFlight" in script
+    assert "preferenceSettingsForm.addEventListener(\"submit\", savePreferenceSettings)" in script
+    assert "preferenceSettingsResetButton.addEventListener(\"click\", resetPreferenceSettings)" in script
+    assert 'apiPath("/api/v1/preferences")' in script
+    assert 'fetchJson("/api/v1/preferences"' in script
+    assert "reuse_explicit_corrections" in script
+    assert "official_title_season" in script
+    assert "此操作不会清除订阅方案、批量提交队列或 Auto Bangumi 结果存储" in script
 
 
 def test_static_app_script_wires_explicit_ab_submit_form() -> None:
@@ -2482,9 +2582,24 @@ def test_candidate_search_api_cache_isolates_different_hosts(
 def test_batch_parse_api_returns_per_item_parsed_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # 路哥S4 (high confidence, single candidate) gets a real candidate so it is
+    # the no-review case; 萌王S4 (multi-candidate) and 邻家天使S2 (no candidate)
+    # both must be flagged for review under US-154.
+    def _search_candidates(search_queries: list[str], mikan_config: object) -> list[dict[str, object]]:
+        if search_queries and "实力至上" in search_queries[0]:
+            return [
+                {
+                    "bangumi_id": "4001",
+                    "title": "欢迎来到实力至上主义的教室 第四季",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/4001",
+                    "source_query": search_queries[0],
+                }
+            ]
+        return []
+
     monkeypatch.setattr(
         "apps.migu_orca_web.views._search_batch_item_candidates",
-        lambda search_queries, mikan_config: [],
+        _search_candidates,
     )
     raw_input = "\n萌王S4\n  \n路哥S4\n邻家天使S2\n"
 
@@ -2519,6 +2634,55 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
     assert items[0]["candidates"] == []
     assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
     assert items[1]["needs_user_review"] is False
+    assert items[1]["candidates"][0]["bangumi_id"] == "4001"
+    # US-154: no-candidate items (even high-confidence single-candidate ones)
+    # must be flagged for review.
+    assert items[2]["needs_user_review"] is True
+    assert items[2]["candidates"] == []
+    # Stage 21: every item carries applied_preferences + preference_warnings.
+    assert items[0]["applied_preferences"] == {
+        "subtitle_groups": {
+            "preferred": [],
+            "excluded": [],
+            "fallback": "next_preferred",
+        },
+        "filter_rule": {
+            "must_contain": "",
+            "must_not_contain": "",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
+        "naming": {"strategy": "official_title_season", "template": "{title}"},
+        "expected_folder_name": "关于我转生变成史莱姆这档事 第四季",
+    }
+    assert items[0]["preference_warnings"] == []
+    assert items[1]["applied_preferences"]["expected_folder_name"] == (
+        "欢迎来到实力至上主义的教室 第四季"
+    )
+    assert items[1]["preference_warnings"] == []
+    # US-154: preference_hits summarizes which preference defaults applied.
+    assert items[1]["preference_hits"] == [
+        {
+            "field": "subtitle_groups",
+            "applied": False,
+            "summary": "未配置字幕组偏好，使用默认选择流程",
+        },
+        {
+            "field": "filter_rule",
+            "applied": False,
+            "summary": "未配置筛选默认值",
+        },
+        {
+            "field": "naming",
+            "applied": True,
+            "summary": "命名策略已生成默认目录名：欢迎来到实力至上主义的教室 第四季",
+        },
+    ]
+    # The high-confidence single-candidate item with a candidate has no review
+    # hints; the multi-candidate and no-candidate items carry Chinese hints.
+    assert items[1]["review_hints"] == []
+    assert any("存在多个候选名称" in hint for hint in items[0]["review_hints"])
+    assert any("未找到候选合集" in hint for hint in items[2]["review_hints"])
 
 
 def test_batch_parse_api_rejects_empty_input_with_chinese_validation_error() -> None:
@@ -2614,6 +2778,205 @@ def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
     assert "llm.example" not in body
     assert "session-id" not in body
     assert "/home/ghostning" not in body
+
+
+def test_batch_parse_api_applies_saved_preferences_from_storage_dir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    save_user_preferences(
+        load_storage_config(storage_dir),
+        VersionedUserPreference(
+            version=1,
+            subtitle_groups=SubtitleGroupPreference(
+                preferred=["Loli"],
+                excluded=["示例组"],
+                fallback="next_preferred",
+            ),
+            filter_defaults=FilterDefaults(
+                must_contain="1080p",
+                must_not_contain="合集版",
+                use_regex=True,
+                case_sensitive=True,
+            ),
+            naming=NamingPreference(strategy="raw_title", template="{title}"),
+        ),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+    )
+
+    item = response.get_json()["result"]["items"][0]
+    assert response.status_code == 200
+    assert item["applied_preferences"] == {
+        "subtitle_groups": {
+            "preferred": ["Loli"],
+            "excluded": ["示例组"],
+            "fallback": "next_preferred",
+        },
+        "filter_rule": {
+            "must_contain": "1080p",
+            "must_not_contain": "合集版",
+            "use_regex": True,
+            "case_sensitive": True,
+        },
+        "naming": {"strategy": "raw_title", "template": "{title}"},
+        "expected_folder_name": "萌王S4",
+    }
+    assert item["preference_warnings"] == []
+
+
+def test_batch_parse_api_falls_back_when_preference_file_is_damaged(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    config = load_storage_config(storage_dir)
+    config.preferences_dir.mkdir(parents=True, exist_ok=True)
+    (config.preferences_dir / "user_preferences.json").write_text(
+        "{not valid json", encoding="utf-8"
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert len(items) == 2
+    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert all(item["applied_preferences"] is None for item in items)
+    assert all(item["preference_warnings"] == ["偏好读取失败，已回退默认流程"] for item in items)
+    assert items[0]["canonical_title_candidates"]
+    assert items[1]["canonical_title_candidates"]
+
+
+def test_batch_parse_api_failed_item_keeps_applied_preferences_config(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def provider() -> FakeAnimeTitleParsingProvider:
+        return FakeAnimeTitleParsingProvider(fail_titles={"杖剑谭S2"})
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        provider,
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    save_user_preferences(
+        load_storage_config(storage_dir),
+        VersionedUserPreference(
+            version=1,
+            subtitle_groups=SubtitleGroupPreference(preferred=["Loli"]),
+            naming=NamingPreference(strategy="raw_title", template="{title}"),
+        ),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n杖剑谭S2", "storage_dir": str(storage_dir)},
+    )
+
+    items = response.get_json()["result"]["items"]
+    failed = next(item for item in items if item["status"] == BATCH_ITEM_STATUS_FAILED)
+    parsed = next(item for item in items if item["status"] == BATCH_ITEM_STATUS_PARSED)
+    assert failed["applied_preferences"]["expected_folder_name"] is None
+    assert "该条目解析失败，命名默认值不可用" in failed["preference_warnings"]
+    assert failed["applied_preferences"]["subtitle_groups"] == {
+        "preferred": ["Loli"],
+        "excluded": [],
+        "fallback": "next_preferred",
+    }
+    assert parsed["applied_preferences"]["expected_folder_name"] == "萌王S4"
+    assert parsed["preference_warnings"] == []
+
+
+def test_batch_parse_api_preference_response_never_leaks_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    config = load_storage_config(storage_dir)
+    config.preferences_dir.mkdir(parents=True, exist_ok=True)
+    # A hand-edited/legacy file carrying extra sensitive keys alongside the
+    # defined contract fields: the repository strips unknown keys on load, so
+    # the batch parse response must never echo them back.
+    (config.preferences_dir / "user_preferences.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "subtitle_groups": {
+                    "preferred": ["Loli"],
+                    "excluded": [],
+                    "fallback": "next_preferred",
+                },
+                "filter_defaults": {
+                    "must_contain": "1080p",
+                    "must_not_contain": "",
+                    "use_regex": False,
+                    "case_sensitive": False,
+                },
+                "naming": {"strategy": "raw_title", "template": "{title}"},
+                "search": {"reuse_explicit_corrections": True},
+                "token": "secret-token",
+                "endpoint": "https://llm.example/api",
+                "cookie": "session-id",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    body = response.get_data(as_text=True)
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    applied = item["applied_preferences"]
+    assert applied is not None
+    assert "token" not in applied
+    assert "endpoint" not in applied
+    assert "cookie" not in applied
+    assert "secret-token" not in body
+    assert "llm.example" not in body
+    assert "session-id" not in body
+    # US-154: preference_hits only carry public rule summaries, and review_hints
+    # are safe Chinese prompts — no sensitive key or value can appear anywhere.
+    for hit in item["preference_hits"]:
+        assert set(hit) == {"field", "applied", "summary"}
+        assert isinstance(hit["summary"], str)
+    for hint in item["review_hints"]:
+        assert isinstance(hint, str)
+        assert "token" not in hint
+        assert "cookie" not in hint
+        assert "llm.example" not in hint
 
 
 def test_batch_parse_api_searches_candidates_for_each_item_query(
@@ -2769,6 +3132,10 @@ def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_
         "url": "[redacted-url]",
         "[redacted]": "[redacted]",
     }
+    # US-154: a search failure must be flagged for review with a Chinese hint,
+    # but it never leaks the redacted URL/cookie from the search error.
+    assert items[1]["needs_user_review"] is True
+    assert any("候选搜索失败" in hint for hint in items[1]["review_hints"])
     assert "secret-token" not in body
     assert "session-cookie" not in body
     assert "https://mikan.example/Home/Search" not in body
@@ -2835,6 +3202,523 @@ def test_batch_parse_api_candidate_results_only_serialize_public_fields(
     assert "secret-token" not in body
     assert "magnet:?" not in body
     assert "<html" not in body
+
+
+def test_batch_parse_api_marks_low_confidence_item_for_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 杖剑谭S2 parses at 0.62 confidence (below the 0.7 threshold) and has a
+    # single canonical candidate, so it must be flagged for review even though
+    # the candidate search returns a result.
+    client = _MappedCandidateSearchClient(
+        responses={
+            "杖与剑的魔剑谭 第二季": [
+                MikanCandidate(
+                    bangumi_id="2001",
+                    title="杖与剑的魔剑谭 第二季",
+                    mikan_url="https://mikan.example/Home/Bangumi/2001",
+                    source_query="杖与剑的魔剑谭 第二季",
+                )
+            ]
+        }
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "杖剑谭S2"},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["confidence"] == 0.62
+    assert item["candidates"][0]["bangumi_id"] == "2001"
+    assert item["needs_user_review"] is True
+    assert any("置信度较低" in hint for hint in item["review_hints"])
+
+
+def test_batch_parse_api_marks_preference_conflict_item_for_review(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # fallback=none with no preferred subtitle group conflicts with auto
+    # selection, so the item is flagged for review even though the parse is
+    # high-confidence and the candidate search succeeds.
+    storage_dir = tmp_path / "migu-state"
+    save_user_preferences(
+        load_storage_config(storage_dir),
+        VersionedUserPreference(
+            version=1,
+            subtitle_groups=SubtitleGroupPreference(
+                preferred=[],
+                excluded=[],
+                fallback="none",
+            ),
+            filter_defaults=FilterDefaults(
+                must_contain="",
+                must_not_contain="",
+                use_regex=False,
+                case_sensitive=False,
+            ),
+            naming=NamingPreference(
+                strategy="official_title_season", template="{title}"
+            ),
+            search=SearchPreference(reuse_explicit_corrections=True),
+        ),
+    )
+    client = _MappedCandidateSearchClient(
+        responses={
+            "欢迎来到实力至上主义的教室 第四季": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="欢迎来到实力至上主义的教室 第四季",
+                )
+            ]
+        }
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={
+            "raw_input": "路哥S4",
+            "storage_dir": str(storage_dir),
+        },
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["candidates"][0]["bangumi_id"] == "4001"
+    assert item["needs_user_review"] is True
+    assert any(
+        "偏好字幕组存在冲突" in hint for hint in item["review_hints"]
+    )
+    assert item["preference_warnings"] == [
+        "fallback 为 none 且未配置偏好字幕组，不会自动选择字幕组"
+    ]
+
+
+# --- US-155: title-correction API + enhanced batch search ---
+
+
+def _correction_payload() -> dict[str, Any]:
+    return {
+        "raw_title": "路哥S4",
+        "canonical_title": "欢迎来到实力至上主义的教室",
+        "season_hint": "S4",
+        "bangumi_metadata": {
+            "bangumi_id": "4001",
+            "title": "欢迎来到实力至上主义的教室",
+        },
+        "query_correction": "欢迎来到实力至上主义的教室 第四季",
+    }
+
+
+def _correction_save_body(
+    storage_dir: Path,
+    correction: dict[str, Any] | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"storage_dir": str(storage_dir)}
+    if correction is not None:
+        body["correction"] = correction
+    return body
+
+
+def test_correction_api_reads_empty_list_when_missing(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().get(f"/api/v1/corrections?storage_dir={storage_dir}")
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"] == {"corrections": []}
+
+
+def test_correction_api_save_returns_normalized_list_and_persists(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    payload = _correction_payload()
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, payload),
+    )
+
+    result = response.get_json()
+    assert response.status_code == 200
+    assert result["ok"] is True
+    assert result["result"]["corrections"] == [payload]
+    assert result["result"]["corrections"][0]["bangumi_metadata"] == {
+        "bangumi_id": "4001",
+        "title": "欢迎来到实力至上主义的教室",
+    }
+
+    # The saved JSON on disk carries only the defined non-sensitive fields.
+    config = load_storage_config(storage_dir)
+    written = json.loads(
+        (config.corrections_dir / "corrections.json").read_text(encoding="utf-8")
+    )
+    assert written == {"version": 1, "corrections": [payload]}
+
+
+def test_correction_api_save_uses_latest_version_for_same_raw_title(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, _correction_payload()),
+    )
+    updated = {
+        **_correction_payload(),
+        "canonical_title": "欢迎来到实力至上主义的教室 第四季",
+        "query_correction": "欢迎来到实力至上主义的教室 第四季",
+    }
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, updated),
+    )
+
+    response = _client().get(f"/api/v1/corrections?storage_dir={storage_dir}")
+
+    corrections = response.get_json()["result"]["corrections"]
+    assert len(corrections) == 1
+    assert corrections[0]["canonical_title"] == "欢迎来到实力至上主义的教室 第四季"
+
+
+def test_correction_api_save_rejects_missing_correction(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, None),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "请提供修正内容"
+    assert payload["error_data"]["details"] == {"field": "correction"}
+
+
+def test_correction_api_save_rejects_invalid_correction(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(
+            storage_dir, {"canonical_title": "葬送的芙莉莲"}
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {"field": "raw_title"}
+
+
+def test_correction_api_save_rejects_unknown_field_without_writing(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(
+            storage_dir, {**_correction_payload(), "token": "secret"}
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert "未定义字段" in payload["error_message"]
+    assert not (
+        load_storage_config(storage_dir).corrections_dir / "corrections.json"
+    ).exists()
+
+
+def test_correction_api_save_rejects_sensitive_value_without_writing(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(
+            storage_dir,
+            {**_correction_payload(), "query_correction": "https://mikan.example/api"},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert "敏感内容" in payload["error_message"]
+    assert not (
+        load_storage_config(storage_dir).corrections_dir / "corrections.json"
+    ).exists()
+
+
+def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, _correction_payload()),
+    )
+    client = _MappedCandidateSearchClient(
+        responses={
+            "欢迎来到实力至上主义的教室 第四季": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="欢迎来到实力至上主义的教室 第四季",
+                    aliases=["路哥 S4"],
+                )
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    # The enhanced queries are searched first; the original queries are never
+    # searched because the enhanced search already found candidates.
+    assert client.searches == [
+        "欢迎来到实力至上主义的教室 第四季",
+        "欢迎来到实力至上主义的教室 第4季",
+        "欢迎来到实力至上主义的教室 S4",
+        "欢迎来到实力至上主义的教室 Season 4",
+        "欢迎来到实力至上主义的教室",
+    ]
+    assert item["enhanced_search_queries"] == [
+        {
+            "query": "欢迎来到实力至上主义的教室 第四季",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:query",
+        },
+        {
+            "query": "欢迎来到实力至上主义的教室 第4季",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:query",
+        },
+        {
+            "query": "欢迎来到实力至上主义的教室 S4",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:query",
+        },
+        {
+            "query": "欢迎来到实力至上主义的教室 Season 4",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:query",
+        },
+        {
+            "query": "欢迎来到实力至上主义的教室",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:canonical",
+        },
+    ]
+    assert item["candidates"][0]["bangumi_id"] == "4001"
+
+
+def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, _correction_payload()),
+    )
+    # Only an original parse query has a candidate; the enhanced queries do not.
+    client = _MappedCandidateSearchClient(
+        responses={
+            "路哥 S4": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="路哥 S4",
+                    aliases=["路哥 S4"],
+                )
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    # The enhanced queries are searched first, then the original queries on
+    # fallback. The repeated first query is served from the candidate cache, so
+    # it is not searched twice through the client.
+    assert client.searches == [
+        "欢迎来到实力至上主义的教室 第四季",
+        "欢迎来到实力至上主义的教室 第4季",
+        "欢迎来到实力至上主义的教室 S4",
+        "欢迎来到实力至上主义的教室 Season 4",
+        "欢迎来到实力至上主义的教室",
+        "实力至上主义教室 S4",
+        "路哥 S4",
+    ]
+    assert item["candidates"][0]["bangumi_id"] == "4001"
+
+
+def test_batch_parse_api_falls_back_to_original_queries_when_corrections_file_damaged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    config = load_storage_config(storage_dir)
+    config.corrections_dir.mkdir(parents=True, exist_ok=True)
+    (config.corrections_dir / "corrections.json").write_text(
+        "{not valid json", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert all(item["enhanced_search_queries"] == [] for item in items)
+
+
+def test_batch_parse_api_does_not_leak_poisoned_corrections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    config = load_storage_config(storage_dir)
+    config.corrections_dir.mkdir(parents=True, exist_ok=True)
+    (config.corrections_dir / "corrections.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "corrections": [
+                    {
+                        "raw_title": "路哥S4",
+                        "canonical_title": "https://mikan.example/api?token=secret",
+                        "query_correction": "路哥",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["enhanced_search_queries"] == []
+    assert "mikan.example" not in body
+    assert "token=secret" not in body
+
+
+def test_batch_parse_api_failed_search_keeps_enhanced_queries_for_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, _correction_payload()),
+    )
+    # Enhanced queries find nothing, and the original-query fallback raises.
+    client = _MappedCandidateSearchClient()
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise Stage1Error("mikan_timeout", "MiKan HTTP 请求超时", "mikan_search")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        _raise,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_FAILED
+    # The enhanced queries are still returned so the user can review what was
+    # attempted even though the item failed.
+    assert item["enhanced_search_queries"]
+    assert all(
+        entry["source"] in ("correction:query", "correction:canonical")
+        for entry in item["enhanced_search_queries"]
+    )
 
 
 def test_candidate_search_api_cache_expires_after_ttl(
@@ -4901,3 +5785,404 @@ def test_batch_recover_api_rejects_invalid_action(tmp_path: Path) -> None:
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "恢复动作必须是 auto、succeeded 或 failed"
+
+
+def _preferences_save_body(
+    storage_dir: Path,
+    preferences: dict[str, Any] | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"storage_dir": str(storage_dir)}
+    if preferences is not None:
+        body["preferences"] = preferences
+    return body
+
+
+def _full_preferences_payload() -> dict[str, Any]:
+    return {
+        "version": 1,
+        "subtitle_groups": {
+            "preferred": ["Loli", "喵萌"],
+            "excluded": ["示例组"],
+            "fallback": "next_preferred",
+        },
+        "filter_defaults": {
+            "must_contain": "1080p",
+            "must_not_contain": "合集版",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
+        "naming": {"strategy": "official_title_season", "template": "{title}"},
+        "search": {"reuse_explicit_corrections": True},
+    }
+
+
+def test_preference_api_reads_defaults_when_missing(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().get(
+        f"/api/v1/preferences?storage_dir={storage_dir}"
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"] == {
+        "version": 1,
+        "subtitle_groups": {
+            "preferred": [],
+            "excluded": [],
+            "fallback": "next_preferred",
+        },
+        "filter_defaults": {
+            "must_contain": "",
+            "must_not_contain": "",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
+        "naming": {"strategy": "official_title_season", "template": "{title}"},
+        "search": {"reuse_explicit_corrections": True},
+    }
+
+
+def test_preference_api_reads_saved_preferences(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+    )
+
+    response = _client().get(
+        f"/api/v1/preferences?storage_dir={storage_dir}"
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["result"] == _full_preferences_payload()
+
+
+def test_preference_api_save_returns_normalized_preferences_and_persists(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    payload = _full_preferences_payload()
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, payload),
+    )
+
+    result = response.get_json()
+    assert response.status_code == 200
+    assert result["ok"] is True
+    assert result["result"] == payload
+
+    # The saved JSON on disk carries only the defined non-sensitive fields.
+    config = load_storage_config(storage_dir)
+    written = json.loads(
+        (config.preferences_dir / "user_preferences.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert written == payload
+
+
+def test_preference_api_save_accepts_empty_payload_as_reset(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+    )
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, {}),
+    )
+
+    result = response.get_json()
+    assert result["ok"] is True
+    assert result["result"]["subtitle_groups"]["preferred"] == []
+    assert result["result"]["subtitle_groups"]["excluded"] == []
+    assert result["result"]["filter_defaults"]["must_contain"] == ""
+
+
+def test_preference_api_save_rejects_missing_preferences(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, None),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "请提供偏好配置"
+    assert payload["error_data"]["details"] == {"field": "preferences"}
+
+
+def test_preference_api_save_rejects_non_object_payload(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, ["Loli"]),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "偏好配置必须是对象"
+
+
+def test_preference_api_save_rejects_unknown_field_without_leaking(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {
+                "subtitle_groups": {"preferred": ["Loli"]},
+                "endpoint": "https://secret-endpoint.example/api",
+            },
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "preferences 包含未定义字段"
+    assert "secret-endpoint" not in str(payload)
+
+
+def test_preference_api_save_rejects_empty_string_list_item(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"preferred": [""]}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {
+        "field": "subtitle_groups.preferred"
+    }
+    assert "空字符串" in payload["error_message"]
+
+
+def test_preference_api_save_rejects_duplicate_subtitle_groups(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"preferred": ["Loli", "Loli"]}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {
+        "field": "subtitle_groups.preferred"
+    }
+    assert "重复" in payload["error_message"]
+
+
+def test_preference_api_save_rejects_group_in_both_lists(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {
+                "subtitle_groups": {
+                    "preferred": ["Loli"],
+                    "excluded": ["Loli"],
+                }
+            },
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {"field": "subtitle_groups"}
+    assert "不能同时出现" in payload["error_message"]
+
+
+def test_preference_api_save_rejects_invalid_fallback_enum(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"fallback": "auto"}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {
+        "field": "subtitle_groups.fallback"
+    }
+
+
+def test_preference_api_save_rejects_invalid_naming_strategy(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"naming": {"strategy": "random"}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {"field": "naming.strategy"}
+
+
+def test_preference_api_save_rejects_non_boolean_filter_flag(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"filter_defaults": {"use_regex": "yes"}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {
+        "field": "filter_defaults.use_regex"
+    }
+
+
+def test_preference_api_save_rejects_overlong_string(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"preferred": ["长" * 101]}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert "长度不能超过" in payload["error_message"]
+
+
+def test_preference_api_save_rejects_sensitive_values(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(
+            storage_dir,
+            {"subtitle_groups": {"preferred": ["https://mikan.example/Home/Search"]}},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert "敏感内容" in payload["error_message"]
+    assert "https://mikan.example" not in str(payload)
+    # No preference file is written for an illegal save.
+    config = load_storage_config(storage_dir)
+    assert not (config.preferences_dir / "user_preferences.json").exists()
+
+
+def test_preference_api_save_does_not_leak_sensitive_values(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+    )
+
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    for marker in (
+        "http://",
+        "https://",
+        "magnet:",
+        "token",
+        "secret",
+        "cookie",
+        "Authorization",
+        "raw_html",
+        "raw_rss",
+        "<html",
+        "<rss",
+    ):
+        assert marker not in body.lower()
+
+
+def test_preference_api_save_storage_failure_returns_chinese_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    def fail_save(*args: object, **kwargs: object) -> dict[str, Any]:
+        raise Stage1Error(
+            "storage_error",
+            "保存用户偏好 JSON 失败",
+            "save_user_preferences",
+            {
+                "reason": f"cannot write {tmp_path}/private-token at https://example.test/api",
+                "directory": "preferences",
+            },
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.save_user_preferences",
+        fail_save,
+    )
+
+    response = _client().post(
+        "/api/v1/preferences",
+        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "storage_error"
+    assert payload["error_message"] == "保存用户偏好 JSON 失败"
+    assert payload["error_data"]["failed_step"] == "save_user_preferences"
+    assert str(tmp_path) not in str(payload)
+    assert "https://example.test/api" not in str(payload)
+    assert "token" not in str(payload).lower()
