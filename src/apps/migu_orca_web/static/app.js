@@ -36,6 +36,21 @@
   const settingsAbResult = document.getElementById("settings-ab-result");
   const settingsAbSubmitButton = document.getElementById("settings-ab-submit");
   const settingsAbReturnLink = document.getElementById("settings-ab-return-link");
+  const preferenceSettingsForm = document.getElementById("preference-settings-form");
+  const preferencePreferredInput = document.getElementById("preference-preferred-groups");
+  const preferenceExcludedInput = document.getElementById("preference-excluded-groups");
+  const preferenceFallbackSelect = document.getElementById("preference-fallback");
+  const preferenceFilterContainInput = document.getElementById("preference-filter-must-contain");
+  const preferenceFilterNotContainInput = document.getElementById("preference-filter-must-not-contain");
+  const preferenceFilterUseRegexInput = document.getElementById("preference-filter-use-regex");
+  const preferenceFilterCaseSensitiveInput = document.getElementById("preference-filter-case-sensitive");
+  const preferenceNamingStrategySelect = document.getElementById("preference-naming-strategy");
+  const preferenceNamingTemplateInput = document.getElementById("preference-naming-template");
+  const preferenceSearchReuseInput = document.getElementById("preference-search-reuse-corrections");
+  const preferenceSettingsError = document.getElementById("preference-settings-error");
+  const preferenceSettingsStatus = document.getElementById("preference-settings-status");
+  const preferenceSettingsSaveButton = document.getElementById("preference-settings-save");
+  const preferenceSettingsResetButton = document.getElementById("preference-settings-reset");
   const candidateSearchForm = document.getElementById("mikan-candidate-search-form");
   const candidateQueryInput = document.getElementById("mikan-candidate-query");
   const candidateSearchError = document.getElementById("mikan-candidate-search-error");
@@ -83,6 +98,7 @@
   let batchQueueItems = [];
   let storageDirPreference = "";
   let saveRequestPreference = true;
+  let currentPreferenceValues = null;
 
   function readPreference(key) {
     try {
@@ -754,6 +770,261 @@
 
   if (settingsAbForm) {
     settingsAbForm.addEventListener("submit", submitSettingsAb);
+  }
+
+  function setPreferenceSettingsError(message, field) {
+    if (!preferenceSettingsError) {
+      return;
+    }
+    preferenceSettingsError.textContent = message;
+    preferenceSettingsError.hidden = false;
+    for (const input of [
+      preferencePreferredInput,
+      preferenceExcludedInput,
+      preferenceFallbackSelect,
+      preferenceFilterContainInput,
+      preferenceFilterNotContainInput,
+      preferenceFilterUseRegexInput,
+      preferenceFilterCaseSensitiveInput,
+      preferenceNamingStrategySelect,
+      preferenceNamingTemplateInput,
+      preferenceSearchReuseInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+    if (field) {
+      field.setAttribute("aria-invalid", "true");
+      field.focus();
+    }
+  }
+
+  function clearPreferenceSettingsError() {
+    if (!preferenceSettingsError) {
+      return;
+    }
+    preferenceSettingsError.textContent = "";
+    preferenceSettingsError.hidden = true;
+    for (const input of [
+      preferencePreferredInput,
+      preferenceExcludedInput,
+      preferenceFallbackSelect,
+      preferenceFilterContainInput,
+      preferenceFilterNotContainInput,
+      preferenceFilterUseRegexInput,
+      preferenceFilterCaseSensitiveInput,
+      preferenceNamingStrategySelect,
+      preferenceNamingTemplateInput,
+      preferenceSearchReuseInput,
+    ]) {
+      if (input) {
+        input.removeAttribute("aria-invalid");
+      }
+    }
+  }
+
+  function setPreferenceSettingsStatus(message, className) {
+    if (!preferenceSettingsStatus) {
+      return;
+    }
+    preferenceSettingsStatus.className = className || "empty-state compact-state";
+    preferenceSettingsStatus.textContent = message;
+  }
+
+  function setPreferenceSettingsInFlight(isInFlight) {
+    if (!preferenceSettingsForm) {
+      return;
+    }
+    const controls = preferenceSettingsForm.querySelectorAll("button, input, select, textarea");
+    for (const control of controls) {
+      control.disabled = isInFlight;
+    }
+    if (preferenceSettingsSaveButton) {
+      preferenceSettingsSaveButton.textContent = isInFlight
+        ? "正在保存..."
+        : "保存偏好默认值";
+    }
+  }
+
+  function preferenceListToText(value) {
+    if (!Array.isArray(value)) {
+      return "";
+    }
+    return value.join("\n");
+  }
+
+  function preferenceTextToArray(value) {
+    const text = value || "";
+    return text
+      .split("\n")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
+
+  function renderPreferenceSettings(preferences) {
+    if (!preferenceSettingsForm) {
+      return;
+    }
+    currentPreferenceValues = preferences;
+    const subtitleGroups = preferences && preferences.subtitle_groups
+      ? preferences.subtitle_groups
+      : {};
+    const filterDefaults = preferences && preferences.filter_defaults
+      ? preferences.filter_defaults
+      : {};
+    const naming = preferences && preferences.naming ? preferences.naming : {};
+    const search = preferences && preferences.search ? preferences.search : {};
+
+    if (preferencePreferredInput) {
+      preferencePreferredInput.value = preferenceListToText(subtitleGroups.preferred);
+    }
+    if (preferenceExcludedInput) {
+      preferenceExcludedInput.value = preferenceListToText(subtitleGroups.excluded);
+    }
+    if (preferenceFallbackSelect) {
+      preferenceFallbackSelect.value = subtitleGroups.fallback || "next_preferred";
+    }
+    if (preferenceFilterContainInput) {
+      preferenceFilterContainInput.value = filterDefaults.must_contain || "";
+    }
+    if (preferenceFilterNotContainInput) {
+      preferenceFilterNotContainInput.value = filterDefaults.must_not_contain || "";
+    }
+    if (preferenceFilterUseRegexInput) {
+      preferenceFilterUseRegexInput.checked = filterDefaults.use_regex === true;
+    }
+    if (preferenceFilterCaseSensitiveInput) {
+      preferenceFilterCaseSensitiveInput.checked = filterDefaults.case_sensitive === true;
+    }
+    if (preferenceNamingStrategySelect) {
+      preferenceNamingStrategySelect.value = naming.strategy || "official_title_season";
+    }
+    if (preferenceNamingTemplateInput) {
+      preferenceNamingTemplateInput.value = naming.template || "{title}";
+    }
+    if (preferenceSearchReuseInput) {
+      preferenceSearchReuseInput.checked = search.reuse_explicit_corrections !== false;
+    }
+  }
+
+  function buildPreferenceSettingsPayload() {
+    const payload = {
+      preferences: {
+        subtitle_groups: {
+          preferred: preferenceTextToArray(preferencePreferredInput.value),
+          excluded: preferenceTextToArray(preferenceExcludedInput.value),
+          fallback: preferenceFallbackSelect ? preferenceFallbackSelect.value : "next_preferred",
+        },
+        filter_defaults: {
+          must_contain: preferenceFilterContainInput ? preferenceFilterContainInput.value.trim() : "",
+          must_not_contain: preferenceFilterNotContainInput ? preferenceFilterNotContainInput.value.trim() : "",
+          use_regex: preferenceFilterUseRegexInput ? preferenceFilterUseRegexInput.checked : false,
+          case_sensitive: preferenceFilterCaseSensitiveInput ? preferenceFilterCaseSensitiveInput.checked : false,
+        },
+        naming: {
+          strategy: preferenceNamingStrategySelect ? preferenceNamingStrategySelect.value : "official_title_season",
+          template: preferenceNamingTemplateInput ? preferenceNamingTemplateInput.value.trim() : "{title}",
+        },
+        search: {
+          reuse_explicit_corrections: preferenceSearchReuseInput ? preferenceSearchReuseInput.checked : true,
+        },
+      },
+    };
+    const storageDir = currentStorageDir();
+    if (storageDir) {
+      payload.storage_dir = storageDir;
+    }
+    return payload;
+  }
+
+  async function loadPreferenceSettings() {
+    if (!preferenceSettingsForm) {
+      return;
+    }
+    clearPreferenceSettingsError();
+    setPreferenceSettingsStatus("正在读取偏好默认值...", "loading-state compact-state");
+    try {
+      const preferences = await fetchJson(apiPath("/api/v1/preferences"));
+      renderPreferenceSettings(preferences);
+      setPreferenceSettingsStatus("已读取偏好默认值。", "empty-state compact-state");
+    } catch (error) {
+      renderPreferenceSettings(currentPreferenceValues || {});
+      setPreferenceSettingsStatus(
+        "读取偏好默认值失败。请检查存储目录后重试。",
+        "error-state compact-state",
+      );
+    }
+  }
+
+  async function savePreferenceSettings(event) {
+    if (event && event.preventDefault) {
+      event.preventDefault();
+    }
+    clearPreferenceSettingsError();
+    setPreferenceSettingsInFlight(true);
+    setPreferenceSettingsStatus("正在保存偏好默认值...", "loading-state compact-state");
+    try {
+      const payload = buildPreferenceSettingsPayload();
+      const preferences = await fetchJson("/api/v1/preferences", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      renderPreferenceSettings(preferences);
+      setPreferenceSettingsStatus("偏好默认值已保存。", "success-state compact-state");
+      showNotification("success", "偏好默认值已保存", "后续批量订阅草案将使用这些默认值。");
+    } catch (error) {
+      // 回退到上次已成功加载/保存的偏好，保证被拒绝的敏感输入不会残留在表单中。
+      renderPreferenceSettings(currentPreferenceValues || {});
+      setPreferenceSettingsStatus("保存偏好默认值失败。请修正后重试。", "error-state compact-state");
+      setPreferenceSettingsError(error.message || "保存失败", null);
+      notifyApiError("保存偏好默认值失败", error);
+    } finally {
+      setPreferenceSettingsInFlight(false);
+    }
+  }
+
+  async function resetPreferenceSettings() {
+    if (!window.confirm(
+      "确认恢复所有偏好为默认值？此操作不会清除订阅方案、批量提交队列或 Auto Bangumi 结果存储。"
+    )) {
+      return;
+    }
+    clearPreferenceSettingsError();
+    setPreferenceSettingsInFlight(true);
+    setPreferenceSettingsStatus("正在恢复默认偏好...", "loading-state compact-state");
+    try {
+      const payload = {preferences: {}};
+      const storageDir = currentStorageDir();
+      if (storageDir) {
+        payload.storage_dir = storageDir;
+      }
+      const preferences = await fetchJson("/api/v1/preferences", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+      });
+      renderPreferenceSettings(preferences);
+      setPreferenceSettingsStatus("已恢复默认偏好。", "success-state compact-state");
+      showNotification("success", "已恢复默认偏好", "偏好默认值已清空，订阅方案与队列不受影响。");
+    } catch (error) {
+      renderPreferenceSettings(currentPreferenceValues || {});
+      setPreferenceSettingsStatus("恢复默认偏好失败。请重试。", "error-state compact-state");
+      notifyApiError("恢复默认偏好失败", error);
+    } finally {
+      setPreferenceSettingsInFlight(false);
+    }
+  }
+
+  if (preferenceSettingsForm) {
+    preferenceSettingsForm.addEventListener("submit", savePreferenceSettings);
+  }
+  if (preferenceSettingsResetButton) {
+    preferenceSettingsResetButton.addEventListener("click", resetPreferenceSettings);
+  }
+  if (preferenceSettingsForm) {
+    loadPreferenceSettings();
   }
 
   if (!form) {

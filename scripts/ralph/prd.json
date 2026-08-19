@@ -52,7 +52,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "保持 /settings 承载配置和偏好、/index 聚焦草案工作台的现有信息架构。"
     },
     {

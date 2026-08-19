@@ -84,6 +84,149 @@
         </form>
       </section>
 
+      <section id="preference-settings-panel" class="panel settings-panel" aria-labelledby="preference-settings-heading">
+        <div class="panel-heading">
+          <h2 id="preference-settings-heading">偏好默认值</h2>
+        </div>
+        <form id="preference-settings-form" class="settings-form">
+          <p class="field-help">
+            这些偏好只保存非敏感用户选择，用于为批量订阅草案提供默认值。不会保存 endpoint、token、cookie、
+            Authorization 头或任何原始外部响应。
+          </p>
+
+          <label for="preference-preferred-groups">偏好字幕组（每行一个）</label>
+          <textarea
+            id="preference-preferred-groups"
+            name="preferred_groups"
+            placeholder="喵萌"
+            aria-describedby="preference-preferred-groups-help"
+          ></textarea>
+          <p id="preference-preferred-groups-help" class="field-help">
+            批量草案会优先使用这些字幕组；留空时不偏好任何字幕组。
+          </p>
+
+          <label for="preference-excluded-groups">排除字幕组（每行一个）</label>
+          <textarea
+            id="preference-excluded-groups"
+            name="excluded_groups"
+            placeholder="Loli"
+            aria-describedby="preference-excluded-groups-help"
+          ></textarea>
+          <p id="preference-excluded-groups-help" class="field-help">
+            这些字幕组不会被批量草案选择；同一字幕组不能同时出现在偏好与排除列表。
+          </p>
+
+          <label for="preference-fallback">无偏好命中时的回退</label>
+          <select
+            id="preference-fallback"
+            name="fallback"
+            aria-describedby="preference-fallback-help"
+          >
+            <option value="next_preferred">依次使用下一个偏好字幕组</option>
+            <option value="none">不自动回退</option>
+          </select>
+          <p id="preference-fallback-help" class="field-help">
+            偏好字幕组都没有有效种子时，是否继续尝试下一个偏好字幕组。
+          </p>
+
+          <label for="preference-filter-must-contain">默认包含规则</label>
+          <input
+            id="preference-filter-must-contain"
+            name="must_contain"
+            type="text"
+            placeholder="1080p"
+            autocomplete="off"
+            aria-describedby="preference-filter-help"
+          >
+
+          <label for="preference-filter-must-not-contain">默认排除规则</label>
+          <input
+            id="preference-filter-must-not-contain"
+            name="must_not_contain"
+            type="text"
+            placeholder="合集版"
+            autocomplete="off"
+            aria-describedby="preference-filter-help"
+          >
+
+          <label class="checkbox-row" for="preference-filter-use-regex">
+            <input
+              id="preference-filter-use-regex"
+              name="use_regex"
+              type="checkbox"
+              value="true"
+            >
+            默认使用正则
+          </label>
+
+          <label class="checkbox-row" for="preference-filter-case-sensitive">
+            <input
+              id="preference-filter-case-sensitive"
+              name="case_sensitive"
+              type="checkbox"
+              value="true"
+            >
+            默认大小写敏感
+          </label>
+          <p id="preference-filter-help" class="field-help">
+            作为批量草案的默认筛选规则；默认按字面文本匹配且不区分大小写。
+          </p>
+
+          <label for="preference-naming-strategy">命名策略</label>
+          <select
+            id="preference-naming-strategy"
+            name="naming_strategy"
+            aria-describedby="preference-naming-help"
+          >
+            <option value="official_title_season">官方标题 + 季数</option>
+            <option value="official_title">官方标题</option>
+            <option value="raw_title">原始标题</option>
+          </select>
+
+          <label for="preference-naming-template">命名模板</label>
+          <input
+            id="preference-naming-template"
+            name="naming_template"
+            type="text"
+            placeholder="{title}"
+            autocomplete="off"
+            aria-describedby="preference-naming-help"
+          >
+          <p id="preference-naming-help" class="field-help">
+            只生成文件夹名默认值，仍可在单卡修改流程中覆盖。
+          </p>
+
+          <label class="checkbox-row" for="preference-search-reuse-corrections">
+            <input
+              id="preference-search-reuse-corrections"
+              name="reuse_explicit_corrections"
+              type="checkbox"
+              value="true"
+            >
+            复用已保存的搜索词修正
+          </label>
+
+          <p id="preference-settings-error" class="field-error" role="alert" hidden></p>
+
+          <div
+            id="preference-settings-status"
+            class="empty-state compact-state"
+            aria-live="polite"
+          >
+            尚未读取偏好默认值。
+          </div>
+
+          <div class="notification-actions">
+            <button id="preference-settings-save" class="primary-button" type="submit">
+              保存偏好默认值
+            </button>
+            <button id="preference-settings-reset" class="danger-button" type="button">
+              恢复默认
+            </button>
+          </div>
+        </form>
+      </section>
+
       <section id="data-source-settings-panel" class="panel settings-panel" aria-labelledby="data-source-settings-heading">
         <div class="panel-heading">
           <h2 id="data-source-settings-heading">数据源</h2>

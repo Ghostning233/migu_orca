@@ -374,14 +374,16 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert "订阅方案工作台" in html
     assert "Settings" in html
     assert 'id="storage-settings-panel"' in html
+    assert 'id="preference-settings-panel"' in html
     assert 'id="data-source-settings-panel"' in html
     assert 'id="qbittorrent-settings-panel"' in html
     assert 'id="auto-bangumi-settings-panel"' in html
     assert "Storage 偏好" in html
+    assert "偏好默认值" in html
     assert "数据源" in html
     assert "qBittorrent" in html
     assert "Auto Bangumi" in html
-    assert html.count('class="panel settings-panel"') == 4
+    assert html.count('class="panel settings-panel"') == 5
     assert "empty-state" in html
     assert 'id="storage-preferences-form"' in html
     assert 'id="settings-storage-dir"' in html
@@ -392,6 +394,23 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'id="storage-preferences-clear"' in html
     assert "非敏感浏览器偏好" in html
     assert "localStorage" in html
+    assert 'id="preference-settings-form"' in html
+    assert 'id="preference-preferred-groups"' in html
+    assert 'id="preference-excluded-groups"' in html
+    assert 'id="preference-fallback"' in html
+    assert 'id="preference-filter-must-contain"' in html
+    assert 'id="preference-filter-must-not-contain"' in html
+    assert 'id="preference-filter-use-regex"' in html
+    assert 'id="preference-filter-case-sensitive"' in html
+    assert 'id="preference-naming-strategy"' in html
+    assert 'id="preference-naming-template"' in html
+    assert 'id="preference-search-reuse-corrections"' in html
+    assert 'id="preference-settings-save"' in html
+    assert 'id="preference-settings-reset"' in html
+    assert "偏好字幕组" in html
+    assert "排除字幕组" in html
+    assert "命名策略" in html
+    assert "不会保存 endpoint、token、cookie" in html
     qbittorrent_panel_html = html[
         html.index('id="qbittorrent-settings-panel"') : html.index('id="auto-bangumi-settings-panel"')
     ]
@@ -950,6 +969,37 @@ def test_static_app_script_wires_local_web_preferences() -> None:
     assert "storagePreferencesForm.addEventListener(\"submit\", persistWebPreferences)" in script
     assert script.index("restoreWebPreferences()") < script.index("loadList()")
     assert "currentSaveRequest()" in script
+
+
+def test_static_app_script_wires_preference_settings_form() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert "preference-settings-form" in script
+    assert "preference-preferred-groups" in script
+    assert "preference-excluded-groups" in script
+    assert "preference-fallback" in script
+    assert "preference-filter-must-contain" in script
+    assert "preference-filter-must-not-contain" in script
+    assert "preference-filter-use-regex" in script
+    assert "preference-filter-case-sensitive" in script
+    assert "preference-naming-strategy" in script
+    assert "preference-naming-template" in script
+    assert "preference-search-reuse-corrections" in script
+    assert "loadPreferenceSettings" in script
+    assert "savePreferenceSettings" in script
+    assert "resetPreferenceSettings" in script
+    assert "buildPreferenceSettingsPayload" in script
+    assert "renderPreferenceSettings" in script
+    assert "setPreferenceSettingsInFlight" in script
+    assert "preferenceSettingsForm.addEventListener(\"submit\", savePreferenceSettings)" in script
+    assert "preferenceSettingsResetButton.addEventListener(\"click\", resetPreferenceSettings)" in script
+    assert 'apiPath("/api/v1/preferences")' in script
+    assert 'fetchJson("/api/v1/preferences"' in script
+    assert "reuse_explicit_corrections" in script
+    assert "official_title_season" in script
+    assert "此操作不会清除订阅方案、批量提交队列或 Auto Bangumi 结果存储" in script
 
 
 def test_static_app_script_wires_explicit_ab_submit_form() -> None:

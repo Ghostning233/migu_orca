@@ -108,6 +108,7 @@ class TestSettingsShell:
         assert nav.locator("a[aria-current='page'][href='/settings']").count() >= 1
         for panel_id in (
             "storage-settings-panel",
+            "preference-settings-panel",
             "data-source-settings-panel",
             "qbittorrent-settings-panel",
             "auto-bangumi-settings-panel",
@@ -115,7 +116,7 @@ class TestSettingsShell:
             assert page.locator(f"#{panel_id}.panel").count() >= 1
             assert page.locator(f"#{panel_id} .empty-state").count() >= 1
 
-        for heading in ("Storage 偏好", "数据源", "qBittorrent", "Auto Bangumi"):
+        for heading in ("Storage 偏好", "偏好默认值", "数据源", "qBittorrent", "Auto Bangumi"):
             assert page.locator(f"text={heading}").count() >= 1
 
 
