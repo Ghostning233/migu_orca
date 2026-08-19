@@ -141,8 +141,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "Stage closeout story；所有功能 story 完成后再执行。"
+      "passes": true,
+      "notes": "Stage closeout story；所有功能 story 完成后再执行。已完成：README、backlog、主 PRD、future stages、M00、M13、Stage 20 PRD 同步 Stage 20 完成状态与 Stage 21 handoff；边界（批量接受/提交前队列/显式 AB 配置/单项失败重试/不创建 qBittorrent 下载任务）已明确；compileall、pytest（822）、browser（231）全绿。"
     }
   ]
 }

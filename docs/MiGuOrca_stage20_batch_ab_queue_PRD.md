@@ -7,8 +7,9 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 20 PRD: 批量接受与 Auto Bangumi 提交前队列 |
 | 文档类型 | Stage PRD |
-| 当前状态 | Planned |
+| 当前状态 | 已完成 |
 | 创建日期 | 2026-08-19 |
+| 完成日期 | 2026-08-19 |
 | 依赖阶段 | Stage 19 |
 
 ## 2. 背景
@@ -126,3 +127,43 @@ Stage 20 把这条链路扩展为批量确认和提交前队列：用户可以�
 
 Stage 20 完成标志：用户可以从一批 Stage 19 草案卡片中批量确认若干项目，查看提交前队列，显式配置并提交 Auto Bangumi；成功和失败项目独立展示，失败项可重试，且所有外部敏感值都没有进入持久化或展示面。
 
+## 11. 完成状态（2026-08-19）
+
+Stage 20 的全部 8 个 user story（US-142..US-149）已完成并通过：
+
+| Story | 内容 | 状态 |
+| --- | --- | --- |
+| US-142 | 新增批量提交前队列数据契约 | 完成 |
+| US-143 | 实现批量接受与全接受编排 | 完成 |
+| US-144 | 实现批量 Auto Bangumi 顺序提交服务 | 完成 |
+| US-145 | 新增批量队列与提交 Web API | 完成 |
+| US-146 | 新增批量接受与全接受 Web UI 操作 | 完成 |
+| US-147 | 新增提交前队列结果界面 | 完成 |
+| US-148 | 实现失败项独立重试与安全回归 | 完成 |
+| US-149 | Stage 20 文档与收尾回归 | 完成 |
+
+### 实现要点
+
+1. **队列契约与存储边界**：`BatchQueueItem`/`BatchSubmissionQueue` 只保存 `queue_id`、`batch_id`、`item_id`、`request_id`、公开标题、状态、尝试次数、脱敏错误和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径永远不写入队列模型、队列 JSON 或公开序列化。
+2. **批量接受与全接受**：`accept_batch_items` 复用现有 Request accept 能力，只接受有有效 `request_id` 且处于 `PENDING_CONFIRM` 的项目；已接受项目幂等返回，单项失败不阻塞其他项；全接受只处理当前批次中可接受的项目，并逐项返回不可接受原因。
+3. **顺序提交服务**：`submit_batch_queue_items` 使用 request-scoped `ab_config` 按队列顺序处理 `READY_TO_SUBMIT` 项目，复用 `build_ab_subscription_payload` + Auto Bangumi client + 脱敏 `ab_submit_result` 契约；提交前校验 Request 仍为 `ACCEPTED`，不满足条件标记 `FAILED`/`RETRYABLE` 并继续；单项成功标记 `SUCCEEDED`，单项失败标记 `FAILED`/`RETRYABLE` 并保留脱敏摘要；已成功项目不会被重复提交。
+4. **Web API**：`POST /api/v1/batches/<batch_id>/accept`、`GET /api/v1/batches/<batch_id>/queue`、`POST /api/v1/batches/<batch_id>/submit`、`POST /api/v1/batches/<batch_id>/retry`。批量提交与重试都要求 request-scoped `ab_config` 和显式确认字段；缺失时返回中文 `validation_error` envelope。API 响应、错误 details 和日志不包含任何敏感外部值。
+5. **Web UI**：批量工作台支持单卡接受、选中批量接受、全接受；`#batch-queue-panel` 展示队列项目、中文状态（待提交/提交中/提交成功/提交失败/可重试）、尝试次数和脱敏结果摘要；提交前表单包含 endpoint、token、fallback 和显式确认，提交成功后清空敏感输入；刷新后通过 URL `batch_id` 恢复队列状态。
+6. **失败项独立重试**：只有 `FAILED`/`RETRYABLE` 项目显示单项重试；重试使用最新保存的 `ACCEPTED` Request 快照，从不使用队列中复制的完整 RSS、token、cookie、magnet 或原始响应；成功项永远不会显示重试按钮，也不会被重复提交。
+7. **安全回归**：端到端浏览器安全回归注入 endpoint、token、Authorization header、cookie、raw HTML、raw RSS XML、原始响应体、完整失败 URL 和本地绝对路径，断言这些值不出现在 API 响应、页面、URL、浏览器 storage、队列 JSON、Request JSON、日志或 trace 中。
+
+### 边界确认
+
+- MiGuOrca **不创建 qBittorrent 下载任务**；下载执行继续由 Auto Bangumi / qBittorrent 负责。
+- MiGuOrca **不绕过 Auto Bangumi** 建立长期订阅状态机。
+- **不引入后台常驻 worker 或复杂调度器**；批量提交采用前台顺序编排，刷新后以持久化队列和 Request/AB result storage 恢复状态。
+- 敏感 AB 配置只存在于单次请求上下文，从不持久化。
+
+## 12. Stage 21 handoff
+
+下一阶段为「用户偏好与智能推荐闭环」（见 `docs/MiGuOrca_future_stages.md` 和 `docs/backlog.md`）。建议方向：
+
+1. 在 Stage 19/20 批量草案基础上记录用户偏好（字幕组、筛选、文件夹命名），减少逐卡修改次数。
+2. 搜索词增强闭环：基于用户修正记录改进候选搜索词；AI 名称解析仍只生成候选，不自动选择最终合集。
+3. AI 解析质量回看：展示低置信度和多义结果，允许用户修正并复用。
+4. 安全存储偏好：只保存非敏感偏好，不保存外部服务 secret。
