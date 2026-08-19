@@ -17,7 +17,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先建立队列契约和存储边界，不接入 Web UI 或真实 AB 调用。"
     },
     {
