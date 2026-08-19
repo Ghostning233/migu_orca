@@ -491,7 +491,13 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "raw_input: rawInput" in script
     assert "批量获取前必须输入至少一个番剧名称" in script
     assert "正在解析批量番剧名称" in script
-    assert "解析状态：" in script
+    assert "batchDraftCards" in script
+    assert "batchCardTitle" in script
+    assert "batchCardSourceName" in script
+    assert "deleteBatchCard" in script
+    assert "batch-draft-card" in script
+    assert "batch-card-grid" in script
+    assert "有效种子数：" in script
     assert "batchStatusLabel" in script
     assert "已解析" in script
     assert "解析失败" in script

@@ -2,7 +2,7 @@
 Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
-- Stage 19 batch UI starts with a lightweight `/index` entry that posts only `{raw_input}` to `POST /api/v1/batches/parse`, preserves the multiline text in the request body, and renders per-item `raw_title` plus Chinese status labels; full card grids, deletion, expand/modify, and accept actions belong to later stories.
+- Stage 19 batch UI posts only `{raw_input}` to `POST /api/v1/batches/parse`, preserves multiline input exactly, keeps returned items in front-end memory as `batchDraftCards`, and renders public API fields into `.batch-draft-card` entries in a scrollable `.batch-card-grid`; delete is client-side filtering by `item_id`, while expand/modify/accept behavior belongs to later stories.
 - Stage 19 batch candidate orchestration stays in `POST /api/v1/batches/parse`: after `parse_anime_title`, call the shared `_search_mikan_candidates(query, config)` for each normalized `search_queries` entry, dedupe candidates per item by `(bangumi_id, mikan_url)`, serialize only public candidate fields, and represent MiKan failures as per-item `FAILED` results with sanitized errors.
 - Stage 19 AI title parsing lives in `src/batch_engine/controllers/anime_title_parser.py`: inject an `AnimeTitleParsingProvider`, use `parse_anime_title(raw_title, provider)` for normalized `AnimeTitleParseResult`, and keep provider failures as sanitized recoverable `Stage1Error(failed_step="ai_title_parse")`; fake mappings are deterministic and never call a real LLM.
 - Stage 19 batch draft primitives live in `src/batch_engine`: `create_batch_draft(raw_input)` preserves each non-empty input line as `BatchDraftItem.raw_title`, assigns independent `item-*` IDs, defaults item status to `RAW`, and `update_batch_item_status` returns a new `BatchDraft` with only the matched item changed.
@@ -592,4 +592,17 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: batch status values should be mapped with a dedicated UI helper (`batchStatusLabel`) instead of rendering internal status codes directly.
   - Gotcha encountered: adding controls before the dev fixture panel can affect browser keyboard-navigation order; the current 20-Tab limit still appears sufficient, but future always-visible fields before the fixture form may need another a11y test adjustment.
   - Useful context: browser tests are present in `tests/browser/test_batch_workbench.py`, but this environment skipped them because Chromium is not installed/available.
+---
+## 2026-08-19 15:56:42 CST - US-137
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Replaced the Stage 19 batch parse row output with a scrollable card grid: each returned item now renders as `.batch-draft-card` with poster image or placeholder, display title from canonical title/candidate/raw input, source summary from public candidate/query fields, `有效种子数：待展开`, Chinese status badge, and an expand control for later stories.
+- Added client-side card deletion backed by the in-memory `batchDraftCards` array; clicking the top-right delete button filters only the matching `item_id` and re-renders without mutating the remaining card content or statuses.
+- Added responsive card CSS: desktop uses a four-column grid, medium screens use two columns, narrow screens use one column, and long result lists are capped with vertical scrolling.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `node --check src/apps/migu_orca_web/static/app.js` passed; `uv run python -m compileall -q src tests` passed; focused `uv run pytest src/apps/migu_orca_web/views_test.py tests/browser/test_batch_workbench.py -q` passed with 95 tests and 6 skipped browser tests; full `uv run pytest -q` passed with 457 tests and 208 skipped browser tests; `uv run pytest tests/browser/ -q` collected the browser suite but skipped all 208 tests because Chromium is not available in this environment.
+- Browser verification note: `dev-browser` verification was attempted through the project's Playwright suite, but Chromium is unavailable here. Manual verification can use `uv run flask --app wsgi:app run` and `/index` in an environment with a browser.
+- **Learnings for future iterations:**
+  - Pattern discovered: Stage 19 card UI should keep the returned batch parse items in `batchDraftCards` and re-render from that array for client-only actions such as deletion; later expand/modify/accept stories can extend the same card objects instead of reparsing the textarea.
+  - Pattern discovered: until the expand/detail story wires generated Request seed summaries, the batch card seed line should use a public `valid_seed_count` field when present and otherwise display `待展开`, avoiding any raw RSS or sensitive external config in the card.
+  - Gotcha encountered: this environment can collect the Playwright browser tests but cannot execute them because Chromium is unavailable; UI stories still need the explicit `uv run pytest tests/browser/ -q` result recorded.
 ---

@@ -204,27 +204,98 @@ textarea {
   resize: vertical;
 }
 
-.batch-result-list {
+.batch-card-grid-wrapper {
+  max-height: 640px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.batch-card-grid {
   display: grid;
-  gap: 8px;
-  list-style: none;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
   padding: 0;
 }
 
-.batch-result-item {
-  align-items: start;
+.batch-draft-card {
   background: #ffffff;
   border: 1px solid #d8dde5;
   border-radius: 6px;
   display: grid;
-  gap: 4px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 10px 12px;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  position: relative;
 }
 
-.batch-result-item strong {
+.batch-card-poster {
+  align-items: center;
+  aspect-ratio: 3 / 4;
+  background: #eef2f6;
+  border: 1px solid #d8dde5;
+  border-radius: 4px;
+  color: #586273;
+  display: flex;
+  font-size: 0.82rem;
+  font-weight: 700;
+  justify-content: center;
+  overflow: hidden;
+  text-align: center;
+}
+
+.batch-card-poster img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.batch-card-title {
   overflow-wrap: anywhere;
+}
+
+.batch-card-raw-title,
+.batch-card-source,
+.batch-card-seeds {
+  color: #586273;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.batch-card-status {
+  justify-self: start;
+}
+
+.batch-card-delete {
+  min-height: 30px;
+  min-width: 30px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+
+.icon-button {
+  align-items: center;
+  background: #ffffff;
+  border: 1px solid #c8d5df;
+  border-radius: 4px;
+  color: #334155;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 1rem;
+  font-weight: 700;
+  justify-content: center;
+  padding: 0;
+}
+
+.icon-button:hover,
+.icon-button:focus {
+  background: #f3f6f9;
+  border-color: #93a4b7;
+}
+
+.batch-card-expand {
+  justify-self: start;
 }
 
 .batch-status {
@@ -238,18 +309,24 @@ textarea {
   white-space: nowrap;
 }
 
-.batch-result-meta {
-  color: #586273;
-  font-size: 0.86rem;
-  grid-column: 1 / -1;
-}
-
 .candidate-list {
   display: grid;
   gap: 12px;
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+@media (max-width: 900px) {
+  .batch-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 560px) {
+  .batch-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .candidate-card {

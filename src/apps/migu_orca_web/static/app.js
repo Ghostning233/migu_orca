@@ -59,6 +59,7 @@
   let selectedRequestId = null;
   let loadedRequests = [];
   let currentDetailPayload = null;
+  let batchDraftCards = [];
   let storageDirPreference = "";
   let saveRequestPreference = true;
 
@@ -811,6 +812,114 @@
     return {raw_input: rawInput};
   }
 
+  function batchCardTitle(row) {
+    const canonicalTitles = Array.isArray(row.canonical_title_candidates)
+      ? row.canonical_title_candidates
+      : [];
+    if (canonicalTitles.length) {
+      return safeText(canonicalTitles[0]) || "未命名条目";
+    }
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    if (candidates.length) {
+      return safeText(candidates[0].title) || "未命名条目";
+    }
+    return safeText(row.raw_title) || "未命名条目";
+  }
+
+  function batchCardSourceName(row) {
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    if (candidates.length) {
+      const candidate = candidates[0];
+      const source = safeText(candidate.source_query || candidate.bangumi_id);
+      return source ? "MiKan：" + source : "MiKan 候选";
+    }
+    const queries = Array.isArray(row.search_queries) ? row.search_queries : [];
+    if (queries.length) {
+      return "搜索词：" + safeText(queries[0]);
+    }
+    return safeText(row.source) || "待解析";
+  }
+
+  function batchCardSeedSummary(row) {
+    const value = row.valid_seed_count;
+    if (Number.isInteger(value) && value >= 0) {
+      return String(value);
+    }
+    return "待展开";
+  }
+
+  function deleteBatchCard(itemId) {
+    batchDraftCards = batchDraftCards.filter((row) => row.item_id !== itemId);
+    renderBatchParseItems(batchDraftCards);
+  }
+
+  function renderBatchCard(row) {
+    const item = document.createElement("article");
+    item.className = "batch-draft-card";
+    item.dataset.itemId = safeText(row.item_id);
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "icon-button batch-card-delete";
+    removeButton.setAttribute("aria-label", "删除 " + (safeText(row.raw_title) || "批量条目"));
+    removeButton.title = "删除";
+    removeButton.textContent = "×";
+    removeButton.addEventListener("click", () => {
+      deleteBatchCard(row.item_id);
+    });
+
+    const posterWrap = document.createElement("div");
+    posterWrap.className = "batch-card-poster";
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    const posterUrl = candidates.length ? safeText(candidates[0].poster_url) : "";
+    if (posterUrl) {
+      const poster = document.createElement("img");
+      poster.alt = "";
+      poster.src = posterUrl;
+      posterWrap.appendChild(poster);
+    } else {
+      posterWrap.textContent = "订阅草案";
+    }
+
+    const status = document.createElement("span");
+    status.className = "batch-status batch-card-status";
+    status.textContent = batchStatusLabel(row.status);
+
+    const title = document.createElement("strong");
+    title.className = "batch-card-title";
+    title.textContent = batchCardTitle(row);
+
+    const rawTitle = document.createElement("div");
+    rawTitle.className = "batch-card-raw-title";
+    rawTitle.textContent = "输入：" + (safeText(row.raw_title) || "未命名条目");
+
+    const source = document.createElement("div");
+    source.className = "batch-card-source";
+    source.textContent = "源名称：" + batchCardSourceName(row);
+
+    const seeds = document.createElement("div");
+    seeds.className = "batch-card-seeds";
+    seeds.textContent = "有效种子数：" + batchCardSeedSummary(row);
+
+    const expandButton = document.createElement("button");
+    expandButton.type = "button";
+    expandButton.className = "secondary-button batch-card-expand";
+    expandButton.textContent = "展开";
+    expandButton.setAttribute("aria-label", "展开 " + (safeText(row.raw_title) || "批量条目"));
+
+    item.append(
+      removeButton,
+      posterWrap,
+      status,
+      title,
+      rawTitle,
+      source,
+      seeds,
+      expandButton,
+    );
+    return item;
+  }
+
   function renderBatchParseItems(items) {
     const rows = Array.isArray(items) ? items : [];
     if (!rows.length) {
@@ -821,28 +930,13 @@
       return;
     }
 
-    batchParseResult.className = "batch-result-list-wrapper";
+    batchParseResult.className = "batch-card-grid-wrapper";
     batchParseResult.replaceChildren();
 
-    const list = document.createElement("ul");
-    list.className = "batch-result-list";
+    const list = document.createElement("div");
+    list.className = "batch-card-grid";
     for (const row of rows) {
-      const item = document.createElement("li");
-      item.className = "batch-result-item";
-
-      const title = document.createElement("strong");
-      title.textContent = safeText(row.raw_title) || "未命名条目";
-
-      const status = document.createElement("span");
-      status.className = "batch-status";
-      status.textContent = batchStatusLabel(row.status);
-
-      const meta = document.createElement("div");
-      meta.className = "batch-result-meta";
-      meta.textContent = "解析状态：" + batchStatusLabel(row.status);
-
-      item.append(title, status, meta);
-      list.appendChild(item);
+      list.appendChild(renderBatchCard(row));
     }
     batchParseResult.appendChild(list);
   }
@@ -877,7 +971,8 @@
         body: JSON.stringify(payload),
       });
       const items = (result && result.items) || [];
-      renderBatchParseItems(items);
+      batchDraftCards = Array.isArray(items) ? items.slice() : [];
+      renderBatchParseItems(batchDraftCards);
       showNotification(
         "success",
         "批量草案已获取",

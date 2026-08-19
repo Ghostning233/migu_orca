@@ -103,7 +103,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "可以先使用 API 返回的公开候选/草案摘要渲染；不要在卡片中暴露 raw RSS 或敏感外部配置。"
     },
     {
