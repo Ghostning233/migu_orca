@@ -147,6 +147,23 @@ class _FakeCandidateSearchClient:
         return self.candidates
 
 
+class _MappedCandidateSearchClient:
+    def __init__(
+        self,
+        responses: dict[str, list[MikanCandidate]] | None = None,
+        errors: dict[str, Stage1Error] | None = None,
+    ) -> None:
+        self.responses = responses or {}
+        self.errors = errors or {}
+        self.searches: list[str] = []
+
+    def search_candidates(self, raw_title: str) -> list[MikanCandidate]:
+        self.searches.append(raw_title)
+        if raw_title in self.errors:
+            raise self.errors[raw_title]
+        return self.responses.get(raw_title, [])
+
+
 def test_root_redirects_to_index() -> None:
     response = _client().get("/")
 
@@ -2260,7 +2277,13 @@ def test_candidate_search_api_cache_isolates_different_hosts(
     assert len(transport.requests) == 2
 
 
-def test_batch_parse_api_returns_per_item_parsed_metadata() -> None:
+def test_batch_parse_api_returns_per_item_parsed_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
     raw_input = "\n萌王S4\n  \n路哥S4\n邻家天使S2\n"
 
     response = _client().post(
@@ -2291,6 +2314,7 @@ def test_batch_parse_api_returns_per_item_parsed_metadata() -> None:
     assert "转生史莱姆 第四季" in items[0]["search_queries"]
     assert items[0]["confidence"] == 0.86
     assert items[0]["needs_user_review"] is True
+    assert items[0]["candidates"] == []
     assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
     assert items[1]["needs_user_review"] is False
 
@@ -2322,6 +2346,10 @@ def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
         "apps.migu_orca_web.views._batch_title_parsing_provider",
         provider,
     )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
 
     response = _client().post(
         "/api/v1/batches/parse",
@@ -2340,6 +2368,7 @@ def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
     assert items[1]["raw_title"] == "杖剑谭S2"
     assert items[1]["canonical_title_candidates"] == []
     assert items[1]["search_queries"] == []
+    assert items[1]["candidates"] == []
     assert items[1]["needs_user_review"] is True
     assert items[1]["error"]["error_type"] == "ai_title_parse_failed"
     assert items[1]["error"]["failed_step"] == "ai_title_parse"
@@ -2383,6 +2412,226 @@ def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
     assert "llm.example" not in body
     assert "session-id" not in body
     assert "/home/ghostning" not in body
+
+
+def test_batch_parse_api_searches_candidates_for_each_item_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _MappedCandidateSearchClient(
+        responses={
+            "欢迎来到实力至上主义的教室 第四季": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="欢迎来到实力至上主义的教室 第四季",
+                    aliases=["路哥 S4"],
+                )
+            ],
+            "实力至上主义教室 S4": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="实力至上主义教室 S4",
+                    aliases=["路哥 S4"],
+                )
+            ],
+            "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季": [
+                MikanCandidate(
+                    bangumi_id="2002",
+                    title="关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+                    mikan_url="https://mikan.example/Home/Bangumi/2002",
+                    source_query="关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+                    poster_url="https://mikan.example/images/2002.jpg",
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={
+            "raw_input": "路哥S4\n邻家天使S2",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert [item["status"] for item in items] == [
+        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_PARSED,
+    ]
+    assert client.searches == [
+        "欢迎来到实力至上主义的教室 第四季",
+        "实力至上主义教室 S4",
+        "路哥 S4",
+        "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+        "邻家的天使大人 第二季",
+        "邻家天使 S2",
+    ]
+    assert items[0]["candidates"] == [
+        {
+            "bangumi_id": "4001",
+            "title": "欢迎来到实力至上主义的教室 第四季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/4001",
+            "poster_url": None,
+            "source_query": "欢迎来到实力至上主义的教室 第四季",
+            "aliases": ["路哥 S4"],
+            "recommendation": "推荐：第 4 季",
+        }
+    ]
+    assert items[1]["candidates"] == [
+        {
+            "bangumi_id": "2002",
+            "title": "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+            "mikan_url": "https://mikan.example/Home/Bangumi/2002",
+            "poster_url": "https://mikan.example/images/2002.jpg",
+            "source_query": "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
+            "aliases": [],
+            "recommendation": "推荐：第 2 季",
+        }
+    ]
+
+
+def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_others(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _MappedCandidateSearchClient(
+        responses={
+            "欢迎来到实力至上主义的教室 第四季": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="欢迎来到实力至上主义的教室 第四季",
+                )
+            ]
+        },
+        errors={
+            "杖与剑的魔剑谭 第二季": Stage1Error(
+                "mikan_timeout",
+                "MiKan HTTP 请求超时",
+                "mikan_search",
+                {
+                    "url": "https://mikan.example/Home/Search?searchstr=secret-token",
+                    "cookie": "session-cookie",
+                },
+            )
+        },
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={
+            "raw_input": "路哥S4\n杖剑谭S2",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert [item["status"] for item in items] == [
+        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_FAILED,
+    ]
+    assert items[0]["candidates"][0]["bangumi_id"] == "4001"
+    assert items[1]["raw_title"] == "杖剑谭S2"
+    assert items[1]["canonical_title_candidates"] == ["杖与剑的魔剑谭 第二季"]
+    assert items[1]["candidates"] == []
+    assert items[1]["error"]["error_type"] == "mikan_timeout"
+    assert items[1]["error"]["failed_step"] == "mikan_search"
+    assert items[1]["error"]["details"] == {
+        "url": "[redacted-url]",
+        "[redacted]": "[redacted]",
+    }
+    assert "secret-token" not in body
+    assert "session-cookie" not in body
+    assert "https://mikan.example/Home/Search" not in body
+
+
+def test_batch_parse_api_candidate_results_only_serialize_public_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SensitiveCandidate(MikanCandidate):
+        def __init__(self) -> None:
+            super().__init__(
+                bangumi_id="9001",
+                title="测试番剧",
+                mikan_url="https://mikan.example/Home/Bangumi/9001",
+                source_query="测试番剧",
+                poster_url="https://mikan.example/public/poster.jpg",
+                aliases=["公开别名"],
+            )
+            self.raw_html = "<html>secret-token</html>"
+            self.raw_rss_xml = "<rss>raw</rss>"
+            self.cookie = "session-cookie"
+            self.token = "secret-token"
+            self.magnet = "magnet:?xt=urn:btih:secret"
+
+    client = _MappedCandidateSearchClient(
+        responses={"测试番剧": [SensitiveCandidate()]}
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={
+            "raw_input": "测试番剧",
+            "mikan_config": {
+                "search_endpoint": "https://mikan.example/Home/Search",
+                "timeout_seconds": 5,
+            },
+        },
+    )
+
+    payload = response.get_json()
+    candidates = payload["result"]["items"][0]["candidates"]
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert candidates == [
+        {
+            "bangumi_id": "9001",
+            "title": "测试番剧",
+            "mikan_url": "https://mikan.example/Home/Bangumi/9001",
+            "poster_url": "https://mikan.example/public/poster.jpg",
+            "source_query": "测试番剧",
+            "aliases": ["公开别名"],
+            "recommendation": "可能匹配",
+        }
+    ]
+    assert "raw_html" not in body
+    assert "raw_rss_xml" not in body
+    assert "session-cookie" not in body
+    assert "secret-token" not in body
+    assert "magnet:?" not in body
     assert "<html" not in body
 
 

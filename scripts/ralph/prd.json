@@ -67,7 +67,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "优先复用现有 `/api/v1/mikan/candidates` 逻辑或其内部函数，避免第二套 MiKan parser。"
     },
     {

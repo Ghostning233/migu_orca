@@ -2,6 +2,7 @@
 Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
+- Stage 19 batch candidate orchestration stays in `POST /api/v1/batches/parse`: after `parse_anime_title`, call the shared `_search_mikan_candidates(query, config)` for each normalized `search_queries` entry, dedupe candidates per item by `(bangumi_id, mikan_url)`, serialize only public candidate fields, and represent MiKan failures as per-item `FAILED` results with sanitized errors.
 - Stage 19 AI title parsing lives in `src/batch_engine/controllers/anime_title_parser.py`: inject an `AnimeTitleParsingProvider`, use `parse_anime_title(raw_title, provider)` for normalized `AnimeTitleParseResult`, and keep provider failures as sanitized recoverable `Stage1Error(failed_step="ai_title_parse")`; fake mappings are deterministic and never call a real LLM.
 - Stage 19 batch draft primitives live in `src/batch_engine`: `create_batch_draft(raw_input)` preserves each non-empty input line as `BatchDraftItem.raw_title`, assigns independent `item-*` IDs, defaults item status to `RAW`, and `update_batch_item_status` returns a new `BatchDraft` with only the matched item changed.
 - Stage 19 batch parsing Web API is `POST /api/v1/batches/parse`: create the draft first, call `parse_anime_title(item.raw_title, provider)` per item, serialize parsed items as `PARSED`, serialize provider failures as per-item `FAILED` with sanitized `Stage1Error` data, and never block the rest of the batch for one failed title.
@@ -562,4 +563,18 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: per-item provider failures should be represented in the successful batch response, not raised as a top-level API failure, so later UI cards can show one failed row while the rest remain usable.
   - Gotcha encountered: the shared Pydantic validation envelope uses English default wrapper text; for the empty-batch business validation, raise a `Stage1Error("validation_error", "请至少输入一个番剧名称", "batch_parse", {"field": "raw_input"})` after `create_batch_draft` so the user-facing error is Chinese and path-safe.
   - Useful context: `CODEX_CURRENT_THREAD_ID` is not populated in this shell, so the progress entry uses the required thread URL template literally.
+---
+## 2026-08-19 15:43:01 CST - US-135
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Extended `POST /api/v1/batches/parse` so every successfully parsed batch item now searches MiKan candidates independently using each normalized `search_queries` value, while reusing the existing `_search_mikan_candidates` path and default/request-scoped MiKan config resolution.
+- Added per-item candidate aggregation with dedupe by `(bangumi_id, mikan_url)`, public-field-only candidate serialization, and item-local MiKan failure handling: a search failure marks only that item `FAILED`, keeps its parsed title metadata, returns no candidates for that item, and emits sanitized error details.
+- Tightened the shared item error serializer to sanitize details and redact magnet values before embedding errors in successful batch responses.
+- Files changed: `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run pytest src/apps/migu_orca_web/views_test.py -q` passed with 94 tests; `uv run python -m compileall -q src tests` passed; `uv run pytest -q` passed with 456 tests and 202 skipped browser tests because Chromium is not available in this environment.
+- Browser verification note: not applicable for US-135 because it is Web API orchestration only and has no UI behavior; browser tests were skipped by the environment due to missing browser binary.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep batch candidate search as an orchestration layer over the existing single-query `_search_mikan_candidates` helper so Stage 19 does not introduce a second MiKan parser/cache/serializer path.
+  - Pattern discovered: candidate-search failures belong to the affected item, not the top-level batch response; preserving parsed metadata on a `FAILED` item gives later UI cards enough context to show what needs review.
+  - Gotcha encountered: once batch parsing calls MiKan search, parse-only tests must stub `_search_batch_item_candidates` or fake `create_mikan_client`; otherwise they would attempt the default real MiKan path.
+  - Useful context: item-level error serialization now runs `sanitize_error_data` plus the local sensitive-field stripper, including `magnet:?` value redaction, before embedding details in a successful response envelope.
 ---
