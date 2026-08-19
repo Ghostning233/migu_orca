@@ -30,6 +30,7 @@ from batch_engine.controllers.batch_queue_controller import (
     NowFactory,
     complete_queue_item_submit,
     mark_queue_item_failed,
+    mark_queue_item_retry_failed,
     sanitize_queue_summary,
     serialize_queue,
     start_queue_item_submit,
@@ -116,6 +117,158 @@ def submit_batch_queue_items(
         batch_id=clean_batch_id,
         queue=next_queue,
         items=results,
+    )
+
+
+def retry_batch_queue_item(
+    *,
+    batch_id: str,
+    queue: BatchSubmissionQueue,
+    request_id: str,
+    ab_config: Any,
+    load_request: LoadRequest,
+    submit_one: SubmitOne,
+    now_factory: NowFactory | None = None,
+) -> BatchSubmitResult:
+    """Retry a single FAILED/RETRYABLE queue item against Auto Bangumi.
+
+    Only FAILED/RETRYABLE items are retried: already-SUCCEEDED and other
+    non-retryable items return a ``skipped`` outcome without any submit call, so
+    a successful subscription can never be re-submitted. The retry re-loads the
+    latest saved Request snapshot via ``load_request`` (never a copy held in the
+    queue), re-validates that it is still ACCEPTED, then starts a new submit
+    attempt (increments ``attempts``) and finalizes it exactly like a first
+    submit. A single retry never affects sibling items, and one retry failure
+    leaves the item FAILED/RETRYABLE with an incremented attempt count.
+    """
+    clean_batch_id = _non_empty("batch_id", batch_id)
+    clean_request_id = _non_empty("request_id", request_id)
+    item = _find_queue_item(queue, clean_request_id)
+    if item is None:
+        raise ValueError("unknown request_id")
+
+    if item.status not in {
+        BATCH_QUEUE_STATUS_FAILED,
+        BATCH_QUEUE_STATUS_RETRYABLE,
+    }:
+        return BatchSubmitResult(
+            batch_id=clean_batch_id,
+            queue=queue,
+            items=[
+                BatchSubmitItemResult(
+                    item_id=item.item_id,
+                    request_id=item.request_id,
+                    title=item.title,
+                    status=SUBMIT_OUTCOME_SKIPPED,
+                    reason=_not_retryable_reason(item.status),
+                    attempts=item.attempts,
+                )
+            ],
+        )
+
+    request = _safe_load_request(load_request, clean_request_id)
+    if request is None:
+        return _reject_retry_before_submit(
+            clean_batch_id,
+            queue,
+            item,
+            queue_status=BATCH_QUEUE_STATUS_FAILED,
+            reason="订阅方案不存在或已删除，无法提交",
+            error_type="request_not_found",
+            now_factory=now_factory,
+        )
+
+    status = request.get("status")
+    if status != ACCEPTED:
+        cancelled = status == CANCELLED
+        return _reject_retry_before_submit(
+            clean_batch_id,
+            queue,
+            item,
+            queue_status=(
+                BATCH_QUEUE_STATUS_FAILED if cancelled else BATCH_QUEUE_STATUS_RETRYABLE
+            ),
+            reason=(
+                "订阅方案已取消，无法提交"
+                if cancelled
+                else "订阅方案尚未确认，无法提交"
+            ),
+            error_type="request_cancelled" if cancelled else "invalid_request_status",
+            now_factory=now_factory,
+        )
+
+    next_queue = start_queue_item_submit(
+        queue,
+        clean_request_id,
+        now_factory=now_factory,
+    )
+    in_flight = _queue_item(next_queue, clean_request_id)
+    try:
+        ab_result = submit_one(request, ab_config)
+    except Stage1Error as exc:
+        ab_result = _failure_result(exc.as_dict())
+    except Exception:  # pragma: no cover - safety boundary
+        ab_result = _failure_result(
+            {
+                "error_type": "unexpected_error",
+                "error_message": "Auto Bangumi 提交发生未预期错误",
+                "failed_step": "retry_batch_queue_item",
+                "details": {},
+            }
+        )
+
+    if _is_success(ab_result):
+        next_queue = complete_queue_item_submit(
+            next_queue,
+            clean_request_id,
+            BATCH_QUEUE_STATUS_SUCCEEDED,
+            ab_result_summary=_success_summary(ab_result),
+            now_factory=now_factory,
+        )
+        return BatchSubmitResult(
+            batch_id=clean_batch_id,
+            queue=next_queue,
+            items=[
+                BatchSubmitItemResult(
+                    item_id=item.item_id,
+                    request_id=item.request_id,
+                    title=item.title,
+                    status=SUBMIT_OUTCOME_SUCCEEDED,
+                    attempts=in_flight.attempts,
+                )
+            ],
+        )
+
+    error = _result_error(ab_result)
+    error_type = str(error.get("error_type") or "ab_submit_failed")
+    retryable = _is_retryable_error_type(error_type)
+    queue_status = (
+        BATCH_QUEUE_STATUS_RETRYABLE if retryable else BATCH_QUEUE_STATUS_FAILED
+    )
+    reason = str(error.get("error_message") or "Auto Bangumi 提交失败")
+    next_queue = complete_queue_item_submit(
+        next_queue,
+        clean_request_id,
+        queue_status,
+        last_error={"error_type": error_type, "error_message": reason},
+        now_factory=now_factory,
+    )
+    return BatchSubmitResult(
+        batch_id=clean_batch_id,
+        queue=next_queue,
+        items=[
+            BatchSubmitItemResult(
+                item_id=item.item_id,
+                request_id=item.request_id,
+                title=item.title,
+                status=(
+                    SUBMIT_OUTCOME_RETRYABLE if retryable else SUBMIT_OUTCOME_FAILED
+                ),
+                reason=reason,
+                error_type=error_type,
+                attempts=in_flight.attempts,
+            )
+        ],
     )
 
 
@@ -334,6 +487,60 @@ def _reject_before_submit(
     )
 
 
+def _reject_retry_before_submit(
+    batch_id: str,
+    queue: BatchSubmissionQueue,
+    item: BatchQueueItem,
+    *,
+    queue_status: str,
+    reason: str,
+    error_type: str,
+    now_factory: NowFactory | None,
+) -> BatchSubmitResult:
+    """Update a retried item FAILED/RETRYABLE before any submit attempt.
+
+    Unlike a first-submit rejection (``mark_queue_item_failed``, READY-only),
+    the item is already FAILED/RETRYABLE, so this uses the retry-specific queue
+    helper which keeps the item FAILED/RETRYABLE with a fresh sanitized error and
+    does NOT increment ``attempts`` (no Auto Bangumi submit was attempted).
+    """
+    next_queue = mark_queue_item_retry_failed(
+        queue,
+        item.request_id,
+        status=queue_status,
+        last_error=reason,
+        now_factory=now_factory,
+    )
+    return BatchSubmitResult(
+        batch_id=batch_id,
+        queue=next_queue,
+        items=[
+            BatchSubmitItemResult(
+                item_id=item.item_id,
+                request_id=item.request_id,
+                title=item.title,
+                status=(
+                    SUBMIT_OUTCOME_RETRYABLE
+                    if queue_status == BATCH_QUEUE_STATUS_RETRYABLE
+                    else SUBMIT_OUTCOME_FAILED
+                ),
+                reason=reason,
+                error_type=error_type,
+                attempts=item.attempts,
+            )
+        ],
+    )
+
+
+def _not_retryable_reason(status: str) -> str:
+    reasons = {
+        BATCH_QUEUE_STATUS_SUCCEEDED: "已提交成功，不可重复提交",
+        BATCH_QUEUE_STATUS_READY_TO_SUBMIT: "尚未提交，无需重试",
+        BATCH_QUEUE_STATUS_SUBMITTING: "提交中，请稍后再试",
+    }
+    return reasons.get(status, "非失败项目，不可单独重试")
+
+
 def _is_success(ab_result: dict[str, Any]) -> bool:
     return bool(ab_result.get("success"))
 
@@ -386,10 +593,20 @@ def _queue_item(
     queue: BatchSubmissionQueue,
     request_id: str,
 ) -> BatchQueueItem:
+    item = _find_queue_item(queue, request_id)
+    if item is None:
+        raise ValueError("unknown request_id")
+    return item
+
+
+def _find_queue_item(
+    queue: BatchSubmissionQueue,
+    request_id: str,
+) -> BatchQueueItem | None:
     for item in queue.items:
         if item.request_id == request_id:
             return item
-    raise ValueError("unknown request_id")
+    return None
 
 
 def _non_empty(name: str, value: str) -> str:
@@ -407,6 +624,7 @@ __all__ = [
     "BatchSubmitResult",
     "SubmitOne",
     "compose_ab_submit_one",
+    "retry_batch_queue_item",
     "serialize_batch_submit_item",
     "serialize_batch_submit_result",
     "submit_batch_queue_items",

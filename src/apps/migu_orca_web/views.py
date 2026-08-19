@@ -38,6 +38,7 @@ from batch_engine.controllers.batch_draft_controller import (
 from batch_engine.controllers.batch_queue_controller import serialize_queue
 from batch_engine.controllers.batch_submit_controller import (
     compose_ab_submit_one,
+    retry_batch_queue_item,
     serialize_batch_submit_result,
     submit_batch_queue_items,
 )
@@ -202,6 +203,18 @@ class BatchSubmitPayload(BaseModel):
     ab_config: RequestAbConfigPayload | None = Field(default=None)
     confirm: bool = False
     storage_dir: str | None = None
+
+
+class BatchRetryPayload(BatchSubmitPayload):
+    """Retry a single FAILED/RETRYABLE queue item with explicit AB config.
+
+    ``request_id`` selects the queue item to retry; only FAILED/RETRYABLE items
+    are retried (already-SUCCEEDED items are skipped server-side). The request-
+    scoped ``ab_config``/``confirm`` contract matches ``BatchSubmitPayload`` and
+    is never persisted into the queue storage.
+    """
+
+    request_id: str
 
 
 class RequestCreatePayload(BaseModel):
@@ -998,6 +1011,54 @@ class BatchSubmitView(PostView):
         )
         # Persist the updated queue so retries and queue reads observe the new
         # statuses/summaries. The request-scoped ab_config is never stored.
+        save_submission_queue(config, result.queue)
+        return serialize_batch_submit_result(result)
+
+
+@class_route(api_blueprint, "/api/v1/batches/<batch_id>/retry", methods=["POST"])
+class BatchRetryView(PostView):
+    request_validator_model = BatchRetryPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchRetryPayload)
+        payload = self.request_validator_model
+        if payload.ab_config is None:
+            raise Stage1Error(
+                "validation_error",
+                "请提供 Auto Bangumi 配置",
+                "batch_retry",
+                {"field": "ab_config"},
+            )
+        if not payload.confirm:
+            raise Stage1Error(
+                "validation_error",
+                "请确认提交到 Auto Bangumi",
+                "batch_retry",
+                {"field": "confirm"},
+            )
+
+        storage_dir = _storage_dir(payload.storage_dir)
+        config = load_storage_config(storage_dir)
+        queue = load_submission_queue(config, payload.batch_id)
+        ab_config = build_ab_config(payload.ab_config.model_dump())
+        try:
+            result = retry_batch_queue_item(
+                batch_id=payload.batch_id,
+                queue=queue,
+                request_id=payload.request_id,
+                ab_config=ab_config,
+                load_request=_build_batch_load_request(storage_dir),
+                submit_one=compose_ab_submit_one(),
+            )
+        except ValueError as exc:
+            raise Stage1Error(
+                "queue_item_not_found",
+                "队列中不存在该订阅方案项目",
+                "batch_retry",
+                {"field": "request_id", "batch_id": payload.batch_id},
+            ) from exc
+        # Persist the updated queue so queue reads observe the retried status.
+        # The request-scoped ab_config is never stored.
         save_submission_queue(config, result.queue)
         return serialize_batch_submit_result(result)
 

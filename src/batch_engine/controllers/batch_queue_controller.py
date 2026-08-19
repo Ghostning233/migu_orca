@@ -219,6 +219,47 @@ def mark_queue_item_failed(
     return _replace_item(queue, updated_item, now=now)
 
 
+def mark_queue_item_retry_failed(
+    queue: BatchSubmissionQueue,
+    request_id: str,
+    *,
+    status: str = BATCH_QUEUE_STATUS_FAILED,
+    last_error: Any = None,
+    now_factory: NowFactory | None = None,
+) -> BatchSubmissionQueue:
+    """Record a failed retry pre-submit check without a submit attempt.
+
+    Only a FAILED or RETRYABLE item may be updated here: when a single-item
+    retry finds its Request no longer ACCEPTED (missing/deleted/cancelled), the
+    item stays FAILED/RETRYABLE with a fresh sanitized ``last_error`` and its
+    ``attempts`` is NOT incremented (no Auto Bangumi submit was attempted).
+    """
+    item = _required_item(queue, request_id)
+    if status not in {
+        BATCH_QUEUE_STATUS_FAILED,
+        BATCH_QUEUE_STATUS_RETRYABLE,
+    }:
+        raise ValueError(f"invalid retry failure status: {status}")
+    if item.status not in {
+        BATCH_QUEUE_STATUS_FAILED,
+        BATCH_QUEUE_STATUS_RETRYABLE,
+    }:
+        raise ValueError(
+            f"cannot update a {item.status} item after a failed retry; "
+            "only FAILED/RETRYABLE items can be retried"
+        )
+
+    now = _now(now_factory)
+    updated_item = replace(
+        item,
+        status=status,
+        last_error=sanitize_queue_summary(last_error),
+        ab_result_summary=None,
+        updated_at=now,
+    )
+    return _replace_item(queue, updated_item, now=now)
+
+
 def serialize_queue(queue: BatchSubmissionQueue) -> dict[str, Any]:
     """Serialize a queue with only non-sensitive, public fields.
 
@@ -241,7 +282,7 @@ def serialize_queue_item(item: BatchQueueItem) -> dict[str, Any]:
         "batch_id": item.batch_id,
         "item_id": item.item_id,
         "request_id": item.request_id,
-        "title": item.title,
+        "title": sanitize_queue_summary(item.title) or item.title,
         "status": item.status,
         "status_label": BATCH_QUEUE_STATUS_LABELS.get(item.status, item.status),
         "attempts": item.attempts,
@@ -473,6 +514,7 @@ __all__ = [
     "create_submission_queue",
     "enqueue_item",
     "mark_queue_item_failed",
+    "mark_queue_item_retry_failed",
     "queue_from_storage_dict",
     "queue_item_from_storage_dict",
     "queue_item_to_storage_dict",

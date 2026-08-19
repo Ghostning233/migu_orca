@@ -125,7 +125,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "优先复用现有 Stage 15 安全回归模式和 AB result sanitization。"
     },
     {

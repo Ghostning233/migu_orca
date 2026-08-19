@@ -20,6 +20,7 @@ from batch_engine.controllers.batch_submit_controller import (
     SUBMIT_OUTCOME_SUCCEEDED,
     BatchSubmitItemResult,
     compose_ab_submit_one,
+    retry_batch_queue_item,
     serialize_batch_submit_result,
     submit_batch_queue_items,
 )
@@ -114,6 +115,46 @@ def _success_submit(request: dict, ab_config) -> dict:
         "fallback_config": None,
         "error": None,
     }
+
+
+def _retried_queue_item(
+    request_id: str = "req-1",
+    *,
+    status: str = BATCH_QUEUE_STATUS_FAILED,
+    attempts: int = 1,
+    batch_id: str = "batch-1",
+) -> BatchQueueItem:
+    """Build a FAILED/RETRYABLE queue item after one failed submit attempt."""
+    queue = _queue(request_ids=[request_id], batch_id=batch_id)
+    queue = start_queue_item_submit(
+        queue,
+        request_id,
+        now_factory=lambda: "2026-08-19T00:01:00+00:00",
+    )
+    queue = complete_queue_item_submit(
+        queue,
+        request_id,
+        status,
+        last_error={"error_type": "ab_submit_failed", "error_message": "初次提交失败"},
+        now_factory=lambda: "2026-08-19T00:02:00+00:00",
+    )
+    assert queue.items[0].attempts == attempts
+    return queue.items[0]
+
+
+def _queue_with_item(item: BatchQueueItem) -> BatchSubmissionQueue:
+    return _queue_with_items([item])
+
+
+def _queue_with_items(items: list[BatchQueueItem]) -> BatchSubmissionQueue:
+    first = items[0]
+    return BatchSubmissionQueue(
+        queue_id=first.queue_id,
+        batch_id=first.batch_id,
+        items=items,
+        created_at="2026-08-19T00:00:00+00:00",
+        updated_at="2026-08-19T00:02:00+00:00",
+    )
 
 
 def _ab_config(**overrides) -> AutoBangumiConfig:
@@ -734,3 +775,574 @@ class TestComposeAbSubmitOne:
         assert ab_result["error"]["error_type"] == "ab_submit_failed"
         assert ab_result["fallback_config"] is not None
         assert ab_result["fallback_config"]["title"] == "葬送的芙莉莲"
+
+
+class TestRetryBatchQueueItem:
+    def test_retry_failed_item_succeeds_and_increments_attempts(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1
+        )
+        queue = _queue_with_item(item)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+            now_factory=_now_factory(
+                [
+                    "2026-08-19T00:03:00+00:00",
+                    "2026-08-19T00:04:00+00:00",
+                ]
+            ),
+        )
+
+        item_result = result.items[0]
+        assert item_result.status == SUBMIT_OUTCOME_SUCCEEDED
+        assert item_result.attempts == 2
+        assert item_result.reason is None
+        queue_item = result.queue.items[0]
+        assert queue_item.status == BATCH_QUEUE_STATUS_SUCCEEDED
+        assert queue_item.attempts == 2
+        assert "ab_subscription_id=ab-req-1" in (queue_item.ab_result_summary or "")
+        assert queue_item.last_error is None
+
+    def test_retry_retryable_item_succeeds(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_RETRYABLE, attempts=1
+        )
+        queue = _queue_with_item(item)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_SUCCEEDED
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUCCEEDED
+        assert result.queue.items[0].attempts == 2
+
+    def test_retry_timeout_keeps_retryable_and_increments_attempts(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_RETRYABLE, attempts=1
+        )
+        queue = _queue_with_item(item)
+
+        def timeout_submit(request, ab_config) -> dict:
+            return {
+                "success": False,
+                "error": {
+                    "error_type": "ab_timeout",
+                    "error_message": "Auto Bangumi HTTP 请求超时",
+                    "failed_step": "create_ab_subscription",
+                    "details": {"category": "timeout"},
+                },
+            }
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=timeout_submit,
+        )
+
+        item_result = result.items[0]
+        assert item_result.status == SUBMIT_OUTCOME_RETRYABLE
+        assert item_result.error_type == "ab_timeout"
+        assert item_result.attempts == 2
+        queue_item = result.queue.items[0]
+        assert queue_item.status == BATCH_QUEUE_STATUS_RETRYABLE
+        assert queue_item.attempts == 2
+        assert "error_type=ab_timeout" in (queue_item.last_error or "")
+        assert queue_item.ab_result_summary is None
+
+    def test_retry_terminal_failure_keeps_failed_and_increments_attempts(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1
+        )
+        queue = _queue_with_item(item)
+
+        def auth_submit(request, ab_config) -> dict:
+            return {
+                "success": False,
+                "error": {
+                    "error_type": "ab_auth_failed",
+                    "error_message": "Auto Bangumi 认证失败",
+                    "failed_step": "create_ab_subscription",
+                    "details": {"status_code": 401},
+                },
+            }
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=auth_submit,
+        )
+
+        item_result = result.items[0]
+        assert item_result.status == SUBMIT_OUTCOME_FAILED
+        assert item_result.error_type == "ab_auth_failed"
+        assert item_result.attempts == 2
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert result.queue.items[0].attempts == 2
+
+    def test_retry_increments_attempts_from_current_count(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1
+        )
+        queue = _queue_with_item(item)
+        queue = start_queue_item_submit(
+            queue, "req-1", now_factory=lambda: "2026-08-19T00:02:00+00:00"
+        )
+        queue = complete_queue_item_submit(
+            queue,
+            "req-1",
+            BATCH_QUEUE_STATUS_FAILED,
+            last_error="再次失败",
+            now_factory=lambda: "2026-08-19T00:03:00+00:00",
+        )
+        assert queue.items[0].attempts == 2
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_SUCCEEDED
+        assert result.items[0].attempts == 3
+        assert result.queue.items[0].attempts == 3
+
+    def test_retry_succeeded_item_is_skipped_without_submit_call(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        succeeded = _succeeded_queue_item("req-1")
+        queue = _queue_with_item(succeeded)
+        calls: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            calls.append(request["request_id"])
+            return _success_submit(request, ab_config)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        assert calls == []
+        assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
+        assert result.items[0].reason == "已提交成功，不可重复提交"
+        assert result.items[0].attempts == 1
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUCCEEDED
+        assert result.queue.items[0].attempts == 1
+
+    def test_retry_ready_item_is_skipped(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
+        assert result.items[0].reason == "尚未提交，无需重试"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
+        assert result.queue.items[0].attempts == 0
+
+    def test_retry_submitting_item_is_skipped(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+        queue = start_queue_item_submit(
+            queue, "req-1", now_factory=lambda: "2026-08-19T00:01:00+00:00"
+        )
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
+        assert result.items[0].reason == "提交中，请稍后再试"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
+
+    def test_retry_missing_request_marks_failed_without_attempt_increment(self) -> None:
+        store = FakeRequestStore([])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1
+        )
+        queue = _queue_with_item(item)
+        called = False
+
+        def submit_one(request, ab_config) -> dict:
+            nonlocal called
+            called = True
+            return _success_submit(request, ab_config)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        item_result = result.items[0]
+        assert item_result.status == SUBMIT_OUTCOME_FAILED
+        assert item_result.reason == "订阅方案不存在或已删除，无法提交"
+        assert item_result.error_type == "request_not_found"
+        assert item_result.attempts == 1
+        assert called is False
+        queue_item = result.queue.items[0]
+        assert queue_item.status == BATCH_QUEUE_STATUS_FAILED
+        assert queue_item.attempts == 1
+        assert queue_item.last_error == "订阅方案不存在或已删除，无法提交"
+
+    def test_retry_cancelled_request_marks_failed_without_attempt_increment(self) -> None:
+        store = FakeRequestStore(
+            [_accepted_request(request_id="req-1", status="CANCELLED")]
+        )
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1
+        )
+        queue = _queue_with_item(item)
+        called = False
+
+        def submit_one(request, ab_config) -> dict:
+            nonlocal called
+            called = True
+            return _success_submit(request, ab_config)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_FAILED
+        assert result.items[0].reason == "订阅方案已取消，无法提交"
+        assert result.items[0].error_type == "request_cancelled"
+        assert result.items[0].attempts == 1
+        assert called is False
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert result.queue.items[0].attempts == 1
+
+    def test_retry_not_accepted_request_marks_retryable_without_attempt_increment(
+        self,
+    ) -> None:
+        store = FakeRequestStore(
+            [_accepted_request(request_id="req-1", status="PENDING_CONFIRM")]
+        )
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_RETRYABLE, attempts=1
+        )
+        queue = _queue_with_item(item)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_RETRYABLE
+        assert result.items[0].reason == "订阅方案尚未确认，无法提交"
+        assert result.items[0].error_type == "invalid_request_status"
+        assert result.items[0].attempts == 1
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_RETRYABLE
+        assert result.queue.items[0].attempts == 1
+
+    def test_retry_unknown_request_id_raises(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue_with_item(
+            _retried_queue_item("req-1", status=BATCH_QUEUE_STATUS_FAILED)
+        )
+
+        with pytest.raises(ValueError, match="unknown request_id"):
+            retry_batch_queue_item(
+                batch_id="batch-1",
+                queue=queue,
+                request_id="req-missing",
+                ab_config=_ab_config(),
+                load_request=store.load,
+                submit_one=_success_submit,
+            )
+
+    def test_retry_stage1_error_is_sanitized(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_RETRYABLE, attempts=1
+        )
+        queue = _queue_with_item(item)
+
+        def raising_submit_one(request, ab_config) -> dict:
+            raise Stage1Error(
+                "ab_submit_failed",
+                "离线模拟失败",
+                "create_ab_subscription",
+                {"status_code": 503},
+            )
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=raising_submit_one,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_FAILED
+        assert result.items[0].reason == "离线模拟失败"
+        assert result.items[0].error_type == "ab_submit_failed"
+        assert result.items[0].attempts == 2
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+
+    def test_retry_unexpected_exception_is_sanitized(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_RETRYABLE, attempts=1
+        )
+        queue = _queue_with_item(item)
+
+        def exploding_submit_one(request, ab_config) -> dict:
+            raise RuntimeError(
+                "token=secret endpoint=https://ab.example.com path=/home/ghostning"
+            )
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=exploding_submit_one,
+        )
+
+        item_result = result.items[0]
+        assert item_result.status == SUBMIT_OUTCOME_FAILED
+        assert item_result.error_type == "unexpected_error"
+        assert "secret" not in (item_result.reason or "")
+        assert "ab.example.com" not in (item_result.reason or "")
+        last_error = result.queue.items[0].last_error or ""
+        assert "secret" not in last_error
+        assert "ab.example.com" not in last_error
+        assert "/home/ghostning" not in last_error
+
+    def test_retry_uses_latest_saved_request_snapshot(self) -> None:
+        # The queue still references the original title, but the retry must
+        # re-load the latest saved ACCEPTED Request snapshot instead.
+        store = FakeRequestStore(
+            [_accepted_request(request_id="req-1", title="葬送的芙莉莲·新版")]
+        )
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1
+        )
+        queue = _queue_with_item(item)
+        submitted: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            submitted.append(request["input"]["raw_title"])
+            return _success_submit(request, ab_config)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        assert submitted == ["葬送的芙莉莲·新版"]
+        assert "葬送的芙莉莲·新版" not in (queue.items[0].title or "")
+        assert result.queue.items[0].title == "标题-req-1"
+
+    def test_retry_never_uses_queue_copied_secrets(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        # Simulate a maliciously populated queue item carrying copied secrets.
+        poisoned = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1
+        )
+        poisoned = BatchQueueItem(
+            queue_id=poisoned.queue_id,
+            batch_id=poisoned.batch_id,
+            item_id=poisoned.item_id,
+            request_id=poisoned.request_id,
+            title=(
+                "https://mikan.example.com/rss/secret token=leaked "
+                "cookie=sid=abc magnet:?xt=urn:btih:deadbeef"
+            ),
+            status=poisoned.status,
+            attempts=poisoned.attempts,
+            last_error=(
+                "endpoint=https://ab.example.com token=leaked raw_rss=<rss>secret"
+            ),
+            ab_result_summary=None,
+            created_at=poisoned.created_at,
+            updated_at=poisoned.updated_at,
+        )
+        queue = _queue_with_item(poisoned)
+        submitted_titles: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            submitted_titles.append(request["input"]["raw_title"])
+            return _success_submit(request, ab_config)
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        # The retry submits from the fresh Request snapshot, never the
+        # queue-copied title/summary, and never leaks the copied secrets through
+        # the queue/result serialization boundary.
+        assert submitted_titles == ["葬送的芙莉莲"]
+        serialized = json.dumps(serialize_batch_submit_result(result), ensure_ascii=False)
+        for keyword in (
+            "endpoint",
+            "token",
+            "cookie",
+            "authorization",
+            "password",
+            "passwd",
+            "bearer",
+            "raw_html",
+            "raw_rss",
+            "response_body",
+            "magnet",
+            "mikan.example.com",
+            "ab.example.com",
+            "leaked",
+            "deadbeef",
+            "sid=abc",
+        ):
+            assert keyword not in serialized
+        assert result.items[0].reason is None
+
+    def test_retry_leaves_sibling_items_unchanged(self) -> None:
+        store = FakeRequestStore(
+            [
+                _accepted_request(request_id="req-1"),
+                _accepted_request(request_id="req-2"),
+            ]
+        )
+        failed = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1
+        )
+        succeeded = _succeeded_queue_item("req-2")
+        queue = _queue_with_items([failed, succeeded])
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_SUCCEEDED
+        # The retried item changed.
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUCCEEDED
+        assert result.queue.items[0].attempts == 2
+        # The succeeded sibling is untouched.
+        assert result.queue.items[1].status == BATCH_QUEUE_STATUS_SUCCEEDED
+        assert result.queue.items[1].attempts == 1
+        assert "ab_subscription_id=ab-1" in (
+            result.queue.items[1].ab_result_summary or ""
+        )
+
+    def test_retry_serialization_contains_only_safe_fields(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        item = _retried_queue_item(
+            "req-1", status=BATCH_QUEUE_STATUS_RETRYABLE, attempts=1
+        )
+        queue = _queue_with_item(item)
+
+        def timeout_submit(request, ab_config) -> dict:
+            return {
+                "success": False,
+                "error": {
+                    "error_type": "ab_timeout",
+                    "error_message": "Auto Bangumi HTTP 请求超时",
+                    "failed_step": "create_ab_subscription",
+                    "details": {"category": "timeout"},
+                },
+            }
+
+        result = retry_batch_queue_item(
+            batch_id="batch-1",
+            queue=queue,
+            request_id="req-1",
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=timeout_submit,
+        )
+
+        serialized = serialize_batch_submit_result(result)
+        body = json.dumps(serialized, ensure_ascii=False)
+        assert set(serialized) == {"batch_id", "queue", "items", "summary"}
+        assert serialized["summary"] == {
+            SUBMIT_OUTCOME_SUCCEEDED: 0,
+            SUBMIT_OUTCOME_FAILED: 0,
+            SUBMIT_OUTCOME_RETRYABLE: 1,
+            SUBMIT_OUTCOME_SKIPPED: 0,
+        }
+        for keyword in (
+            "endpoint",
+            "token",
+            "cookie",
+            "authorization",
+            "password",
+            "passwd",
+            "bearer",
+            "magnet",
+            "raw_html",
+            "raw_rss",
+            "response_body",
+            "ab.example.com",
+            "secret-token",
+        ):
+            assert keyword not in body
+        assert "ab.example.com" not in (result.queue.items[0].last_error or "")

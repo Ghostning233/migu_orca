@@ -10,6 +10,7 @@ from batch_engine.controllers.batch_queue_controller import (
     create_submission_queue,
     enqueue_item,
     mark_queue_item_failed,
+    mark_queue_item_retry_failed,
     sanitize_queue_summary,
     serialize_queue,
     serialize_queue_item,
@@ -323,6 +324,117 @@ class TestStatusTransitions:
             mark_queue_item_failed(base, "req-1")
 
 
+class TestMarkQueueItemRetryFailed:
+    def test_updates_failed_item_without_incrementing_attempts(self) -> None:
+        base = _queue_with(
+            _item(request_id="req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=2)
+        )
+        queue = mark_queue_item_retry_failed(
+            base,
+            "req-1",
+            status=BATCH_QUEUE_STATUS_RETRYABLE,
+            last_error={"category": "request_not_found"},
+            now_factory=_now_factory(["2026-08-19T04:00:00+00:00"]),
+        )
+
+        item = queue.items[0]
+        assert item.status == BATCH_QUEUE_STATUS_RETRYABLE
+        assert item.attempts == 2
+        assert item.last_error == "category=request_not_found"
+        assert item.ab_result_summary is None
+        assert item.updated_at == "2026-08-19T04:00:00+00:00"
+
+    def test_updates_retryable_item_defaulting_to_failed(self) -> None:
+        base = _queue_with(
+            _item(request_id="req-1", status=BATCH_QUEUE_STATUS_RETRYABLE, attempts=1)
+        )
+        queue = mark_queue_item_retry_failed(base, "req-1", last_error="已取消")
+
+        assert queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert queue.items[0].attempts == 1
+        assert queue.items[0].last_error == "已取消"
+
+    def test_sanitizes_sensitive_error_values(self) -> None:
+        base = _queue_with(
+            _item(request_id="req-1", status=BATCH_QUEUE_STATUS_FAILED, attempts=1)
+        )
+        queue = mark_queue_item_retry_failed(
+            base,
+            "req-1",
+            last_error={
+                "token": "super-secret-token",
+                "cookie": "sid=abc123",
+                "category": "request_cancelled",
+            },
+        )
+
+        assert queue.items[0].last_error == "category=request_cancelled"
+        assert "super-secret-token" not in (queue.items[0].last_error or "")
+        assert "sid=abc123" not in (queue.items[0].last_error or "")
+
+    def test_rejects_ready_items(self) -> None:
+        base = _queue_with(_item(request_id="req-1"))
+
+        with pytest.raises(ValueError, match="only FAILED/RETRYABLE"):
+            mark_queue_item_retry_failed(base, "req-1")
+
+    def test_rejects_submitting_items(self) -> None:
+        base = _queue_with(
+            _item(request_id="req-1", status=BATCH_QUEUE_STATUS_SUBMITTING)
+        )
+
+        with pytest.raises(ValueError, match="only FAILED/RETRYABLE"):
+            mark_queue_item_retry_failed(base, "req-1")
+
+    def test_rejects_succeeded_items(self) -> None:
+        base = _queue_with(
+            _item(request_id="req-1", status=BATCH_QUEUE_STATUS_SUCCEEDED)
+        )
+
+        with pytest.raises(ValueError, match="only FAILED/RETRYABLE"):
+            mark_queue_item_retry_failed(base, "req-1")
+
+    def test_rejects_invalid_target_status(self) -> None:
+        base = _queue_with(
+            _item(request_id="req-1", status=BATCH_QUEUE_STATUS_FAILED)
+        )
+
+        with pytest.raises(ValueError, match="invalid retry failure status"):
+            mark_queue_item_retry_failed(base, "req-1", status=BATCH_QUEUE_STATUS_SUCCEEDED)
+
+    def test_unknown_request_id_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown request_id"):
+            mark_queue_item_retry_failed(_queue(), "req-missing")
+
+    def test_only_target_item_changes(self) -> None:
+        base = enqueue_item(
+            _queue(),
+            item_id="item-1",
+            request_id="req-1",
+            title="葬送的芙莉莲",
+        )
+        base = enqueue_item(
+            base,
+            item_id="item-2",
+            request_id="req-2",
+            title="咒术回战 第三季",
+        )
+        base = start_queue_item_submit(base, "req-1")
+        base = complete_queue_item_submit(
+            base,
+            "req-1",
+            BATCH_QUEUE_STATUS_FAILED,
+            last_error={"category": "timeout"},
+        )
+
+        queue = mark_queue_item_retry_failed(base, "req-1", last_error="request_not_found")
+
+        assert queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert queue.items[0].last_error == "request_not_found"
+        assert queue.items[1].status == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
+        assert queue.items[1].last_error is None
+
+
 class TestStatusLabels:
     def test_chinese_labels_cover_every_supported_status(self) -> None:
         assert BATCH_QUEUE_STATUS_LABELS == {
@@ -478,13 +590,14 @@ class TestSerializationBoundary:
         assert serialized["status_label"] == "可重试"
 
     def test_serialization_defensively_redacts_directly_constructed_items(self) -> None:
-        # A directly constructed item with raw values must still serialize safe.
+        # A directly constructed item with raw values must still serialize safe,
+        # including a poisoned title carrying a copied RSS URL and token.
         raw_item = BatchQueueItem(
             queue_id="queue-1",
             batch_id="batch-1",
             item_id="item-1",
             request_id="req-1",
-            title="葬送的芙莉莲",
+            title="https://mikanani.me/RSS/Search?searchstr=x token=abc123",
             status=BATCH_QUEUE_STATUS_FAILED,
             attempts=1,
             last_error=(

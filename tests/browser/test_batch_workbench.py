@@ -1523,3 +1523,345 @@ class TestBatchQueuePanel:
         )
         expect(page.locator("#batch-queue-refresh")).to_be_enabled()
         expect(page.locator("#batch-queue-submit-form")).to_be_visible()
+
+
+def _open_queue_with_items(
+    page: Page,
+    live_server_url: str,
+    items: list[dict[str, Any]],
+    *,
+    batch_id: str = "batch-browser",
+) -> None:
+    """Load the index with a mocked queue GET returning the given items."""
+    queue_items = []
+    for item in items:
+        queue_items.append(dict(item, batch_id=batch_id))
+
+    def _queue_get(route: Any, request: Any) -> None:
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "batch_id": batch_id,
+                        "queue": {
+                            "queue_id": f"queue-{batch_id}",
+                            "batch_id": batch_id,
+                            "created_at": "2026-08-19T00:00:00+00:00",
+                            "updated_at": "2026-08-19T00:00:00+00:00",
+                            "items": queue_items,
+                        },
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    page.route(f"**/api/v1/batches/{batch_id}/queue*", _queue_get)
+    page.goto(f"{live_server_url}/index?batch_id={batch_id}")
+
+
+class TestBatchQueueRetry:
+    """Stage 20 failed-item independent retry (US-148).
+
+    Covers retry button visibility (FAILED/RETRYABLE only), single-item retry
+    success/failure with attempt counting, sensitive input clearing on success,
+    in-flight disabling, and no re-submission of already-succeeded items.
+    """
+
+    def test_batch_queue_retry_button_only_shows_for_failed_and_retryable(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        items = [
+            _queue_item(
+                "item-ok",
+                "req-ok",
+                "关于我转生变成史莱姆这档事 第四季",
+                status="SUCCEEDED",
+                attempts=1,
+                ab_result_summary="Auto Bangumi 已接受该订阅方案",
+            ),
+            _queue_item(
+                "item-fail",
+                "req-fail",
+                "实力至上主义教室 第四季",
+                status="FAILED",
+                attempts=1,
+                last_error="订阅方案已不存在，跳过提交",
+            ),
+            _queue_item(
+                "item-retry",
+                "req-retry",
+                "邻家天使 第二季",
+                status="RETRYABLE",
+                attempts=2,
+                last_error="Auto Bangumi 暂时不可用，稍后重试",
+            ),
+            _queue_item(
+                "item-ready",
+                "req-ready",
+                "另一部新番",
+                status="READY_TO_SUBMIT",
+                attempts=0,
+            ),
+        ]
+        _open_queue_with_items(page, live_server_url, items)
+
+        # 仅 FAILED/RETRYABLE 项目提供单项重试按钮
+        expect(page.locator(".batch-queue-item-retry")).to_have_count(2)
+        fail_item = page.locator('.batch-queue-item[data-item-id="item-fail"]')
+        retry_item = page.locator('.batch-queue-item[data-item-id="item-retry"]')
+        ok_item = page.locator('.batch-queue-item[data-item-id="item-ok"]')
+        ready_item = page.locator('.batch-queue-item[data-item-id="item-ready"]')
+        expect(fail_item.locator(".batch-queue-item-retry")).to_have_count(1)
+        expect(retry_item.locator(".batch-queue-item-retry")).to_have_count(1)
+        expect(ok_item.locator(".batch-queue-item-retry")).to_have_count(0)
+        expect(ready_item.locator(".batch-queue-item-retry")).to_have_count(0)
+        # 重试按钮携带公开的 request_id，文本为“重试”
+        retry_button = retry_item.locator(".batch-queue-item-retry")
+        expect(retry_button).to_contain_text("重试")
+        assert retry_button.get_attribute("data-request-id") == "req-retry"
+
+    def test_batch_queue_retry_success_updates_item_and_clears_sensitive_inputs(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        failed = _queue_item(
+            "item-fail",
+            "req-fail",
+            "实力至上主义教室 第四季",
+            status="FAILED",
+            attempts=1,
+            last_error="Auto Bangumi HTTP 提交失败",
+        )
+        succeeded = _queue_item(
+            "item-fail",
+            "req-fail",
+            "实力至上主义教室 第四季",
+            status="SUCCEEDED",
+            attempts=2,
+            ab_result_summary="Auto Bangumi 已接受该订阅方案",
+            updated_at="2026-08-19T00:05:00+00:00",
+        )
+        retry_calls: list[dict[str, Any]] = []
+
+        def _retry(route: Any, request: Any) -> None:
+            retry_calls.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_submit_result([succeeded]),
+            )
+
+        page.route("**/api/v1/batches/batch-browser/retry*", _retry)
+        _open_queue_with_items(page, live_server_url, [failed])
+
+        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        page.check("#batch-queue-ab-confirm")
+        page.click(
+            '.batch-queue-item[data-item-id="item-fail"] .batch-queue-item-retry'
+        )
+
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        expect(page.locator("#page-notification")).to_contain_text("批量提交成功")
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "提交成功 1 项"
+        )
+        item = page.locator('.batch-queue-item[data-item-id="item-fail"]')
+        expect(item.locator(".batch-queue-status")).to_contain_text("提交成功")
+        expect(item.locator(".batch-queue-item-meta")).to_contain_text("尝试次数：2")
+        expect(item.locator(".batch-queue-item-summary")).to_contain_text(
+            "结果：Auto Bangumi 已接受该订阅方案"
+        )
+        # 重试成功后按钮消失，敏感输入清空，确认取消勾选
+        expect(item.locator(".batch-queue-item-retry")).to_have_count(0)
+        expect(page.locator("#batch-queue-ab-endpoint")).to_have_value("")
+        expect(page.locator("#batch-queue-ab-token")).to_have_value("")
+        expect(page.locator("#batch-queue-ab-confirm")).not_to_be_checked()
+
+        payload = retry_calls[0]
+        assert payload["request_id"] == "req-fail"
+        assert payload["ab_config"]["endpoint"] == "https://ab.example/api"
+        assert payload["ab_config"]["token"] == "ab-secret-token"
+        assert payload["confirm"] is True
+        # 敏感配置不进入 DOM
+        body_text = page.locator("body").inner_text()
+        assert "ab-secret-token" not in body_text
+
+    def test_batch_queue_retry_success_leaves_sibling_items_unchanged(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        failed = _queue_item(
+            "item-fail",
+            "req-fail",
+            "实力至上主义教室 第四季",
+            status="FAILED",
+            attempts=1,
+            last_error="Auto Bangumi HTTP 提交失败",
+        )
+        sibling = _queue_item(
+            "item-sibling",
+            "req-sibling",
+            "关于我转生变成史莱姆这档事 第四季",
+            status="SUCCEEDED",
+            attempts=1,
+            ab_result_summary="Auto Bangumi 已接受该订阅方案",
+        )
+        succeeded = _queue_item(
+            "item-fail",
+            "req-fail",
+            "实力至上主义教室 第四季",
+            status="SUCCEEDED",
+            attempts=2,
+            ab_result_summary="Auto Bangumi 已接受该订阅方案",
+            updated_at="2026-08-19T00:05:00+00:00",
+        )
+
+        def _retry(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_submit_result([succeeded, sibling]),
+            )
+
+        page.route("**/api/v1/batches/batch-browser/retry*", _retry)
+        _open_queue_with_items(page, live_server_url, [failed, sibling])
+
+        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        page.check("#batch-queue-ab-confirm")
+        page.click(
+            '.batch-queue-item[data-item-id="item-fail"] .batch-queue-item-retry'
+        )
+
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        fail_item = page.locator('.batch-queue-item[data-item-id="item-fail"]')
+        sibling_item = page.locator('.batch-queue-item[data-item-id="item-sibling"]')
+        expect(fail_item.locator(".batch-queue-status")).to_contain_text("提交成功")
+        expect(fail_item.locator(".batch-queue-item-meta")).to_contain_text(
+            "尝试次数：2"
+        )
+        # 兄弟项目保持不变
+        expect(sibling_item.locator(".batch-queue-status")).to_contain_text("提交成功")
+        expect(sibling_item.locator(".batch-queue-item-meta")).to_contain_text(
+            "尝试次数：1"
+        )
+        expect(sibling_item.locator(".batch-queue-item-summary")).to_contain_text(
+            "结果：Auto Bangumi 已接受该订阅方案"
+        )
+        expect(sibling_item.locator(".batch-queue-item-retry")).to_have_count(0)
+
+    def test_batch_queue_retry_failure_preserves_inputs_and_keeps_item_retryable(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        failed = _queue_item(
+            "item-fail",
+            "req-fail",
+            "实力至上主义教室 第四季",
+            status="FAILED",
+            attempts=1,
+            last_error="Auto Bangumi HTTP 提交失败",
+        )
+
+        def _retry_fail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=400,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": False,
+                        "error_message": "Auto Bangumi 单项重试失败：连接超时",
+                        "error_type": "ab_connection_failed",
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/batches/batch-browser/retry*", _retry_fail)
+        _open_queue_with_items(page, live_server_url, [failed])
+
+        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        page.check("#batch-queue-ab-confirm")
+        page.click(
+            '.batch-queue-item[data-item-id="item-fail"] .batch-queue-item-retry'
+        )
+
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        expect(page.locator("#page-notification")).to_contain_text("单项重试失败")
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "Auto Bangumi 单项重试失败"
+        )
+        # HTTP 级失败：保留敏感输入与确认，便于再次重试
+        expect(page.locator("#batch-queue-ab-endpoint")).to_have_value(
+            "https://ab.example/api"
+        )
+        expect(page.locator("#batch-queue-ab-token")).to_have_value(
+            "ab-secret-token"
+        )
+        expect(page.locator("#batch-queue-ab-confirm")).to_be_checked()
+        # 项目保持提交失败，重试按钮仍在
+        item = page.locator('.batch-queue-item[data-item-id="item-fail"]')
+        expect(item.locator(".batch-queue-status")).to_contain_text("提交失败")
+        expect(item.locator(".batch-queue-item-meta")).to_contain_text("尝试次数：1")
+        expect(item.locator(".batch-queue-item-retry")).to_have_count(1)
+        # 敏感值不进入 DOM
+        body_text = page.locator("body").inner_text()
+        assert "ab-secret-token" not in body_text
+
+    def test_batch_queue_retry_disables_controls_while_in_flight(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        # 重试端点不 mock：由 conftest 的 test-slow-retry 延迟路由真实返回 400，
+        # 让浏览器 fetch 保持 ~1.5s，从而稳定观察 in-flight 的 loading/disabled 状态。
+        failed = _queue_item(
+            "item-fail",
+            "req-fail",
+            "实力至上主义教室 第四季",
+            status="FAILED",
+            attempts=1,
+            last_error="Auto Bangumi HTTP 提交失败",
+            batch_id="test-slow-retry",
+        )
+        _open_queue_with_items(page, live_server_url, [failed], batch_id="test-slow-retry")
+        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        page.check("#batch-queue-ab-confirm")
+        page.click(
+            '.batch-queue-item[data-item-id="item-fail"] .batch-queue-item-retry'
+        )
+
+        # 重试中：结果区显示 loading，重试按钮与提交按钮、敏感输入全部禁用
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "正在重试到 Auto Bangumi"
+        )
+        expect(page.locator("#batch-queue-submit-result")).to_have_class(
+            "loading-state compact-state"
+        )
+        expect(page.locator(".batch-queue-item-retry")).to_be_disabled()
+        expect(page.locator("#batch-queue-submit-button")).to_be_disabled()
+        expect(page.locator("#batch-queue-ab-endpoint")).to_be_disabled()
+        expect(page.locator("#batch-queue-ab-token")).to_be_disabled()
+        expect(page.locator("#batch-queue-ab-confirm")).to_be_disabled()
+
+        # 失败后恢复可操作，保留输入便于再次重试；项目保持提交失败
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        expect(page.locator("#page-notification")).to_contain_text("单项重试失败")
+        expect(page.locator("#batch-queue-submit-result")).to_contain_text(
+            "Auto Bangumi 单项重试失败"
+        )
+        expect(page.locator(".batch-queue-item-retry")).to_be_enabled()
+        expect(page.locator("#batch-queue-submit-button")).to_be_enabled()
+        expect(page.locator("#batch-queue-ab-endpoint")).to_have_value(
+            "https://ab.example/api"
+        )
+        expect(page.locator("#batch-queue-ab-token")).to_have_value(
+            "ab-secret-token"
+        )
+        item = page.locator('.batch-queue-item[data-item-id="item-fail"]')
+        expect(item.locator(".batch-queue-status")).to_contain_text("提交失败")
+        # 敏感值不进入 DOM
+        body_text = page.locator("body").inner_text()
+        assert "ab-secret-token" not in body_text

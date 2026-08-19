@@ -470,6 +470,12 @@ textarea {
   color: #7a5200;
 }
 
+.batch-queue-item-retry {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 2px 12px;
+}
+
 .batch-card-queue-status-succeeded {
   background: #e7f4e9;
   border: 1px solid #abd3b6;

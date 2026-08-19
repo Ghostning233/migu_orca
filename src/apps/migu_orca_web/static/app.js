@@ -1719,7 +1719,18 @@
       batchQueueStatusClass(item.status);
     status.textContent = batchQueueStatusLabel(item.status);
     statusRow.appendChild(status);
-    // SUCCEEDED 项目不提供重试入口（单项重试是 US-148）。
+    // SUCCEEDED / READY / SUBMITTING 项目不提供重试入口（单项重试是 US-148）。
+    if (item.status === "FAILED" || item.status === "RETRYABLE") {
+      const retryButton = document.createElement("button");
+      retryButton.className = "secondary-button batch-queue-item-retry";
+      retryButton.type = "button";
+      retryButton.textContent = "重试";
+      retryButton.setAttribute("data-request-id", safeText(item.request_id));
+      retryButton.addEventListener("click", function () {
+        retryBatchQueueItem(item);
+      });
+      statusRow.appendChild(retryButton);
+    }
     row.appendChild(statusRow);
 
     const title = document.createElement("strong");
@@ -1879,6 +1890,11 @@
         control.disabled = isInFlight;
       }
     }
+    if (batchQueueList) {
+      for (const button of batchQueueList.querySelectorAll(".batch-queue-item-retry")) {
+        button.disabled = isInFlight;
+      }
+    }
     if (batchQueueSubmitButton) {
       batchQueueSubmitButton.textContent = isInFlight ? "正在提交..." : "提交队列";
     }
@@ -1977,6 +1993,75 @@
         "error-state compact-state",
       );
       notifyApiError("批量提交失败", error);
+    } finally {
+      setBatchQueueInFlight(false);
+    }
+  }
+
+  async function retryBatchQueueItem(item) {
+    clearBatchQueueSubmitError();
+    if (!currentBatchId) {
+      setBatchQueueSubmitError("缺少批次标识，无法重试。");
+      return;
+    }
+    const endpoint = batchQueueAbEndpointInput ? batchQueueAbEndpointInput.value.trim() : "";
+    const token = batchQueueAbTokenInput ? batchQueueAbTokenInput.value.trim() : "";
+    const fallbackEnabled = batchQueueAbFallbackInput ? batchQueueAbFallbackInput.checked : false;
+    const confirm = batchQueueAbConfirmInput ? batchQueueAbConfirmInput.checked : false;
+    if (!endpoint) {
+      setBatchQueueSubmitError("提交前必须填写 endpoint。", batchQueueAbEndpointInput);
+      return;
+    }
+    if (!token) {
+      setBatchQueueSubmitError("提交前必须填写 token。", batchQueueAbTokenInput);
+      return;
+    }
+    if (!confirm) {
+      setBatchQueueSubmitError("请勾选确认后再提交到 Auto Bangumi。", batchQueueAbConfirmInput);
+      return;
+    }
+
+    setBatchQueueInFlight(true);
+    setBatchQueueSubmitResult(
+      "正在重试到 Auto Bangumi...",
+      "loading-state compact-state",
+    );
+    try {
+      const result = await fetchJson(
+        apiPath("/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/retry"),
+        {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            storage_dir: currentStorageDir() || null,
+            request_id: item.request_id,
+            ab_config: {
+              endpoint: endpoint,
+              token: token,
+              fallback_enabled: fallbackEnabled,
+            },
+            confirm: true,
+          }),
+        },
+      );
+      const summary = (result && result.summary) || {};
+      clearBatchQueueSensitiveFields();
+      applyQueueResult(result && result.queue);
+      syncQueueStatusToCards(batchQueueItems);
+      if (batchDraftCards.length) {
+        renderBatchParseItems(batchDraftCards);
+      }
+      setBatchQueueSubmitResult(
+        batchQueueSummaryMessage(summary),
+        "success-state compact-state",
+      );
+      showBatchQueueSubmitNotification(summary);
+    } catch (error) {
+      setBatchQueueSubmitResult(
+        "Auto Bangumi 单项重试失败。请检查配置与订阅方案状态后重试。",
+        "error-state compact-state",
+      );
+      notifyApiError("单项重试失败", error);
     } finally {
       setBatchQueueInFlight(false);
     }
