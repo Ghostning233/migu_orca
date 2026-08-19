@@ -18,6 +18,7 @@ from batch_engine.controllers.batch_queue_controller import (
 )
 from batch_engine.models import (
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+    BatchQueueItem,
     BatchSubmissionQueue,
 )
 from shared.errors import Stage1Error
@@ -82,6 +83,38 @@ def _run(
         item_ids=item_ids,
         queue=queue,
         now_factory=_now_factory(now) if now else None,
+    )
+
+
+def _ready_item(
+    request_id: str = "req-1",
+    *,
+    item_id: str = "item-1",
+    batch_id: str = "batch-1",
+) -> BatchQueueItem:
+    """Build a READY_TO_SUBMIT queue item exactly as an accept would enqueue it."""
+    queue = create_submission_queue(
+        batch_id,
+        queue_id_factory=lambda: "queue-1",
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    queue = enqueue_item(
+        queue,
+        item_id=item_id,
+        request_id=request_id,
+        title="标题",
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    return queue.items[0]
+
+
+def _queue_with_item(item: BatchQueueItem) -> BatchSubmissionQueue:
+    return BatchSubmissionQueue(
+        queue_id=item.queue_id,
+        batch_id=item.batch_id,
+        items=[item],
+        created_at="2026-08-19T00:00:00+00:00",
+        updated_at="2026-08-19T00:00:00+00:00",
     )
 
 
@@ -248,9 +281,13 @@ class TestIdempotentRepeat:
         assert store.accept_calls == []
         item = result.items[0]
         assert item.status == ACCEPT_OUTCOME_ALREADY_ACCEPTED
-        assert item.reason == "该订阅方案已确认，跳过重复接受"
-        assert item.queued is False
-        assert result.queue.items == []
+        assert item.reason == "该订阅方案已确认，已补建提交队列"
+        assert item.queued is True
+        # The ACCEPTED Request had no queue item, so one READY_TO_SUBMIT item is
+        # rebuilt so the accepted Request can still be submitted.
+        assert len(result.queue.items) == 1
+        assert result.queue.items[0].request_id == "req-1"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
 
     def test_repeat_batch_accept_does_not_duplicate_queue_items(self) -> None:
         store = FakeRequestStore([_request(request_id="req-1")])
@@ -267,6 +304,44 @@ class TestIdempotentRepeat:
         assert repeated.items[0].status == ACCEPT_OUTCOME_ALREADY_ACCEPTED
         assert len(repeated.queue.items) == 1
         assert repeated.queue == first.queue
+
+    def test_accepted_request_with_existing_queue_item_is_idempotent(self) -> None:
+        """ACCEPTED + the queue already holds the request_id: stay idempotent."""
+        store = FakeRequestStore([_request(request_id="req-1", status="ACCEPTED")])
+        existing = _queue_with_item(_ready_item("req-1"))
+
+        result = _run(
+            [BatchAcceptItem(item_id="item-1", request_id="req-1")],
+            store,
+            queue=existing,
+        )
+
+        assert store.accept_calls == []
+        item = result.items[0]
+        assert item.status == ACCEPT_OUTCOME_ALREADY_ACCEPTED
+        assert item.reason == "该订阅方案已确认，跳过重复接受"
+        assert item.queued is False
+        assert result.queue == existing
+        assert len(result.queue.items) == 1
+
+    def test_accepted_request_with_missing_queue_item_is_re_enqueued(self) -> None:
+        """ACCEPTED but the queue lost the item: rebuild READY_TO_SUBMIT."""
+        store = FakeRequestStore([_request(request_id="req-1", status="ACCEPTED")])
+
+        result = _run(
+            [BatchAcceptItem(item_id="item-1", request_id="req-1")],
+            store,
+            queue=create_submission_queue("batch-1"),
+        )
+
+        assert store.accept_calls == []
+        item = result.items[0]
+        assert item.status == ACCEPT_OUTCOME_ALREADY_ACCEPTED
+        assert item.reason == "该订阅方案已确认，已补建提交队列"
+        assert item.queued is True
+        assert len(result.queue.items) == 1
+        assert result.queue.items[0].request_id == "req-1"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
 
 
 class TestSingleItemFailureDoesNotBlock:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,8 +75,12 @@ from storage_engine.controllers.request_repository import (
     delete_request_snapshot,
     list_request_snapshots,
     load_request_snapshot,
+    save_request_snapshot,
 )
-from storage_engine.controllers.ab_result_repository import load_ab_submit_result
+from storage_engine.controllers.ab_result_repository import (
+    load_ab_submit_result,
+    save_ab_submit_result,
+)
 from storage_engine.controllers.history_repository import load_status_history
 from storage_engine.controllers.queue_repository import (
     load_submission_queue,
@@ -573,6 +579,51 @@ def _build_batch_accept_one(storage_dir: Path | None) -> AcceptOne:
     return accept_one
 
 
+def _build_batch_persist_submit_result(storage_dir: Path | None):
+    """Build the injected per-item AB-result persister for batch submit/retry.
+
+    Mirrors the single-item submit-ab storage contract
+    (``RequestAbSubmitView.save`` + ``apply_request_save_action``): sanitize the
+    AB result, attach it to the Request snapshot, persist the snapshot, and
+    write ``ab_results/<request_id>.json`` so the Request detail API can read
+    and show the result. Auto Bangumi secrets (endpoint/token/cookie/raw
+    response) never reach the persisted data because the result was already
+    normalized by the AB submit contract and is sanitized again here.
+    """
+    config = load_storage_config(storage_dir)
+
+    def persist_submit_result(
+        request: dict[str, Any],
+        ab_submit_result: dict[str, Any],
+    ) -> dict[str, Any]:
+        sanitized = _sanitize_ab_submit_result(ab_submit_result)
+        updated = deepcopy(request)
+        updated["ab_submit_result"] = sanitized
+        updated["updated_at"] = datetime.now(UTC).isoformat()
+        save_request_snapshot(config, updated)
+        save_ab_submit_result(config, updated)
+        return updated
+
+    return persist_submit_result
+
+
+def _build_batch_persist_queue(config: StorageConfig):
+    """Build the injected per-item queue persister for batch submit/retry.
+
+    The submit service flushes each item's SUBMITTING status before the Auto
+    Bangumi call and its final status after the attempt; persisting through the
+    existing queue repository means an interruption between the external submit
+    and the final queue save can never leave READY_TO_SUBMIT on disk for an
+    item that already reached Auto Bangumi. The queue only holds non-sensitive
+    public fields, so writing it never stores Auto Bangumi secrets.
+    """
+
+    def persist_queue(queue: BatchSubmissionQueue) -> None:
+        save_submission_queue(config, queue)
+
+    return persist_queue
+
+
 def _sanitize_ab_submit_result(result: dict[str, Any]) -> dict[str, Any]:
     sanitized = _strip_sensitive_result_fields(sanitize_error_data(result))
     assert isinstance(sanitized, dict)
@@ -1008,9 +1059,13 @@ class BatchSubmitView(PostView):
             ab_config=ab_config,
             load_request=_build_batch_load_request(storage_dir),
             submit_one=compose_ab_submit_one(),
+            persist_queue=_build_batch_persist_queue(config),
+            persist_submit_result=_build_batch_persist_submit_result(storage_dir),
         )
         # Persist the updated queue so retries and queue reads observe the new
-        # statuses/summaries. The request-scoped ab_config is never stored.
+        # statuses/summaries. The request-scoped ab_config is never stored; the
+        # service already flushed each item's SUBMITTING and final status before
+        # returning, so a crash mid-batch cannot resurrect READY_TO_SUBMIT.
         save_submission_queue(config, result.queue)
         return serialize_batch_submit_result(result)
 
@@ -1049,6 +1104,8 @@ class BatchRetryView(PostView):
                 ab_config=ab_config,
                 load_request=_build_batch_load_request(storage_dir),
                 submit_one=compose_ab_submit_one(),
+                persist_queue=_build_batch_persist_queue(config),
+                persist_submit_result=_build_batch_persist_submit_result(storage_dir),
             )
         except ValueError as exc:
             raise Stage1Error(

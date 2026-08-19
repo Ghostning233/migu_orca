@@ -53,6 +53,11 @@ SUBMIT_OUTCOME_FAILED = "failed"
 SUBMIT_OUTCOME_RETRYABLE = "retryable"
 SUBMIT_OUTCOME_SKIPPED = "skipped"
 
+#: Error type used when persisting an AB submit result (Request snapshot +
+#: ab_results/<request_id>.json) fails for one item. Kept non-retryable so the
+#: item is never blindly re-submitted after an ambiguous persistence failure.
+SUBMIT_PERSIST_ERROR_TYPE = "result_persist_failed"
+
 #: Transient Auto Bangumi errors that can be retried with the same config.
 _RETRYABLE_SUBMIT_ERROR_TYPES = frozenset(
     {"ab_timeout", "ab_connection_failed"}
@@ -60,6 +65,15 @@ _RETRYABLE_SUBMIT_ERROR_TYPES = frozenset(
 
 LoadRequest = Callable[[str], dict[str, Any] | None]
 SubmitOne = Callable[[dict[str, Any], Any], dict[str, Any]]
+#: Persists the in-memory queue after a per-item status transition (used to
+#: flush SUBMITTING before any Auto Bangumi call and the final item status
+#: after the attempt, so an interruption can never leave READY_TO_SUBMIT on
+#: disk for an item that already reached Auto Bangumi).
+PersistQueue = Callable[[BatchSubmissionQueue], None]
+#: Persists one item's sanitized AB submit result into the Request snapshot and
+#: ab_results/<request_id>.json, mirroring the single-item submit-ab contract.
+#: Receives (request, ab_submit_result) and must raise Stage1Error on failure.
+PersistSubmitResult = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -92,6 +106,8 @@ def submit_batch_queue_items(
     load_request: LoadRequest,
     submit_one: SubmitOne,
     now_factory: NowFactory | None = None,
+    persist_queue: PersistQueue | None = None,
+    persist_submit_result: PersistSubmitResult | None = None,
 ) -> BatchSubmitResult:
     """Process READY_TO_SUBMIT queue items sequentially against Auto Bangumi.
 
@@ -99,6 +115,17 @@ def submit_batch_queue_items(
     any submit call; pre-submit validation (the Request must still be ACCEPTED)
     and per-item submit failures mark the item FAILED or RETRYABLE and never
     block the rest of the batch.
+
+    Reliability contract (interruption safety): when ``persist_queue`` is
+    provided, the item is flushed to disk as SUBMITTING *before* the Auto
+    Bangumi call, and the final SUCCEEDED/FAILED/RETRYABLE status is flushed
+    after the attempt, so a crash between the external submit and the final
+    queue save can never leave READY_TO_SUBMIT on disk for an item that already
+    reached Auto Bangumi. When ``persist_submit_result`` is provided, every
+    item's sanitized AB result (success or failure) is written into the Request
+    snapshot and ``ab_results/<request_id>.json``; a per-item persistence
+    failure marks that item FAILED with ``result_persist_failed`` and never
+    blocks the rest of the batch.
     """
     clean_batch_id = _non_empty("batch_id", batch_id)
     next_queue = queue
@@ -111,6 +138,8 @@ def submit_batch_queue_items(
             load_request=load_request,
             submit_one=submit_one,
             now_factory=now_factory,
+            persist_queue=persist_queue,
+            persist_submit_result=persist_submit_result,
         )
         results.append(item_result)
     return BatchSubmitResult(
@@ -129,6 +158,8 @@ def retry_batch_queue_item(
     load_request: LoadRequest,
     submit_one: SubmitOne,
     now_factory: NowFactory | None = None,
+    persist_queue: PersistQueue | None = None,
+    persist_submit_result: PersistSubmitResult | None = None,
 ) -> BatchSubmitResult:
     """Retry a single FAILED/RETRYABLE queue item against Auto Bangumi.
 
@@ -140,6 +171,11 @@ def retry_batch_queue_item(
     attempt (increments ``attempts``) and finalizes it exactly like a first
     submit. A single retry never affects sibling items, and one retry failure
     leaves the item FAILED/RETRYABLE with an incremented attempt count.
+
+    The same reliability contract as ``submit_batch_queue_items`` applies:
+    ``persist_queue`` flushes SUBMITTING before the Auto Bangumi call and the
+    final status after it; ``persist_submit_result`` writes the sanitized AB
+    result into the Request snapshot and ``ab_results/<request_id>.json``.
     """
     clean_batch_id = _non_empty("batch_id", batch_id)
     clean_request_id = _non_empty("request_id", request_id)
@@ -202,6 +238,11 @@ def retry_batch_queue_item(
         clean_request_id,
         now_factory=now_factory,
     )
+    if persist_queue is not None:
+        # Flush SUBMITTING before the Auto Bangumi call (same interruption
+        # safety as a first submit: the disk never keeps READY_TO_SUBMIT for
+        # an item that already reached Auto Bangumi).
+        persist_queue(next_queue)
     in_flight = _queue_item(next_queue, clean_request_id)
     try:
         ab_result = submit_one(request, ab_config)
@@ -217,7 +258,13 @@ def retry_batch_queue_item(
             }
         )
 
-    if _is_success(ab_result):
+    persist_error = _persist_submit_result_safely(
+        persist_submit_result,
+        request,
+        ab_result,
+    )
+
+    if _is_success(ab_result) and persist_error is None:
         next_queue = complete_queue_item_submit(
             next_queue,
             clean_request_id,
@@ -225,6 +272,8 @@ def retry_batch_queue_item(
             ab_result_summary=_success_summary(ab_result),
             now_factory=now_factory,
         )
+        if persist_queue is not None:
+            persist_queue(next_queue)
         return BatchSubmitResult(
             batch_id=clean_batch_id,
             queue=next_queue,
@@ -239,13 +288,20 @@ def retry_batch_queue_item(
             ],
         )
 
-    error = _result_error(ab_result)
-    error_type = str(error.get("error_type") or "ab_submit_failed")
-    retryable = _is_retryable_error_type(error_type)
+    if persist_error is not None:
+        error_type = SUBMIT_PERSIST_ERROR_TYPE
+        retryable = False
+        reason = str(
+            getattr(persist_error, "message", None) or "保存 Auto Bangumi 提交结果失败"
+        )
+    else:
+        error = _result_error(ab_result)
+        error_type = str(error.get("error_type") or "ab_submit_failed")
+        retryable = _is_retryable_error_type(error_type)
+        reason = str(error.get("error_message") or "Auto Bangumi 提交失败")
     queue_status = (
         BATCH_QUEUE_STATUS_RETRYABLE if retryable else BATCH_QUEUE_STATUS_FAILED
     )
-    reason = str(error.get("error_message") or "Auto Bangumi 提交失败")
     next_queue = complete_queue_item_submit(
         next_queue,
         clean_request_id,
@@ -253,6 +309,8 @@ def retry_batch_queue_item(
         last_error={"error_type": error_type, "error_message": reason},
         now_factory=now_factory,
     )
+    if persist_queue is not None:
+        persist_queue(next_queue)
     return BatchSubmitResult(
         batch_id=clean_batch_id,
         queue=next_queue,
@@ -336,6 +394,8 @@ def _submit_one_item(
     load_request: LoadRequest,
     submit_one: SubmitOne,
     now_factory: NowFactory | None,
+    persist_queue: PersistQueue | None,
+    persist_submit_result: PersistSubmitResult | None,
 ) -> tuple[BatchSubmitItemResult, BatchSubmissionQueue]:
     if item.status != BATCH_QUEUE_STATUS_READY_TO_SUBMIT:
         return (
@@ -386,6 +446,12 @@ def _submit_one_item(
         item.request_id,
         now_factory=now_factory,
     )
+    if persist_queue is not None:
+        # Flush SUBMITTING before any Auto Bangumi call: if the process dies
+        # after the external submit but before the final status is persisted,
+        # the disk queue holds SUBMITTING (never READY_TO_SUBMIT), so a later
+        # submit/retry skips it instead of re-creating the subscription.
+        persist_queue(next_queue)
     in_flight = _queue_item(next_queue, item.request_id)
     try:
         ab_result = submit_one(request, ab_config)
@@ -401,7 +467,17 @@ def _submit_one_item(
             }
         )
 
-    if _is_success(ab_result):
+    # Persist the sanitized AB result (success or failure) into the Request
+    # snapshot and ab_results/<request_id>.json, mirroring the single-item
+    # submit-ab contract. A per-item persistence failure is recorded on this
+    # item and never blocks the rest of the batch.
+    persist_error = _persist_submit_result_safely(
+        persist_submit_result,
+        request,
+        ab_result,
+    )
+
+    if _is_success(ab_result) and persist_error is None:
         next_queue = complete_queue_item_submit(
             next_queue,
             item.request_id,
@@ -409,6 +485,8 @@ def _submit_one_item(
             ab_result_summary=_success_summary(ab_result),
             now_factory=now_factory,
         )
+        if persist_queue is not None:
+            persist_queue(next_queue)
         return (
             BatchSubmitItemResult(
                 item_id=item.item_id,
@@ -420,15 +498,22 @@ def _submit_one_item(
             next_queue,
         )
 
-    error = _result_error(ab_result)
-    error_type = str(error.get("error_type") or "ab_submit_failed")
-    retryable = _is_retryable_error_type(error_type)
+    if persist_error is not None:
+        error_type = SUBMIT_PERSIST_ERROR_TYPE
+        retryable = False
+        reason = str(
+            getattr(persist_error, "message", None) or "保存 Auto Bangumi 提交结果失败"
+        )
+    else:
+        error = _result_error(ab_result)
+        error_type = str(error.get("error_type") or "ab_submit_failed")
+        retryable = _is_retryable_error_type(error_type)
+        reason = str(error.get("error_message") or "Auto Bangumi 提交失败")
     queue_status = (
         BATCH_QUEUE_STATUS_RETRYABLE
         if retryable
         else BATCH_QUEUE_STATUS_FAILED
     )
-    reason = str(error.get("error_message") or "Auto Bangumi 提交失败")
     next_queue = complete_queue_item_submit(
         next_queue,
         item.request_id,
@@ -436,6 +521,8 @@ def _submit_one_item(
         last_error={"error_type": error_type, "error_message": reason},
         now_factory=now_factory,
     )
+    if persist_queue is not None:
+        persist_queue(next_queue)
     return (
         BatchSubmitItemResult(
             item_id=item.item_id,
@@ -549,6 +636,35 @@ def _failure_result(error: dict[str, Any]) -> dict[str, Any]:
     return {"success": False, "error": error}
 
 
+def _persist_submit_result_safely(
+    persist_submit_result: PersistSubmitResult | None,
+    request: dict[str, Any],
+    ab_result: dict[str, Any],
+) -> Stage1Error | None:
+    """Persist one item's AB result, returning a sanitized error on failure.
+
+    ``persist_submit_result`` is the Web-layer injected writer that mirrors the
+    single-item submit-ab storage contract (Request snapshot + ab_results file).
+    Any failure is normalized to a stable sanitized ``Stage1Error`` so the item
+    can be marked FAILED with ``result_persist_failed`` and the rest of the
+    batch keeps processing.
+    """
+    if persist_submit_result is None:
+        return None
+    try:
+        persist_submit_result(request, ab_result)
+        return None
+    except Stage1Error as exc:
+        return exc
+    except Exception:  # pragma: no cover - safety boundary
+        return Stage1Error(
+            SUBMIT_PERSIST_ERROR_TYPE,
+            "保存 Auto Bangumi 提交结果失败",
+            "persist_batch_submit_result",
+            {"request_id": str(request.get("request_id") or "")},
+        )
+
+
 def _result_error(ab_result: dict[str, Any]) -> dict[str, Any]:
     error = ab_result.get("error")
     return error if isinstance(error, dict) else {}
@@ -620,8 +736,11 @@ __all__ = [
     "SUBMIT_OUTCOME_RETRYABLE",
     "SUBMIT_OUTCOME_SKIPPED",
     "SUBMIT_OUTCOME_SUCCEEDED",
+    "SUBMIT_PERSIST_ERROR_TYPE",
     "BatchSubmitItemResult",
     "BatchSubmitResult",
+    "PersistQueue",
+    "PersistSubmitResult",
     "SubmitOne",
     "compose_ab_submit_one",
     "retry_batch_queue_item",

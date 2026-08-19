@@ -202,17 +202,41 @@ def _accept_one_item(
     status = request.get("status")
     fallback_title = item.title or _request_title(request)
     if status == ACCEPTED:
-        # Idempotent repeat: already accepted, so never re-accept, never
-        # re-write confirmation history, and never re-enqueue the queue item.
+        if _queue_has_item(queue, request_id):
+            # Idempotent repeat: the queue already holds this request, so never
+            # re-accept, never re-write confirmation history, and never
+            # duplicate the queue item.
+            return (
+                BatchAcceptItemResult(
+                    item_id=item.item_id,
+                    request_id=request_id,
+                    title=fallback_title,
+                    status=ACCEPT_OUTCOME_ALREADY_ACCEPTED,
+                    reason="该订阅方案已确认，跳过重复接受",
+                ),
+                queue,
+            )
+        # The Request is already ACCEPTED but its queue item is missing (the
+        # queue save failed, was deleted, or is corrupted): rebuild the
+        # READY_TO_SUBMIT item so the accepted Request can be submitted again.
+        title = fallback_title or "未命名订阅方案"
+        next_queue = enqueue_item(
+            queue,
+            item_id=item.item_id,
+            request_id=request_id,
+            title=sanitize_queue_summary(title) or title,
+            now_factory=now_factory,
+        )
         return (
             BatchAcceptItemResult(
                 item_id=item.item_id,
                 request_id=request_id,
                 title=fallback_title,
                 status=ACCEPT_OUTCOME_ALREADY_ACCEPTED,
-                reason="该订阅方案已确认，跳过重复接受",
+                reason="该订阅方案已确认，已补建提交队列",
+                queued=True,
             ),
-            queue,
+            next_queue,
         )
 
     if status != PENDING_CONFIRM:
@@ -292,6 +316,10 @@ def _safe_load_request(
         return load_request(request_id)
     except Exception:  # pragma: no cover - safety boundary
         return None
+
+
+def _queue_has_item(queue: BatchSubmissionQueue, request_id: str) -> bool:
+    return any(item.request_id == request_id for item in queue.items)
 
 
 def _select_items(

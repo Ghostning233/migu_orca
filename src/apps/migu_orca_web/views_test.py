@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +34,10 @@ from request_engine.controllers.request_controller import (
 )
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, EntryRequest, MatchedBangumi, RssSource
-from storage_engine.controllers.ab_result_repository import save_ab_submit_result
+from storage_engine.controllers.ab_result_repository import (
+    load_ab_submit_result,
+    save_ab_submit_result,
+)
 from storage_engine.controllers.history_repository import (
     append_status_history,
     load_status_history,
@@ -3748,10 +3752,44 @@ def test_batch_accept_api_is_idempotent_for_already_accepted_items(
     item = payload["result"]["items"][0]
     assert payload["ok"] is True
     assert item["status"] == "already_accepted"
+    assert item["reason"] == "该订阅方案已确认，已补建提交队列"
+    assert item["queued"] is True
+    # The ACCEPTED Request had no queue item, so one READY_TO_SUBMIT item is
+    # rebuilt so it can still be submitted.
+    queue_items = payload["result"]["queue"]["items"]
+    assert len(queue_items) == 1
+    assert queue_items[0]["request_id"] == "request-a"
+    assert queue_items[0]["status"] == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
+    assert payload["result"]["summary"]["already_accepted"] == 1
+
+
+def test_batch_accept_api_keeps_existing_queue_item_idempotent(
+    tmp_path: Path,
+) -> None:
+    """ACCEPTED + queue already holds the request_id: no duplicate enqueue."""
+    _saved_accepted_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    response = _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert payload["ok"] is True
+    assert item["status"] == "already_accepted"
     assert item["reason"] == "该订阅方案已确认，跳过重复接受"
     assert item["queued"] is False
-    assert payload["result"]["queue"]["items"] == []
-    assert payload["result"]["summary"]["already_accepted"] == 1
+    assert len(payload["result"]["queue"]["items"]) == 1
 
 
 def test_batch_accept_api_accepts_empty_selection(tmp_path: Path) -> None:
@@ -4178,6 +4216,125 @@ def test_batch_submit_api_does_not_leak_sensitive_values(
     assert "secret-token" not in body
     assert "auto-bangumi.local" not in body
     assert "Authorization" not in body
+
+
+def test_batch_submit_api_persists_ab_result_into_request_and_ab_results(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Batch submit writes the sanitized AB result into the Request snapshot and
+    ab_results/<request_id>.json, and the detail API can read it."""
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: FakeAutoBangumiClient(),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["items"][0]["status"] == "succeeded"
+
+    config = load_storage_config(storage_dir)
+    # Request snapshot carries the sanitized AB result (single-item contract).
+    request_body = (config.requests_dir / "request-a.json").read_text(encoding="utf-8")
+    request_snapshot = json.loads(request_body)
+    assert request_snapshot["ab_submit_result"]["success"] is True
+    assert (
+        request_snapshot["ab_submit_result"]["ab_subscription_id"]
+        == "fake-ab-subscription"
+    )
+    # ab_results/<request_id>.json exists with the sanitized record.
+    ab_result = load_ab_submit_result(config, "request-a")
+    assert ab_result["request_id"] == "request-a"
+    assert ab_result["ab_submit_result"]["success"] is True
+    assert (
+        ab_result["ab_submit_result"]["ab_subscription_id"]
+        == "fake-ab-subscription"
+    )
+    # The Request detail API can read and show the result.
+    detail = _client().get(
+        "/api/v1/requests/request-a",
+        query_string={"storage_dir": str(storage_dir)},
+    ).get_json()
+    assert detail["ok"] is True
+    assert detail["result"]["ab_result"]["available"] is True
+    assert (
+        detail["result"]["ab_result"]["record"]["ab_submit_result"][
+            "ab_subscription_id"
+        ]
+        == "fake-ab-subscription"
+    )
+    # No secrets in any persisted file.
+    for text in (
+        request_body,
+        (config.ab_results_dir / "request-a.json").read_text(encoding="utf-8"),
+    ):
+        assert "secret-token" not in text
+        assert "auto-bangumi.local" not in text
+        assert "Authorization" not in text
+
+
+def test_batch_submit_api_persists_failed_ab_result(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A failed batch submit also persists the sanitized failure result."""
+    _saved_request(tmp_path, "芙莉莲", "request-a")
+    storage_dir = tmp_path / "storage"
+    _batch_accept(
+        _client(),
+        "batch-1",
+        storage_dir,
+        items=[{"item_id": "item-a", "request_id": "request-a", "title": "芙莉莲"}],
+    )
+
+    failing_client = FakeAutoBangumiClient(
+        error=Stage1Error(
+            "ab_auth_failed",
+            "Auto Bangumi 认证失败",
+            "submit_ab_subscription",
+            {},
+        )
+    )
+    monkeypatch.setattr(
+        "ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client",
+        lambda _config: failing_client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/batch-1/submit",
+        json=_batch_submit_payload(storage_dir),
+    )
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["result"]["items"][0]["status"] == "failed"
+    assert payload["result"]["items"][0]["error_type"] == "ab_auth_failed"
+
+    config = load_storage_config(storage_dir)
+    request_snapshot = json.loads(
+        (config.requests_dir / "request-a.json").read_text(encoding="utf-8")
+    )
+    assert request_snapshot["ab_submit_result"]["success"] is False
+    assert (
+        request_snapshot["ab_submit_result"]["error"]["error_type"]
+        == "ab_auth_failed"
+    )
+    ab_result = load_ab_submit_result(config, "request-a")
+    assert ab_result["ab_submit_result"]["success"] is False
+    assert ab_result["ab_submit_result"]["error"]["error_type"] == "ab_auth_failed"
 
 
 def test_batch_retry_api_requires_ab_config(tmp_path: Path) -> None:
