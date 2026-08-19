@@ -50,7 +50,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "API 应复用 US-132/US-133 的模型和 provider seam；不要在本 story 做卡片 UI。"
     },
     {

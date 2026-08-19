@@ -9,6 +9,8 @@ import pytest
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
+from batch_engine.models import BATCH_ITEM_STATUS_FAILED, BATCH_ITEM_STATUS_PARSED
 from mikan_engine.controllers.mikan_client import MikanCandidate, create_mikan_client
 from mikan_engine.controllers.mikan_config import (
     DEFAULT_MIKAN_SEARCH_ENDPOINT,
@@ -2256,6 +2258,132 @@ def test_candidate_search_api_cache_isolates_different_hosts(
     assert first.get_json()["result"]["candidates"][0]["bangumi_id"] == "100"
     assert second.get_json()["result"]["candidates"][0]["bangumi_id"] == "200"
     assert len(transport.requests) == 2
+
+
+def test_batch_parse_api_returns_per_item_parsed_metadata() -> None:
+    raw_input = "\n萌王S4\n  \n路哥S4\n邻家天使S2\n"
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": raw_input},
+    )
+
+    payload = response.get_json()
+    result = payload["result"]
+    items = result["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert result["batch_id"].startswith("batch-")
+    assert result["raw_input"] == raw_input
+    assert [item["raw_title"] for item in items] == [
+        "萌王S4",
+        "路哥S4",
+        "邻家天使S2",
+    ]
+    assert len({item["item_id"] for item in items}) == 3
+    assert all(item["item_id"].startswith("item-") for item in items)
+    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert items[0]["canonical_title_candidates"] == [
+        "关于我转生变成史莱姆这档事 第四季",
+        "关于我转生变成史莱姆这档事 第4季",
+    ]
+    assert items[0]["season_hint"] == "S4"
+    assert "转生史莱姆 第四季" in items[0]["search_queries"]
+    assert items[0]["confidence"] == 0.86
+    assert items[0]["needs_user_review"] is True
+    assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
+    assert items[1]["needs_user_review"] is False
+
+
+def test_batch_parse_api_rejects_empty_input_with_chinese_validation_error() -> None:
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "\n \t\n"},
+    )
+
+    payload = response.get_json()
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "请至少输入一个番剧名称"
+    assert payload["error_data"]["failed_step"] == "batch_parse"
+    assert payload["error_data"]["details"] == {"field": "raw_input"}
+    assert "/home/" not in body
+
+
+def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def provider() -> FakeAnimeTitleParsingProvider:
+        return FakeAnimeTitleParsingProvider(fail_titles={"杖剑谭S2"})
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        provider,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n杖剑谭S2\n路哥S4"},
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert [item["status"] for item in items] == [
+        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_FAILED,
+        BATCH_ITEM_STATUS_PARSED,
+    ]
+    assert items[1]["raw_title"] == "杖剑谭S2"
+    assert items[1]["canonical_title_candidates"] == []
+    assert items[1]["search_queries"] == []
+    assert items[1]["needs_user_review"] is True
+    assert items[1]["error"]["error_type"] == "ai_title_parse_failed"
+    assert items[1]["error"]["failed_step"] == "ai_title_parse"
+    assert items[0]["canonical_title_candidates"]
+    assert items[2]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
+
+
+def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SensitiveProvider:
+        def parse(self, raw_title: str):
+            raise RuntimeError(
+                "token=secret-token endpoint=https://llm.example/api "
+                "cookie=session-id path=/home/ghostning/raw.html <html>raw</html>"
+            )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        lambda: SensitiveProvider(),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "敏感测试"},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_FAILED
+    assert item["error"]["error_message"] == "AI 名称解析失败，请检查该条目后重试"
+    assert item["error"]["details"] == {
+        "raw_title_length": 4,
+        "provider_source": "fake",
+        "recoverable": True,
+    }
+    assert "secret-token" not in body
+    assert "llm.example" not in body
+    assert "session-id" not in body
+    assert "/home/ghostning" not in body
+    assert "<html" not in body
 
 
 def test_candidate_search_api_cache_expires_after_ttl(

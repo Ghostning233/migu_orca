@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 
 
 BATCH_ITEM_STATUS_RAW = "RAW"
+BATCH_ITEM_STATUS_PARSED = "PARSED"
+BATCH_ITEM_STATUS_FAILED = "FAILED"
 ANIME_TITLE_PARSE_SOURCE_FAKE = "fake"
 
 
@@ -35,6 +37,8 @@ class AnimeTitleParseResult:
 __all__ = [
     "ANIME_TITLE_PARSE_SOURCE_FAKE",
     "AnimeTitleParseResult",
+    "BATCH_ITEM_STATUS_FAILED",
+    "BATCH_ITEM_STATUS_PARSED",
     "BATCH_ITEM_STATUS_RAW",
     "BatchDraft",
     "BatchDraftItem",
