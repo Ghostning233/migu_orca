@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.13 |
-| 文档状态 | Stage 18 已完成，后续待办见 `docs/backlog.md` |
+| 当前版本 | v0.14 |
+| 文档状态 | Stage 18 已完成；项目方向已调整为批量新番订阅前置工作台 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -49,18 +49,23 @@ MiGu 来源于 Mikan + Bangumi。ORCA 表示 Orchestrated RSS Coordination for A
 5. 用户手动填写订阅名称、目录名称、季度编号、筛选规则等信息。
 6. Auto Bangumi 根据 RSS 与规则将种子添加到下载任务。
 
-这个流程可用，但每季度会重复大量人工操作。MiGuOrca 的目标是在 MiKanProject 与 Auto Bangumi 之间提供一层自动化编排能力，降低搜索、判断字幕组、筛选种子和命名目录的成本。
+这个流程可用，但每季度会重复大量人工操作。用户往往先从 Bilibili UP 主季度新番推荐视频、社区清单或聊天中得到一批想看的番剧，而且输入通常是 `萌王S4`、`路哥S4`、`杖剑谭S2`、`邻家天使S2` 这类简称。用户原本需要先查官方译名或日文名，再逐个在 MiKan 搜索、选择合集、确认字幕组、调试筛选规则并配置 Auto Bangumi。
+
+MiGuOrca 的目标是在 MiKanProject 与 Auto Bangumi 之间提供一层批量订阅前置编排能力，降低批量名称解析、搜索、判断字幕组、筛选种子和命名目录的成本。
 
 ## 3. 项目目标
 
-MiGuOrca 是一个面向动画 RSS 的自动订阅编排系统。
+MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台。
 
 项目长期目标是：
 
-1. 用户输入想看的番剧名称。
-2. 系统搜索并分析番剧 RSS。
-3. 系统根据规则和偏好生成可确认 Request。
-4. 用户确认后，系统调用 Auto Bangumi 或生成降级配置。
+1. 用户批量输入想看的番剧简称、口语名或不完整标题。
+2. 系统使用 AI 名称解析与搜索词增强，将模糊输入转换为可搜索、可审核的官方标题候选。
+3. 系统逐项搜索并分析 MiKan RSS，生成可审核的订阅草案卡片。
+4. 用户逐项审核、删除、展开查看、修改字幕组/筛选规则/文件夹名和有效种子。
+5. 用户单个接受、批量接受或全接受后，系统显式提交 Auto Bangumi 或生成降级配置。
+
+MiGuOrca 不做 Auto Bangumi 或 qBittorrent 的替代品，不建立绕过 Auto Bangumi 的长期订阅执行系统，也不直接创建 qBittorrent 下载任务。下载执行和长期订阅执行由 Auto Bangumi / qBittorrent 负责；MiGuOrca 聚焦订阅前判断、批量编排和用户可审核配置生成。
 
 当前已完成 Stage 17：离线 Request 生成、Request 确认/取消/受限修改、已保存 Request 安全删除、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、qBittorrent 显式连接测试入口、Web UI Settings 信息架构拆分、Web UI Request 可操作性修复、Web UI ACCEPTED 管理与筛选语义优化、真实 MiKan 合集详情页解析与直连 URL/ID 入口，以及真实 MiKan 搜索候选合集展示与用户手动选择。CLI 可通过 `--source mikan --mikan-config <path> --mikan-bangumi <url-or-id>` 直接解析已选中 MiKan `Home/Bangumi/<id>` 合集并绕过搜索；Web API `POST /api/v1/requests` 支持 request-scoped `mikan_bangumi` 字段。详情页 parser 会输出安全结构化元数据，优先返回字幕组级 RSS，番剧级 RSS 仅作为 `全部字幕组` fallback。Stage 17 新增 request-scoped 候选搜索 Web API `POST /api/v1/mikan/candidates`，并在 `/index` Request 生成流程中接入候选卡片展示、`选择此合集` 手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签；候选选择与直连 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路，不自动选择、不自动生成，即使只有一个候选也必须用户显式点击。
 
@@ -206,6 +211,10 @@ M00 CLI 与流程编排
 | 第十六阶段 | 真实 MiKan 合集详情页解析与直连 URL/ID 入口（已完成） | M03、M00、M13 |
 | 第十七阶段 | 真实 MiKan 搜索候选合集展示与用户选择（已完成） | M03、M13、M00 |
 | 第十八阶段 | 真实 MiKan 主流程收敛、可编辑预览和 Seeds 展示优化（已完成） | M13、M03、M00、M01、M06 |
+| 第十九阶段 | 批量番剧输入、AI 名称解析和订阅草案卡片工作台 | M13、M00、M01、M03、M06 |
+| 第二十阶段 | 批量接受与 Auto Bangumi 提交前队列管理 | M13、M10、M11、M01 |
+| 第二十一阶段 | 用户偏好、字幕组偏好和搜索词增强闭环 | M08、M03、M05、M13 |
+| 第二十二阶段 | 部署/配置向导可行性验证（仅辅助配置，不替代 AB/qB） | M14、M13、M10、qBittorrent 集成边界 |
 
 ## 10. 主 PRD 已确认事项
 
@@ -219,6 +228,9 @@ M00 CLI 与流程编排
 | D-MAIN-04 | 第一阶段实现定位 | 全部 | 最小离线技术探针，不提前建设完整长期架构 |
 | D-MAIN-05 | Stage 1 代码结构 | 全部 | 保留 apps/engine/controllers/models，总量收敛为 4 个 engine |
 | D-MAIN-06 | Stage 1 Request 状态 | M00、M01 | Request 是 PENDING_CONFIRM 快照，不是完整状态机；失败使用独立 ErrorResult |
+| D-MAIN-07 | Stage 19 后产品定位 | 全部 | MiGuOrca 是 Auto Bangumi 前置订阅编排工作台，不是 Auto Bangumi 或 qBittorrent 替代品 |
+| D-MAIN-08 | 批量输入方向 | M00、M13、M03 | 下一阶段以批量番剧简称解析、订阅草案卡片和用户审核为主，不再把单番剧自动提交作为核心卖点 |
+| D-MAIN-09 | AI 能力边界 | M03、M08、M13 | AI 只生成候选标题和搜索词，不自动决定最终合集；低置信度结果必须可审核 |
 
 ## 11. 文档职责边界
 
@@ -241,7 +253,7 @@ M00 CLI 与流程编排
 
 ## 12. 合规说明
 
-本系统定位为 RSS 订阅自动化与下载流程编排工具。
+本系统定位为 RSS 订阅前置编排和 Auto Bangumi 提交辅助工具。
 
 用户需要自行确保订阅源、下载内容、收藏行为符合当地法律法规及内容授权要求。
 
@@ -249,8 +261,9 @@ M00 CLI 与流程编排
 
 ## 13. 下一步工作
 
-1. Stage 18 已完成真实 MiKan Web 主流程收敛：普通用户只输入番剧标题，系统使用默认 MiKan 配置搜索候选合集，选择后先生成可编辑订阅草案，再保存为正式订阅方案。下一阶段候选事项见 `docs/backlog.md`，当前优先项为 BL-010 / AI 番剧名解析与搜索词增强（低优先级，可选增强，不自动选择候选）。
-2. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
-3. 后续若要让 qBittorrent 启动下载、创建任务或绕过 Auto Bangumi 建立订阅，必须先新增独立 Stage 和验收标准；Stage 12 仅完成连接测试。
-4. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。Stage 18 的 MiKan 候选搜索、直连 fallback 和可编辑预览不得把 MiKan config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
-5. 每次阶段推进继续使用 `uv run pytest` 和 `uv run python -m compileall -q src` 验证；具备浏览器环境时额外执行 `uv run pytest tests/browser`。
+1. Stage 19 建议聚焦批量番剧输入与订阅草案卡片工作台：用户输入一批简称，系统解析为候选官方标题和搜索词，生成可审核卡片，支持删除、展开、单卡修改和单卡接受。
+2. AI 番剧名解析与搜索词增强从低优先级增强调整为 Stage 19 的关键能力，但必须保留手动搜索、候选选择和 MiKan URL/ID 直连兜底。
+3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
+4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路。
+5. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析和可编辑预览不得把 MiKan config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
+6. 每次阶段推进继续使用 `uv run pytest` 和 `uv run python -m compileall -q src` 验证；具备浏览器环境时额外执行 `uv run pytest tests/browser`。

@@ -1,21 +1,25 @@
 # MiGuOrca
 
-MiGuOrca 是一个面向动画订阅场景的 RSS 编排工具，目标是在 MiKanProject 与 Auto Bangumi 之间提供一层自动化协作能力。
+MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台，目标是在 MiKanProject 与 Auto Bangumi 之间提供 MiKan 订阅源发现、筛选预览、批量草案审核与提交辅助能力。
 
 当前已完成 Stage 18。Stage 18 已把真实 MiKan 搜索收敛为普通 Web 主流程：用户只输入番剧标题，系统使用默认 MiKan 配置请求 `https://mikanani.me/Home/Search?searchstr=<番剧名>` 获取候选合集，用户手动选择合集后先生成可编辑订阅草案预览，再确认保存。普通 UI 已移除 `search_endpoint`、`timeout_seconds`、`query` 等技术字段，主生成区提供「搜索无结果时使用直连合集」勾选框和 MiKan 合集 URL/ID 输入，预览阶段可修改字幕组、筛选规则和文件夹名并重算种子展示，用户态文案中文化（订阅方案/订阅草案/待确认/已确认/已取消），Seeds 区按 有效种子 -> 完整种子（按字幕组分组）-> 排除种子 顺序展示。fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。Stage 17 已在 Web UI `/index` 接入真实 MiKan 候选搜索、手动选择、直连 URL/ID fallback、安全候选缓存和 display-only 推荐标签；候选选择和 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路。
 
 ## 项目目标
 
-MVP 聚焦单番剧的订阅闭环：
+MVP 已完成单番剧订阅草案闭环，后续方向调整为“批量新番订阅前置工作台”：
 
-1. 接收一个番剧名称。
-2. 搜索并分析 MiKanProject 数据。
-3. 生成可确认的 Request。
-4. 用户确认后提交到 Auto Bangumi，或在失败时导出 JSON 形式的降级配置。
+1. 接收用户从季度新番推荐视频、清单或聊天中整理出的一批番剧简称。
+2. 使用 AI 名称解析与搜索词增强，将 `萌王S4`、`路哥S4`、`杖剑谭S2`、`邻家天使S2` 等模糊输入转换为可搜索、可审核的候选标题。
+3. 为每个条目搜索并分析 MiKanProject 数据，生成番剧订阅草案卡片。
+4. 允许用户逐个审核、删除、展开查看、修改字幕组/筛选规则/文件夹名和有效种子。
+5. 支持单个接受、批量接受和全接受；接受后进入 Auto Bangumi 提交流程。
+
+MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行、长期订阅执行和下载任务创建继续交给 Auto Bangumi / qBittorrent；MiGuOrca 的价值来自订阅前判断、批量编排和用户可审核的配置生成。
 
 ## 目前状态
 
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
+- 项目方向已调整为批量新番订阅前置工作台。下一阶段应围绕批量输入、AI 番剧名解析、订阅草案卡片、单卡修改、单个/批量接受和 Auto Bangumi 提交前审核展开，而不是扩展为 qBittorrent 下载器或 Auto Bangumi 替代执行系统。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
