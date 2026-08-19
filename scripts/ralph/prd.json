@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "只做 seam 和 fake provider；不要接真实 LLM API。"
     },
     {

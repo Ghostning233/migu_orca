@@ -2,6 +2,7 @@
 Started: Fri Aug 14 20:20:45 CST 2026
 ---
 ## Codebase Patterns
+- Stage 19 AI title parsing lives in `src/batch_engine/controllers/anime_title_parser.py`: inject an `AnimeTitleParsingProvider`, use `parse_anime_title(raw_title, provider)` for normalized `AnimeTitleParseResult`, and keep provider failures as sanitized recoverable `Stage1Error(failed_step="ai_title_parse")`; fake mappings are deterministic and never call a real LLM.
 - Stage 19 batch draft primitives live in `src/batch_engine`: `create_batch_draft(raw_input)` preserves each non-empty input line as `BatchDraftItem.raw_title`, assigns independent `item-*` IDs, defaults item status to `RAW`, and `update_batch_item_status` returns a new `BatchDraft` with only the matched item changed.
 - Stage 18 is complete and archived; active Ralph work is now `agent/stage19-batch-draft-workbench`. Stage 19 product direction is a batch seasonal-anime draft workbench: parse multiple shorthand titles, generate reviewable per-item cards, support single-card edit/accept, and keep Auto Bangumi/qBittorrent as execution systems rather than replacing them.
 - Stage 19 AI title parsing is a provider seam plus fake provider first: AI may generate candidate official titles/search queries/confidence/review flags, but must never silently select the final MiKan collection or accept a card. Manual candidate review and direct MiKan URL/ID fallback remain required safety paths.
@@ -532,4 +533,18 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Pattern discovered: injectable ID factories make batch parsing tests deterministic while production still uses UUID-backed `batch-*` and `item-*` IDs.
   - Gotcha encountered: item lookup must track "found" separately from equality of the returned list, because setting an item to its existing status should still be treated as a valid update.
   - Useful context: US-133 should build its AI title parsing seam on top of `BatchDraftItem.raw_title` and leave final MiKan candidate selection manual/reviewable.
+---
+## 2026-08-19 15:31:14 CST - US-133
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added the Stage 19 AI title parsing seam: `AnimeTitleParsingProvider` protocol plus `parse_anime_title(raw_title, provider)` normalization, returning `AnimeTitleParseResult` with raw title, canonical candidates, season hint, search queries, confidence, review flag, and source.
+- Added deterministic `FakeAnimeTitleParsingProvider` mappings for `萌王S4`, `路哥S4`, `杖剑谭S2`, and `邻家天使S2`; low-confidence and multi-candidate outputs are explicitly marked `needs_user_review=true`, and unknown titles fall back to a reviewable safe query.
+- Added recoverable provider failure handling through sanitized `Stage1Error(failed_step="ai_title_parse")` that excludes tokens, endpoints, cookies, local paths, raw HTML/RSS, and original exception text.
+- Files changed: `src/batch_engine/models/__init__.py`, `src/batch_engine/controllers/anime_title_parser.py`, `src/batch_engine/controllers/anime_title_parser_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Quality checks: `uv run python -m compileall -q src tests` passed; `uv run pytest src/batch_engine/controllers -q` passed with 15 tests; `uv run pytest -q` passed with 449 tests and 202 skipped browser tests because the browser binary is not available in this environment.
+- Browser verification note: not applicable for US-133 because it is provider/model-only and has no Web UI behavior.
+- **Learnings for future iterations:**
+  - Pattern discovered: keep batch AI parsing behind `parse_anime_title(raw_title, provider)` so Web/API orchestration can inject fake or future real providers without changing item parsing or MiKan candidate selection.
+  - Pattern discovered: `needs_user_review` is derived defensively from low confidence (`< 0.7`) or multiple canonical candidates, even if a provider forgets to set the flag.
+  - Gotcha encountered: provider exceptions should not be returned verbatim; wrap them in a sanitized `Stage1Error` with only provider source/recoverable metadata so future per-item API failures can stay safe.
+  - Useful context: US-134 can call `create_batch_draft(raw_input)` first, then `parse_anime_title(item.raw_title, provider)` per item and mark only failed items as failed without blocking the rest of the batch.
 ---
