@@ -1,0 +1,736 @@
+from __future__ import annotations
+
+from copy import deepcopy
+import json
+
+import pytest
+
+from ab_engine.controllers.ab_client import FakeAutoBangumiClient
+from ab_engine.controllers.ab_config import AutoBangumiConfig
+from batch_engine.controllers.batch_queue_controller import (
+    complete_queue_item_submit,
+    create_submission_queue,
+    enqueue_item,
+    start_queue_item_submit,
+)
+from batch_engine.controllers.batch_submit_controller import (
+    SUBMIT_OUTCOME_FAILED,
+    SUBMIT_OUTCOME_RETRYABLE,
+    SUBMIT_OUTCOME_SKIPPED,
+    SUBMIT_OUTCOME_SUCCEEDED,
+    BatchSubmitItemResult,
+    compose_ab_submit_one,
+    serialize_batch_submit_result,
+    submit_batch_queue_items,
+)
+from batch_engine.models import (
+    BATCH_QUEUE_STATUS_FAILED,
+    BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+    BATCH_QUEUE_STATUS_RETRYABLE,
+    BATCH_QUEUE_STATUS_SUBMITTING,
+    BATCH_QUEUE_STATUS_SUCCEEDED,
+    BatchQueueItem,
+    BatchSubmissionQueue,
+)
+from shared.errors import Stage1Error
+
+
+def _accepted_request(
+    *,
+    request_id: str = "req-1",
+    title: str = "葬送的芙莉莲",
+    status: str = "ACCEPTED",
+) -> dict:
+    return {
+        "request_id": request_id,
+        "status": status,
+        "input": {"raw_title": title},
+        "source_info": {"matched_bangumi": {"title": title}},
+        "confirmable_config": {
+            "selected_rss_url": "https://mikan.example.com/rss/sub",
+            "expected_folder_name": title,
+            "filter_rule": {},
+        },
+    }
+
+
+class FakeRequestStore:
+    """In-memory request snapshot store for the batch submit service."""
+
+    def __init__(self, requests: list[dict]) -> None:
+        self._requests = {
+            request["request_id"]: deepcopy(request) for request in requests
+        }
+
+    def load(self, request_id: str) -> dict | None:
+        request = self._requests.get(request_id)
+        return deepcopy(request) if request is not None else None
+
+
+def _now_factory(values: list[str]):
+    stamps = iter(values)
+    return lambda: next(stamps)
+
+
+def _queue(*, request_ids: list[str], batch_id: str = "batch-1") -> BatchSubmissionQueue:
+    queue = create_submission_queue(
+        batch_id,
+        queue_id_factory=lambda: "queue-1",
+        now_factory=lambda: "2026-08-19T00:00:00+00:00",
+    )
+    for index, request_id in enumerate(request_ids, start=1):
+        queue = enqueue_item(
+            queue,
+            item_id=f"item-{index}",
+            request_id=request_id,
+            title=f"标题-{request_id}",
+            now_factory=lambda: "2026-08-19T00:00:00+00:00",
+        )
+    return queue
+
+
+def _succeeded_queue_item(request_id: str = "req-1") -> BatchQueueItem:
+    queue = _queue(request_ids=[request_id])
+    queue = start_queue_item_submit(
+        queue,
+        request_id,
+        now_factory=lambda: "2026-08-19T00:01:00+00:00",
+    )
+    queue = complete_queue_item_submit(
+        queue,
+        request_id,
+        BATCH_QUEUE_STATUS_SUCCEEDED,
+        ab_result_summary={"success": True, "ab_subscription_id": "ab-1"},
+        now_factory=lambda: "2026-08-19T00:02:00+00:00",
+    )
+    return queue.items[0]
+
+
+def _success_submit(request: dict, ab_config) -> dict:
+    return {
+        "success": True,
+        "ab_subscription_id": f"ab-{request['request_id']}",
+        "ab_response": {"id": f"ab-{request['request_id']}"},
+        "fallback_config": None,
+        "error": None,
+    }
+
+
+def _ab_config(**overrides) -> AutoBangumiConfig:
+    values = {
+        "endpoint": "https://ab.example.com/api/subscription",
+        "token": "secret-token",
+        "fallback_enabled": False,
+    }
+    values.update(overrides)
+    return AutoBangumiConfig(**values)
+
+
+class TestAllSuccesses:
+    def test_multiple_read_items_all_succeed_in_order(self) -> None:
+        store = FakeRequestStore(
+            [
+                _accepted_request(request_id="req-1"),
+                _accepted_request(request_id="req-2"),
+            ]
+        )
+        queue = _queue(request_ids=["req-1", "req-2"])
+        calls: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            calls.append(request["request_id"])
+            return _success_submit(request, ab_config)
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+            now_factory=_now_factory(
+                [
+                    "2026-08-19T00:01:00+00:00",
+                    "2026-08-19T00:02:00+00:00",
+                    "2026-08-19T00:03:00+00:00",
+                    "2026-08-19T00:04:00+00:00",
+                ]
+            ),
+        )
+
+        assert calls == ["req-1", "req-2"]
+        assert [item.status for item in result.items] == [
+            SUBMIT_OUTCOME_SUCCEEDED,
+            SUBMIT_OUTCOME_SUCCEEDED,
+        ]
+        queue_items = result.queue.items
+        assert all(item.status == BATCH_QUEUE_STATUS_SUCCEEDED for item in queue_items)
+        assert all(item.attempts == 1 for item in queue_items)
+        assert all(
+            "ab_subscription_id=ab-" in (item.ab_result_summary or "")
+            for item in queue_items
+        )
+        assert all(item.last_error is None for item in queue_items)
+
+    def test_success_summary_never_contains_ab_config(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        serialized = json.dumps(serialize_batch_submit_result(result), ensure_ascii=False)
+        for keyword in (
+            "endpoint",
+            "token",
+            "secret-token",
+            "cookie",
+            "authorization",
+            "password",
+            "passwd",
+            "bearer",
+            "magnet",
+            "raw_html",
+            "raw_rss",
+            "response_body",
+        ):
+            assert keyword not in serialized
+
+
+class TestSingleFailureContinues:
+    def test_one_submit_failure_does_not_block_the_rest(self) -> None:
+        store = FakeRequestStore(
+            [
+                _accepted_request(request_id="req-1"),
+                _accepted_request(request_id="req-2"),
+            ]
+        )
+        queue = _queue(request_ids=["req-1", "req-2"])
+
+        def submit_one(request, ab_config) -> dict:
+            if request["request_id"] == "req-1":
+                return {
+                    "success": False,
+                    "ab_subscription_id": None,
+                    "ab_response": None,
+                    "fallback_config": None,
+                    "error": {
+                        "error_type": "ab_submit_failed",
+                        "error_message": "Auto Bangumi HTTP 提交失败",
+                        "failed_step": "create_ab_subscription",
+                        "details": {"status_code": 503},
+                    },
+                }
+            return _success_submit(request, ab_config)
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_FAILED
+        assert result.items[0].reason == "Auto Bangumi HTTP 提交失败"
+        assert result.items[0].error_type == "ab_submit_failed"
+        assert result.items[1].status == SUBMIT_OUTCOME_SUCCEEDED
+
+        queue_items = result.queue.items
+        assert queue_items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert "error_type=ab_submit_failed" in (queue_items[0].last_error or "")
+        assert queue_items[0].ab_result_summary is None
+        assert queue_items[1].status == BATCH_QUEUE_STATUS_SUCCEEDED
+
+    def test_stage1_error_from_submit_one_is_sanitized(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        def raising_submit_one(request, ab_config) -> dict:
+            raise Stage1Error(
+                "ab_submit_failed",
+                "离线模拟失败",
+                "create_ab_subscription",
+                {"status_code": 503},
+            )
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=raising_submit_one,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_FAILED
+        assert result.items[0].reason == "离线模拟失败"
+        assert result.items[0].error_type == "ab_submit_failed"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+
+    def test_unexpected_exception_is_sanitized(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        def exploding_submit_one(request, ab_config) -> dict:
+            raise RuntimeError(
+                "token=secret endpoint=https://ab.example.com path=/home/ghostning"
+            )
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=exploding_submit_one,
+        )
+
+        item = result.items[0]
+        assert item.status == SUBMIT_OUTCOME_FAILED
+        assert item.error_type == "unexpected_error"
+        assert "secret" not in (item.reason or "")
+        assert "ab.example.com" not in (item.reason or "")
+        last_error = result.queue.items[0].last_error or ""
+        assert "secret" not in last_error
+        assert "ab.example.com" not in last_error
+        assert "/home/ghostning" not in last_error
+
+
+class TestRetryableClassification:
+    def test_timeout_error_is_retryable(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        def timeout_submit(request, ab_config) -> dict:
+            return {
+                "success": False,
+                "error": {
+                    "error_type": "ab_timeout",
+                    "error_message": "Auto Bangumi HTTP 请求超时",
+                    "failed_step": "create_ab_subscription",
+                    "details": {"category": "timeout"},
+                },
+            }
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=timeout_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_RETRYABLE
+        assert result.items[0].error_type == "ab_timeout"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_RETRYABLE
+        assert result.queue.items[0].attempts == 1
+
+    def test_connection_error_is_retryable(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        def connection_submit(request, ab_config) -> dict:
+            return {
+                "success": False,
+                "error": {
+                    "error_type": "ab_connection_failed",
+                    "error_message": "Auto Bangumi HTTP 连接失败",
+                    "failed_step": "create_ab_subscription",
+                    "details": {"category": "connection"},
+                },
+            }
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=connection_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_RETRYABLE
+
+    def test_auth_failure_is_terminal_failed(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        def auth_submit(request, ab_config) -> dict:
+            return {
+                "success": False,
+                "error": {
+                    "error_type": "ab_auth_failed",
+                    "error_message": "Auto Bangumi 认证失败",
+                    "failed_step": "create_ab_subscription",
+                    "details": {"status_code": 401},
+                },
+            }
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=auth_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_FAILED
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+
+
+class TestNonAcceptedPreSubmit:
+    def test_missing_request_snapshot_marks_failed_and_continues(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-2")])
+        queue = _queue(request_ids=["req-1", "req-2"])
+        calls: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            calls.append(request["request_id"])
+            return _success_submit(request, ab_config)
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        first = result.items[0]
+        assert first.status == SUBMIT_OUTCOME_FAILED
+        assert first.reason == "订阅方案不存在或已删除，无法提交"
+        assert first.error_type == "request_not_found"
+        assert first.attempts == 0
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        # The rest of the batch still processed.
+        assert calls == ["req-2"]
+        assert result.items[1].status == SUBMIT_OUTCOME_SUCCEEDED
+
+    def test_cancelled_request_marks_failed(self) -> None:
+        store = FakeRequestStore(
+            [_accepted_request(request_id="req-1", status="CANCELLED")]
+        )
+        queue = _queue(request_ids=["req-1"])
+        called = False
+
+        def submit_one(request, ab_config) -> dict:
+            nonlocal called
+            called = True
+            return _success_submit(request, ab_config)
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        item = result.items[0]
+        assert item.status == SUBMIT_OUTCOME_FAILED
+        assert item.reason == "订阅方案已取消，无法提交"
+        assert item.error_type == "request_cancelled"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_FAILED
+        assert called is False
+
+    def test_not_yet_accepted_request_marks_retryable(self) -> None:
+        store = FakeRequestStore(
+            [_accepted_request(request_id="req-1", status="PENDING_CONFIRM")]
+        )
+        queue = _queue(request_ids=["req-1"])
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        item = result.items[0]
+        assert item.status == SUBMIT_OUTCOME_RETRYABLE
+        assert item.reason == "订阅方案尚未确认，无法提交"
+        assert item.error_type == "invalid_request_status"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_RETRYABLE
+        assert result.queue.items[0].last_error == "订阅方案尚未确认，无法提交"
+
+    def test_unknown_status_marks_retryable(self) -> None:
+        store = FakeRequestStore(
+            [_accepted_request(request_id="req-1", status="SOMETHING")]
+        )
+        queue = _queue(request_ids=["req-1"])
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        assert result.items[0].status == SUBMIT_OUTCOME_RETRYABLE
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_RETRYABLE
+
+
+class TestAlreadySucceededSkipped:
+    def test_succeeded_items_are_never_resubmitted(self) -> None:
+        store = FakeRequestStore(
+            [
+                _accepted_request(request_id="req-1"),
+                _accepted_request(request_id="req-2"),
+            ]
+        )
+        succeeded = _succeeded_queue_item("req-1")
+        queue = _queue(request_ids=["req-1", "req-2"])
+        queue = BatchSubmissionQueue(
+            queue_id=queue.queue_id,
+            batch_id=queue.batch_id,
+            items=[succeeded, queue.items[1]],
+            created_at=queue.created_at,
+            updated_at=queue.updated_at,
+        )
+        calls: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            calls.append(request["request_id"])
+            return _success_submit(request, ab_config)
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        assert calls == ["req-2"]
+        assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
+        assert result.items[0].reason == "已提交成功，跳过重复提交"
+        assert result.items[0].attempts == 1
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUCCEEDED
+        assert result.queue.items[0].attempts == 1
+        assert result.items[1].status == SUBMIT_OUTCOME_SUCCEEDED
+
+    def test_non_ready_items_are_skipped_without_submit_call(self) -> None:
+        store = FakeRequestStore(
+            [
+                _accepted_request(request_id="req-1"),
+                _accepted_request(request_id="req-2"),
+                _accepted_request(request_id="req-3"),
+            ]
+        )
+        queue = _queue(request_ids=["req-1", "req-2", "req-3"])
+        in_flight = start_queue_item_submit(
+            queue,
+            "req-1",
+            now_factory=lambda: "2026-08-19T00:01:00+00:00",
+        )
+        queue = BatchSubmissionQueue(
+            queue_id=queue.queue_id,
+            batch_id=queue.batch_id,
+            items=[
+                in_flight.items[0],
+                queue.items[1],
+                queue.items[2],
+            ],
+            created_at=queue.created_at,
+            updated_at=in_flight.updated_at,
+        )
+        calls: list[str] = []
+
+        def submit_one(request, ab_config) -> dict:
+            calls.append(request["request_id"])
+            return _success_submit(request, ab_config)
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=submit_one,
+        )
+
+        assert calls == ["req-2", "req-3"]
+        assert result.items[0].status == SUBMIT_OUTCOME_SKIPPED
+        assert result.items[0].reason == "提交中，跳过本次提交"
+        assert result.queue.items[0].status == BATCH_QUEUE_STATUS_SUBMITTING
+        assert result.queue.items[0].attempts == 1
+
+
+class TestEmptyAndValidation:
+    def test_empty_queue_returns_empty_result(self) -> None:
+        store = FakeRequestStore([])
+        queue = _queue(request_ids=[])
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=_success_submit,
+        )
+
+        assert result.items == []
+        assert result.queue.items == []
+        serialized = serialize_batch_submit_result(result)
+        assert serialized["summary"] == {
+            SUBMIT_OUTCOME_SUCCEEDED: 0,
+            SUBMIT_OUTCOME_FAILED: 0,
+            SUBMIT_OUTCOME_RETRYABLE: 0,
+            SUBMIT_OUTCOME_SKIPPED: 0,
+        }
+
+    def test_rejects_empty_batch_id(self) -> None:
+        store = FakeRequestStore([])
+        queue = _queue(request_ids=[])
+
+        try:
+            submit_batch_queue_items(
+                batch_id="  ",
+                queue=queue,
+                ab_config=_ab_config(),
+                load_request=store.load,
+                submit_one=_success_submit,
+            )
+        except ValueError as exc:
+            assert "batch_id" in str(exc)
+        else:  # pragma: no cover - safety boundary
+            raise AssertionError("empty batch_id must be rejected")
+
+
+class TestSerialization:
+    def test_serialization_contains_only_safe_fields(self) -> None:
+        store = FakeRequestStore([_accepted_request(request_id="req-1")])
+        queue = _queue(request_ids=["req-1"])
+
+        def failing_submit(request, ab_config) -> dict:
+            return {
+                "success": False,
+                "error": {
+                    "error_type": "ab_submit_failed",
+                    "error_message": "Auto Bangumi HTTP 提交失败",
+                    "failed_step": "create_ab_subscription",
+                    "details": {"status_code": 503},
+                },
+            }
+
+        result = submit_batch_queue_items(
+            batch_id="batch-1",
+            queue=queue,
+            ab_config=_ab_config(),
+            load_request=store.load,
+            submit_one=failing_submit,
+        )
+
+        serialized = serialize_batch_submit_result(result)
+        body = json.dumps(serialized, ensure_ascii=False)
+
+        assert set(serialized) == {"batch_id", "queue", "items", "summary"}
+        assert serialized["summary"] == {
+            SUBMIT_OUTCOME_SUCCEEDED: 0,
+            SUBMIT_OUTCOME_FAILED: 1,
+            SUBMIT_OUTCOME_RETRYABLE: 0,
+            SUBMIT_OUTCOME_SKIPPED: 0,
+        }
+        item = serialized["items"][0]
+        assert set(item) == {
+            "item_id",
+            "request_id",
+            "title",
+            "status",
+            "reason",
+            "error_type",
+            "attempts",
+        }
+        assert item["status"] == SUBMIT_OUTCOME_FAILED
+        assert item["reason"] == "Auto Bangumi HTTP 提交失败"
+        for keyword in (
+            "endpoint",
+            "token",
+            "cookie",
+            "authorization",
+            "password",
+            "passwd",
+            "bearer",
+            "magnet",
+            "raw_html",
+            "raw_rss",
+            "response_body",
+            "ab.example.com",
+        ):
+            assert keyword not in body
+        assert "ab.example.com" not in (result.queue.items[0].last_error or "")
+
+
+class TestComposeAbSubmitOne:
+    def test_composed_submit_one_reuses_existing_ab_contract(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from batch_engine.controllers import batch_submit_controller
+
+        client = FakeAutoBangumiClient()
+        monkeypatch.setattr(
+            batch_submit_controller.ab_http_client,
+            "create_auto_bangumi_http_client",
+            lambda config: client,
+        )
+
+        submit_one = compose_ab_submit_one()
+        ab_config = _ab_config(fallback_enabled=False)
+        ab_result = submit_one(
+            _accepted_request(request_id="req-1", title="葬送的芙莉莲"),
+            ab_config,
+        )
+
+        # The existing sanitized result contract is returned unchanged.
+        assert ab_result == {
+            "success": True,
+            "ab_subscription_id": "fake-ab-subscription",
+            "ab_response": {"id": "fake-ab-subscription", "status": "created"},
+            "fallback_config": None,
+            "error": None,
+        }
+        # The payload came from build_ab_subscription_payload on the ACCEPTED
+        # request snapshot.
+        assert client.calls == [
+            {
+                "title": "葬送的芙莉莲",
+                "rss_url": "https://mikan.example.com/rss/sub",
+                "save_path": "葬送的芙莉莲",
+                "filter_rule": {},
+            }
+        ]
+        assert "secret-token" not in json.dumps(ab_result)
+        assert "ab.example.com" not in json.dumps(ab_result)
+
+    def test_composed_submit_one_propagates_fallback_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from batch_engine.controllers import batch_submit_controller
+
+        client = FakeAutoBangumiClient(
+            error=Stage1Error(
+                "ab_submit_failed",
+                "离线模拟失败",
+                "create_ab_subscription",
+                {"status_code": 503},
+            )
+        )
+        monkeypatch.setattr(
+            batch_submit_controller.ab_http_client,
+            "create_auto_bangumi_http_client",
+            lambda config: client,
+        )
+
+        submit_one = compose_ab_submit_one()
+        ab_result = submit_one(
+            _accepted_request(request_id="req-1", title="葬送的芙莉莲"),
+            _ab_config(fallback_enabled=True),
+        )
+
+        assert ab_result["success"] is False
+        assert ab_result["error"]["error_type"] == "ab_submit_failed"
+        assert ab_result["fallback_config"] is not None
+        assert ab_result["fallback_config"]["title"] == "葬送的芙莉莲"

@@ -52,7 +52,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "本阶段采用前台顺序编排，不引入线程、后台 worker 或复杂调度器。"
     },
     {
