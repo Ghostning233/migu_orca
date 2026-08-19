@@ -538,13 +538,13 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
         "/home/ghostning/stage19-secret.xml",
     )
     first_preview = {
-        **generate_request(EntryRequest(raw_title="关于我转生变成史莱姆这档事"))[
-            "request"
-        ],
+        # 标题必须命中 static fixture catalog（config/system/static_mikan_sources.json
+        # 仅含「咒术回战 第三季」「葬送的芙莉莲」），否则 generate_request 返回 None。
+        **generate_request(EntryRequest(raw_title="咒术回战"))["request"],
         "request_id": "req-stage19-sec",
     }
     second_preview = {
-        **generate_request(EntryRequest(raw_title="实力至上主义教室"))["request"],
+        **generate_request(EntryRequest(raw_title="葬送的芙莉莲"))["request"],
         "request_id": "req-stage19-other",
     }
 
@@ -694,7 +694,9 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
 
     page.route("**/api/v1/batches/parse", _fulfill_batch)
     page.route("**/api/v1/requests/preview-save", _save_preview)
-    page.route("**/api/v1/requests/req-stage19-sec/accept", _accept)
+    # acceptSavedRequest 用 apiPath() 拼 URL，设置 storage 偏好后 URL 会带
+    # ?storage_dir= query；Playwright glob 不匹配 query，必须加 * 通配。
+    page.route("**/api/v1/requests/req-stage19-sec/accept*", _accept)
 
     set_storage_preferences(page, storage_dir, save_request=False)
     page.goto(f"{live_server_url}/index")
@@ -717,7 +719,10 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
     expect(first_card.locator(".batch-card-delete")).to_be_hidden()
     expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
     assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-stage19-sec"
-    assert accept_calls and accept_calls[0]["storage_dir"] is None
+    # 设置了 storage 偏好时，accept 请求体按 RequestActionPayload 契约携带
+    # storage_dir（URL query 经 apiPath 同样携带）；storage_dir 是功能参数，
+    # 不属于 sensitive_values。无偏好分支（null）由 accept 测试覆盖。
+    assert accept_calls and accept_calls[0]["storage_dir"] == str(storage_dir)
 
     browser_state = page.evaluate(
         """() => ({

@@ -381,8 +381,11 @@ class TestBatchWorkbenchEntry:
 
         second_card.locator(".batch-card-expand").click()
         second_text = second_card.locator(".batch-card-review").inner_text()
+        # 第二个卡片必须保持独立：字幕组不变成喵萌，有效种子区不引用喵萌组。
+        # 注意：不能断言 "V2" not in second_text——咒术回战 fixture 的默认排除规则
+        # 与种子标题本身含 "V2"（如 [Loli] 咒术回战 第三季 - 01 V2 [1080p]）。
         assert "喵萌" not in second_text
-        assert "V2" not in second_text
+        assert "有效种子（当前选中字幕组：喵萌）" not in second_text
         expect(second_card.locator(".batch-card-seeds")).to_contain_text("2")
 
     def test_batch_card_modify_failure_preserves_card_state(
