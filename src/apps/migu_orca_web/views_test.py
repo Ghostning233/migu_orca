@@ -627,6 +627,45 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "解析失败" in script
 
 
+def test_static_app_script_wires_batch_preference_display() -> None:
+    response = _client().get("/migu-orca-static/app.js")
+
+    script = response.get_data(as_text=True)
+    assert response.status_code == 200
+    # US-156 preference/review metadata helpers wired into the batch cards.
+    assert "batchCardPreferenceHits" in script
+    assert "batchCardPreferenceWarnings" in script
+    assert "batchCardReviewHints" in script
+    assert "batchCardEnhancedQueries" in script
+    assert "batchCardAppliedPreferences" in script
+    assert "batchCardPreferenceFallback" in script
+    assert "batchCardPreferenceSummary" in script
+    assert "batchCardNeedsReview" in script
+    assert "buildBatchCardPreferenceBlock" in script
+    assert "buildBatchCardSearchSourceBlock" in script
+    assert "batch-card-preference" in script
+    assert "batch-card-preference-block" in script
+    assert "batch-card-search-source-block" in script
+    assert "batch-card-preference-list" in script
+    assert "batch-card-review-status" in script
+    assert "偏好与审核" in script
+    assert "偏好命中摘要" in script
+    assert "偏好警告" in script
+    assert "审核提示" in script
+    assert "当前默认配置" in script
+    assert "偏好字幕组" in script
+    assert "排除字幕组" in script
+    assert "搜索词来源" in script
+    assert "修正增强搜索词" in script
+    assert "原始搜索词" in script
+    assert "偏好不可用，已回退默认流程" in script
+    assert "未配置偏好，使用默认流程" in script
+    assert "偏好命中：" in script
+    assert "需人工核对" in script
+    assert "无需人工核对。" in script
+    assert "无搜索词，已回退默认流程。" in script
+
+
 def test_static_app_script_wires_batch_queue_result_panel() -> None:
     response = _client().get("/migu-orca-static/app.js")
 

@@ -1167,6 +1167,279 @@
     };
   }
 
+  // Stage 21 (US-156): the batch card exposes the parse-time preference/review
+  // metadata (preference hits, preference warnings, review hints, search-query
+  // source) plus the preference default config. These helpers only read the
+  // public non-sensitive fields the batch parse API already returns, so no
+  // endpoint/token/cookie/raw response ever reaches the rendered card.
+
+  function batchCardPreferenceHits(row) {
+    return Array.isArray(row.preference_hits) ? row.preference_hits : [];
+  }
+
+  function batchCardPreferenceWarnings(row) {
+    return Array.isArray(row.preference_warnings) ? row.preference_warnings : [];
+  }
+
+  function batchCardReviewHints(row) {
+    return Array.isArray(row.review_hints) ? row.review_hints : [];
+  }
+
+  function batchCardEnhancedQueries(row) {
+    return Array.isArray(row.enhanced_search_queries) ? row.enhanced_search_queries : [];
+  }
+
+  function batchCardAppliedPreferences(row) {
+    const applied = row.applied_preferences;
+    return applied && typeof applied === "object" ? applied : null;
+  }
+
+  function batchCardPreferenceFallback(row) {
+    const warnings = batchCardPreferenceWarnings(row);
+    for (const warning of warnings) {
+      const text = String(warning || "");
+      if (text.indexOf("偏好读取失败") !== -1 || text.indexOf("偏好应用失败") !== -1) {
+        return text;
+      }
+    }
+    return null;
+  }
+
+  function batchCardPreferenceHitLabel(field) {
+    const labels = {
+      subtitle_groups: "字幕组",
+      filter_rule: "筛选",
+      naming: "命名",
+    };
+    return Object.prototype.hasOwnProperty.call(labels, field)
+      ? labels[field]
+      : safeText(field);
+  }
+
+  function batchCardPreferenceSummary(row) {
+    if (batchCardPreferenceFallback(row)) {
+      return "偏好不可用，已回退默认流程";
+    }
+    const hits = batchCardPreferenceHits(row);
+    const appliedFields = hits
+      .filter((hit) => hit && hit.applied === true)
+      .map((hit) => batchCardPreferenceHitLabel(hit.field));
+    if (appliedFields.length) {
+      return "偏好命中：" + appliedFields.join("、");
+    }
+    return "未配置偏好，使用默认流程";
+  }
+
+  function batchCardNeedsReview(row) {
+    return row.needs_user_review === true && fieldValue(row.status) !== "ACCEPTED";
+  }
+
+  function batchCardFallbackLabel(fallback) {
+    const labels = {
+      next_preferred: "偏好字幕组优先",
+      none: "不自动选择",
+    };
+    return Object.prototype.hasOwnProperty.call(labels, fallback)
+      ? labels[fallback]
+      : safeText(fallback);
+  }
+
+  function batchCardNamingStrategyLabel(strategy) {
+    const labels = {
+      official_title_season: "官方标题+季",
+      official_title: "官方标题",
+      raw_title: "原始标题",
+    };
+    return Object.prototype.hasOwnProperty.call(labels, strategy)
+      ? labels[strategy]
+      : safeText(strategy);
+  }
+
+  function buildBatchCardPreferenceBlock(row) {
+    const block = document.createElement("div");
+    block.className = "batch-card-review-block batch-card-preference-block";
+    const heading = document.createElement("h4");
+    heading.textContent = "偏好与审核";
+    block.appendChild(heading);
+
+    const fallback = batchCardPreferenceFallback(row);
+    if (fallback) {
+      const fallbackNote = document.createElement("p");
+      fallbackNote.className = "batch-card-preference-note";
+      fallbackNote.textContent = safeText(fallback);
+      block.appendChild(fallbackNote);
+    }
+
+    const hits = batchCardPreferenceHits(row);
+    if (hits.length) {
+      const hitsHeading = document.createElement("h5");
+      hitsHeading.textContent = "偏好命中摘要";
+      block.appendChild(hitsHeading);
+      const hitsList = document.createElement("ul");
+      hitsList.className = "batch-card-preference-list";
+      for (const hit of hits) {
+        if (!hit) {
+          continue;
+        }
+        const item = document.createElement("li");
+        item.textContent =
+          batchCardPreferenceHitLabel(hit.field) +
+          "：" +
+          safeText(hit.summary);
+        hitsList.appendChild(item);
+      }
+      block.appendChild(hitsList);
+    } else if (!fallback) {
+      const note = document.createElement("p");
+      note.className = "muted-text";
+      note.textContent = "未配置偏好默认值。";
+      block.appendChild(note);
+    }
+
+    const warnings = batchCardPreferenceWarnings(row).filter(
+      (warning) => String(warning || "").trim() !== "",
+    );
+    if (warnings.length) {
+      const warningsHeading = document.createElement("h5");
+      warningsHeading.textContent = "偏好警告";
+      block.appendChild(warningsHeading);
+      const warningsList = document.createElement("ul");
+      warningsList.className = "batch-card-preference-list";
+      for (const warning of warnings) {
+        const item = document.createElement("li");
+        item.textContent = safeText(warning);
+        warningsList.appendChild(item);
+      }
+      block.appendChild(warningsList);
+    }
+
+    const reviewHeading = document.createElement("h5");
+    reviewHeading.textContent = "审核提示";
+    block.appendChild(reviewHeading);
+    const reviewHints = batchCardReviewHints(row);
+    if (reviewHints.length) {
+      const hintsList = document.createElement("ul");
+      hintsList.className = "batch-card-preference-list";
+      for (const hint of reviewHints) {
+        const item = document.createElement("li");
+        item.textContent = safeText(hint);
+        hintsList.appendChild(item);
+      }
+      block.appendChild(hintsList);
+    } else {
+      const note = document.createElement("p");
+      note.className = "muted-text";
+      note.textContent = "无需人工核对。";
+      block.appendChild(note);
+    }
+
+    const applied = batchCardAppliedPreferences(row);
+    if (applied) {
+      const configHeading = document.createElement("h5");
+      configHeading.textContent = "当前默认配置";
+      block.appendChild(configHeading);
+      const subtitleGroups =
+        applied.subtitle_groups && typeof applied.subtitle_groups === "object"
+          ? applied.subtitle_groups
+          : {};
+      const filterRule =
+        applied.filter_rule && typeof applied.filter_rule === "object"
+          ? applied.filter_rule
+          : {};
+      const naming =
+        applied.naming && typeof applied.naming === "object"
+          ? applied.naming
+          : {};
+      const preferred = Array.isArray(subtitleGroups.preferred)
+        ? subtitleGroups.preferred
+        : [];
+      const excluded = Array.isArray(subtitleGroups.excluded)
+        ? subtitleGroups.excluded
+        : [];
+      const filterParts = [filterRule.must_contain, filterRule.must_not_contain]
+        .map((part) => String(part || "").trim())
+        .filter((part) => part !== "");
+      const configRows = [
+        ["偏好字幕组", safeText(preferred.join("、") || "未配置")],
+        ["排除字幕组", safeText(excluded.join("、") || "未配置")],
+        ["Fallback", batchCardFallbackLabel(subtitleGroups.fallback)],
+        ["默认筛选", filterParts.length ? safeText(filterParts.join(" / ")) : "无"],
+        ["匹配模式", filterRule.use_regex === true ? "正则" : "普通字符"],
+        ["大小写", filterRule.case_sensitive === true ? "区分大小写" : "不区分大小写"],
+        ["命名策略", batchCardNamingStrategyLabel(naming.strategy)],
+        ["命名模板", safeText(naming.template || "{title}")],
+      ];
+      if (applied.expected_folder_name) {
+        configRows.push(["默认目录名", safeText(applied.expected_folder_name)]);
+      }
+      block.appendChild(detailList(configRows));
+    }
+
+    return block;
+  }
+
+  function buildBatchCardSearchSourceBlock(row) {
+    const block = document.createElement("div");
+    block.className = "batch-card-review-block batch-card-search-source-block";
+    const heading = document.createElement("h4");
+    heading.textContent = "搜索词来源";
+    block.appendChild(heading);
+
+    const enhanced = batchCardEnhancedQueries(row);
+    if (enhanced.length) {
+      const sourceLabel = document.createElement("h5");
+      sourceLabel.textContent = "修正增强搜索词";
+      block.appendChild(sourceLabel);
+      const list = document.createElement("ul");
+      list.className = "batch-card-preference-list";
+      for (const entry of enhanced) {
+        if (!entry) {
+          continue;
+        }
+        const item = document.createElement("li");
+        item.textContent = safeText(entry.query) + "（来源：" + safeText(entry.source) + "）";
+        list.appendChild(item);
+      }
+      block.appendChild(list);
+      const originalHeading = document.createElement("h5");
+      originalHeading.textContent = "原始搜索词";
+      block.appendChild(originalHeading);
+      const originalList = document.createElement("ul");
+      originalList.className = "batch-card-preference-list";
+      const originalQueries = Array.isArray(row.search_queries)
+        ? row.search_queries
+        : [];
+      for (const query of originalQueries) {
+        const item = document.createElement("li");
+        item.textContent = safeText(query);
+        originalList.appendChild(item);
+      }
+      block.appendChild(originalList);
+      return block;
+    }
+
+    const queries = Array.isArray(row.search_queries) ? row.search_queries : [];
+    if (queries.length) {
+      const defaultLabel = document.createElement("h5");
+      defaultLabel.textContent = "默认解析搜索词";
+      block.appendChild(defaultLabel);
+      const list = document.createElement("ul");
+      list.className = "batch-card-preference-list";
+      for (const query of queries) {
+        const item = document.createElement("li");
+        item.textContent = safeText(query);
+        list.appendChild(item);
+      }
+      block.appendChild(list);
+    } else {
+      const note = document.createElement("p");
+      note.className = "muted-text";
+      note.textContent = "无搜索词，已回退默认流程。";
+      block.appendChild(note);
+    }
+    return block;
+  }
+
   function canExpandBatchCard(row) {
     return ["DRAFT", "READY"].indexOf(fieldValue(row.status)) !== -1;
   }
@@ -1660,7 +1933,13 @@
     });
     actions.appendChild(acceptButton);
 
-    panel.append(filterBlock, seedsBlock, actions);
+    panel.append(
+      buildBatchCardPreferenceBlock(row),
+      buildBatchCardSearchSourceBlock(row),
+      filterBlock,
+      seedsBlock,
+      actions,
+    );
     return panel;
   }
 
@@ -1731,6 +2010,12 @@
       queueStatus.textContent = batchQueueStatusLabel(row.queue_status);
       statusRow.appendChild(queueStatus);
     }
+    if (batchCardNeedsReview(row)) {
+      const reviewStatus = document.createElement("span");
+      reviewStatus.className = "batch-status batch-card-review-status";
+      reviewStatus.textContent = "需人工核对";
+      statusRow.appendChild(reviewStatus);
+    }
 
     const title = document.createElement("strong");
     title.className = "batch-card-title";
@@ -1743,6 +2028,10 @@
     const source = document.createElement("div");
     source.className = "batch-card-source";
     source.textContent = "源名称：" + batchCardSourceName(row);
+
+    const preference = document.createElement("div");
+    preference.className = "batch-card-preference";
+    preference.textContent = batchCardPreferenceSummary(row);
 
     const seeds = document.createElement("div");
     seeds.className = "batch-card-seeds";
@@ -1777,6 +2066,7 @@
       title,
       rawTitle,
       source,
+      preference,
       seeds,
     ];
     if (row.accept_feedback && row.accept_feedback.reason) {

@@ -12,6 +12,12 @@ from shared.models import EntryRequest
 
 pytestmark = pytest.mark.browser
 
+#: Sentinel to distinguish "field not provided by the caller" from an explicit
+#: ``None`` (Stage 21 US-156 tests assert the no-preference fallback, where the
+#: batch parse API returns ``applied_preferences: null`` / ``preference_hits:
+#: null`` alongside a fallback warning).
+_UNDEFINED = object()
+
 
 def _batch_parse_result(items: list[dict[str, Any]], *, batch_id: str = "batch-browser") -> str:
     return json.dumps(
@@ -39,6 +45,14 @@ def _batch_item(
     confirmable_config: dict[str, Any] | None = None,
     source_info: dict[str, Any] | None = None,
     preview_request: dict[str, Any] | None = None,
+    search_queries: list[str] | None = None,
+    confidence: float = 0.9,
+    needs_user_review: bool = False,
+    applied_preferences: dict[str, Any] | None | object = _UNDEFINED,
+    preference_hits: list[dict[str, Any]] | None | object = _UNDEFINED,
+    preference_warnings: list[str] | None = None,
+    review_hints: list[str] | None = None,
+    enhanced_search_queries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     title = canonical_title or candidate_title or raw_title
     candidates = []
@@ -54,21 +68,32 @@ def _batch_item(
                 "recommendation": None,
             }
         )
-    return {
+    item: dict[str, Any] = {
         "item_id": item_id,
         "raw_title": raw_title,
         "status": status,
         "canonical_title_candidates": [canonical_title] if canonical_title else [],
         "season_hint": None,
-        "search_queries": [source_query or title],
-        "confidence": 0.9,
-        "needs_user_review": False,
+        "search_queries": list(search_queries or [source_query or title]),
+        "confidence": confidence,
+        "needs_user_review": needs_user_review,
         "source": "fake",
         "candidates": candidates,
         "confirmable_config": confirmable_config,
         "source_info": source_info,
         "preview_request": preview_request,
     }
+    if applied_preferences is not _UNDEFINED:
+        item["applied_preferences"] = applied_preferences
+    if preference_hits is not _UNDEFINED:
+        item["preference_hits"] = preference_hits
+    if preference_warnings is not None:
+        item["preference_warnings"] = list(preference_warnings)
+    if review_hints is not None:
+        item["review_hints"] = list(review_hints)
+    if enhanced_search_queries is not None:
+        item["enhanced_search_queries"] = list(enhanced_search_queries)
+    return item
 
 
 def _preview_request(title: str, request_id: str) -> dict[str, Any]:
@@ -79,7 +104,16 @@ def _preview_request(title: str, request_id: str) -> dict[str, Any]:
 
 
 def _reviewable_batch_item(
-    *, item_id: str = "item-review", preview_request: dict[str, Any] | None = None
+    *,
+    item_id: str = "item-review",
+    preview_request: dict[str, Any] | None = None,
+    confidence: float = 0.9,
+    needs_user_review: bool = False,
+    applied_preferences: dict[str, Any] | None | object = _UNDEFINED,
+    preference_hits: list[dict[str, Any]] | None | object = _UNDEFINED,
+    preference_warnings: list[str] | None = None,
+    review_hints: list[str] | None = None,
+    enhanced_search_queries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return _batch_item(
         item_id,
@@ -123,6 +157,13 @@ def _reviewable_batch_item(
             ],
         },
         preview_request=preview_request,
+        confidence=confidence,
+        needs_user_review=needs_user_review,
+        applied_preferences=applied_preferences,
+        preference_hits=preference_hits,
+        preference_warnings=preference_warnings,
+        review_hints=review_hints,
+        enhanced_search_queries=enhanced_search_queries,
     )
 
 
@@ -1870,3 +1911,308 @@ class TestBatchQueueRetry:
         # 敏感值不进入 DOM
         body_text = page.locator("body").inner_text()
         assert "ab-secret-token" not in body_text
+
+
+def _preference_hits() -> list[dict[str, str]]:
+    return [
+        {
+            "field": "subtitle_groups",
+            "applied": True,
+            "summary": "字幕组偏好已作为可编辑默认值",
+        },
+        {
+            "field": "filter_rule",
+            "applied": True,
+            "summary": "筛选默认值已作为可编辑默认规则",
+        },
+        {
+            "field": "naming",
+            "applied": True,
+            "summary": "命名策略已生成默认目录名：关于我转生变成史莱姆这档事 第四季",
+        },
+    ]
+
+
+def _applied_preferences() -> dict[str, Any]:
+    return {
+        "subtitle_groups": {
+            "preferred": ["喵萌"],
+            "excluded": ["Loli"],
+            "fallback": "next_preferred",
+        },
+        "filter_rule": {
+            "must_contain": "1080p",
+            "must_not_contain": "合集版",
+            "use_regex": True,
+            "case_sensitive": False,
+        },
+        "naming": {"strategy": "official_title_season", "template": "{title}"},
+        "expected_folder_name": "关于我转生变成史莱姆这档事 第四季",
+    }
+
+
+def _enhanced_queries() -> list[dict[str, str]]:
+    return [
+        {
+            "query": "转生史莱姆 第四季",
+            "original_query": "转生史莱姆",
+            "source": "correction:canonical",
+        },
+        {
+            "query": "转生史莱姆 S4",
+            "original_query": "转生史莱姆",
+            "source": "correction:canonical",
+        },
+    ]
+
+
+class TestBatchWorkbenchPreferenceDisplay:
+    """US-156: 批量卡片展示偏好命中摘要、搜索词来源、审核提示与当前默认配置."""
+
+    def test_batch_card_shows_preference_hits_and_default_config(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        item = _reviewable_batch_item(
+            applied_preferences=_applied_preferences(),
+            preference_hits=_preference_hits(),
+            preference_warnings=["fallback 为 next_preferred，未配置时回退到第一个偏好字幕组"],
+            review_hints=["该条目需要人工核对后再接受。"],
+            enhanced_search_queries=_enhanced_queries(),
+        )
+
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([item]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+
+        card = page.locator(".batch-draft-card")
+        expect(card.locator(".batch-card-preference")).to_contain_text(
+            "偏好命中：字幕组、筛选、命名"
+        )
+        card.locator(".batch-card-expand").click()
+
+        panel = card.locator(".batch-card-review")
+        text = panel.inner_text()
+        assert "偏好与审核" in text
+        assert "偏好命中摘要" in text
+        assert "字幕组：字幕组偏好已作为可编辑默认值" in text
+        assert "筛选：筛选默认值已作为可编辑默认规则" in text
+        assert "命名：命名策略已生成默认目录名：关于我转生变成史莱姆这档事 第四季" in text
+        assert "偏好警告" in text
+        assert "fallback 为 next_preferred" in text
+        assert "审核提示" in text
+        assert "该条目需要人工核对后再接受。" in text
+        assert "当前默认配置" in text
+        assert "偏好字幕组" in text
+        assert "喵萌" in text
+        assert "排除字幕组" in text
+        assert "Loli" in text
+        assert "Fallback" in text
+        assert "偏好字幕组优先" in text
+        assert "默认筛选" in text
+        assert "1080p / 合集版" in text
+        assert "匹配模式" in text
+        assert "正则" in text
+        assert "命名策略" in text
+        assert "官方标题+季" in text
+        assert "默认目录名" in text
+        assert "搜索词来源" in text
+        assert "修正增强搜索词" in text
+        assert "转生史莱姆 第四季（来源：correction:canonical）" in text
+        assert "转生史莱姆 S4（来源：correction:canonical）" in text
+        assert "原始搜索词" in text
+        assert "转生史莱姆" in text
+
+    def test_batch_card_shows_low_confidence_review_status(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        item = _reviewable_batch_item(
+            needs_user_review=True,
+            confidence=0.62,
+            review_hints=[
+                "名称解析置信度较低（0.62），建议核对候选合集。",
+                "存在多个候选名称（2 个），建议确认正确的合集。",
+            ],
+        )
+
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([item]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+
+        card = page.locator(".batch-draft-card")
+        expect(card.locator(".batch-card-review-status")).to_contain_text(
+            "需人工核对"
+        )
+        card.locator(".batch-card-expand").click()
+
+        panel = card.locator(".batch-card-review")
+        text = panel.inner_text()
+        assert "审核提示" in text
+        assert "名称解析置信度较低（0.62），建议核对候选合集。" in text
+        assert "存在多个候选名称（2 个），建议确认正确的合集。" in text
+
+    def test_batch_card_no_preference_fallback(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        item = _reviewable_batch_item(
+            applied_preferences=None,
+            preference_hits=None,
+            preference_warnings=["偏好读取失败，已回退默认流程"],
+            needs_user_review=True,
+            review_hints=["该条目需要人工核对后再接受。"],
+        )
+
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([item]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+
+        card = page.locator(".batch-draft-card")
+        expect(card.locator(".batch-card-preference")).to_contain_text(
+            "偏好不可用，已回退默认流程"
+        )
+        card.locator(".batch-card-expand").click()
+
+        panel = card.locator(".batch-card-review")
+        text = panel.inner_text()
+        assert "偏好与审核" in text
+        assert "偏好读取失败，已回退默认流程" in text
+        assert "未配置偏好默认值" not in text
+        assert "当前默认配置" not in text
+        assert "审核提示" in text
+        assert "该条目需要人工核对后再接受。" in text
+
+    def test_batch_card_modify_syncs_only_current_card(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        first_preview = _preview_request("咒术回战", "req-pref-first")
+        second_preview = _preview_request("咒术回战", "req-pref-second")
+        first_item = _reviewable_batch_item(
+            item_id="item-first",
+            preview_request=first_preview,
+            applied_preferences=_applied_preferences(),
+            preference_hits=_preference_hits(),
+            preference_warnings=["fallback 为 next_preferred"],
+            needs_user_review=True,
+            review_hints=["该条目需要人工核对后再接受。"],
+        )
+        second_item = _batch_item(
+            "item-second",
+            "路哥S4",
+            status="DRAFT",
+            canonical_title="实力至上主义教室 第四季",
+            preview_request=second_preview,
+            applied_preferences=_applied_preferences(),
+            preference_hits=_preference_hits(),
+            preference_warnings=["fallback 为 next_preferred"],
+            needs_user_review=True,
+            review_hints=["该条目需要人工核对后再接受。"],
+        )
+
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([first_item, second_item]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4\n路哥S4")
+        page.click("#batch-parse-submit")
+
+        first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+        second_card = page.locator(".batch-draft-card", has_text="路哥S4")
+
+        def _panel_text(card: Any) -> str:
+            return card.locator(".batch-card-review").evaluate(
+                "el => el.textContent"
+            )
+
+        second_card.locator(".batch-card-expand").click()
+        second_text_before = _panel_text(second_card)
+
+        # 修改第一张卡片：更换字幕组并刷新偏好/审核区域，第二张卡片保持完全不变。
+        first_card.locator(".batch-card-expand").click()
+        first_card.locator(".batch-card-modify").click()
+        expect(page.locator("#detail-preview-edit-form")).to_be_visible()
+        page.select_option("#preview-subtitle-group", value="喵萌")
+        page.fill("#preview-must-not-contain", "V2")
+        page.click("button:has-text('应用修改')")
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        expect(page.locator("#page-notification")).to_contain_text(
+            "当前批量卡片已回流最新订阅草案"
+        )
+        first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+        first_text = _panel_text(first_card)
+        assert "当前字幕组" in first_text
+        assert "喵萌" in first_text
+        assert "偏好与审核" in first_text
+        assert "偏好命中：字幕组、筛选、命名" not in first_text
+
+        second_card = page.locator(".batch-draft-card", has_text="路哥S4")
+        second_text_after = _panel_text(second_card)
+        assert second_text_after == second_text_before
+        # 第二张卡片的“当前字幕组”仍是 fixture 默认（Loli），修改未回流到其他卡片。
+        assert "当前字幕组Loli" in second_text_after
+
+    def test_batch_card_preference_metadata_never_leaks_sensitive_config(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        applied = _applied_preferences()
+        # 攻击性注入：即使后端意外把敏感字段塞进偏好元数据，渲染器也只读取
+        # 白名单公开字段，绝不渲染这些键。
+        applied["token"] = "preference-token-secret"
+        applied["endpoint"] = "https://mikan.example/Home/Search"
+        applied["raw_rss_xml"] = "<rss>preference-raw</rss>"
+        item = _reviewable_batch_item(
+            applied_preferences=applied,
+            preference_hits=_preference_hits(),
+            preference_warnings=["fallback 为 next_preferred"],
+            enhanced_search_queries=_enhanced_queries(),
+        )
+
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([item]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+        page.locator(".batch-draft-card .batch-card-expand").click()
+
+        body_text = page.locator("body").inner_text()
+        assert "preference-token-secret" not in body_text
+        assert "mikan.example" not in body_text
+        assert "preference-raw" not in body_text
+        assert "secret-token" not in body_text
+        assert "session-cookie" not in body_text
+        assert "<rss>" not in body_text
+        assert "raw-body-secret" not in body_text
