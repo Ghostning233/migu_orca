@@ -51,6 +51,7 @@ from batch_engine.controllers.preference_applicator import (
     build_preference_hits,
     build_review_metadata,
 )
+from batch_engine.controllers.search_enhancer import enhance_search_queries
 from batch_engine.models import (
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_PARSED,
@@ -77,7 +78,13 @@ from request_engine.controllers.request_controller import (
     summarize_request,
 )
 from shared.errors import Stage1Error
-from shared.models import EntryRequest, VersionedUserPreference
+from shared.models import EntryRequest, TitleCorrection, VersionedUserPreference
+from storage_engine.controllers.correction_repository import (
+    build_correction_from_api,
+    load_corrections,
+    save_correction,
+    serialize_corrections,
+)
 from storage_engine.controllers.request_repository import (
     delete_request_snapshot,
     list_request_snapshots,
@@ -276,6 +283,25 @@ class PreferenceSavePayload(BaseModel):
     preferences: Any = None
 
 
+class CorrectionQuery(BaseModel):
+    """Read the saved non-sensitive title corrections (query args only)."""
+
+    storage_dir: str | None = None
+
+
+class CorrectionSavePayload(BaseModel):
+    """Save one explicit title correction.
+
+    ``correction`` is typed loosely (``Any``) so the view can convert the raw
+    payload through ``build_correction_from_api`` and raise a Chinese
+    ``validation_error`` envelope for every shape/type/sensitive-value problem —
+    the same loose-typing convention as ``PreferenceSavePayload``.
+    """
+
+    storage_dir: str | None = None
+    correction: Any = None
+
+
 class RequestCreatePayload(BaseModel):
     title: str
     source: str = "static-fixture"
@@ -443,6 +469,7 @@ def _serialize_batch_parse_result(
     preference_warnings: list[str] | None = None,
     needs_user_review: bool | None = None,
     review_hints: list[str] | None = None,
+    enhanced_search_queries: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "item_id": item.item_id,
@@ -463,6 +490,7 @@ def _serialize_batch_parse_result(
         "preference_hits": preference_hits,
         "preference_warnings": list(preference_warnings or []),
         "review_hints": list(review_hints or []),
+        "enhanced_search_queries": list(enhanced_search_queries or []),
     }
     if error is not None:
         result["error"] = _optional_error(error)
@@ -477,6 +505,7 @@ def _serialize_failed_batch_item(
     preference_hits: list[dict[str, object]] | None = None,
     preference_warnings: list[str] | None = None,
     review_hints: list[str] | None = None,
+    enhanced_search_queries: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     return {
         "item_id": item.item_id,
@@ -493,6 +522,7 @@ def _serialize_failed_batch_item(
         "preference_hits": preference_hits,
         "preference_warnings": list(preference_warnings or []),
         "review_hints": list(review_hints or []),
+        "enhanced_search_queries": list(enhanced_search_queries or []),
         "error": _optional_error(error),
     }
 
@@ -597,6 +627,82 @@ def _load_preferences_for_batch(
         return load_user_preferences(config)
     except Stage1Error:
         return None
+
+
+def _load_corrections_for_batch(
+    config: StorageConfig,
+) -> list[TitleCorrection]:
+    """Load saved title corrections for batch parsing.
+
+    Returns ``[]`` when the correction file is damaged or unreadable, so batch
+    parsing falls back to the original ``search_queries`` and one item's missing
+    corrections never block the rest of the batch.
+    """
+    try:
+        return load_corrections(config)
+    except Stage1Error:
+        return []
+
+
+def _search_batch_item_candidates_enhanced(
+    enhanced_queries: list[dict[str, object]],
+    original_queries: list[str],
+    mikan_config: MikanConfig,
+) -> list[dict[str, object]]:
+    """Search enhanced queries first, falling back to the original queries.
+
+    When no correction matched (``enhanced_queries`` is empty), this delegates
+    directly to ``_search_batch_item_candidates`` so the default flow is
+    byte-for-byte unchanged. Otherwise the enhanced queries are searched with
+    per-query tolerance (a single bad variant never blocks the rest); if none of
+    them yield candidates, the original queries are searched exactly as today.
+    """
+    if not enhanced_queries:
+        return _search_batch_item_candidates(original_queries, mikan_config)
+
+    candidates: list[dict[str, object]] = []
+    seen: set[tuple[object, object]] = set()
+    for entry in enhanced_queries:
+        query = str(entry.get("query") or "").strip()
+        if not query:
+            continue
+        try:
+            for candidate in _search_mikan_candidates(query, mikan_config):
+                key = (candidate.get("bangumi_id"), candidate.get("mikan_url"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                candidates.append(candidate)
+        except Stage1Error:
+            # One enhanced variant failing never blocks the remaining variants.
+            continue
+    if candidates:
+        return candidates
+    return _search_batch_item_candidates(original_queries, mikan_config)
+
+
+def _enhanced_entries_for_item(
+    raw_title: str,
+    parse_result: AnimeTitleParseResult | None,
+    corrections: list[TitleCorrection],
+) -> list[dict[str, object]]:
+    """Build the reviewable enhanced-query metadata for one batch item.
+
+    Each entry retains the original parse query, the enhanced query, and its
+    ``correction:query``/``correction:canonical`` source marker so the user can
+    review exactly what changed. When no correction matches (or the correction
+    store is damaged/unavailable), this is ``[]`` and the original
+    ``search_queries`` are used unchanged.
+    """
+    search_queries = list(parse_result.search_queries) if parse_result is not None else []
+    return [
+        {
+            "query": entry["query"],
+            "original_query": entry["original_query"],
+            "source": entry["source"],
+        }
+        for entry in enhance_search_queries(raw_title, search_queries, corrections)
+    ]
 
 
 def _preference_application_for_item(
@@ -1060,6 +1166,42 @@ class PreferenceSaveView(PostView):
         return serialize_preferences(preferences)
 
 
+@class_route(api_blueprint, "/api/v1/corrections", methods=["GET"])
+class CorrectionView(GetView):
+    """Read the saved non-sensitive title corrections (empty when absent)."""
+
+    request_validator_model = CorrectionQuery
+
+    def get_object(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, CorrectionQuery)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        corrections = load_corrections(config)
+        return {"corrections": serialize_corrections(corrections)}
+
+
+@class_route(api_blueprint, "/api/v1/corrections", methods=["POST"])
+class CorrectionSaveView(PostView):
+    """Save one non-sensitive title correction and return the normalized list."""
+
+    request_validator_model = CorrectionSavePayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, CorrectionSavePayload)
+        payload = self.request_validator_model
+        if payload.correction is None:
+            raise Stage1Error(
+                "validation_error",
+                "请提供修正内容",
+                "save_correction",
+                {"field": "correction"},
+            )
+        correction = build_correction_from_api(payload.correction)
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        save_correction(config, correction)
+        return {"corrections": serialize_corrections(load_corrections(config))}
+
+
 @class_route(api_blueprint, "/api/v1/batches/parse", methods=["POST"])
 class BatchParseView(PostView):
     request_validator_model = BatchParsePayload
@@ -1081,6 +1223,7 @@ class BatchParseView(PostView):
             _storage_dir(self.request_validator_model.storage_dir)
         )
         preferences = _load_preferences_for_batch(config)
+        corrections = _load_corrections_for_batch(config)
         serialized_items: list[dict[str, object]] = []
         for item in batch.items:
             try:
@@ -1117,12 +1260,19 @@ class BatchParseView(PostView):
                         preference_hits=hits,
                         preference_warnings=warnings,
                         review_hints=review.review_hints,
+                        enhanced_search_queries=_enhanced_entries_for_item(
+                            item.raw_title, None, corrections
+                        ),
                     )
                 )
                 continue
 
+            enhanced_queries = _enhanced_entries_for_item(
+                item.raw_title, parse_result, corrections
+            )
             try:
-                candidates = _search_batch_item_candidates(
+                candidates = _search_batch_item_candidates_enhanced(
+                    enhanced_queries,
                     parse_result.search_queries,
                     mikan_config,
                 )
@@ -1162,6 +1312,7 @@ class BatchParseView(PostView):
                         preference_warnings=warnings,
                         needs_user_review=review.needs_user_review,
                         review_hints=review.review_hints,
+                        enhanced_search_queries=enhanced_queries,
                     )
                 )
                 continue
@@ -1199,6 +1350,7 @@ class BatchParseView(PostView):
                     preference_warnings=warnings,
                     needs_user_review=review.needs_user_review,
                     review_hints=review.review_hints,
+                    enhanced_search_queries=enhanced_queries,
                 )
             )
 

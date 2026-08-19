@@ -105,7 +105,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "真实 LLM provider 不是本 story 必需条件；先建立确定性 correction/search enhancement seam。"
     },
     {

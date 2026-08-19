@@ -3275,6 +3275,413 @@ def test_batch_parse_api_marks_preference_conflict_item_for_review(
     ]
 
 
+# --- US-155: title-correction API + enhanced batch search ---
+
+
+def _correction_payload() -> dict[str, Any]:
+    return {
+        "raw_title": "路哥S4",
+        "canonical_title": "欢迎来到实力至上主义的教室",
+        "season_hint": "S4",
+        "bangumi_metadata": {
+            "bangumi_id": "4001",
+            "title": "欢迎来到实力至上主义的教室",
+        },
+        "query_correction": "欢迎来到实力至上主义的教室 第四季",
+    }
+
+
+def _correction_save_body(
+    storage_dir: Path,
+    correction: dict[str, Any] | None,
+) -> dict[str, Any]:
+    body: dict[str, Any] = {"storage_dir": str(storage_dir)}
+    if correction is not None:
+        body["correction"] = correction
+    return body
+
+
+def test_correction_api_reads_empty_list_when_missing(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().get(f"/api/v1/corrections?storage_dir={storage_dir}")
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"] == {"corrections": []}
+
+
+def test_correction_api_save_returns_normalized_list_and_persists(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    payload = _correction_payload()
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, payload),
+    )
+
+    result = response.get_json()
+    assert response.status_code == 200
+    assert result["ok"] is True
+    assert result["result"]["corrections"] == [payload]
+    assert result["result"]["corrections"][0]["bangumi_metadata"] == {
+        "bangumi_id": "4001",
+        "title": "欢迎来到实力至上主义的教室",
+    }
+
+    # The saved JSON on disk carries only the defined non-sensitive fields.
+    config = load_storage_config(storage_dir)
+    written = json.loads(
+        (config.corrections_dir / "corrections.json").read_text(encoding="utf-8")
+    )
+    assert written == {"version": 1, "corrections": [payload]}
+
+
+def test_correction_api_save_uses_latest_version_for_same_raw_title(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, _correction_payload()),
+    )
+    updated = {
+        **_correction_payload(),
+        "canonical_title": "欢迎来到实力至上主义的教室 第四季",
+        "query_correction": "欢迎来到实力至上主义的教室 第四季",
+    }
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, updated),
+    )
+
+    response = _client().get(f"/api/v1/corrections?storage_dir={storage_dir}")
+
+    corrections = response.get_json()["result"]["corrections"]
+    assert len(corrections) == 1
+    assert corrections[0]["canonical_title"] == "欢迎来到实力至上主义的教室 第四季"
+
+
+def test_correction_api_save_rejects_missing_correction(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, None),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_message"] == "请提供修正内容"
+    assert payload["error_data"]["details"] == {"field": "correction"}
+
+
+def test_correction_api_save_rejects_invalid_correction(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(
+            storage_dir, {"canonical_title": "葬送的芙莉莲"}
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert payload["error_data"]["details"] == {"field": "raw_title"}
+
+
+def test_correction_api_save_rejects_unknown_field_without_writing(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(
+            storage_dir, {**_correction_payload(), "token": "secret"}
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert "未定义字段" in payload["error_message"]
+    assert not (
+        load_storage_config(storage_dir).corrections_dir / "corrections.json"
+    ).exists()
+
+
+def test_correction_api_save_rejects_sensitive_value_without_writing(
+    tmp_path: Path,
+) -> None:
+    storage_dir = tmp_path / "storage"
+
+    response = _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(
+            storage_dir,
+            {**_correction_payload(), "query_correction": "https://mikan.example/api"},
+        ),
+    )
+
+    payload = response.get_json()
+    assert payload["ok"] is False
+    assert payload["error_type"] == "validation_error"
+    assert "敏感内容" in payload["error_message"]
+    assert not (
+        load_storage_config(storage_dir).corrections_dir / "corrections.json"
+    ).exists()
+
+
+def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, _correction_payload()),
+    )
+    client = _MappedCandidateSearchClient(
+        responses={
+            "欢迎来到实力至上主义的教室 第四季": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="欢迎来到实力至上主义的教室 第四季",
+                    aliases=["路哥 S4"],
+                )
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    # The enhanced queries are searched first; the original queries are never
+    # searched because the enhanced search already found candidates.
+    assert client.searches == [
+        "欢迎来到实力至上主义的教室 第四季",
+        "欢迎来到实力至上主义的教室 第4季",
+        "欢迎来到实力至上主义的教室 S4",
+        "欢迎来到实力至上主义的教室 Season 4",
+        "欢迎来到实力至上主义的教室",
+    ]
+    assert item["enhanced_search_queries"] == [
+        {
+            "query": "欢迎来到实力至上主义的教室 第四季",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:query",
+        },
+        {
+            "query": "欢迎来到实力至上主义的教室 第4季",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:query",
+        },
+        {
+            "query": "欢迎来到实力至上主义的教室 S4",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:query",
+        },
+        {
+            "query": "欢迎来到实力至上主义的教室 Season 4",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:query",
+        },
+        {
+            "query": "欢迎来到实力至上主义的教室",
+            "original_query": "欢迎来到实力至上主义的教室 第四季",
+            "source": "correction:canonical",
+        },
+    ]
+    assert item["candidates"][0]["bangumi_id"] == "4001"
+
+
+def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, _correction_payload()),
+    )
+    # Only an original parse query has a candidate; the enhanced queries do not.
+    client = _MappedCandidateSearchClient(
+        responses={
+            "路哥 S4": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="路哥 S4",
+                    aliases=["路哥 S4"],
+                )
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    # The enhanced queries are searched first, then the original queries on
+    # fallback. The repeated first query is served from the candidate cache, so
+    # it is not searched twice through the client.
+    assert client.searches == [
+        "欢迎来到实力至上主义的教室 第四季",
+        "欢迎来到实力至上主义的教室 第4季",
+        "欢迎来到实力至上主义的教室 S4",
+        "欢迎来到实力至上主义的教室 Season 4",
+        "欢迎来到实力至上主义的教室",
+        "实力至上主义教室 S4",
+        "路哥 S4",
+    ]
+    assert item["candidates"][0]["bangumi_id"] == "4001"
+
+
+def test_batch_parse_api_falls_back_to_original_queries_when_corrections_file_damaged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    config = load_storage_config(storage_dir)
+    config.corrections_dir.mkdir(parents=True, exist_ok=True)
+    (config.corrections_dir / "corrections.json").write_text(
+        "{not valid json", encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4\n路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    items = payload["result"]["items"]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert all(item["enhanced_search_queries"] == [] for item in items)
+
+
+def test_batch_parse_api_does_not_leak_poisoned_corrections(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    config = load_storage_config(storage_dir)
+    config.corrections_dir.mkdir(parents=True, exist_ok=True)
+    (config.corrections_dir / "corrections.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "corrections": [
+                    {
+                        "raw_title": "路哥S4",
+                        "canonical_title": "https://mikan.example/api?token=secret",
+                        "query_correction": "路哥",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    body = response.get_data(as_text=True)
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["enhanced_search_queries"] == []
+    assert "mikan.example" not in body
+    assert "token=secret" not in body
+
+
+def test_batch_parse_api_failed_search_keeps_enhanced_queries_for_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_dir = tmp_path / "storage"
+    _client().post(
+        "/api/v1/corrections",
+        json=_correction_save_body(storage_dir, _correction_payload()),
+    )
+    # Enhanced queries find nothing, and the original-query fallback raises.
+    client = _MappedCandidateSearchClient()
+
+    def _raise(*args: object, **kwargs: object) -> None:
+        raise Stage1Error("mikan_timeout", "MiKan HTTP 请求超时", "mikan_search")
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        _raise,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_FAILED
+    # The enhanced queries are still returned so the user can review what was
+    # attempted even though the item failed.
+    assert item["enhanced_search_queries"]
+    assert all(
+        entry["source"] in ("correction:query", "correction:canonical")
+        for entry in item["enhanced_search_queries"]
+    )
+
+
 def test_candidate_search_api_cache_expires_after_ttl(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

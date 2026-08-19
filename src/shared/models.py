@@ -117,6 +117,50 @@ class VersionedUserPreference:
     search: SearchPreference = field(default_factory=SearchPreference)
 
 
+# Stage 21 explicit title-correction contract. A correction links a shorthand
+# ``raw_title`` (what the user typed) to the public canonical title the user
+# confirmed, plus a season hint, optional public bangumi metadata, and an
+# explicit search-query correction. Only non-sensitive public fields are stored;
+# endpoint/token/cookie/Authorization/magnet/raw HTML-RSS/response bodies and
+# local absolute paths are rejected by the correction repository validation.
+
+#: Maximum number of corrections kept per storage (global cap; same-raw_title
+#: duplicates use a latest-version strategy that never grows this bound).
+MAX_STORED_CORRECTIONS = 500
+
+
+@dataclass(frozen=True)
+class BangumiCorrectionMetadata:
+    """Public, non-sensitive bangumi metadata captured with a title correction.
+
+    Only the public bangumi id and canonical title are stored — never raw HTML,
+    raw RSS XML, magnets, cookies, tokens, endpoints, full failed URLs, response
+    bodies, or local absolute paths.
+    """
+
+    bangumi_id: str | None = None
+    title: str | None = None
+
+
+@dataclass(frozen=True)
+class TitleCorrection:
+    """An explicitly-saved user correction reused by later batch searches.
+
+    ``raw_title`` is the shorthand the user typed; ``canonical_title`` is the
+    public canonical title the user confirmed; ``season_hint`` is an optional
+    season marker (``S4``/``第四季``/``Season 4``); ``bangumi_metadata`` holds
+    optional public bangumi identity; ``query_correction`` is an explicit
+    search query the user found reliable (may be a Chinese, Japanese, numeric,
+    or romanized variant). Only non-sensitive public fields are stored.
+    """
+
+    raw_title: str
+    canonical_title: str
+    season_hint: str | None = None
+    bangumi_metadata: BangumiCorrectionMetadata | None = None
+    query_correction: str | None = None
+
+
 @dataclass(frozen=True)
 class ExcludedSeed:
     name: str

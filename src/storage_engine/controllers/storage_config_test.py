@@ -23,6 +23,7 @@ def test_load_storage_config_uses_predictable_default_layout() -> None:
     assert config.ab_results_dir == DEFAULT_STORAGE_DIR / "ab_results"
     assert config.queue_dir == DEFAULT_STORAGE_DIR / "queue"
     assert config.preferences_dir == DEFAULT_STORAGE_DIR / "preferences"
+    assert config.corrections_dir == DEFAULT_STORAGE_DIR / "corrections"
 
 
 def test_load_storage_config_allows_caller_override(tmp_path: Path) -> None:
@@ -36,6 +37,7 @@ def test_load_storage_config_allows_caller_override(tmp_path: Path) -> None:
     assert config.ab_results_dir == storage_dir / "ab_results"
     assert config.queue_dir == storage_dir / "queue"
     assert config.preferences_dir == storage_dir / "preferences"
+    assert config.corrections_dir == storage_dir / "corrections"
 
 
 def test_ensure_storage_layout_creates_json_storage_directories(tmp_path: Path) -> None:
@@ -50,6 +52,7 @@ def test_ensure_storage_layout_creates_json_storage_directories(tmp_path: Path) 
     assert config.ab_results_dir.is_dir()
     assert config.queue_dir.is_dir()
     assert config.preferences_dir.is_dir()
+    assert config.corrections_dir.is_dir()
 
 
 def test_ensure_storage_layout_returns_stable_error_for_file_path(
