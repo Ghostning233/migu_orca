@@ -45,7 +45,12 @@ from batch_engine.controllers.batch_submit_controller import (
     serialize_batch_submit_result,
     submit_batch_queue_items,
 )
-from batch_engine.controllers.preference_applicator import apply_preferences_to_item
+from batch_engine.controllers.preference_applicator import (
+    AppliedBatchPreferences,
+    apply_preferences_to_item,
+    build_preference_hits,
+    build_review_metadata,
+)
 from batch_engine.models import (
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_PARSED,
@@ -434,7 +439,10 @@ def _serialize_batch_parse_result(
     candidates: list[dict[str, object]] | None = None,
     error: Stage1Error | None = None,
     applied_preferences: dict[str, object] | None = None,
+    preference_hits: list[dict[str, object]] | None = None,
     preference_warnings: list[str] | None = None,
+    needs_user_review: bool | None = None,
+    review_hints: list[str] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "item_id": item.item_id,
@@ -444,11 +452,17 @@ def _serialize_batch_parse_result(
         "season_hint": parse_result.season_hint,
         "search_queries": list(parse_result.search_queries),
         "confidence": parse_result.confidence,
-        "needs_user_review": parse_result.needs_user_review,
+        "needs_user_review": (
+            parse_result.needs_user_review
+            if needs_user_review is None
+            else needs_user_review
+        ),
         "source": parse_result.source,
         "candidates": candidates or [],
         "applied_preferences": applied_preferences,
+        "preference_hits": preference_hits,
         "preference_warnings": list(preference_warnings or []),
+        "review_hints": list(review_hints or []),
     }
     if error is not None:
         result["error"] = _optional_error(error)
@@ -460,7 +474,9 @@ def _serialize_failed_batch_item(
     error: Stage1Error,
     *,
     applied_preferences: dict[str, object] | None = None,
+    preference_hits: list[dict[str, object]] | None = None,
     preference_warnings: list[str] | None = None,
+    review_hints: list[str] | None = None,
 ) -> dict[str, object]:
     return {
         "item_id": item.item_id,
@@ -474,7 +490,9 @@ def _serialize_failed_batch_item(
         "source": "unknown",
         "candidates": [],
         "applied_preferences": applied_preferences,
+        "preference_hits": preference_hits,
         "preference_warnings": list(preference_warnings or []),
+        "review_hints": list(review_hints or []),
         "error": _optional_error(error),
     }
 
@@ -585,7 +603,7 @@ def _preference_application_for_item(
     raw_title: str,
     parse_result: AnimeTitleParseResult | None,
     preferences: VersionedUserPreference | None,
-) -> tuple[dict[str, object] | None, list[str]]:
+) -> tuple[AppliedBatchPreferences | None, list[str]]:
     """Build the per-item applied-preferences metadata for a batch draft.
 
     Returns ``(None, [fallback warning])`` when preferences are unavailable or
@@ -598,7 +616,27 @@ def _preference_application_for_item(
         applied = apply_preferences_to_item(raw_title, parse_result, preferences)
     except Exception:
         return None, ["偏好应用失败，已回退默认流程"]
-    return applied.to_dict(), list(applied.warnings)
+    return applied, list(applied.warnings)
+
+
+def _serialize_preference_application(
+    applied: AppliedBatchPreferences | None,
+    warnings: list[str],
+) -> tuple[dict[str, object] | None, list[dict[str, object]] | None, list[str]]:
+    """Split an applied-preference result into the three public API fields.
+
+    Returns ``(applied_preferences, preference_hits, preference_warnings)``;
+    the first two are ``None`` when preferences were unavailable, while the
+    fallback warning list is always present so the UI can explain the default
+    flow. Only public rule summaries leave this function.
+    """
+    if applied is None:
+        return None, None, list(warnings)
+    return (
+        applied.to_dict(),
+        build_preference_hits(applied),
+        list(warnings),
+    )
 
 
 def _load_batch_queue_or_none(
@@ -1058,15 +1096,27 @@ class BatchParseView(PostView):
                     for updated in failed_batch.items
                     if updated.item_id == item.item_id
                 )
-                applied, warnings = _preference_application_for_item(
+                applied_obj, warnings = _preference_application_for_item(
                     item.raw_title, None, preferences
+                )
+                applied, hits, warnings = _serialize_preference_application(
+                    applied_obj, warnings
+                )
+                review = build_review_metadata(
+                    raw_title=item.raw_title,
+                    parse_result=None,
+                    candidates=[],
+                    preference_warnings=warnings,
+                    status=BATCH_ITEM_STATUS_FAILED,
                 )
                 serialized_items.append(
                     _serialize_failed_batch_item(
                         failed_item,
                         exc,
                         applied_preferences=applied,
+                        preference_hits=hits,
                         preference_warnings=warnings,
+                        review_hints=review.review_hints,
                     )
                 )
                 continue
@@ -1087,8 +1137,19 @@ class BatchParseView(PostView):
                     for updated in failed_batch.items
                     if updated.item_id == item.item_id
                 )
-                applied, warnings = _preference_application_for_item(
+                applied_obj, warnings = _preference_application_for_item(
                     item.raw_title, parse_result, preferences
+                )
+                applied, hits, warnings = _serialize_preference_application(
+                    applied_obj, warnings
+                )
+                review = build_review_metadata(
+                    raw_title=item.raw_title,
+                    parse_result=parse_result,
+                    candidates=[],
+                    preference_warnings=warnings,
+                    search_failed=True,
+                    status=BATCH_ITEM_STATUS_FAILED,
                 )
                 serialized_items.append(
                     _serialize_batch_parse_result(
@@ -1097,7 +1158,10 @@ class BatchParseView(PostView):
                         candidates=[],
                         error=exc,
                         applied_preferences=applied,
+                        preference_hits=hits,
                         preference_warnings=warnings,
+                        needs_user_review=review.needs_user_review,
+                        review_hints=review.review_hints,
                     )
                 )
                 continue
@@ -1112,8 +1176,18 @@ class BatchParseView(PostView):
                 for updated in parsed_batch.items
                 if updated.item_id == item.item_id
             )
-            applied, warnings = _preference_application_for_item(
+            applied_obj, warnings = _preference_application_for_item(
                 item.raw_title, parse_result, preferences
+            )
+            applied, hits, warnings = _serialize_preference_application(
+                applied_obj, warnings
+            )
+            review = build_review_metadata(
+                raw_title=item.raw_title,
+                parse_result=parse_result,
+                candidates=candidates,
+                preference_warnings=warnings,
+                status=BATCH_ITEM_STATUS_PARSED,
             )
             serialized_items.append(
                 _serialize_batch_parse_result(
@@ -1121,7 +1195,10 @@ class BatchParseView(PostView):
                     parse_result,
                     candidates=candidates,
                     applied_preferences=applied,
+                    preference_hits=hits,
                     preference_warnings=warnings,
+                    needs_user_review=review.needs_user_review,
+                    review_hints=review.review_hints,
                 )
             )
 

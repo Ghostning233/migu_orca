@@ -3,7 +3,12 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from batch_engine.models import AnimeTitleParseResult
+from batch_engine.controllers.anime_title_parser import LOW_CONFIDENCE_THRESHOLD
+from batch_engine.models import (
+    BATCH_ITEM_STATUS_FAILED,
+    BATCH_ITEM_STATUS_PARSED,
+    AnimeTitleParseResult,
+)
 from shared.errors import Stage1Error
 from shared.models import NamingPreference, VersionedUserPreference
 from subscription_engine.controllers.subscription_controller import generate_folder_name
@@ -74,6 +79,169 @@ def build_preference_config(
             "template": naming.template,
         },
     }
+
+
+#: Warning text that marks a preference configuration conflict requiring user
+#: review: no preferred subtitle group is configured and the fallback is
+#: disabled, so the preference cannot drive subtitle-group selection.
+PREFERENCE_CONFLICT_WARNING = "fallback 为 none 且未配置偏好字幕组，不会自动选择字幕组"
+
+
+def _is_preference_conflict_warning(warning: str) -> bool:
+    return PREFERENCE_CONFLICT_WARNING in warning
+
+
+@dataclass(frozen=True)
+class BatchReviewMetadata:
+    """Per-item review metadata for a batch draft.
+
+    ``needs_user_review`` is True whenever the item should be checked by the
+    user before acceptance (low confidence, multiple candidates, no candidates,
+    search fallback/failure, or a preference conflict). ``review_hints`` are the
+    Chinese review prompts shown to explain why. This metadata only annotates
+    the item — it never changes the candidate list, never auto-selects a
+    collection, and never auto-accepts a card.
+    """
+
+    needs_user_review: bool
+    review_hints: list[str]
+
+
+def build_preference_hits(
+    applied: AppliedBatchPreferences,
+) -> list[dict[str, object]]:
+    """Return per-field public preference-hit summaries for one batch item.
+
+    Each entry carries ``field``, ``applied``, and a Chinese rule summary so the
+    Web UI can show which preference defaults were hit (applied as editable
+    defaults), missed (not configured), or conflicted (could not be applied).
+    Only public rule summaries are returned; endpoint/token/cookie/magnet/raw
+    HTML-RSS/response bodies and local absolute paths never appear.
+    """
+    hits: list[dict[str, object]] = []
+
+    preferred = applied.subtitle_groups.get("preferred") or []
+    excluded = applied.subtitle_groups.get("excluded") or []
+    if preferred or excluded:
+        hits.append(
+            {
+                "field": "subtitle_groups",
+                "applied": True,
+                "summary": "字幕组偏好已作为可编辑默认值",
+            }
+        )
+    else:
+        hits.append(
+            {
+                "field": "subtitle_groups",
+                "applied": False,
+                "summary": "未配置字幕组偏好，使用默认选择流程",
+            }
+        )
+
+    must_contain = (applied.filter_rule.get("must_contain") or "").strip()
+    must_not_contain = (applied.filter_rule.get("must_not_contain") or "").strip()
+    if must_contain or must_not_contain:
+        hits.append(
+            {
+                "field": "filter_rule",
+                "applied": True,
+                "summary": "筛选默认值已作为可编辑默认规则",
+            }
+        )
+    else:
+        hits.append(
+            {
+                "field": "filter_rule",
+                "applied": False,
+                "summary": "未配置筛选默认值",
+            }
+        )
+
+    if applied.expected_folder_name:
+        hits.append(
+            {
+                "field": "naming",
+                "applied": True,
+                "summary": "命名策略已生成默认目录名：" + applied.expected_folder_name,
+            }
+        )
+    else:
+        hits.append(
+            {
+                "field": "naming",
+                "applied": False,
+                "summary": "未应用命名默认值",
+            }
+        )
+
+    return hits
+
+
+def build_review_metadata(
+    *,
+    raw_title: str,
+    parse_result: AnimeTitleParseResult | None,
+    candidates: list[dict[str, object]] | None,
+    preference_warnings: list[str] | None,
+    search_failed: bool = False,
+    status: str = BATCH_ITEM_STATUS_PARSED,
+) -> BatchReviewMetadata:
+    """Compute the review-needed flag and Chinese review hints for one item.
+
+    ``needs_user_review`` is True when the parse is low-confidence or
+    multi-candidate, the item has no candidates, the candidate search fell back
+    or failed, or the saved preferences conflict for this item. ``candidates``
+    are the serialized public candidate dicts (empty list when a search produced
+    no results). The result is item-local: one item's review state never affects
+    its siblings.
+    """
+    hints: list[str] = []
+    needs_review = status == BATCH_ITEM_STATUS_FAILED
+
+    if parse_result is not None:
+        raw = (raw_title or "").strip()
+        if any((query or "").strip() == raw for query in parse_result.search_queries):
+            needs_review = True
+            hints.append("搜索词已回退为原始输入，建议核对搜索结果。")
+        if parse_result.confidence < LOW_CONFIDENCE_THRESHOLD:
+            needs_review = True
+            hints.append(
+                f"名称解析置信度较低（{parse_result.confidence:.2f}），建议核对候选合集。"
+            )
+        candidate_count = len(parse_result.canonical_title_candidates)
+        if candidate_count > 1:
+            needs_review = True
+            hints.append(
+                f"存在多个候选名称（{candidate_count} 个），建议确认正确的合集。"
+            )
+        elif parse_result.needs_user_review and not hints:
+            needs_review = True
+            hints.append("名称解析结果建议人工核对。")
+
+        if not candidates and not search_failed:
+            needs_review = True
+            hints.append("未找到候选合集，建议手动选择或使用直连合集。")
+    else:
+        needs_review = True
+        hints.append("该条目解析失败，请检查后重试。")
+
+    if search_failed:
+        needs_review = True
+        hints.append("候选搜索失败，已回退默认流程，建议核对搜索结果。")
+
+    for warning in preference_warnings or []:
+        if _is_preference_conflict_warning(warning):
+            needs_review = True
+            hints.append("偏好字幕组存在冲突，请确认字幕组选择。")
+
+    if needs_review and not hints:
+        hints.append("该条目需要人工核对后再接受。")
+
+    return BatchReviewMetadata(
+        needs_user_review=needs_review,
+        review_hints=list(dict.fromkeys(hints)),
+    )
 
 
 def apply_preferences_to_item(
@@ -158,6 +326,10 @@ def _append_season_hint(base: str, season_hint: str | None) -> str:
 
 __all__ = [
     "AppliedBatchPreferences",
+    "BatchReviewMetadata",
+    "PREFERENCE_CONFLICT_WARNING",
     "apply_preferences_to_item",
     "build_preference_config",
+    "build_preference_hits",
+    "build_review_metadata",
 ]

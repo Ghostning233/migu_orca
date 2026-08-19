@@ -46,6 +46,7 @@ from shared.models import (
     MatchedBangumi,
     NamingPreference,
     RssSource,
+    SearchPreference,
     SubtitleGroupPreference,
     VersionedUserPreference,
 )
@@ -2542,9 +2543,24 @@ def test_candidate_search_api_cache_isolates_different_hosts(
 def test_batch_parse_api_returns_per_item_parsed_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # 路哥S4 (high confidence, single candidate) gets a real candidate so it is
+    # the no-review case; 萌王S4 (multi-candidate) and 邻家天使S2 (no candidate)
+    # both must be flagged for review under US-154.
+    def _search_candidates(search_queries: list[str], mikan_config: object) -> list[dict[str, object]]:
+        if search_queries and "实力至上" in search_queries[0]:
+            return [
+                {
+                    "bangumi_id": "4001",
+                    "title": "欢迎来到实力至上主义的教室 第四季",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/4001",
+                    "source_query": search_queries[0],
+                }
+            ]
+        return []
+
     monkeypatch.setattr(
         "apps.migu_orca_web.views._search_batch_item_candidates",
-        lambda search_queries, mikan_config: [],
+        _search_candidates,
     )
     raw_input = "\n萌王S4\n  \n路哥S4\n邻家天使S2\n"
 
@@ -2579,6 +2595,11 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
     assert items[0]["candidates"] == []
     assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
     assert items[1]["needs_user_review"] is False
+    assert items[1]["candidates"][0]["bangumi_id"] == "4001"
+    # US-154: no-candidate items (even high-confidence single-candidate ones)
+    # must be flagged for review.
+    assert items[2]["needs_user_review"] is True
+    assert items[2]["candidates"] == []
     # Stage 21: every item carries applied_preferences + preference_warnings.
     assert items[0]["applied_preferences"] == {
         "subtitle_groups": {
@@ -2600,6 +2621,29 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         "欢迎来到实力至上主义的教室 第四季"
     )
     assert items[1]["preference_warnings"] == []
+    # US-154: preference_hits summarizes which preference defaults applied.
+    assert items[1]["preference_hits"] == [
+        {
+            "field": "subtitle_groups",
+            "applied": False,
+            "summary": "未配置字幕组偏好，使用默认选择流程",
+        },
+        {
+            "field": "filter_rule",
+            "applied": False,
+            "summary": "未配置筛选默认值",
+        },
+        {
+            "field": "naming",
+            "applied": True,
+            "summary": "命名策略已生成默认目录名：欢迎来到实力至上主义的教室 第四季",
+        },
+    ]
+    # The high-confidence single-candidate item with a candidate has no review
+    # hints; the multi-candidate and no-candidate items carry Chinese hints.
+    assert items[1]["review_hints"] == []
+    assert any("存在多个候选名称" in hint for hint in items[0]["review_hints"])
+    assert any("未找到候选合集" in hint for hint in items[2]["review_hints"])
 
 
 def test_batch_parse_api_rejects_empty_input_with_chinese_validation_error() -> None:
@@ -2884,6 +2928,16 @@ def test_batch_parse_api_preference_response_never_leaks_sensitive_values(
     assert "secret-token" not in body
     assert "llm.example" not in body
     assert "session-id" not in body
+    # US-154: preference_hits only carry public rule summaries, and review_hints
+    # are safe Chinese prompts — no sensitive key or value can appear anywhere.
+    for hit in item["preference_hits"]:
+        assert set(hit) == {"field", "applied", "summary"}
+        assert isinstance(hit["summary"], str)
+    for hint in item["review_hints"]:
+        assert isinstance(hint, str)
+        assert "token" not in hint
+        assert "cookie" not in hint
+        assert "llm.example" not in hint
 
 
 def test_batch_parse_api_searches_candidates_for_each_item_query(
@@ -3039,6 +3093,10 @@ def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_
         "url": "[redacted-url]",
         "[redacted]": "[redacted]",
     }
+    # US-154: a search failure must be flagged for review with a Chinese hint,
+    # but it never leaks the redacted URL/cookie from the search error.
+    assert items[1]["needs_user_review"] is True
+    assert any("候选搜索失败" in hint for hint in items[1]["review_hints"])
     assert "secret-token" not in body
     assert "session-cookie" not in body
     assert "https://mikan.example/Home/Search" not in body
@@ -3105,6 +3163,116 @@ def test_batch_parse_api_candidate_results_only_serialize_public_fields(
     assert "secret-token" not in body
     assert "magnet:?" not in body
     assert "<html" not in body
+
+
+def test_batch_parse_api_marks_low_confidence_item_for_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 杖剑谭S2 parses at 0.62 confidence (below the 0.7 threshold) and has a
+    # single canonical candidate, so it must be flagged for review even though
+    # the candidate search returns a result.
+    client = _MappedCandidateSearchClient(
+        responses={
+            "杖与剑的魔剑谭 第二季": [
+                MikanCandidate(
+                    bangumi_id="2001",
+                    title="杖与剑的魔剑谭 第二季",
+                    mikan_url="https://mikan.example/Home/Bangumi/2001",
+                    source_query="杖与剑的魔剑谭 第二季",
+                )
+            ]
+        }
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "杖剑谭S2"},
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["confidence"] == 0.62
+    assert item["candidates"][0]["bangumi_id"] == "2001"
+    assert item["needs_user_review"] is True
+    assert any("置信度较低" in hint for hint in item["review_hints"])
+
+
+def test_batch_parse_api_marks_preference_conflict_item_for_review(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # fallback=none with no preferred subtitle group conflicts with auto
+    # selection, so the item is flagged for review even though the parse is
+    # high-confidence and the candidate search succeeds.
+    storage_dir = tmp_path / "migu-state"
+    save_user_preferences(
+        load_storage_config(storage_dir),
+        VersionedUserPreference(
+            version=1,
+            subtitle_groups=SubtitleGroupPreference(
+                preferred=[],
+                excluded=[],
+                fallback="none",
+            ),
+            filter_defaults=FilterDefaults(
+                must_contain="",
+                must_not_contain="",
+                use_regex=False,
+                case_sensitive=False,
+            ),
+            naming=NamingPreference(
+                strategy="official_title_season", template="{title}"
+            ),
+            search=SearchPreference(reuse_explicit_corrections=True),
+        ),
+    )
+    client = _MappedCandidateSearchClient(
+        responses={
+            "欢迎来到实力至上主义的教室 第四季": [
+                MikanCandidate(
+                    bangumi_id="4001",
+                    title="欢迎来到实力至上主义的教室 第四季",
+                    mikan_url="https://mikan.example/Home/Bangumi/4001",
+                    source_query="欢迎来到实力至上主义的教室 第四季",
+                )
+            ]
+        }
+    )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        lambda config: client,
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={
+            "raw_input": "路哥S4",
+            "storage_dir": str(storage_dir),
+        },
+    )
+
+    payload = response.get_json()
+    item = payload["result"]["items"][0]
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["candidates"][0]["bangumi_id"] == "4001"
+    assert item["needs_user_review"] is True
+    assert any(
+        "偏好字幕组存在冲突" in hint for hint in item["review_hints"]
+    )
+    assert item["preference_warnings"] == [
+        "fallback 为 none 且未配置偏好字幕组，不会自动选择字幕组"
+    ]
 
 
 def test_candidate_search_api_cache_expires_after_ttl(

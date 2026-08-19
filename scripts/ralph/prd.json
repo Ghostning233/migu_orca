@@ -88,7 +88,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "本 story 只增加解释性元数据和状态，不实现自动接受。"
     },
     {
