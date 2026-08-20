@@ -1479,6 +1479,13 @@ class BatchRetryView(PostView):
         config = load_storage_config(storage_dir)
         queue = load_submission_queue(config, payload.batch_id)
         ab_config = build_ab_config(payload.ab_config.model_dump())
+        if not (payload.request_id or "").strip():
+            raise Stage1Error(
+                "validation_error",
+                "请提供要重试的订阅方案 request_id",
+                "batch_retry",
+                {"field": "request_id"},
+            )
         try:
             result = retry_batch_queue_item(
                 batch_id=payload.batch_id,
@@ -1491,6 +1498,8 @@ class BatchRetryView(PostView):
                 persist_submit_result=_build_batch_persist_submit_result(storage_dir),
             )
         except ValueError as exc:
+            # After the request_id validation above, the only remaining
+            # ValueError from the service is an unknown queue item.
             raise Stage1Error(
                 "queue_item_not_found",
                 "队列中不存在该订阅方案项目",
@@ -1524,6 +1533,13 @@ class BatchRecoverView(PostView):
                 "batch_recover",
                 {"field": "confirm"},
             )
+        if not (payload.request_id or "").strip():
+            raise Stage1Error(
+                "validation_error",
+                "请提供要恢复的订阅方案 request_id",
+                "batch_recover",
+                {"field": "request_id"},
+            )
 
         storage_dir = _storage_dir(payload.storage_dir)
         config = load_storage_config(storage_dir)
@@ -1538,6 +1554,8 @@ class BatchRecoverView(PostView):
                 persist_queue=_build_batch_persist_queue(config),
             )
         except ValueError as exc:
+            # After the request_id/action validation above, the only remaining
+            # ValueError from the service is an unknown queue item.
             raise Stage1Error(
                 "queue_item_not_found",
                 "队列中不存在该订阅方案项目",

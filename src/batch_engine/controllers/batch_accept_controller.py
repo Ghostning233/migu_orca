@@ -217,8 +217,28 @@ def _accept_one_item(
                 queue,
             )
         # The Request is already ACCEPTED but its queue item is missing (the
-        # queue save failed, was deleted, or is corrupted): rebuild the
-        # READY_TO_SUBMIT item so the accepted Request can be submitted again.
+        # queue save failed, was deleted, or is corrupted). If the Request
+        # already carries a SUCCESSFUL AB submit result, the subscription was
+        # already created on Auto Bangumi: rebuilding a READY_TO_SUBMIT item
+        # would let a later submit re-create it (duplicate subscription), so we
+        # never re-enqueue it.
+        persisted_result = request.get("ab_submit_result")
+        if (
+            isinstance(persisted_result, dict)
+            and persisted_result.get("success") is True
+        ):
+            return (
+                BatchAcceptItemResult(
+                    item_id=item.item_id,
+                    request_id=request_id,
+                    title=fallback_title,
+                    status=ACCEPT_OUTCOME_ALREADY_ACCEPTED,
+                    reason="该订阅方案已提交成功，跳过重复入队",
+                ),
+                queue,
+            )
+        # Otherwise rebuild the READY_TO_SUBMIT item so the accepted Request can
+        # be submitted again.
         title = fallback_title or "未命名订阅方案"
         next_queue = enqueue_item(
             queue,

@@ -11,6 +11,7 @@ from batch_engine.controllers.batch_queue_controller import (
     enqueue_item,
     mark_queue_item_failed,
     mark_queue_item_retry_failed,
+    queue_item_from_storage_dict,
     sanitize_queue_summary,
     serialize_queue,
     serialize_queue_item,
@@ -372,6 +373,56 @@ class TestMarkQueueItemRetryFailed:
         assert queue.items[0].last_error == "category=request_cancelled"
         assert "super-secret-token" not in (queue.items[0].last_error or "")
         assert "sid=abc123" not in (queue.items[0].last_error or "")
+
+    def test_sanitizer_swallows_keyword_space_separated_values(self) -> None:
+        """Regression: "Bearer abc123" / "token xyz" must redact the value too,
+        not just the keyword label."""
+        for raw in (
+            "Authorization: Bearer abc123XYZ",
+            "token abc123XYZ",
+            "password hunter2",
+        ):
+            summary = sanitize_queue_summary({"details": raw})
+            assert summary is not None
+            assert "abc123XYZ" not in summary
+            assert "hunter2" not in summary
+            assert "Bearer" not in summary
+
+    def test_queue_item_from_storage_rejects_unknown_status(self) -> None:
+        """Regression: a corrupted/poisoned queue file with an unknown status
+        must be rejected as invalid storage instead of loading a ghost item."""
+        with pytest.raises(ValueError, match="invalid queue item status"):
+            queue_item_from_storage_dict(
+                {
+                    "queue_id": "queue-1",
+                    "batch_id": "batch-1",
+                    "item_id": "item-1",
+                    "request_id": "req-1",
+                    "title": "标题",
+                    "status": "BOGUS",
+                }
+            )
+
+    def test_queue_item_from_storage_accepts_known_statuses(self) -> None:
+        for status in (
+            BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+            BATCH_QUEUE_STATUS_SUBMITTING,
+            BATCH_QUEUE_STATUS_SUCCEEDED,
+            BATCH_QUEUE_STATUS_FAILED,
+            BATCH_QUEUE_STATUS_RETRYABLE,
+            BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED,
+        ):
+            item = queue_item_from_storage_dict(
+                {
+                    "queue_id": "queue-1",
+                    "batch_id": "batch-1",
+                    "item_id": "item-1",
+                    "request_id": "req-1",
+                    "title": "标题",
+                    "status": status,
+                }
+            )
+            assert item.status == status
 
     def test_rejects_ready_items(self) -> None:
         base = _queue_with(_item(request_id="req-1"))

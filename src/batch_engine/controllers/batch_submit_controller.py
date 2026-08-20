@@ -386,11 +386,14 @@ def recover_batch_queue_item(
     Stuck states are never auto-retried (a retry could re-create a subscription
     Auto Bangumi already made), so they need an explicit recovery path:
 
-    - ``action=auto``: only meaningful for SUBMITTING. If the Request snapshot
-      already carries an ``ab_submit_result`` (the result was persisted but the
-      queue was not finalized before an interruption), the item is recovered to
-      SUCCEEDED. Without a persisted result the outcome is ``needs_manual`` and
-      the caller must ask the user to verify Auto Bangumi.
+    - ``action=auto``: only meaningful for SUBMITTING. The persisted
+      ``ab_submit_result`` decides the outcome: a ``success: true`` result
+      finalizes the item as SUCCEEDED; a ``success: false`` result finalizes
+      it as RETRYABLE (transient AB errors) or FAILED (terminal errors) with
+      the sanitized error summary kept on the item; a missing/invalid result
+      (non-dict or no ``success`` key) returns ``needs_manual`` so the caller
+      asks the user to verify Auto Bangumi. A persisted failure is never
+      auto-marked SUCCEEDED.
     - ``action=succeeded``: manual confirmation that Auto Bangumi created the
       subscription -> SUCCEEDED (with a sanitized summary when a result exists).
     - ``action=failed``: manual confirmation that Auto Bangumi did NOT create
@@ -489,7 +492,14 @@ def _recover_auto(
 
     request = _safe_load_request(load_request, item.request_id)
     ab_result = (request or {}).get("ab_submit_result")
-    if not isinstance(ab_result, dict) or "success" not in ab_result:
+    if not isinstance(ab_result, dict) or not isinstance(
+        ab_result.get("success"), bool
+    ):
+        # A missing, non-dict, or non-boolean success flag is not a legal
+        # result object: fall back to manual verification (e.g. a persisted
+        # ``success: null`` must never be silently turned into a terminal
+        # FAILED, because a later retry assumes Auto Bangumi did NOT create
+        # the subscription — which we cannot know).
         return _recover_needs_manual(
             batch_id,
             queue,
@@ -701,7 +711,9 @@ def serialize_batch_submit_item(item: BatchSubmitItemResult) -> dict[str, Any]:
         "request_id": item.request_id,
         "title": sanitize_queue_summary(item.title) or item.title,
         "status": item.status,
-        "reason": item.reason,
+        # Reasons are re-sanitized defensively on the way out, so even an
+        # injected custom reason can never leak secrets through the API.
+        "reason": sanitize_queue_summary(item.reason),
         "error_type": item.error_type,
         "attempts": item.attempts,
     }
@@ -712,7 +724,8 @@ def serialize_batch_submit_result(result: BatchSubmitResult) -> dict[str, Any]:
 
     The queue is re-serialized through ``serialize_queue`` so even a directly
     constructed queue cannot leak secrets; per-item results carry only public
-    metadata and Chinese/readable reasons.
+    metadata and Chinese/readable reasons. The summary counts every outcome,
+    including the recovery ``needs_manual`` outcome (always 0 for submit/retry).
     """
     summary: dict[str, int] = {}
     for item in result.items:
@@ -726,6 +739,10 @@ def serialize_batch_submit_result(result: BatchSubmitResult) -> dict[str, Any]:
             SUBMIT_OUTCOME_FAILED: summary.get(SUBMIT_OUTCOME_FAILED, 0),
             SUBMIT_OUTCOME_RETRYABLE: summary.get(SUBMIT_OUTCOME_RETRYABLE, 0),
             SUBMIT_OUTCOME_SKIPPED: summary.get(SUBMIT_OUTCOME_SKIPPED, 0),
+            RECOVER_OUTCOME_NEEDS_MANUAL: summary.get(
+                RECOVER_OUTCOME_NEEDS_MANUAL,
+                0,
+            ),
         },
     }
 
@@ -783,6 +800,40 @@ def _submit_one_item(
             ),
             error_type="request_cancelled" if cancelled else "invalid_request_status",
             now_factory=now_factory,
+        )
+
+    # Defense in depth: if the Request already carries a SUCCESSFUL AB submit
+    # result, the subscription was already created on Auto Bangumi. Never call
+    # Auto Bangumi again — finalize the item as SUCCEEDED with the persisted
+    # result summary instead (this can happen when a queue item was rebuilt
+    # manually or a queue file was restored from before the submit).
+    persisted_result = request.get("ab_submit_result")
+    if isinstance(persisted_result, dict) and persisted_result.get("success") is True:
+        next_queue = start_queue_item_submit(
+            queue,
+            item.request_id,
+            now_factory=now_factory,
+        )
+        in_flight = _queue_item(next_queue, item.request_id)
+        next_queue = complete_queue_item_submit(
+            next_queue,
+            item.request_id,
+            BATCH_QUEUE_STATUS_SUCCEEDED,
+            ab_result_summary=_success_summary(persisted_result),
+            now_factory=now_factory,
+        )
+        if persist_queue is not None:
+            persist_queue(next_queue)
+        return (
+            BatchSubmitItemResult(
+                item_id=item.item_id,
+                request_id=item.request_id,
+                title=item.title,
+                status=SUBMIT_OUTCOME_SUCCEEDED,
+                reason="该订阅方案已提交成功，跳过重复提交",
+                attempts=in_flight.attempts,
+            ),
+            next_queue,
         )
 
     next_queue = start_queue_item_submit(

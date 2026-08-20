@@ -57,6 +57,11 @@ _SENSITIVE_KEYWORDS = re.compile(
 _URL_RE = re.compile(r"https?://[^\s<>'\"]+")
 _MAGNET_RE = re.compile(r"magnet:\?[^\s<>'\"]*", re.IGNORECASE)
 _ABSOLUTE_PATH_RE = re.compile(r"(?<!\w)(?:/[^\s<>'\"]+)+")
+# Absolute (root) path form only: a slash segment at the start of the text or
+# right after whitespace/a quote. Used when a field legitimately allows
+# relative path separators (e.g. naming templates like "TV/{title}/Season N"),
+# while still rejecting true absolute paths like "/home/user/...".
+_ABSOLUTE_PATH_STRICT_RE = re.compile(r"(?:^|[\s'\"])(/[^\s<>'\"]+)")
 _FILE_SCHEME_RE = re.compile(r"file://", re.IGNORECASE)
 _WINDOWS_DRIVE_RE = re.compile(r"(?i)\b[a-z]:[\\/]")
 _MARKUP_RE = re.compile(
@@ -77,13 +82,22 @@ def default_user_preferences() -> VersionedUserPreference:
     return VersionedUserPreference()
 
 
-def contains_sensitive_value(text: str) -> bool:
-    """Return True when ``text`` looks like a sensitive external value."""
+def contains_sensitive_value(text: str, *, allow_relative_paths: bool = False) -> bool:
+    """Return True when ``text`` looks like a sensitive external value.
+
+    ``allow_relative_paths`` is for fields that legitimately contain relative
+    path separators (e.g. naming templates like ``TV/{title}/Season N``): only
+    true absolute paths (root paths, Windows drives, file:// URLs) are then
+    rejected, while relative slash segments are allowed.
+    """
     if _URL_RE.search(text):
         return True
     if _MAGNET_RE.search(text):
         return True
-    if _ABSOLUTE_PATH_RE.search(text):
+    if allow_relative_paths:
+        if _ABSOLUTE_PATH_STRICT_RE.search(text):
+            return True
+    elif _ABSOLUTE_PATH_RE.search(text):
         return True
     if _FILE_SCHEME_RE.search(text):
         return True
@@ -179,6 +193,10 @@ def validate_preferences(
         "naming.template",
         failed_step,
         max_length=MAX_NAMING_TEMPLATE_LENGTH,
+        # Naming templates legitimately contain relative path separators
+        # (e.g. "TV/{title}/Season {season}"); only absolute paths / drives /
+        # URLs / keywords are rejected.
+        allow_relative_paths=True,
     )
 
     search = preferences.search
@@ -560,10 +578,11 @@ def _validate_string(
     failed_step: str,
     *,
     max_length: int | None = None,
+    allow_relative_paths: bool = False,
 ) -> None:
     if not isinstance(value, str):
         _raise_validation(failed_step, field, f"{field} 必须是字符串")
-    if contains_sensitive_value(value):
+    if contains_sensitive_value(value, allow_relative_paths=allow_relative_paths):
         _raise_validation(failed_step, field, f"{field} 包含不允许的敏感内容")
     if max_length is not None and len(value) > max_length:
         _raise_validation(

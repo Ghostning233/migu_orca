@@ -4935,6 +4935,7 @@ def test_batch_submit_api_submits_queue_items_successfully(
         "failed": 0,
         "retryable": 0,
         "skipped": 0,
+        "needs_manual": 0,
     }
     assert result["items"] == [
         {
@@ -5009,6 +5010,7 @@ def test_batch_submit_api_single_failure_does_not_block_others(
         "failed": 1,
         "retryable": 0,
         "skipped": 0,
+        "needs_manual": 0,
     }
     assert result["items"][0]["status"] == "succeeded"
     assert result["items"][1]["status"] == "failed"
@@ -5050,6 +5052,7 @@ def test_batch_submit_api_skips_already_succeeded_items(
         "failed": 0,
         "retryable": 0,
         "skipped": 1,
+        "needs_manual": 0,
     }
     assert second_payload["result"]["items"][0]["status"] == "skipped"
     assert (
@@ -5345,6 +5348,7 @@ def test_batch_retry_api_retries_failed_item_successfully(
         "failed": 0,
         "retryable": 0,
         "skipped": 0,
+        "needs_manual": 0,
     }
     assert result["items"] == [
         {
@@ -5417,6 +5421,7 @@ def test_batch_retry_api_failure_keeps_retryable_status_and_increments_attempts(
         "failed": 0,
         "retryable": 1,
         "skipped": 0,
+        "needs_manual": 0,
     }
     item = result["items"][0]
     assert item["status"] == "retryable"
@@ -5472,6 +5477,7 @@ def test_batch_retry_api_skips_succeeded_items_without_resubmit(
         "failed": 0,
         "retryable": 0,
         "skipped": 1,
+        "needs_manual": 0,
     }
     assert result["items"][0]["status"] == "skipped"
     assert result["items"][0]["reason"] == "已提交成功，不可重复提交"
