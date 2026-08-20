@@ -12,6 +12,27 @@ from shared.models import EntryRequest
 
 pytestmark = pytest.mark.browser
 
+
+@pytest.fixture(autouse=True)
+def _isolate_corrections_save(page: Page) -> Any:
+    """Isolate the user-correction save the front end fires after a successful
+    accept: intercept POST /api/v1/corrections so real saves never touch the
+    default storage, and record the payloads so tests can assert the closure
+    (US-155). Returns the recorded payload list."""
+    calls: list[dict[str, Any]] = []
+
+    def _fulfill(route: Any, request: Any) -> None:
+        calls.append(json.loads(request.post_data or "{}"))
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"corrections": []}, ensure_ascii=False),
+        )
+
+    page.route("**/api/v1/corrections", _fulfill)
+    yield calls
+
+
 #: Sentinel to distinguish "field not provided by the caller" from an explicit
 #: ``None`` (Stage 21 US-156 tests assert the no-preference fallback, where the
 #: batch parse API returns ``applied_preferences: null`` / ``preference_hits:
@@ -42,6 +63,7 @@ def _batch_item(
     candidate_title: str | None = None,
     poster_url: str | None = None,
     source_query: str | None = None,
+    season_hint: str | None = None,
     confirmable_config: dict[str, Any] | None = None,
     source_info: dict[str, Any] | None = None,
     preview_request: dict[str, Any] | None = None,
@@ -73,7 +95,7 @@ def _batch_item(
         "raw_title": raw_title,
         "status": status,
         "canonical_title_candidates": [canonical_title] if canonical_title else [],
-        "season_hint": None,
+        "season_hint": season_hint,
         "search_queries": list(search_queries or [source_query or title]),
         "confidence": confidence,
         "needs_user_review": needs_user_review,
@@ -121,6 +143,7 @@ def _reviewable_batch_item(
         status="DRAFT",
         canonical_title="关于我转生变成史莱姆这档事 第四季",
         candidate_title="关于我转生变成史莱姆这档事 第四季",
+        season_hint="S4",
         source_query="转生史莱姆 第四季",
         confirmable_config={
             "selected_subtitle_group": "桜都字幕组",
@@ -739,6 +762,74 @@ class TestBatchWorkbenchEntry:
         assert accept_calls and accept_calls[0]["items"][0]["item_id"] == "item-accept"
         assert accept_calls[0]["storage_dir"] is None
         assert "item_ids" not in accept_calls[0]
+
+    def test_accept_records_user_correction(
+        self,
+        page: Page,
+        live_server_url: str,
+        _isolate_corrections_save: list[dict[str, Any]],
+    ) -> None:
+        """US-155 closure: accepting a card records the user-confirmed
+        raw_title -> canonical_title correction through the corrections API, so
+        later batch inputs reuse the confirmed title/search query."""
+        first_preview = _preview_request("咒术回战", "req-batch-corr")
+
+        def _fulfill_batch(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        _reviewable_batch_item(
+                            item_id="item-corr", preview_request=first_preview
+                        )
+                    ]
+                ),
+            )
+
+        def _save_preview(route: Any, request: Any) -> None:
+            payload = json.loads(request.post_data or "{}")
+            saved = dict(payload["request"])
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "request": saved,
+                            "summary": {"request_id": saved["request_id"]},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill_batch)
+        page.route("**/api/v1/requests/preview-save", _save_preview)
+        page.route("**/api/v1/batches/batch-browser/accept*", _accept_route_handler({"item-corr"}))
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+
+        first_card = page.locator(".batch-draft-card", has_text="萌王S4")
+        first_card.locator(".batch-card-expand").click()
+        page.once("dialog", lambda dialog: dialog.accept())
+        first_card.locator(".batch-card-accept").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        expect(first_card.locator(".batch-card-status")).to_contain_text("已接受")
+        # The corrections API received the confirmed mapping.
+        assert _isolate_corrections_save, "corrections API was not called"
+        correction = _isolate_corrections_save[0]["correction"]
+        assert correction["raw_title"] == "萌王S4"
+        assert correction["canonical_title"] == "关于我转生变成史莱姆这档事 第四季"
+        assert correction["season_hint"] == "S4"
+        assert correction["query_correction"] == "关于我转生变成史莱姆这档事 第四季"
+        # Only non-sensitive public fields are submitted.
+        body = json.dumps(_isolate_corrections_save[0], ensure_ascii=False)
+        assert "secret-token" not in body
+        assert "token" not in body
 
     def test_batch_card_grid_uses_single_column_on_narrow_screen(
         self, page: Page, live_server_url: str

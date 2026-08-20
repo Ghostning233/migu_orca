@@ -470,6 +470,7 @@ def _serialize_batch_parse_result(
     needs_user_review: bool | None = None,
     review_hints: list[str] | None = None,
     enhanced_search_queries: list[dict[str, object]] | None = None,
+    preview_request: dict[str, object] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "item_id": item.item_id,
@@ -491,6 +492,7 @@ def _serialize_batch_parse_result(
         "preference_warnings": list(preference_warnings or []),
         "review_hints": list(review_hints or []),
         "enhanced_search_queries": list(enhanced_search_queries or []),
+        "preview_request": preview_request,
     }
     if error is not None:
         result["error"] = _optional_error(error)
@@ -743,6 +745,72 @@ def _serialize_preference_application(
         build_preference_hits(applied),
         list(warnings),
     )
+
+
+def _build_batch_preview_request(
+    *,
+    batch_id: str,
+    item_id: str,
+    raw_title: str,
+    parse_result: AnimeTitleParseResult,
+    applied: AppliedBatchPreferences | None,
+) -> dict[str, object]:
+    """Build the editable in-memory draft (``preview_request``) for a parsed
+    batch item so the card can enter the existing preview-modify /
+    preview-save / accept flow.
+
+    The draft is a PENDING_CONFIRM skeleton whose editable defaults come from
+    the user preferences: the first preferred subtitle group, the default
+    filter rule (with explicit ``use_regex``/``case_sensitive`` booleans), and
+    the preferred folder name. RSS/seed data is intentionally absent — it is
+    only available after a MiKan collection is chosen — so seeds start empty.
+    Only non-sensitive public fields are included; the request-scoped
+    ``request_id`` is derived from the batch/item identity so preview-save can
+    persist it without colliding across batches.
+    """
+    config = applied.to_dict() if applied is not None else None
+    subtitle_groups = (config or {}).get("subtitle_groups") or {}
+    preferred = subtitle_groups.get("preferred") or []
+    filter_rule = (config or {}).get("filter_rule") or {
+        "must_contain": "",
+        "must_not_contain": "",
+        "use_regex": False,
+        "case_sensitive": False,
+    }
+    canonical = (
+        list(parse_result.canonical_title_candidates)[0]
+        if parse_result.canonical_title_candidates
+        else raw_title
+    )
+    return {
+        "request_id": f"{batch_id}-{item_id}",
+        "status": PENDING_CONFIRM,
+        "input": {"raw_title": raw_title},
+        "source_info": {
+            "matched_bangumi": {
+                "title": canonical,
+                "aliases": list(parse_result.canonical_title_candidates),
+            },
+            "rss_sources": [],
+        },
+        "confirmable_config": {
+            "selected_subtitle_group": (
+                str(preferred[0]) if preferred else None
+            ),
+            "selected_rss_url": None,
+            "filter_rule": {
+                "must_contain": str(filter_rule.get("must_contain") or ""),
+                "must_not_contain": str(filter_rule.get("must_not_contain") or ""),
+                "use_regex": bool(filter_rule.get("use_regex")),
+                "case_sensitive": bool(filter_rule.get("case_sensitive")),
+            },
+            "effective_seed_names": [],
+            "expected_folder_name": (
+                applied.expected_folder_name if applied is not None else None
+            ),
+            "warnings": [],
+        },
+    }
 
 
 def _load_batch_queue_or_none(
@@ -1351,6 +1419,13 @@ class BatchParseView(PostView):
                     needs_user_review=review.needs_user_review,
                     review_hints=review.review_hints,
                     enhanced_search_queries=enhanced_queries,
+                    preview_request=_build_batch_preview_request(
+                        batch_id=batch.batch_id,
+                        item_id=item.item_id,
+                        raw_title=item.raw_title,
+                        parse_result=parse_result,
+                        applied=applied_obj,
+                    ),
                 )
             )
 
