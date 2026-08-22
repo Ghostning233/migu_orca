@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -291,6 +292,45 @@ class TestInvalidStoredFile:
 class TestValidation:
     def test_validate_accepts_full_legal_preferences(self) -> None:
         validate_preferences(_full_preferences())
+
+    def test_validate_accepts_naming_template_with_relative_paths(self) -> None:
+        """Regression: naming templates legitimately contain relative path
+        separators (subdirectory layout) and must not be rejected as sensitive."""
+        for template in (
+            "TV/{title}/Season {season}",
+            "{title}/{season}",
+            "动画/{title}",
+        ):
+            prefs = _full_preferences()
+            prefs = replace(
+                prefs,
+                naming=NamingPreference(
+                    strategy=prefs.naming.strategy,
+                    template=template,
+                ),
+            )
+            validate_preferences(prefs)
+
+    def test_validate_rejects_absolute_path_in_naming_template(self) -> None:
+        """Even with relative paths allowed, a true absolute path in the naming
+        template is still rejected."""
+        for template in (
+            "/home/ghostning/动画/{title}",
+            "C:\\Users\\admin\\{title}",
+            "file:///tmp/{title}",
+        ):
+            prefs = _full_preferences()
+            prefs = replace(
+                prefs,
+                naming=NamingPreference(
+                    strategy=prefs.naming.strategy,
+                    template=template,
+                ),
+            )
+            with pytest.raises(Stage1Error) as error:
+                validate_preferences(prefs)
+            assert error.value.error_type == "validation_error"
+            assert error.value.details == {"field": "naming.template"}
 
     def test_validate_rejects_invalid_fallback_enum(self) -> None:
         prefs = VersionedUserPreference(

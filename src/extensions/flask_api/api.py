@@ -17,6 +17,18 @@ _URL_RE = re.compile(r"https?://[^\s<>'\"]+")
 _TOKEN_RE = re.compile(
     r"(?i)(token|secret|cookie|authorization|password|passwd|bearer|username|sid|session)"
 )
+# Redacts "key=value" / "key: value" pairs where the key names a sensitive
+# value, so the secret value itself cannot survive inside a plain string.
+_SENSITIVE_KEY_VALUE_RE = re.compile(
+    r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
+    r"username|sid|session|endpoint|rss_url)\s*[=:]\s*[^\s,;]+"
+)
+# Redacts a sensitive keyword followed by a space-separated value (e.g.
+# "Bearer abc123") — replacing only the keyword would leave the raw value.
+_SENSITIVE_WORD_VALUE_RE = re.compile(
+    r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
+    r"username|sid|session)\s+[^\s,;'\"<>]+"
+)
 
 
 def ok_response(result: Any) -> Response:
@@ -157,6 +169,11 @@ def sanitize_error_data(value: Any) -> Any:
 def _sanitize_string(value: str) -> str:
     sanitized = _URL_RE.sub("[redacted-url]", value)
     sanitized = _ABSOLUTE_PATH_RE.sub("[redacted-path]", sanitized)
+    # Keyword + space-separated value FIRST (so "Bearer abc123" is swallowed as
+    # one unit), then "key=value"/"key: value" pairs — the reverse order would
+    # let the pair regex consume the keyword and leave the raw value behind.
+    sanitized = _SENSITIVE_WORD_VALUE_RE.sub("[redacted]", sanitized)
+    sanitized = _SENSITIVE_KEY_VALUE_RE.sub("[redacted]", sanitized)
     if "<rss" in sanitized.lower() or "<html" in sanitized.lower():
         return "[redacted-content]"
     if _TOKEN_RE.search(sanitized):

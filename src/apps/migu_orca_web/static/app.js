@@ -1811,12 +1811,64 @@
       }
       renderBatchParseItems(batchDraftCards);
       applyQueueResult(result && result.queue);
+      // 用户确认了这些卡片的 raw_title → canonical title 映射：记录为搜索词
+      // 修正，供后续批量输入复用（非关键路径，失败不阻断接受流程）。
+      // 从更新后的 batchDraftCards 匹配（applyBatchAcceptResult 已把被接受的
+      // 行状态更新为 ACCEPTED），而不是用传入的旧行引用。
+      for (const acceptedRow of rows) {
+        const updatedRow = batchDraftCards.find(
+          (card) => card.item_id === acceptedRow.item_id,
+        );
+        if (updatedRow && fieldValue(updatedRow.status) === "ACCEPTED") {
+          recordUserCorrection(updatedRow);
+        }
+      }
       await loadList({loadSelectedDetail: false});
       showBatchAcceptNotification(outcomeCounts, opts.single);
     } catch (error) {
       notifyApiError("接受失败", error);
     } finally {
       setBatchAcceptInFlight(false);
+    }
+  }
+
+  async function recordUserCorrection(row) {
+    // 把用户确认的 raw_title → canonical title 保存为非敏感 TitleCorrection，
+    // 供 search_enhancer 在后续批量输入中生成可审核的增强搜索词。只有公开
+    // 非敏感字段被提交；保存失败静默（不影响接受流程）。
+    const canonicalTitles = Array.isArray(row.canonical_title_candidates)
+      ? row.canonical_title_candidates
+      : [];
+    const canonical = canonicalTitles.length ? String(canonicalTitles[0]) : "";
+    const raw = row.raw_title ? String(row.raw_title) : "";
+    if (!raw || !canonical) {
+      return;
+    }
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    const first = candidates.length ? candidates[0] : null;
+    const correction = {
+      raw_title: raw,
+      canonical_title: canonical,
+      season_hint: row.season_hint || null,
+      query_correction: canonical,
+    };
+    if (first && first.bangumi_id) {
+      correction.bangumi_metadata = {
+        bangumi_id: String(first.bangumi_id),
+        title: String(first.title || canonical),
+      };
+    }
+    try {
+      await fetchJson("/api/v1/corrections", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+          correction: correction,
+          storage_dir: currentStorageDir() || null,
+        }),
+      });
+    } catch (error) {
+      // 非关键路径：修正保存失败不阻断接受流程。
     }
   }
 

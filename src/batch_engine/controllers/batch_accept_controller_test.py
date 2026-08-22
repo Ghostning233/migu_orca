@@ -343,6 +343,59 @@ class TestIdempotentRepeat:
         assert result.queue.items[0].request_id == "req-1"
         assert result.queue.items[0].status == BATCH_QUEUE_STATUS_READY_TO_SUBMIT
 
+    def test_accepted_request_with_successful_result_is_never_re_enqueued(
+        self,
+    ) -> None:
+        """Regression: an ACCEPTED Request whose AB submit already SUCCEEDED must
+        never be re-enqueued — rebuilding READY_TO_SUBMIT would let a later
+        submit re-create the subscription on Auto Bangumi."""
+        request = _request(request_id="req-1", status="ACCEPTED")
+        request["ab_submit_result"] = {
+            "success": True,
+            "ab_subscription_id": "ab-req-1",
+            "ab_response": {"id": "ab-req-1"},
+            "fallback_config": None,
+            "error": None,
+        }
+        store = FakeRequestStore([request])
+
+        result = _run(
+            [BatchAcceptItem(item_id="item-1", request_id="req-1")],
+            store,
+            queue=create_submission_queue("batch-1"),
+        )
+
+        assert store.accept_calls == []
+        item = result.items[0]
+        assert item.status == ACCEPT_OUTCOME_ALREADY_ACCEPTED
+        assert item.reason == "该订阅方案已提交成功，跳过重复入队"
+        assert item.queued is False
+        assert result.queue.items == []
+
+    def test_accepted_request_with_failed_result_is_re_enqueued(self) -> None:
+        """A persisted FAILED result means Auto Bangumi did not create the
+        subscription, so the missing queue item may still be rebuilt."""
+        request = _request(request_id="req-1", status="ACCEPTED")
+        request["ab_submit_result"] = {
+            "success": False,
+            "ab_subscription_id": None,
+            "ab_response": None,
+            "fallback_config": None,
+            "error": {"error_type": "ab_auth_failed", "error_message": "认证失败"},
+        }
+        store = FakeRequestStore([request])
+
+        result = _run(
+            [BatchAcceptItem(item_id="item-1", request_id="req-1")],
+            store,
+            queue=create_submission_queue("batch-1"),
+        )
+
+        item = result.items[0]
+        assert item.status == ACCEPT_OUTCOME_ALREADY_ACCEPTED
+        assert item.queued is True
+        assert len(result.queue.items) == 1
+
 
 class TestSingleItemFailureDoesNotBlock:
     def test_one_failure_does_not_block_others(self) -> None:

@@ -63,6 +63,13 @@ _SENSITIVE_KEY_VALUE_RE = re.compile(
     r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
     r"username|sid|session|endpoint|rss_url)\s*[=:]\s*[^\s,;]+"
 )
+# Redacts a sensitive keyword followed by a space-separated value (e.g.
+# "Bearer abc123", "Authorization: Bearer xyz") — replacing only the keyword
+# would leave the raw token value behind.
+_SENSITIVE_WORD_VALUE_RE = re.compile(
+    r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
+    r"username|sid|session)\s+[^\s,;'\"<>]+"
+)
 
 
 def create_submission_queue(
@@ -353,19 +360,37 @@ def queue_from_storage_dict(data: Any) -> BatchSubmissionQueue:
 def queue_item_from_storage_dict(data: Any) -> BatchQueueItem:
     if not isinstance(data, dict):
         raise ValueError("queue item storage JSON must be an object")
+    status = str(data.get("status") or BATCH_QUEUE_STATUS_READY_TO_SUBMIT)
+    if status not in _KNOWN_QUEUE_STATUSES:
+        # A corrupted/poisoned queue file with an unknown status would silently
+        # become a "ghost item" that every submit/retry/recover skips; reject it
+        # as invalid storage so the caller maps it to storage_json_error.
+        raise ValueError(f"invalid queue item status: {status}")
     return BatchQueueItem(
         queue_id=str(data.get("queue_id") or ""),
         batch_id=str(data.get("batch_id") or ""),
         item_id=str(data.get("item_id") or ""),
         request_id=str(data.get("request_id") or ""),
         title=str(data.get("title") or ""),
-        status=str(data.get("status") or BATCH_QUEUE_STATUS_READY_TO_SUBMIT),
+        status=status,
         attempts=int(data.get("attempts") or 0),
         last_error=_optional_str(data.get("last_error")),
         ab_result_summary=_optional_str(data.get("ab_result_summary")),
         created_at=data.get("created_at"),
         updated_at=data.get("updated_at"),
     )
+
+
+_KNOWN_QUEUE_STATUSES = frozenset(
+    {
+        BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
+        BATCH_QUEUE_STATUS_SUBMITTING,
+        BATCH_QUEUE_STATUS_SUCCEEDED,
+        BATCH_QUEUE_STATUS_FAILED,
+        BATCH_QUEUE_STATUS_RETRYABLE,
+        BATCH_QUEUE_STATUS_RESULT_PERSIST_FAILED,
+    }
+)
 
 
 def sanitize_queue_summary(value: Any, *, fallback: str | None = None) -> str | None:
@@ -422,6 +447,10 @@ def _optional_str(value: Any) -> str | None:
 def _sanitize_string_value(value: str) -> str:
     text = _MAGNET_RE.sub("[redacted]", value)
     text = _URL_RE.sub("[redacted-url]", text)
+    # Keyword + space-separated value FIRST (so "Bearer abc123" is swallowed as
+    # one unit), then "key=value"/"key: value" pairs — the reverse order would
+    # let the pair regex consume the keyword and leave the raw value behind.
+    text = _SENSITIVE_WORD_VALUE_RE.sub("[redacted]", text)
     text = _SENSITIVE_KEY_VALUE_RE.sub("[redacted]", text)
     text = _ABSOLUTE_PATH_RE.sub("[redacted-path]", text)
     if "<rss" in text.lower() or "<html" in text.lower():

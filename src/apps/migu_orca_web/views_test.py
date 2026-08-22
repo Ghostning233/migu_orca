@@ -653,6 +653,13 @@ def test_static_app_script_wires_batch_preference_display() -> None:
     assert "偏好警告" in script
     assert "审核提示" in script
     assert "当前默认配置" in script
+    # US-155 closure: accepted cards record user corrections via the
+    # corrections API so later batch inputs reuse confirmed titles.
+    assert "recordUserCorrection" in script
+    assert 'fetchJson("/api/v1/corrections"' in script
+    assert "raw_title: raw" in script
+    assert "canonical_title: canonical" in script
+    assert "query_correction" in script
     assert "偏好字幕组" in script
     assert "排除字幕组" in script
     assert "搜索词来源" in script
@@ -2833,6 +2840,128 @@ def test_batch_parse_api_applies_saved_preferences_from_storage_dir(
     assert item["preference_warnings"] == []
 
 
+def test_batch_parse_api_preview_request_carries_preference_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-153/US-156 closure: a parsed batch item gets an editable
+    preview_request whose defaults come from the saved preferences, so the card
+    can enter the existing preview-modify / preview-save / accept flow."""
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+    save_user_preferences(
+        load_storage_config(storage_dir),
+        VersionedUserPreference(
+            version=1,
+            subtitle_groups=SubtitleGroupPreference(
+                preferred=["Loli"],
+                excluded=["示例组"],
+                fallback="next_preferred",
+            ),
+            filter_defaults=FilterDefaults(
+                must_contain="1080p",
+                must_not_contain="合集版",
+                use_regex=True,
+                case_sensitive=True,
+            ),
+            naming=NamingPreference(strategy="raw_title", template="{title}"),
+        ),
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+    )
+
+    item = response.get_json()["result"]["items"][0]
+    assert response.status_code == 200
+    preview = item["preview_request"]
+    assert preview is not None
+    assert preview["status"] == "PENDING_CONFIRM"
+    assert preview["input"] == {"raw_title": "萌王S4"}
+    assert preview["request_id"] == f"{response.get_json()['result']['batch_id']}-{item['item_id']}"
+    assert (
+        preview["source_info"]["matched_bangumi"]["title"]
+        == "关于我转生变成史莱姆这档事 第四季"
+    )
+    assert preview["source_info"]["rss_sources"] == []
+    assert preview["confirmable_config"]["selected_subtitle_group"] == "Loli"
+    assert preview["confirmable_config"]["filter_rule"] == {
+        "must_contain": "1080p",
+        "must_not_contain": "合集版",
+        "use_regex": True,
+        "case_sensitive": True,
+    }
+    assert preview["confirmable_config"]["expected_folder_name"] == "萌王S4"
+    assert preview["confirmable_config"]["effective_seed_names"] == []
+    # The preview skeleton never carries sensitive values.
+    assert "token" not in str(preview)
+    assert "endpoint" not in str(preview)
+    assert "http" not in str(preview)
+
+
+def test_batch_parse_api_preview_request_empty_defaults_without_preferences(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Without saved preferences the preview_request still exists but uses the
+    empty Stage 19 defaults, so cards remain editable/acceptable."""
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+    )
+
+    item = response.get_json()["result"]["items"][0]
+    assert item["status"] == "PARSED"
+    preview = item["preview_request"]
+    assert preview is not None
+    assert preview["status"] == "PENDING_CONFIRM"
+    assert preview["confirmable_config"]["selected_subtitle_group"] is None
+    assert preview["confirmable_config"]["filter_rule"] == {
+        "must_contain": "",
+        "must_not_contain": "",
+        "use_regex": False,
+        "case_sensitive": False,
+    }
+    # 无偏好时 expected_folder_name 仍由默认命名策略生成（官方标题+季数）。
+    assert isinstance(preview["confirmable_config"]["expected_folder_name"], str)
+    assert preview["confirmable_config"]["expected_folder_name"]
+
+
+def test_batch_parse_api_failed_item_has_no_preview_request(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A FAILED item (parse/search failure) has no editable preview_request."""
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        lambda: FakeAnimeTitleParsingProvider(fail_titles={"萌王S4"}),
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+    storage_dir = tmp_path / "migu-state"
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+    )
+
+    item = response.get_json()["result"]["items"][0]
+    assert item["status"] == "FAILED"
+    assert item.get("preview_request") is None
+
+
 def test_batch_parse_api_falls_back_when_preference_file_is_damaged(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -4935,6 +5064,7 @@ def test_batch_submit_api_submits_queue_items_successfully(
         "failed": 0,
         "retryable": 0,
         "skipped": 0,
+        "needs_manual": 0,
     }
     assert result["items"] == [
         {
@@ -5009,6 +5139,7 @@ def test_batch_submit_api_single_failure_does_not_block_others(
         "failed": 1,
         "retryable": 0,
         "skipped": 0,
+        "needs_manual": 0,
     }
     assert result["items"][0]["status"] == "succeeded"
     assert result["items"][1]["status"] == "failed"
@@ -5050,6 +5181,7 @@ def test_batch_submit_api_skips_already_succeeded_items(
         "failed": 0,
         "retryable": 0,
         "skipped": 1,
+        "needs_manual": 0,
     }
     assert second_payload["result"]["items"][0]["status"] == "skipped"
     assert (
@@ -5345,6 +5477,7 @@ def test_batch_retry_api_retries_failed_item_successfully(
         "failed": 0,
         "retryable": 0,
         "skipped": 0,
+        "needs_manual": 0,
     }
     assert result["items"] == [
         {
@@ -5417,6 +5550,7 @@ def test_batch_retry_api_failure_keeps_retryable_status_and_increments_attempts(
         "failed": 0,
         "retryable": 1,
         "skipped": 0,
+        "needs_manual": 0,
     }
     item = result["items"][0]
     assert item["status"] == "retryable"
@@ -5472,6 +5606,7 @@ def test_batch_retry_api_skips_succeeded_items_without_resubmit(
         "failed": 0,
         "retryable": 0,
         "skipped": 1,
+        "needs_manual": 0,
     }
     assert result["items"][0]["status"] == "skipped"
     assert result["items"][0]["reason"] == "已提交成功，不可重复提交"
