@@ -16,6 +16,14 @@ Started: 2026-08-23 22:43:00 CST
 
 ---
 
+## 2026-08-24 00:00:00 CST - US-169
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Moved DRAFT/READY batch-card draft viewing into the shared subscription-detail panel, with focus/scroll, edit, save, accept, and safe context cleanup on deletion, re-search, and mode changes.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, browser and view tests, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch cards should only link to the shared detail panel; keep card grids independent of all detail content.
+---
+
 ## 2026-08-23 23:12:52 CST - US-165
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - Added a versioned MiKan poster cache configuration and an atomic, bounded disk-cache repository with opaque SHA-256 keys, 7-day sliding TTL, and throttled cleanup.

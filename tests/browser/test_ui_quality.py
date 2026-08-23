@@ -756,9 +756,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
     ).click()
 
     page.once("dialog", lambda dialog: dialog.accept())
-    page.locator(".batch-draft-card", has_text="萌王S4").locator(
-        ".batch-card-accept"
-    ).click()
+    page.locator(".batch-detail-accept").click()
     page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
     first_card = page.locator(".batch-draft-card", has_text="萌王S4")
@@ -1205,9 +1203,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
     ).click()
 
     page.once("dialog", lambda dialog: dialog.accept())
-    page.locator(".batch-draft-card", has_text="萌王S4").locator(
-        ".batch-card-accept"
-    ).click()
+    page.locator(".batch-detail-accept").click()
     page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
     # 批量提交 → 单项失败，出现单项重试按钮
@@ -1631,9 +1627,9 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
         "偏好不可用，已回退默认流程"
     )
 
-    # 展开卡片查看偏好与审核面板、当前默认配置和搜索词来源。
+    # 通过共享详情查看偏好与审核、当前默认配置和搜索词来源。
     first_card.locator(".batch-card-expand").click()
-    review_text = first_card.locator(".batch-card-review").inner_text()
+    review_text = page.locator("#request-detail-container").inner_text()
     assert "偏好与审核" in review_text
     assert "偏好命中摘要" in review_text
     assert "字幕组偏好已作为可编辑默认值" in review_text

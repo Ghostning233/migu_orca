@@ -89,7 +89,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "复用现有 preview/request 详情渲染与动作，不创建第二套草案模型。"
     },
     {

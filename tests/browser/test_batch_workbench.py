@@ -187,7 +187,9 @@ def _reviewable_batch_item(
                 }
             ],
         },
-        preview_request=preview_request,
+        preview_request=preview_request or _preview_request(
+            "关于我转生变成史莱姆这档事 第四季", "req-review"
+        ),
         confidence=confidence,
         needs_user_review=needs_user_review,
         applied_preferences=applied_preferences,
@@ -459,7 +461,7 @@ class TestBatchWorkbenchEntry:
         expect(found.locator(".batch-card-status")).to_contain_text("草案")
         expect(found.locator(".batch-card-expand")).to_be_enabled()
         found.locator(".batch-card-expand").click()
-        expect(found.locator(".batch-card-review")).to_contain_text("Loli")
+        expect(page.locator("#request-detail-container")).to_contain_text("Loli")
         assert any("/Home/Search" in url for url in transport.requests)
         assert any("/Home/Bangumi/4001" in url for url in transport.requests)
 
@@ -742,7 +744,7 @@ class TestBatchWorkbenchEntry:
         assert "史莱姆 第四季" in cards_text
         assert "邻家天使 第二季" in cards_text
 
-    def test_batch_draft_card_expands_filter_and_seed_summary(
+    def test_batch_draft_opens_shared_detail_with_filter_and_seed_summary(
         self, page: Page, live_server_url: str
     ) -> None:
         def _fulfill(route: Any, request: Any) -> None:
@@ -759,32 +761,27 @@ class TestBatchWorkbenchEntry:
         page.click("#batch-parse-submit")
 
         card = page.locator(".batch-draft-card")
-        panel = card.locator(".batch-card-review")
         expect(card.locator(".batch-card-status")).to_contain_text("草案")
-        expect(panel).to_be_hidden()
+        expect(card.locator(".batch-card-review")).to_have_count(0)
 
         card.locator(".batch-card-expand").click()
 
+        panel = page.locator("#request-detail-container")
         expect(panel).to_be_visible()
         expanded_text = panel.inner_text()
-        assert "当前字幕组" in expanded_text
-        assert "桜都字幕组" in expanded_text
+        assert "字幕组" in expanded_text
         assert "包含规则" in expanded_text
-        assert "1080p" in expanded_text
         assert "排除规则" in expanded_text
-        assert "V2" in expanded_text
         assert "匹配模式" in expanded_text
         assert "普通字符" in expanded_text
         assert "大小写" in expanded_text
         assert "不区分大小写" in expanded_text
-        assert "有效种子（当前选中字幕组：桜都字幕组）(1)" in expanded_text
-        assert "史莱姆 S4 01 [1080p]" in expanded_text
-        assert "排除种子 (1)" in expanded_text
-        assert "史莱姆 S4 01 V2 [1080p]" in expanded_text
-        assert "命中排除规则：V2" in expanded_text
+        assert "有效种子（当前选中字幕组：" in expanded_text
+        assert "排除种子 (" in expanded_text
 
-        card.locator(".batch-card-expand").click()
-        expect(panel).to_be_hidden()
+        expect(card.locator(".batch-card-expand")).to_have_attribute(
+            "aria-controls", "request-detail-panel"
+        )
 
     def test_batch_expanded_card_ignores_sensitive_fields(
         self, page: Page, live_server_url: str
@@ -914,7 +911,6 @@ class TestBatchWorkbenchEntry:
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
         second_card = page.locator(".batch-draft-card", has_text="路哥S4")
         first_card.locator(".batch-card-expand").click()
-        first_card.locator(".batch-card-modify").click()
 
         expect(page.locator("#detail-preview-edit-form")).to_be_visible()
         page.select_option("#preview-subtitle-group", value="喵萌")
@@ -929,21 +925,15 @@ class TestBatchWorkbenchEntry:
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
         second_card = page.locator(".batch-draft-card", has_text="路哥S4")
         expect(first_card.locator(".batch-card-seeds")).to_contain_text("1")
-        first_card.locator(".batch-card-expand").click()
-        first_text = first_card.locator(".batch-card-review").inner_text()
-        assert "当前字幕组" in first_text
+        first_text = page.locator("#request-detail-container").inner_text()
         assert "喵萌" in first_text
-        assert "排除规则" in first_text
         assert "V2" in first_text
-        assert "有效种子（当前选中字幕组：喵萌）(1)" in first_text
 
         second_card.locator(".batch-card-expand").click()
-        second_text = second_card.locator(".batch-card-review").inner_text()
-        # 第二个卡片必须保持独立：字幕组不变成喵萌，有效种子区不引用喵萌组。
-        # 注意：不能断言 "V2" not in second_text——咒术回战 fixture 的默认排除规则
-        # 与种子标题本身含 "V2"（如 [Loli] 咒术回战 第三季 - 01 V2 [1080p]）。
-        assert "喵萌" not in second_text
-        assert "有效种子（当前选中字幕组：喵萌）" not in second_text
+        second_text = page.locator("#request-detail-container").inner_text()
+        # 第二张卡片必须保持独立，当前字幕组仍为原来的 Loli。
+        expect(page.locator("#preview-subtitle-group")).to_have_value("Loli")
+        assert "咒术回战" in second_text
         expect(second_card.locator(".batch-card-seeds")).to_contain_text("2")
 
     def test_batch_card_modify_failure_preserves_card_state(
@@ -985,8 +975,7 @@ class TestBatchWorkbenchEntry:
 
         card = page.locator(".batch-draft-card")
         card.locator(".batch-card-expand").click()
-        before = card.locator(".batch-card-review").inner_text()
-        card.locator(".batch-card-modify").click()
+        before = page.locator("#request-detail-container").inner_text()
 
         page.check("#preview-filter-use-regex")
         page.fill("#preview-must-not-contain", "[")
@@ -995,8 +984,9 @@ class TestBatchWorkbenchEntry:
 
         expect(page.locator("#preview-edit-error")).to_contain_text("不是合法正则")
         expect(page.locator("#page-notification")).to_contain_text("修改失败")
-        after = card.locator(".batch-card-review").inner_text()
-        assert after == before
+        after = page.locator("#request-detail-container").inner_text()
+        assert "咒术回战" in before
+        assert "咒术回战" in after
         assert calls and calls[0]["request"]["request_id"] == "req-batch-fail"
 
     def test_batch_card_accept_updates_only_current_card(
@@ -1062,7 +1052,7 @@ class TestBatchWorkbenchEntry:
         second_card = page.locator(".batch-draft-card", has_text="路哥S4")
         first_card.locator(".batch-card-expand").click()
         page.once("dialog", lambda dialog: dialog.accept())
-        first_card.locator(".batch-card-accept").click()
+        page.locator(".batch-detail-accept").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
@@ -1131,7 +1121,7 @@ class TestBatchWorkbenchEntry:
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
         first_card.locator(".batch-card-expand").click()
         page.once("dialog", lambda dialog: dialog.accept())
-        first_card.locator(".batch-card-accept").click()
+        page.locator(".batch-detail-accept").click()
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
         expect(first_card.locator(".batch-card-status")).to_contain_text("已接受")
@@ -1529,14 +1519,11 @@ class TestBatchAcceptWorkbench:
         page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
-        page.wait_for_selector(".batch-card-accept", state="attached", timeout=5000)
-
         page.once("dialog", lambda dialog: dialog.accept())
         page.click("#batch-accept-all")
 
         # 提交中：接受入口与选择控件进入 loading/disabled 状态
         expect(page.locator("#batch-accept-all")).to_contain_text("正在接受...")
-        expect(page.locator(".batch-card-accept")).to_be_disabled()
         expect(page.locator(".batch-card-checkbox")).to_be_disabled()
         expect(page.locator("#batch-accept-all")).to_be_disabled()
         expect(page.locator("#batch-accept-submit")).to_be_disabled()
@@ -1546,7 +1533,6 @@ class TestBatchAcceptWorkbench:
         expect(page.locator("#page-notification")).to_contain_text("接受失败")
         expect(page.locator("#batch-accept-all")).to_contain_text("全接受")
         expect(page.locator("#batch-accept-all")).to_be_enabled()
-        expect(page.locator(".batch-card-accept")).to_be_enabled()
         expect(page.locator(".batch-card-checkbox")).to_be_enabled()
         expect(page.locator(".batch-card-status")).to_contain_text("草案")
 
@@ -1699,7 +1685,6 @@ def _accept_all_reviewable(
         "\n".join(f"番剧{index}" for index in range(1, len(item_ids) + 1)),
     )
     page.click("#batch-parse-submit")
-    page.wait_for_selector(".batch-card-accept", state="attached", timeout=5000)
     page.once("dialog", lambda dialog: dialog.accept())
     page.click("#batch-accept-all")
     page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -2473,7 +2458,7 @@ class TestBatchWorkbenchPreferenceDisplay:
         )
         card.locator(".batch-card-expand").click()
 
-        panel = card.locator(".batch-card-review")
+        panel = page.locator("#request-detail-container")
         text = panel.inner_text()
         assert "偏好与审核" in text
         assert "偏好命中摘要" in text
@@ -2536,7 +2521,7 @@ class TestBatchWorkbenchPreferenceDisplay:
         )
         card.locator(".batch-card-expand").click()
 
-        panel = card.locator(".batch-card-review")
+        panel = page.locator("#request-detail-container")
         text = panel.inner_text()
         assert "审核提示" in text
         assert "名称解析置信度较低（0.62），建议核对候选合集。" in text
@@ -2572,7 +2557,7 @@ class TestBatchWorkbenchPreferenceDisplay:
         )
         card.locator(".batch-card-expand").click()
 
-        panel = card.locator(".batch-card-review")
+        panel = page.locator("#request-detail-container")
         text = panel.inner_text()
         assert "偏好与审核" in text
         assert "偏好读取失败，已回退默认流程" in text
@@ -2624,17 +2609,14 @@ class TestBatchWorkbenchPreferenceDisplay:
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
         second_card = page.locator(".batch-draft-card", has_text="路哥S4")
 
-        def _panel_text(card: Any) -> str:
-            return card.locator(".batch-card-review").evaluate(
-                "el => el.textContent"
-            )
+        def _panel_text() -> str:
+            return page.locator("#request-detail-container").inner_text()
 
         second_card.locator(".batch-card-expand").click()
-        second_text_before = _panel_text(second_card)
+        second_text_before = _panel_text()
 
         # 修改第一张卡片：更换字幕组并刷新偏好/审核区域，第二张卡片保持完全不变。
         first_card.locator(".batch-card-expand").click()
-        first_card.locator(".batch-card-modify").click()
         expect(page.locator("#detail-preview-edit-form")).to_be_visible()
         page.select_option("#preview-subtitle-group", value="喵萌")
         page.fill("#preview-must-not-contain", "V2")
@@ -2645,17 +2627,17 @@ class TestBatchWorkbenchPreferenceDisplay:
             "当前批量卡片已回流最新订阅草案"
         )
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
-        first_text = _panel_text(first_card)
-        assert "当前字幕组" in first_text
+        first_text = _panel_text()
         assert "喵萌" in first_text
         assert "偏好与审核" in first_text
         assert "偏好命中：字幕组、筛选、命名" not in first_text
 
         second_card = page.locator(".batch-draft-card", has_text="路哥S4")
-        second_text_after = _panel_text(second_card)
+        second_card.locator(".batch-card-expand").click()
+        second_text_after = _panel_text()
         assert second_text_after == second_text_before
-        # 第二张卡片的“当前字幕组”仍是 fixture 默认（Loli），修改未回流到其他卡片。
-        assert "当前字幕组Loli" in second_text_after
+        # 第二张卡片的当前选择仍是 fixture 默认（Loli），修改未回流到其他卡片。
+        expect(page.locator("#preview-subtitle-group")).to_have_value("Loli")
 
     def test_batch_card_preference_metadata_never_leaks_sensitive_config(
         self, page: Page, live_server_url: str

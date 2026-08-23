@@ -610,7 +610,8 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "applyBatchAcceptResult" in script
     assert "markBatchCardAccepted" in script
     assert "savePreviewDraftRequest" in script
-    assert "renderBatchCardReviewPanel" in script
+    assert "openBatchCardDetail" in script
+    assert "clearBatchDetailContext" in script
     assert "canExpandBatchCard" in script
     assert "batchCardIsSelectable" in script
     assert "toggleBatchItemSelection" in script
@@ -621,9 +622,8 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "deleteBatchCard" in script
     assert "batch-draft-card" in script
     assert "batch-card-grid" in script
-    assert "batch-card-review" in script
-    assert "batch-card-modify" in script
-    assert "batch-card-accept" in script
+    assert "batch-detail-context" in script
+    assert "batch-detail-accept" in script
     assert "batch-card-checkbox" in script
     assert "batch-card-queue-status" in script
     assert "batch-card-reason" in script
@@ -637,7 +637,7 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "无法接受：" in script
     assert "接受失败：" in script
     assert "待提交" in script
-    assert "当前字幕组" in script
+    assert "request-detail-panel" in script
     assert "有效种子（当前选中字幕组：" in script
     assert "排除种子 (" in script
     assert "有效种子数：" in script
