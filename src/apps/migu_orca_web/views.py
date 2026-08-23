@@ -562,7 +562,7 @@ def _optional_error(error: Stage1Error) -> dict[str, object]:
 
 def _serialize_candidate(candidate: MikanCandidate, query: str) -> dict[str, object]:
     poster_key = poster_service.register(candidate.poster_url)
-    return {
+    serialized: dict[str, object] = {
         "bangumi_id": candidate.bangumi_id,
         "title": candidate.title,
         "mikan_url": candidate.mikan_url,
@@ -582,6 +582,9 @@ def _serialize_candidate(candidate: MikanCandidate, query: str) -> dict[str, obj
             candidate.aliases,
         ),
     }
+    if candidate.total_episodes is not None:
+        serialized["total_episodes"] = candidate.total_episodes
+    return serialized
 
 
 def _search_mikan_candidates(

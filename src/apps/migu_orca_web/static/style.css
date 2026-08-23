@@ -728,6 +728,12 @@ textarea {
   font-weight: 700;
 }
 
+.candidate-progress,
+.batch-card-progress {
+  color: #586273;
+  font-size: 0.88rem;
+}
+
 .candidate-poster {
   background: #eef2f6;
   border-radius: 4px;

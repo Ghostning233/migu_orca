@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+import re
 from codecs import getincrementaldecoder
 from time import monotonic
 from typing import Protocol
@@ -54,6 +55,7 @@ class MikanBangumiDetail:
     poster_url: str | None
     bangumi_rss_url: str | None
     subgroups: list[MikanSubgroupDetail]
+    total_episodes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -71,6 +73,7 @@ class MikanCandidate:
     mikan_url: str
     source_query: str
     poster_url: str | None = None
+    total_episodes: int | None = None
     aliases: list[str] = field(default_factory=list)
 
 
@@ -665,6 +668,35 @@ def _parse_bangumi_detail(html: str, bangumi_url: str) -> MikanBangumiDetail:
     return detail
 
 
+_TOTAL_EPISODE_ATTRS = frozenset(
+    {"data-total-episodes", "data-total-episode", "data-episodes-total"}
+)
+_TOTAL_EPISODE_TEXT = re.compile(
+    r"(?:总集数|共|全)\s*[：:]?\s*([1-9]\d{0,3})\s*集"
+)
+
+
+def _validated_total_episodes(value: str | None) -> int | None:
+    """Return an explicitly supplied public total, never an inferred count."""
+    if value is None or not re.fullmatch(r"[1-9]\d{0,3}", value.strip()):
+        return None
+    return int(value)
+
+
+def _total_episodes_from_attrs(attrs: dict[str, str]) -> int | None:
+    for name in _TOTAL_EPISODE_ATTRS:
+        total = _validated_total_episodes(attrs.get(name))
+        if total is not None:
+            return total
+    return None
+
+
+def _total_episodes_from_public_text(text: str) -> int | None:
+    """Read only an explicit labelled total from visible candidate metadata."""
+    match = _TOTAL_EPISODE_TEXT.search(" ".join(text.split()))
+    return _validated_total_episodes(match.group(1)) if match is not None else None
+
+
 class _MikanSearchParser(HTMLParser):
     def __init__(self, search_endpoint: str) -> None:
         super().__init__(convert_charrefs=True)
@@ -777,12 +809,16 @@ class _MikanCandidatePageParser(HTMLParser):
             if self._card_depth == 0:
                 self._current_card = _MikanCandidateCard()
             self._card_depth += 1
+        if self._current_card is not None and self._current_card.total_episodes is None:
+            self._current_card.total_episodes = _total_episodes_from_attrs(attr_map)
         if tag_name not in _HTML_VOID_ELEMENTS:
             self._tag_stack.append((tag_name, is_container))
 
     def handle_data(self, data: str) -> None:
         if self._active_href is not None:
             self._active_text.append(data)
+        if self._current_card is not None and self._card_depth > 0:
+            self._current_card.metadata_text.append(data)
 
     def handle_endtag(self, tag: str) -> None:
         tag_name = tag.lower()
@@ -840,6 +876,11 @@ class _MikanCandidatePageParser(HTMLParser):
                     title=canonical_title,
                     mikan_url=card.href,
                     poster_url=card.poster_url,
+                    total_episodes=(
+                        card.total_episodes
+                        if card.total_episodes is not None
+                        else _total_episodes_from_public_text(" ".join(card.metadata_text))
+                    ),
                     source_query=self._source_query,
                     aliases=aliases,
                 )
@@ -854,6 +895,8 @@ class _MikanCandidateCard:
         self.title: str | None = None
         self.title_attr: str | None = None
         self.poster_url: str | None = None
+        self.total_episodes: int | None = None
+        self.metadata_text: list[str] = []
 
 
 class _MikanBangumiPageParser(HTMLParser):
@@ -880,6 +923,7 @@ class _MikanBangumiPageParser(HTMLParser):
         self._broadcast_depth = 0
         self._broadcast_parts: list[str] = []
         self._poster_url: str | None = None
+        self._total_episodes: int | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag_name = tag.lower()
@@ -898,6 +942,8 @@ class _MikanBangumiPageParser(HTMLParser):
                 self._current_row = _MikanPageRow()
 
         attr_map = {name.lower(): value for name, value in attrs if value is not None}
+        if self._total_episodes is None:
+            self._total_episodes = _total_episodes_from_attrs(attr_map)
         classes = set(attr_map.get("class", "").split())
         if "bangumi-title" in classes:
             self._title_depth = 1
@@ -1049,6 +1095,7 @@ class _MikanBangumiPageParser(HTMLParser):
             poster_url=self._poster_url,
             bangumi_rss_url=bangumi_rss_url,
             subgroups=subgroups,
+            total_episodes=self._total_episodes,
         )
 
     def _bangumi_rss_url(self) -> str | None:

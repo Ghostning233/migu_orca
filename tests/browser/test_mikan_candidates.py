@@ -157,6 +157,54 @@ class TestCandidateSearchStates:
         # The query input is preserved after a successful search.
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
 
+    def test_candidate_cards_show_explicit_or_unknown_episode_progress(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        body = _candidate_result_json(
+            "芙莉莲",
+            [
+                {
+                    "bangumi_id": "2353",
+                    "title": "葬送的芙莉莲",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+                    "poster_url": None,
+                    "total_episodes": 28,
+                    "source_query": "芙莉莲",
+                    "aliases": [],
+                },
+                {
+                    "bangumi_id": "3072",
+                    "title": "未知总集数",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/3072",
+                    "poster_url": None,
+                    "source_query": "芙莉莲",
+                    "aliases": [],
+                },
+                {
+                    "bangumi_id": "3073",
+                    "title": "异常总集数",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/3073",
+                    "poster_url": None,
+                    "total_episodes": "invalid",
+                    "source_query": "芙莉莲",
+                    "aliases": [],
+                },
+            ],
+        )
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(status=200, content_type="application/json", body=body),
+        )
+        set_storage_preferences(page, storage_dir, save_request=False)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+
+        cards = page.locator(".candidate-card")
+        expect(cards.nth(0)).to_contain_text("播出进度：待开发 / 28 集")
+        expect(cards.nth(1)).to_contain_text("播出进度：待开发 / 未知")
+        expect(cards.nth(2)).to_contain_text("播出进度：待开发 / 未知")
+
     def test_candidate_search_loading_names_query_and_locks_search_workspace(
         self, page: Page, live_server_url: str
     ) -> None:

@@ -107,7 +107,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "当前最新播出集数的数据源未定义，本 Stage 固定显示待开发。"
     },
     {

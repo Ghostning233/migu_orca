@@ -2193,6 +2193,14 @@
     seeds.className = "batch-card-seeds";
     seeds.textContent = "有效种子数：" + batchCardSeedSummary(row);
 
+    const progress = document.createElement("div");
+    progress.className = "batch-card-progress";
+    const selectedCandidate = row.selected_candidate || null;
+    const totalEpisodes = selectedCandidate && selectedCandidate.total_episodes;
+    progress.textContent =
+      "播出进度：待开发 / " +
+      (Number.isInteger(totalEpisodes) && totalEpisodes > 0 ? totalEpisodes + " 集" : "未知");
+
     const candidateFeedback = renderBatchCandidateSearchFeedback(row);
 
     const expandButton = document.createElement("button");
@@ -2253,6 +2261,7 @@
       source,
       preference,
       seeds,
+      progress,
     ];
     if (candidateFeedback) {
       children.push(candidateFeedback);
@@ -3165,6 +3174,14 @@
     meta.className = "candidate-meta";
     meta.textContent = "MiKan ID: " + safeText(candidate.bangumi_id);
     item.appendChild(meta);
+
+    const progress = document.createElement("div");
+    progress.className = "candidate-progress";
+    const totalEpisodes = candidate.total_episodes;
+    progress.textContent =
+      "播出进度：待开发 / " +
+      (Number.isInteger(totalEpisodes) && totalEpisodes > 0 ? totalEpisodes + " 集" : "未知");
+    item.appendChild(progress);
 
     if (candidate.poster_url) {
       const poster = document.createElement("img");

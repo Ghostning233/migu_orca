@@ -66,3 +66,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Batch-candidate choices are a single fixed dialog keyed by `activeBatchCandidateItemId`; rerendering cards preserves the one-panel invariant while keeping card layout independent.
   - UI browser validation runs through Playwright; the complete Chromium suite is 256 tests and may need persistent-session polling in this environment.
 ---
+
+## 2026-08-24 00:05:16 CST - US-170
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added the optional public `total_episodes` contract to MiKan candidates, details, cache copies, and API serialization; only explicit labelled or `data-total-episodes` metadata is accepted.
+- Rendered `播出进度：待开发 / N 集` or `播出进度：待开发 / 未知` in single-candidate, batch-candidate, and selected batch-result cards without inferring any current episode from seeds, RSS, or download state.
+- Added parser, cache, API, and Chromium coverage for explicit, missing, and malformed totals.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_candidate_cache.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, related unit/browser tests, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Candidate card rendering is shared by individual search and batch popover choices; add public display metadata there once, then use `selected_candidate` for the batch result-card summary.
+  - Keep unknown external optional metadata untrusted in JavaScript: only positive integers receive the numeric display, everything else uses the stable unknown placeholder.
+---

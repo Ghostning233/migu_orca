@@ -100,6 +100,21 @@ def test_candidate_cache_set_then_get_roundtrips() -> None:
     assert len(cache) == 1
 
 
+def test_candidate_cache_preserves_optional_total_episodes() -> None:
+    cache = CandidateSearchCache()
+    candidate = MikanCandidate(
+        bangumi_id="2353",
+        title="葬送的芙莉莲",
+        mikan_url="https://mikan.example/Home/Bangumi/2353",
+        source_query="芙莉莲",
+        total_episodes=28,
+    )
+
+    cache.set("key-episodes", [candidate])
+
+    assert cache.get("key-episodes") == [candidate]
+
+
 def test_candidate_cache_get_returns_immutable_copies() -> None:
     cache = CandidateSearchCache()
     cache.set("key-1", [_candidate(aliases=["Frieren EN"])])

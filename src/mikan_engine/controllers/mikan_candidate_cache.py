@@ -62,6 +62,7 @@ def _copy_candidates(candidates: list[MikanCandidate]) -> list[MikanCandidate]:
             title=candidate.title,
             mikan_url=candidate.mikan_url,
             poster_url=candidate.poster_url,
+            total_episodes=candidate.total_episodes,
             source_query=candidate.source_query,
             aliases=list(candidate.aliases),
         )

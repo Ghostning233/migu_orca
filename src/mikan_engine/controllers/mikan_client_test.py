@@ -1313,6 +1313,34 @@ def test_mikan_candidate_search_parses_current_mikan_recommendation_links() -> N
     )
 
 
+def test_mikan_candidate_search_parses_only_explicit_public_total_episodes() -> None:
+    transport = FakeTransport(
+        """
+        <section class="related-recommendations">
+          <div class="bangumi-item" data-total-episodes="12">
+            <a href="/Home/Bangumi/100">有公开总集数</a>
+          </div>
+          <div class="bangumi-item">
+            <a href="/Home/Bangumi/200">缺少总集数</a>
+            <span>总集数：24 集</span>
+          </div>
+          <div class="bangumi-item" data-total-episodes="0">
+            <a href="/Home/Bangumi/300">异常元数据</a>
+            <span>第 3 集</span>
+          </div>
+        </section>
+        """
+    )
+    client = create_mikan_client(
+        MikanConfig(search_endpoint="https://mikanani.me/Home/Search", timeout_seconds=5),
+        transport=transport,
+    )
+
+    candidates = client.search_candidates("测试")
+
+    assert [candidate.total_episodes for candidate in candidates] == [12, 24, None]
+
+
 def test_mikan_candidate_search_rejects_unsafe_hrefs() -> None:
     transport = FakeTransport(
         """
