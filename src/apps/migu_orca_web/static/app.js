@@ -1175,16 +1175,11 @@
     if (canonicalTitles.length) {
       return safeText(canonicalTitles[0]) || "未命名条目";
     }
-    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
-    if (candidates.length) {
-      return safeText(candidates[0].title) || "未命名条目";
-    }
     return safeText(row.raw_title) || "未命名条目";
   }
 
   function batchCardSourceName(row) {
-    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
-    const selectedCandidate = row.selected_candidate || candidates[0] || null;
+    const selectedCandidate = row.selected_candidate || null;
     if (selectedCandidate) {
       const candidate = selectedCandidate;
       const source = safeText(candidate.source_query || candidate.bangumi_id);
@@ -2101,8 +2096,7 @@
 
     const posterWrap = document.createElement("div");
     posterWrap.className = "batch-card-poster";
-    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
-    const selectedCandidate = row.selected_candidate || candidates[0] || null;
+    const selectedCandidate = row.selected_candidate || null;
     const posterUrl = selectedCandidate ? safeText(selectedCandidate.poster_url) : "";
     if (posterUrl) {
       const poster = document.createElement("img");
@@ -2155,6 +2149,7 @@
     seeds.textContent = "有效种子数：" + batchCardSeedSummary(row);
 
     const candidateChoices = renderBatchCandidateChoices(row);
+    const candidateFeedback = renderBatchCandidateSearchFeedback(row);
 
     const expandButton = document.createElement("button");
     expandButton.type = "button";
@@ -2191,6 +2186,9 @@
     if (candidateChoices) {
       children.push(candidateChoices);
     }
+    if (candidateFeedback) {
+      children.push(candidateFeedback);
+    }
     if (row.accept_feedback && row.accept_feedback.reason) {
       const reason = document.createElement("div");
       reason.className = "batch-card-reason";
@@ -2219,18 +2217,45 @@
     hint.className = "field-help";
     hint.textContent = "请选择一个真实 MiKan 合集后生成订阅草案。";
     container.appendChild(hint);
+    const list = document.createElement("ul");
+    list.className = "candidate-list batch-candidate-list";
     for (const candidate of candidates) {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "secondary-button batch-candidate-select";
-      button.textContent = "选择：" + (safeText(candidate.title) || "未命名合集");
+      button.textContent = "选择此合集";
       button.disabled = batchAcceptInFlight;
       button.addEventListener("click", function () {
         generateBatchRequestFromCandidate(row, candidate);
       });
-      container.appendChild(button);
+      list.appendChild(
+        renderCandidateCard(candidate, {
+          query: batchCardTitle(row),
+          chooseButton: button,
+        }),
+      );
     }
+    container.appendChild(list);
     return container;
+  }
+
+  function renderBatchCandidateSearchFeedback(row) {
+    const status = fieldValue(row.status);
+    if (status !== "EMPTY" && status !== "FAILED") {
+      return null;
+    }
+    const feedback = document.createElement("p");
+    feedback.className = "batch-candidate-feedback";
+    if (status === "EMPTY") {
+      feedback.textContent = "未找到匹配的 MiKan 合集。";
+      return feedback;
+    }
+    const error = row.error && typeof row.error === "object" ? row.error : {};
+    const message = safeText(error.error_message);
+    feedback.textContent = message
+      ? "搜索失败：" + message + "。可重新获取批量草案后重试。"
+      : "搜索失败。可重新获取批量草案后重试。";
+    return feedback;
   }
 
   function renderBatchParseItems(items) {
@@ -2998,6 +3023,54 @@
     return {query: query};
   }
 
+  function renderCandidateCard(candidate, options) {
+    const opts = options || {};
+    const item = document.createElement("li");
+    item.className = "candidate-card";
+
+    const title = document.createElement("strong");
+    title.textContent = safeText(candidate.title) || "未命名合集";
+    item.appendChild(title);
+
+    // Display-only recommendation label (e.g. 推荐：第 2 季 / 季数不符 /
+    // 可能匹配). It only annotates the card; it never selects the candidate
+    // or triggers Request generation.
+    if (candidate.recommendation) {
+      const badge = document.createElement("span");
+      badge.className = "candidate-recommendation";
+      badge.textContent = safeText(candidate.recommendation);
+      item.appendChild(badge);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "candidate-meta";
+    meta.textContent = "MiKan ID: " + safeText(candidate.bangumi_id);
+    item.appendChild(meta);
+
+    if (candidate.poster_url) {
+      const poster = document.createElement("img");
+      poster.className = "candidate-poster";
+      poster.alt = "";
+      poster.src = candidate.poster_url;
+      item.appendChild(poster);
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "candidate-poster candidate-poster-placeholder";
+      placeholder.textContent = "暂无封面";
+      item.appendChild(placeholder);
+    }
+
+    const source = document.createElement("div");
+    source.className = "candidate-source";
+    source.textContent = "搜索词：" + safeText(candidate.source_query || opts.query);
+    item.appendChild(source);
+
+    if (opts.chooseButton) {
+      item.appendChild(opts.chooseButton);
+    }
+    return item;
+  }
+
   function renderCandidateCards(candidates, query) {
     const cards = Array.isArray(candidates) ? candidates : [];
     if (!cards.length) {
@@ -3014,41 +3087,6 @@
     const list = document.createElement("ul");
     list.className = "candidate-list";
     for (const candidate of cards) {
-      const item = document.createElement("li");
-      item.className = "candidate-card";
-
-      const title = document.createElement("strong");
-      title.textContent = safeText(candidate.title) || "未命名合集";
-      item.appendChild(title);
-
-      // Display-only recommendation label (e.g. 推荐：第 2 季 / 季数不符 /
-      // 可能匹配). It only annotates the card; it never selects the candidate
-      // or triggers Request generation.
-      if (candidate.recommendation) {
-        const badge = document.createElement("span");
-        badge.className = "candidate-recommendation";
-        badge.textContent = safeText(candidate.recommendation);
-        item.appendChild(badge);
-      }
-
-      const meta = document.createElement("div");
-      meta.className = "candidate-meta";
-      meta.textContent = "MiKan ID: " + safeText(candidate.bangumi_id);
-      item.appendChild(meta);
-
-      if (candidate.poster_url) {
-        const poster = document.createElement("img");
-        poster.className = "candidate-poster";
-        poster.alt = "";
-        poster.src = candidate.poster_url;
-        item.appendChild(poster);
-      }
-
-      const source = document.createElement("div");
-      source.className = "candidate-source";
-      source.textContent = "搜索词：" + safeText(candidate.source_query || query);
-      item.appendChild(source);
-
       const chooseButton = document.createElement("button");
       chooseButton.type = "button";
       chooseButton.className = "primary-button candidate-select";
@@ -3056,9 +3094,7 @@
       chooseButton.addEventListener("click", () => {
         generateRequestFromCandidate(candidate);
       });
-      item.appendChild(chooseButton);
-
-      list.appendChild(item);
+      list.appendChild(renderCandidateCard(candidate, {query: query, chooseButton: chooseButton}));
     }
     candidateSearchResult.appendChild(list);
   }

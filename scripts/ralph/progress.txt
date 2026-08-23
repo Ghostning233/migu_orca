@@ -11,6 +11,7 @@ Started: 2026-08-23 15:45:00 CST
 - 候选与结果 UI 只渲染公开字段和脱敏错误；endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、持久化、日志、截图或 trace。
 - 搜索状态文案必须基于可观测事件；单一长请求只能展示请求级状态，不能用定时器伪造服务端页面解析或逐项进度。
 - 创建订阅方案工作台通过原生 `role=tablist` 分段切换单个/批量输入；结果应置于独立的整行 `search-results-panel`，并与当前模式同步显隐，避免两类旧结果混排。
+- 单个与批量的公开 MiKan 候选卡复用 `renderCandidateCard`；批量卡片只有 `selected_candidate` 才能作为已选来源或主封面，绝不可把 `candidates[0]` 当作默认选择。
 
 ---
 
@@ -45,4 +46,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The workbench's existing result containers can be relocated in the SSR template without changing the API or preview lifecycle, because the native JS resolves them by stable IDs.
   - Keep hidden mode results in the dedicated panel rather than clearing them on switch; this preserves each mode's client-side result state while preventing mixed-mode display.
   - Full checks passed: compileall, JS syntax, and pytest (824 passed, 251 skipped). Playwright is configured but Chromium is unavailable here, so `tests/browser/` was skipped; manual browser verification remains needed on an environment with Chromium.
+---
+
+## 2026-08-23 16:50:00 CST - US-161
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Unified single-search and batch-search candidate presentation through a shared public candidate-card renderer; FOUND batch groups now show every candidate's title, MiKan ID, search hint, poster or explicit placeholder, and an explicit selection action.
+- Removed first-candidate fallback from batch-card title/source/poster display, so a FOUND group remains unselected until the user chooses a real MiKan collection; EMPTY and FAILED groups now show clear no-result or sanitized retry guidance without actions.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Reuse `renderCandidateCard` for both single and batch results so public candidate fields, poster placeholders, and explicit selection semantics cannot drift between modes.
+  - A batch card must only use `selected_candidate` for its chosen-source and hero-poster display; using `candidates[0]` implicitly suggests an automatic choice.
+  - Full checks passed: compileall, JS syntax, and pytest (824 passed, 252 skipped). Playwright coverage was added, but Chromium is unavailable in this environment so `tests/browser/` was skipped; manual browser verification is still needed where Chromium is installed.
 ---

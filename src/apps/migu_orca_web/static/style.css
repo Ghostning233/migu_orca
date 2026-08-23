@@ -649,9 +649,29 @@ textarea {
   width: 120px;
 }
 
+.candidate-poster-placeholder {
+  align-items: center;
+  background: #eef2f6;
+  border: 1px solid #d8dde5;
+  color: #586273;
+  display: flex;
+  font-size: 0.82rem;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 120px;
+  text-align: center;
+}
+
 .candidate-source {
   color: #586273;
   font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.batch-candidate-feedback {
+  color: #586273;
+  font-size: 0.86rem;
+  margin: 0;
   overflow-wrap: anywhere;
 }
 

@@ -69,7 +69,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "候选卡只渲染公开字段；AI/推荐标签只能注释，不自动选择。"
     },
     {

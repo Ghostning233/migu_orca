@@ -526,16 +526,80 @@ class TestBatchWorkbenchEntry:
         assert "萌王S4" in result_text
         assert "路哥S4" in result_text
         assert "关于我转生变成史莱姆这档事 第四季" in result_text
-        assert "源名称：MiKan：萌王 第四季" in result_text
+        assert "源名称：搜索词：萌王 第四季" in result_text
         assert "有效种子数：待展开" in result_text
         assert "已解析" in result_text
         assert "解析失败" in result_text
-        expect(page.locator(".batch-card-poster img")).to_have_count(1)
+        expect(page.locator(".batch-candidate-list img.candidate-poster")).to_have_count(1)
         expect(page.locator(".batch-card-expand")).to_have_count(2)
         expect(page.locator("#page-notification")).to_contain_text("批量草案已获取")
         assert captured_payloads == [
             {"raw_input": "萌王S4\n\n路哥S4", "storage_dir": None}
         ]
+
+    def test_batch_found_candidates_share_public_card_details_without_default_selection(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        item = _batch_item(
+            "item-found", "萌王S4", status="FOUND", source_query="萌王 第四季"
+        )
+        item["candidates"] = [
+            {
+                "bangumi_id": "4001",
+                "title": "关于我转生变成史莱姆这档事 第四季",
+                "mikan_url": "https://mikan.example/Home/Bangumi/4001",
+                "poster_url": "https://mikan.example/poster.jpg",
+                "source_query": "萌王 第四季",
+                "aliases": [],
+            },
+            {
+                "bangumi_id": "4002",
+                "title": "关于我转生变成史莱姆这档事 第三季",
+                "mikan_url": "https://mikan.example/Home/Bangumi/4002",
+                "poster_url": None,
+                "source_query": "萌王 第四季",
+                "aliases": [],
+            },
+        ]
+        empty_item = _batch_item("item-empty", "路哥S4", status="EMPTY")
+        failed_item = _batch_item("item-failed", "杖剑谭S2", status="FAILED")
+        failed_item["error"] = {
+            "error_type": "mikan_unavailable",
+            "error_message": "MiKan 候选搜索暂时不可用",
+        }
+
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([item, empty_item, failed_item]),
+            ),
+        )
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+
+        card = page.locator(".batch-draft-card")
+        choices = card.locator(".batch-candidate-list")
+        expect(choices.locator(".candidate-card")).to_have_count(2)
+        expect(choices).to_contain_text("MiKan ID: 4001")
+        expect(choices).to_contain_text("MiKan ID: 4002")
+        expect(choices).to_contain_text("暂无封面")
+        expect(choices.locator("img.candidate-poster")).to_have_count(1)
+        expect(choices.locator(".batch-candidate-select")).to_have_count(2)
+        expect(card.locator(".batch-card-status")).to_contain_text("找到候选")
+        expect(card.locator(".batch-card-expand")).to_be_disabled()
+        expect(
+            page.locator(".batch-draft-card", has_text="路哥S4").locator(
+                ".batch-candidate-feedback"
+            )
+        ).to_contain_text("未找到匹配的 MiKan 合集")
+        expect(
+            page.locator(".batch-draft-card", has_text="杖剑谭S2").locator(
+                ".batch-candidate-feedback"
+            )
+        ).to_contain_text("MiKan 候选搜索暂时不可用")
 
     def test_batch_card_delete_removes_only_selected_card(
         self, page: Page, live_server_url: str
