@@ -61,6 +61,10 @@
   const candidateFallbackInput = document.getElementById("mikan-fallback-bangumi");
   const candidateFallbackError = document.getElementById("mikan-fallback-error");
   const candidateFallbackGenerate = document.getElementById("mikan-fallback-generate");
+  const searchModeTabs = document.getElementById("search-mode-tabs");
+  const singleSearchEntry = document.getElementById("single-search-entry");
+  const batchSearchEntry = document.getElementById("batch-workbench-entry");
+  const batchSearchResults = document.getElementById("batch-search-results");
   const batchParseForm = document.getElementById("batch-parse-form");
   const batchRawInput = document.getElementById("batch-raw-input");
   const batchParseError = document.getElementById("batch-parse-error");
@@ -99,6 +103,64 @@
   let storageDirPreference = "";
   let saveRequestPreference = true;
   let currentPreferenceValues = null;
+  let activeSearchMode = "single";
+
+  function searchModeButtons() {
+    return searchModeTabs
+      ? Array.from(searchModeTabs.querySelectorAll("[data-search-mode]"))
+      : [];
+  }
+
+  function setSearchMode(mode, focusTab) {
+    const nextMode = mode === "batch" ? "batch" : "single";
+    activeSearchMode = nextMode;
+    const isBatch = nextMode === "batch";
+    if (singleSearchEntry) {
+      singleSearchEntry.hidden = isBatch;
+    }
+    if (batchSearchEntry) {
+      batchSearchEntry.hidden = !isBatch;
+    }
+    if (candidateSearchResult) {
+      candidateSearchResult.hidden = isBatch;
+    }
+    if (batchSearchResults) {
+      batchSearchResults.hidden = !isBatch;
+    }
+    for (const button of searchModeButtons()) {
+      const selected = button.dataset.searchMode === nextMode;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      if (selected && focusTab) {
+        button.focus();
+      }
+    }
+  }
+
+  function wireSearchModeTabs() {
+    const buttons = searchModeButtons();
+    for (const button of buttons) {
+      button.addEventListener("click", function () {
+        setSearchMode(button.dataset.searchMode, false);
+      });
+      button.addEventListener("keydown", function (event) {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+          return;
+        }
+        event.preventDefault();
+        const currentIndex = buttons.indexOf(button);
+        const nextIndex = event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? buttons.length - 1
+            : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+        const nextButton = buttons[nextIndex];
+        setSearchMode(nextButton.dataset.searchMode, true);
+      });
+    }
+    setSearchMode(activeSearchMode, false);
+  }
 
   function readPreference(key) {
     try {
@@ -3062,6 +3124,8 @@
       syncCandidateFallbackVisibility,
     );
   }
+
+  wireSearchModeTabs();
 
   function setCandidateSelectionInFlight(isInFlight) {
     const buttons = document.querySelectorAll(".candidate-select");

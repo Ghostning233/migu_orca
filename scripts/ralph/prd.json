@@ -51,7 +51,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Flask SSR + 原生 JS，无前端构建链；保留现有直连 fallback 和 Storage 摘要能力但重新安排层级。"
     },
     {

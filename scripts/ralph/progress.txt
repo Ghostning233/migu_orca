@@ -10,6 +10,7 @@ Started: 2026-08-23 15:45:00 CST
 - 真实候选结果必须区分 FOUND、EMPTY、FAILED；EMPTY/FAILED/PARSED 不得携带可接受的空壳 `preview_request`，只有用户显式选择公开 MiKan 候选并完成详情解析后才能进入 DRAFT/READY。
 - 候选与结果 UI 只渲染公开字段和脱敏错误；endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、持久化、日志、截图或 trace。
 - 搜索状态文案必须基于可观测事件；单一长请求只能展示请求级状态，不能用定时器伪造服务端页面解析或逐项进度。
+- 创建订阅方案工作台通过原生 `role=tablist` 分段切换单个/批量输入；结果应置于独立的整行 `search-results-panel`，并与当前模式同步显隐，避免两类旧结果混排。
 
 ---
 
@@ -33,4 +34,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The batch workbench keeps its cards in browser memory; after candidate selection, update only the selected row with the ordinary unsaved preview request and status `DRAFT` so existing preview-modify/save and accept flows continue to work.
   - Candidate selection can share `/api/v1/requests` with `source=mikan` and `mikan_bangumi`; this is the existing route that resolves MiKan details and must remain the sole detail-parser path.
   - Full suite passed (824 passed, 250 skipped). Browser tests are present but Chromium is unavailable in this environment, so manual browser verification remains needed where Chromium can be installed.
+---
+
+## 2026-08-23 16:36:42 CST - US-160
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Reworked the creation workbench into explicit single-search and batch-search tabs, with roving-tabindex keyboard navigation and ARIA selected state.
+- Moved single and batch result areas (including the batch acceptance toolbar) into a full-width `search-results-panel`, so only the active mode's input and results are visible.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_shell.py`, `tests/browser/test_mikan_candidates.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The workbench's existing result containers can be relocated in the SSR template without changing the API or preview lifecycle, because the native JS resolves them by stable IDs.
+  - Keep hidden mode results in the dedicated panel rather than clearing them on switch; this preserves each mode's client-side result state while preventing mixed-mode display.
+  - Full checks passed: compileall, JS syntax, and pytest (824 passed, 251 skipped). Playwright is configured but Chromium is unavailable here, so `tests/browser/` was skipped; manual browser verification remains needed on an environment with Chromium.
 ---

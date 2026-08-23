@@ -54,13 +54,13 @@ class TestDefaultFixtureDoesNotUseRealMikan:
     ) -> None:
         page.goto(f"{live_server_url}/index")
 
-        # The main generate panel hosts the candidate search form directly (no
-        # hidden disclosure), and its user-facing heading is the MiKan title.
+        # The default tab exposes the real candidate-search form directly (no
+        # hidden disclosure); the workbench retains a general creation title.
         expect(page.locator("#mikan-candidate-search-form")).to_be_visible()
         expect(page.locator("#mikan-candidate-query")).to_be_visible()
         assert page.locator("#mikan-candidate-search").count() == 0
         heading = page.locator("#generate-heading").inner_text()
-        assert "真实 MiKan 候选搜索" in heading
+        assert "创建订阅方案" in heading
 
     def test_default_generation_never_calls_candidate_search(
         self, page: Page, live_server_url: str, storage_dir: Path

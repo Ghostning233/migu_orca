@@ -162,6 +162,10 @@ h2 {
   grid-column: 1 / -1;
 }
 
+.search-results-panel {
+  grid-column: 1 / -1;
+}
+
 .dev-fixture-panel {
   grid-column: 1 / -1;
 }
@@ -187,11 +191,47 @@ h2 {
 }
 
 .batch-workbench-entry {
-  border-bottom: 1px solid #d8dde5;
   display: grid;
   gap: 12px;
-  margin-bottom: 18px;
-  padding-bottom: 18px;
+}
+
+.batch-workbench-entry[hidden],
+.single-search-entry[hidden],
+.search-results-panel [hidden] {
+  display: none;
+}
+
+.single-search-entry {
+  display: grid;
+  gap: 18px;
+}
+
+.search-mode-tabs {
+  border-bottom: 1px solid #d8dde5;
+  display: flex;
+  gap: 8px;
+}
+
+.search-mode-tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: #586273;
+  min-height: 38px;
+  padding: 7px 12px;
+}
+
+.search-mode-tab:hover,
+.search-mode-tab:focus,
+.search-mode-tab.is-selected {
+  background: #edf3f7;
+  border-color: #22577a;
+  color: #22577a;
+}
+
+.search-mode-tab:focus {
+  box-shadow: none;
 }
 
 .section-heading h3 {
@@ -1279,8 +1319,17 @@ button:disabled {
   }
 
   .top-nav a,
-  button {
+  button:not(.search-mode-tab) {
     width: 100%;
+  }
+
+  .search-mode-tabs {
+    gap: 4px;
+  }
+
+  .search-mode-tab {
+    flex: 1 1 0;
+    padding-inline: 8px;
   }
 
   .notification-actions {

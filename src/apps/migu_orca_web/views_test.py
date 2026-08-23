@@ -227,7 +227,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert "主流程通过真实 MiKan 候选搜索" in html
     assert "fixture-backed 生成保留在开发/离线测试区域" in html
     assert "外部数据源、连接测试与提交配置集中在 Settings" in html
-    assert "真实 MiKan 候选搜索" in html
+    assert "创建订阅方案" in html
     assert "订阅方案列表" in html
     assert "订阅方案详情" in html
     assert 'href="/index"' in html
@@ -236,6 +236,13 @@ def test_index_serves_web_ui_shell() -> None:
     assert "订阅方案工作台" in html
     assert "Settings" in html
     assert 'id="generate-panel"' in html
+    assert 'id="search-mode-tabs"' in html
+    assert 'id="single-search-tab"' in html
+    assert 'id="batch-search-tab"' in html
+    assert 'role="tablist"' in html
+    assert 'aria-selected="true"' in html
+    assert 'id="search-results-panel"' in html
+    assert 'id="search-results-heading"' in html
     assert 'id="request-list-panel"' in html
     assert 'id="request-detail-panel"' in html
     assert 'id="dev-fixture-panel"' in html
@@ -256,6 +263,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-candidate-query"' in html
     assert 'name="mikan_candidate_title"' in html
     assert 'id="batch-workbench-entry"' in html
+    assert 'aria-labelledby="batch-search-tab"' in html
     assert 'id="batch-parse-form"' in html
     assert 'id="batch-raw-input"' in html
     assert 'name="batch_raw_input"' in html
@@ -266,6 +274,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert "邻家天使S2" in html
     assert 'id="batch-parse-submit"' in html
     assert 'id="batch-parse-result"' in html
+    assert 'id="batch-search-results" hidden' in html
     assert 'id="batch-parse-error"' in html
     assert 'id="batch-accept-toolbar"' in html
     assert 'id="batch-select-all-checkbox"' in html
