@@ -303,6 +303,10 @@ textarea {
   width: 100%;
 }
 
+.batch-card-poster-placeholder {
+  padding: 8px;
+}
+
 .batch-card-title {
   overflow-wrap: anywhere;
 }
@@ -415,6 +419,32 @@ textarea {
 
 .batch-card-expand {
   justify-self: start;
+}
+
+/* A card toggle is not a request indicator. Only real in-flight operations
+ * may opt into loading UI, so hover can never inherit a spinner animation. */
+.batch-card-expand:not([aria-busy="true"]),
+.batch-card-expand:not([aria-busy="true"])::before,
+.batch-card-expand:not([aria-busy="true"])::after {
+  animation: none;
+}
+
+.batch-candidate-choices {
+  background: #f8fafc;
+  border: 1px solid #c8d5df;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+}
+
+.batch-candidate-choices .field-help {
+  margin: 0;
+}
+
+.batch-candidate-list {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .batch-card-review {

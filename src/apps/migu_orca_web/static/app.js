@@ -97,6 +97,10 @@
   let currentBatchEditItemId = null;
   let batchDraftCards = [];
   let currentBatchId = null;
+  // Candidate choices belong to the result panel, not to individual cards.
+  // Keeping the active item separately prevents cards from growing with every
+  // candidate and makes switching between rows deterministic.
+  let activeBatchCandidateItemId = null;
   let selectedBatchItemIds = new Set();
   let batchAcceptInFlight = false;
   let batchQueueItems = [];
@@ -2082,8 +2086,44 @@
 
   function deleteBatchCard(itemId) {
     selectedBatchItemIds.delete(itemId);
+    if (activeBatchCandidateItemId === itemId) {
+      activeBatchCandidateItemId = null;
+    }
     batchDraftCards = batchDraftCards.filter((row) => row.item_id !== itemId);
     renderBatchParseItems(batchDraftCards);
+  }
+
+  function renderBatchCardPoster(row) {
+    const selectedCandidate = row.selected_candidate || null;
+    const posterUrl = selectedCandidate ? safeText(selectedCandidate.poster_url) : "";
+    const posterWrap = document.createElement("div");
+    posterWrap.className = "batch-card-poster";
+
+    function showPlaceholder(message, kind) {
+      posterWrap.replaceChildren();
+      const placeholder = document.createElement("span");
+      placeholder.className = "batch-card-poster-placeholder";
+      if (kind) {
+        placeholder.dataset.posterState = kind;
+      }
+      placeholder.textContent = message;
+      posterWrap.appendChild(placeholder);
+    }
+
+    if (posterUrl) {
+      const poster = document.createElement("img");
+      poster.alt = "";
+      poster.src = posterUrl;
+      poster.addEventListener("error", function () {
+        showPlaceholder("暂无封面", "unavailable");
+      }, {once: true});
+      posterWrap.appendChild(poster);
+    } else if (fieldValue(row.status) === "FOUND") {
+      showPlaceholder("待选择合集", "unselected");
+    } else {
+      showPlaceholder("暂无封面", "unavailable");
+    }
+    return posterWrap;
   }
 
   function renderBatchCard(row) {
@@ -2119,18 +2159,7 @@
       deleteBatchCard(row.item_id);
     });
 
-    const posterWrap = document.createElement("div");
-    posterWrap.className = "batch-card-poster";
-    const selectedCandidate = row.selected_candidate || null;
-    const posterUrl = selectedCandidate ? safeText(selectedCandidate.poster_url) : "";
-    if (posterUrl) {
-      const poster = document.createElement("img");
-      poster.alt = "";
-      poster.src = posterUrl;
-      posterWrap.appendChild(poster);
-    } else {
-      posterWrap.textContent = "订阅草案";
-    }
+    const posterWrap = renderBatchCardPoster(row);
 
     const statusRow = document.createElement("div");
     statusRow.className = "batch-card-status-row";
@@ -2173,29 +2202,46 @@
     seeds.className = "batch-card-seeds";
     seeds.textContent = "有效种子数：" + batchCardSeedSummary(row);
 
-    const candidateChoices = renderBatchCandidateChoices(row);
-    const candidateFeedback = renderBatchCandidateSearchFeedback(row);
-
     const expandButton = document.createElement("button");
     expandButton.type = "button";
     expandButton.className = "secondary-button batch-card-expand";
-    expandButton.textContent = "展开";
-    expandButton.setAttribute("aria-label", "展开 " + (safeText(row.raw_title) || "批量条目"));
     const reviewPanel = renderBatchCardReviewPanel(row);
-    if (!canExpandBatchCard(row)) {
-      expandButton.disabled = true;
-      expandButton.title = "生成草案后可展开查看";
-    }
-    expandButton.addEventListener("click", () => {
-      const isOpening = reviewPanel.hidden;
-      reviewPanel.hidden = !isOpening;
-      expandButton.textContent = isOpening ? "收起" : "展开";
+    const canChooseCandidate =
+      fieldValue(row.status) === "FOUND" &&
+      Array.isArray(row.candidates) &&
+      row.candidates.length > 0;
+    const isCandidateActive = activeBatchCandidateItemId === row.item_id;
+    if (canChooseCandidate) {
+      expandButton.textContent = isCandidateActive ? "收起候选" : "查看候选";
       expandButton.setAttribute(
-        "aria-expanded",
-        isOpening ? "true" : "false",
+        "aria-label",
+        (isCandidateActive ? "收起候选" : "查看候选") + "：" +
+          (safeText(row.raw_title) || "批量条目"),
       );
-    });
-    expandButton.setAttribute("aria-expanded", "false");
+      expandButton.setAttribute("aria-controls", "batch-candidate-choices");
+      expandButton.setAttribute("aria-expanded", isCandidateActive ? "true" : "false");
+      expandButton.addEventListener("click", function () {
+        activeBatchCandidateItemId = isCandidateActive ? null : row.item_id;
+        renderBatchParseItems(batchDraftCards);
+      });
+    } else if (canExpandBatchCard(row)) {
+      expandButton.textContent = "查看草案";
+      expandButton.setAttribute("aria-label", "查看草案：" + (safeText(row.raw_title) || "批量条目"));
+      expandButton.setAttribute("aria-controls", "batch-card-review-" + safeText(row.item_id));
+      expandButton.setAttribute("aria-expanded", "false");
+      reviewPanel.id = "batch-card-review-" + safeText(row.item_id);
+      expandButton.addEventListener("click", function () {
+        const isOpening = reviewPanel.hidden;
+        reviewPanel.hidden = !isOpening;
+        expandButton.textContent = isOpening ? "收起草案" : "查看草案";
+        expandButton.setAttribute("aria-expanded", isOpening ? "true" : "false");
+      });
+    } else {
+      expandButton.textContent = "查看候选";
+      expandButton.disabled = true;
+      expandButton.title = "当前条目没有可选择的候选合集";
+      expandButton.setAttribute("aria-expanded", "false");
+    }
 
     const children = [
       selectCheckbox,
@@ -2208,12 +2254,6 @@
       preference,
       seeds,
     ];
-    if (candidateChoices) {
-      children.push(candidateChoices);
-    }
-    if (candidateFeedback) {
-      children.push(candidateFeedback);
-    }
     if (row.accept_feedback && row.accept_feedback.reason) {
       const reason = document.createElement("div");
       reason.className = "batch-card-reason";
@@ -2237,7 +2277,9 @@
       return null;
     }
     const container = document.createElement("div");
+    container.id = "batch-candidate-choices";
     container.className = "batch-candidate-choices";
+    container.setAttribute("aria-label", "候选合集：" + batchCardTitle(row));
     const hint = document.createElement("p");
     hint.className = "field-help";
     hint.textContent = "请选择一个真实 MiKan 合集后生成订阅草案。";
@@ -2305,6 +2347,16 @@
       list.appendChild(renderBatchCard(row));
     }
     batchParseResult.appendChild(list);
+
+    const activeRow = rows.find((row) => row.item_id === activeBatchCandidateItemId);
+    if (activeRow && fieldValue(activeRow.status) === "FOUND") {
+      const choices = renderBatchCandidateChoices(activeRow);
+      if (choices) {
+        batchParseResult.appendChild(choices);
+      }
+    } else if (activeBatchCandidateItemId) {
+      activeBatchCandidateItemId = null;
+    }
 
     if (batchAcceptToolbar) {
       batchAcceptToolbar.hidden = false;
