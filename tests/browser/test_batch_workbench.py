@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import unquote_plus
 
 import pytest
 from playwright.sync_api import Page, expect
 
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from mikan_engine.controllers.mikan_client import create_mikan_client
+from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.models import EntryRequest
 
 
@@ -368,6 +371,88 @@ def _accept_route_handler(accepted_ids: set[str], *, batch_id: str = "batch-brow
 
 class TestBatchWorkbenchEntry:
     """Stage 19 batch workbench entry and draft-card rendering."""
+
+    def test_production_batch_states_select_real_candidate_before_draft(
+        self,
+        page: Page,
+        live_server_url: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The browser consumes the real parse serializer, not a DRAFT-shaped mock.
+
+        Only the outbound MiKan transport is replaced.  The Flask batch parse
+        endpoint, candidate serialization, and selected-candidate request
+        generation all run through their production implementations.
+        """
+
+        class _MikanTransport:
+            def __init__(self) -> None:
+                self.requests: list[str] = []
+
+            def get_text(self, url: str, *, timeout: float) -> str:
+                del timeout
+                self.requests.append(url)
+                if "/Home/Search" in url:
+                    query = unquote_plus(url.split("searchstr=", 1)[-1])
+                    if "杖与剑" in query or "杖剑谭" in query:
+                        raise ConnectionError("external MiKan is unavailable")
+                    if "关于我转生" in query or "转生史莱姆" in query:
+                        return (
+                            '<article class="search-result">'
+                            '<a href="/Home/Bangumi/4001">'
+                            '关于我转生变成史莱姆这档事 第四季</a>'
+                            '<img class="poster" src="/images/slime.jpg">'
+                            "</article>"
+                        )
+                    return "<section class=\"search-result\"></section>"
+                if "/Home/Bangumi/4001" in url:
+                    return (
+                        '<h1 class="bangumi-title">关于我转生变成史莱姆这档事 第四季</h1>'
+                        '<section class="subgroup-section">'
+                        '<h2 class="subgroup-name">Loli</h2>'
+                        '<a href="/RSS/Bangumi?bangumiId=4001&subgroupid=10">RSS</a>'
+                        "</section>"
+                    )
+                if "/RSS/Bangumi?bangumiId=4001&subgroupid=10" in url:
+                    return (
+                        "<rss><channel><item><title>史莱姆 S4 - 01 [1080p]</title>"
+                        "<link>https://example.invalid/episode/1</link>"
+                        "</item></channel></rss>"
+                    )
+                raise AssertionError(f"unexpected mocked MiKan URL: {url}")
+
+        transport = _MikanTransport()
+
+        def _create_client(config: MikanConfig):
+            return create_mikan_client(config, transport=transport)
+
+        monkeypatch.setattr(
+            "mikan_engine.controllers.mikan_client.create_mikan_client",
+            _create_client,
+        )
+
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4\n路哥S4\n杖剑谭S2")
+        page.click("#batch-parse-submit")
+
+        found = page.locator(".batch-draft-card", has_text="萌王S4")
+        empty = page.locator(".batch-draft-card", has_text="路哥S4")
+        failed = page.locator(".batch-draft-card", has_text="杖剑谭S2")
+        expect(found.locator(".batch-card-status")).to_contain_text("找到候选")
+        expect(found.locator("img.candidate-poster")).to_have_count(1)
+        expect(found.locator(".batch-card-expand")).to_be_disabled()
+        expect(empty.locator(".batch-card-status")).to_contain_text("未找到候选")
+        expect(empty.locator(".batch-card-expand")).to_be_disabled()
+        expect(failed.locator(".batch-card-status")).to_contain_text("搜索失败")
+        expect(failed.locator(".batch-card-expand")).to_be_disabled()
+
+        found.locator(".batch-candidate-select").click()
+        expect(found.locator(".batch-card-status")).to_contain_text("草案")
+        expect(found.locator(".batch-card-expand")).to_be_enabled()
+        found.locator(".batch-card-expand").click()
+        expect(found.locator(".batch-card-review")).to_contain_text("Loli")
+        assert any("/Home/Search" in url for url in transport.requests)
+        assert any("/Home/Bangumi/4001" in url for url in transport.requests)
 
     def test_found_candidate_selection_creates_only_that_batch_draft(
         self, page: Page, live_server_url: str
