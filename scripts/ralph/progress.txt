@@ -77,3 +77,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Candidate card rendering is shared by individual search and batch popover choices; add public display metadata there once, then use `selected_candidate` for the batch result-card summary.
   - Keep unknown external optional metadata untrusted in JavaScript: only positive integers receive the numeric display, everything else uses the stable unknown placeholder.
 ---
+
+## 2026-08-24 00:15:31 CST - US-171
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Updated disabled and `aria-disabled` controls to use static feedback with a default cursor and no pseudo-element animation, while preserving request progress in the existing live status areas.
+- Prevented disabled navigation, tab, icon, secondary, and danger controls from inheriting hover/focus highlights.
+- Added Chromium regression coverage for candidate search, batch draft/accept, queue, and Settings controls, including native non-triggerability.
+- Files changed: `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Put loading feedback in the request's aria-live status; disabled controls are availability feedback and must remain static unless they explicitly carry `aria-busy=true`.
+---

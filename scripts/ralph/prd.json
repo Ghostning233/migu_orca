@@ -124,7 +124,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "不要全局移除真实异步操作使用的 loading 样式。"
     },
     {

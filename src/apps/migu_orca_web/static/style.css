@@ -80,8 +80,8 @@ h2 {
   text-decoration: none;
 }
 
-.top-nav a:hover,
-.top-nav a:focus,
+.top-nav a:not([aria-disabled="true"]):hover,
+.top-nav a:not([aria-disabled="true"]):focus,
 .top-nav a[aria-current="page"] {
   border-color: #22577a;
   box-shadow: 0 0 0 2px #d7e9f2;
@@ -235,8 +235,8 @@ h2 {
   padding: 7px 12px;
 }
 
-.search-mode-tab:hover,
-.search-mode-tab:focus,
+.search-mode-tab:not(:disabled):not([aria-disabled="true"]):hover,
+.search-mode-tab:not(:disabled):not([aria-disabled="true"]):focus,
 .search-mode-tab.is-selected {
   background: #edf3f7;
   border-color: #22577a;
@@ -411,8 +411,8 @@ textarea {
   padding: 0;
 }
 
-.icon-button:hover,
-.icon-button:focus {
+.icon-button:not(:disabled):not([aria-disabled="true"]):hover,
+.icon-button:not(:disabled):not([aria-disabled="true"]):focus {
   background: #f3f6f9;
   border-color: #93a4b7;
 }
@@ -984,9 +984,26 @@ button {
   outline-offset: 2px;
 }
 
-button:disabled {
-  cursor: wait;
+button:disabled,
+:is(input, select, textarea):disabled,
+:is(a, button, input, select, textarea, [role="button"])[aria-disabled="true"] {
+  cursor: default;
   opacity: 0.68;
+}
+
+/* Disabled controls are static feedback. Request progress belongs to the
+ * surrounding aria-live status, while a real aria-busy control may opt into
+ * its own loading treatment. */
+button:disabled:not([aria-busy="true"]),
+:is(input, select, textarea):disabled:not([aria-busy="true"]),
+:is(a, button, input, select, textarea, [role="button"])[aria-disabled="true"]:not([aria-busy="true"]),
+button:disabled:not([aria-busy="true"])::before,
+button:disabled:not([aria-busy="true"])::after,
+:is(input, select, textarea):disabled:not([aria-busy="true"])::before,
+:is(input, select, textarea):disabled:not([aria-busy="true"])::after,
+:is(a, button, input, select, textarea, [role="button"])[aria-disabled="true"]:not([aria-busy="true"])::before,
+:is(a, button, input, select, textarea, [role="button"])[aria-disabled="true"]:not([aria-busy="true"])::after {
+  animation: none;
 }
 
 .primary-button {
@@ -1007,8 +1024,8 @@ button:disabled {
   justify-self: start;
 }
 
-.secondary-button:hover,
-.secondary-button:focus {
+.secondary-button:not(:disabled):not([aria-disabled="true"]):hover,
+.secondary-button:not(:disabled):not([aria-disabled="true"]):focus {
   border-color: #22577a;
   box-shadow: 0 0 0 2px #d7e9f2;
   outline: none;
@@ -1025,8 +1042,8 @@ button:disabled {
   padding: 8px 14px;
 }
 
-.danger-button:hover,
-.danger-button:focus {
+.danger-button:not(:disabled):not([aria-disabled="true"]):hover,
+.danger-button:not(:disabled):not([aria-disabled="true"]):focus {
   background: #971b12;
   border-color: #74140d;
 }
