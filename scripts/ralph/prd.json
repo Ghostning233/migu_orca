@@ -16,7 +16,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先修正后端公开契约，不在本 story 重构页面布局。PARSED 不能再承载空壳草案语义。"
     },
     {

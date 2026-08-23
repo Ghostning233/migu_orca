@@ -12,3 +12,14 @@ Started: 2026-08-23 15:45:00 CST
 - 搜索状态文案必须基于可观测事件；单一长请求只能展示请求级状态，不能用定时器伪造服务端页面解析或逐项进度。
 
 ---
+
+## 2026-08-23 16:27:46 CST - US-158
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented stable batch candidate states: successful searches now return `FOUND` when candidates exist and `EMPTY` when they do not; parse and search failures remain isolated as `FAILED`.
+- Removed batch parse's empty preview-request generation, so no-candidate results cannot be expanded, accepted, or otherwise treated as draft skeletons.
+- Files changed: `src/batch_engine/models/__init__.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch parse serializes one independent item per input line, allowing per-item MiKan failures without aborting the complete response.
+  - Candidate searches are already centralized through `_search_mikan_candidates` and cache-backed batch helpers; follow-up selection work should preserve that seam.
+  - Full tests passed (824 passed); browser tests were skipped because Chromium is unavailable in this environment, so UI stories still need the dev-browser validation path when available.
+---
