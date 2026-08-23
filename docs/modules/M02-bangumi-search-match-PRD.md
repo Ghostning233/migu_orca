@@ -123,3 +123,13 @@ match_bangumi(raw_title, candidates, season_hint = null) -> match_result
 | Q-M02-03 | 别名表由静态数据提供、配置维护，还是运行时生成？ | 否 | 已确认：由候选数据携带 aliases |
 | Q-M02-04 | 同分时优先级如何定义？ | 否 | 已确认：返回歧义错误 |
 | Q-M02-05 | TV、剧场版、OVA、重制版如何区分？ | 否 | 第一阶段先记录为待扩展规则 |
+
+## 12. Stage 22 搜索结果语义补充
+
+Stage 22 明确 M02 的标题解析/本地匹配与 M03 真实 MiKan 候选发现是不同层级：
+
+1. 标题解析或相似度匹配成功只表示得到了候选标题/搜索词，不表示 MiKan 已返回真实合集。
+2. M03 返回空候选是正常 EMPTY 结果；M02 不得把 raw title、canonical title candidate 或 aliases 包装成伪 MiKan 候选。
+3. 只有带公开 `bangumi_id` 与规范化 `mikan_url` 的 M03 候选才可供用户显式选择。
+4. 低置信度、歧义或无候选必须保留人工审核语义，不得自动进入订阅草案或接受状态。
+5. 单个与批量入口复用同一边界，批量模式不能放宽候选真实性要求。

@@ -1,0 +1,147 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage21-preference-recommendation",
+  "description": "MiGuOrca Stage 21：在 Stage 19/20 批量订阅草案和 Auto Bangumi 提交队列基础上，增加非敏感用户偏好、偏好驱动的草案默认值、低置信度审核提示和用户修正驱动的搜索词增强。AI 只生成候选，不自动选择合集、接受卡片或提交 Auto Bangumi。",
+  "userStories": [
+    {
+      "id": "US-150",
+      "title": "新增非敏感用户偏好数据契约与存储",
+      "description": "As a user, I want to save my subtitle-group, filter, and naming defaults so that future batch drafts require less manual editing.",
+      "acceptanceCriteria": [
+        "新增版本化用户偏好模型或等价结构，支持 preferred/excluded subtitle groups、fallback、filter_defaults、naming strategy/template 和 search correction 开关",
+        "偏好存储使用 path-safe 的本地 JSON repository，缺失配置返回安全默认偏好，不破坏旧版本数据读取",
+        "偏好字段只允许非敏感字符串、布尔值、有限枚举和字符串列表；拒绝 endpoint、token、cookie、Authorization header、magnet、raw HTML、raw RSS、原始响应体和本地绝对路径",
+        "保存操作采用临时文件或等价的安全写入方式，不能因为非法 batch/request 输入穿越存储目录",
+        "单元测试覆盖默认偏好、合法保存、旧版本兼容、非法字段和敏感值过滤",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "先建立 M08 偏好契约和存储边界，不接入批量解析或 Web UI。"
+    },
+    {
+      "id": "US-151",
+      "title": "新增用户偏好 Web API",
+      "description": "As a Web UI caller, I want to read and explicitly save my non-sensitive preferences so that the workbench can use stable defaults.",
+      "acceptanceCriteria": [
+        "新增读取偏好 API，返回版本、字幕组偏好、筛选默认值、命名策略和搜索增强开关",
+        "新增保存偏好 API，只接受已定义的非敏感字段并返回保存后的规范化偏好",
+        "保存 API 对空列表、重复字幕组、非法枚举、非法 filter flags 和过长字符串返回统一中文 validation_error envelope",
+        "API 响应、错误 details 和日志不得包含 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体或本地绝对路径",
+        "Web API 测试覆盖读取默认值、保存成功、非法字段、敏感字段和存储失败",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "API 复用 US-150 repository；不在本 story 应用偏好到批量草案。"
+    },
+    {
+      "id": "US-152",
+      "title": "新增偏好管理 Web UI",
+      "description": "As a user, I want a clear preference form so that I can control the defaults used by batch drafts.",
+      "acceptanceCriteria": [
+        "Settings 或批量工作台提供偏好面板，包含偏好字幕组、排除字幕组、fallback、包含/排除规则、使用正则、大小写敏感和命名策略",
+        "页面加载时展示已保存偏好；保存成功后展示中文成功反馈并刷新规范化值",
+        "清空或恢复默认操作必须显式触发，且不会清除 Stage 20 队列、Request 或 AB result storage",
+        "偏好表单不展示或回显任何外部 endpoint、token、cookie、Authorization header 或原始外部响应",
+        "浏览器测试覆盖加载、保存、非法输入、恢复默认和刷新后偏好保持",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "保持 /settings 承载配置和偏好、/index 聚焦草案工作台的现有信息架构。"
+    },
+    {
+      "id": "US-153",
+      "title": "将用户偏好应用到批量草案生成",
+      "description": "As a user, I want saved preferences applied to each batch draft so that subtitle groups, filters, and folder names start from my defaults.",
+      "acceptanceCriteria": [
+        "批量解析或草案生成读取当前保存的非敏感偏好，并对每个 item 生成偏好应用结果",
+        "字幕组选择遵守排除列表、优先列表和现有 M05 fallback 顺序，不能选择没有有效种子的字幕组",
+        "filter_defaults 只作为可编辑的默认 filter_rule，正确保留 use_regex 和 case_sensitive 语义",
+        "naming strategy 只生成 expected_folder_name 默认值，用户仍可通过现有单卡修改流程覆盖",
+        "响应为每个 item 返回 applied_preferences、preference_warnings 或等价的可审核元数据；偏好冲突只影响当前 item",
+        "偏好读取或应用失败时回退到 Stage 19 默认流程，不阻塞同批次其他 item",
+        "单元测试覆盖字幕组优先/排除、筛选默认值、命名默认值、冲突和回退",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "复用 M05/M06/M07 和 Stage 19 批量链路，不创建第二套筛选或命名实现。"
+    },
+    {
+      "id": "US-154",
+      "title": "增加偏好命中与低置信度审核元数据",
+      "description": "As a user, I want to understand why a draft was suggested and which items still need review before accepting them.",
+      "acceptanceCriteria": [
+        "每个批量 item 可展示偏好命中的字幕组、筛选或命名字段，以及未命中或冲突原因",
+        "低置信度、多候选、偏好冲突、无候选和搜索回退 item 必须设置 needs_user_review=true 或等价状态",
+        "偏好命中不得改变用户最终候选合集选择，不得自动将卡片标记为 ACCEPTED",
+        "卡片和 API 只返回公开标题、公开候选元数据、规则摘要和中文审核提示，不返回 raw HTML、raw RSS XML、magnet、cookie、token、完整 URL 或原始响应体",
+        "单元测试覆盖高置信度无提醒、低置信度、多候选、偏好冲突和敏感字段过滤",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "本 story 只增加解释性元数据和状态，不实现自动接受。"
+    },
+    {
+      "id": "US-155",
+      "title": "记录用户修正并增强搜索词",
+      "description": "As a user, I want explicit title and candidate corrections reused in later searches so that shorthand names become more reliable over time.",
+      "acceptanceCriteria": [
+        "用户通过现有单卡修改或明确的修正操作提交后，系统记录 raw_title、公开 canonical title、season hint、公开 bangumi metadata 和 search query correction",
+        "搜索词增强只使用显式保存的非敏感修正，支持中日文标题、数字季/第 N 季和罗马字等公开 query 变体",
+        "增强结果保留原始 query、增强 query 和来源标记，方便用户审核；搜索失败时回退原有 search_queries",
+        "同一 raw_title 的修正记录采用有界数量或最新版本策略，不能无限增长或写入完整外部响应",
+        "单元测试覆盖修正保存、后续 query 复用、重复修正、搜索失败回退和敏感字段过滤",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "真实 LLM provider 不是本 story 必需条件；先建立确定性 correction/search enhancement seam。"
+    },
+    {
+      "id": "US-156",
+      "title": "在批量工作台展示偏好与修正结果",
+      "description": "As a user, I want the batch cards to show applied defaults and correction/review hints so that I can audit recommendations before accepting them.",
+      "acceptanceCriteria": [
+        "批量卡片或展开区域展示偏好命中摘要、搜索词来源、低置信度/多候选/冲突提醒和当前默认配置",
+        "用户修改单卡后，当前卡片的偏好命中和审核提示同步更新，其他卡片保持不变",
+        "偏好提示不会覆盖现有卡片修改、候选选择、批量接受和 Stage 20 队列状态",
+        "无偏好、偏好读取失败或增强失败时展示明确的默认流程状态，不阻塞手动候选选择和直连 fallback",
+        "浏览器测试覆盖偏好命中、低置信度提示、单卡修改回流、无偏好回退和敏感字段不展示",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "复用 Stage 19 卡片和 Stage 20 队列 UI；不要改变接受/提交语义。"
+    },
+    {
+      "id": "US-157",
+      "title": "Stage 21 文档与安全回归收尾",
+      "description": "As a maintainer, I want Stage 21 preference behavior and its AI/manual-review boundary documented and security-tested.",
+      "acceptanceCriteria": [
+        "README、主 PRD、future stages、backlog、M08、M00、M13 和 Stage 21 PRD 同步 Stage 21 完成状态及 Stage 22 handoff",
+        "文档明确偏好只保存非敏感字段、AI 只生成候选、用户仍需审核和接受、无偏好时回退旧流程",
+        "新增端到端安全回归，断言 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径不出现在偏好 JSON、API 响应、页面、URL、浏览器 storage、日志或 trace 中",
+        "`uv run python -m compileall -q src tests` 通过",
+        "`uv run pytest -q` 通过",
+        "`uv run pytest tests/browser/ -q` 通过；如果浏览器不可用，必须记录明确 skip 原因",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Stage closeout story；所有功能 story 完成后再执行。已完成：README、主 PRD、future stages、backlog、M08、M00、M13、Stage 21 PRD 同步完成状态与 Stage 22 handoff；新增端到端安全回归 test_stage21_preferences_corrections_do_not_leak_sensitive_values。"
+    }
+  ]
+}

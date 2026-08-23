@@ -1,147 +1,129 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage21-preference-recommendation",
-  "description": "MiGuOrca Stage 21：在 Stage 19/20 批量订阅草案和 Auto Bangumi 提交队列基础上，增加非敏感用户偏好、偏好驱动的草案默认值、低置信度审核提示和用户修正驱动的搜索词增强。AI 只生成候选，不自动选择合集、接受卡片或提交 Auto Bangumi。",
+  "branchName": "agent/stage22-web-search-workbench",
+  "description": "MiGuOrca Stage 22：重构 Web UI 创建订阅方案工作台，统一单个/批量真实 MiKan 候选搜索、候选选择与草案生成语义，建立独立结果面板和可信搜索状态；无候选不得生成空壳草案，AI 不自动选择、接受或提交。",
   "userStories": [
     {
-      "id": "US-150",
-      "title": "新增非敏感用户偏好数据契约与存储",
-      "description": "As a user, I want to save my subtitle-group, filter, and naming defaults so that future batch drafts require less manual editing.",
+      "id": "US-158",
+      "title": "建立批量真实候选结果状态契约",
+      "description": "作为用户，我希望系统区分标题已解析、找到候选、没有候选和搜索失败，从而不会把无效输入误认为真实番剧草案。",
       "acceptanceCriteria": [
-        "新增版本化用户偏好模型或等价结构，支持 preferred/excluded subtitle groups、fallback、filter_defaults、naming strategy/template 和 search correction 开关",
-        "偏好存储使用 path-safe 的本地 JSON repository，缺失配置返回安全默认偏好，不破坏旧版本数据读取",
-        "偏好字段只允许非敏感字符串、布尔值、有限枚举和字符串列表；拒绝 endpoint、token、cookie、Authorization header、magnet、raw HTML、raw RSS、原始响应体和本地绝对路径",
-        "保存操作采用临时文件或等价的安全写入方式，不能因为非法 batch/request 输入穿越存储目录",
-        "单元测试覆盖默认偏好、合法保存、旧版本兼容、非法字段和敏感值过滤",
+        "批量 API 为每个条目输出稳定公开的候选搜索状态，至少可区分 FOUND、EMPTY、FAILED 或语义等价值",
+        "PARSED 仅表示标题解析完成；MiKan 候选为空时不得返回可接受的 preview_request",
+        "搜索成功但无候选返回 EMPTY；网络或页面解析异常返回 FAILED 和脱敏错误，单项失败不阻塞其他项",
+        "API 和控制器测试覆盖不存在标题、有候选、空候选、异常及敏感字段过滤",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "先建立 M08 偏好契约和存储边界，不接入批量解析或 Web UI。"
+      "passes": false,
+      "notes": "先修正后端公开契约，不在本 story 重构页面布局。PARSED 不能再承载空壳草案语义。"
     },
     {
-      "id": "US-151",
-      "title": "新增用户偏好 Web API",
-      "description": "As a Web UI caller, I want to read and explicitly save my non-sensitive preferences so that the workbench can use stable defaults.",
+      "id": "US-159",
+      "title": "收敛候选选择与订阅草案生成链路",
+      "description": "作为用户，我希望单个和批量搜索都在我选择真实 MiKan 合集后才生成订阅草案，从而保证草案来自可审核的真实候选。",
       "acceptanceCriteria": [
-        "新增读取偏好 API，返回版本、字幕组偏好、筛选默认值、命名策略和搜索增强开关",
-        "新增保存偏好 API，只接受已定义的非敏感字段并返回保存后的规范化偏好",
-        "保存 API 对空列表、重复字幕组、非法枚举、非法 filter flags 和过长字符串返回统一中文 validation_error envelope",
-        "API 响应、错误 details 和日志不得包含 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体或本地绝对路径",
-        "Web API 测试覆盖读取默认值、保存成功、非法字段、敏感字段和存储失败",
+        "单个与批量入口复用 _search_mikan_candidates、公开候选序列化和候选缓存，不新增第二套 MiKan 搜索或 parser",
+        "批量模式仅编排多个搜索项，每个 FOUND 条目允许用户显式选择实际候选",
+        "候选选择复用现有 mikan_bangumi 详情解析与 preview modify/save 链路；选择成功后才进入 DRAFT 或 READY",
+        "EMPTY、FAILED、PARSED 条目不能展开、修改、保存或接受",
+        "API、控制器和前端静态测试覆盖候选选择到草案的状态迁移",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "API 复用 US-150 repository；不在本 story 应用偏好到批量草案。"
+      "passes": false,
+      "notes": "复用现有单番剧原子链路；不要为批量卡片另造详情解析、筛选、命名或 Request 生命周期。"
     },
     {
-      "id": "US-152",
-      "title": "新增偏好管理 Web UI",
-      "description": "As a user, I want a clear preference form so that I can control the defaults used by batch drafts.",
+      "id": "US-160",
+      "title": "重构创建订阅方案工作台信息架构",
+      "description": "作为用户，我希望在单个搜索和批量搜索之间清晰切换，并在独立区域查看结果，从而避免输入与大量卡片混排。",
       "acceptanceCriteria": [
-        "Settings 或批量工作台提供偏好面板，包含偏好字幕组、排除字幕组、fallback、包含/排除规则、使用正则、大小写敏感和命名策略",
-        "页面加载时展示已保存偏好；保存成功后展示中文成功反馈并刷新规范化值",
-        "清空或恢复默认操作必须显式触发，且不会清除 Stage 20 队列、Request 或 AB result storage",
-        "偏好表单不展示或回显任何外部 endpoint、token、cookie、Authorization header 或原始外部响应",
-        "浏览器测试覆盖加载、保存、非法输入、恢复默认和刷新后偏好保持",
+        "generate-panel 标题改为创建订阅方案",
+        "页面提供单个搜索和批量搜索分段切换，选中项高亮且一次只显示对应输入模块",
+        "新增与订阅方案详情同级且独占一行的 search-results-panel，两种模式结果和批量结果工具栏迁入该面板",
+        "切换模式不会把另一模式旧结果显示为当前结果，焦点、ARIA 选中态和键盘操作正确",
+        "桌面和窄屏布局保持可读",
+        "Verify in browser using dev-browser skill",
         "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
+        "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": "保持 /settings 承载配置和偏好、/index 聚焦草案工作台的现有信息架构。"
+      "passes": false,
+      "notes": "Flask SSR + 原生 JS，无前端构建链；保留现有直连 fallback 和 Storage 摘要能力但重新安排层级。"
     },
     {
-      "id": "US-153",
-      "title": "将用户偏好应用到批量草案生成",
-      "description": "As a user, I want saved preferences applied to each batch draft so that subtitle groups, filters, and folder names start from my defaults.",
+      "id": "US-161",
+      "title": "统一单个与批量真实候选卡片",
+      "description": "作为用户，我希望两种搜索模式都展示一致的真实候选信息和封面，从而能判断并选择正确合集。",
       "acceptanceCriteria": [
-        "批量解析或草案生成读取当前保存的非敏感偏好，并对每个 item 生成偏好应用结果",
-        "字幕组选择遵守排除列表、优先列表和现有 M05 fallback 顺序，不能选择没有有效种子的字幕组",
-        "filter_defaults 只作为可编辑的默认 filter_rule，正确保留 use_regex 和 case_sensitive 语义",
-        "naming strategy 只生成 expected_folder_name 默认值，用户仍可通过现有单卡修改流程覆盖",
-        "响应为每个 item 返回 applied_preferences、preference_warnings 或等价的可审核元数据；偏好冲突只影响当前 item",
-        "偏好读取或应用失败时回退到 Stage 19 默认流程，不阻塞同批次其他 item",
-        "单元测试覆盖字幕组优先/排除、筛选默认值、命名默认值、冲突和回退",
+        "单个和批量结果复用统一候选卡渲染或共享渲染原语",
+        "FOUND 卡片展示公开标题、MiKan ID、匹配提示、封面或明确占位，以及选择此合集按钮",
+        "批量结果按原始输入分组，每组可包含多个真实候选且不默认选择第一个候选",
+        "EMPTY 显示未找到匹配的 MiKan 合集且无草案动作；FAILED 显示可重试的脱敏错误且不影响其他分组",
+        "poster_url 缺失只触发占位，不改变 FOUND 状态",
+        "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "复用 M05/M06/M07 和 Stage 19 批量链路，不创建第二套筛选或命名实现。"
+      "passes": false,
+      "notes": "候选卡只渲染公开字段；AI/推荐标签只能注释，不自动选择。"
     },
     {
-      "id": "US-154",
-      "title": "增加偏好命中与低置信度审核元数据",
-      "description": "As a user, I want to understand why a draft was suggested and which items still need review before accepting them.",
+      "id": "US-162",
+      "title": "增加简洁真实的搜索状态反馈",
+      "description": "作为用户，我希望在等待搜索时知道系统正在处理什么，并在结束后看到明确结果摘要。",
       "acceptanceCriteria": [
-        "每个批量 item 可展示偏好命中的字幕组、筛选或命名字段，以及未命中或冲突原因",
-        "低置信度、多候选、偏好冲突、无候选和搜索回退 item 必须设置 needs_user_review=true 或等价状态",
-        "偏好命中不得改变用户最终候选合集选择，不得自动将卡片标记为 ACCEPTED",
-        "卡片和 API 只返回公开标题、公开候选元数据、规则摘要和中文审核提示，不返回 raw HTML、raw RSS XML、magnet、cookie、token、完整 URL 或原始响应体",
-        "单元测试覆盖高置信度无提醒、低置信度、多候选、偏好冲突和敏感字段过滤",
+        "复用现有状态容器展示搜索开始、完成、无结果和失败反馈",
+        "单个搜索开始文案包含经安全渲染的当前标题，完成文案包含候选数量或明确无结果",
+        "批量搜索在单一长请求下只展示请求级真实状态和条目总数，不伪造逐项或页面解析进度",
+        "loading 期间禁用相关输入、模式切换和提交操作，完成或失败后恢复",
+        "状态变化使用 aria-live 且不会造成焦点跳失",
+        "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "本 story 只增加解释性元数据和状态，不实现自动接受。"
+      "passes": false,
+      "notes": "除非实现真实可观测的逐项请求，否则不得用定时器伪造内部进度。"
     },
     {
-      "id": "US-155",
-      "title": "记录用户修正并增强搜索词",
-      "description": "As a user, I want explicit title and candidate corrections reused in later searches so that shorthand names become more reliable over time.",
+      "id": "US-163",
+      "title": "补齐真实状态与共享链路浏览器回归",
+      "description": "作为维护者，我希望浏览器测试使用生产 API 的真实状态形状，从而防止 mock 再次掩盖前后端契约错误。",
       "acceptanceCriteria": [
-        "用户通过现有单卡修改或明确的修正操作提交后，系统记录 raw_title、公开 canonical title、season hint、公开 bangumi metadata 和 search query correction",
-        "搜索词增强只使用显式保存的非敏感修正，支持中日文标题、数字季/第 N 季和罗马字等公开 query 变体",
-        "增强结果保留原始 query、增强 query 和来源标记，方便用户审核；搜索失败时回退原有 search_queries",
-        "同一 raw_title 的修正记录采用有界数量或最新版本策略，不能无限增长或写入完整外部响应",
-        "单元测试覆盖修正保存、后续 query 复用、重复修正、搜索失败回退和敏感字段过滤",
+        "审计并替换关键测试中用理想化 DRAFT 代替真实 PARSED 和候选状态的 mock",
+        "Playwright 覆盖单个和批量 FOUND、EMPTY、FAILED、有封面、无封面、模式切换和独立结果面板",
+        "Playwright 覆盖真实候选选择到 DRAFT、展开、修改或接受的完整交互",
+        "至少一组 Flask API 与 Playwright 联合路径使用生产序列化结果，只 mock 外部 MiKan transport",
+        "测试不依赖实时 MiKan 网站",
+        "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "真实 LLM provider 不是本 story 必需条件；先建立确定性 correction/search enhancement seam。"
+      "passes": false,
+      "notes": "重点清除 progress.txt 已记录的真实 PARSED 被 DRAFT mock 掩盖问题。"
     },
     {
-      "id": "US-156",
-      "title": "在批量工作台展示偏好与修正结果",
-      "description": "As a user, I want the batch cards to show applied defaults and correction/review hints so that I can audit recommendations before accepting them.",
+      "id": "US-164",
+      "title": "Stage 22 文档、安全回归与收尾",
+      "description": "作为维护者，我希望 Stage 22 的实现、文档和安全边界保持一致，从而可以可靠交接下一阶段。",
       "acceptanceCriteria": [
-        "批量卡片或展开区域展示偏好命中摘要、搜索词来源、低置信度/多候选/冲突提醒和当前默认配置",
-        "用户修改单卡后，当前卡片的偏好命中和审核提示同步更新，其他卡片保持不变",
-        "偏好提示不会覆盖现有卡片修改、候选选择、批量接受和 Stage 20 队列状态",
-        "无偏好、偏好读取失败或增强失败时展示明确的默认流程状态，不阻塞手动候选选择和直连 fallback",
-        "浏览器测试覆盖偏好命中、低置信度提示、单卡修改回流、无偏好回退和敏感字段不展示",
+        "同步 README、主 PRD、Future Stages、backlog、Stage 22 PRD 和受影响的 M00、M02、M03、M13 模块 PRD，并标记实际完成状态",
+        "Stage 21 历史完成事实保持不变，部署配置向导继续作为 Stage 23 远期可选方向",
+        "端到端安全回归断言新结果面板、API、URL、浏览器 storage、Request/队列 JSON、日志与 trace 不泄露敏感值或原始外部内容",
+        "README 本地验收覆盖模式切换、独立结果面板、真实候选选择、EMPTY/FAILED、封面占位和搜索状态反馈",
+        "Verify in browser using dev-browser skill",
         "Tests pass",
-        "Typecheck passes",
-        "Verify in browser using dev-browser skill"
-      ],
-      "priority": 7,
-      "passes": true,
-      "notes": "复用 Stage 19 卡片和 Stage 20 队列 UI；不要改变接受/提交语义。"
-    },
-    {
-      "id": "US-157",
-      "title": "Stage 21 文档与安全回归收尾",
-      "description": "As a maintainer, I want Stage 21 preference behavior and its AI/manual-review boundary documented and security-tested.",
-      "acceptanceCriteria": [
-        "README、主 PRD、future stages、backlog、M08、M00、M13 和 Stage 21 PRD 同步 Stage 21 完成状态及 Stage 22 handoff",
-        "文档明确偏好只保存非敏感字段、AI 只生成候选、用户仍需审核和接受、无偏好时回退旧流程",
-        "新增端到端安全回归，断言 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径不出现在偏好 JSON、API 响应、页面、URL、浏览器 storage、日志或 trace 中",
-        "`uv run python -m compileall -q src tests` 通过",
-        "`uv run pytest -q` 通过",
-        "`uv run pytest tests/browser/ -q` 通过；如果浏览器不可用，必须记录明确 skip 原因",
         "Typecheck passes"
       ],
-      "priority": 8,
-      "passes": true,
-      "notes": "Stage closeout story；所有功能 story 完成后再执行。已完成：README、主 PRD、future stages、backlog、M08、M00、M13、Stage 21 PRD 同步完成状态与 Stage 22 handoff；新增端到端安全回归 test_stage21_preferences_corrections_do_not_leak_sensitive_values。"
+      "priority": 7,
+      "passes": false,
+      "notes": "Stage closeout story；功能 stories 全部完成后执行全量质量检查并同步最终状态。"
     }
   ]
 }
