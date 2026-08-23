@@ -37,3 +37,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Poster rendering is already shared between individual candidate cards and batch cards, so `loading=lazy` and `decoding=async` belong in both render paths.
   - The full Chromium suite is slower than the command window; targeted candidate Chromium coverage and the batch workbench suite pass, while future closeout should run the suite in the project’s normal CI/interactive environment.
 ---
+
+## 2026-08-23 23:29:47 CST - US-167
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added candidate-aware MiKan search streaming that stops after a complete related-candidate section, while retaining the existing bounded full-read behavior for missing or incomplete structure.
+- Added a de-identified large search-response fixture plus coverage for candidate equivalence, substantially fewer bytes read, UTF-8 and marker chunk boundaries, and safe fallback paths.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/mikan_engine/controllers/fixtures/mikan_search_large_response.html`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Candidate-aware transport behavior remains optional (`get_search_text`); existing injected transports continue using `get_text` and preserve the bounded fallback seam.
+  - The early-stop detector must require both a recognized candidate and the matching candidate-section close, with incremental UTF-8 decoding to remain safe across network chunks.
+---

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+from codecs import getincrementaldecoder
 from time import monotonic
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -84,6 +85,28 @@ class UrlopenMikanTransport:
     """urllib-backed transport for real MiKanProject page reads."""
 
     def get_text(self, url: str, *, timeout: float) -> str:
+        return self._get_text(url, timeout=timeout)
+
+    def get_search_text(self, url: str, *, timeout: float) -> str:
+        """Read a search page until its complete candidate region when possible.
+
+        MiKan search pages append potentially large episode tables after the
+        related-candidate section.  The detector is deliberately conservative:
+        it only stops after seeing a candidate link and the matching section
+        close tag.  Missing or malformed markers therefore retain the normal
+        bounded full-read behavior.
+        """
+
+        detector = _MikanCandidateSectionDetector()
+        return self._get_text(url, timeout=timeout, stop_detector=detector)
+
+    def _get_text(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        stop_detector: "_MikanCandidateSectionDetector | None" = None,
+    ) -> str:
         started_at = monotonic()
         max_deadline = started_at + MAX_MIKAN_STREAM_SECONDS
         deadline = min(started_at + timeout, max_deadline)
@@ -123,11 +146,56 @@ class UrlopenMikanTransport:
                 total += len(chunk)
                 if total > MAX_MIKAN_RESPONSE_BYTES:
                     raise MikanResponseTooLargeError
+                if stop_detector is not None and stop_detector.feed(chunk):
+                    break
                 deadline = min(monotonic() + timeout, max_deadline)
             body = b"".join(chunks)
         if len(body) > MAX_MIKAN_RESPONSE_BYTES:
             raise MikanResponseTooLargeError
         return body.decode("utf-8")
+
+
+class _MikanCandidateSectionDetector(HTMLParser):
+    """Incrementally recognize a complete ``related-recommendations`` section.
+
+    HTMLParser retains incomplete tags across ``feed`` calls, while the
+    incremental decoder retains partial UTF-8 code points.  This makes the
+    early-stop boundary safe when either HTML markers or Chinese text cross a
+    network chunk boundary.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._decoder = getincrementaldecoder("utf-8")("strict")
+        self._section_depth = 0
+        self._saw_candidate = False
+        self.complete = False
+
+    def feed(self, chunk: bytes) -> bool:  # type: ignore[override]
+        if self.complete:
+            return True
+        super().feed(self._decoder.decode(chunk))
+        return self.complete
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_name = tag.lower()
+        attr_map = {name.lower(): value for name, value in attrs if value is not None}
+        if self._section_depth == 0:
+            classes = set(attr_map.get("class", "").split())
+            if tag_name == "section" and "related-recommendations" in classes:
+                self._section_depth = 1
+            return
+        if tag_name == "section":
+            self._section_depth += 1
+        elif tag_name == "a" and _extract_bangumi_id(attr_map.get("href", "")) is not None:
+            self._saw_candidate = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._section_depth == 0 or tag.lower() != "section":
+            return
+        self._section_depth -= 1
+        if self._section_depth == 0 and self._saw_candidate:
+            self.complete = True
 
 
 def _set_response_timeout(response: object, timeout: float) -> None:
@@ -179,11 +247,8 @@ class MikanClient:
             self._config.search_endpoint,
             normalized_title,
         )
-        html = _read_mikan_text(
-            self._transport,
-            search_url,
-            timeout=self._config.timeout_seconds,
-            failed_step="mikan_search",
+        html = _read_mikan_search_text(
+            self._transport, search_url, timeout=self._config.timeout_seconds
         )
         return _parse_search_candidates(html, self._config.search_endpoint)
 
@@ -202,11 +267,8 @@ class MikanClient:
             self._config.search_endpoint,
             normalized_title,
         )
-        html = _read_mikan_text(
-            self._transport,
-            search_url,
-            timeout=self._config.timeout_seconds,
-            failed_step="mikan_search",
+        html = _read_mikan_search_text(
+            self._transport, search_url, timeout=self._config.timeout_seconds
         )
         return _parse_candidate_cards(
             html,
@@ -394,6 +456,30 @@ def _read_mikan_text(
         raise _mikan_timeout(failed_step) from exc
     except Stage1Error as exc:
         raise _sanitize_mikan_stage_error(exc, failed_step) from exc
+
+
+def _read_mikan_search_text(
+    transport: MikanTransport,
+    url: str,
+    *,
+    timeout: float,
+) -> str:
+    """Use candidate-aware streaming when the transport provides it.
+
+    Test and integration transports only promise ``get_text``; retaining that
+    fallback keeps the transport seam backwards-compatible and bounded.
+    """
+
+    get_search_text = getattr(transport, "get_search_text", None)
+    if callable(get_search_text):
+        class _SearchTransport:
+            def get_text(self, request_url: str, *, timeout: float) -> str:
+                return get_search_text(request_url, timeout=timeout)
+
+        return _read_mikan_text(
+            _SearchTransport(), url, timeout=timeout, failed_step="mikan_search"
+        )
+    return _read_mikan_text(transport, url, timeout=timeout, failed_step="mikan_search")
 
 
 def _sanitize_mikan_stage_error(error: Stage1Error, failed_step: str) -> Stage1Error:

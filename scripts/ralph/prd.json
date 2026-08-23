@@ -53,7 +53,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "必须先证明候选一致性和字节节省，再改生产 transport。"
     },
     {

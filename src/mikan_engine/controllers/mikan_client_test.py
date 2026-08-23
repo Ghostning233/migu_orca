@@ -13,6 +13,7 @@ from mikan_engine.controllers.mikan_client import (
     MikanPartialResponseError,
     _MikanBangumiPageParser,
     _MikanCandidatePageParser,
+    _parse_candidate_cards,
     UrlopenMikanTransport,
     create_mikan_client,
 )
@@ -403,6 +404,80 @@ def test_mikan_urlopen_transport_prefers_read1_for_streaming_response(
     assert text == "partial"
     assert response.read1_calls == 2
     assert response.read_calls == 0
+
+
+def test_mikan_search_transport_stops_after_complete_candidate_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The de-identified large fixture models episode data after candidates."""
+    fixture = _read_fixture("mikan_search_large_response.html").encode("utf-8")
+    full_response = _FakeUrlopenResponse(fixture)
+    early_response = _ChunkedFakeUrlopenResponse(
+        [fixture[index : index + 37] for index in range(0, len(fixture), 37)]
+    )
+
+    def fake_urlopen_full(request: object, *, timeout: float) -> _FakeUrlopenResponse:
+        return full_response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen_full)
+    full_html = UrlopenMikanTransport().get_text(
+        "https://mikan.example/Home/Search", timeout=15
+    )
+
+    def fake_urlopen_early(
+        request: object, *, timeout: float
+    ) -> _ChunkedFakeUrlopenResponse:
+        return early_response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen_early)
+    early_html = UrlopenMikanTransport().get_search_text(
+        "https://mikan.example/Home/Search", timeout=15
+    )
+
+    assert len(early_html.encode("utf-8")) < len(full_html.encode("utf-8")) // 4
+    assert _parse_candidate_cards(
+        early_html, "https://mikan.example/Home/Search", "fixture"
+    ) == _parse_candidate_cards(
+        full_html, "https://mikan.example/Home/Search", "fixture"
+    )
+
+
+def test_mikan_search_transport_handles_utf8_and_marker_across_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = (
+        '<section class="related-recommendations"><a href="/Home/Bangumi/7">'
+        "芙莉莲</a></section><div>ignored</div>"
+    ).encode("utf-8")
+    response = _ChunkedFakeUrlopenResponse(
+        [body[index : index + 2] for index in range(0, len(body), 2)]
+    )
+    monkeypatch.setattr(mikan_client_module, "urlopen", lambda request, timeout: response)
+
+    html = UrlopenMikanTransport().get_search_text(
+        "https://mikan.example/Home/Search", timeout=15
+    )
+
+    assert "ignored" not in html
+    assert _parse_candidate_cards(html, "https://mikan.example/Home/Search", "fixture")[0].title == "芙莉莲"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'<section class="not-candidates"><a href="/Home/Bangumi/7">x</a></section>tail',
+        b'<section class="related-recommendations"><a href="/Home/Bangumi/7">x</a>tail',
+    ],
+)
+def test_mikan_search_transport_falls_back_to_full_bounded_read(
+    monkeypatch: pytest.MonkeyPatch, body: bytes
+) -> None:
+    response = _ChunkedFakeUrlopenResponse([body[:12], body[12:], b""])
+    monkeypatch.setattr(mikan_client_module, "urlopen", lambda request, timeout: response)
+
+    assert UrlopenMikanTransport().get_search_text(
+        "https://mikan.example/Home/Search", timeout=15
+    ) == body.decode("utf-8")
 
 
 def test_mikan_urlopen_transport_stops_at_stream_hard_limit(
