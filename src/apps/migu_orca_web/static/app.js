@@ -1126,7 +1126,7 @@
       PARSED: "已解析",
       FOUND: "找到候选",
       EMPTY: "未找到候选",
-      FAILED: "解析失败",
+      FAILED: "搜索失败",
       NEEDS_REVIEW: "待确认",
       DRAFT: "草案",
       READY: "待接受",

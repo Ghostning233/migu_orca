@@ -644,7 +644,7 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "已解析" in script
     assert "找到候选" in script
     assert "未找到候选" in script
-    assert "解析失败" in script
+    assert "搜索失败" in script
 
 
 def test_static_app_script_wires_batch_preference_display() -> None:

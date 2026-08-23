@@ -747,6 +747,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
 
     set_storage_preferences(page, storage_dir, save_request=False)
     page.goto(f"{live_server_url}/index")
+    page.get_by_role("tab", name="批量搜索").click()
     page.fill("#batch-raw-input", "萌王S4\n路哥S4")
     page.click("#batch-parse-submit")
     expect(page.locator(".batch-draft-card")).to_have_count(2)
@@ -1195,6 +1196,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
 
     set_storage_preferences(page, storage_dir, save_request=False)
     page.goto(f"{live_server_url}/index")
+    page.get_by_role("tab", name="批量搜索").click()
     page.fill("#batch-raw-input", "萌王S4\n路哥S4")
     page.click("#batch-parse-submit")
     expect(page.locator(".batch-draft-card")).to_have_count(2)
@@ -1611,6 +1613,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
     page.route("**/api/v1/batches/parse", _fulfill_batch)
 
     page.goto(f"{live_server_url}/index")
+    page.get_by_role("tab", name="批量搜索").click()
     page.fill("#batch-raw-input", "萌王S4\n路哥S4")
     page.click("#batch-parse-submit")
     expect(page.locator(".batch-draft-card")).to_have_count(2, timeout=5000)

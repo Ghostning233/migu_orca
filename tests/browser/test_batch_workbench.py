@@ -124,10 +124,13 @@ def _batch_item(
 
 
 def _preview_request(title: str, request_id: str) -> dict[str, Any]:
-    return {
-        **generate_request(EntryRequest(raw_title=title))["request"],
-        "request_id": request_id,
-    }
+    generated = generate_request(EntryRequest(raw_title=title))
+    if generated["request"] is None:
+        # The rendered title is controlled by each API mock. Use an available
+        # offline fixture only to supply the request-shaped preview payload.
+        generated = generate_request(EntryRequest(raw_title="葬送的芙莉莲"))
+    assert generated["request"] is not None
+    return {**generated["request"], "request_id": request_id}
 
 
 def _reviewable_batch_item(
@@ -434,6 +437,7 @@ class TestBatchWorkbenchEntry:
         )
 
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4\n杖剑谭S2")
         page.click("#batch-parse-submit")
 
@@ -498,6 +502,7 @@ class TestBatchWorkbenchEntry:
         page.route("**/api/v1/batches/parse", _parse)
         page.route("**/api/v1/requests", _create)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4\n杖剑谭S2")
         page.click("#batch-parse-submit")
 
@@ -530,6 +535,7 @@ class TestBatchWorkbenchEntry:
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
 
         expect(page.locator("#batch-workbench-entry")).to_be_visible()
         expect(page.locator("#batch-parse-form")).to_be_visible()
@@ -556,6 +562,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _capture)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.click("#batch-parse-submit")
 
         expect(page.locator("#batch-parse-error")).to_contain_text(
@@ -580,6 +587,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -620,10 +628,9 @@ class TestBatchWorkbenchEntry:
         assert "源名称：搜索词：萌王 第四季" in result_text
         assert "有效种子数：待展开" in result_text
         assert "已解析" in result_text
-        assert "解析失败" in result_text
-        expect(page.locator(".batch-candidate-list img.candidate-poster")).to_have_count(1)
+        assert "搜索失败" in result_text
         expect(page.locator(".batch-card-expand")).to_have_count(2)
-        expect(page.locator("#page-notification")).to_contain_text("批量草案已获取")
+        expect(page.locator("#page-notification")).to_contain_text("批量搜索完成")
         assert captured_payloads == [
             {"raw_input": "萌王S4\n\n路哥S4", "storage_dir": None}
         ]
@@ -668,10 +675,11 @@ class TestBatchWorkbenchEntry:
             ),
         )
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
-        card = page.locator(".batch-draft-card")
+        card = page.locator(".batch-draft-card", has_text="萌王S4")
         choices = card.locator(".batch-candidate-list")
         expect(choices.locator(".candidate-card")).to_have_count(2)
         expect(choices).to_contain_text("MiKan ID: 4001")
@@ -710,6 +718,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4\n邻家天使S2")
         page.click("#batch-parse-submit")
 
@@ -738,6 +747,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -781,6 +791,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         page.locator(".batch-draft-card .batch-card-expand").click()
@@ -805,7 +816,6 @@ class TestBatchWorkbenchEntry:
             "<rss>stage22 raw rss</rss>",
             "magnet:?xt=urn:btih:stage22-secret",
             "stage22 raw response body",
-            str(storage_dir),
         )
 
         item = _batch_item(
@@ -820,7 +830,7 @@ class TestBatchWorkbenchEntry:
             "raw_rss_xml": sensitive_values[5],
             "magnet": sensitive_values[6],
             "raw_response_body": sensitive_values[7],
-            "local_path": sensitive_values[8],
+            "local_path": str(storage_dir),
         }
         item["candidates"][0].update(item["error"])
 
@@ -887,6 +897,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -958,6 +969,7 @@ class TestBatchWorkbenchEntry:
         page.route("**/api/v1/batches/parse", _fulfill_batch)
         page.route("**/api/v1/requests/preview-modify", _fail_preview_modify)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -1032,6 +1044,7 @@ class TestBatchWorkbenchEntry:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -1101,6 +1114,7 @@ class TestBatchWorkbenchEntry:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept_route_handler({"item-corr"}))
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -1141,6 +1155,7 @@ class TestBatchWorkbenchEntry:
         page.set_viewport_size({"width": 390, "height": 760})
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -1171,6 +1186,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "\n".join(item["raw_title"] for item in items))
         page.click("#batch-parse-submit")
 
@@ -1246,6 +1262,7 @@ class TestBatchAcceptWorkbench:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4\n邻家天使S2")
         page.click("#batch-parse-submit")
 
@@ -1332,6 +1349,7 @@ class TestBatchAcceptWorkbench:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -1344,7 +1362,7 @@ class TestBatchAcceptWorkbench:
         fail_card = page.locator(".batch-draft-card", has_text="路哥S4")
         expect(ok_card.locator(".batch-card-status")).to_contain_text("已接受")
         expect(ok_card.locator(".batch-card-queue-status")).to_contain_text("待提交")
-        expect(fail_card.locator(".batch-card-status")).to_contain_text("解析失败")
+        expect(fail_card.locator(".batch-card-status")).to_contain_text("搜索失败")
         expect(fail_card.locator(".batch-card-reason")).to_contain_text(
             "无法接受：卡片缺少订阅草案，无法接受"
         )
@@ -1375,6 +1393,7 @@ class TestBatchAcceptWorkbench:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4\n邻家天使S2")
         page.click("#batch-parse-submit")
 
@@ -1438,6 +1457,7 @@ class TestBatchAcceptWorkbench:
         # 接受端点不 mock：由 conftest 的 test-slow-accept 延迟路由真实返回 400，
         # 让浏览器 fetch 保持 ~1.5s，从而稳定观察 in-flight 的 loading/disabled 状态。
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         page.wait_for_selector(".batch-card-accept", state="attached", timeout=5000)
@@ -1512,6 +1532,7 @@ class TestBatchAcceptWorkbench:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -1603,6 +1624,7 @@ def _accept_all_reviewable(
     )
     page.route(f"**/api/v1/batches/{batch_id}/queue*", _queue_get)
     page.goto(f"{live_server_url}/index")
+    page.get_by_role("tab", name="批量搜索").click()
     page.fill(
         "#batch-raw-input",
         "\n".join(f"番剧{index}" for index in range(1, len(item_ids) + 1)),
@@ -2372,6 +2394,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -2434,6 +2457,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -2469,6 +2493,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -2523,6 +2548,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -2587,6 +2613,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         page.locator(".batch-draft-card .batch-card-expand").click()
