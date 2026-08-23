@@ -1,0 +1,94 @@
+# Ralph Progress Log
+Started: 2026-08-23 15:45:00 CST
+
+## Codebase Patterns
+
+- Python 依赖、检查与测试统一通过 `uv`；前端原生 JavaScript 修改后额外运行 `node --check src/apps/migu_orca_web/static/app.js`。
+- Web UI story 必须使用 `.agents/skills/dev-browser/SKILL.md`，通过 `uv run pytest tests/browser/ -q` 在真实 Chromium 验证；外部 MiKan 通过 transport seam 或 Playwright route mock，不依赖实时网站。
+- 单个与批量候选搜索必须复用 `_search_mikan_candidates`、公开候选序列化、候选缓存和现有 `mikan_bangumi` 详情到 preview 链路，不新增第二套 MiKan parser、筛选、命名或 Request 生命周期。
+- 标题 `PARSED` 只表示解析完成，不等于找到 MiKan 候选或生成草案。Stage 22 前真实后端返回 `PARSED`，但 `canExpandBatchCard` 只允许 `DRAFT/READY`；现有部分浏览器 mock 使用 `DRAFT` 掩盖了该契约错误，后续测试必须使用生产状态形状。
+- 真实候选结果必须区分 FOUND、EMPTY、FAILED；EMPTY/FAILED/PARSED 不得携带可接受的空壳 `preview_request`，只有用户显式选择公开 MiKan 候选并完成详情解析后才能进入 DRAFT/READY。
+- 候选与结果 UI 只渲染公开字段和脱敏错误；endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、持久化、日志、截图或 trace。
+- 搜索状态文案必须基于可观测事件；单一长请求只能展示请求级状态，不能用定时器伪造服务端页面解析或逐项进度。
+- 工作台级 loading 锁定必须在恢复时还原控件原本的 disabled 状态，避免错误启用不可操作的卡片或提交按钮。
+- 创建订阅方案工作台通过原生 `role=tablist` 分段切换单个/批量输入；结果应置于独立的整行 `search-results-panel`，并与当前模式同步显隐，避免两类旧结果混排。
+- 单个与批量的公开 MiKan 候选卡复用 `renderCandidateCard`；批量卡片只有 `selected_candidate` 才能作为已选来源或主封面，绝不可把 `candidates[0]` 当作默认选择。
+- 浏览器回归若需穿过真实 Flask 序列化和详情生成链路，可替换 `mikan_engine.controllers.mikan_client.create_mikan_client` 为携带假 transport 的真实 client；只模拟外部 MiKan 读写，不 mock 内部 API 响应。
+
+---
+
+## 2026-08-23 16:27:46 CST - US-158
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented stable batch candidate states: successful searches now return `FOUND` when candidates exist and `EMPTY` when they do not; parse and search failures remain isolated as `FAILED`.
+- Removed batch parse's empty preview-request generation, so no-candidate results cannot be expanded, accepted, or otherwise treated as draft skeletons.
+- Files changed: `src/batch_engine/models/__init__.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch parse serializes one independent item per input line, allowing per-item MiKan failures without aborting the complete response.
+  - Candidate searches are already centralized through `_search_mikan_candidates` and cache-backed batch helpers; follow-up selection work should preserve that seam.
+  - Full tests passed (824 passed); browser tests were skipped because Chromium is unavailable in this environment, so UI stories still need the dev-browser validation path when available.
+---
+
+## 2026-08-23 16:31:44 CST - US-159
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented explicit batch candidate selection: only FOUND items render public MiKan candidate actions, and selecting one reuses the existing `mikan_bangumi` request generation plus preview modify/save/accept lifecycle before the card enters DRAFT.
+- Prevented PARSED, EMPTY, and FAILED batch items from being selected for batch acceptance; those items remain non-expandable and cannot be modified or accepted without a generated draft.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The batch workbench keeps its cards in browser memory; after candidate selection, update only the selected row with the ordinary unsaved preview request and status `DRAFT` so existing preview-modify/save and accept flows continue to work.
+  - Candidate selection can share `/api/v1/requests` with `source=mikan` and `mikan_bangumi`; this is the existing route that resolves MiKan details and must remain the sole detail-parser path.
+  - Full suite passed (824 passed, 250 skipped). Browser tests are present but Chromium is unavailable in this environment, so manual browser verification remains needed where Chromium can be installed.
+---
+
+## 2026-08-23 16:36:42 CST - US-160
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Reworked the creation workbench into explicit single-search and batch-search tabs, with roving-tabindex keyboard navigation and ARIA selected state.
+- Moved single and batch result areas (including the batch acceptance toolbar) into a full-width `search-results-panel`, so only the active mode's input and results are visible.
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/index.html`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_shell.py`, `tests/browser/test_mikan_candidates.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The workbench's existing result containers can be relocated in the SSR template without changing the API or preview lifecycle, because the native JS resolves them by stable IDs.
+  - Keep hidden mode results in the dedicated panel rather than clearing them on switch; this preserves each mode's client-side result state while preventing mixed-mode display.
+  - Full checks passed: compileall, JS syntax, and pytest (824 passed, 251 skipped). Playwright is configured but Chromium is unavailable here, so `tests/browser/` was skipped; manual browser verification remains needed on an environment with Chromium.
+---
+
+## 2026-08-23 16:50:00 CST - US-161
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Unified single-search and batch-search candidate presentation through a shared public candidate-card renderer; FOUND batch groups now show every candidate's title, MiKan ID, search hint, poster or explicit placeholder, and an explicit selection action.
+- Removed first-candidate fallback from batch-card title/source/poster display, so a FOUND group remains unselected until the user chooses a real MiKan collection; EMPTY and FAILED groups now show clear no-result or sanitized retry guidance without actions.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Reuse `renderCandidateCard` for both single and batch results so public candidate fields, poster placeholders, and explicit selection semantics cannot drift between modes.
+  - A batch card must only use `selected_candidate` for its chosen-source and hero-poster display; using `candidates[0]` implicitly suggests an automatic choice.
+  - Full checks passed: compileall, JS syntax, and pytest (824 passed, 252 skipped). Playwright coverage was added, but Chromium is unavailable in this environment so `tests/browser/` was skipped; manual browser verification is still needed where Chromium is installed.
+---
+
+## 2026-08-23 16:44:25 CST - US-162
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented observable search feedback: single searches name the safely rendered title while loading and report either a candidate count or an explicit no-result outcome; batch searches report only the request-level non-empty input count and final item summary.
+- Locked the complete search workspace during either search, including both mode tabs and search actions, while preserving each control's original disabled state when the request completes.
+- Added Playwright regressions that hold real mocked requests open to assert loading status, workspace locking, and post-response restoration.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_mikan_candidates.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Search loading can be tested reliably by retaining Playwright route objects and fulfilling them after assertions; sleeping inside a route handler blocks the dispatcher.
+  - Browser verification command ran, but Chromium is unavailable in this environment, so 253 browser tests were skipped; run the suite where Chromium is installed for interactive verification.
+  - Full quality checks passed: compileall, JavaScript syntax, and pytest (824 passed, 253 skipped).
+---
+
+## 2026-08-23 16:47:52 CST - US-163
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added a Playwright regression that uses the production Flask batch-parse serialization to render FOUND, EMPTY, and FAILED cards, then selects the real FOUND candidate and verifies the ordinary MiKan detail/RSS chain produces an expandable DRAFT.
+- Files changed: `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep legacy DRAFT fixtures only for post-selection editing and acceptance tests; state-contract tests must start from production FOUND/EMPTY/FAILED responses.
+  - A fake `MikanTransport` injected through the real client factory lets browser tests cover Flask serialization and request generation without a live MiKan dependency.
+  - Full checks passed: compileall, JavaScript syntax, and pytest (824 passed, 254 skipped); the Playwright suite is configured but Chromium is unavailable in this environment, so browser cases were skipped and need execution where Chromium is installed.
+---
+
+## 2026-08-23 16:52:37 CST - US-164
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Completed the Stage 22 closeout documentation across the README, primary and module PRDs, Future Stages, backlog, and Stage 22 PRD; Stage 21 remains recorded as completed and Stage 23 remains a remote optional direction.
+- Added a Playwright regression that feeds a noisy batch-search payload into the dedicated result panel and verifies external transport values never render or reach URL, browser storage, or local Request/queue JSON.
+- Files changed: `README.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_future_stages.md`, `docs/MiGuOrca_stage22_web_search_workbench_PRD.md`, `docs/backlog.md`, `docs/modules/M00-entry-orchestration-PRD.md`, `docs/modules/M02-bangumi-search-match-PRD.md`, `docs/modules/M03-mikan-source-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Search-result regressions can safely use a Playwright API-route payload with extra transport fields; assert only the intended public candidate UI is rendered and every persisted/browser surface remains clean.
+  - Full checks passed: compileall, JavaScript syntax, and pytest (824 passed, 255 skipped). Browser verification was attempted with the dev-browser workflow, but Chromium is unavailable in this environment; 255 browser tests were skipped and require execution where Chromium is installed.
+---

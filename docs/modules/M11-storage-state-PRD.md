@@ -80,7 +80,15 @@ Stage 18 补充：
 - Web API `POST /api/v1/requests/preview-save` 通过 `apply_request_save_action` 复用 `save_request_snapshot` 持久化 `PENDING_CONFIRM` 预览草案；保存后的对象进入现有待确认流程，可继续确认/取消/修改/删除。
 - Request、history 与 AB result repository 的用户可见 `error_message` 已中文化（例如「未找到已保存的订阅方案」「保存/读取/删除/列出订阅方案 JSON 失败」），内部字段名、错误 type 和 API 字段保持不变。
 
-## 7. 待确认问题
+## 7. Stage 23 封面缓存规划
+
+1. 新增与业务 Request storage 分离的 poster cache 目录；目录由应用配置解析，客户端和外部响应不能控制本地路径。
+2. cache key 使用规范化受信图片 URL 的不可逆摘要，文件名只含白名单字符/扩展名；公共 API 不暴露原始 URL 或绝对路径。
+3. 缓存默认 TTL 7 天并按成功访问续期；下载采用 10 秒总超时和 5 MiB 上限，临时文件校验成功后原子替换。
+4. 清理采用有节流的机会式扫描，不引入后台 worker；只删除明确 cache root 内过期的普通缓存文件，拒绝符号链接和路径逃逸。
+5. Request、history、队列、偏好和修正 JSON 不保存图片二进制、原始封面 URL或缓存绝对路径。
+
+## 8. 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |

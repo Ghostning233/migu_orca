@@ -44,7 +44,7 @@ Stage 22 必须先恢复搜索结果的可信度，再重构布局。标题解�
 4. 不创建 qBittorrent 下载任务，不绕过 Auto Bangumi，不引入后台 worker。
 5. 不在本阶段实现 SSE/WebSocket 等流式基础设施；除非现有请求可观测到真实逐项进度，否则只展示请求级真实状态。
 6. 不把 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL或本地绝对路径带入 API、页面、URL、浏览器 storage、日志、截图或测试 trace。
-7. 不实施部署/配置向导；该远期可选方向顺延至 Stage 23。
+7. 不实施部署/配置向导；该远期可选方向在后续路线调整中顺延至 Stage 25。
 
 ## 5. 产品决策
 
@@ -219,7 +219,7 @@ FAILED：用户查看脱敏提示并重试，其他批量条目不受影响
 验收标准：
 
 1. 同步 README、主 PRD、Future Stages、backlog、Stage 22 PRD 和受影响的 M00/M02/M03/M13 模块 PRD，标记 Stage 22 实际完成状态。
-2. Stage 21 历史完成事实保持不变；部署/配置向导继续作为 Stage 23 远期可选方向。
+2. Stage 21 历史完成事实保持不变；部署/配置向导在后续路线调整中顺延为 Stage 25 远期可选方向。
 3. 端到端安全回归断言新结果面板、API、URL、localStorage、sessionStorage、Request/队列 JSON、日志与 trace 不包含 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL或本地绝对路径。
 4. README 本地验收清单覆盖模式切换、独立结果面板、真实候选选择、EMPTY/FAILED、封面占位和搜索状态反馈。
 5. `node --check src/apps/migu_orca_web/static/app.js` 通过。
@@ -240,6 +240,6 @@ Stage 22 完成标志（已达成）：用户能在一个清晰的创建订阅�
 
 ## 11. Stage 23 handoff
 
-原 Stage 22「部署/配置向导可行性验证」顺延为 Stage 23，仍为远期可选能力，不阻塞搜索工作台和批量订阅闭环。候选方向保持不变：配置检查清单、脱敏连接诊断、教程式向导、Docker Compose 示例，以及仅处理非敏感配置或明确脱敏示例的导入/导出。
+Stage 22 后续人工验收确认，下一阶段调整为 Stage 23「媒体缓存、MiKan 读取优化与批量审核体验」（见 `docs/MiGuOrca_stage23_media_cache_search_ui_PRD.md`）：服务端安全缓存封面、减少搜索大响应无用读取、将候选改为锚定浮层、将草案统一送入详情区，并收敛剧集摘要与禁用按钮反馈。
 
-Stage 23 不得将 MiGuOrca 扩展为通用运维 Agent，不默认接管用户机器、NAS、Docker daemon 或外部系统配置，也不得改变“不直接创建 qBittorrent 下载任务、不绕过 Auto Bangumi”的边界。
+正式番名与季数解析进入 Stage 24 专项；原部署/配置向导顺延为 Stage 25 远期可选能力。流式封面代理等未排期方向见 `docs/optional_features.md`。

@@ -1,129 +1,150 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage22-web-search-workbench",
-  "description": "MiGuOrca Stage 22：重构 Web UI 创建订阅方案工作台，统一单个/批量真实 MiKan 候选搜索、候选选择与草案生成语义，建立独立结果面板和可信搜索状态；无候选不得生成空壳草案，AI 不自动选择、接受或提交。",
+  "branchName": "agent/stage23-media-cache-search-ui",
+  "description": "MiGuOrca Stage 23：增加安全同源 MiKan 封面缓存与异步加载，在保证候选完整的前提下减少搜索页无用读取，并把批量候选改为锚定浮层、草案统一送入详情区，同时增加播出进度占位和友好的禁用按钮反馈。",
   "userStories": [
     {
-      "id": "US-158",
-      "title": "建立批量真实候选结果状态契约",
-      "description": "作为用户，我希望系统区分标题已解析、找到候选、没有候选和搜索失败，从而不会把无效输入误认为真实番剧草案。",
+      "id": "US-165",
+      "title": "建立安全封面缓存契约与存储",
+      "description": "作为部署者，我希望服务端安全缓存候选封面，从而避免客户端直接依赖 MiKan 图片域名。",
       "acceptanceCriteria": [
-        "批量 API 为每个条目输出稳定公开的候选搜索状态，至少可区分 FOUND、EMPTY、FAILED 或语义等价值",
-        "PARSED 仅表示标题解析完成；MiKan 候选为空时不得返回可接受的 preview_request",
-        "搜索成功但无候选返回 EMPTY；网络或页面解析异常返回 FAILED 和脱敏错误，单项失败不阻塞其他项",
-        "API 和控制器测试覆盖不存在标题、有候选、空候选、异常及敏感字段过滤",
+        "新增版本化封面缓存配置和 repository，默认 TTL 7 天、下载总超时 10 秒、单图上限 5 MiB",
+        "缓存 key 不可逆且文件名 path-safe，缓存目录由应用配置确定，任何请求参数都不能控制文件路径",
+        "缓存写入采用临时文件加原子替换，失败、中断、超限或非图片响应不留下半文件",
+        "机会式清理只删除明确缓存目录内超过 TTL 的普通缓存文件，并有节流避免每个请求全量扫描",
+        "单元测试覆盖命中、未命中、滑动续期、过期清理、路径穿越、符号链接、超限和原子写入失败",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": "先修正后端公开契约，不在本 story 重构页面布局。PARSED 不能再承载空壳草案语义。"
+      "passes": false,
+      "notes": "先实现存储和安全边界，不在本 story 添加公共图片代理路由。不得引入后台 worker。"
     },
     {
-      "id": "US-159",
-      "title": "收敛候选选择与订阅草案生成链路",
-      "description": "作为用户，我希望单个和批量搜索都在我选择真实 MiKan 合集后才生成订阅草案，从而保证草案来自可审核的真实候选。",
+      "id": "US-166",
+      "title": "接入同源封面端点与异步图片加载",
+      "description": "作为用户，我希望候选封面从 MiGuOrca 服务端加载，并且图片失败或变慢时不阻塞其他内容。",
       "acceptanceCriteria": [
-        "单个与批量入口复用 _search_mikan_candidates、公开候选序列化和候选缓存，不新增第二套 MiKan 搜索或 parser",
-        "批量模式仅编排多个搜索项，每个 FOUND 条目允许用户显式选择实际候选",
-        "候选选择复用现有 mikan_bangumi 详情解析与 preview modify/save 链路；选择成功后才进入 DRAFT 或 READY",
-        "EMPTY、FAILED、PARSED 条目不能展开、修改、保存或接受",
-        "API、控制器和前端静态测试覆盖候选选择到草案的状态迁移",
-        "Tests pass",
-        "Typecheck passes"
-      ],
-      "priority": 2,
-      "passes": true,
-      "notes": "复用现有单番剧原子链路；不要为批量卡片另造详情解析、筛选、命名或 Request 生命周期。"
-    },
-    {
-      "id": "US-160",
-      "title": "重构创建订阅方案工作台信息架构",
-      "description": "作为用户，我希望在单个搜索和批量搜索之间清晰切换，并在独立区域查看结果，从而避免输入与大量卡片混排。",
-      "acceptanceCriteria": [
-        "generate-panel 标题改为创建订阅方案",
-        "页面提供单个搜索和批量搜索分段切换，选中项高亮且一次只显示对应输入模块",
-        "新增与订阅方案详情同级且独占一行的 search-results-panel，两种模式结果和批量结果工具栏迁入该面板",
-        "切换模式不会把另一模式旧结果显示为当前结果，焦点、ARIA 选中态和键盘操作正确",
-        "桌面和窄屏布局保持可读",
+        "候选响应提供同源 opaque poster URL，不把原始 MiKan poster URL 交给浏览器",
+        "封面端点只接受已登记 opaque key，不接受任意 URL，并阻止私网、环回、本地地址、异常重定向和开放代理行为",
+        "端点只返回白名单图片类型，缓存失败使用稳定占位或错误语义且不影响候选选择",
+        "单个和批量候选图片使用占位、loading=lazy、decoding=async，正文和操作先于图片可用",
+        "浏览器测试证明慢图片不阻塞页面交互，完成后显示，失败后保持占位",
+        "API、日志、URL、storage 和 trace 不泄露原始图片 URL、缓存绝对路径或外部响应内容",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
-      "priority": 3,
-      "passes": true,
-      "notes": "Flask SSR + 原生 JS，无前端构建链；保留现有直连 fallback 和 Storage 摘要能力但重新安排层级。"
+      "priority": 2,
+      "passes": false,
+      "notes": "流式封面代理不在本 Stage，见 docs/optional_features.md。"
     },
     {
-      "id": "US-161",
-      "title": "统一单个与批量真实候选卡片",
-      "description": "作为用户，我希望两种搜索模式都展示一致的真实候选信息和封面，从而能判断并选择正确合集。",
+      "id": "US-167",
+      "title": "优化 MiKan 搜索页有界提前停止",
+      "description": "作为用户，我希望系统只读取候选所需的搜索页内容，从而减少大页面带来的等待时间和流量。",
       "acceptanceCriteria": [
-        "单个和批量结果复用统一候选卡渲染或共享渲染原语",
-        "FOUND 卡片展示公开标题、MiKan ID、匹配提示、封面或明确占位，以及选择此合集按钮",
-        "批量结果按原始输入分组，每组可包含多个真实候选且不默认选择第一个候选",
-        "EMPTY 显示未找到匹配的 MiKan 合集且无草案动作；FAILED 显示可重试的脱敏错误且不影响其他分组",
-        "poster_url 缺失只触发占位，不改变 FOUND 状态",
+        "增加当前 MiKan 页面结构的脱敏大响应 fixture，明确候选区域、候选结束位置和后续无关内容",
+        "实现 marker 或结构感知的 chunk 读取提前停止，覆盖标记与 UTF-8 字符跨 chunk，不使用未经证明的固定 1000 行生产截断",
+        "完整读取与提前停止解析出的候选标题、ID、顺序、封面和去重结果完全一致",
+        "标记缺失、候选结构未闭合或提前内容不足时安全回退现有有界读取，不返回伪空结果",
+        "测试断言提前停止读取字节数显著少于完整 fixture，并保留大小、超时和错误脱敏保护",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "必须先证明候选一致性和字节节省，再改生产 transport。"
+    },
+    {
+      "id": "US-168",
+      "title": "将批量候选改为锚定式单实例浮层",
+      "description": "作为用户，我希望候选显示在对应按钮附近并能方便关闭，从而不在结果区域制造嵌套滚动。",
+      "acceptanceCriteria": [
+        "查看候选打开带箭头且锚定触发按钮的单实例浮层，不作为结果 panel 普通文档流子块撑高布局",
+        "点击其他 FOUND 卡片切换锚点和候选，点击外部、Escape、模式切换、重新搜索或删除 active 卡片关闭浮层",
+        "打开和关闭正确维护 aria-expanded、aria-controls、焦点进入与返回，同时最多一个浮层",
+        "桌面优先按钮下方展示，空间不足时保持在 viewport，窄屏不产生横向溢出或结果 panel 内新增滚动条",
+        "候选选择、封面占位、EMPTY/FAILED 和安全过滤行为保持不变",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": "候选卡只渲染公开字段；AI/推荐标签只能注释，不自动选择。"
+      "passes": false,
+      "notes": "优先使用原生 Popover API 或等价渐进增强；必须有 Chromium 行为回归。"
     },
     {
-      "id": "US-162",
-      "title": "增加简洁真实的搜索状态反馈",
-      "description": "作为用户，我希望在等待搜索时知道系统正在处理什么，并在结束后看到明确结果摘要。",
+      "id": "US-169",
+      "title": "统一批量草案到订阅方案详情",
+      "description": "作为用户，我希望批量草案也在统一详情区域查看和操作，从而避免结果卡片过长或互相拉伸。",
       "acceptanceCriteria": [
-        "复用现有状态容器展示搜索开始、完成、无结果和失败反馈",
-        "单个搜索开始文案包含经安全渲染的当前标题，完成文案包含候选数量或明确无结果",
-        "批量搜索在单一长请求下只展示请求级真实状态和条目总数，不伪造逐项或页面解析进度",
-        "loading 期间禁用相关输入、模式切换和提交操作，完成或失败后恢复",
-        "状态变化使用 aria-live 且不会造成焦点跳失",
+        "DRAFT/READY 卡片的查看草案把对应 preview/request 渲染到现有订阅方案详情，不在卡片内创建完整草案面板",
+        "打开详情后滚动或聚焦到详情标题，并保留修改、保存草案、接受和种子筛选展示能力",
+        "切换另一张卡片只更新详情目标，不改变其他卡片高度、选择状态、候选或队列状态",
+        "结果卡片布局相互独立，不因同一 grid row 其他卡片详情被拉长，窄屏同样稳定",
+        "删除当前卡片、重新搜索或模式切换时安全清理详情上下文",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": "除非实现真实可观测的逐项请求，否则不得用定时器伪造内部进度。"
+      "passes": false,
+      "notes": "复用现有 preview/request 详情渲染与动作，不创建第二套草案模型。"
     },
     {
-      "id": "US-163",
-      "title": "补齐真实状态与共享链路浏览器回归",
-      "description": "作为维护者，我希望浏览器测试使用生产 API 的真实状态形状，从而防止 mock 再次掩盖前后端契约错误。",
+      "id": "US-170",
+      "title": "增加总集数与播出进度占位",
+      "description": "作为用户，我希望在结果卡片看到紧凑的剧集摘要，从而为后续核对种子完整性建立位置和数据契约。",
       "acceptanceCriteria": [
-        "审计并替换关键测试中用理想化 DRAFT 代替真实 PARSED 和候选状态的 mock",
-        "Playwright 覆盖单个和批量 FOUND、EMPTY、FAILED、有封面、无封面、模式切换和独立结果面板",
-        "Playwright 覆盖真实候选选择到 DRAFT、展开、修改或接受的完整交互",
-        "至少一组 Flask API 与 Playwright 联合路径使用生产序列化结果，只 mock 外部 MiKan transport",
-        "测试不依赖实时 MiKan 网站",
+        "M03 只在 MiKan 明确公开元数据存在时解析可选 total_episodes，缺失或非法值保持 null，不得猜测",
+        "公开候选、详情和卡片契约只增加非敏感可选总集数字段，不保存原始页面内容",
+        "卡片单行显示 播出进度：待开发 / N 集，总集数未知显示 播出进度：待开发 / 未知",
+        "不使用有效种子数、RSS 最大集数或下载状态推断最新播出集数",
+        "单元和浏览器测试覆盖有总集数、未知总集数和异常元数据",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "重点清除 progress.txt 已记录的真实 PARSED 被 DRAFT mock 掩盖问题。"
+      "passes": false,
+      "notes": "当前最新播出集数的数据源未定义，本 Stage 固定显示待开发。"
     },
     {
-      "id": "US-164",
-      "title": "Stage 22 文档、安全回归与收尾",
-      "description": "作为维护者，我希望 Stage 22 的实现、文档和安全边界保持一致，从而可以可靠交接下一阶段。",
+      "id": "US-171",
+      "title": "统一禁用按钮的静态反馈",
+      "description": "作为用户，我希望不可点击按钮明确显示禁用状态而不是等待动画，从而不会误判系统仍在加载。",
       "acceptanceCriteria": [
-        "同步 README、主 PRD、Future Stages、backlog、Stage 22 PRD 和受影响的 M00、M02、M03、M13 模块 PRD，并标记实际完成状态",
-        "Stage 21 历史完成事实保持不变，部署配置向导继续作为 Stage 23 远期可选方向",
-        "端到端安全回归断言新结果面板、API、URL、浏览器 storage、Request/队列 JSON、日志与 trace 不泄露敏感值或原始外部内容",
-        "README 本地验收覆盖模式切换、独立结果面板、真实候选选择、EMPTY/FAILED、封面占位和搜索状态反馈",
+        "审计 index 与 settings 的按钮和链接式控件，disabled 或 aria-disabled=true 使用静态视觉和普通或 default 鼠标，不使用 progress 或 wait",
+        "禁用控件 hover 不出现 spinner、旋转伪元素、无限 animation 或可点击高亮，真实 aria-busy=true 状态仍可显示 loading",
+        "禁用状态保持足够对比度、可读标签和辅助技术语义，不只依赖颜色表达",
+        "Playwright 覆盖候选、草案、批量接受、队列和 Settings 代表控件的 computed style 与不可触发行为",
         "Verify in browser using dev-browser skill",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Stage closeout story；功能 stories 全部完成后执行全量质量检查并同步最终状态。"
+      "passes": false,
+      "notes": "不要全局移除真实异步操作使用的 loading 样式。"
+    },
+    {
+      "id": "US-172",
+      "title": "Stage 23 文档、安全回归与收尾",
+      "description": "作为维护者，我希望 Stage 23 的实现、测试、文档和后续边界一致，从而可安全交接番名解析专项。",
+      "acceptanceCriteria": [
+        "同步 README、主 PRD、Future Stages、backlog、Stage 23 PRD、optional features 和受影响的 M00、M03、M11、M12、M13 模块 PRD并标记实际完成状态",
+        "文档明确 Stage 24 为正式番名与季数解析、部署配置向导顺延 Stage 25，流式封面代理仍为可选功能",
+        "端到端安全回归覆盖封面端点 SSRF、任意 URL、路径穿越、超限非图片、原始 URL缓存路径泄露，以及浮层详情敏感值过滤",
+        "README 本地验收覆盖封面缓存过期、异步图片、搜索提前停止、候选浮层、统一草案详情、播出进度占位和禁用按钮",
+        "node --check src/apps/migu_orca_web/static/app.js passes",
+        "真实 Chromium 浏览器套件全部执行通过且不得整体 skipped",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": "Stage closeout story；US-165 至 US-171 全部完成后执行。"
     }
   ]
 }
