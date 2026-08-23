@@ -2202,6 +2202,8 @@
     seeds.className = "batch-card-seeds";
     seeds.textContent = "有效种子数：" + batchCardSeedSummary(row);
 
+    const candidateFeedback = renderBatchCandidateSearchFeedback(row);
+
     const expandButton = document.createElement("button");
     expandButton.type = "button";
     expandButton.className = "secondary-button batch-card-expand";
@@ -2254,6 +2256,9 @@
       preference,
       seeds,
     ];
+    if (candidateFeedback) {
+      children.push(candidateFeedback);
+    }
     if (row.accept_feedback && row.accept_feedback.reason) {
       const reason = document.createElement("div");
       reason.className = "batch-card-reason";

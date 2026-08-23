@@ -445,14 +445,17 @@ class TestBatchWorkbenchEntry:
         empty = page.locator(".batch-draft-card", has_text="路哥S4")
         failed = page.locator(".batch-draft-card", has_text="杖剑谭S2")
         expect(found.locator(".batch-card-status")).to_contain_text("找到候选")
-        expect(found.locator("img.candidate-poster")).to_have_count(1)
-        expect(found.locator(".batch-card-expand")).to_be_disabled()
+        expect(found.locator(".batch-card-poster")).to_contain_text("待选择合集")
+        expect(found.locator(".batch-card-expand")).to_be_enabled()
         expect(empty.locator(".batch-card-status")).to_contain_text("未找到候选")
         expect(empty.locator(".batch-card-expand")).to_be_disabled()
         expect(failed.locator(".batch-card-status")).to_contain_text("搜索失败")
         expect(failed.locator(".batch-card-expand")).to_be_disabled()
 
-        found.locator(".batch-candidate-select").click()
+        found.locator(".batch-card-expand").click()
+        choices = page.locator("#batch-candidate-choices")
+        expect(choices.locator("img.candidate-poster")).to_have_count(1)
+        choices.locator(".batch-candidate-select").click()
         expect(found.locator(".batch-card-status")).to_contain_text("草案")
         expect(found.locator(".batch-card-expand")).to_be_enabled()
         found.locator(".batch-card-expand").click()
@@ -509,7 +512,7 @@ class TestBatchWorkbenchEntry:
         found = page.locator(".batch-draft-card", has_text="萌王S4")
         empty = page.locator(".batch-draft-card", has_text="路哥S4")
         failed = page.locator(".batch-draft-card", has_text="杖剑谭S2")
-        expect(found.locator(".batch-candidate-select")).to_have_count(1)
+        expect(found.locator(".batch-candidate-select")).to_have_count(0)
         expect(empty.locator(".batch-candidate-select")).to_have_count(0)
         expect(failed.locator(".batch-candidate-select")).to_have_count(0)
         expect(empty.locator(".batch-card-expand")).to_be_disabled()
@@ -518,7 +521,8 @@ class TestBatchWorkbenchEntry:
         expect(failed.locator(".batch-card-checkbox")).to_be_disabled()
         assert captured == []
 
-        found.locator(".batch-candidate-select").click()
+        found.locator(".batch-card-expand").click()
+        page.locator("#batch-candidate-choices .batch-candidate-select").click()
         expect(found.locator(".batch-card-status")).to_contain_text("草案")
         expect(found.locator(".batch-card-expand")).to_be_enabled()
         assert captured == [
@@ -680,15 +684,18 @@ class TestBatchWorkbenchEntry:
         page.click("#batch-parse-submit")
 
         card = page.locator(".batch-draft-card", has_text="萌王S4")
-        choices = card.locator(".batch-candidate-list")
+        card.locator(".batch-card-expand").click()
+        choices = page.locator("#batch-candidate-choices .batch-candidate-list")
         expect(choices.locator(".candidate-card")).to_have_count(2)
         expect(choices).to_contain_text("MiKan ID: 4001")
         expect(choices).to_contain_text("MiKan ID: 4002")
         expect(choices).to_contain_text("暂无封面")
-        expect(choices.locator("img.candidate-poster")).to_have_count(1)
+        # The fixture deliberately has no image route; the renderer replaces
+        # failed poster loads with its stable public-only placeholder.
+        expect(choices.locator("img.candidate-poster")).to_have_count(0)
         expect(choices.locator(".batch-candidate-select")).to_have_count(2)
         expect(card.locator(".batch-card-status")).to_contain_text("找到候选")
-        expect(card.locator(".batch-card-expand")).to_be_disabled()
+        expect(card.locator(".batch-card-expand")).to_be_enabled()
         expect(
             page.locator(".batch-draft-card", has_text="路哥S4").locator(
                 ".batch-candidate-feedback"
@@ -848,6 +855,9 @@ class TestBatchWorkbenchEntry:
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         expect(page.locator("#search-results-panel")).to_be_visible()
+        page.locator(".batch-draft-card", has_text="萌王S4").locator(
+            ".batch-card-expand"
+        ).click()
         expect(page.locator(".candidate-card")).to_have_count(1)
 
         browser_state = page.evaluate(
