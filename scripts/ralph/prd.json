@@ -17,7 +17,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先实现存储和安全边界，不在本 story 添加公共图片代理路由。不得引入后台 worker。"
     },
     {

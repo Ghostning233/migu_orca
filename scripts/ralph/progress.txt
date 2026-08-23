@@ -15,3 +15,13 @@ Started: 2026-08-23 22:43:00 CST
 - endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始图片 URL、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、持久化、日志、截图或 trace。
 
 ---
+
+## 2026-08-23 23:12:52 CST - US-165
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added a versioned MiKan poster cache configuration and an atomic, bounded disk-cache repository with opaque SHA-256 keys, 7-day sliding TTL, and throttled cleanup.
+- Added focused tests for cache hit/miss, TTL renewal and expiration, traversal rejection, symlink safety, image/size validation, and failed atomic replacement cleanup.
+- Files changed: `src/mikan_engine/controllers/mikan_poster_cache.py`, `src/mikan_engine/controllers/mikan_poster_cache_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Poster storage is intentionally transport- and route-free in US-165; US-166 should register trusted parser-produced sources before exposing opaque keys.
+  - Cache time is injected through the repository clock, keeping TTL and cleanup tests deterministic.
+---
