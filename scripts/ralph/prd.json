@@ -71,7 +71,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "优先使用原生 Popover API 或等价渐进增强；必须有 Chromium 行为回归。"
     },
     {

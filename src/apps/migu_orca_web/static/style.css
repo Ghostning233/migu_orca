@@ -435,8 +435,46 @@ textarea {
   border-radius: 6px;
   display: grid;
   gap: 10px;
-  margin-top: 16px;
+  left: 12px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
   padding: 14px;
+  position: fixed;
+  top: 12px;
+  width: min(760px, calc(100vw - 24px));
+  z-index: 20;
+}
+
+.batch-candidate-choices::before {
+  background: #f8fafc;
+  border-left: 1px solid #c8d5df;
+  border-top: 1px solid #c8d5df;
+  content: "";
+  height: 12px;
+  left: calc(var(--batch-popover-arrow-left, 24px) - 6px);
+  position: absolute;
+  top: -7px;
+  transform: rotate(45deg);
+  width: 12px;
+}
+
+.batch-candidate-choices.is-above::before {
+  bottom: -7px;
+  top: auto;
+}
+
+.batch-candidate-choices h3 {
+  font-size: 0.98rem;
+  margin: 0;
+  padding-right: 32px;
+}
+
+.batch-candidate-close {
+  min-height: 30px;
+  min-width: 30px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
 }
 
 .batch-candidate-choices .field-help {

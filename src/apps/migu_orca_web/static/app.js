@@ -97,7 +97,7 @@
   let currentBatchEditItemId = null;
   let batchDraftCards = [];
   let currentBatchId = null;
-  // Candidate choices belong to the result panel, not to individual cards.
+  // Candidate choices are a single anchored dialog, rather than card content.
   // Keeping the active item separately prevents cards from growing with every
   // candidate and makes switching between rows deterministic.
   let activeBatchCandidateItemId = null;
@@ -118,6 +118,9 @@
 
   function setSearchMode(mode, focusTab) {
     const nextMode = mode === "batch" ? "batch" : "single";
+    if (nextMode !== "batch") {
+      closeBatchCandidatePopover({focusTrigger: false});
+    }
     activeSearchMode = nextMode;
     const isBatch = nextMode === "batch";
     if (singleSearchEntry) {
@@ -2093,6 +2096,60 @@
     renderBatchParseItems(batchDraftCards);
   }
 
+  function batchCandidateTrigger(itemId) {
+    if (!batchParseResult || !itemId) {
+      return null;
+    }
+    return Array.from(batchParseResult.querySelectorAll(".batch-card-expand[data-item-id]")).find(
+      (trigger) => trigger.dataset.itemId === String(itemId),
+    ) || null;
+  }
+
+  function positionBatchCandidatePopover() {
+    const popover = document.getElementById("batch-candidate-choices");
+    const trigger = batchCandidateTrigger(activeBatchCandidateItemId);
+    if (!popover || !trigger) {
+      return;
+    }
+    const margin = 12;
+    const gap = 10;
+    const triggerRect = trigger.getBoundingClientRect();
+    const maxWidth = Math.min(760, window.innerWidth - margin * 2);
+    popover.style.maxWidth = maxWidth + "px";
+    popover.style.maxHeight = Math.max(180, window.innerHeight - margin * 2) + "px";
+    let left = Math.max(margin, Math.min(triggerRect.left, window.innerWidth - maxWidth - margin));
+    let top = triggerRect.bottom + gap;
+    const opensAbove = top + popover.offsetHeight > window.innerHeight - margin;
+    if (opensAbove) {
+      top = Math.max(margin, triggerRect.top - popover.offsetHeight - gap);
+    }
+    popover.classList.toggle("is-above", opensAbove);
+    popover.style.left = left + "px";
+    popover.style.top = top + "px";
+    popover.style.setProperty(
+      "--batch-popover-arrow-left",
+      Math.max(18, Math.min(triggerRect.left + triggerRect.width / 2 - left, maxWidth - 18)) + "px",
+    );
+  }
+
+  function closeBatchCandidatePopover(options) {
+    if (!activeBatchCandidateItemId) {
+      return;
+    }
+    const opts = options || {};
+    const itemId = activeBatchCandidateItemId;
+    activeBatchCandidateItemId = null;
+    renderBatchParseItems(batchDraftCards);
+    if (opts.focusTrigger !== false) {
+      requestAnimationFrame(function () {
+        const trigger = batchCandidateTrigger(itemId);
+        if (trigger) {
+          trigger.focus();
+        }
+      });
+    }
+  }
+
   function renderBatchCardPoster(row) {
     const selectedCandidate = row.selected_candidate || null;
     const posterUrl = selectedCandidate ? safeText(selectedCandidate.poster_url) : "";
@@ -2224,9 +2281,21 @@
       );
       expandButton.setAttribute("aria-controls", "batch-candidate-choices");
       expandButton.setAttribute("aria-expanded", isCandidateActive ? "true" : "false");
+      expandButton.dataset.itemId = safeText(row.item_id);
       expandButton.addEventListener("click", function () {
-        activeBatchCandidateItemId = isCandidateActive ? null : row.item_id;
+        if (isCandidateActive) {
+          closeBatchCandidatePopover();
+          return;
+        }
+        activeBatchCandidateItemId = row.item_id;
         renderBatchParseItems(batchDraftCards);
+        requestAnimationFrame(function () {
+          const closeButton = document.querySelector("#batch-candidate-choices .batch-candidate-close");
+          positionBatchCandidatePopover();
+          if (closeButton) {
+            closeButton.focus();
+          }
+        });
       });
     } else if (canExpandBatchCard(row)) {
       expandButton.textContent = "查看草案";
@@ -2286,7 +2355,21 @@
     const container = document.createElement("div");
     container.id = "batch-candidate-choices";
     container.className = "batch-candidate-choices";
-    container.setAttribute("aria-label", "候选合集：" + batchCardTitle(row));
+    container.setAttribute("role", "dialog");
+    container.setAttribute("aria-modal", "false");
+    container.setAttribute("aria-labelledby", "batch-candidate-choices-title");
+    const heading = document.createElement("h3");
+    heading.id = "batch-candidate-choices-title";
+    heading.textContent = "候选合集：" + batchCardTitle(row);
+    const closeButton = document.createElement("button");
+    closeButton.type = "button";
+    closeButton.className = "icon-button batch-candidate-close";
+    closeButton.setAttribute("aria-label", "关闭候选合集");
+    closeButton.textContent = "×";
+    closeButton.addEventListener("click", function () {
+      closeBatchCandidatePopover();
+    });
+    container.append(heading, closeButton);
     const hint = document.createElement("p");
     hint.className = "field-help";
     hint.textContent = "请选择一个真实 MiKan 合集后生成订阅草案。";
@@ -2300,6 +2383,7 @@
       button.textContent = "选择此合集";
       button.disabled = batchAcceptInFlight;
       button.addEventListener("click", function () {
+        activeBatchCandidateItemId = null;
         generateBatchRequestFromCandidate(row, candidate);
       });
       list.appendChild(
@@ -2360,6 +2444,7 @@
       const choices = renderBatchCandidateChoices(activeRow);
       if (choices) {
         batchParseResult.appendChild(choices);
+        requestAnimationFrame(positionBatchCandidatePopover);
       }
     } else if (activeBatchCandidateItemId) {
       activeBatchCandidateItemId = null;
@@ -2408,6 +2493,7 @@
       syncBatchIdToUrl(currentBatchId);
       selectedBatchItemIds = new Set();
       batchAcceptInFlight = false;
+      activeBatchCandidateItemId = null;
       batchDraftCards = Array.isArray(items) ? items.slice() : [];
       renderBatchParseItems(batchDraftCards);
       await loadBatchQueue();
@@ -2430,6 +2516,26 @@
   if (batchParseForm) {
     batchParseForm.addEventListener("submit", parseBatchDraft);
   }
+
+  document.addEventListener("click", function (event) {
+    if (!activeBatchCandidateItemId || !(event.target instanceof Element)) {
+      return;
+    }
+    if (event.target.closest("#batch-candidate-choices, .batch-card-expand")) {
+      return;
+    }
+    closeBatchCandidatePopover();
+  });
+
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && activeBatchCandidateItemId) {
+      event.preventDefault();
+      closeBatchCandidatePopover();
+    }
+  });
+
+  window.addEventListener("resize", positionBatchCandidatePopover);
+  window.addEventListener("scroll", positionBatchCandidatePopover, true);
 
   if (batchSelectAllCheckbox) {
     batchSelectAllCheckbox.addEventListener("change", function () {

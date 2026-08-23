@@ -47,3 +47,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Candidate-aware transport behavior remains optional (`get_search_text`); existing injected transports continue using `get_text` and preserve the bounded fallback seam.
   - The early-stop detector must require both a recognized candidate and the matching candidate-section close, with incremental UTF-8 decoding to remain safe across network chunks.
 ---
+
+## 2026-08-24 00:18:00 CST - US-168
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Replaced the batch candidate panel with a single viewport-bounded anchored dialog, including an arrow, close control, anchor switching, outside-click/Escape dismissal, and keyboard focus transfer/return.
+- Kept the existing candidate selection, poster placeholder, and EMPTY/FAILED behaviors intact; re-search, card deletion, and search-mode changes safely clear the active dialog.
+- Added Chromium coverage for fixed positioning, single-instance anchor switching, independent card-grid height, focus behavior, Escape, and outside-click closure.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch-candidate choices are a single fixed dialog keyed by `activeBatchCandidateItemId`; rerendering cards preserves the one-panel invariant while keeping card layout independent.
+  - UI browser validation runs through Playwright; the complete Chromium suite is 256 tests and may need persistent-session polling in this environment.
+---

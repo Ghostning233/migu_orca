@@ -1207,6 +1207,65 @@ class TestBatchWorkbenchEntry:
         )
         assert scroll_metrics["scrollHeight"] > scroll_metrics["clientHeight"]
 
+    def test_found_candidates_use_one_anchored_popover_with_keyboard_closure(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """US-168: candidate choices overlay the grid and return focus on close."""
+        items = [
+            _batch_item(
+                "item-one", "萌王S4", status="FOUND", candidate_title="史莱姆 第四季"
+            ),
+            _batch_item(
+                "item-two", "路哥S4", status="FOUND", candidate_title="实力至上主义教室 第四季"
+            ),
+        ]
+
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(items),
+            ),
+        )
+        page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
+        page.fill("#batch-raw-input", "萌王S4\n路哥S4")
+        page.click("#batch-parse-submit")
+
+        grid = page.locator(".batch-card-grid")
+        height_before = grid.bounding_box()["height"]
+        first = page.locator('.batch-draft-card[data-item-id="item-one"]')
+        second = page.locator('.batch-draft-card[data-item-id="item-two"]')
+        first_trigger = first.locator(".batch-card-expand")
+        second_trigger = second.locator(".batch-card-expand")
+        first_trigger.click()
+
+        popover = page.locator("#batch-candidate-choices")
+        expect(popover).to_have_attribute("role", "dialog")
+        expect(first_trigger).to_have_attribute("aria-expanded", "true")
+        assert grid.bounding_box()["height"] == height_before
+        geometry = popover.evaluate(
+            "el => ({position: getComputedStyle(el).position, left: el.getBoundingClientRect().left, right: el.getBoundingClientRect().right, viewport: window.innerWidth})"
+        )
+        assert geometry["position"] == "fixed"
+        assert geometry["left"] >= 0
+        assert geometry["right"] <= geometry["viewport"]
+        expect(popover.locator(".batch-candidate-close")).to_be_focused()
+
+        second_trigger.click()
+        expect(page.locator("#batch-candidate-choices")).to_have_count(1)
+        expect(first_trigger).to_have_attribute("aria-expanded", "false")
+        expect(second_trigger).to_have_attribute("aria-expanded", "true")
+
+        page.keyboard.press("Escape")
+        expect(page.locator("#batch-candidate-choices")).to_have_count(0)
+        expect(second_trigger).to_be_focused()
+
+        first_trigger.click()
+        page.locator(".batch-card-source").first.click()
+        expect(page.locator("#batch-candidate-choices")).to_have_count(0)
+
 
 class TestBatchAcceptWorkbench:
     """Stage 20 batch accept workbench: single, selected, accept-all, and reasons."""
