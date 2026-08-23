@@ -2114,6 +2114,8 @@
       const poster = document.createElement("img");
       poster.alt = "";
       poster.src = posterUrl;
+      poster.loading = "lazy";
+      poster.decoding = "async";
       poster.addEventListener("error", function () {
         showPlaceholder("暂无封面", "unavailable");
       }, {once: true});
@@ -3135,6 +3137,8 @@
       poster.className = "candidate-poster";
       poster.alt = "";
       poster.src = candidate.poster_url;
+      poster.loading = "lazy";
+      poster.decoding = "async";
       poster.addEventListener("error", () => {
         const placeholder = document.createElement("div");
         placeholder.className = "candidate-poster candidate-poster-placeholder";

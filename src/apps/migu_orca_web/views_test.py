@@ -33,6 +33,7 @@ from mikan_engine.controllers.mikan_config import (
     MikanConfig,
     default_mikan_config,
 )
+from mikan_engine.controllers.mikan_poster_cache import poster_cache_key
 from qbittorrent_engine.controllers.qbittorrent_config import QBittorrentConfig
 from request_engine.controllers.request_controller import (
     accept_request,
@@ -2126,7 +2127,8 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
             "bangumi_id": "2353",
             "title": "葬送的芙莉莲",
             "mikan_url": "https://mikan.example/Home/Bangumi/2353",
-            "poster_url": "https://mikan.example/assets/cover/2353.jpg",
+            "poster_url": "/api/v1/mikan/posters/"
+            + poster_cache_key("https://mikan.example/assets/cover/2353.jpg"),
             "source_query": "芙莉莲",
             "aliases": ["Frieren EN"],
             "recommendation": "可能匹配",
@@ -3179,7 +3181,8 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
             "bangumi_id": "2002",
             "title": "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
             "mikan_url": "https://mikan.example/Home/Bangumi/2002",
-            "poster_url": "https://mikan.example/images/2002.jpg",
+            "poster_url": "/api/v1/mikan/posters/"
+            + poster_cache_key("https://mikan.example/images/2002.jpg"),
             "source_query": "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
             "aliases": [],
             "recommendation": "推荐：第 2 季",
@@ -3307,7 +3310,8 @@ def test_batch_parse_api_candidate_results_only_serialize_public_fields(
             "bangumi_id": "9001",
             "title": "测试番剧",
             "mikan_url": "https://mikan.example/Home/Bangumi/9001",
-            "poster_url": "https://mikan.example/public/poster.jpg",
+            "poster_url": "/api/v1/mikan/posters/"
+            + poster_cache_key("https://mikan.example/public/poster.jpg"),
             "source_query": "测试番剧",
             "aliases": ["公开别名"],
             "recommendation": "可能匹配",

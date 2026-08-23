@@ -101,7 +101,7 @@ class TestCandidateSearchStates:
                     "bangumi_id": "2353",
                     "title": "葬送的芙莉莲",
                     "mikan_url": "https://mikan.example/Home/Bangumi/2353",
-                    "poster_url": "https://mikan.example/assets/cover/2353.jpg",
+                    "poster_url": "/api/v1/mikan/posters/" + "a" * 64,
                     "source_query": "芙莉莲",
                     "aliases": ["Frieren EN"],
                 },
@@ -121,7 +121,7 @@ class TestCandidateSearchStates:
 
         page.route("**/api/v1/mikan/candidates", _fulfill)
         page.route(
-            "**/assets/cover/2353.jpg",
+            "**/api/v1/mikan/posters/*",
             lambda route: route.fulfill(
                 status=200,
                 content_type="image/gif",
@@ -142,8 +142,14 @@ class TestCandidateSearchStates:
         expect(
             page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
         ).to_have_attribute(
-            "src", "https://mikan.example/assets/cover/2353.jpg"
+            "src", "/api/v1/mikan/posters/" + "a" * 64
         )
+        expect(
+            page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
+        ).to_have_attribute("loading", "lazy")
+        expect(
+            page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
+        ).to_have_attribute("decoding", "async")
         expect(
             page.locator(".candidate-card").nth(1).locator("img.candidate-poster")
         ).to_have_count(0)
