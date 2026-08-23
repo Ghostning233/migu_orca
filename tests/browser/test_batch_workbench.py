@@ -369,6 +369,76 @@ def _accept_route_handler(accepted_ids: set[str], *, batch_id: str = "batch-brow
 class TestBatchWorkbenchEntry:
     """Stage 19 batch workbench entry and draft-card rendering."""
 
+    def test_found_candidate_selection_creates_only_that_batch_draft(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """FOUND items use the normal MiKan preview chain; other states cannot act."""
+        preview = _preview_request("关于我转生变成史莱姆这档事 第四季", "req-selected")
+        captured: list[dict[str, Any]] = []
+
+        def _parse(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        _batch_item(
+                            "item-found",
+                            "萌王S4",
+                            status="FOUND",
+                            candidate_title="关于我转生变成史莱姆这档事 第四季",
+                        ),
+                        _batch_item("item-empty", "路哥S4", status="EMPTY"),
+                        _batch_item("item-failed", "杖剑谭S2", status="FAILED"),
+                    ]
+                ),
+            )
+
+        def _create(route: Any, request: Any) -> None:
+            if request.method != "POST":
+                route.continue_()
+                return
+            captured.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {"ok": True, "result": {"request": preview}},
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/batches/parse", _parse)
+        page.route("**/api/v1/requests", _create)
+        page.goto(f"{live_server_url}/index")
+        page.fill("#batch-raw-input", "萌王S4\n路哥S4\n杖剑谭S2")
+        page.click("#batch-parse-submit")
+
+        found = page.locator(".batch-draft-card", has_text="萌王S4")
+        empty = page.locator(".batch-draft-card", has_text="路哥S4")
+        failed = page.locator(".batch-draft-card", has_text="杖剑谭S2")
+        expect(found.locator(".batch-candidate-select")).to_have_count(1)
+        expect(empty.locator(".batch-candidate-select")).to_have_count(0)
+        expect(failed.locator(".batch-candidate-select")).to_have_count(0)
+        expect(empty.locator(".batch-card-expand")).to_be_disabled()
+        expect(failed.locator(".batch-card-expand")).to_be_disabled()
+        expect(empty.locator(".batch-card-checkbox")).to_be_disabled()
+        expect(failed.locator(".batch-card-checkbox")).to_be_disabled()
+        assert captured == []
+
+        found.locator(".batch-candidate-select").click()
+        expect(found.locator(".batch-card-status")).to_contain_text("草案")
+        expect(found.locator(".batch-card-expand")).to_be_enabled()
+        assert captured == [
+            {
+                "title": "关于我转生变成史莱姆这档事 第四季",
+                "source": "mikan",
+                "mikan_bangumi": "https://mikan.example/Home/Bangumi/item-found",
+                "storage_dir": None,
+                "save_request": False,
+            }
+        ]
+
     def test_batch_entry_is_visible_with_multiline_examples(
         self, page: Page, live_server_url: str
     ) -> None:

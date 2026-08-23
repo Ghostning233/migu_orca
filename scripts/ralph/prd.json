@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "复用现有单番剧原子链路；不要为批量卡片另造详情解析、筛选、命名或 Request 生命周期。"
     },
     {

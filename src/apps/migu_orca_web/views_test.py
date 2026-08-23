@@ -584,6 +584,10 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "batchCardSourceName" in script
     assert "batchCardReviewData" in script
     assert "batchCardRequest" in script
+    assert "renderBatchCandidateChoices" in script
+    assert "batch-candidate-select" in script
+    assert "generateBatchRequestFromCandidate" in script
+    assert "createPreviewDraftFromCandidate" in script
     assert "openBatchCardModify" in script
     assert "updateBatchCardRequest" in script
     assert "acceptBatchCard" in script
@@ -625,6 +629,8 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "有效种子数：" in script
     assert "batchStatusLabel" in script
     assert "已解析" in script
+    assert "找到候选" in script
+    assert "未找到候选" in script
     assert "解析失败" in script
 
 

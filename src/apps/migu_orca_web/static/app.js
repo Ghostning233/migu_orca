@@ -1035,6 +1035,8 @@
     const labels = {
       RAW: "待解析",
       PARSED: "已解析",
+      FOUND: "找到候选",
+      EMPTY: "未找到候选",
       FAILED: "解析失败",
       NEEDS_REVIEW: "待确认",
       DRAFT: "草案",
@@ -1120,8 +1122,9 @@
 
   function batchCardSourceName(row) {
     const candidates = Array.isArray(row.candidates) ? row.candidates : [];
-    if (candidates.length) {
-      const candidate = candidates[0];
+    const selectedCandidate = row.selected_candidate || candidates[0] || null;
+    if (selectedCandidate) {
+      const candidate = selectedCandidate;
       const source = safeText(candidate.source_query || candidate.bangumi_id);
       return source ? "MiKan：" + source : "MiKan 候选";
     }
@@ -1527,7 +1530,7 @@
   }
 
   function batchCardIsSelectable(row) {
-    return fieldValue(row.status) !== "ACCEPTED";
+    return canAcceptBatchCard(row);
   }
 
   function updateBatchAcceptToolbar() {
@@ -2015,8 +2018,7 @@
       "选择 " + (safeText(row.raw_title) || "批量条目"),
     );
     selectCheckbox.checked = selectedBatchItemIds.has(row.item_id);
-    selectCheckbox.disabled =
-      fieldValue(row.status) === "ACCEPTED" || batchAcceptInFlight;
+    selectCheckbox.disabled = !batchCardIsSelectable(row) || batchAcceptInFlight;
     selectCheckbox.addEventListener("change", function () {
       toggleBatchItemSelection(row.item_id, selectCheckbox.checked);
     });
@@ -2038,7 +2040,8 @@
     const posterWrap = document.createElement("div");
     posterWrap.className = "batch-card-poster";
     const candidates = Array.isArray(row.candidates) ? row.candidates : [];
-    const posterUrl = candidates.length ? safeText(candidates[0].poster_url) : "";
+    const selectedCandidate = row.selected_candidate || candidates[0] || null;
+    const posterUrl = selectedCandidate ? safeText(selectedCandidate.poster_url) : "";
     if (posterUrl) {
       const poster = document.createElement("img");
       poster.alt = "";
@@ -2089,6 +2092,8 @@
     seeds.className = "batch-card-seeds";
     seeds.textContent = "有效种子数：" + batchCardSeedSummary(row);
 
+    const candidateChoices = renderBatchCandidateChoices(row);
+
     const expandButton = document.createElement("button");
     expandButton.type = "button";
     expandButton.className = "secondary-button batch-card-expand";
@@ -2121,6 +2126,9 @@
       preference,
       seeds,
     ];
+    if (candidateChoices) {
+      children.push(candidateChoices);
+    }
     if (row.accept_feedback && row.accept_feedback.reason) {
       const reason = document.createElement("div");
       reason.className = "batch-card-reason";
@@ -2133,6 +2141,34 @@
     children.push(expandButton, reviewPanel);
     item.append.apply(item, children);
     return item;
+  }
+
+  function renderBatchCandidateChoices(row) {
+    if (fieldValue(row.status) !== "FOUND") {
+      return null;
+    }
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    if (!candidates.length) {
+      return null;
+    }
+    const container = document.createElement("div");
+    container.className = "batch-candidate-choices";
+    const hint = document.createElement("p");
+    hint.className = "field-help";
+    hint.textContent = "请选择一个真实 MiKan 合集后生成订阅草案。";
+    container.appendChild(hint);
+    for (const candidate of candidates) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button batch-candidate-select";
+      button.textContent = "选择：" + (safeText(candidate.title) || "未命名合集");
+      button.disabled = batchAcceptInFlight;
+      button.addEventListener("click", function () {
+        generateBatchRequestFromCandidate(row, candidate);
+      });
+      container.appendChild(button);
+    }
+    return container;
   }
 
   function renderBatchParseItems(items) {
@@ -3047,22 +3083,7 @@
     setCandidateSelectionInFlight(true);
     setState(detailContainer, "正在从候选生成订阅草案...", "loading-state");
     try {
-      // The server resolves the system-default MiKan config when no
-      // request-scoped config is sent, so candidate generation only needs the
-      // selected candidate's normalized bangumi URL. Candidate selection always
-      // produces an editable preview draft (save_request=false); the user
-      // explicitly saves it with 保存草案.
-      const result = await fetchJson("/api/v1/requests", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          title: candidate.title || "未命名合集",
-          source: "mikan",
-          mikan_bangumi: candidate.mikan_url,
-          storage_dir: currentStorageDir() || null,
-          save_request: false,
-        }),
-      });
+      const result = await createPreviewDraftFromCandidate(candidate);
       await finalizeGeneratedRequest(result);
     } catch (error) {
       setState(
@@ -3073,6 +3094,61 @@
       notifyApiError("生成失败", error);
     } finally {
       setCandidateSelectionInFlight(false);
+    }
+  }
+
+  async function createPreviewDraftFromCandidate(candidate) {
+    // Both single and batch selection use the existing mikan_bangumi detail
+    // parser and preview-modify/save lifecycle. A candidate only contains
+    // public metadata; request-scoped configuration remains server-side.
+    return fetchJson("/api/v1/requests", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        title: candidate.title || "未命名合集",
+        source: "mikan",
+        mikan_bangumi: candidate.mikan_url,
+        storage_dir: currentStorageDir() || null,
+        save_request: false,
+      }),
+    });
+  }
+
+  async function generateBatchRequestFromCandidate(row, candidate) {
+    if (!row || fieldValue(row.status) !== "FOUND") {
+      return;
+    }
+    if (!candidate || !candidate.mikan_url) {
+      showNotification("error", "生成失败", "候选合集缺少 MiKan URL，无法生成订阅草案。");
+      return;
+    }
+    setBatchAcceptInFlight(true);
+    try {
+      const result = await createPreviewDraftFromCandidate(candidate);
+      const request = result && result.request;
+      if (!request) {
+        throw new Error("candidate preview returned no request");
+      }
+      batchDraftCards = batchDraftCards.map(function (current) {
+        if (current.item_id !== row.item_id) {
+          return current;
+        }
+        return Object.assign({}, current, {
+          status: "DRAFT",
+          preview_request: request,
+          selected_candidate: candidate,
+        });
+      });
+      renderBatchParseItems(batchDraftCards);
+      showNotification(
+        "success",
+        "订阅草案已生成",
+        "已根据所选 MiKan 合集生成当前批量条目的订阅草案。",
+      );
+    } catch (error) {
+      notifyApiError("生成订阅草案失败", error);
+    } finally {
+      setBatchAcceptInFlight(false);
     }
   }
 

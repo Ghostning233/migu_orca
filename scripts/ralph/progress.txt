@@ -23,3 +23,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Candidate searches are already centralized through `_search_mikan_candidates` and cache-backed batch helpers; follow-up selection work should preserve that seam.
   - Full tests passed (824 passed); browser tests were skipped because Chromium is unavailable in this environment, so UI stories still need the dev-browser validation path when available.
 ---
+
+## 2026-08-23 16:31:44 CST - US-159
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented explicit batch candidate selection: only FOUND items render public MiKan candidate actions, and selecting one reuses the existing `mikan_bangumi` request generation plus preview modify/save/accept lifecycle before the card enters DRAFT.
+- Prevented PARSED, EMPTY, and FAILED batch items from being selected for batch acceptance; those items remain non-expandable and cannot be modified or accepted without a generated draft.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The batch workbench keeps its cards in browser memory; after candidate selection, update only the selected row with the ordinary unsaved preview request and status `DRAFT` so existing preview-modify/save and accept flows continue to work.
+  - Candidate selection can share `/api/v1/requests` with `source=mikan` and `mikan_bangumi`; this is the existing route that resolves MiKan details and must remain the sole detail-parser path.
+  - Full suite passed (824 passed, 250 skipped). Browser tests are present but Chromium is unavailable in this environment, so manual browser verification remains needed where Chromium can be installed.
+---
