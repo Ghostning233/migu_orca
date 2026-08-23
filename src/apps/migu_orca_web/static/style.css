@@ -158,12 +158,25 @@ h2 {
   padding: 20px;
 }
 
+/* Keep the primary workspace panels together even though results are a
+ * separate, full-width DOM section between them. */
+.generate-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.request-list-panel {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .request-detail-panel {
   grid-column: 1 / -1;
 }
 
 .search-results-panel {
   grid-column: 1 / -1;
+  grid-row: 2;
 }
 
 .dev-fixture-panel {
@@ -595,6 +608,7 @@ textarea {
 .candidate-list {
   display: grid;
   gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
@@ -607,6 +621,10 @@ textarea {
 }
 
 @media (max-width: 560px) {
+  .candidate-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .batch-card-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -643,7 +661,10 @@ textarea {
 }
 
 .candidate-poster {
+  background: #eef2f6;
   border-radius: 4px;
+  display: block;
+  height: 160px;
   max-height: 160px;
   object-fit: cover;
   width: 120px;
@@ -1287,6 +1308,13 @@ button:disabled {
 
   .app-layout {
     grid-template-columns: 1fr;
+  }
+
+  .generate-panel,
+  .request-list-panel,
+  .search-results-panel {
+    grid-column: 1;
+    grid-row: auto;
   }
 
   .page-notification {

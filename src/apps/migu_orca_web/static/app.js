@@ -3078,6 +3078,12 @@
       poster.className = "candidate-poster";
       poster.alt = "";
       poster.src = candidate.poster_url;
+      poster.addEventListener("error", () => {
+        const placeholder = document.createElement("div");
+        placeholder.className = "candidate-poster candidate-poster-placeholder";
+        placeholder.textContent = "暂无封面";
+        poster.replaceWith(placeholder);
+      }, {once: true});
       item.appendChild(poster);
     } else {
       const placeholder = document.createElement("div");

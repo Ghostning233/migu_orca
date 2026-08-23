@@ -120,6 +120,14 @@ class TestCandidateSearchStates:
             route.fulfill(status=200, content_type="application/json", body=body)
 
         page.route("**/api/v1/mikan/candidates", _fulfill)
+        page.route(
+            "**/assets/cover/2353.jpg",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="image/gif",
+                body=b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
+            ),
+        )
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
