@@ -153,9 +153,9 @@ Stage 18 已在 Web 主流程中使用系统默认 MiKan 配置：
 7. M03 仍只负责候选搜索、详情解析、RSS 源输出和安全错误边界，不负责 UI 文案或预览编辑。
 8. fixture 作为 M03 的离线测试 seam 保留：静态 MiKan/RSS fixture 只服务 CLI、单元测试和浏览器离线回归，不参与 Web 普通主流程。
 
-## 13. Stage 22 统一候选契约规划
+## 13. Stage 22 统一候选契约（已完成）
 
-Stage 22 将统一单个与批量 Web 入口使用的真实 MiKan 候选契约：
+Stage 22 已统一单个与批量 Web 入口使用的真实 MiKan 候选契约：
 
 1. 两种入口继续复用 `MikanClient.search_candidates`、`_search_mikan_candidates`、候选缓存和公开候选序列化，不新增第二套搜索页 parser。
 2. 搜索成功且没有候选时返回空列表并映射为 EMPTY；HTTP/超时/页面解析异常映射为 FAILED 和稳定脱敏错误，二者不得混淆。

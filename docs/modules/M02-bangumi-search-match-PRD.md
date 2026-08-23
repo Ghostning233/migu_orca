@@ -124,9 +124,9 @@ match_bangumi(raw_title, candidates, season_hint = null) -> match_result
 | Q-M02-04 | 同分时优先级如何定义？ | 否 | 已确认：返回歧义错误 |
 | Q-M02-05 | TV、剧场版、OVA、重制版如何区分？ | 否 | 第一阶段先记录为待扩展规则 |
 
-## 12. Stage 22 搜索结果语义补充
+## 12. Stage 22 搜索结果语义补充（已完成）
 
-Stage 22 明确 M02 的标题解析/本地匹配与 M03 真实 MiKan 候选发现是不同层级：
+Stage 22 已明确 M02 的标题解析/本地匹配与 M03 真实 MiKan 候选发现是不同层级：
 
 1. 标题解析或相似度匹配成功只表示得到了候选标题/搜索词，不表示 MiKan 已返回真实合集。
 2. M03 返回空候选是正常 EMPTY 结果；M02 不得把 raw title、canonical title candidate 或 aliases 包装成伪 MiKan 候选。

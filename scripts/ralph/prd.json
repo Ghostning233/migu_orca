@@ -122,7 +122,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Stage closeout story；功能 stories 全部完成后执行全量质量检查并同步最终状态。"
     }
   ]

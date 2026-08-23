@@ -273,9 +273,9 @@ Stage 21 在 Stage 19/20 批量编排之上增加偏好应用、审核元数据�
 4. 搜索词增强通过 `src/batch_engine/controllers/search_enhancer.py` 纯函数把非敏感修正展开为 `{query, original_query, source}` 可审核条目，先用增强 query 搜索、失败再回退原 `search_queries`。
 5. M00 不保存 LLM secret，不自动选择最终 MiKan 合集，不自动接受批量卡片，不引入后台 worker。
 
-## 16. Stage 22 单个/批量真实候选编排规划
+## 16. Stage 22 单个/批量真实候选编排（已完成）
 
-Stage 22 将修正 Stage 19 批量编排中“标题解析结果被当作草案”的语义偏差，并把单个与批量入口收敛到同一原子链路：
+Stage 22 已修正 Stage 19 批量编排中“标题解析结果被当作草案”的语义偏差，并把单个与批量入口收敛到同一原子链路：
 
 ```text
 原始输入（单条或多条）

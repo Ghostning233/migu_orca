@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from urllib.parse import unquote_plus
 
@@ -11,6 +12,7 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.models import EntryRequest
+from tests.browser.conftest import set_storage_preferences
 
 
 pytestmark = pytest.mark.browser
@@ -789,6 +791,73 @@ class TestBatchWorkbenchEntry:
         assert "<rss>" not in body_text
         assert "raw-body-secret" not in body_text
         assert "https://mikan.example/RSS/Bangumi" not in body_text
+
+    def test_search_results_do_not_persist_or_render_sensitive_transport_data(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """Stage 22 results stay public-only even if an upstream payload is noisy."""
+        sensitive_values = (
+            "https://private-mikan.stage22.local/failed?token=stage22-token",
+            "stage22-token",
+            "stage22-cookie",
+            "Bearer stage22-authorization",
+            "<html>stage22 raw html</html>",
+            "<rss>stage22 raw rss</rss>",
+            "magnet:?xt=urn:btih:stage22-secret",
+            "stage22 raw response body",
+            str(storage_dir),
+        )
+
+        item = _batch_item(
+            "item-public", "萌王S4", status="FOUND", candidate_title="史莱姆 第四季"
+        )
+        item["error"] = {
+            "failed_url": sensitive_values[0],
+            "token": sensitive_values[1],
+            "cookie": sensitive_values[2],
+            "authorization": sensitive_values[3],
+            "raw_html": sensitive_values[4],
+            "raw_rss_xml": sensitive_values[5],
+            "magnet": sensitive_values[6],
+            "raw_response_body": sensitive_values[7],
+            "local_path": sensitive_values[8],
+        }
+        item["candidates"][0].update(item["error"])
+
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([item]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        set_storage_preferences(page, storage_dir, save_request=False)
+        page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+        expect(page.locator("#search-results-panel")).to_be_visible()
+        expect(page.locator(".candidate-card")).to_have_count(1)
+
+        browser_state = page.evaluate(
+            """() => ({
+                url: window.location.href,
+                localStorage: JSON.stringify(window.localStorage),
+                sessionStorage: JSON.stringify(window.sessionStorage),
+                bodyText: document.body.innerText,
+            })"""
+        )
+        persisted_json = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in storage_dir.rglob("*.json")
+        ) if storage_dir.exists() else ""
+        for value in sensitive_values:
+            assert value not in browser_state["url"]
+            assert value not in browser_state["localStorage"]
+            assert value not in browser_state["sessionStorage"]
+            assert value not in browser_state["bodyText"]
+            assert value not in persisted_json
 
     def test_batch_card_modify_updates_only_current_card(
         self, page: Page, live_server_url: str

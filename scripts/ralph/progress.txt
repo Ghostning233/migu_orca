@@ -82,3 +82,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - A fake `MikanTransport` injected through the real client factory lets browser tests cover Flask serialization and request generation without a live MiKan dependency.
   - Full checks passed: compileall, JavaScript syntax, and pytest (824 passed, 254 skipped); the Playwright suite is configured but Chromium is unavailable in this environment, so browser cases were skipped and need execution where Chromium is installed.
 ---
+
+## 2026-08-23 16:52:37 CST - US-164
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Completed the Stage 22 closeout documentation across the README, primary and module PRDs, Future Stages, backlog, and Stage 22 PRD; Stage 21 remains recorded as completed and Stage 23 remains a remote optional direction.
+- Added a Playwright regression that feeds a noisy batch-search payload into the dedicated result panel and verifies external transport values never render or reach URL, browser storage, or local Request/queue JSON.
+- Files changed: `README.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_future_stages.md`, `docs/MiGuOrca_stage22_web_search_workbench_PRD.md`, `docs/backlog.md`, `docs/modules/M00-entry-orchestration-PRD.md`, `docs/modules/M02-bangumi-search-match-PRD.md`, `docs/modules/M03-mikan-source-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Search-result regressions can safely use a Playwright API-route payload with extra transport fields; assert only the intended public candidate UI is rendered and every persisted/browser surface remains clean.
+  - Full checks passed: compileall, JavaScript syntax, and pytest (824 passed, 255 skipped). Browser verification was attempted with the dev-browser workflow, but Chromium is unavailable in this environment; 255 browser tests were skipped and require execution where Chromium is installed.
+---
