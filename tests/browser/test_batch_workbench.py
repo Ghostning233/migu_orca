@@ -497,8 +497,12 @@ class TestBatchWorkbenchEntry:
         page.click("#batch-parse-submit")
 
         expect(page.locator("#batch-parse-result")).to_contain_text(
-            "正在解析批量番剧名称"
+            "正在搜索 2 个批量条目的 MiKan 候选"
         )
+        expect(page.locator("#batch-raw-input")).to_be_disabled()
+        expect(page.locator("#batch-parse-submit")).to_be_disabled()
+        expect(page.locator("#single-search-tab")).to_be_disabled()
+        expect(page.locator("#batch-search-tab")).to_be_disabled()
         assert pending_routes
         pending_routes[0].fulfill(
             status=200,

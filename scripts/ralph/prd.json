@@ -87,7 +87,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "除非实现真实可观测的逐项请求，否则不得用定时器伪造内部进度。"
     },
     {

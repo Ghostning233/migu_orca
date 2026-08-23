@@ -543,8 +543,9 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "mikan-candidate-search-error" in script
     assert "mikan_config" not in script
     assert "searchMikanCandidates" in script
+    assert "setSearchWorkspaceInFlight" in script
     assert "clearCandidateSensitiveFields" not in script
-    assert "正在搜索 MiKan 候选" in script
+    assert "正在搜索「" in script
     assert "候选搜索失败" in script
     assert "未找到候选合集" in script
     assert "MiKan ID" in script
@@ -587,7 +588,8 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "parseBatchDraft" in script
     assert "raw_input: rawInput" in script
     assert "批量获取前必须输入至少一个番剧名称" in script
-    assert "正在解析批量番剧名称" in script
+    assert "正在搜索 " in script
+    assert "个批量条目的 MiKan 候选" in script
     assert "batchDraftCards" in script
     assert "batchCardTitle" in script
     assert "batchCardSourceName" in script

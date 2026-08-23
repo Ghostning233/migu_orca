@@ -104,6 +104,7 @@
   let saveRequestPreference = true;
   let currentPreferenceValues = null;
   let activeSearchMode = "single";
+  let searchWorkspaceDisabledStates = new Map();
 
   function searchModeButtons() {
     return searchModeTabs
@@ -160,6 +161,32 @@
       });
     }
     setSearchMode(activeSearchMode, false);
+  }
+
+  function setSearchWorkspaceInFlight(isInFlight) {
+    const controls = [];
+    for (const container of [
+      document.getElementById("generate-panel"),
+      document.getElementById("search-results-panel"),
+    ]) {
+      if (!container) {
+        continue;
+      }
+      for (const control of container.querySelectorAll("button, input, textarea, select")) {
+        controls.push(control);
+      }
+    }
+    for (const control of controls) {
+      if (isInFlight) {
+        searchWorkspaceDisabledStates.set(control, control.disabled);
+        control.disabled = true;
+      } else if (searchWorkspaceDisabledStates.has(control)) {
+        control.disabled = searchWorkspaceDisabledStates.get(control);
+      }
+    }
+    if (!isInFlight) {
+      searchWorkspaceDisabledStates = new Map();
+    }
   }
 
   function readPreference(key) {
@@ -1147,9 +1174,7 @@
   }
 
   function setBatchParseInFlight(isInFlight) {
-    if (batchRawInput) {
-      batchRawInput.disabled = isInFlight;
-    }
+    setSearchWorkspaceInFlight(isInFlight);
     if (batchParseSubmit) {
       batchParseSubmit.disabled = isInFlight;
       batchParseSubmit.textContent = isInFlight
@@ -2306,8 +2331,11 @@
     }
 
     setBatchParseInFlight(true);
+    const itemCount = payload.raw_input
+      .split(/\r?\n/)
+      .filter((line) => line.trim()).length;
     setBatchParseResult(
-      "正在解析批量番剧名称...",
+      "正在搜索 " + itemCount + " 个批量条目的 MiKan 候选...",
       "loading-state compact-state",
     );
     try {
@@ -2326,8 +2354,8 @@
       await loadBatchQueue();
       showNotification(
         "success",
-        "批量草案已获取",
-        "已返回 " + items.length + " 个条目的解析状态。",
+        "批量搜索完成",
+        "已返回 " + items.length + " 个条目的候选搜索状态。",
       );
     } catch (error) {
       setBatchParseResult(
@@ -2966,9 +2994,7 @@
   }
 
   function setCandidateSearchInFlight(isInFlight) {
-    for (const control of candidateAreaControls()) {
-      control.disabled = isInFlight;
-    }
+    setSearchWorkspaceInFlight(isInFlight);
     if (candidateSearchSubmit) {
       candidateSearchSubmit.textContent = isInFlight ? "正在搜索..." : "搜索候选";
     }
@@ -3119,7 +3145,7 @@
 
     setCandidateSearchInFlight(true);
     setCandidateSearchResult(
-      "正在搜索 MiKan 候选...",
+      "正在搜索「" + payload.query + "」的 MiKan 候选...",
       "loading-state compact-state",
     );
     try {
@@ -3132,8 +3158,10 @@
       renderCandidateCards(candidates, result.query || payload.query);
       showNotification(
         "success",
-        "候选搜索完成",
-        "找到 " + candidates.length + " 个候选合集。",
+        candidates.length ? "候选搜索完成" : "未找到候选合集",
+        candidates.length
+          ? "找到 " + candidates.length + " 个候选合集。"
+          : "可调整番剧标题后重试。",
       );
     } catch (error) {
       setCandidateSearchResult(

@@ -10,6 +10,7 @@ Started: 2026-08-23 15:45:00 CST
 - 真实候选结果必须区分 FOUND、EMPTY、FAILED；EMPTY/FAILED/PARSED 不得携带可接受的空壳 `preview_request`，只有用户显式选择公开 MiKan 候选并完成详情解析后才能进入 DRAFT/READY。
 - 候选与结果 UI 只渲染公开字段和脱敏错误；endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、持久化、日志、截图或 trace。
 - 搜索状态文案必须基于可观测事件；单一长请求只能展示请求级状态，不能用定时器伪造服务端页面解析或逐项进度。
+- 工作台级 loading 锁定必须在恢复时还原控件原本的 disabled 状态，避免错误启用不可操作的卡片或提交按钮。
 - 创建订阅方案工作台通过原生 `role=tablist` 分段切换单个/批量输入；结果应置于独立的整行 `search-results-panel`，并与当前模式同步显隐，避免两类旧结果混排。
 - 单个与批量的公开 MiKan 候选卡复用 `renderCandidateCard`；批量卡片只有 `selected_candidate` 才能作为已选来源或主封面，绝不可把 `candidates[0]` 当作默认选择。
 
@@ -57,4 +58,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Reuse `renderCandidateCard` for both single and batch results so public candidate fields, poster placeholders, and explicit selection semantics cannot drift between modes.
   - A batch card must only use `selected_candidate` for its chosen-source and hero-poster display; using `candidates[0]` implicitly suggests an automatic choice.
   - Full checks passed: compileall, JS syntax, and pytest (824 passed, 252 skipped). Playwright coverage was added, but Chromium is unavailable in this environment so `tests/browser/` was skipped; manual browser verification is still needed where Chromium is installed.
+---
+
+## 2026-08-23 16:44:25 CST - US-162
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Implemented observable search feedback: single searches name the safely rendered title while loading and report either a candidate count or an explicit no-result outcome; batch searches report only the request-level non-empty input count and final item summary.
+- Locked the complete search workspace during either search, including both mode tabs and search actions, while preserving each control's original disabled state when the request completes.
+- Added Playwright regressions that hold real mocked requests open to assert loading status, workspace locking, and post-response restoration.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_mikan_candidates.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Search loading can be tested reliably by retaining Playwright route objects and fulfilling them after assertions; sleeping inside a route handler blocks the dispatcher.
+  - Browser verification command ran, but Chromium is unavailable in this environment, so 253 browser tests were skipped; run the suite where Chromium is installed for interactive verification.
+  - Full quality checks passed: compileall, JavaScript syntax, and pytest (824 passed, 253 skipped).
 ---

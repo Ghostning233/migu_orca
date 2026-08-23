@@ -143,6 +143,39 @@ class TestCandidateSearchStates:
         # The query input is preserved after a successful search.
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
 
+    def test_candidate_search_loading_names_query_and_locks_search_workspace(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        pending_routes: list[Any] = []
+
+        def _hold(route: Any, request: Any) -> None:
+            pending_routes.append(route)
+
+        page.route("**/api/v1/mikan/candidates", _hold)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+
+        expect(page.locator("#mikan-candidate-search-result")).to_contain_text(
+            "正在搜索「芙莉莲」的 MiKan 候选"
+        )
+        expect(page.locator("#mikan-candidate-query")).to_be_disabled()
+        expect(page.locator("#mikan-candidate-search-submit")).to_be_disabled()
+        expect(page.locator("#single-search-tab")).to_be_disabled()
+        expect(page.locator("#batch-search-tab")).to_be_disabled()
+        assert pending_routes
+
+        pending_routes[0].fulfill(
+            status=200,
+            content_type="application/json",
+            body=_candidate_result_json("芙莉莲", []),
+        )
+        expect(page.locator("#mikan-candidate-search-result")).to_contain_text(
+            "未找到候选合集"
+        )
+        expect(page.locator("#mikan-candidate-query")).to_be_enabled()
+        expect(page.locator("#batch-search-tab")).to_be_enabled()
+
     def test_candidate_search_empty_result(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
