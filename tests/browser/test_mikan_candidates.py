@@ -205,6 +205,58 @@ class TestCandidateSearchStates:
         expect(cards.nth(1)).to_contain_text("播出进度：待开发 / 未知")
         expect(cards.nth(2)).to_contain_text("播出进度：待开发 / 未知")
 
+    def test_same_origin_poster_failure_and_extra_candidate_fields_stay_safe(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """A failed opaque poster must not expose or block the candidate workspace."""
+        raw_poster_url = "https://images.example/private/poster.jpg?token=poster-secret"
+        cache_path = "/srv/migu-orca/.migu_orca/mikan_posters_v1/secret.img"
+        body = _candidate_result_json(
+            "安全封面",
+            [
+                {
+                    "bangumi_id": "2353",
+                    "title": "安全封面测试",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+                    "poster_url": "/api/v1/mikan/posters/" + "b" * 64,
+                    "source_query": "安全封面",
+                    "aliases": [],
+                    # These are intentionally ignored by the public renderer.
+                    "raw_poster_url": raw_poster_url,
+                    "cache_path": cache_path,
+                    "raw_response_body": "poster response body",
+                }
+            ],
+        )
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200, content_type="application/json", body=body
+            ),
+        )
+        poster_requests: list[str] = []
+
+        def _fail_poster(route: Any, request: Any) -> None:
+            poster_requests.append(request.url)
+            route.fulfill(status=404, content_type="application/json", body="{}")
+
+        page.route("**/api/v1/mikan/posters/*", _fail_poster)
+
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="安全封面")
+        page.click("#mikan-candidate-search-submit")
+
+        card = page.locator(".candidate-card")
+        expect(card).to_contain_text("安全封面测试")
+        expect(card.locator("button:has-text('选择此合集')")).to_be_enabled()
+        expect(card.locator(".candidate-poster-placeholder")).to_be_visible()
+        body_text = page.locator("body").inner_text()
+        for sensitive_value in (raw_poster_url, cache_path, "poster response body"):
+            assert sensitive_value not in body_text
+        assert poster_requests == [
+            f"{live_server_url}/api/v1/mikan/posters/" + "b" * 64
+        ]
+
     def test_candidate_search_loading_names_query_and_locks_search_workspace(
         self, page: Page, live_server_url: str
     ) -> None:

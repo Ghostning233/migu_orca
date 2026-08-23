@@ -11,6 +11,7 @@ Started: 2026-08-23 22:43:00 CST
 - 批量候选浮层全页同时最多一个，必须支持切换、点击外部/Escape 关闭、焦点返回和 viewport 约束；批量草案统一送入现有订阅方案详情，不在卡片内展开完整草案。
 - 剧集摘要固定使用 `播出进度：待开发 / <总集数或未知>`；总集数只解析明确公开元数据，不用种子/RSS推断当前最新播出集数。
 - disabled/`aria-disabled=true` 控件使用静态反馈和普通/default 鼠标；只有真实 `aria-busy=true` 才允许 loading 动画。
+- 同源封面加载失败时前端移除图片并保留稳定占位，候选操作不能依赖图片成功；Chromium 回归应断言仅请求 opaque poster endpoint，且额外候选字段不会进入页面。
 - 正式番名与季数解析不在 Stage 23，移交 Stage 24；AI/规则只生成可审核搜索词，不自动选择最终 MiKan 合集。
 - endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始图片 URL、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、持久化、日志、截图或 trace。
 
@@ -86,4 +87,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - Files changed: `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
 - **Learnings for future iterations:**
   - Put loading feedback in the request's aria-live status; disabled controls are availability feedback and must remain static unless they explicitly carry `aria-busy=true`.
+---
+
+## 2026-08-24 00:26:53 CST - US-172
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Closed Stage 23 documentation, added a Chromium regression for failed opaque posters and candidate-field filtering, and confirmed the existing cache/SSRF, non-image, size, path, popover, detail, and sensitive-data coverage.
+- Files changed: `README.md`, Stage/main/future/backlog/module PRDs, `docs/optional_features.md`, `tests/browser/test_mikan_candidates.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - A failed same-origin poster removes the image and retains the stable candidate placeholder; candidate selection remains available and only the opaque endpoint is requested.
+  - The Stage 23 closeout validation baseline is `uv run pytest tests/browser/ -q` (259 passed) plus `uv run pytest -q` (1102 passed); browser tests require `.migu_orca/storage` to be absent.
 ---

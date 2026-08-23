@@ -303,7 +303,7 @@ FAILED：脱敏失败，当前条目可重试
 
 ## 17. Stage 23/24 handoff
 
-Stage 23 不改变 M00 的候选选择与 Request 原子链路，只调整 M03 封面/搜索读取和 M13 候选/草案呈现。批量 DRAFT 的“查看草案”必须复用现有 preview/request 详情渲染，不能新建第二套草案模型。
+Stage 23 已完成且未改变 M00 的候选选择与 Request 原子链路；批量 DRAFT 的“查看草案”复用现有 preview/request 详情渲染，不新建第二套草案模型。
 
 正式番名与季数解析进入 Stage 24：需要替换仅覆盖开发示例的 fake provider 行为，使 `萌王S4`、`无职转生s4` 等简称/季数生成可审核官方搜索词，并修复“源名称：搜索词：...”标签叠加。解析失败必须保留原始搜索、手动候选选择和 MiKan URL/ID fallback；不得自动选择最终合集。
 

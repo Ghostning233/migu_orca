@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.20 |
-| 文档状态 | Stage 22 已完成；Stage 23 媒体缓存、MiKan 读取优化与批量审核体验已规划、待开发 |
+| 当前版本 | v0.21 |
+| 文档状态 | Stage 23 已完成；Stage 24 正式番名与季数解析待规划 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -79,7 +79,7 @@ Stage 21 已完成用户偏好与智能推荐闭环：用户可在 `/settings` �
 
 Stage 22 已完成。单个与批量搜索继续复用 `_search_mikan_candidates`、公开候选序列化、候选缓存以及既有 MiKan 详情到 preview 链路，建立“标题解析 → 真实候选 FOUND/EMPTY/FAILED → 用户显式选择 → DRAFT/READY 草案”的可信状态契约：无候选不再生成空壳 `preview_request`，PARSED/EMPTY/FAILED 均不能操作草案。`/index` 已重构为可切换单个/批量模式的“创建订阅方案”工作台，两种结果统一位于独立面板，并由真实浏览器回归保护。执行记录见 `docs/MiGuOrca_stage22_web_search_workbench_PRD.md`。
 
-Stage 23 已完成规划、待开发。该阶段将把 MiKan 封面转为服务端安全同源缓存（默认 7 天滑动 TTL、10 秒下载超时、5 MiB 上限），以浏览器异步图片请求避免正文阻塞；基于脱敏大响应 fixture 证明候选区域后，对 MiKan 搜索页实施 marker/结构感知的有界提前停止；将批量候选改为锚定触发按钮的单实例浮层，将批量草案统一展示到“订阅方案详情”，增加 `播出进度：待开发 / 总集数` 摘要并统一禁用按钮反馈。正式番名/季数解析移交 Stage 24，部署/配置向导顺延 Stage 25。
+Stage 23 已完成。MiKan 封面现经服务端安全同源缓存（默认 7 天滑动 TTL、10 秒下载超时、5 MiB 上限）异步加载；脱敏大响应 fixture 证明候选一致后，搜索 transport 以 marker/结构感知提前停止；批量候选使用锚定触发按钮的单实例浮层，批量草案统一进入“订阅方案详情”，结果卡增加 `播出进度：待开发 / 总集数` 摘要，禁用按钮采用静态反馈。正式番名/季数解析进入 Stage 24，部署/配置向导顺延 Stage 25；流式封面代理仍为可选功能。
 
 ## 4. 第一阶段范围
 
@@ -155,10 +155,10 @@ Stage 23 已完成规划、待开发。该阶段将把 MiKan 封面转为服务�
 
 | 模块编号 | 模块名称 | 当前状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
-| M00 | 入口与流程编排模块 | Stage 18 已实现真实 MiKan Web 主流程；Stage 19/20 已编排批量草案、接受与提交前队列；Stage 21 已接入偏好/搜索增强；Stage 22 已收敛单个/批量真实候选选择到草案生成链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
+| M00 | 入口与流程编排模块 | Stage 18～23 已实现真实候选、批量草案/队列、偏好/搜索增强、候选选择与统一草案详情链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
 | M01 | 用户输入与 Request 管理模块 | Stage 15 已实现 CLI/Web 确认、取消、受限修改；`ACCEPTED` Request 支持受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
 | M02 | 番剧搜索与匹配模块 | Stage 1 已确认；Stage 22 已明确标题解析/匹配成功不等于真实 MiKan 候选搜索成功 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
-| M03 | MiKan 数据源模块 | Stage 17～22 已实现详情、候选、缓存、搜索增强与统一候选契约；Stage 23 将增加安全封面缓存来源、搜索响应提前停止和可选总集数 | P0 | docs/modules/M03-mikan-source-PRD.md |
+| M03 | MiKan 数据源模块 | Stage 17～23 已实现详情、候选、缓存、搜索增强、同源安全封面、提前停止和可选总集数契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
 | M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
 | M05 | 字幕组评估模块 | Stage 1 已确认；Stage 21 已为 `select_subtitle_group` 增加排除列表过滤（先排除、再优先、最后 fallback） | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
 | M06 | 种子筛选规则模块 | Stage 15 已实现默认字面匹配、大小写不敏感与可选 `use_regex` / `case_sensitive` | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
@@ -166,9 +166,9 @@ Stage 23 已完成规划、待开发。该阶段将把 MiKan 封面转为服务�
 | M08 | 用户偏好与规则配置模块 | Stage 21 已实现非敏感偏好契约与存储（字幕组/筛选/命名/搜索修正）、偏好 Web API、偏好 Web UI 和批量草案偏好应用；偏好与修正存储只保存非敏感字段 | P1 | docs/modules/M08-user-preference-rule-PRD.md |
 | M09 | Request 确认交互模块 | Stage 2 已实现 | P2 | docs/modules/M09-request-confirmation-PRD.md |
 | M10 | Auto Bangumi 集成模块 | Stage 4 已实现真实 HTTP adapter 与显式 CLI 提交路径；Stage 20 已复用现有 payload/client/脱敏契约实现批量顺序提交与失败项独立重试 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
-| M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 将增加 path-safe 封面缓存、滑动 TTL 与机会式清理 | P2 | docs/modules/M11-storage-state-PRD.md |
-| M12 | 日志与错误处理模块 | Stage 1 最小化；Stage 23 将约束封面下载、提前停止与缓存清理的脱敏错误 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 18～22 已接入真实搜索、批量工作台、队列、偏好和统一候选；Stage 23 将接入同源异步封面、候选浮层、统一草案详情、剧集摘要与禁用按钮样式 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 已实现 path-safe 封面缓存、滑动 TTL 与机会式清理 | P2 | docs/modules/M11-storage-state-PRD.md |
+| M12 | 日志与错误处理模块 | Stage 1 最小化；Stage 23 已约束封面下载、提前停止与缓存清理的脱敏错误 | P1 | docs/modules/M12-log-error-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 18～23 已接入真实搜索、批量工作台、队列、偏好、同源异步封面、候选浮层、统一草案详情、剧集摘要与禁用按钮静态反馈 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 12 已支持显式 AB、MiKan 与 qBittorrent 配置边界 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序

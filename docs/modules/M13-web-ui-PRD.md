@@ -50,7 +50,7 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 20 | 批量接受、提交前队列与失败项重试 | 已接入 | `/index` 批量工作台提供单卡接受、勾选批量接受和全接受；`#batch-queue-panel` 展示提交前队列（中文状态、尝试次数、脱敏结果摘要）并提供显式 AB 提交；失败项可独立重试，成功项不显示重试 |
 | Stage 21 | 偏好管理面板与批量卡片偏好/修正展示 | 已接入 | `/settings` 的 `#preference-settings-panel` 管理非敏感偏好（字幕组、筛选、命名、搜索增强开关），支持保存与显式恢复默认；批量卡片展示偏好命中摘要、需人工核对 chip、偏好与审核面板（偏好命中/警告/审核提示/当前默认配置）和搜索词来源面板（修正增强搜索词/原始搜索词） |
 | Stage 22 | 搜索工作台与真实候选闭环 | 已接入 | “创建订阅方案”提供单个/批量分段切换；两种结果迁入独立 `#search-results-panel`；统一候选卡、封面/占位、FOUND/EMPTY/FAILED、候选选择后草案动作和真实搜索反馈 |
-| Stage 23 | 媒体缓存与批量审核体验 | 规划完成，待开发 | 候选封面使用同源异步缓存；批量候选为锚定按钮的单实例浮层；批量草案进入统一详情；卡片显示播出进度占位；禁用按钮使用静态反馈 |
+| Stage 23 | 媒体缓存与批量审核体验 | 已接入 | 候选封面使用同源异步缓存；批量候选为锚定按钮的单实例浮层；批量草案进入统一详情；卡片显示播出进度占位；禁用按钮使用静态反馈 |
 
 以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 20 的提交前队列只展示队列项目标题、状态、尝试次数、时间和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径必须被忽略或脱敏，AB 配置只存在于当前提交 POST body，不写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot。Stage 21 的偏好表单是非敏感表面，只提交已定义的非敏感偏好字段，拒绝的敏感输入回退到上次有效值；批量卡片只渲染 `preference_hits`/`preference_warnings`/`review_hints`/`applied_preferences`/`enhanced_search_queries` 中的公开规则摘要和中文提示，endpoint、token、cookie、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。
 
@@ -121,7 +121,7 @@ Stage 22 UI 调整要求（已完成）：
 10. Playwright 必须使用生产 API 的真实状态形状覆盖 FOUND/EMPTY/FAILED、PARSED→选择候选→DRAFT、封面/占位、模式切换、独立结果面板、窄屏和基础无障碍；不得用理想化 `DRAFT` mock 掩盖后端 `PARSED` 契约。
 11. 新面板只渲染公开候选与脱敏状态，不得显示或持久化 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL或本地绝对路径。
 
-Stage 23 UI 调整要求（规划完成，待开发）：
+Stage 23 UI 调整要求（已完成）：
 
 1. 候选图片只使用 MiGuOrca 同源 opaque cache URL，默认显示占位，并设置 `loading="lazy"`、`decoding="async"`；图片慢或失败不阻塞正文、选择和其他操作。
 2. 批量 FOUND 的“查看候选”打开单实例锚定浮层，箭头指向触发按钮；点击其他按钮切换，点击外部/Escape/模式切换/重新搜索/删除 active 卡片关闭。

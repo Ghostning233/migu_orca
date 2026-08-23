@@ -126,11 +126,11 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 
 执行 PRD：`docs/MiGuOrca_stage22_web_search_workbench_PRD.md`。
 
-## 6. Stage 23: 媒体缓存、MiKan 读取优化与批量审核体验
+## 6. Stage 23: 媒体缓存、MiKan 读取优化与批量审核体验（已完成）
 
 目标：
 
-解决 Stage 22 人工验收后的封面可达性、MiKan 大响应、候选/草案展示和禁用按钮反馈问题。
+已解决 Stage 22 人工验收后的封面可达性、MiKan 大响应、候选/草案展示和禁用按钮反馈问题：同源安全封面缓存、结构感知提前停止、锚定候选浮层、统一草案详情、播出进度占位及静态禁用反馈均已完成。
 
 主要功能：
 
@@ -184,11 +184,11 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 2. Stage 20：批量接受与 Auto Bangumi 提交前队列（已完成）。
 3. Stage 21：用户偏好与智能推荐闭环（已完成）。
 4. Stage 22：Web UI 搜索工作台重构与真实候选闭环（已完成）。
-5. Stage 23：媒体缓存、MiKan 读取优化与批量审核体验（规划完成，待开发）。
+5. Stage 23：媒体缓存、MiKan 读取优化与批量审核体验（已完成）。
 6. Stage 24：正式番名与季数解析（待规划）。
 
 如果要覆盖“降低 Auto Bangumi/qBittorrent 配置门槛”，再增加 1 个远期可选 Stage：
 
 1. Stage 25：部署/配置向导可行性验证。
 
-因此，Stage 19 到 Stage 22 的基础功能闭环已经完成；当前进入 Stage 23 的媒体/读取/UI 收敛，随后由 Stage 24 解决正式番名与季数解析。若再覆盖配置痛点，则扩展到 Stage 25。流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
+因此，Stage 19 到 Stage 23 的基础功能与媒体/读取/UI 收敛已经完成；下一步由 Stage 24 解决正式番名与季数解析。若再覆盖配置痛点，则扩展到 Stage 25。流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
