@@ -63,6 +63,7 @@ class TestIndexStage13WorkbenchShell:
 
         for panel_id in (
             "generate-panel",
+            "search-results-panel",
             "request-list-panel",
             "request-detail-panel",
         ):
@@ -76,7 +77,8 @@ class TestIndexStage13WorkbenchShell:
         page.goto(f"{live_server_url}/index")
 
         for heading in (
-            "真实 MiKan 候选搜索",
+            "创建订阅方案",
+            "搜索结果",
             "订阅方案列表",
             "订阅方案详情",
         ):
@@ -85,6 +87,32 @@ class TestIndexStage13WorkbenchShell:
             )
         assert page.locator("text=qBittorrent 连接测试").count() == 0
         assert page.locator("text=验收说明").count() == 0
+
+    def test_search_modes_keep_inputs_and_results_separate(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        page.goto(f"{live_server_url}/index")
+
+        single_tab = page.get_by_role("tab", name="单个搜索")
+        batch_tab = page.get_by_role("tab", name="批量搜索")
+        assert single_tab.get_attribute("aria-selected") == "true"
+        assert batch_tab.get_attribute("aria-selected") == "false"
+        assert page.locator("#single-search-entry").is_visible()
+        assert page.locator("#batch-workbench-entry").is_hidden()
+        assert page.locator("#mikan-candidate-search-result").is_visible()
+        assert page.locator("#batch-search-results").is_hidden()
+
+        batch_tab.click()
+        assert batch_tab.get_attribute("aria-selected") == "true"
+        assert single_tab.get_attribute("aria-selected") == "false"
+        assert page.locator("#batch-workbench-entry").is_visible()
+        assert page.locator("#single-search-entry").is_hidden()
+        assert page.locator("#batch-search-results").is_visible()
+        assert page.locator("#mikan-candidate-search-result").is_hidden()
+
+        batch_tab.press("ArrowLeft")
+        assert single_tab.get_attribute("aria-selected") == "true"
+        assert page.locator("#single-search-entry").is_visible()
 
 
 class TestSettingsShell:

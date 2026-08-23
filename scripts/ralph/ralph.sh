@@ -97,10 +97,6 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
-if [[ -n "$MODEL" && "$TOOL" != "claude" ]]; then
-  echo "Warning: --model is currently only passed to Claude; ignoring model '$MODEL' for tool '$TOOL'."
-fi
-
 MODEL_LABEL="${MODEL:-default}"
 echo "Starting Ralph - Tool: $TOOL - Model: $MODEL_LABEL - Max iterations: $MAX_ITERATIONS"
 for i in $(seq 1 $MAX_ITERATIONS); do
@@ -115,7 +111,12 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     COMPLETION_OUTPUT="$OUTPUT"
   elif [[ "$TOOL" == "codex" ]]; then
     LAST_MESSAGE_FILE=$(mktemp)
-    OUTPUT=$(codex exec --dangerously-bypass-approvals-and-sandbox --output-last-message "$LAST_MESSAGE_FILE" - < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr) || true
+    CODEX_ARGS=(exec --dangerously-bypass-approvals-and-sandbox --output-last-message "$LAST_MESSAGE_FILE")
+    if [[ -n "$MODEL" ]]; then
+      CODEX_ARGS+=(--model "$MODEL")
+    fi
+    CODEX_ARGS+=(-)
+    OUTPUT=$(codex "${CODEX_ARGS[@]}" < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr) || true
     COMPLETION_OUTPUT=$(cat "$LAST_MESSAGE_FILE" 2>/dev/null || true)
     rm -f "$LAST_MESSAGE_FILE"
   else

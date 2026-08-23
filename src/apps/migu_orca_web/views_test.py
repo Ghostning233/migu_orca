@@ -18,8 +18,9 @@ from batch_engine.controllers.batch_queue_controller import (
     start_queue_item_submit,
 )
 from batch_engine.models import (
+    BATCH_ITEM_STATUS_EMPTY,
     BATCH_ITEM_STATUS_FAILED,
-    BATCH_ITEM_STATUS_PARSED,
+    BATCH_ITEM_STATUS_FOUND,
     BATCH_QUEUE_STATUS_FAILED,
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
     BATCH_QUEUE_STATUS_RETRYABLE,
@@ -226,7 +227,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert "主流程通过真实 MiKan 候选搜索" in html
     assert "fixture-backed 生成保留在开发/离线测试区域" in html
     assert "外部数据源、连接测试与提交配置集中在 Settings" in html
-    assert "真实 MiKan 候选搜索" in html
+    assert "创建订阅方案" in html
     assert "订阅方案列表" in html
     assert "订阅方案详情" in html
     assert 'href="/index"' in html
@@ -235,6 +236,13 @@ def test_index_serves_web_ui_shell() -> None:
     assert "订阅方案工作台" in html
     assert "Settings" in html
     assert 'id="generate-panel"' in html
+    assert 'id="search-mode-tabs"' in html
+    assert 'id="single-search-tab"' in html
+    assert 'id="batch-search-tab"' in html
+    assert 'role="tablist"' in html
+    assert 'aria-selected="true"' in html
+    assert 'id="search-results-panel"' in html
+    assert 'id="search-results-heading"' in html
     assert 'id="request-list-panel"' in html
     assert 'id="request-detail-panel"' in html
     assert 'id="dev-fixture-panel"' in html
@@ -255,6 +263,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'id="mikan-candidate-query"' in html
     assert 'name="mikan_candidate_title"' in html
     assert 'id="batch-workbench-entry"' in html
+    assert 'aria-labelledby="batch-search-tab"' in html
     assert 'id="batch-parse-form"' in html
     assert 'id="batch-raw-input"' in html
     assert 'name="batch_raw_input"' in html
@@ -265,6 +274,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert "邻家天使S2" in html
     assert 'id="batch-parse-submit"' in html
     assert 'id="batch-parse-result"' in html
+    assert 'id="batch-search-results" hidden' in html
     assert 'id="batch-parse-error"' in html
     assert 'id="batch-accept-toolbar"' in html
     assert 'id="batch-select-all-checkbox"' in html
@@ -533,8 +543,9 @@ def test_static_app_script_wires_mikan_candidate_search_control() -> None:
     assert "mikan-candidate-search-error" in script
     assert "mikan_config" not in script
     assert "searchMikanCandidates" in script
+    assert "setSearchWorkspaceInFlight" in script
     assert "clearCandidateSensitiveFields" not in script
-    assert "正在搜索 MiKan 候选" in script
+    assert "正在搜索「" in script
     assert "候选搜索失败" in script
     assert "未找到候选合集" in script
     assert "MiKan ID" in script
@@ -577,12 +588,19 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "parseBatchDraft" in script
     assert "raw_input: rawInput" in script
     assert "批量获取前必须输入至少一个番剧名称" in script
-    assert "正在解析批量番剧名称" in script
+    assert "正在搜索 " in script
+    assert "个批量条目的 MiKan 候选" in script
     assert "batchDraftCards" in script
     assert "batchCardTitle" in script
     assert "batchCardSourceName" in script
     assert "batchCardReviewData" in script
     assert "batchCardRequest" in script
+    assert "renderBatchCandidateChoices" in script
+    assert "batch-candidate-select" in script
+    assert "renderCandidateCard" in script
+    assert "candidate-poster-placeholder" in script
+    assert "generateBatchRequestFromCandidate" in script
+    assert "createPreviewDraftFromCandidate" in script
     assert "openBatchCardModify" in script
     assert "updateBatchCardRequest" in script
     assert "acceptBatchCard" in script
@@ -624,7 +642,9 @@ def test_static_app_script_wires_batch_parse_entry() -> None:
     assert "有效种子数：" in script
     assert "batchStatusLabel" in script
     assert "已解析" in script
-    assert "解析失败" in script
+    assert "找到候选" in script
+    assert "未找到候选" in script
+    assert "搜索失败" in script
 
 
 def test_static_app_script_wires_batch_preference_display() -> None:
@@ -2629,7 +2649,11 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
     ]
     assert len({item["item_id"] for item in items}) == 3
     assert all(item["item_id"].startswith("item-") for item in items)
-    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert [item["status"] for item in items] == [
+        BATCH_ITEM_STATUS_EMPTY,
+        BATCH_ITEM_STATUS_FOUND,
+        BATCH_ITEM_STATUS_EMPTY,
+    ]
     assert items[0]["canonical_title_candidates"] == [
         "关于我转生变成史莱姆这档事 第四季",
         "关于我转生变成史莱姆这档事 第4季",
@@ -2734,9 +2758,9 @@ def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert [item["status"] for item in items] == [
-        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_EMPTY,
         BATCH_ITEM_STATUS_FAILED,
-        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_EMPTY,
     ]
     assert items[1]["raw_title"] == "杖剑谭S2"
     assert items[1]["canonical_title_candidates"] == []
@@ -2840,13 +2864,11 @@ def test_batch_parse_api_applies_saved_preferences_from_storage_dir(
     assert item["preference_warnings"] == []
 
 
-def test_batch_parse_api_preview_request_carries_preference_defaults(
+def test_batch_parse_api_empty_result_has_no_preview_request(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """US-153/US-156 closure: a parsed batch item gets an editable
-    preview_request whose defaults come from the saved preferences, so the card
-    can enter the existing preview-modify / preview-save / accept flow."""
+    """An empty MiKan result cannot create an editable draft skeleton."""
     monkeypatch.setattr(
         "apps.migu_orca_web.views._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
@@ -2878,37 +2900,15 @@ def test_batch_parse_api_preview_request_carries_preference_defaults(
 
     item = response.get_json()["result"]["items"][0]
     assert response.status_code == 200
-    preview = item["preview_request"]
-    assert preview is not None
-    assert preview["status"] == "PENDING_CONFIRM"
-    assert preview["input"] == {"raw_title": "萌王S4"}
-    assert preview["request_id"] == f"{response.get_json()['result']['batch_id']}-{item['item_id']}"
-    assert (
-        preview["source_info"]["matched_bangumi"]["title"]
-        == "关于我转生变成史莱姆这档事 第四季"
-    )
-    assert preview["source_info"]["rss_sources"] == []
-    assert preview["confirmable_config"]["selected_subtitle_group"] == "Loli"
-    assert preview["confirmable_config"]["filter_rule"] == {
-        "must_contain": "1080p",
-        "must_not_contain": "合集版",
-        "use_regex": True,
-        "case_sensitive": True,
-    }
-    assert preview["confirmable_config"]["expected_folder_name"] == "萌王S4"
-    assert preview["confirmable_config"]["effective_seed_names"] == []
-    # The preview skeleton never carries sensitive values.
-    assert "token" not in str(preview)
-    assert "endpoint" not in str(preview)
-    assert "http" not in str(preview)
+    assert item["status"] == BATCH_ITEM_STATUS_EMPTY
+    assert item["preview_request"] is None
 
 
-def test_batch_parse_api_preview_request_empty_defaults_without_preferences(
+def test_batch_parse_api_empty_result_has_no_preview_without_preferences(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """Without saved preferences the preview_request still exists but uses the
-    empty Stage 19 defaults, so cards remain editable/acceptable."""
+    """Missing preferences do not turn an empty result into a draft."""
     monkeypatch.setattr(
         "apps.migu_orca_web.views._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
@@ -2921,20 +2921,8 @@ def test_batch_parse_api_preview_request_empty_defaults_without_preferences(
     )
 
     item = response.get_json()["result"]["items"][0]
-    assert item["status"] == "PARSED"
-    preview = item["preview_request"]
-    assert preview is not None
-    assert preview["status"] == "PENDING_CONFIRM"
-    assert preview["confirmable_config"]["selected_subtitle_group"] is None
-    assert preview["confirmable_config"]["filter_rule"] == {
-        "must_contain": "",
-        "must_not_contain": "",
-        "use_regex": False,
-        "case_sensitive": False,
-    }
-    # 无偏好时 expected_folder_name 仍由默认命名策略生成（官方标题+季数）。
-    assert isinstance(preview["confirmable_config"]["expected_folder_name"], str)
-    assert preview["confirmable_config"]["expected_folder_name"]
+    assert item["status"] == BATCH_ITEM_STATUS_EMPTY
+    assert item["preview_request"] is None
 
 
 def test_batch_parse_api_failed_item_has_no_preview_request(
@@ -2987,7 +2975,7 @@ def test_batch_parse_api_falls_back_when_preference_file_is_damaged(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert len(items) == 2
-    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert all(item["status"] == BATCH_ITEM_STATUS_EMPTY for item in items)
     assert all(item["applied_preferences"] is None for item in items)
     assert all(item["preference_warnings"] == ["偏好读取失败，已回退默认流程"] for item in items)
     assert items[0]["canonical_title_candidates"]
@@ -3026,7 +3014,7 @@ def test_batch_parse_api_failed_item_keeps_applied_preferences_config(
 
     items = response.get_json()["result"]["items"]
     failed = next(item for item in items if item["status"] == BATCH_ITEM_STATUS_FAILED)
-    parsed = next(item for item in items if item["status"] == BATCH_ITEM_STATUS_PARSED)
+    empty = next(item for item in items if item["status"] == BATCH_ITEM_STATUS_EMPTY)
     assert failed["applied_preferences"]["expected_folder_name"] is None
     assert "该条目解析失败，命名默认值不可用" in failed["preference_warnings"]
     assert failed["applied_preferences"]["subtitle_groups"] == {
@@ -3034,8 +3022,8 @@ def test_batch_parse_api_failed_item_keeps_applied_preferences_config(
         "excluded": [],
         "fallback": "next_preferred",
     }
-    assert parsed["applied_preferences"]["expected_folder_name"] == "萌王S4"
-    assert parsed["preference_warnings"] == []
+    assert empty["applied_preferences"]["expected_folder_name"] == "萌王S4"
+    assert empty["preference_warnings"] == []
 
 
 def test_batch_parse_api_preference_response_never_leaks_sensitive_values(
@@ -3087,7 +3075,7 @@ def test_batch_parse_api_preference_response_never_leaks_sensitive_values(
     item = payload["result"]["items"][0]
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["status"] == BATCH_ITEM_STATUS_EMPTY
     applied = item["applied_preferences"]
     assert applied is not None
     assert "token" not in applied
@@ -3164,8 +3152,8 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert [item["status"] for item in items] == [
-        BATCH_ITEM_STATUS_PARSED,
-        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_FOUND,
+        BATCH_ITEM_STATUS_FOUND,
     ]
     assert client.searches == [
         "欢迎来到实力至上主义的教室 第四季",
@@ -3248,7 +3236,7 @@ def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_
     assert response.status_code == 200
     assert payload["ok"] is True
     assert [item["status"] for item in items] == [
-        BATCH_ITEM_STATUS_PARSED,
+        BATCH_ITEM_STATUS_FOUND,
         BATCH_ITEM_STATUS_FAILED,
     ]
     assert items[0]["candidates"][0]["bangumi_id"] == "4001"
@@ -3366,7 +3354,7 @@ def test_batch_parse_api_marks_low_confidence_item_for_review(
     item = payload["result"]["items"][0]
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["status"] == BATCH_ITEM_STATUS_FOUND
     assert item["confidence"] == 0.62
     assert item["candidates"][0]["bangumi_id"] == "2001"
     assert item["needs_user_review"] is True
@@ -3432,7 +3420,7 @@ def test_batch_parse_api_marks_preference_conflict_item_for_review(
     item = payload["result"]["items"][0]
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["status"] == BATCH_ITEM_STATUS_FOUND
     assert item["candidates"][0]["bangumi_id"] == "4001"
     assert item["needs_user_review"] is True
     assert any(
@@ -3643,7 +3631,7 @@ def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
     item = payload["result"]["items"][0]
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["status"] == BATCH_ITEM_STATUS_FOUND
     # The enhanced queries are searched first; the original queries are never
     # searched because the enhanced search already found candidates.
     assert client.searches == [
@@ -3720,7 +3708,7 @@ def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_noth
     item = payload["result"]["items"][0]
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["status"] == BATCH_ITEM_STATUS_FOUND
     # The enhanced queries are searched first, then the original queries on
     # fallback. The repeated first query is served from the candidate cache, so
     # it is not searched twice through the client.
@@ -3760,7 +3748,7 @@ def test_batch_parse_api_falls_back_to_original_queries_when_corrections_file_da
     items = payload["result"]["items"]
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert all(item["status"] == BATCH_ITEM_STATUS_PARSED for item in items)
+    assert all(item["status"] == BATCH_ITEM_STATUS_EMPTY for item in items)
     assert all(item["enhanced_search_queries"] == [] for item in items)
 
 
@@ -3801,7 +3789,7 @@ def test_batch_parse_api_does_not_leak_poisoned_corrections(
     body = response.get_data(as_text=True)
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert item["status"] == BATCH_ITEM_STATUS_PARSED
+    assert item["status"] == BATCH_ITEM_STATUS_EMPTY
     assert item["enhanced_search_queries"] == []
     assert "mikan.example" not in body
     assert "token=secret" not in body

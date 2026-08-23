@@ -31,7 +31,7 @@
     <main class="app-layout">
       <section id="generate-panel" class="panel generate-panel" aria-labelledby="generate-heading">
         <div class="panel-heading">
-          <h2 id="generate-heading">真实 MiKan 候选搜索</h2>
+          <h2 id="generate-heading">创建订阅方案</h2>
         </div>
 
         <section
@@ -48,10 +48,44 @@
           </a>
         </section>
 
+        <div
+          id="search-mode-tabs"
+          class="search-mode-tabs"
+          role="tablist"
+          aria-label="创建订阅方案方式"
+        >
+          <button
+            id="single-search-tab"
+            class="search-mode-tab is-selected"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="single-search-entry"
+            tabindex="0"
+            data-search-mode="single"
+          >
+            单个搜索
+          </button>
+          <button
+            id="batch-search-tab"
+            class="search-mode-tab"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="batch-workbench-entry"
+            tabindex="-1"
+            data-search-mode="batch"
+          >
+            批量搜索
+          </button>
+        </div>
+
         <section
           id="batch-workbench-entry"
           class="batch-workbench-entry"
-          aria-labelledby="batch-workbench-heading"
+          role="tabpanel"
+          aria-labelledby="batch-search-tab"
+          hidden
         >
           <div class="section-heading">
             <h3 id="batch-workbench-heading">批量新番草案</h3>
@@ -71,42 +105,6 @@
             </p>
             <p id="batch-parse-error" class="field-error" role="alert" hidden></p>
 
-            <div
-              id="batch-parse-result"
-              class="empty-state compact-state"
-              aria-live="polite"
-              aria-relevant="additions text"
-            >
-              粘贴多行番剧名称后获取解析结果。
-            </div>
-
-            <div id="batch-accept-toolbar" class="batch-accept-toolbar" hidden>
-              <label class="batch-select-all">
-                <input type="checkbox" id="batch-select-all-checkbox">
-                <span>全选</span>
-              </label>
-              <span id="batch-accept-selected-count" class="batch-selected-count">
-                已选择 0 项
-              </span>
-              <div class="notification-actions batch-accept-actions">
-                <button
-                  id="batch-accept-submit"
-                  class="primary-button"
-                  type="button"
-                  disabled
-                >
-                  批量接受
-                </button>
-                <button
-                  id="batch-accept-all"
-                  class="secondary-button"
-                  type="button"
-                >
-                  全接受
-                </button>
-              </div>
-            </div>
-
             <div class="notification-actions">
               <button id="batch-parse-submit" class="primary-button" type="submit">
                 获取批量草案
@@ -115,6 +113,12 @@
           </form>
         </section>
 
+        <section
+          id="single-search-entry"
+          class="single-search-entry"
+          role="tabpanel"
+          aria-labelledby="single-search-tab"
+        >
         <form id="mikan-candidate-search-form" method="post">
           <label for="mikan-candidate-query">番剧标题</label>
           <input
@@ -129,15 +133,6 @@
             输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
           </p>
           <p id="mikan-candidate-search-error" class="field-error" role="alert" hidden></p>
-
-          <div
-            id="mikan-candidate-search-result"
-            class="empty-state compact-state"
-            aria-live="polite"
-            aria-relevant="additions text"
-          >
-            输入番剧标题后搜索候选合集。
-          </div>
 
           <div class="notification-actions">
             <button id="mikan-candidate-search-submit" class="primary-button" type="submit">
@@ -180,6 +175,52 @@
             </button>
           </div>
         </form>
+        </section>
+      </section>
+
+      <section
+        id="search-results-panel"
+        class="panel search-results-panel"
+        aria-labelledby="search-results-heading"
+      >
+        <div class="panel-heading">
+          <h2 id="search-results-heading">搜索结果</h2>
+        </div>
+        <div
+          id="mikan-candidate-search-result"
+          class="empty-state compact-state"
+          aria-live="polite"
+          aria-relevant="additions text"
+        >
+          输入番剧标题后搜索候选合集。
+        </div>
+        <div id="batch-search-results" hidden>
+          <div
+            id="batch-parse-result"
+            class="empty-state compact-state"
+            aria-live="polite"
+            aria-relevant="additions text"
+          >
+            粘贴多行番剧名称后获取解析结果。
+          </div>
+          <div id="batch-accept-toolbar" class="batch-accept-toolbar" hidden>
+            <label class="batch-select-all">
+              <input type="checkbox" id="batch-select-all-checkbox">
+              <span>全选</span>
+            </label>
+            <span id="batch-accept-selected-count" class="batch-selected-count">
+              已选择 0 项
+            </span>
+            <div class="notification-actions batch-accept-actions">
+              <button id="batch-accept-submit" class="primary-button" type="button" disabled>
+                批量接受
+              </button>
+              <button id="batch-accept-all" class="secondary-button" type="button">
+                全接受
+              </button>
+            </div>
+          </div>
+        </div>
       </section>
 
       <section id="request-list-panel" class="panel request-list-panel" aria-labelledby="request-list-heading">

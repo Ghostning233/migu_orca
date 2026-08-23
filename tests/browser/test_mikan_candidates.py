@@ -54,13 +54,13 @@ class TestDefaultFixtureDoesNotUseRealMikan:
     ) -> None:
         page.goto(f"{live_server_url}/index")
 
-        # The main generate panel hosts the candidate search form directly (no
-        # hidden disclosure), and its user-facing heading is the MiKan title.
+        # The default tab exposes the real candidate-search form directly (no
+        # hidden disclosure); the workbench retains a general creation title.
         expect(page.locator("#mikan-candidate-search-form")).to_be_visible()
         expect(page.locator("#mikan-candidate-query")).to_be_visible()
         assert page.locator("#mikan-candidate-search").count() == 0
         heading = page.locator("#generate-heading").inner_text()
-        assert "真实 MiKan 候选搜索" in heading
+        assert "创建订阅方案" in heading
 
     def test_default_generation_never_calls_candidate_search(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -120,6 +120,14 @@ class TestCandidateSearchStates:
             route.fulfill(status=200, content_type="application/json", body=body)
 
         page.route("**/api/v1/mikan/candidates", _fulfill)
+        page.route(
+            "**/assets/cover/2353.jpg",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="image/gif",
+                body=b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;",
+            ),
+        )
         _open_candidate_search(page, live_server_url)
         _fill_candidate_search(page, query="芙莉莲")
         page.click("#mikan-candidate-search-submit")
@@ -142,6 +150,39 @@ class TestCandidateSearchStates:
 
         # The query input is preserved after a successful search.
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
+
+    def test_candidate_search_loading_names_query_and_locks_search_workspace(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        pending_routes: list[Any] = []
+
+        def _hold(route: Any, request: Any) -> None:
+            pending_routes.append(route)
+
+        page.route("**/api/v1/mikan/candidates", _hold)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+
+        expect(page.locator("#mikan-candidate-search-result")).to_contain_text(
+            "正在搜索「芙莉莲」的 MiKan 候选"
+        )
+        expect(page.locator("#mikan-candidate-query")).to_be_disabled()
+        expect(page.locator("#mikan-candidate-search-submit")).to_be_disabled()
+        expect(page.locator("#single-search-tab")).to_be_disabled()
+        expect(page.locator("#batch-search-tab")).to_be_disabled()
+        assert pending_routes
+
+        pending_routes[0].fulfill(
+            status=200,
+            content_type="application/json",
+            body=_candidate_result_json("芙莉莲", []),
+        )
+        expect(page.locator("#mikan-candidate-search-result")).to_contain_text(
+            "未找到候选合集"
+        )
+        expect(page.locator("#mikan-candidate-query")).to_be_enabled()
+        expect(page.locator("#batch-search-tab")).to_be_enabled()
 
     def test_candidate_search_empty_result(
         self, page: Page, live_server_url: str, storage_dir: Path

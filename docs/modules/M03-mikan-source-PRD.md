@@ -153,16 +153,27 @@ Stage 18 已在 Web 主流程中使用系统默认 MiKan 配置：
 7. M03 仍只负责候选搜索、详情解析、RSS 源输出和安全错误边界，不负责 UI 文案或预览编辑。
 8. fixture 作为 M03 的离线测试 seam 保留：静态 MiKan/RSS fixture 只服务 CLI、单元测试和浏览器离线回归，不参与 Web 普通主流程。
 
-## 13. 已确认事项与待确认问题
+## 13. Stage 22 统一候选契约（已完成）
 
-### 13.1 已确认事项
+Stage 22 已统一单个与批量 Web 入口使用的真实 MiKan 候选契约：
+
+1. 两种入口继续复用 `MikanClient.search_candidates`、`_search_mikan_candidates`、候选缓存和公开候选序列化，不新增第二套搜索页 parser。
+2. 搜索成功且没有候选时返回空列表并映射为 EMPTY；HTTP/超时/页面解析异常映射为 FAILED 和稳定脱敏错误，二者不得混淆。
+3. 公开候选字段保持 `bangumi_id`、`title`、规范化 `mikan_url`、可选 `poster_url`、`source_query`、`aliases` 与 display-only recommendation；原始 HTML 和内部解析状态不进入响应。
+4. `poster_url` 必须是规范化公开 HTTP(S) URL 或 `null`；缺失封面由 M13 展示占位，不影响候选 FOUND 状态。
+5. 只有用户显式选择公开候选后，才把其 `mikan_url`/ID 交给现有详情解析与 RSS 链路；候选搜索本身不生成 Request。
+6. 单项搜索失败不阻塞批量其他条目，缓存与错误继续遵守现有敏感值边界。
+
+## 14. 已确认事项与待确认问题
+
+### 14.1 已确认事项
 
 | 编号 | 事项 | 当前结论 |
 | --- | --- | --- |
 | D-M03-01 | 第一阶段静态 MiKan/RSS 数据组织方式 | 纳入仓库并作为测试 fixture，保证离线验收可重复 |
 | D-M03-02 | 静态 RSS 内容组织方式 | M03 输出 fixture_path 或等价静态内容标识，M04 负责按路径读取或接收测试传入内容 |
 
-### 13.2 待确认问题
+### 14.2 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |

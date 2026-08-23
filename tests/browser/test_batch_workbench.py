@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote_plus
 
 import pytest
 from playwright.sync_api import Page, expect
 
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from mikan_engine.controllers.mikan_client import create_mikan_client
+from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.models import EntryRequest
+from tests.browser.conftest import set_storage_preferences
 
 
 pytestmark = pytest.mark.browser
@@ -119,10 +124,13 @@ def _batch_item(
 
 
 def _preview_request(title: str, request_id: str) -> dict[str, Any]:
-    return {
-        **generate_request(EntryRequest(raw_title=title))["request"],
-        "request_id": request_id,
-    }
+    generated = generate_request(EntryRequest(raw_title=title))
+    if generated["request"] is None:
+        # The rendered title is controlled by each API mock. Use an available
+        # offline fixture only to supply the request-shaped preview payload.
+        generated = generate_request(EntryRequest(raw_title="葬送的芙莉莲"))
+    assert generated["request"] is not None
+    return {**generated["request"], "request_id": request_id}
 
 
 def _reviewable_batch_item(
@@ -369,10 +377,169 @@ def _accept_route_handler(accepted_ids: set[str], *, batch_id: str = "batch-brow
 class TestBatchWorkbenchEntry:
     """Stage 19 batch workbench entry and draft-card rendering."""
 
+    def test_production_batch_states_select_real_candidate_before_draft(
+        self,
+        page: Page,
+        live_server_url: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The browser consumes the real parse serializer, not a DRAFT-shaped mock.
+
+        Only the outbound MiKan transport is replaced.  The Flask batch parse
+        endpoint, candidate serialization, and selected-candidate request
+        generation all run through their production implementations.
+        """
+
+        class _MikanTransport:
+            def __init__(self) -> None:
+                self.requests: list[str] = []
+
+            def get_text(self, url: str, *, timeout: float) -> str:
+                del timeout
+                self.requests.append(url)
+                if "/Home/Search" in url:
+                    query = unquote_plus(url.split("searchstr=", 1)[-1])
+                    if "杖与剑" in query or "杖剑谭" in query:
+                        raise ConnectionError("external MiKan is unavailable")
+                    if "关于我转生" in query or "转生史莱姆" in query:
+                        return (
+                            '<article class="search-result">'
+                            '<a href="/Home/Bangumi/4001">'
+                            '关于我转生变成史莱姆这档事 第四季</a>'
+                            '<img class="poster" src="/images/slime.jpg">'
+                            "</article>"
+                        )
+                    return "<section class=\"search-result\"></section>"
+                if "/Home/Bangumi/4001" in url:
+                    return (
+                        '<h1 class="bangumi-title">关于我转生变成史莱姆这档事 第四季</h1>'
+                        '<section class="subgroup-section">'
+                        '<h2 class="subgroup-name">Loli</h2>'
+                        '<a href="/RSS/Bangumi?bangumiId=4001&subgroupid=10">RSS</a>'
+                        "</section>"
+                    )
+                if "/RSS/Bangumi?bangumiId=4001&subgroupid=10" in url:
+                    return (
+                        "<rss><channel><item><title>史莱姆 S4 - 01 [1080p]</title>"
+                        "<link>https://example.invalid/episode/1</link>"
+                        "</item></channel></rss>"
+                    )
+                raise AssertionError(f"unexpected mocked MiKan URL: {url}")
+
+        transport = _MikanTransport()
+
+        def _create_client(config: MikanConfig):
+            return create_mikan_client(config, transport=transport)
+
+        monkeypatch.setattr(
+            "mikan_engine.controllers.mikan_client.create_mikan_client",
+            _create_client,
+        )
+
+        page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
+        page.fill("#batch-raw-input", "萌王S4\n路哥S4\n杖剑谭S2")
+        page.click("#batch-parse-submit")
+
+        found = page.locator(".batch-draft-card", has_text="萌王S4")
+        empty = page.locator(".batch-draft-card", has_text="路哥S4")
+        failed = page.locator(".batch-draft-card", has_text="杖剑谭S2")
+        expect(found.locator(".batch-card-status")).to_contain_text("找到候选")
+        expect(found.locator(".batch-card-poster")).to_contain_text("待选择合集")
+        expect(found.locator(".batch-card-expand")).to_be_enabled()
+        expect(empty.locator(".batch-card-status")).to_contain_text("未找到候选")
+        expect(empty.locator(".batch-card-expand")).to_be_disabled()
+        expect(failed.locator(".batch-card-status")).to_contain_text("搜索失败")
+        expect(failed.locator(".batch-card-expand")).to_be_disabled()
+
+        found.locator(".batch-card-expand").click()
+        choices = page.locator("#batch-candidate-choices")
+        expect(choices.locator("img.candidate-poster")).to_have_count(1)
+        choices.locator(".batch-candidate-select").click()
+        expect(found.locator(".batch-card-status")).to_contain_text("草案")
+        expect(found.locator(".batch-card-expand")).to_be_enabled()
+        found.locator(".batch-card-expand").click()
+        expect(found.locator(".batch-card-review")).to_contain_text("Loli")
+        assert any("/Home/Search" in url for url in transport.requests)
+        assert any("/Home/Bangumi/4001" in url for url in transport.requests)
+
+    def test_found_candidate_selection_creates_only_that_batch_draft(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """FOUND items use the normal MiKan preview chain; other states cannot act."""
+        preview = _preview_request("关于我转生变成史莱姆这档事 第四季", "req-selected")
+        captured: list[dict[str, Any]] = []
+
+        def _parse(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [
+                        _batch_item(
+                            "item-found",
+                            "萌王S4",
+                            status="FOUND",
+                            candidate_title="关于我转生变成史莱姆这档事 第四季",
+                        ),
+                        _batch_item("item-empty", "路哥S4", status="EMPTY"),
+                        _batch_item("item-failed", "杖剑谭S2", status="FAILED"),
+                    ]
+                ),
+            )
+
+        def _create(route: Any, request: Any) -> None:
+            if request.method != "POST":
+                route.continue_()
+                return
+            captured.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {"ok": True, "result": {"request": preview}},
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/batches/parse", _parse)
+        page.route("**/api/v1/requests", _create)
+        page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
+        page.fill("#batch-raw-input", "萌王S4\n路哥S4\n杖剑谭S2")
+        page.click("#batch-parse-submit")
+
+        found = page.locator(".batch-draft-card", has_text="萌王S4")
+        empty = page.locator(".batch-draft-card", has_text="路哥S4")
+        failed = page.locator(".batch-draft-card", has_text="杖剑谭S2")
+        expect(found.locator(".batch-candidate-select")).to_have_count(0)
+        expect(empty.locator(".batch-candidate-select")).to_have_count(0)
+        expect(failed.locator(".batch-candidate-select")).to_have_count(0)
+        expect(empty.locator(".batch-card-expand")).to_be_disabled()
+        expect(failed.locator(".batch-card-expand")).to_be_disabled()
+        expect(empty.locator(".batch-card-checkbox")).to_be_disabled()
+        expect(failed.locator(".batch-card-checkbox")).to_be_disabled()
+        assert captured == []
+
+        found.locator(".batch-card-expand").click()
+        page.locator("#batch-candidate-choices .batch-candidate-select").click()
+        expect(found.locator(".batch-card-status")).to_contain_text("草案")
+        expect(found.locator(".batch-card-expand")).to_be_enabled()
+        assert captured == [
+            {
+                "title": "关于我转生变成史莱姆这档事 第四季",
+                "source": "mikan",
+                "mikan_bangumi": "https://mikan.example/Home/Bangumi/item-found",
+                "storage_dir": None,
+                "save_request": False,
+            }
+        ]
+
     def test_batch_entry_is_visible_with_multiline_examples(
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
 
         expect(page.locator("#batch-workbench-entry")).to_be_visible()
         expect(page.locator("#batch-parse-form")).to_be_visible()
@@ -399,6 +566,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _capture)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.click("#batch-parse-submit")
 
         expect(page.locator("#batch-parse-error")).to_contain_text(
@@ -423,12 +591,17 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n\n路哥S4")
         page.click("#batch-parse-submit")
 
         expect(page.locator("#batch-parse-result")).to_contain_text(
-            "正在解析批量番剧名称"
+            "正在搜索 2 个批量条目的 MiKan 候选"
         )
+        expect(page.locator("#batch-raw-input")).to_be_disabled()
+        expect(page.locator("#batch-parse-submit")).to_be_disabled()
+        expect(page.locator("#single-search-tab")).to_be_disabled()
+        expect(page.locator("#batch-search-tab")).to_be_disabled()
         assert pending_routes
         pending_routes[0].fulfill(
             status=200,
@@ -456,16 +629,83 @@ class TestBatchWorkbenchEntry:
         assert "萌王S4" in result_text
         assert "路哥S4" in result_text
         assert "关于我转生变成史莱姆这档事 第四季" in result_text
-        assert "源名称：MiKan：萌王 第四季" in result_text
+        assert "源名称：搜索词：萌王 第四季" in result_text
         assert "有效种子数：待展开" in result_text
         assert "已解析" in result_text
-        assert "解析失败" in result_text
-        expect(page.locator(".batch-card-poster img")).to_have_count(1)
+        assert "搜索失败" in result_text
         expect(page.locator(".batch-card-expand")).to_have_count(2)
-        expect(page.locator("#page-notification")).to_contain_text("批量草案已获取")
+        expect(page.locator("#page-notification")).to_contain_text("批量搜索完成")
         assert captured_payloads == [
             {"raw_input": "萌王S4\n\n路哥S4", "storage_dir": None}
         ]
+
+    def test_batch_found_candidates_share_public_card_details_without_default_selection(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        item = _batch_item(
+            "item-found", "萌王S4", status="FOUND", source_query="萌王 第四季"
+        )
+        item["candidates"] = [
+            {
+                "bangumi_id": "4001",
+                "title": "关于我转生变成史莱姆这档事 第四季",
+                "mikan_url": "https://mikan.example/Home/Bangumi/4001",
+                "poster_url": "https://mikan.example/poster.jpg",
+                "source_query": "萌王 第四季",
+                "aliases": [],
+            },
+            {
+                "bangumi_id": "4002",
+                "title": "关于我转生变成史莱姆这档事 第三季",
+                "mikan_url": "https://mikan.example/Home/Bangumi/4002",
+                "poster_url": None,
+                "source_query": "萌王 第四季",
+                "aliases": [],
+            },
+        ]
+        empty_item = _batch_item("item-empty", "路哥S4", status="EMPTY")
+        failed_item = _batch_item("item-failed", "杖剑谭S2", status="FAILED")
+        failed_item["error"] = {
+            "error_type": "mikan_unavailable",
+            "error_message": "MiKan 候选搜索暂时不可用",
+        }
+
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([item, empty_item, failed_item]),
+            ),
+        )
+        page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+
+        card = page.locator(".batch-draft-card", has_text="萌王S4")
+        card.locator(".batch-card-expand").click()
+        choices = page.locator("#batch-candidate-choices .batch-candidate-list")
+        expect(choices.locator(".candidate-card")).to_have_count(2)
+        expect(choices).to_contain_text("MiKan ID: 4001")
+        expect(choices).to_contain_text("MiKan ID: 4002")
+        expect(choices).to_contain_text("暂无封面")
+        # The fixture deliberately has no image route; the renderer replaces
+        # failed poster loads with its stable public-only placeholder.
+        expect(choices.locator("img.candidate-poster")).to_have_count(0)
+        expect(choices.locator(".batch-candidate-select")).to_have_count(2)
+        expect(card.locator(".batch-card-status")).to_contain_text("找到候选")
+        expect(card.locator(".batch-card-expand")).to_be_enabled()
+        expect(
+            page.locator(".batch-draft-card", has_text="路哥S4").locator(
+                ".batch-candidate-feedback"
+            )
+        ).to_contain_text("未找到匹配的 MiKan 合集")
+        expect(
+            page.locator(".batch-draft-card", has_text="杖剑谭S2").locator(
+                ".batch-candidate-feedback"
+            )
+        ).to_contain_text("MiKan 候选搜索暂时不可用")
 
     def test_batch_card_delete_removes_only_selected_card(
         self, page: Page, live_server_url: str
@@ -485,6 +725,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4\n邻家天使S2")
         page.click("#batch-parse-submit")
 
@@ -513,6 +754,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -556,6 +798,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         page.locator(".batch-draft-card .batch-card-expand").click()
@@ -566,6 +809,75 @@ class TestBatchWorkbenchEntry:
         assert "<rss>" not in body_text
         assert "raw-body-secret" not in body_text
         assert "https://mikan.example/RSS/Bangumi" not in body_text
+
+    def test_search_results_do_not_persist_or_render_sensitive_transport_data(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """Stage 22 results stay public-only even if an upstream payload is noisy."""
+        sensitive_values = (
+            "https://private-mikan.stage22.local/failed?token=stage22-token",
+            "stage22-token",
+            "stage22-cookie",
+            "Bearer stage22-authorization",
+            "<html>stage22 raw html</html>",
+            "<rss>stage22 raw rss</rss>",
+            "magnet:?xt=urn:btih:stage22-secret",
+            "stage22 raw response body",
+        )
+
+        item = _batch_item(
+            "item-public", "萌王S4", status="FOUND", candidate_title="史莱姆 第四季"
+        )
+        item["error"] = {
+            "failed_url": sensitive_values[0],
+            "token": sensitive_values[1],
+            "cookie": sensitive_values[2],
+            "authorization": sensitive_values[3],
+            "raw_html": sensitive_values[4],
+            "raw_rss_xml": sensitive_values[5],
+            "magnet": sensitive_values[6],
+            "raw_response_body": sensitive_values[7],
+            "local_path": str(storage_dir),
+        }
+        item["candidates"][0].update(item["error"])
+
+        def _fulfill(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([item]),
+            )
+
+        page.route("**/api/v1/batches/parse", _fulfill)
+        set_storage_preferences(page, storage_dir, save_request=False)
+        page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+        expect(page.locator("#search-results-panel")).to_be_visible()
+        page.locator(".batch-draft-card", has_text="萌王S4").locator(
+            ".batch-card-expand"
+        ).click()
+        expect(page.locator(".candidate-card")).to_have_count(1)
+
+        browser_state = page.evaluate(
+            """() => ({
+                url: window.location.href,
+                localStorage: JSON.stringify(window.localStorage),
+                sessionStorage: JSON.stringify(window.sessionStorage),
+                bodyText: document.body.innerText,
+            })"""
+        )
+        persisted_json = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in storage_dir.rglob("*.json")
+        ) if storage_dir.exists() else ""
+        for value in sensitive_values:
+            assert value not in browser_state["url"]
+            assert value not in browser_state["localStorage"]
+            assert value not in browser_state["sessionStorage"]
+            assert value not in browser_state["bodyText"]
+            assert value not in persisted_json
 
     def test_batch_card_modify_updates_only_current_card(
         self, page: Page, live_server_url: str
@@ -595,6 +907,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -666,6 +979,7 @@ class TestBatchWorkbenchEntry:
         page.route("**/api/v1/batches/parse", _fulfill_batch)
         page.route("**/api/v1/requests/preview-modify", _fail_preview_modify)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -740,6 +1054,7 @@ class TestBatchWorkbenchEntry:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -809,6 +1124,7 @@ class TestBatchWorkbenchEntry:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept_route_handler({"item-corr"}))
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -849,6 +1165,7 @@ class TestBatchWorkbenchEntry:
         page.set_viewport_size({"width": 390, "height": 760})
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -879,6 +1196,7 @@ class TestBatchWorkbenchEntry:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "\n".join(item["raw_title"] for item in items))
         page.click("#batch-parse-submit")
 
@@ -954,6 +1272,7 @@ class TestBatchAcceptWorkbench:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4\n邻家天使S2")
         page.click("#batch-parse-submit")
 
@@ -1040,6 +1359,7 @@ class TestBatchAcceptWorkbench:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -1052,7 +1372,7 @@ class TestBatchAcceptWorkbench:
         fail_card = page.locator(".batch-draft-card", has_text="路哥S4")
         expect(ok_card.locator(".batch-card-status")).to_contain_text("已接受")
         expect(ok_card.locator(".batch-card-queue-status")).to_contain_text("待提交")
-        expect(fail_card.locator(".batch-card-status")).to_contain_text("解析失败")
+        expect(fail_card.locator(".batch-card-status")).to_contain_text("搜索失败")
         expect(fail_card.locator(".batch-card-reason")).to_contain_text(
             "无法接受：卡片缺少订阅草案，无法接受"
         )
@@ -1083,6 +1403,7 @@ class TestBatchAcceptWorkbench:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4\n邻家天使S2")
         page.click("#batch-parse-submit")
 
@@ -1146,6 +1467,7 @@ class TestBatchAcceptWorkbench:
         # 接受端点不 mock：由 conftest 的 test-slow-accept 延迟路由真实返回 400，
         # 让浏览器 fetch 保持 ~1.5s，从而稳定观察 in-flight 的 loading/disabled 状态。
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         page.wait_for_selector(".batch-card-accept", state="attached", timeout=5000)
@@ -1220,6 +1542,7 @@ class TestBatchAcceptWorkbench:
         page.route("**/api/v1/requests/preview-save", _save_preview)
         page.route("**/api/v1/batches/batch-browser/accept*", _accept)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -1311,6 +1634,7 @@ def _accept_all_reviewable(
     )
     page.route(f"**/api/v1/batches/{batch_id}/queue*", _queue_get)
     page.goto(f"{live_server_url}/index")
+    page.get_by_role("tab", name="批量搜索").click()
     page.fill(
         "#batch-raw-input",
         "\n".join(f"番剧{index}" for index in range(1, len(item_ids) + 1)),
@@ -2080,6 +2404,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -2142,6 +2467,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -2177,6 +2503,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
 
@@ -2231,6 +2558,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4\n路哥S4")
         page.click("#batch-parse-submit")
 
@@ -2295,6 +2623,7 @@ class TestBatchWorkbenchPreferenceDisplay:
 
         page.route("**/api/v1/batches/parse", _fulfill)
         page.goto(f"{live_server_url}/index")
+        page.get_by_role("tab", name="批量搜索").click()
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         page.locator(".batch-draft-card .batch-card-expand").click()

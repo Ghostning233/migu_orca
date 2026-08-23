@@ -148,13 +148,12 @@ Stage 21 的全部 8 个 user story（US-150..US-157）已完成并通过：
 
 ## 12. Stage 22 handoff
 
-下一阶段为「部署/配置向导可行性验证」（见 `docs/MiGuOrca_future_stages.md`）。建议方向：
+Stage 21 的偏好与修正闭环已经完成；后续人工验收发现，Stage 18/19 的单个与批量搜索虽然共用真实 MiKan candidate search，但界面、候选状态和草案生成语义仍未真正收敛。下一阶段调整为 Stage 22「Web UI 搜索工作台重构与真实候选闭环」（见 `docs/MiGuOrca_stage22_web_search_workbench_PRD.md`）：
 
-1. 配置检查清单：检测 AB / qB / MiGuOrca 的连接配置是否完整。
-2. 连接诊断：复用现有 qBittorrent test-connection 和 Auto Bangumi submit seam，输出脱敏诊断。
-3. 教程式向导：按步骤引导用户填写 endpoint、token、qB 地址和认证信息。
-4. Docker Compose 模板：提供可读模板和安全说明，用户自行部署。
-5. 配置导入/导出：只处理非敏感配置或明确脱敏后的示例。
+1. 以“单个搜索 / 批量搜索”管理输入模式，并将结果移入独立结果面板。
+2. 明确区分标题 `PARSED`、候选 FOUND/EMPTY/FAILED 和 DRAFT/READY 草案。
+3. 无真实 MiKan 候选时不得根据输入或解析标题生成可接受的空壳草案。
+4. 单个/批量入口复用候选展示、显式选择和 `mikan_bangumi` 详情到 preview 的链路。
+5. 补齐真实生产状态形状、候选封面/占位和搜索反馈的浏览器回归。
 
-Stage 22 是远期可选能力，不阻塞批量订阅工作台；如果实施，必须继续遵守 Stage 21 的敏感值边界（偏好与配置只保存非敏感字段，外部 endpoint/token 只存在于请求上下文）。
-
+Stage 21 的安全边界继续适用：偏好与修正只保存非敏感字段，外部 endpoint/token 只存在于请求上下文。原部署/配置向导顺延为 Stage 23 远期可选能力。

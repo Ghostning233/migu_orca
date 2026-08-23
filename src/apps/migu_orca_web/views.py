@@ -53,8 +53,9 @@ from batch_engine.controllers.preference_applicator import (
 )
 from batch_engine.controllers.search_enhancer import enhance_search_queries
 from batch_engine.models import (
+    BATCH_ITEM_STATUS_EMPTY,
     BATCH_ITEM_STATUS_FAILED,
-    BATCH_ITEM_STATUS_PARSED,
+    BATCH_ITEM_STATUS_FOUND,
     AnimeTitleParseResult,
     BatchDraftItem,
     BatchSubmissionQueue,
@@ -1385,14 +1386,19 @@ class BatchParseView(PostView):
                 )
                 continue
 
-            parsed_batch = update_batch_item_status(
+            candidate_status = (
+                BATCH_ITEM_STATUS_FOUND
+                if candidates
+                else BATCH_ITEM_STATUS_EMPTY
+            )
+            searched_batch = update_batch_item_status(
                 batch,
                 item.item_id,
-                BATCH_ITEM_STATUS_PARSED,
+                candidate_status,
             )
-            parsed_item = next(
+            searched_item = next(
                 updated
-                for updated in parsed_batch.items
+                for updated in searched_batch.items
                 if updated.item_id == item.item_id
             )
             applied_obj, warnings = _preference_application_for_item(
@@ -1406,11 +1412,11 @@ class BatchParseView(PostView):
                 parse_result=parse_result,
                 candidates=candidates,
                 preference_warnings=warnings,
-                status=BATCH_ITEM_STATUS_PARSED,
+                status=candidate_status,
             )
             serialized_items.append(
                 _serialize_batch_parse_result(
-                    parsed_item,
+                    searched_item,
                     parse_result,
                     candidates=candidates,
                     applied_preferences=applied,
@@ -1419,13 +1425,6 @@ class BatchParseView(PostView):
                     needs_user_review=review.needs_user_review,
                     review_hints=review.review_hints,
                     enhanced_search_queries=enhanced_queries,
-                    preview_request=_build_batch_preview_request(
-                        batch_id=batch.batch_id,
-                        item_id=item.item_id,
-                        raw_title=item.raw_title,
-                        parse_result=parse_result,
-                        applied=applied_obj,
-                    ),
                 )
             )
 

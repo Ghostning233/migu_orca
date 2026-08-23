@@ -158,8 +158,25 @@ h2 {
   padding: 20px;
 }
 
+/* Keep the primary workspace panels together even though results are a
+ * separate, full-width DOM section between them. */
+.generate-panel {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.request-list-panel {
+  grid-column: 2;
+  grid-row: 1;
+}
+
 .request-detail-panel {
   grid-column: 1 / -1;
+}
+
+.search-results-panel {
+  grid-column: 1 / -1;
+  grid-row: 2;
 }
 
 .dev-fixture-panel {
@@ -187,11 +204,47 @@ h2 {
 }
 
 .batch-workbench-entry {
-  border-bottom: 1px solid #d8dde5;
   display: grid;
   gap: 12px;
-  margin-bottom: 18px;
-  padding-bottom: 18px;
+}
+
+.batch-workbench-entry[hidden],
+.single-search-entry[hidden],
+.search-results-panel [hidden] {
+  display: none;
+}
+
+.single-search-entry {
+  display: grid;
+  gap: 18px;
+}
+
+.search-mode-tabs {
+  border-bottom: 1px solid #d8dde5;
+  display: flex;
+  gap: 8px;
+}
+
+.search-mode-tab {
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: #586273;
+  min-height: 38px;
+  padding: 7px 12px;
+}
+
+.search-mode-tab:hover,
+.search-mode-tab:focus,
+.search-mode-tab.is-selected {
+  background: #edf3f7;
+  border-color: #22577a;
+  color: #22577a;
+}
+
+.search-mode-tab:focus {
+  box-shadow: none;
 }
 
 .section-heading h3 {
@@ -248,6 +301,10 @@ textarea {
   height: 100%;
   object-fit: cover;
   width: 100%;
+}
+
+.batch-card-poster-placeholder {
+  padding: 8px;
 }
 
 .batch-card-title {
@@ -362,6 +419,32 @@ textarea {
 
 .batch-card-expand {
   justify-self: start;
+}
+
+/* A card toggle is not a request indicator. Only real in-flight operations
+ * may opt into loading UI, so hover can never inherit a spinner animation. */
+.batch-card-expand:not([aria-busy="true"]),
+.batch-card-expand:not([aria-busy="true"])::before,
+.batch-card-expand:not([aria-busy="true"])::after {
+  animation: none;
+}
+
+.batch-candidate-choices {
+  background: #f8fafc;
+  border: 1px solid #c8d5df;
+  border-radius: 6px;
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+}
+
+.batch-candidate-choices .field-help {
+  margin: 0;
+}
+
+.batch-candidate-list {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .batch-card-review {
@@ -555,6 +638,7 @@ textarea {
 .candidate-list {
   display: grid;
   gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
@@ -567,6 +651,10 @@ textarea {
 }
 
 @media (max-width: 560px) {
+  .candidate-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .batch-card-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -603,15 +691,38 @@ textarea {
 }
 
 .candidate-poster {
+  background: #eef2f6;
   border-radius: 4px;
+  display: block;
+  height: 160px;
   max-height: 160px;
   object-fit: cover;
   width: 120px;
 }
 
+.candidate-poster-placeholder {
+  align-items: center;
+  background: #eef2f6;
+  border: 1px solid #d8dde5;
+  color: #586273;
+  display: flex;
+  font-size: 0.82rem;
+  font-weight: 700;
+  justify-content: center;
+  min-height: 120px;
+  text-align: center;
+}
+
 .candidate-source {
   color: #586273;
   font-size: 0.86rem;
+  overflow-wrap: anywhere;
+}
+
+.batch-candidate-feedback {
+  color: #586273;
+  font-size: 0.86rem;
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
@@ -1229,6 +1340,13 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .generate-panel,
+  .request-list-panel,
+  .search-results-panel {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
   .page-notification {
     flex-direction: column;
     width: calc(100% - 32px);
@@ -1279,8 +1397,17 @@ button:disabled {
   }
 
   .top-nav a,
-  button {
+  button:not(.search-mode-tab) {
     width: 100%;
+  }
+
+  .search-mode-tabs {
+    gap: 4px;
+  }
+
+  .search-mode-tab {
+    flex: 1 1 0;
+    padding-inline: 8px;
   }
 
   .notification-actions {

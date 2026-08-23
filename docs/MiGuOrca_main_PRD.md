@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.17 |
-| 文档状态 | Stage 21 已完成；下一阶段为部署/配置向导可行性验证（Stage 22） |
+| 当前版本 | v0.19 |
+| 文档状态 | Stage 22 Web UI 搜索工作台重构与真实候选闭环已完成 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -76,6 +76,8 @@ Stage 19 已完成批量新番订阅草案工作台：`POST /api/v1/batches/pars
 Stage 20 已完成批量接受与 Auto Bangumi 提交前队列：批量工作台提供单卡接受、选中批量接受和全接受入口，明确显示选中数量和不可接受原因；已接受项目进入独立追踪的提交前队列（`BatchQueueItem`/`BatchSubmissionQueue`），每个 item 独立记录状态（`READY_TO_SUBMIT`/`SUBMITTING`/`SUCCEEDED`/`FAILED`/`RETRYABLE`）、尝试次数、脱敏错误和脱敏结果摘要；队列只保存非敏感元数据，endpoint、token、cookie、Authorization header、原始响应体、完整 RSS URL、magnet 和本地绝对路径从不写入队列 JSON、Request snapshot、API 响应、浏览器 storage、URL、日志、截图或 trace。Web API 新增 `POST /api/v1/batches/<batch_id>/accept`、`GET /api/v1/batches/<batch_id>/queue`、`POST /api/v1/batches/<batch_id>/submit` 和 `POST /api/v1/batches/<batch_id>/retry`。批量提交要求 request-scoped `ab_config` 和显式确认，复用现有 payload builder、Auto Bangumi client 和脱敏结果契约，按队列顺序逐项处理，单项失败不阻塞其他项，失败项可独立重试，成功项不会被重复提交；批量提交采用前台顺序编排，不创建 qBittorrent 下载任务，不绕过 Auto Bangumi，不引入后台常驻 worker。
 
 Stage 21 已完成用户偏好与智能推荐闭环：用户可在 `/settings` 显式保存非敏感偏好（字幕组/筛选/命名/搜索修正开关），批量草案生成时对每个 item 应用偏好生成默认配置，并返回偏好命中、偏好警告、低置信度/多候选/冲突审核提示和搜索词来源等可审核元数据；用户明确提交的非敏感修正（raw_title、公开 canonical title、season_hint、公开 bangumi 元数据和 query_correction）会形成有界安全的搜索词增强记录，后续批量输入复用增强搜索词，失败时回退原搜索词。偏好与修正存储只保存非敏感字段，endpoint、token、cookie、Authorization header、magnet、raw HTML、raw RSS XML、原始响应体和本地绝对路径从偏好 JSON、API 响应、页面、URL、浏览器 storage、日志和 trace 中被拒绝或剥离。Web API 新增 `GET/POST /api/v1/preferences` 和 `GET/POST /api/v1/corrections`。Stage 21 保持 Stage 19/20 的人工审核与提交语义：AI 只生成候选标题和搜索词，偏好只生成可编辑默认值，用户仍需逐卡审核并显式接受；无偏好或增强失败时回退 Stage 19 默认流程（fake provider、手动候选选择、直连 URL/ID fallback 仍然可用）。
+
+Stage 22 已完成。单个与批量搜索继续复用 `_search_mikan_candidates`、公开候选序列化、候选缓存以及既有 MiKan 详情到 preview 链路，建立“标题解析 → 真实候选 FOUND/EMPTY/FAILED → 用户显式选择 → DRAFT/READY 草案”的可信状态契约：无候选不再生成空壳 `preview_request`，PARSED/EMPTY/FAILED 均不能操作草案。`/index` 已重构为可切换单个/批量模式的“创建订阅方案”工作台，两种结果统一位于独立面板，并由真实浏览器回归保护。执行记录见 `docs/MiGuOrca_stage22_web_search_workbench_PRD.md`。
 
 ## 4. 第一阶段范围
 
@@ -151,10 +153,10 @@ Stage 21 已完成用户偏好与智能推荐闭环：用户可在 `/settings` �
 
 | 模块编号 | 模块名称 | 当前状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
-| M00 | 入口与流程编排模块 | Stage 18 已实现真实 MiKan 作为 Web 主流程，fixture 降级为开发/离线测试路径；Stage 19/20 已在其上编排批量草案、批量接受与提交前队列；Stage 21 已接入偏好应用与搜索词增强编排 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
+| M00 | 入口与流程编排模块 | Stage 18 已实现真实 MiKan Web 主流程；Stage 19/20 已编排批量草案、接受与提交前队列；Stage 21 已接入偏好/搜索增强；Stage 22 已收敛单个/批量真实候选选择到草案生成链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
 | M01 | 用户输入与 Request 管理模块 | Stage 15 已实现 CLI/Web 确认、取消、受限修改；`ACCEPTED` Request 支持受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
-| M02 | 番剧搜索与匹配模块 | Stage 1 已确认 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
-| M03 | MiKan 数据源模块 | Stage 17 已实现详情页解析、direct URL/ID、候选搜索、候选缓存和推荐标签；Stage 18 已实现默认 Web 配置与主流程接入；Stage 21 已接入修正驱动的搜索词增强 | P0 | docs/modules/M03-mikan-source-PRD.md |
+| M02 | 番剧搜索与匹配模块 | Stage 1 已确认；Stage 22 已明确标题解析/匹配成功不等于真实 MiKan 候选搜索成功 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
+| M03 | MiKan 数据源模块 | Stage 17 已实现详情页解析、direct URL/ID、候选搜索、候选缓存和推荐标签；Stage 18 已接入默认 Web 配置；Stage 21 已接入搜索词增强；Stage 22 已统一单个/批量公开候选契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
 | M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
 | M05 | 字幕组评估模块 | Stage 1 已确认；Stage 21 已为 `select_subtitle_group` 增加排除列表过滤（先排除、再优先、最后 fallback） | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
 | M06 | 种子筛选规则模块 | Stage 15 已实现默认字面匹配、大小写不敏感与可选 `use_regex` / `case_sensitive` | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
@@ -164,7 +166,7 @@ Stage 21 已完成用户偏好与智能推荐闭环：用户可在 `/settings` �
 | M10 | Auto Bangumi 集成模块 | Stage 4 已实现真实 HTTP adapter 与显式 CLI 提交路径；Stage 20 已复用现有 payload/client/脱敏契约实现批量顺序提交与失败项独立重试 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | Stage 15 已实现本地 JSON Request、历史和 AB 结果存储，以及 path-safe Request 删除；Stage 20 已新增脱敏提交前队列持久化（`queue_dir`） | P2 | docs/modules/M11-storage-state-PRD.md |
 | M12 | 日志与错误处理模块 | Stage 1 最小化 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 18 已将 `/index` 主流程改为真实 MiKan 候选搜索、直连兜底、可编辑预览、中文状态和 Seeds 分组展示；Stage 19 已接入批量草案卡片工作台；Stage 20 已接入批量接受/全接受、提交前队列面板和失败项重试；Stage 21 已接入 `/settings` 偏好管理面板和批量卡片偏好/修正/审核展示 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 18～22 已接入真实搜索、批量工作台、提交前队列、偏好展示、单个/批量模式切换、独立结果面板、统一候选卡与真实搜索状态反馈 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 12 已支持显式 AB、MiKan 与 qBittorrent 配置边界 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
@@ -220,7 +222,8 @@ M00 CLI 与流程编排
 | 第十九阶段 | 批量番剧输入、AI 名称解析和订阅草案卡片工作台（已完成） | M13、M00、M01、M03、M06 |
 | 第二十阶段 | 批量接受与 Auto Bangumi 提交前队列管理（已完成） | M13、M10、M11、M01 |
 | 第二十一阶段 | 用户偏好、字幕组偏好和搜索词增强闭环（已完成） | M08、M03、M05、M13 |
-| 第二十二阶段 | 部署/配置向导可行性验证（仅辅助配置，不替代 AB/qB） | M14、M13、M10、qBittorrent 集成边界 |
+| 第二十二阶段 | Web UI 搜索工作台重构与真实候选闭环（规划完成，待开发） | M13、M00、M02、M03、测试基础设施 |
+| 第二十三阶段 | 部署/配置向导可行性验证（远期可选，仅辅助配置，不替代 AB/qB） | M14、M13、M10、qBittorrent 集成边界 |
 
 ## 10. 主 PRD 已确认事项
 
@@ -267,9 +270,10 @@ M00 CLI 与流程编排
 
 ## 13. 下一步工作
 
-1. Stage 22 部署/配置向导可行性验证：评估是否需要独立能力帮助用户从 0 配置 qBittorrent、Auto Bangumi 和 MiGuOrca 的连接信息；优先考虑配置检查、连接诊断、教程式向导和 Docker Compose 模板，而不是全自动运维 Agent。该阶段是远期可选能力，不阻塞批量订阅工作台。执行方向见 `docs/MiGuOrca_future_stages.md`。
-2. AI 番剧名解析与搜索词增强保持为可审核增强能力；无论偏好闭环是否落地，都必须保留手动搜索、候选选择和 MiKan URL/ID 直连兜底。
-3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
-4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
-5. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析、可编辑预览、偏好/修正存储和批量提交前队列不得把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
-6. 每次阶段推进继续使用 `uv run pytest` 和 `uv run python -m compileall -q src` 验证；具备浏览器环境时额外执行 `uv run pytest tests/browser`。
+1. Stage 22 Web UI 搜索工作台重构与真实候选闭环：统一单个/批量模式切换与独立结果面板，建立 FOUND/EMPTY/FAILED 候选语义，禁止无候选空壳草案，修复真实 `PARSED` 与前端卡片动作不一致，并补齐生产状态形状的 Playwright 回归。执行 PRD 见 `docs/MiGuOrca_stage22_web_search_workbench_PRD.md`。
+2. Stage 23 部署/配置向导可行性验证保留为远期可选能力：评估配置检查、连接诊断、教程式向导和 Docker Compose 模板，而不是全自动运维 Agent。
+3. AI 番剧名解析与搜索词增强保持为可审核增强能力；必须保留手动搜索、候选选择和 MiKan URL/ID 直连兜底。
+4. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
+5. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
+6. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析、可编辑预览、偏好/修正存储和批量提交前队列不得把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
+7. 每次阶段推进继续使用 `uv run pytest`、`uv run python -m compileall -q src tests` 和 Web UI 的 `node --check` 验证；UI story 必须执行 `uv run pytest tests/browser/ -q`。

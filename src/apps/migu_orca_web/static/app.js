@@ -61,6 +61,10 @@
   const candidateFallbackInput = document.getElementById("mikan-fallback-bangumi");
   const candidateFallbackError = document.getElementById("mikan-fallback-error");
   const candidateFallbackGenerate = document.getElementById("mikan-fallback-generate");
+  const searchModeTabs = document.getElementById("search-mode-tabs");
+  const singleSearchEntry = document.getElementById("single-search-entry");
+  const batchSearchEntry = document.getElementById("batch-workbench-entry");
+  const batchSearchResults = document.getElementById("batch-search-results");
   const batchParseForm = document.getElementById("batch-parse-form");
   const batchRawInput = document.getElementById("batch-raw-input");
   const batchParseError = document.getElementById("batch-parse-error");
@@ -93,12 +97,101 @@
   let currentBatchEditItemId = null;
   let batchDraftCards = [];
   let currentBatchId = null;
+  // Candidate choices belong to the result panel, not to individual cards.
+  // Keeping the active item separately prevents cards from growing with every
+  // candidate and makes switching between rows deterministic.
+  let activeBatchCandidateItemId = null;
   let selectedBatchItemIds = new Set();
   let batchAcceptInFlight = false;
   let batchQueueItems = [];
   let storageDirPreference = "";
   let saveRequestPreference = true;
   let currentPreferenceValues = null;
+  let activeSearchMode = "single";
+  let searchWorkspaceDisabledStates = new Map();
+
+  function searchModeButtons() {
+    return searchModeTabs
+      ? Array.from(searchModeTabs.querySelectorAll("[data-search-mode]"))
+      : [];
+  }
+
+  function setSearchMode(mode, focusTab) {
+    const nextMode = mode === "batch" ? "batch" : "single";
+    activeSearchMode = nextMode;
+    const isBatch = nextMode === "batch";
+    if (singleSearchEntry) {
+      singleSearchEntry.hidden = isBatch;
+    }
+    if (batchSearchEntry) {
+      batchSearchEntry.hidden = !isBatch;
+    }
+    if (candidateSearchResult) {
+      candidateSearchResult.hidden = isBatch;
+    }
+    if (batchSearchResults) {
+      batchSearchResults.hidden = !isBatch;
+    }
+    for (const button of searchModeButtons()) {
+      const selected = button.dataset.searchMode === nextMode;
+      button.classList.toggle("is-selected", selected);
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+      if (selected && focusTab) {
+        button.focus();
+      }
+    }
+  }
+
+  function wireSearchModeTabs() {
+    const buttons = searchModeButtons();
+    for (const button of buttons) {
+      button.addEventListener("click", function () {
+        setSearchMode(button.dataset.searchMode, false);
+      });
+      button.addEventListener("keydown", function (event) {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
+          return;
+        }
+        event.preventDefault();
+        const currentIndex = buttons.indexOf(button);
+        const nextIndex = event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? buttons.length - 1
+            : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+        const nextButton = buttons[nextIndex];
+        setSearchMode(nextButton.dataset.searchMode, true);
+      });
+    }
+    setSearchMode(activeSearchMode, false);
+  }
+
+  function setSearchWorkspaceInFlight(isInFlight) {
+    const controls = [];
+    for (const container of [
+      document.getElementById("generate-panel"),
+      document.getElementById("search-results-panel"),
+    ]) {
+      if (!container) {
+        continue;
+      }
+      for (const control of container.querySelectorAll("button, input, textarea, select")) {
+        controls.push(control);
+      }
+    }
+    for (const control of controls) {
+      if (isInFlight) {
+        searchWorkspaceDisabledStates.set(control, control.disabled);
+        control.disabled = true;
+      } else if (searchWorkspaceDisabledStates.has(control)) {
+        control.disabled = searchWorkspaceDisabledStates.get(control);
+      }
+    }
+    if (!isInFlight) {
+      searchWorkspaceDisabledStates = new Map();
+    }
+  }
 
   function readPreference(key) {
     try {
@@ -1035,7 +1128,9 @@
     const labels = {
       RAW: "待解析",
       PARSED: "已解析",
-      FAILED: "解析失败",
+      FOUND: "找到候选",
+      EMPTY: "未找到候选",
+      FAILED: "搜索失败",
       NEEDS_REVIEW: "待确认",
       DRAFT: "草案",
       READY: "待接受",
@@ -1083,9 +1178,7 @@
   }
 
   function setBatchParseInFlight(isInFlight) {
-    if (batchRawInput) {
-      batchRawInput.disabled = isInFlight;
-    }
+    setSearchWorkspaceInFlight(isInFlight);
     if (batchParseSubmit) {
       batchParseSubmit.disabled = isInFlight;
       batchParseSubmit.textContent = isInFlight
@@ -1111,17 +1204,13 @@
     if (canonicalTitles.length) {
       return safeText(canonicalTitles[0]) || "未命名条目";
     }
-    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
-    if (candidates.length) {
-      return safeText(candidates[0].title) || "未命名条目";
-    }
     return safeText(row.raw_title) || "未命名条目";
   }
 
   function batchCardSourceName(row) {
-    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
-    if (candidates.length) {
-      const candidate = candidates[0];
+    const selectedCandidate = row.selected_candidate || null;
+    if (selectedCandidate) {
+      const candidate = selectedCandidate;
       const source = safeText(candidate.source_query || candidate.bangumi_id);
       return source ? "MiKan：" + source : "MiKan 候选";
     }
@@ -1527,7 +1616,7 @@
   }
 
   function batchCardIsSelectable(row) {
-    return fieldValue(row.status) !== "ACCEPTED";
+    return canAcceptBatchCard(row);
   }
 
   function updateBatchAcceptToolbar() {
@@ -1997,8 +2086,44 @@
 
   function deleteBatchCard(itemId) {
     selectedBatchItemIds.delete(itemId);
+    if (activeBatchCandidateItemId === itemId) {
+      activeBatchCandidateItemId = null;
+    }
     batchDraftCards = batchDraftCards.filter((row) => row.item_id !== itemId);
     renderBatchParseItems(batchDraftCards);
+  }
+
+  function renderBatchCardPoster(row) {
+    const selectedCandidate = row.selected_candidate || null;
+    const posterUrl = selectedCandidate ? safeText(selectedCandidate.poster_url) : "";
+    const posterWrap = document.createElement("div");
+    posterWrap.className = "batch-card-poster";
+
+    function showPlaceholder(message, kind) {
+      posterWrap.replaceChildren();
+      const placeholder = document.createElement("span");
+      placeholder.className = "batch-card-poster-placeholder";
+      if (kind) {
+        placeholder.dataset.posterState = kind;
+      }
+      placeholder.textContent = message;
+      posterWrap.appendChild(placeholder);
+    }
+
+    if (posterUrl) {
+      const poster = document.createElement("img");
+      poster.alt = "";
+      poster.src = posterUrl;
+      poster.addEventListener("error", function () {
+        showPlaceholder("暂无封面", "unavailable");
+      }, {once: true});
+      posterWrap.appendChild(poster);
+    } else if (fieldValue(row.status) === "FOUND") {
+      showPlaceholder("待选择合集", "unselected");
+    } else {
+      showPlaceholder("暂无封面", "unavailable");
+    }
+    return posterWrap;
   }
 
   function renderBatchCard(row) {
@@ -2015,8 +2140,7 @@
       "选择 " + (safeText(row.raw_title) || "批量条目"),
     );
     selectCheckbox.checked = selectedBatchItemIds.has(row.item_id);
-    selectCheckbox.disabled =
-      fieldValue(row.status) === "ACCEPTED" || batchAcceptInFlight;
+    selectCheckbox.disabled = !batchCardIsSelectable(row) || batchAcceptInFlight;
     selectCheckbox.addEventListener("change", function () {
       toggleBatchItemSelection(row.item_id, selectCheckbox.checked);
     });
@@ -2035,18 +2159,7 @@
       deleteBatchCard(row.item_id);
     });
 
-    const posterWrap = document.createElement("div");
-    posterWrap.className = "batch-card-poster";
-    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
-    const posterUrl = candidates.length ? safeText(candidates[0].poster_url) : "";
-    if (posterUrl) {
-      const poster = document.createElement("img");
-      poster.alt = "";
-      poster.src = posterUrl;
-      posterWrap.appendChild(poster);
-    } else {
-      posterWrap.textContent = "订阅草案";
-    }
+    const posterWrap = renderBatchCardPoster(row);
 
     const statusRow = document.createElement("div");
     statusRow.className = "batch-card-status-row";
@@ -2089,26 +2202,48 @@
     seeds.className = "batch-card-seeds";
     seeds.textContent = "有效种子数：" + batchCardSeedSummary(row);
 
+    const candidateFeedback = renderBatchCandidateSearchFeedback(row);
+
     const expandButton = document.createElement("button");
     expandButton.type = "button";
     expandButton.className = "secondary-button batch-card-expand";
-    expandButton.textContent = "展开";
-    expandButton.setAttribute("aria-label", "展开 " + (safeText(row.raw_title) || "批量条目"));
     const reviewPanel = renderBatchCardReviewPanel(row);
-    if (!canExpandBatchCard(row)) {
-      expandButton.disabled = true;
-      expandButton.title = "生成草案后可展开查看";
-    }
-    expandButton.addEventListener("click", () => {
-      const isOpening = reviewPanel.hidden;
-      reviewPanel.hidden = !isOpening;
-      expandButton.textContent = isOpening ? "收起" : "展开";
+    const canChooseCandidate =
+      fieldValue(row.status) === "FOUND" &&
+      Array.isArray(row.candidates) &&
+      row.candidates.length > 0;
+    const isCandidateActive = activeBatchCandidateItemId === row.item_id;
+    if (canChooseCandidate) {
+      expandButton.textContent = isCandidateActive ? "收起候选" : "查看候选";
       expandButton.setAttribute(
-        "aria-expanded",
-        isOpening ? "true" : "false",
+        "aria-label",
+        (isCandidateActive ? "收起候选" : "查看候选") + "：" +
+          (safeText(row.raw_title) || "批量条目"),
       );
-    });
-    expandButton.setAttribute("aria-expanded", "false");
+      expandButton.setAttribute("aria-controls", "batch-candidate-choices");
+      expandButton.setAttribute("aria-expanded", isCandidateActive ? "true" : "false");
+      expandButton.addEventListener("click", function () {
+        activeBatchCandidateItemId = isCandidateActive ? null : row.item_id;
+        renderBatchParseItems(batchDraftCards);
+      });
+    } else if (canExpandBatchCard(row)) {
+      expandButton.textContent = "查看草案";
+      expandButton.setAttribute("aria-label", "查看草案：" + (safeText(row.raw_title) || "批量条目"));
+      expandButton.setAttribute("aria-controls", "batch-card-review-" + safeText(row.item_id));
+      expandButton.setAttribute("aria-expanded", "false");
+      reviewPanel.id = "batch-card-review-" + safeText(row.item_id);
+      expandButton.addEventListener("click", function () {
+        const isOpening = reviewPanel.hidden;
+        reviewPanel.hidden = !isOpening;
+        expandButton.textContent = isOpening ? "收起草案" : "查看草案";
+        expandButton.setAttribute("aria-expanded", isOpening ? "true" : "false");
+      });
+    } else {
+      expandButton.textContent = "查看候选";
+      expandButton.disabled = true;
+      expandButton.title = "当前条目没有可选择的候选合集";
+      expandButton.setAttribute("aria-expanded", "false");
+    }
 
     const children = [
       selectCheckbox,
@@ -2121,6 +2256,9 @@
       preference,
       seeds,
     ];
+    if (candidateFeedback) {
+      children.push(candidateFeedback);
+    }
     if (row.accept_feedback && row.accept_feedback.reason) {
       const reason = document.createElement("div");
       reason.className = "batch-card-reason";
@@ -2133,6 +2271,63 @@
     children.push(expandButton, reviewPanel);
     item.append.apply(item, children);
     return item;
+  }
+
+  function renderBatchCandidateChoices(row) {
+    if (fieldValue(row.status) !== "FOUND") {
+      return null;
+    }
+    const candidates = Array.isArray(row.candidates) ? row.candidates : [];
+    if (!candidates.length) {
+      return null;
+    }
+    const container = document.createElement("div");
+    container.id = "batch-candidate-choices";
+    container.className = "batch-candidate-choices";
+    container.setAttribute("aria-label", "候选合集：" + batchCardTitle(row));
+    const hint = document.createElement("p");
+    hint.className = "field-help";
+    hint.textContent = "请选择一个真实 MiKan 合集后生成订阅草案。";
+    container.appendChild(hint);
+    const list = document.createElement("ul");
+    list.className = "candidate-list batch-candidate-list";
+    for (const candidate of candidates) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary-button batch-candidate-select";
+      button.textContent = "选择此合集";
+      button.disabled = batchAcceptInFlight;
+      button.addEventListener("click", function () {
+        generateBatchRequestFromCandidate(row, candidate);
+      });
+      list.appendChild(
+        renderCandidateCard(candidate, {
+          query: batchCardTitle(row),
+          chooseButton: button,
+        }),
+      );
+    }
+    container.appendChild(list);
+    return container;
+  }
+
+  function renderBatchCandidateSearchFeedback(row) {
+    const status = fieldValue(row.status);
+    if (status !== "EMPTY" && status !== "FAILED") {
+      return null;
+    }
+    const feedback = document.createElement("p");
+    feedback.className = "batch-candidate-feedback";
+    if (status === "EMPTY") {
+      feedback.textContent = "未找到匹配的 MiKan 合集。";
+      return feedback;
+    }
+    const error = row.error && typeof row.error === "object" ? row.error : {};
+    const message = safeText(error.error_message);
+    feedback.textContent = message
+      ? "搜索失败：" + message + "。可重新获取批量草案后重试。"
+      : "搜索失败。可重新获取批量草案后重试。";
+    return feedback;
   }
 
   function renderBatchParseItems(items) {
@@ -2157,6 +2352,16 @@
       list.appendChild(renderBatchCard(row));
     }
     batchParseResult.appendChild(list);
+
+    const activeRow = rows.find((row) => row.item_id === activeBatchCandidateItemId);
+    if (activeRow && fieldValue(activeRow.status) === "FOUND") {
+      const choices = renderBatchCandidateChoices(activeRow);
+      if (choices) {
+        batchParseResult.appendChild(choices);
+      }
+    } else if (activeBatchCandidateItemId) {
+      activeBatchCandidateItemId = null;
+    }
 
     if (batchAcceptToolbar) {
       batchAcceptToolbar.hidden = false;
@@ -2183,8 +2388,11 @@
     }
 
     setBatchParseInFlight(true);
+    const itemCount = payload.raw_input
+      .split(/\r?\n/)
+      .filter((line) => line.trim()).length;
     setBatchParseResult(
-      "正在解析批量番剧名称...",
+      "正在搜索 " + itemCount + " 个批量条目的 MiKan 候选...",
       "loading-state compact-state",
     );
     try {
@@ -2203,8 +2411,8 @@
       await loadBatchQueue();
       showNotification(
         "success",
-        "批量草案已获取",
-        "已返回 " + items.length + " 个条目的解析状态。",
+        "批量搜索完成",
+        "已返回 " + items.length + " 个条目的候选搜索状态。",
       );
     } catch (error) {
       setBatchParseResult(
@@ -2843,9 +3051,7 @@
   }
 
   function setCandidateSearchInFlight(isInFlight) {
-    for (const control of candidateAreaControls()) {
-      control.disabled = isInFlight;
-    }
+    setSearchWorkspaceInFlight(isInFlight);
     if (candidateSearchSubmit) {
       candidateSearchSubmit.textContent = isInFlight ? "正在搜索..." : "搜索候选";
     }
@@ -2900,6 +3106,60 @@
     return {query: query};
   }
 
+  function renderCandidateCard(candidate, options) {
+    const opts = options || {};
+    const item = document.createElement("li");
+    item.className = "candidate-card";
+
+    const title = document.createElement("strong");
+    title.textContent = safeText(candidate.title) || "未命名合集";
+    item.appendChild(title);
+
+    // Display-only recommendation label (e.g. 推荐：第 2 季 / 季数不符 /
+    // 可能匹配). It only annotates the card; it never selects the candidate
+    // or triggers Request generation.
+    if (candidate.recommendation) {
+      const badge = document.createElement("span");
+      badge.className = "candidate-recommendation";
+      badge.textContent = safeText(candidate.recommendation);
+      item.appendChild(badge);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "candidate-meta";
+    meta.textContent = "MiKan ID: " + safeText(candidate.bangumi_id);
+    item.appendChild(meta);
+
+    if (candidate.poster_url) {
+      const poster = document.createElement("img");
+      poster.className = "candidate-poster";
+      poster.alt = "";
+      poster.src = candidate.poster_url;
+      poster.addEventListener("error", () => {
+        const placeholder = document.createElement("div");
+        placeholder.className = "candidate-poster candidate-poster-placeholder";
+        placeholder.textContent = "暂无封面";
+        poster.replaceWith(placeholder);
+      }, {once: true});
+      item.appendChild(poster);
+    } else {
+      const placeholder = document.createElement("div");
+      placeholder.className = "candidate-poster candidate-poster-placeholder";
+      placeholder.textContent = "暂无封面";
+      item.appendChild(placeholder);
+    }
+
+    const source = document.createElement("div");
+    source.className = "candidate-source";
+    source.textContent = "搜索词：" + safeText(candidate.source_query || opts.query);
+    item.appendChild(source);
+
+    if (opts.chooseButton) {
+      item.appendChild(opts.chooseButton);
+    }
+    return item;
+  }
+
   function renderCandidateCards(candidates, query) {
     const cards = Array.isArray(candidates) ? candidates : [];
     if (!cards.length) {
@@ -2916,41 +3176,6 @@
     const list = document.createElement("ul");
     list.className = "candidate-list";
     for (const candidate of cards) {
-      const item = document.createElement("li");
-      item.className = "candidate-card";
-
-      const title = document.createElement("strong");
-      title.textContent = safeText(candidate.title) || "未命名合集";
-      item.appendChild(title);
-
-      // Display-only recommendation label (e.g. 推荐：第 2 季 / 季数不符 /
-      // 可能匹配). It only annotates the card; it never selects the candidate
-      // or triggers Request generation.
-      if (candidate.recommendation) {
-        const badge = document.createElement("span");
-        badge.className = "candidate-recommendation";
-        badge.textContent = safeText(candidate.recommendation);
-        item.appendChild(badge);
-      }
-
-      const meta = document.createElement("div");
-      meta.className = "candidate-meta";
-      meta.textContent = "MiKan ID: " + safeText(candidate.bangumi_id);
-      item.appendChild(meta);
-
-      if (candidate.poster_url) {
-        const poster = document.createElement("img");
-        poster.className = "candidate-poster";
-        poster.alt = "";
-        poster.src = candidate.poster_url;
-        item.appendChild(poster);
-      }
-
-      const source = document.createElement("div");
-      source.className = "candidate-source";
-      source.textContent = "搜索词：" + safeText(candidate.source_query || query);
-      item.appendChild(source);
-
       const chooseButton = document.createElement("button");
       chooseButton.type = "button";
       chooseButton.className = "primary-button candidate-select";
@@ -2958,9 +3183,7 @@
       chooseButton.addEventListener("click", () => {
         generateRequestFromCandidate(candidate);
       });
-      item.appendChild(chooseButton);
-
-      list.appendChild(item);
+      list.appendChild(renderCandidateCard(candidate, {query: query, chooseButton: chooseButton}));
     }
     candidateSearchResult.appendChild(list);
   }
@@ -2985,7 +3208,7 @@
 
     setCandidateSearchInFlight(true);
     setCandidateSearchResult(
-      "正在搜索 MiKan 候选...",
+      "正在搜索「" + payload.query + "」的 MiKan 候选...",
       "loading-state compact-state",
     );
     try {
@@ -2998,8 +3221,10 @@
       renderCandidateCards(candidates, result.query || payload.query);
       showNotification(
         "success",
-        "候选搜索完成",
-        "找到 " + candidates.length + " 个候选合集。",
+        candidates.length ? "候选搜索完成" : "未找到候选合集",
+        candidates.length
+          ? "找到 " + candidates.length + " 个候选合集。"
+          : "可调整番剧标题后重试。",
       );
     } catch (error) {
       setCandidateSearchResult(
@@ -3027,6 +3252,8 @@
     );
   }
 
+  wireSearchModeTabs();
+
   function setCandidateSelectionInFlight(isInFlight) {
     const buttons = document.querySelectorAll(".candidate-select");
     for (const button of buttons) {
@@ -3047,22 +3274,7 @@
     setCandidateSelectionInFlight(true);
     setState(detailContainer, "正在从候选生成订阅草案...", "loading-state");
     try {
-      // The server resolves the system-default MiKan config when no
-      // request-scoped config is sent, so candidate generation only needs the
-      // selected candidate's normalized bangumi URL. Candidate selection always
-      // produces an editable preview draft (save_request=false); the user
-      // explicitly saves it with 保存草案.
-      const result = await fetchJson("/api/v1/requests", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          title: candidate.title || "未命名合集",
-          source: "mikan",
-          mikan_bangumi: candidate.mikan_url,
-          storage_dir: currentStorageDir() || null,
-          save_request: false,
-        }),
-      });
+      const result = await createPreviewDraftFromCandidate(candidate);
       await finalizeGeneratedRequest(result);
     } catch (error) {
       setState(
@@ -3073,6 +3285,61 @@
       notifyApiError("生成失败", error);
     } finally {
       setCandidateSelectionInFlight(false);
+    }
+  }
+
+  async function createPreviewDraftFromCandidate(candidate) {
+    // Both single and batch selection use the existing mikan_bangumi detail
+    // parser and preview-modify/save lifecycle. A candidate only contains
+    // public metadata; request-scoped configuration remains server-side.
+    return fetchJson("/api/v1/requests", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        title: candidate.title || "未命名合集",
+        source: "mikan",
+        mikan_bangumi: candidate.mikan_url,
+        storage_dir: currentStorageDir() || null,
+        save_request: false,
+      }),
+    });
+  }
+
+  async function generateBatchRequestFromCandidate(row, candidate) {
+    if (!row || fieldValue(row.status) !== "FOUND") {
+      return;
+    }
+    if (!candidate || !candidate.mikan_url) {
+      showNotification("error", "生成失败", "候选合集缺少 MiKan URL，无法生成订阅草案。");
+      return;
+    }
+    setBatchAcceptInFlight(true);
+    try {
+      const result = await createPreviewDraftFromCandidate(candidate);
+      const request = result && result.request;
+      if (!request) {
+        throw new Error("candidate preview returned no request");
+      }
+      batchDraftCards = batchDraftCards.map(function (current) {
+        if (current.item_id !== row.item_id) {
+          return current;
+        }
+        return Object.assign({}, current, {
+          status: "DRAFT",
+          preview_request: request,
+          selected_candidate: candidate,
+        });
+      });
+      renderBatchParseItems(batchDraftCards);
+      showNotification(
+        "success",
+        "订阅草案已生成",
+        "已根据所选 MiKan 合集生成当前批量条目的订阅草案。",
+      );
+    } catch (error) {
+      notifyApiError("生成订阅草案失败", error);
+    } finally {
+      setBatchAcceptInFlight(false);
     }
   }
 

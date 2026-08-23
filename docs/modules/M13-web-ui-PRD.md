@@ -2,7 +2,7 @@
 
 ## 1. 模块目标
 
-M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7 已实现 Flask Web UI MVP，Stage 8 补强可用性，Stage 9 增加浏览器自动化测试，Stage 10 增加确认、取消和受限修改操作入口，Stage 11 增加显式真实 MiKan / Auto Bangumi 配置入口，Stage 12 增加 qBittorrent 显式连接测试入口，Stage 13 将配置相关能力迁移到独立 Settings 页面并收敛 Request 工作台，Stage 14 修复默认生成后的 Request 可操作性、未保存预览契约、Seeds 三列表和 qBittorrent Settings 直显，Stage 15 增加 `ACCEPTED` Request 的修改与删除动作，并将筛选规则默认语义改为大小写不敏感的字面匹配，同时提供 `使用正则` 与 `大小写敏感` 选项。Stage 16 在 CLI/API 层完成真实 MiKan direct URL/ID 入口，但没有新增 Web UI 控件。Stage 17 已在 `/index` Request 生成流程中接入真实 MiKan 候选搜索、候选卡片手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签。Stage 18 已把真实 MiKan 候选搜索调整为 `/index` 普通 Web 主流程，并将 fixture 降级为开发/离线测试路径。Stage 19 后，M13 的主方向调整为批量新番订阅前置工作台：批量输入番剧简称，生成可审核订阅草案卡片，并支持单卡展开、删除、修改和接受。Stage 20 已在此基础上接入批量接受、全接受、提交前队列面板和失败项独立重试，完成批量确认与 Auto Bangumi 提交辅助闭环。Stage 21 已在 `/settings` 接入偏好管理面板，并在批量卡片上展示偏好命中、低置信度/多候选/冲突审核提示、当前默认配置和搜索词来源。
+M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7～22 已逐步完成 Flask Web UI、Request 操作、Settings、真实 MiKan 候选、可编辑预览、批量工作台、提交前队列与偏好展示。Stage 22 已完成搜索工作台信息架构与真实候选语义收敛：单个/批量入口通过分段控件管理，结果进入独立面板，标题解析、真实候选和订阅草案状态明确分离。
 
 ## 2. 模块边界
 
@@ -49,6 +49,7 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 19 | 批量输入与订阅草案卡片工作台 | 已接入 | `/index` 批量工作区支持多行简称输入、AI 名称解析 seam、逐项 MiKan 候选搜索、订阅草案卡片网格、删除、展开、详情修改回流和单卡接受 |
 | Stage 20 | 批量接受、提交前队列与失败项重试 | 已接入 | `/index` 批量工作台提供单卡接受、勾选批量接受和全接受；`#batch-queue-panel` 展示提交前队列（中文状态、尝试次数、脱敏结果摘要）并提供显式 AB 提交；失败项可独立重试，成功项不显示重试 |
 | Stage 21 | 偏好管理面板与批量卡片偏好/修正展示 | 已接入 | `/settings` 的 `#preference-settings-panel` 管理非敏感偏好（字幕组、筛选、命名、搜索增强开关），支持保存与显式恢复默认；批量卡片展示偏好命中摘要、需人工核对 chip、偏好与审核面板（偏好命中/警告/审核提示/当前默认配置）和搜索词来源面板（修正增强搜索词/原始搜索词） |
+| Stage 22 | 搜索工作台与真实候选闭环 | 已接入 | “创建订阅方案”提供单个/批量分段切换；两种结果迁入独立 `#search-results-panel`；统一候选卡、封面/占位、FOUND/EMPTY/FAILED、候选选择后草案动作和真实搜索反馈 |
 
 以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 20 的提交前队列只展示队列项目标题、状态、尝试次数、时间和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径必须被忽略或脱敏，AB 配置只存在于当前提交 POST body，不写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot。Stage 21 的偏好表单是非敏感表面，只提交已定义的非敏感偏好字段，拒绝的敏感输入回退到上次有效值；批量卡片只渲染 `preference_hits`/`preference_warnings`/`review_hints`/`applied_preferences`/`enhanced_search_queries` 中的公开规则摘要和中文提示，endpoint、token、cookie、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。
 
@@ -105,13 +106,27 @@ Stage 21 UI 调整要求（Stage 21 已落地）：
 6. 单卡修改只更新当前卡片，其他卡片的偏好命中/审核提示文本保持不变；偏好提示不覆盖现有卡片修改、候选选择、批量接受和 Stage 20 队列状态。
 7. 偏好/审核展示只读公开非敏感字段；无偏好、偏好读取失败或增强失败时展示明确的默认流程状态，不阻塞手动候选选择和直连 fallback。
 
+Stage 22 UI 调整要求（已完成）：
+
+1. `#generate-panel` 标题使用用户目标“创建订阅方案”，不再使用“真实 MiKan 候选搜索”作为一级标题。
+2. 使用具备键盘操作、焦点样式和 ARIA 选中态的“单个搜索 / 批量搜索”分段控件；一次只展示当前模式输入。
+3. 新增 `#search-results-panel`，与订阅方案详情等 panel 同级并独占一行；单个候选列表、批量分组结果及批量选择工具栏统一迁入该面板。
+4. 模式切换不能把另一模式的旧结果冒充当前结果；结果面板必须显示当前模式和安全搜索上下文。
+5. 单个和批量结果复用候选卡渲染原语；FOUND 显示标题、MiKan ID、匹配提示、封面或占位和“选择此合集”，批量按原始输入分组且不默认选择第一个候选。
+6. EMPTY 显示“未找到匹配的 MiKan 合集”，FAILED 显示可重试的脱敏错误；两者均不显示展开、修改、保存、接受动作。
+7. `PARSED` 只表示标题解析成功，不能渲染为已找到或可接受草案；只有真实候选选择并完成详情解析后，DRAFT/READY 才可展开、修改和接受。
+8. 复用现有状态框显示简洁真实的搜索中、完成、空结果和失败反馈；单一长请求不得用定时器伪造服务端页面解析或逐项进度。
+9. loading 时禁用相关输入、模式切换和提交控件，结束后恢复；状态框使用 `aria-live`，不得强制移动用户焦点。
+10. Playwright 必须使用生产 API 的真实状态形状覆盖 FOUND/EMPTY/FAILED、PARSED→选择候选→DRAFT、封面/占位、模式切换、独立结果面板、窄屏和基础无障碍；不得用理想化 `DRAFT` mock 掩盖后端 `PARSED` 契约。
+11. 新面板只渲染公开候选与脱敏状态，不得显示或持久化 endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL或本地绝对路径。
+
 ## 4. 后续能力规划
 
 Web UI 后续可以支持：
 
 1. 字幕组和 RSS 源候选的更细粒度人工选择。
 2. 降级 JSON 下载或复制入口。
-3. 部署/配置向导仅作为远期辅助能力，不作为 qBittorrent 下载或 Auto Bangumi 替代执行系统。
+3. Stage 23 部署/配置向导仅作为远期辅助能力，不作为 qBittorrent 下载或 Auto Bangumi 替代执行系统。
 4. 认证、权限或远程部署保护，仅在出现多人使用或公网暴露场景后实现。
 
 ## 5. 待确认问题
