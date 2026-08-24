@@ -12,7 +12,7 @@ from shared.errors import Stage1Error
 
 
 class AutoBangumiHttpTransport(Protocol):
-    """Transport boundary used by the real Auto Bangumi HTTP client."""
+    """Transport boundary used by the API Token compatibility adapter."""
 
     def post_json(
         self,
@@ -23,6 +23,17 @@ class AutoBangumiHttpTransport(Protocol):
         timeout: float,
     ) -> dict[str, Any]:
         """POST a JSON payload and return the decoded response object."""
+
+    def request_json(
+        self,
+        method: Literal["GET", "POST"],
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, str] | None = None,
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        """Make one JSON request without following credentialed redirects."""
 
 
 class AutoBangumiLegacyTransport(Protocol):
@@ -155,7 +166,11 @@ class _RejectRedirects(HTTPRedirectHandler):
 
 
 class AutoBangumiHttpClient:
-    """Real Auto Bangumi HTTP adapter for creating subscriptions."""
+    """API Token compatibility adapter with read-only, fail-closed capability probing.
+
+    No current Token API write contract is verified.  In particular, this adapter
+    must never reinterpret the legacy 3.1 RSS body as a Token API request.
+    """
 
     def __init__(
         self,
@@ -169,36 +184,65 @@ class AutoBangumiHttpClient:
         self._timeout = timeout
 
     def create_subscription(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Create a subscription from an already prepared AB payload."""
+        """Reject writes until a version-specific Token API contract is covered."""
 
-        validated_payload = _validate_subscription_payload(payload)
+        # Validate the public call shape before returning the compatibility error;
+        # this retains the existing input-validation contract without ever sending
+        # a request with the Bearer credential.
+        _validate_subscription_payload(payload)
         if self._config.auth_mode != "api_token" or not self._config.token:
             raise Stage1Error(
                 "ab_submit_unsupported",
                 "当前 Auto Bangumi 认证模式暂不支持提交",
                 "create_ab_subscription",
             )
+        raise Stage1Error(
+            "ab_submit_unsupported",
+            "当前 Auto Bangumi 版本暂不支持提交",
+            "create_ab_subscription",
+        )
+
+    def probe(self) -> dict[str, Any]:
+        """Probe a Token-authenticated service without attempting any write."""
+
+        if self._config.auth_mode != "api_token" or not self._config.token:
+            raise Stage1Error(
+                "ab_probe_unsupported",
+                "当前 Auto Bangumi 认证模式暂不支持此探测方式",
+                "probe_ab_connection",
+            )
         try:
-            ab_response = self._transport.post_json(
-                self._config.base_url,
+            status = self._transport.request_json(
+                "GET",
+                _api_endpoint(self._config.base_url, "/api/v1/status"),
                 {
-                    "Authorization": f"Bearer {self._config.token}",
-                    "Content-Type": "application/json",
                     "Accept": "application/json",
+                    "Authorization": f"Bearer {self._config.token}",
                 },
-                validated_payload,
                 timeout=self._timeout,
             )
         except Stage1Error:
             raise
         except HTTPError as exc:
-            raise _http_error_to_stage1_error(exc) from exc
+            raise _http_error_to_stage1_error(exc, step="probe_ab_connection") from exc
         except URLError as exc:
-            raise _network_error_to_stage1_error(exc) from exc
+            raise _network_error_to_stage1_error(exc, step="probe_ab_connection") from exc
         except (TimeoutError, ConnectionError) as exc:
-            raise _network_exception_to_stage1_error(exc) from exc
-
-        return _validate_ab_response(ab_response)
+            if isinstance(exc, TimeoutError):
+                raise _timeout_error("probe_ab_connection") from exc
+            raise Stage1Error(
+                "ab_connection_failed",
+                "Auto Bangumi HTTP 连接失败",
+                "probe_ab_connection",
+                {"category": "connection"},
+            ) from exc
+        return {
+            "reachable": True,
+            "authenticated": True,
+            "version": _status_version(status),
+            "adapter": "api_token",
+            "submit_supported": False,
+        }
 
 
 class LegacyAutoBangumi31Client:

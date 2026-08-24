@@ -46,3 +46,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - `status: true` 是 3.1 写入成功的唯一稳定信号，返回订阅 ID 不应作为成功前提。
   - 带认证 Cookie 的 JSON POST 需要使用 no-redirect transport；标准 urllib redirect 行为不能作为安全边界。
 ---
+
+## 2026-08-24 23:34:38 CST - US-176
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 将 API Token/Bearer 适配器改为只读的 `/api/v1/status` 能力探测，返回 reachable、authenticated、version、adapter 和 `submit_supported: false` 的脱敏摘要。
+- 移除了未验证 Token 写契约对服务根地址的 POST；所有 Token 模式写提交现在稳定 fail closed，且不复用 3.1 Cookie/RSS body。
+- Files changed: `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_http_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - API Token 兼容适配器可安全执行同源 Bearer 的只读 status 探测；探测成功不表示具备提交能力，必须以 `submit_supported` 为准。
+  - 未有逐版本写契约和 fixture 覆盖时，Token 写提交必须在 transport 前 fail closed，避免错误复用 legacy 3.1 的 Cookie 或 payload。
+---
