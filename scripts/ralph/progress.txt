@@ -4,6 +4,7 @@ Started: 2026-08-24 09:30:00 CST
 ## Codebase Patterns
 
 - Python 依赖、检查与测试统一通过 `uv`；Web 前端修改后运行 `node --check src/apps/migu_orca_web/static/app.js`，UI story 必须通过 `.agents/skills/dev-browser/SKILL.md` 在真实 Chromium 验证。
+- 只读连接测试应沿用“request-scoped config → controller safe summary → view allowlist”的边界：控制器绝不触发写接口，视图只公开可安全显示的能力字段。
 - AutoBangumi 默认 `auth_mode=password`（base_url/username/password），兼容 `auth_mode=api_token`（base_url/token）；两种敏感字段互斥并严格 request-scoped。
 - 将 Web 的可选认证字段交给严格配置构造器前，必须使用 `model_dump(exclude_none=True)`，防止未选择模式的空字段被误判为混用凭据。
 - UI 只接收服务根地址；login/status/subscribe 路径由 M10 adapter 拼接。允许局域网地址，但认证 header/Cookie 禁止跨 origin 转发或危险重定向。
@@ -55,4 +56,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - API Token 兼容适配器可安全执行同源 Bearer 的只读 status 探测；探测成功不表示具备提交能力，必须以 `submit_supported` 为准。
   - 未有逐版本写契约和 fixture 覆盖时，Token 写提交必须在 transport 前 fail closed，避免错误复用 legacy 3.1 的 Cookie 或 payload。
+---
+
+## 2026-08-24 23:42:51 CST - US-177
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 新增 AutoBangumi request-scoped 只读连接测试 API，按认证模式复用现有 password 登录/status 与 API Token Bearer/status adapter，绝不调用订阅写接口。
+- 成功只返回可公开的连通性、认证状态、版本、中文认证模式、adapter 与提交能力；校验、认证、连接、超时和协议错误均使用脱敏统一信封。
+- Files changed: `src/ab_engine/controllers/ab_connection_controller.py`, `src/ab_engine/controllers/ab_connection_controller_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 只读连接测试可直接复用 `probe()` seam，并在 controller 层选取 password legacy 或 api_token adapter，避免 UI/API 各自分支认证逻辑。
+  - API 返回的连接摘要和错误 details 都应由 view 白名单过滤；禁止把 adapter 可能附带的 base_url、凭据或 Cookie 透传。
+  - 此故事没有 UI 交互改动；全量 pytest 已执行真实 Chromium 套件，下一条 UI 故事仍须按 dev-browser skill 新增针对性验证。
 ---

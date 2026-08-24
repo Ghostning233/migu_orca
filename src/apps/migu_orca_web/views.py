@@ -12,6 +12,7 @@ from extensions.flask_api import class_route
 from extensions.flask_api.api import sanitize_error_data
 from extensions.flask_api.views import GetView, PostView
 from ab_engine.controllers.ab_config import build_ab_config
+from ab_engine.controllers.ab_connection_controller import test_ab_connection
 from apps.migu_orca_entry.controllers.entry_controller import (
     apply_ab_submit_action,
     apply_confirmation_action,
@@ -383,6 +384,12 @@ class RequestAbConfigPayload(BaseModel):
 
 
 class RequestAbSubmitPayload(RequestActionPayload):
+    ab_config: RequestAbConfigPayload
+
+
+class AutoBangumiTestConnectionPayload(BaseModel):
+    """Explicit request-scoped credentials for a read-only AB probe."""
+
     ab_config: RequestAbConfigPayload
 
 
@@ -945,6 +952,22 @@ def _sanitize_qbittorrent_connection_summary(summary: dict[str, Any]) -> dict[st
     return sanitized
 
 
+def _sanitize_ab_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    allowed_fields = {
+        "reachable",
+        "authenticated",
+        "version",
+        "auth_mode",
+        "adapter",
+        "submit_supported",
+    }
+    sanitized = sanitize_error_data(
+        {key: value for key, value in summary.items() if key in allowed_fields}
+    )
+    assert isinstance(sanitized, dict)
+    return sanitized
+
+
 def _raise_qbittorrent_result_error(result: dict[str, Any]) -> None:
     error = result.get("error")
     if not isinstance(error, dict):
@@ -969,6 +992,42 @@ def _raise_qbittorrent_result_error(result: dict[str, Any]) -> None:
     raise Stage1Error(
         error_type,
         _qbittorrent_error_message(error_type, str(error.get("error_message") or "")),
+        failed_step,
+        safe_details,
+    )
+
+
+def _raise_ab_connection_result_error(result: dict[str, Any]) -> None:
+    error = result.get("error")
+    if not isinstance(error, dict):
+        raise Stage1Error(
+            "invalid_ab_response",
+            "Auto Bangumi 响应无法识别",
+            "test_ab_connection",
+        )
+    error_type = str(error.get("error_type") or "invalid_ab_response")
+    failed_step = str(error.get("failed_step") or "test_ab_connection")
+    details = error.get("details")
+    safe_details = (
+        {
+            key: value
+            for key, value in details.items()
+            if key in {"category", "field", "status_code"}
+        }
+        if isinstance(details, dict)
+        else None
+    )
+    messages = {
+        "config_error": "Auto Bangumi 配置无效",
+        "ab_auth_failed": "Auto Bangumi 认证失败",
+        "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
+        "ab_timeout": "Auto Bangumi HTTP 请求超时",
+        "ab_unsupported_version": "当前 Auto Bangumi 版本暂不受支持",
+        "invalid_ab_response": "Auto Bangumi 响应无法识别",
+    }
+    raise Stage1Error(
+        error_type,
+        messages.get(error_type, "Auto Bangumi 连接测试失败"),
         failed_step,
         safe_details,
     )
@@ -1842,3 +1901,23 @@ class QbittorrentTestConnectionView(PostView):
         summary = result["summary"]
         assert isinstance(summary, dict)
         return _sanitize_qbittorrent_connection_summary(summary)
+
+
+@class_route(api_blueprint, "/api/v1/autobangumi/test-connection", methods=["POST"])
+class AutoBangumiTestConnectionView(PostView):
+    request_validator_model = AutoBangumiTestConnectionPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(
+            self.request_validator_model,
+            AutoBangumiTestConnectionPayload,
+        )
+        ab_config = build_ab_config(
+            self.request_validator_model.ab_config.model_dump(exclude_none=True)
+        )
+        result = test_ab_connection(ab_config=ab_config)
+        if not result["success"]:
+            _raise_ab_connection_result_error(result)
+        summary = result["summary"]
+        assert isinstance(summary, dict)
+        return _sanitize_ab_connection_summary(summary)

@@ -8,6 +8,7 @@ from flask.testing import FlaskClient
 import pytest
 
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
+from ab_engine.controllers.ab_config import AutoBangumiConfig
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
@@ -4390,6 +4391,62 @@ def test_submit_ab_sanitizes_echoed_ab_response(
     assert "auto-bangumi.local" not in str(payload)
     assert "secret-token" not in saved_ab_result
     assert "auto-bangumi.local" not in saved_ab_result
+
+
+def test_autobangumi_test_connection_returns_safe_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_test_ab_connection(*, ab_config: AutoBangumiConfig) -> dict[str, Any]:
+        captured["config"] = ab_config
+        return {
+            "success": True,
+            "summary": {
+                "reachable": True,
+                "authenticated": True,
+                "version": "3.1.18",
+                "auth_mode": "账号密码",
+                "adapter": "legacy_3_1",
+                "submit_supported": True,
+                "base_url": "http://private-auto-bangumi.local",
+                "token": "secret-token",
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr("apps.migu_orca_web.views.test_ab_connection", fake_test_ab_connection)
+    response = _client().post(
+        "/api/v1/autobangumi/test-connection",
+        json={"ab_config": {"auth_mode": "password", "base_url": "http://private-auto-bangumi.local", "username": "private-user", "password": "private-password", "fallback_enabled": False}},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {"ok": True, "result": {"reachable": True, "authenticated": True, "version": "3.1.18", "auth_mode": "账号密码", "adapter": "legacy_3_1", "submit_supported": True}}
+    assert captured["config"].username == "private-user"
+    assert "private" not in str(payload)
+    assert "secret" not in str(payload)
+
+
+def test_autobangumi_test_connection_sanitizes_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.test_ab_connection",
+        lambda *, ab_config: {"success": False, "summary": None, "error": {"error_type": "ab_auth_failed", "error_message": "http://private-auto-bangumi.local token=secret-token", "failed_step": "probe_ab_connection", "details": {"username": "private-user", "password": "private-password", "cookie": "token=secret-token", "category": "auth"}}},
+    )
+    response = _client().post(
+        "/api/v1/autobangumi/test-connection",
+        json={"ab_config": {"auth_mode": "api_token", "base_url": "http://private-auto-bangumi.local", "token": "secret-token", "fallback_enabled": False}},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "ab_auth_failed"
+    assert payload["error_data"] == {"failed_step": "probe_ab_connection", "details": {"category": "auth"}}
+    assert "private" not in str(payload)
+    assert "secret" not in str(payload)
 
 
 def test_qbittorrent_test_connection_returns_safe_summary(
