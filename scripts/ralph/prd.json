@@ -132,7 +132,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "审查纠正（必须单独提交）：此前“测试通过”记录已被复审推翻。仅在 US-175 与 US-178 完成后，追加 progress（不得删除旧记录）说明复审结论、实际修复及精确测试结果；同步必要的 Stage 24/M10 文档。执行 compileall、node --check、pytest -m not browser、真实 Chromium、full pytest、diff/status/log；不做真实 AutoBangumi 写操作。实机凭据不得写进 progress、文档、测试或脚本。"
     }
   ]

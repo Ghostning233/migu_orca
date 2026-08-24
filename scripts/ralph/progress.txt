@@ -124,3 +124,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - 真实 Chromium 安全回归应同时检查失败后的单项 retry 和成功后的敏感字段清理。
   - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest tests/browser/ -q`（260 passed）和 `uv run pytest -q`（1119 passed）均已通过。
 ---
+
+## 2026-08-25 02:40:35 CST - US-180
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成 Stage 24 收尾复审：确认此前 US-175 的 filter/payload 修复与 US-178 的 API Token 批量 retry Chromium 修复已纳入回归；现有 README、主 PRD、Future Stages、backlog、Stage 24 PRD 及 M10/M12/M13/M14 文档保持同步，并保留只读实机验收与禁止真实写订阅的边界。
+- Files changed: `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 全量 Chromium 运行时间会超过交互命令的输出窗口；应使用独立会话并以最终 pytest 摘要判定结果，不能把进度点当作通过。
+  - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest -q -m 'not browser'`（859 passed, 260 deselected）、`uv run pytest tests/browser/ -q`（260 passed）及 `uv run pytest -q`（1119 passed）均已通过；未执行真实 AutoBangumi 写操作。
+---
