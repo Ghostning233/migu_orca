@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import Page
+from playwright.sync_api import Page, expect
 
 from tests.browser.conftest import create_saved_request, set_storage_preferences
 from request_engine.controllers.request_controller import accept_request
@@ -131,8 +131,10 @@ class TestAutoBangumiSubmitFlow:
         page.wait_for_url("**/settings?request_id=req-ab-form#auto-bangumi")
         assert page.locator("#settings-ab-submit-form").is_visible()
         assert page.locator("#settings-ab-request-id").inner_text() == "req-ab-form"
-        assert page.locator("#settings-ab-token").get_attribute("type") == "password"
-        assert page.locator("#settings-ab-fallback-enabled").get_attribute("type") == "checkbox"
+        assert page.locator("#settings-ab-auth-mode").input_value() == "password"
+        assert page.locator("#settings-ab-username").is_visible()
+        assert page.locator("#settings-ab-password").get_attribute("type") == "password"
+        assert page.locator("#settings-ab-token-fields").is_hidden()
 
     def test_ab_submit_requires_confirmation_and_sends_request_scoped_config(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -165,9 +167,9 @@ class TestAutoBangumiSubmitFlow:
         page.route("**/api/v1/requests/req-ab-submit/submit-ab**", handle_submit)
         set_storage_preferences(page, storage_dir)
         page.goto(f"{live_server_url}/settings?request_id=req-ab-submit#auto-bangumi")
-        page.locator("#settings-ab-endpoint").fill("ab-endpoint-value")
-        page.locator("#settings-ab-token").fill("browser-secret-token")
-        page.locator("#settings-ab-fallback-enabled").check()
+        page.locator("#settings-ab-endpoint").fill("http://ab.example.invalid")
+        page.locator("#settings-ab-username").fill("browser-user")
+        page.locator("#settings-ab-password").fill("browser-secret-password")
 
         seen_dialogs = []
         page.on(
@@ -184,9 +186,11 @@ class TestAutoBangumiSubmitFlow:
         assert captured["payload"] == {
             "storage_dir": str(storage_dir),
             "ab_config": {
-                "endpoint": "ab-endpoint-value",
-                "token": "browser-secret-token",
-                "fallback_enabled": True,
+                "auth_mode": "password",
+                "base_url": "http://ab.example.invalid",
+                "username": "browser-user",
+                "password": "browser-secret-password",
+                "fallback_enabled": False,
             },
         }
         storage_keys = page.evaluate("Object.keys(window.localStorage)")
@@ -194,6 +198,51 @@ class TestAutoBangumiSubmitFlow:
         assert all("ab" not in key.lower() for key in storage_keys)
         assert session_keys == []
         assert page.locator("#settings-ab-endpoint").input_value() == ""
+        assert page.locator("#settings-ab-username").input_value() == ""
+        assert page.locator("#settings-ab-password").input_value() == ""
+
+    def test_connection_uses_password_mode_and_clears_credentials(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        def _connection(route: object) -> None:
+            request = getattr(route, "request")
+            captured["body"] = request.post_data_json
+            getattr(route, "fulfill")(
+                status=200,
+                content_type="application/json",
+                body=(
+                    '{"ok": true, "result": {"reachable": true, '
+                    '"authenticated": true, "version": "3.1.18", '
+                    '"auth_mode": "账号密码", "adapter": "legacy_3_1", '
+                    '"submit_supported": true}}'
+                ),
+            )
+
+        page.route("**/api/v1/autobangumi/test-connection", _connection)
+        page.goto(f"{live_server_url}/settings#auto-bangumi")
+        assert page.locator("#settings-ab-submit-form").is_visible()
+        assert page.locator("#settings-ab-submit").is_hidden()
+        page.fill("#settings-ab-endpoint", "http://ab.example.invalid")
+        page.fill("#settings-ab-username", "browser-user")
+        page.fill("#settings-ab-password", "browser-secret-password")
+        page.click("#settings-ab-test-submit")
+        expect(page.locator("#settings-ab-result")).to_contain_text("连接成功")
+        assert captured["body"] == {
+            "ab_config": {
+                "auth_mode": "password",
+                "base_url": "http://ab.example.invalid",
+                "username": "browser-user",
+                "password": "browser-secret-password",
+                "fallback_enabled": False,
+            }
+        }
+        for selector in ("#settings-ab-endpoint", "#settings-ab-username", "#settings-ab-password"):
+            expect(page.locator(selector)).to_have_value("")
+        state = page.evaluate("() => JSON.stringify({url: location.href, localStorage, sessionStorage, body: document.body.innerText})")
+        assert "browser-secret-password" not in state
+        assert "browser-user" not in state
         assert page.locator("#settings-ab-token").input_value() == ""
 
 

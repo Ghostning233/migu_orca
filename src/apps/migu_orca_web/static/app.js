@@ -29,9 +29,13 @@
   const settingsAbContext = document.getElementById("settings-ab-context");
   const settingsAbForm = document.getElementById("settings-ab-submit-form");
   const settingsAbRequestId = document.getElementById("settings-ab-request-id");
-  const settingsAbEndpointInput = document.getElementById("settings-ab-endpoint");
+  const settingsAbAuthModeInput = document.getElementById("settings-ab-auth-mode");
+  const settingsAbBaseUrlInput = document.getElementById("settings-ab-endpoint");
+  const settingsAbUsernameInput = document.getElementById("settings-ab-username");
+  const settingsAbPasswordInput = document.getElementById("settings-ab-password");
   const settingsAbTokenInput = document.getElementById("settings-ab-token");
   const settingsAbFallbackInput = document.getElementById("settings-ab-fallback-enabled");
+  const settingsAbTestButton = document.getElementById("settings-ab-test-submit");
   const settingsAbFormError = document.getElementById("settings-ab-error");
   const settingsAbResult = document.getElementById("settings-ab-result");
   const settingsAbSubmitButton = document.getElementById("settings-ab-submit");
@@ -79,7 +83,10 @@
   const batchQueueCount = document.getElementById("batch-queue-count");
   const batchQueueList = document.getElementById("batch-queue-list");
   const batchQueueSubmitForm = document.getElementById("batch-queue-submit-form");
-  const batchQueueAbEndpointInput = document.getElementById("batch-queue-ab-endpoint");
+  const batchQueueAbAuthModeInput = document.getElementById("batch-queue-ab-auth-mode");
+  const batchQueueAbBaseUrlInput = document.getElementById("batch-queue-ab-endpoint");
+  const batchQueueAbUsernameInput = document.getElementById("batch-queue-ab-username");
+  const batchQueueAbPasswordInput = document.getElementById("batch-queue-ab-password");
   const batchQueueAbTokenInput = document.getElementById("batch-queue-ab-token");
   const batchQueueAbFallbackInput = document.getElementById("batch-queue-ab-fallback-enabled");
   const batchQueueAbConfirmInput = document.getElementById("batch-queue-ab-confirm");
@@ -706,13 +713,59 @@
     return requestIdFromLocation();
   }
 
+  function abInputs(prefix) {
+    return {
+      mode: document.getElementById(prefix + "-auth-mode"),
+      baseUrl: document.getElementById(prefix + "-base-url") || document.getElementById(prefix + "-endpoint"),
+      username: document.getElementById(prefix + "-username"),
+      password: document.getElementById(prefix + "-password"),
+      token: document.getElementById(prefix + "-token"),
+      passwordFields: document.getElementById(prefix + "-password-fields"),
+      tokenFields: document.getElementById(prefix + "-token-fields"),
+    };
+  }
+
+  function syncAbAuthMode(prefix) {
+    const inputs = abInputs(prefix);
+    const tokenMode = inputs.mode && inputs.mode.value === "api_token";
+    if (inputs.passwordFields) inputs.passwordFields.hidden = tokenMode;
+    if (inputs.tokenFields) inputs.tokenFields.hidden = !tokenMode;
+  }
+
+  function buildAbConfig(prefix) {
+    const inputs = abInputs(prefix);
+    const authMode = inputs.mode ? inputs.mode.value : "password";
+    const baseUrl = inputs.baseUrl ? inputs.baseUrl.value.trim() : "";
+    const fallbackInput = document.getElementById(prefix + "-fallback-enabled");
+    const fallbackEnabled = fallbackInput ? fallbackInput.checked : false;
+    if (!baseUrl) throw {message: "请填写服务地址。", field: inputs.baseUrl};
+    if (authMode === "password") {
+      const username = inputs.username ? inputs.username.value.trim() : "";
+      const password = inputs.password ? inputs.password.value : "";
+      if (!username) throw {message: "请填写用户名。", field: inputs.username};
+      if (!password) throw {message: "请填写密码。", field: inputs.password};
+      return {auth_mode: "password", base_url: baseUrl, username: username, password: password, fallback_enabled: fallbackEnabled};
+    }
+    const token = inputs.token ? inputs.token.value.trim() : "";
+    if (!token) throw {message: "请填写 API Token。", field: inputs.token};
+    return {auth_mode: "api_token", base_url: baseUrl, token: token, fallback_enabled: fallbackEnabled};
+  }
+
+  function clearAbSensitiveFields(prefix, clearConfirm) {
+    const inputs = abInputs(prefix);
+    for (const input of [inputs.baseUrl, inputs.username, inputs.password, inputs.token]) {
+      if (input) input.value = "";
+    }
+    if (clearConfirm) clearConfirm.checked = false;
+  }
+
   function setSettingsAbError(message, field) {
     if (!settingsAbFormError) {
       return;
     }
     settingsAbFormError.textContent = message;
     settingsAbFormError.hidden = false;
-    for (const input of [settingsAbEndpointInput, settingsAbTokenInput]) {
+    for (const input of [settingsAbBaseUrlInput, settingsAbUsernameInput, settingsAbPasswordInput, settingsAbTokenInput]) {
       if (input) {
         input.removeAttribute("aria-invalid");
       }
@@ -729,7 +782,7 @@
     }
     settingsAbFormError.textContent = "";
     settingsAbFormError.hidden = true;
-    for (const input of [settingsAbEndpointInput, settingsAbTokenInput]) {
+    for (const input of [settingsAbBaseUrlInput, settingsAbUsernameInput, settingsAbPasswordInput, settingsAbTokenInput]) {
       if (input) {
         input.removeAttribute("aria-invalid");
       }
@@ -760,12 +813,7 @@
   }
 
   function clearSettingsAbSensitiveFields() {
-    if (settingsAbEndpointInput) {
-      settingsAbEndpointInput.value = "";
-    }
-    if (settingsAbTokenInput) {
-      settingsAbTokenInput.value = "";
-    }
+    clearAbSensitiveFields("settings-ab");
   }
 
   function initializeSettingsAbForm() {
@@ -774,14 +822,19 @@
     }
     const requestId = settingsAbRequestIdFromLocation();
     if (!requestId) {
-      settingsAbForm.hidden = true;
+      const submitButton = settingsAbSubmitButton;
+      if (submitButton) submitButton.hidden = true;
+      const requestContext = document.getElementById("settings-ab-request-context");
+      if (requestContext) requestContext.hidden = true;
       if (settingsAbContext) {
         settingsAbContext.textContent =
-          "从已确认订阅方案详情进入后，可在此提交到 Auto Bangumi。";
+          "可使用当前服务地址和认证信息测试连接；从已确认订阅方案详情进入后可提交。";
       }
       return;
     }
-    settingsAbForm.hidden = false;
+    if (settingsAbSubmitButton) settingsAbSubmitButton.hidden = false;
+    const requestContext = document.getElementById("settings-ab-request-context");
+    if (requestContext) requestContext.hidden = false;
     if (settingsAbRequestId) {
       settingsAbRequestId.textContent = requestId;
     }
@@ -798,18 +851,15 @@
     event.preventDefault();
     clearSettingsAbError();
     const requestId = settingsAbRequestIdFromLocation();
-    const endpoint = settingsAbEndpointInput ? settingsAbEndpointInput.value.trim() : "";
-    const token = settingsAbTokenInput ? settingsAbTokenInput.value.trim() : "";
     if (!requestId) {
       setSettingsAbError("缺少 request_id，无法提交 Auto Bangumi。");
       return;
     }
-    if (!endpoint) {
-      setSettingsAbError("提交 Auto Bangumi 前必须填写 endpoint。", settingsAbEndpointInput);
-      return;
-    }
-    if (!token) {
-      setSettingsAbError("提交 Auto Bangumi 前必须填写 token。", settingsAbTokenInput);
+    let abConfig;
+    try {
+      abConfig = buildAbConfig("settings-ab");
+    } catch (validationError) {
+      setSettingsAbError(validationError.message, validationError.field);
       return;
     }
     if (!window.confirm("确认提交此订阅方案到 Auto Bangumi？")) {
@@ -826,11 +876,7 @@
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
             storage_dir: currentStorageDir() || null,
-            ab_config: {
-              endpoint: endpoint,
-              token: token,
-              fallback_enabled: settingsAbFallbackInput ? settingsAbFallbackInput.checked : false,
-            },
+            ab_config: abConfig,
           }),
         },
       );
@@ -867,6 +913,37 @@
   }
 
   initializeSettingsAbForm();
+
+  syncAbAuthMode("settings-ab");
+  if (settingsAbAuthModeInput) settingsAbAuthModeInput.addEventListener("change", () => syncAbAuthMode("settings-ab"));
+  if (settingsAbTokenInput) settingsAbTokenInput.addEventListener("input", () => {
+    if (settingsAbTokenInput.value && settingsAbAuthModeInput && settingsAbAuthModeInput.value === "password") {
+      settingsAbAuthModeInput.value = "api_token";
+      syncAbAuthMode("settings-ab");
+    }
+  });
+
+  async function testSettingsAbConnection() {
+    clearSettingsAbError();
+    let abConfig;
+    try {
+      abConfig = buildAbConfig("settings-ab");
+    } catch (validationError) {
+      setSettingsAbError(validationError.message, validationError.field);
+      return;
+    }
+    setSettingsAbInFlight(true);
+    setSettingsAbResult("正在测试 Auto Bangumi 连接...", "loading-state compact-state");
+    try {
+      const result = await fetchJson("/api/v1/autobangumi/test-connection", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ab_config: abConfig})});
+      clearSettingsAbSensitiveFields();
+      setSettingsAbResult("连接成功；版本：" + safeText(result.version) + "；认证方式：" + safeText(result.auth_mode), "success-state compact-state");
+    } catch (error) {
+      setSettingsAbResult("Auto Bangumi 连接测试失败。请检查配置后重试。", "error-state compact-state");
+    } finally { setSettingsAbInFlight(false); }
+  }
+
+  if (settingsAbTestButton) settingsAbTestButton.addEventListener("click", testSettingsAbConnection);
 
   if (settingsAbForm) {
     settingsAbForm.addEventListener("submit", submitSettingsAb);
@@ -2715,7 +2792,9 @@
     batchQueueAbError.textContent = message;
     batchQueueAbError.hidden = false;
     for (const input of [
-      batchQueueAbEndpointInput,
+      batchQueueAbBaseUrlInput,
+      batchQueueAbUsernameInput,
+      batchQueueAbPasswordInput,
       batchQueueAbTokenInput,
       batchQueueAbConfirmInput,
     ]) {
@@ -2736,7 +2815,9 @@
     batchQueueAbError.textContent = "";
     batchQueueAbError.hidden = true;
     for (const input of [
-      batchQueueAbEndpointInput,
+      batchQueueAbBaseUrlInput,
+      batchQueueAbUsernameInput,
+      batchQueueAbPasswordInput,
       batchQueueAbTokenInput,
       batchQueueAbConfirmInput,
     ]) {
@@ -2756,15 +2837,7 @@
   }
 
   function clearBatchQueueSensitiveFields() {
-    if (batchQueueAbEndpointInput) {
-      batchQueueAbEndpointInput.value = "";
-    }
-    if (batchQueueAbTokenInput) {
-      batchQueueAbTokenInput.value = "";
-    }
-    if (batchQueueAbConfirmInput) {
-      batchQueueAbConfirmInput.checked = false;
-    }
+    clearAbSensitiveFields("batch-queue-ab", batchQueueAbConfirmInput);
   }
 
   function setBatchQueueInFlight(isInFlight) {
@@ -2822,16 +2895,12 @@
       setBatchQueueSubmitError("缺少批次标识，无法提交队列。");
       return;
     }
-    const endpoint = batchQueueAbEndpointInput ? batchQueueAbEndpointInput.value.trim() : "";
-    const token = batchQueueAbTokenInput ? batchQueueAbTokenInput.value.trim() : "";
-    const fallbackEnabled = batchQueueAbFallbackInput ? batchQueueAbFallbackInput.checked : false;
     const confirm = batchQueueAbConfirmInput ? batchQueueAbConfirmInput.checked : false;
-    if (!endpoint) {
-      setBatchQueueSubmitError("提交前必须填写 endpoint。", batchQueueAbEndpointInput);
-      return;
-    }
-    if (!token) {
-      setBatchQueueSubmitError("提交前必须填写 token。", batchQueueAbTokenInput);
+    let abConfig;
+    try {
+      abConfig = buildAbConfig("batch-queue-ab");
+    } catch (validationError) {
+      setBatchQueueSubmitError(validationError.message, validationError.field);
       return;
     }
     if (!confirm) {
@@ -2849,11 +2918,7 @@
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({
             storage_dir: currentStorageDir() || null,
-            ab_config: {
-              endpoint: endpoint,
-              token: token,
-              fallback_enabled: fallbackEnabled,
-            },
+            ab_config: abConfig,
             confirm: true,
           }),
         },
@@ -2887,16 +2952,12 @@
       setBatchQueueSubmitError("缺少批次标识，无法重试。");
       return;
     }
-    const endpoint = batchQueueAbEndpointInput ? batchQueueAbEndpointInput.value.trim() : "";
-    const token = batchQueueAbTokenInput ? batchQueueAbTokenInput.value.trim() : "";
-    const fallbackEnabled = batchQueueAbFallbackInput ? batchQueueAbFallbackInput.checked : false;
     const confirm = batchQueueAbConfirmInput ? batchQueueAbConfirmInput.checked : false;
-    if (!endpoint) {
-      setBatchQueueSubmitError("提交前必须填写 endpoint。", batchQueueAbEndpointInput);
-      return;
-    }
-    if (!token) {
-      setBatchQueueSubmitError("提交前必须填写 token。", batchQueueAbTokenInput);
+    let abConfig;
+    try {
+      abConfig = buildAbConfig("batch-queue-ab");
+    } catch (validationError) {
+      setBatchQueueSubmitError(validationError.message, validationError.field);
       return;
     }
     if (!confirm) {
@@ -2918,11 +2979,7 @@
           body: JSON.stringify({
             storage_dir: currentStorageDir() || null,
             request_id: item.request_id,
-            ab_config: {
-              endpoint: endpoint,
-              token: token,
-              fallback_enabled: fallbackEnabled,
-            },
+            ab_config: abConfig,
             confirm: true,
           }),
         },
@@ -3022,6 +3079,16 @@
   if (batchQueueSubmitForm) {
     batchQueueSubmitForm.addEventListener("submit", submitBatchQueue);
   }
+  syncAbAuthMode("batch-queue-ab");
+  if (batchQueueAbAuthModeInput) {
+    batchQueueAbAuthModeInput.addEventListener("change", () => syncAbAuthMode("batch-queue-ab"));
+  }
+  if (batchQueueAbTokenInput) batchQueueAbTokenInput.addEventListener("input", () => {
+    if (batchQueueAbTokenInput.value && batchQueueAbAuthModeInput && batchQueueAbAuthModeInput.value === "password") {
+      batchQueueAbAuthModeInput.value = "api_token";
+      syncAbAuthMode("batch-queue-ab");
+    }
+  });
   if (batchQueueRefresh) {
     batchQueueRefresh.addEventListener("click", function () {
       loadBatchQueue();

@@ -68,3 +68,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - API 返回的连接摘要和错误 details 都应由 view 白名单过滤；禁止把 adapter 可能附带的 base_url、凭据或 Cookie 透传。
   - 此故事没有 UI 交互改动；全量 pytest 已执行真实 Chromium 套件，下一条 UI 故事仍须按 dev-browser skill 新增针对性验证。
 ---
+
+## 2026-08-25 00:03:00 CST - US-178
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 重构 Settings、单项提交和批量队列的 Auto Bangumi 表单：默认账号密码，支持 API Token 切换，并统一生成 request-scoped 新认证配置。
+- Settings 不再依赖 request_id 才可用；新增只读连接测试，成功后清空服务地址与全部认证字段；单项和批量提交继续保留明确确认。
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/{settings,index}.html`, `src/apps/migu_orca_web/static/{app,style}.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_actions.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 共享认证表单可通过以 DOM id 前缀为参数的构造器同步模式可见性、校验、提交 payload 与成功后的敏感字段清理。
+  - CSS 中 grid/flex 规则可能覆盖浏览器原生 `hidden`，认证模式切换的容器与按条件显示的按钮需明确为 `[hidden] { display: none; }`。
+  - 浏览器测试使用 mock 的只读连接 API，验证页面、URL 与 Web Storage 不携带用户输入的凭据。
+---

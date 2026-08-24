@@ -455,9 +455,13 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'id="settings-ab-submit-form"' in html
     assert 'id="settings-ab-request-id"' in html
     assert 'id="settings-ab-endpoint"' in html
-    assert 'name="ab_submit_endpoint"' in html
+    assert 'name="ab_base_url"' in html
+    assert 'id="settings-ab-auth-mode"' in html
+    assert 'id="settings-ab-username"' in html
+    assert 'id="settings-ab-password"' in html
+    assert 'id="settings-ab-test-submit"' in html
     assert 'id="settings-ab-token"' in html
-    assert 'name="ab_submit_token"' in html
+    assert 'name="ab_token"' in html
     assert 'id="settings-ab-fallback-enabled"' in html
     assert 'name="ab_submit_fallback_enabled"' in html
     assert 'id="settings-ab-result"' in html
@@ -732,10 +736,9 @@ def test_static_app_script_wires_batch_queue_result_panel() -> None:
     assert "batch-queue-ab-confirm" in script
     assert "batch-queue-submit-button" in script
     assert "batch-queue-refresh" in script
-    assert "提交前必须填写 endpoint" in script
-    assert "提交前必须填写 token" in script
+    assert "请填写服务地址。" in script
+    assert "请填写 API Token。" in script
     assert "请勾选确认后再提交到 Auto Bangumi" in script
-    assert "提交前必须填写 endpoint" in script
     assert "正在提交队列到 Auto Bangumi" in script
     assert "Auto Bangumi 批量提交失败" in script
     assert "Auto Bangumi 单项重试失败" in script
@@ -1094,13 +1097,14 @@ def test_static_app_script_wires_explicit_ab_submit_form() -> None:
     assert "settingsAbFallbackInput" in script
     assert "initializeSettingsAbForm" in script
     assert "submitSettingsAb" in script
-    assert "提交 Auto Bangumi 前必须填写 endpoint。" in script
-    assert "提交 Auto Bangumi 前必须填写 token。" in script
+    assert "buildAbConfig" in script
+    assert "testSettingsAbConnection" in script
+    assert "请填写 API Token。" in script
     assert "确认提交此订阅方案到 Auto Bangumi？" in script
     assert '"/submit-ab"' in script
     assert "storage_dir: currentStorageDir() || null" in script
     assert "ab_config" in script
-    assert "fallback_enabled: settingsAbFallbackInput ? settingsAbFallbackInput.checked : false" in script
+    assert 'document.getElementById(prefix + "-fallback-enabled")' in script
     assert "Auto Bangumi 提交成功" in script
     assert "clearSettingsAbSensitiveFields" in script
     assert "secret-token" not in script
