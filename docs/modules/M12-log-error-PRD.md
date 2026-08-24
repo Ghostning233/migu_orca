@@ -60,7 +60,7 @@ ErrorResult 独立于 Request。Stage 1 不通过 `FAILED` Request 表达流程�
 3. MiKan 搜索提前停止需要可诊断的“标记命中/安全 fallback”测试指标，但生产日志不得记录原始 HTML 或完整搜索 URL。
 4. 缓存清理失败不掩盖业务响应，也不得扩大删除范围重试。
 
-## 8. Stage 24 AutoBangumi 错误边界（规划）
+## 8. Stage 24 AutoBangumi 错误边界（已完成）
 
 1. 区分配置校验、认证失败、连接失败、超时、协议不兼容、筛选规则不可表达和写入失败；只返回稳定类别与必要安全状态码。
 2. base_url、username、password、token、Cookie、Authorization header、原始响应体和完整失败 URL不得进入错误 details、日志或 trace。

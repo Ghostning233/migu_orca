@@ -145,11 +145,11 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 
 不包含：正式番名/季数解析、最新播出集数抓取、流式封面代理、后台 worker 或部署向导。
 
-## 7. Stage 24: AutoBangumi 真实认证与订阅兼容闭环
+## 7. Stage 24: AutoBangumi 真实认证与订阅兼容闭环（已完成）
 
 目标：
 
-修复 Stage 20 真实 adapter 与 AutoBangumi 3.1.18 实机协议不兼容的问题：默认用服务地址、用户名和密码登录，通过 token Cookie 调用只读状态与 `/api/v1/rss/subscribe`；保留新版 API Token/Bearer 模式，增加连接测试并接通单个/批量队列。
+已修复 Stage 20 真实 adapter 与 AutoBangumi 3.1.18 的协议不兼容：默认用服务地址、用户名和密码登录，通过单次 token Cookie 调用只读状态与 `/api/v1/rss/subscribe`；保留新版 API Token/Bearer 兼容模式（无已证明写契约时 fail closed），并完成连接测试和单个/批量队列接通。
 
 执行 PRD：`docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
 
@@ -195,6 +195,6 @@ Stage 24 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.m
 3. Stage 21：用户偏好与智能推荐闭环（已完成）。
 4. Stage 22：Web UI 搜索工作台重构与真实候选闭环（已完成）。
 5. Stage 23：媒体缓存、MiKan 读取优化与批量审核体验（已完成）。
-6. Stage 24：AutoBangumi 真实认证与订阅兼容闭环（规划完成，待开发）。
+6. Stage 24：AutoBangumi 真实认证与订阅兼容闭环（已完成）。
 
-因此，Stage 19 到 Stage 23 的基础功能与媒体/读取/UI 收敛已经完成；Stage 24 优先补齐真实 AutoBangumi 闭环。之后不统计或预留阶段数量，按 backlog 优先级动态规划；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
+因此，Stage 19 到 Stage 24 的基础功能、媒体/读取/UI 收敛和真实 AutoBangumi 闭环已经完成。之后不统计或预留阶段数量，按 backlog 优先级动态规划；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。

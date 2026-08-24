@@ -48,6 +48,7 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 18 | 真实 MiKan 主流程、可编辑预览与 Seeds 优化 | 已接入 | `/index` 主生成区默认搜索真实 MiKan 候选；普通 UI 移除 `search_endpoint`、`timeout_seconds`、`query`；候选选择和直连 fallback 默认生成可编辑订阅草案（`preview-modify` dry-run + `preview-save`）；Seeds 改为有效、完整、排除顺序并按字幕组分组；fixture 入口放入底部「开发 / 离线测试」面板并默认收起 |
 | Stage 19 | 批量输入与订阅草案卡片工作台 | 已接入 | `/index` 批量工作区支持多行简称输入、AI 名称解析 seam、逐项 MiKan 候选搜索、订阅草案卡片网格、删除、展开、详情修改回流和单卡接受 |
 | Stage 20 | 批量接受、提交前队列与失败项重试 | 已接入 | `/index` 批量工作台提供单卡接受、勾选批量接受和全接受；`#batch-queue-panel` 展示提交前队列（中文状态、尝试次数、脱敏结果摘要）并提供显式 AB 提交；失败项可独立重试，成功项不显示重试 |
+| Stage 24 | AutoBangumi 真实认证与订阅兼容 | 已接入 | Settings 和批量队列默认使用账号密码/服务根地址，可切换 API Token；只读连接测试、3.1.18 Cookie submit、凭据清理与 Chromium 安全回归均已完成 |
 | Stage 21 | 偏好管理面板与批量卡片偏好/修正展示 | 已接入 | `/settings` 的 `#preference-settings-panel` 管理非敏感偏好（字幕组、筛选、命名、搜索增强开关），支持保存与显式恢复默认；批量卡片展示偏好命中摘要、需人工核对 chip、偏好与审核面板（偏好命中/警告/审核提示/当前默认配置）和搜索词来源面板（修正增强搜索词/原始搜索词） |
 | Stage 22 | 搜索工作台与真实候选闭环 | 已接入 | “创建订阅方案”提供单个/批量分段切换；两种结果迁入独立 `#search-results-panel`；统一候选卡、封面/占位、FOUND/EMPTY/FAILED、候选选择后草案动作和真实搜索反馈 |
 | Stage 23 | 媒体缓存与批量审核体验 | 已接入 | 候选封面使用同源异步缓存；批量候选为锚定按钮的单实例浮层；批量草案进入统一详情；卡片显示播出进度占位；禁用按钮使用静态反馈 |
@@ -92,10 +93,10 @@ Stage 20 UI 调整要求（Stage 20 已落地）：
 1. `/index` 批量工作台提供单卡接受、可勾选选择、批量接受和全接受入口；工具栏显示选中数量（`已选择 N 项`），FAILED、已删除、缺少候选等不可接受项目逐项显示中文原因。
 2. 批量接受成功后的卡片显示「已接受 / 待提交」，其他卡片状态保持不变；提交过程中接受按钮、复选框和删除按钮进入 loading/disabled 状态，失败后恢复可操作。
 3. `#batch-queue-panel` 展示队列项目标题、中文状态（待提交/提交中/提交成功/提交失败/可重试）、尝试次数、脱敏结果摘要和最后更新时间。
-4. 提交前表单包含 endpoint、token、fallback 选项和显式确认；提交中按钮禁用，批量响应结束后各项目状态独立刷新，成功项目不显示重试按钮；提交成功后清空 endpoint/token 输入，HTTP 级失败时保留输入以便重试。
+4. 提交前表单包含服务地址、认证方式、当前模式凭据、fallback 选项和显式确认；默认账号密码，可切换 API Token。提交中按钮禁用，批量响应结束后各项目状态独立刷新，成功项目不显示重试按钮；提交成功后清空服务地址和全部认证输入，HTTP 级失败时保留输入以便重试。
 5. 刷新页面后通过 URL `batch_id` 恢复队列状态（`syncBatchIdToUrl`/`batchIdFromLocation`），从持久化队列重新加载已记录的结果摘要。
 6. 单项重试按钮只出现在 FAILED/RETRYABLE 项目上；点击重试后使用最新保存的 `ACCEPTED` Request 重新提交，成功项永远不会显示重试按钮。
-7. endpoint、token 只存在于提交 POST body；不得写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot；页面和 API 不得展示 token、完整 endpoint、cookie、原始响应体、magnet、raw RSS XML 或本地绝对路径。
+7. 服务地址、username、password、token 只存在于当前提交 POST body；不得写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot；页面和 API 不得展示凭据、完整服务地址、Authorization、cookie、原始响应体、magnet、raw RSS XML 或本地绝对路径。
 
 Stage 21 UI 调整要求（Stage 21 已落地）：
 
@@ -132,7 +133,7 @@ Stage 23 UI 调整要求（已完成）：
 7. disabled/`aria-disabled=true` 控件使用静态视觉和普通/default 鼠标，hover 不显示 spinner/无限动画；只有真实 `aria-busy=true` 才显示 loading。
 8. 新浮层、详情和封面端点继续遵守敏感值过滤与真实 Chromium 回归要求。
 
-Stage 24 UI 调整要求（规划）：
+Stage 24 UI 调整要求（已完成）：
 
 1. Settings AutoBangumi 分区始终提供只读“测试连接”，不再要求先有 request_id；提交仍只对已接受 Request 展示并要求显式确认。
 2. 表单字段为服务地址和认证方式；默认账号密码模式显示用户名/密码，API Token 模式只显示 token，隐藏模式的敏感字段必须清空且不提交。

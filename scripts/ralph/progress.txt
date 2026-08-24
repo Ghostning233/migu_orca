@@ -90,3 +90,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - 认证模式既决定客户端凭据隔离，也决定订阅 body；仅替换 client 或 payload 之一会产生不可用的跨契约组合。
   - UI 默认认证模式改变后，测试旧 Token 场景必须先显式切换模式，避免向隐藏控件填值。
 ---
+
+## 2026-08-25 00:30:44 CST - US-180
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成 Stage 24 文档收尾：README、主 PRD、Future Stages、backlog、Stage PRD 与 M10/M12/M13/M14 已同步真实 AutoBangumi 3.1.18 认证、连接测试、submit 契约和完成状态。
+- 补充了不含凭据的手动只读验收说明；本轮未提供显式实例或凭据，因此没有进行实机烟雾，也没有调用任何真实订阅写接口。
+- Files changed: `README.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_future_stages.md`, `docs/backlog.md`, `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`, `docs/modules/M10-auto-bangumi-integration-PRD.md`, `docs/modules/M12-log-error-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `docs/modules/M14-system-config-PRD.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Stage closeout documentation must replace legacy endpoint/token wording in API examples and manual acceptance steps, not just update the current-stage status.
+  - AutoBangumi real-instance validation remains read-only unless a user explicitly confirms a write from the accepted-Request Web UI.
+  - Useful context: `uv run pytest -q`, `uv run pytest tests/browser/ -q`, `uv run python -m compileall -q src tests`, and `node --check src/apps/migu_orca_web/static/app.js` were run; Chromium uses fixture routes only.
+---

@@ -5,7 +5,7 @@
 | 字段 | 内容 |
 | --- | --- |
 | Stage | 24 |
-| 状态 | 规划完成，待开发 |
+| 状态 | 已完成（2026-08-25） |
 | 日期 | 2026-08-24 |
 | Ralph 分支 | `agent/stage24-autobangumi-compatibility` |
 | 主要模块 | M10、M12、M13、M14、Web API、浏览器测试 |
@@ -147,7 +147,7 @@ Settings 的 AutoBangumi 分区在没有 `request_id` 时也显示“测试连�
 
 让单个 submit、批量 submit/retry 统一使用新 adapter，保留 Stage 20 队列幂等和恢复语义。通过 fake 3.1.18 transport 完整验证登录 → submit，并证明单项失败不阻塞批量后续项。
 
-### US-180：Stage 24 文档、安全回归与实机只读验收
+### US-180：Stage 24 文档、安全回归与实机只读验收（已完成）
 
 同步项目文档，运行完整测试与真实 Chromium；提供不含真实凭据的手动验收说明。允许对显式提供的实例执行只读连接烟雾测试，但禁止自动创建订阅。
 
@@ -161,4 +161,10 @@ Settings 的 AutoBangumi 分区在没有 `request_id` 时也显示“测试连�
 6. 自动化不访问真实 AutoBangumi 写接口；实机只读烟雾不输出或持久化凭据。
 7. README、主 PRD、Future Stages、backlog、Stage 24 PRD 和 M10/M12/M13/M14 文档一致。
 
-Stage 24 完成标志：用户在 Settings 填写服务地址和默认账号密码即可先验证 AutoBangumi 连接，再对已接受 Request 显式提交；3.1.18 使用经过验证的 Cookie 与 RSS subscribe 契约，新版 token 模式具有明确能力边界；单个/批量队列保持幂等与脱敏，且任何凭据都不落盘。
+Stage 24 完成标志（已达成）：用户在 Settings 填写服务地址和默认账号密码即可先验证 AutoBangumi 连接，再对已接受 Request 显式提交；3.1.18 使用经过验证的 Cookie 与 RSS subscribe 契约，新版 token 模式具有明确能力边界；单个/批量队列保持幂等与脱敏，且任何凭据都不落盘。
+
+## 11. 手动只读验收
+
+仅当操作者显式提供自己的实例和凭据时，可在 `/settings#auto-bangumi` 选择认证模式并点击“测试连接”。确认摘要只显示连通性、公开版本、认证方式、adapter 和提交能力；不要记录、截图或复制服务地址、账号、密码、token、Cookie、Authorization 或原始响应。
+
+本阶段的 Ralph 与自动化只运行 fixture/Chromium 回归，不使用真实实例，也不会调用订阅写接口。真实订阅只能由用户在已接受 Request 上通过页面确认后自行执行。

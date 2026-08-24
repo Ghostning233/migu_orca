@@ -24,7 +24,7 @@
 | 13 | BL-015 | 用户偏好与智能推荐闭环 | 完成 (Stage 21, 2026-08-20) |
 | 14 | BL-016 | Web UI 搜索工作台重构与真实候选闭环 | 完成 (Stage 22, 2026-08-23) |
 | 15 | BL-017 | 媒体缓存、MiKan 读取优化与批量审核体验 | 完成 (Stage 23, 2026-08-24) |
-| 16 | BL-019 | AutoBangumi 真实认证与订阅兼容闭环 | 规划完成，待开发 (Stage 24) |
+| 16 | BL-019 | AutoBangumi 真实认证与订阅兼容闭环 | 完成 (Stage 24, 2026-08-25) |
 | 17 | BL-018 | 正式番名与季数解析 | 待规划 |
 | 18 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
@@ -328,7 +328,7 @@ Stage 21 handoff：在 Stage 19/20 批量草案基础上记录用户偏好（字
 - 偏好不隐式追踪用户观看行为或下载内容。
 - 不引入复杂账号体系，除非出现多人使用或远程部署需求。
 
-Stage 23 closeout：同源安全封面缓存、搜索结构感知提前停止、锚定候选浮层、统一草案详情、播出进度占位与禁用控件静态反馈均已完成并有安全/Chromium 回归。人工核验发现 AutoBangumi 真实 API 契约尚未跑通，因此 BL-019 以更高优先级进入 Stage 24。其他未开发事项只保留优先级，不再预绑定 Stage 编号。
+Stage 23 closeout：同源安全封面缓存、搜索结构感知提前停止、锚定候选浮层、统一草案详情、播出进度占位与禁用控件静态反馈均已完成并有安全/Chromium 回归。随后 BL-019 在 Stage 24 完成 AutoBangumi 3.1.18 账号密码/Cookie 与 RSS subscribe 兼容闭环，并保留 API Token fail-closed 边界。其他未开发事项只保留优先级，不再预绑定 Stage 编号。
 
 ### BL-016: Web UI 搜索工作台重构与真实候选闭环
 
@@ -383,16 +383,16 @@ Stage 23 closeout：同源安全封面缓存、搜索结构感知提前停止、
 
 ### BL-019: AutoBangumi 真实认证与订阅兼容闭环
 
-- 状态：规划完成，待开发 (Stage 24)
+- 状态：完成 (Stage 24, 2026-08-25)
 - 来源：2026-08-24 AutoBangumi 3.1.18 实机只读验证
 - 优先级：16
 - 执行 PRD：`docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`
 
 目标：
 
-- 默认使用服务地址、用户名和密码登录 AutoBangumi 3.1.18，以 token Cookie 调用只读与订阅接口。
-- 保留新版 API Token/Bearer 兼容模式，未知写契约 fail closed。
-- 增加只读连接测试，按真实 `/api/v1/rss/subscribe` 契约提交单个/批量已接受 Request。
+- 已默认使用服务地址、用户名和密码登录 AutoBangumi 3.1.18，以单次 token Cookie 调用只读与订阅接口。
+- 已保留新版 API Token/Bearer 兼容模式，未知写契约 fail closed。
+- 已增加只读连接测试，按真实 `/api/v1/rss/subscribe` 契约提交单个/批量已接受 Request。
 - 凭据保持 request-scoped；自动化与 Ralph 不对真实实例执行写操作。
 
 ### BL-018: 正式番名与季数解析

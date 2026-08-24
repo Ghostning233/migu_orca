@@ -32,17 +32,19 @@ Stage 3 已完成本模块的离线可测契约：AB 提交结果 envelope、Req
 | ab_config | object | 是 | AB 地址、认证和降级开关等系统配置 |
 | fallback_enabled | bool | 否 | 是否允许生成降级配置 |
 
-当前 AB config JSON 最小字段：
+当前 AutoBangumi 配置是 request-scoped 的双认证契约。默认账号密码模式：
 
 ```json
 {
-  "endpoint": "http://auto-bangumi.local",
-  "token": "replace-with-token",
+  "auth_mode": "password",
+  "base_url": "http://auto-bangumi.local",
+  "username": "replace-with-username",
+  "password": "replace-with-password",
   "fallback_enabled": true
 }
 ```
 
-`token` 不得出现在日志、错误 details、测试快照或文档示例的真实值中。
+兼容 API Token 模式使用 `auth_mode: "api_token"`、`base_url` 和 `token`；两组凭据互斥。`base_url` 只接受 HTTP(S) 服务根地址，adapter 自行拼接固定路径。用户名、密码、token、Cookie 和 Authorization 不得出现在日志、错误 details、测试快照或文档示例的真实值中。
 
 ## 4. 输出数据
 
@@ -94,11 +96,13 @@ uv run migu-orca "番剧名" --action accept --submit-ab --ab-config config/user
 
 ## 6. 已实现契约
 
-1. AB payload 内部字段为 `title`、`rss_url`、`save_path`、`filter_rule`。
-2. AB client 暴露 `create_subscription(payload)`。
-3. 所有 client 结果通过 `submit_ab_subscription(...)` 归一化为稳定 submit result envelope。
-4. AB 调用失败可在 `fallback_enabled=true` 时生成 JSON 可序列化的 `fallback_config`。
-5. 预期业务错误使用 `Stage1Error.as_dict()` 或兼容 ErrorResult 结构。
+1. 账号密码 adapter 以 form POST `/api/v1/auth/login` 登录，将返回 token 保持为单次 client Cookie；只读探测使用 `/api/v1/status`。
+2. AutoBangumi 3.1.18 payload 由已接受 Request 纯函数映射为 `{data: Bangumi, rss: RSSItem}`，`status=true` 即成功，外部订阅 ID 可为空；不可无损表达的筛选规则会明确拒绝。
+3. `api_token` adapter 仅用 Bearer 执行已验证的只读探测；在缺少逐版本写契约时 fail closed，绝不套用 3.1 payload。
+4. AB client 暴露 `create_subscription(payload)`。
+5. 所有 client 结果通过 `submit_ab_subscription(...)` 归一化为稳定 submit result envelope。
+6. AB 调用失败可在 `fallback_enabled=true` 时生成 JSON 可序列化的 `fallback_config`。
+7. 预期业务错误使用 `Stage1Error.as_dict()` 或兼容 ErrorResult 结构。
 
 ## 7. 待确认问题
 
@@ -119,9 +123,9 @@ Stage 12 已在独立 qBittorrent 边界中实现显式连接测试，用于验�
 
 如后续需要绕过 AB 直接调用 qBittorrent 启动下载或创建任务，应新增独立 Stage、独立验收标准和对应 Web UI 操作边界。
 
-## 9. Stage 24 真实兼容契约（规划）
+## 9. Stage 24 真实兼容契约（已完成）
 
-1. 现有 `endpoint + Bearer token + {title,rss_url,save_path,filter_rule}` 仅视为待替换的历史骨架，不是已验证真实契约。
+1. 旧 `endpoint + Bearer token + {title,rss_url,save_path,filter_rule}` 不再是有效提交契约。
 2. 默认 `password` adapter 接收服务根地址、用户名和密码：form 登录 `/api/v1/auth/login`，将返回 token 作为单次会话 Cookie，3.1.18 只读探测使用 `/api/v1/status`。
 3. 3.1.18 写入使用 `/api/v1/rss/subscribe` 与 `{data: Bangumi, rss: RSSItem}`；`status=true` 表示成功，外部订阅 ID 可为空。
 4. `api_token` adapter 使用 Bearer Header，但只有明确版本/契约证明后才允许写入；未知版本只能报告连接能力，不能猜测 payload。

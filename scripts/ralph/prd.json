@@ -132,7 +132,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "实机凭据不得写进 progress、文档、测试或脚本。"
     }
   ]

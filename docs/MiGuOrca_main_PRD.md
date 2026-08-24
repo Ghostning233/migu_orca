@@ -8,7 +8,7 @@
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
 | 当前版本 | v0.22 |
-| 文档状态 | Stage 23 已完成；Stage 24 AutoBangumi 真实认证与订阅兼容闭环已规划、待开发 |
+| 文档状态 | Stage 24 AutoBangumi 真实认证与订阅兼容闭环已完成 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -81,7 +81,7 @@ Stage 22 已完成。单个与批量搜索继续复用 `_search_mikan_candidates
 
 Stage 23 已完成。MiKan 封面现经服务端安全同源缓存异步加载，搜索 transport 以结构感知提前停止，批量候选/草案布局、剧集摘要和禁用按钮反馈均已收敛。
 
-Stage 24 已完成规划、待开发。实机只读验证确认 AutoBangumi 3.1.18 使用账号密码登录、token Cookie、`/api/v1/rss/subscribe` 和 `status` 成功响应，与现有 Bearer、自定义 payload 和强制订阅 ID 假设不兼容。本阶段默认接入账号密码认证，保留新版 API Token/Bearer 能力边界，增加只读连接测试，并让单个/批量队列复用真实 adapter。执行 PRD 见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。其他未开发事项只按 backlog 优先级排序，不预绑定 Stage 编号。
+Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 token Cookie、`/api/v1/status` 与 `/api/v1/rss/subscribe` 的 `{data, rss}` 契约，成功以 `status=true` 判断且订阅 ID 可为空；Settings 提供 request-scoped 只读连接测试，单个/批量队列复用同一 adapter/payload/result seam。API Token/Bearer 模式维持兼容但无已证明写契约时 fail closed。执行 PRD 见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。其他未开发事项只按 backlog 优先级排序，不预绑定 Stage 编号。
 
 ## 4. 第一阶段范围
 
@@ -167,11 +167,11 @@ Stage 24 已完成规划、待开发。实机只读验证确认 AutoBangumi 3.1.
 | M07 | 文件夹命名模块 | Stage 1 已确认 | P1 | docs/modules/M07-folder-naming-PRD.md |
 | M08 | 用户偏好与规则配置模块 | Stage 21 已实现非敏感偏好契约与存储（字幕组/筛选/命名/搜索修正）、偏好 Web API、偏好 Web UI 和批量草案偏好应用；偏好与修正存储只保存非敏感字段 | P1 | docs/modules/M08-user-preference-rule-PRD.md |
 | M09 | Request 确认交互模块 | Stage 2 已实现 | P2 | docs/modules/M09-request-confirmation-PRD.md |
-| M10 | Auto Bangumi 集成模块 | Stage 4/20 已建立 adapter 与队列骨架；Stage 24 将按 3.1.18 实机契约修复账号密码/Cookie、真实 subscribe payload/response，并保留 Bearer 兼容模式 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
+| M10 | Auto Bangumi 集成模块 | Stage 24 已按 3.1.18 契约实现账号密码/Cookie、真实 subscribe payload/response，并保留 fail-closed Bearer 兼容模式 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 已实现 path-safe 封面缓存、滑动 TTL 与机会式清理 | P2 | docs/modules/M11-storage-state-PRD.md |
-| M12 | 日志与错误处理模块 | Stage 23 已约束媒体错误；Stage 24 将增加 AB 认证、连接、协议兼容与规则转换的脱敏分类 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 18～23 已完成搜索与审核工作台；Stage 24 将重构 AB 账号密码/API Token、连接测试和单批量提交界面 | P2 | docs/modules/M13-web-ui-PRD.md |
-| M14 | 系统配置模块 | Stage 12 已支持显式外部配置边界；Stage 24 将定义 request-scoped AB 双认证配置 | P1 | docs/modules/M14-system-config-PRD.md |
+| M12 | 日志与错误处理模块 | Stage 24 已覆盖 AB 认证、连接、协议兼容与规则转换的脱敏分类 | P1 | docs/modules/M12-log-error-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 24 已完成 AB 账号密码/API Token、连接测试和单批量提交界面 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M14 | 系统配置模块 | Stage 24 已定义 request-scoped AB 双认证配置 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
 
@@ -228,7 +228,7 @@ M00 CLI 与流程编排
 | 第二十一阶段 | 用户偏好、字幕组偏好和搜索词增强闭环（已完成） | M08、M03、M05、M13 |
 | 第二十二阶段 | Web UI 搜索工作台重构与真实候选闭环（已完成） | M13、M00、M02、M03、测试基础设施 |
 | 第二十三阶段 | 媒体缓存、MiKan 读取优化与批量审核体验（已完成） | M03、M11、M12、M13、测试基础设施 |
-| 第二十四阶段 | AutoBangumi 真实认证与订阅兼容闭环（规划完成，待开发） | M10、M12、M13、M14、测试基础设施 |
+| 第二十四阶段 | AutoBangumi 真实认证与订阅兼容闭环（已完成） | M10、M12、M13、M14、测试基础设施 |
 
 Stage 24 之后不预留阶段编号；从 backlog 中按当时优先级选择并单独规划。
 
@@ -277,8 +277,7 @@ Stage 24 之后不预留阶段编号；从 backlog 中按当时优先级选择�
 
 ## 13. 下一步工作
 
-1. Stage 24 AutoBangumi 真实认证与订阅兼容闭环：默认账号密码登录兼容 3.1.18，保留 API Token/Bearer，增加只读连接测试并接通真实单个/批量提交。执行 PRD 见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
-2. 正式番名与季数解析、部署/配置向导和流式封面代理等未开发事项只在 `docs/backlog.md` / `docs/optional_features.md` 按优先级维护，不提前绑定 Stage 编号。
+1. 正式番名与季数解析、部署/配置向导和流式封面代理等未开发事项只在 `docs/backlog.md` / `docs/optional_features.md` 按优先级维护，不提前绑定 Stage 编号。
 4. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 5. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
 6. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析、可编辑预览、偏好/修正存储和批量提交前队列不得把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
