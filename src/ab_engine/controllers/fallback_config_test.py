@@ -72,3 +72,31 @@ def test_build_ab_fallback_config_does_not_retain_mutable_objects() -> None:
         "must_not_contain": "SP",
     }
     assert fallback_config["failure_reason"]["details"] == {"attempt": 1}
+
+
+def test_build_ab_fallback_config_supports_the_password_mode_legacy_31_body() -> None:
+    fallback_config = build_ab_fallback_config(
+        {
+            "data": {
+                "official_title": "番剧 标准标题",
+                "rss_link": "https://example.invalid/rss.xml",
+                "save_path": "番剧 标准标题",
+                "filter": "SP",
+            },
+            "rss": {"url": "https://example.invalid/rss.xml"},
+        },
+        Stage1Error("ab_submit_failed", "Auto Bangumi 提交失败", "create_ab_subscription"),
+    )
+
+    assert fallback_config == {
+        "title": "番剧 标准标题",
+        "rss_url": "https://example.invalid/rss.xml",
+        "save_path": "番剧 标准标题",
+        "filter_rule": {"legacy_31_filter": "SP"},
+        "failure_reason": {
+            "error_type": "ab_submit_failed",
+            "error_message": "Auto Bangumi 提交失败",
+            "failed_step": "create_ab_subscription",
+            "details": {},
+        },
+    }

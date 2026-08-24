@@ -895,7 +895,7 @@ def test_apply_ab_submit_action_attaches_success_result_to_accepted_request(
 def test_apply_ab_submit_action_outputs_fallback_config_for_ab_failure(
     tmp_path: Path,
 ) -> None:
-    config = _ab_config(tmp_path, fallback_enabled=True)
+    config = _ab_config(tmp_path, fallback_enabled=True, password_mode=True)
     client = FakeAutoBangumiClient(
         error=Stage1Error(
             "ab_submit_failed",
@@ -923,6 +923,7 @@ def test_apply_ab_submit_action_outputs_fallback_config_for_ab_failure(
     assert ab_submit_result["fallback_config"]["title"] == "葬送的芙莉莲"
     assert ab_submit_result["fallback_config"]["rss_url"]
     assert ab_submit_result["fallback_config"]["save_path"] == "葬送的芙莉莲"
+    assert ab_submit_result["fallback_config"]["filter_rule"] == {"legacy_31_filter": "(?!)"}
     assert (
         ab_submit_result["fallback_config"]["failure_reason"]
         == ab_submit_result["error"]
@@ -1253,14 +1254,24 @@ def test_all_filtered_out_still_returns_request_without_selection(
     assert confirmable["warnings"]
 
 
-def _ab_config(tmp_path: Path, *, fallback_enabled: bool) -> Path:
+def _ab_config(
+    tmp_path: Path, *, fallback_enabled: bool, password_mode: bool = False
+) -> Path:
+    auth = (
+        {
+            "auth_mode": "password",
+            "username": "private-user",
+            "password": "private-password",
+        }
+        if password_mode
+        else {"auth_mode": "api_token", "token": "secret-token"}
+    )
     path = tmp_path / "ab-config.json"
     path.write_text(
         json.dumps(
             {
                 "base_url": "http://auto-bangumi.local",
-                "auth_mode": "api_token",
-                "token": "secret-token",
+                **auth,
                 "fallback_enabled": fallback_enabled,
             }
         ),

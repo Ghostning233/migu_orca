@@ -17,6 +17,7 @@ Started: 2026-08-24 09:30:00 CST
 - 未开发工作统一在 backlog 按优先级排序，不提前绑定 Stage 编号；当前 Stage 完成后再选择最高优先级事项规划下一 Stage。
 - AutoBangumi 3.1 的订阅成功以响应 `status: true` 为准，订阅 ID 可以为空；3.1 的 `data`/`rss` body 应由纯 Request mapper 构造，filter 必须转换为等价正则或明确拒绝。
 - 所有 AutoBangumi 写入口必须经由同一 auth-mode dispatch，同时选择对应的 adapter 与 payload：password → legacy 3.1 Cookie + `{data,rss}`，api_token → Token compatibility adapter + fail-closed 写入。
+- AutoBangumi 3.1 的 `filter` 是 `re.search` 命中即排除：将 MiGuOrca 的 `must_contain`（全部命中才接受）编码为“任一未命中”分支，将 `must_not_contain`（任一命中即排除）编码为命中分支并用 OR 合并；空规则使用永不匹配的 `(?!)`。
 
 ## 2026-08-24 22:42:00 CST - US-173
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -100,4 +101,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Stage closeout documentation must replace legacy endpoint/token wording in API examples and manual acceptance steps, not just update the current-stage status.
   - AutoBangumi real-instance validation remains read-only unless a user explicitly confirms a write from the accepted-Request Web UI.
   - Useful context: `uv run pytest -q`, `uv run pytest tests/browser/ -q`, `uv run python -m compileall -q src tests`, and `node --check src/apps/migu_orca_web/static/app.js` were run; Chromium uses fixture routes only.
+---
+
+## 2026-08-25 02:10:16 CST - US-175
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 根据复审结论修正 AutoBangumi 3.1.18 payload：filter 现在准确表达 MiGuOrca 的包含/排除、regex 与大小写语义；空规则使用 `(?!)`，非法正则稳定返回 `ab_filter_unsupported`。
+- `data` 现在映射已确认字幕组、可证明季数及可用的公开元数据；password 模式 fallback 从 `{data,rss}` 恢复稳定的 `title`、`rss_url`、`save_path` 与 `filter_rule`，不携带连接凭据或服务地址。
+- Files changed: `src/ab_engine/controllers/subscription_payload.py`, `src/ab_engine/controllers/fallback_config.py`, corresponding AutoBangumi, single-submit and batch-submit tests, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - AutoBangumi 3.1 的 filter 是排除表达式；不能沿用 MiGuOrca 的“包含即接受”正向正则。
+  - password-mode fallback 必须从 legacy `{data,rss}` 合同还原公开手工字段，不能退回旧的自定义请求 body。
+  - Useful context: `uv run python -m compileall -q src tests`、focused pytest（133 passed）和 `uv run pytest -q -m 'not browser'`（859 passed, 260 deselected）已通过；真实 Chromium 的 `test_a11y.py`（14 passed）已运行，整套 browser 调用受执行环境约 30 秒截断，需在无该限制的 CI/本地完成全套确认。
 ---

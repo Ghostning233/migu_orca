@@ -49,7 +49,7 @@
       ],
       "priority": 3,
       "passes": true,
-      "notes": "不复用旧 title/rss_url/filter_rule 自定义 body。"
+      "notes": "审查纠正（必须单独提交）：AutoBangumi 3.1.18 的 filter 是 re.search 命中即排除。must_contain 应生成不满足即命中的排除式，must_not_contain 应生成满足即命中的排除式，两者合并为 OR；空规则必须是永不匹配 (?!)；保留 regex/case 语义，非法或不可等价表达必须 ab_filter_unsupported。补充可执行行为测试。data 必须映射已确认且可证明的 season、selected_subtitle_group 到 group_name，并在可靠时映射 season_raw/dpi/source/subtitle；不能证明的非第一季 fail closed，禁止静默 season=1。单个/批量/retry 复用同 mapper。password {data,rss} 的 fallback 也须映射完整的稳定内部字段 title/rss_url/save_path/filter_rule，且排除所有凭据/服务地址/响应。添加单个和批量 password fallback 测试；不复用旧 title/rss_url/filter_rule 自定义 body。"
     },
     {
       "id": "US-176",
@@ -98,8 +98,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": "UI 使用用户可理解的中文文案。"
+      "passes": false,
+      "notes": "审查纠正（必须单独提交）：修复 tests/browser/test_ui_quality.py::test_stage20_batch_retry_does_not_leak_sensitive_values。该用例若走 API Token，必须先显式切换认证方式再填写服务地址与 token；也可改用默认账号密码，但必须保留批量失败、单项 retry、成功后清空敏感字段和 request-scoped/脱敏断言。禁止 skip/xfail/放宽断言/无意义超时。使用 Playwright route/mock 隔离外部 AutoBangumi，并以真实 Chromium 验证；UI 使用用户可理解的中文文案。"
     },
     {
       "id": "US-179",
@@ -132,8 +132,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "实机凭据不得写进 progress、文档、测试或脚本。"
+      "passes": false,
+      "notes": "审查纠正（必须单独提交）：此前“测试通过”记录已被复审推翻。仅在 US-175 与 US-178 完成后，追加 progress（不得删除旧记录）说明复审结论、实际修复及精确测试结果；同步必要的 Stage 24/M10 文档。执行 compileall、node --check、pytest -m not browser、真实 Chromium、full pytest、diff/status/log；不做真实 AutoBangumi 写操作。实机凭据不得写进 progress、文档、测试或脚本。"
     }
   ]
 }

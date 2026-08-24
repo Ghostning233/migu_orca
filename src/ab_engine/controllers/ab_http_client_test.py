@@ -45,7 +45,7 @@ def _password_config() -> AutoBangumiConfig:
 def _legacy_payload() -> dict[str, Any]:
     request = accept_request(build_pending_request(
         EntryRequest("番剧"), MatchedBangumi("番剧", [], "https://example.invalid/bangumi", 1.0), [],
-        SubtitleGroupSelection("Loli", "https://example.invalid/rss.xml", []), FilterRule(must_contain="1080p"), "番剧",
+        SubtitleGroupSelection("Loli", "https://example.invalid/rss.xml", []), FilterRule(must_not_contain="SP"), "番剧",
     ))
     return build_legacy_31_subscription_payload(request)
 
