@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, redirect, render_template, url_for
+from flask import Blueprint, Response, redirect, render_template, url_for
 from pydantic import BaseModel, Field, field_validator
 
 from extensions.flask_api import class_route
@@ -70,6 +70,7 @@ from mikan_engine.controllers.mikan_candidate_recommendation import (
 )
 from mikan_engine.controllers.mikan_client import MikanCandidate
 from mikan_engine.controllers.mikan_config import MikanConfig, default_mikan_config
+from mikan_engine.controllers.mikan_poster_service import MikanPosterService
 from qbittorrent_engine.controllers.qbittorrent_controller import (
     test_qbittorrent_connection,
 )
@@ -110,6 +111,7 @@ from storage_engine.controllers.queue_repository import (
 from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
 
 api_blueprint = Blueprint("migu_orca_web_api", __name__)
+poster_service = MikanPosterService()
 web_blueprint = Blueprint(
     "migu_orca_web",
     __name__,
@@ -559,11 +561,16 @@ def _optional_error(error: Stage1Error) -> dict[str, object]:
 
 
 def _serialize_candidate(candidate: MikanCandidate, query: str) -> dict[str, object]:
-    return {
+    poster_key = poster_service.register(candidate.poster_url)
+    serialized: dict[str, object] = {
         "bangumi_id": candidate.bangumi_id,
         "title": candidate.title,
         "mikan_url": candidate.mikan_url,
-        "poster_url": candidate.poster_url,
+        "poster_url": (
+            url_for("migu_orca_web_api.mikan_poster", key=poster_key)
+            if poster_key is not None
+            else None
+        ),
         "source_query": candidate.source_query,
         "aliases": list(candidate.aliases),
         # Display-only recommendation label derived from the search query and
@@ -575,6 +582,9 @@ def _serialize_candidate(candidate: MikanCandidate, query: str) -> dict[str, obj
             candidate.aliases,
         ),
     }
+    if candidate.total_episodes is not None:
+        serialized["total_episodes"] = candidate.total_episodes
+    return serialized
 
 
 def _search_mikan_candidates(
@@ -1195,6 +1205,13 @@ class MikanCandidateSearchView(PostView):
             "query": payload.query,
             "candidates": candidates,
         }
+
+
+@api_blueprint.get("/api/v1/mikan/posters/<key>")
+def mikan_poster(key: str) -> Response:
+    """Serve only a prior parser-registered poster under an opaque key."""
+    path, content_type = poster_service.get(key)
+    return Response(path.read_bytes(), content_type=content_type, headers={"Cache-Control": "private, max-age=86400"})
 
 
 @class_route(api_blueprint, "/api/v1/preferences", methods=["GET"])

@@ -101,7 +101,7 @@ class TestCandidateSearchStates:
                     "bangumi_id": "2353",
                     "title": "葬送的芙莉莲",
                     "mikan_url": "https://mikan.example/Home/Bangumi/2353",
-                    "poster_url": "https://mikan.example/assets/cover/2353.jpg",
+                    "poster_url": "/api/v1/mikan/posters/" + "a" * 64,
                     "source_query": "芙莉莲",
                     "aliases": ["Frieren EN"],
                 },
@@ -121,7 +121,7 @@ class TestCandidateSearchStates:
 
         page.route("**/api/v1/mikan/candidates", _fulfill)
         page.route(
-            "**/assets/cover/2353.jpg",
+            "**/api/v1/mikan/posters/*",
             lambda route: route.fulfill(
                 status=200,
                 content_type="image/gif",
@@ -142,14 +142,120 @@ class TestCandidateSearchStates:
         expect(
             page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
         ).to_have_attribute(
-            "src", "https://mikan.example/assets/cover/2353.jpg"
+            "src", "/api/v1/mikan/posters/" + "a" * 64
         )
+        expect(
+            page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
+        ).to_have_attribute("loading", "lazy")
+        expect(
+            page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
+        ).to_have_attribute("decoding", "async")
         expect(
             page.locator(".candidate-card").nth(1).locator("img.candidate-poster")
         ).to_have_count(0)
 
         # The query input is preserved after a successful search.
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
+
+    def test_candidate_cards_show_explicit_or_unknown_episode_progress(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        body = _candidate_result_json(
+            "芙莉莲",
+            [
+                {
+                    "bangumi_id": "2353",
+                    "title": "葬送的芙莉莲",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+                    "poster_url": None,
+                    "total_episodes": 28,
+                    "source_query": "芙莉莲",
+                    "aliases": [],
+                },
+                {
+                    "bangumi_id": "3072",
+                    "title": "未知总集数",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/3072",
+                    "poster_url": None,
+                    "source_query": "芙莉莲",
+                    "aliases": [],
+                },
+                {
+                    "bangumi_id": "3073",
+                    "title": "异常总集数",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/3073",
+                    "poster_url": None,
+                    "total_episodes": "invalid",
+                    "source_query": "芙莉莲",
+                    "aliases": [],
+                },
+            ],
+        )
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(status=200, content_type="application/json", body=body),
+        )
+        set_storage_preferences(page, storage_dir, save_request=False)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+
+        cards = page.locator(".candidate-card")
+        expect(cards.nth(0)).to_contain_text("播出进度：待开发 / 28 集")
+        expect(cards.nth(1)).to_contain_text("播出进度：待开发 / 未知")
+        expect(cards.nth(2)).to_contain_text("播出进度：待开发 / 未知")
+
+    def test_same_origin_poster_failure_and_extra_candidate_fields_stay_safe(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """A failed opaque poster must not expose or block the candidate workspace."""
+        raw_poster_url = "https://images.example/private/poster.jpg?token=poster-secret"
+        cache_path = "/srv/migu-orca/.migu_orca/mikan_posters_v1/secret.img"
+        body = _candidate_result_json(
+            "安全封面",
+            [
+                {
+                    "bangumi_id": "2353",
+                    "title": "安全封面测试",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+                    "poster_url": "/api/v1/mikan/posters/" + "b" * 64,
+                    "source_query": "安全封面",
+                    "aliases": [],
+                    # These are intentionally ignored by the public renderer.
+                    "raw_poster_url": raw_poster_url,
+                    "cache_path": cache_path,
+                    "raw_response_body": "poster response body",
+                }
+            ],
+        )
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200, content_type="application/json", body=body
+            ),
+        )
+        poster_requests: list[str] = []
+
+        def _fail_poster(route: Any, request: Any) -> None:
+            poster_requests.append(request.url)
+            route.fulfill(status=404, content_type="application/json", body="{}")
+
+        page.route("**/api/v1/mikan/posters/*", _fail_poster)
+
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="安全封面")
+        page.click("#mikan-candidate-search-submit")
+
+        card = page.locator(".candidate-card")
+        expect(card).to_contain_text("安全封面测试")
+        expect(card.locator("button:has-text('选择此合集')")).to_be_enabled()
+        expect(card.locator(".candidate-poster-placeholder")).to_be_visible()
+        body_text = page.locator("body").inner_text()
+        for sensitive_value in (raw_poster_url, cache_path, "poster response body"):
+            assert sensitive_value not in body_text
+        assert poster_requests == [
+            f"{live_server_url}/api/v1/mikan/posters/" + "b" * 64
+        ]
 
     def test_candidate_search_loading_names_query_and_locks_search_workspace(
         self, page: Page, live_server_url: str

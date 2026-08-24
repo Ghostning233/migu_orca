@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
+import re
+from codecs import getincrementaldecoder
 from time import monotonic
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -53,6 +55,7 @@ class MikanBangumiDetail:
     poster_url: str | None
     bangumi_rss_url: str | None
     subgroups: list[MikanSubgroupDetail]
+    total_episodes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +73,7 @@ class MikanCandidate:
     mikan_url: str
     source_query: str
     poster_url: str | None = None
+    total_episodes: int | None = None
     aliases: list[str] = field(default_factory=list)
 
 
@@ -84,6 +88,28 @@ class UrlopenMikanTransport:
     """urllib-backed transport for real MiKanProject page reads."""
 
     def get_text(self, url: str, *, timeout: float) -> str:
+        return self._get_text(url, timeout=timeout)
+
+    def get_search_text(self, url: str, *, timeout: float) -> str:
+        """Read a search page until its complete candidate region when possible.
+
+        MiKan search pages append potentially large episode tables after the
+        related-candidate section.  The detector is deliberately conservative:
+        it only stops after seeing a candidate link and the matching section
+        close tag.  Missing or malformed markers therefore retain the normal
+        bounded full-read behavior.
+        """
+
+        detector = _MikanCandidateSectionDetector()
+        return self._get_text(url, timeout=timeout, stop_detector=detector)
+
+    def _get_text(
+        self,
+        url: str,
+        *,
+        timeout: float,
+        stop_detector: "_MikanCandidateSectionDetector | None" = None,
+    ) -> str:
         started_at = monotonic()
         max_deadline = started_at + MAX_MIKAN_STREAM_SECONDS
         deadline = min(started_at + timeout, max_deadline)
@@ -123,11 +149,56 @@ class UrlopenMikanTransport:
                 total += len(chunk)
                 if total > MAX_MIKAN_RESPONSE_BYTES:
                     raise MikanResponseTooLargeError
+                if stop_detector is not None and stop_detector.feed(chunk):
+                    break
                 deadline = min(monotonic() + timeout, max_deadline)
             body = b"".join(chunks)
         if len(body) > MAX_MIKAN_RESPONSE_BYTES:
             raise MikanResponseTooLargeError
         return body.decode("utf-8")
+
+
+class _MikanCandidateSectionDetector(HTMLParser):
+    """Incrementally recognize a complete ``related-recommendations`` section.
+
+    HTMLParser retains incomplete tags across ``feed`` calls, while the
+    incremental decoder retains partial UTF-8 code points.  This makes the
+    early-stop boundary safe when either HTML markers or Chinese text cross a
+    network chunk boundary.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._decoder = getincrementaldecoder("utf-8")("strict")
+        self._section_depth = 0
+        self._saw_candidate = False
+        self.complete = False
+
+    def feed(self, chunk: bytes) -> bool:  # type: ignore[override]
+        if self.complete:
+            return True
+        super().feed(self._decoder.decode(chunk))
+        return self.complete
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_name = tag.lower()
+        attr_map = {name.lower(): value for name, value in attrs if value is not None}
+        if self._section_depth == 0:
+            classes = set(attr_map.get("class", "").split())
+            if tag_name == "section" and "related-recommendations" in classes:
+                self._section_depth = 1
+            return
+        if tag_name == "section":
+            self._section_depth += 1
+        elif tag_name == "a" and _extract_bangumi_id(attr_map.get("href", "")) is not None:
+            self._saw_candidate = True
+
+    def handle_endtag(self, tag: str) -> None:
+        if self._section_depth == 0 or tag.lower() != "section":
+            return
+        self._section_depth -= 1
+        if self._section_depth == 0 and self._saw_candidate:
+            self.complete = True
 
 
 def _set_response_timeout(response: object, timeout: float) -> None:
@@ -179,11 +250,8 @@ class MikanClient:
             self._config.search_endpoint,
             normalized_title,
         )
-        html = _read_mikan_text(
-            self._transport,
-            search_url,
-            timeout=self._config.timeout_seconds,
-            failed_step="mikan_search",
+        html = _read_mikan_search_text(
+            self._transport, search_url, timeout=self._config.timeout_seconds
         )
         return _parse_search_candidates(html, self._config.search_endpoint)
 
@@ -202,11 +270,8 @@ class MikanClient:
             self._config.search_endpoint,
             normalized_title,
         )
-        html = _read_mikan_text(
-            self._transport,
-            search_url,
-            timeout=self._config.timeout_seconds,
-            failed_step="mikan_search",
+        html = _read_mikan_search_text(
+            self._transport, search_url, timeout=self._config.timeout_seconds
         )
         return _parse_candidate_cards(
             html,
@@ -396,6 +461,30 @@ def _read_mikan_text(
         raise _sanitize_mikan_stage_error(exc, failed_step) from exc
 
 
+def _read_mikan_search_text(
+    transport: MikanTransport,
+    url: str,
+    *,
+    timeout: float,
+) -> str:
+    """Use candidate-aware streaming when the transport provides it.
+
+    Test and integration transports only promise ``get_text``; retaining that
+    fallback keeps the transport seam backwards-compatible and bounded.
+    """
+
+    get_search_text = getattr(transport, "get_search_text", None)
+    if callable(get_search_text):
+        class _SearchTransport:
+            def get_text(self, request_url: str, *, timeout: float) -> str:
+                return get_search_text(request_url, timeout=timeout)
+
+        return _read_mikan_text(
+            _SearchTransport(), url, timeout=timeout, failed_step="mikan_search"
+        )
+    return _read_mikan_text(transport, url, timeout=timeout, failed_step="mikan_search")
+
+
 def _sanitize_mikan_stage_error(error: Stage1Error, failed_step: str) -> Stage1Error:
     if error.error_type == "mikan_http_failed":
         status_code = error.details.get("status_code")
@@ -579,6 +668,35 @@ def _parse_bangumi_detail(html: str, bangumi_url: str) -> MikanBangumiDetail:
     return detail
 
 
+_TOTAL_EPISODE_ATTRS = frozenset(
+    {"data-total-episodes", "data-total-episode", "data-episodes-total"}
+)
+_TOTAL_EPISODE_TEXT = re.compile(
+    r"(?:总集数|共|全)\s*[：:]?\s*([1-9]\d{0,3})\s*集"
+)
+
+
+def _validated_total_episodes(value: str | None) -> int | None:
+    """Return an explicitly supplied public total, never an inferred count."""
+    if value is None or not re.fullmatch(r"[1-9]\d{0,3}", value.strip()):
+        return None
+    return int(value)
+
+
+def _total_episodes_from_attrs(attrs: dict[str, str]) -> int | None:
+    for name in _TOTAL_EPISODE_ATTRS:
+        total = _validated_total_episodes(attrs.get(name))
+        if total is not None:
+            return total
+    return None
+
+
+def _total_episodes_from_public_text(text: str) -> int | None:
+    """Read only an explicit labelled total from visible candidate metadata."""
+    match = _TOTAL_EPISODE_TEXT.search(" ".join(text.split()))
+    return _validated_total_episodes(match.group(1)) if match is not None else None
+
+
 class _MikanSearchParser(HTMLParser):
     def __init__(self, search_endpoint: str) -> None:
         super().__init__(convert_charrefs=True)
@@ -691,12 +809,16 @@ class _MikanCandidatePageParser(HTMLParser):
             if self._card_depth == 0:
                 self._current_card = _MikanCandidateCard()
             self._card_depth += 1
+        if self._current_card is not None and self._current_card.total_episodes is None:
+            self._current_card.total_episodes = _total_episodes_from_attrs(attr_map)
         if tag_name not in _HTML_VOID_ELEMENTS:
             self._tag_stack.append((tag_name, is_container))
 
     def handle_data(self, data: str) -> None:
         if self._active_href is not None:
             self._active_text.append(data)
+        if self._current_card is not None and self._card_depth > 0:
+            self._current_card.metadata_text.append(data)
 
     def handle_endtag(self, tag: str) -> None:
         tag_name = tag.lower()
@@ -754,6 +876,11 @@ class _MikanCandidatePageParser(HTMLParser):
                     title=canonical_title,
                     mikan_url=card.href,
                     poster_url=card.poster_url,
+                    total_episodes=(
+                        card.total_episodes
+                        if card.total_episodes is not None
+                        else _total_episodes_from_public_text(" ".join(card.metadata_text))
+                    ),
                     source_query=self._source_query,
                     aliases=aliases,
                 )
@@ -768,6 +895,8 @@ class _MikanCandidateCard:
         self.title: str | None = None
         self.title_attr: str | None = None
         self.poster_url: str | None = None
+        self.total_episodes: int | None = None
+        self.metadata_text: list[str] = []
 
 
 class _MikanBangumiPageParser(HTMLParser):
@@ -794,6 +923,7 @@ class _MikanBangumiPageParser(HTMLParser):
         self._broadcast_depth = 0
         self._broadcast_parts: list[str] = []
         self._poster_url: str | None = None
+        self._total_episodes: int | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag_name = tag.lower()
@@ -812,6 +942,8 @@ class _MikanBangumiPageParser(HTMLParser):
                 self._current_row = _MikanPageRow()
 
         attr_map = {name.lower(): value for name, value in attrs if value is not None}
+        if self._total_episodes is None:
+            self._total_episodes = _total_episodes_from_attrs(attr_map)
         classes = set(attr_map.get("class", "").split())
         if "bangumi-title" in classes:
             self._title_depth = 1
@@ -963,6 +1095,7 @@ class _MikanBangumiPageParser(HTMLParser):
             poster_url=self._poster_url,
             bangumi_rss_url=bangumi_rss_url,
             subgroups=subgroups,
+            total_episodes=self._total_episodes,
         )
 
     def _bangumi_rss_url(self) -> str | None:

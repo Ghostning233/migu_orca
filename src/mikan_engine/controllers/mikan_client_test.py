@@ -13,6 +13,7 @@ from mikan_engine.controllers.mikan_client import (
     MikanPartialResponseError,
     _MikanBangumiPageParser,
     _MikanCandidatePageParser,
+    _parse_candidate_cards,
     UrlopenMikanTransport,
     create_mikan_client,
 )
@@ -403,6 +404,80 @@ def test_mikan_urlopen_transport_prefers_read1_for_streaming_response(
     assert text == "partial"
     assert response.read1_calls == 2
     assert response.read_calls == 0
+
+
+def test_mikan_search_transport_stops_after_complete_candidate_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The de-identified large fixture models episode data after candidates."""
+    fixture = _read_fixture("mikan_search_large_response.html").encode("utf-8")
+    full_response = _FakeUrlopenResponse(fixture)
+    early_response = _ChunkedFakeUrlopenResponse(
+        [fixture[index : index + 37] for index in range(0, len(fixture), 37)]
+    )
+
+    def fake_urlopen_full(request: object, *, timeout: float) -> _FakeUrlopenResponse:
+        return full_response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen_full)
+    full_html = UrlopenMikanTransport().get_text(
+        "https://mikan.example/Home/Search", timeout=15
+    )
+
+    def fake_urlopen_early(
+        request: object, *, timeout: float
+    ) -> _ChunkedFakeUrlopenResponse:
+        return early_response
+
+    monkeypatch.setattr(mikan_client_module, "urlopen", fake_urlopen_early)
+    early_html = UrlopenMikanTransport().get_search_text(
+        "https://mikan.example/Home/Search", timeout=15
+    )
+
+    assert len(early_html.encode("utf-8")) < len(full_html.encode("utf-8")) // 4
+    assert _parse_candidate_cards(
+        early_html, "https://mikan.example/Home/Search", "fixture"
+    ) == _parse_candidate_cards(
+        full_html, "https://mikan.example/Home/Search", "fixture"
+    )
+
+
+def test_mikan_search_transport_handles_utf8_and_marker_across_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = (
+        '<section class="related-recommendations"><a href="/Home/Bangumi/7">'
+        "芙莉莲</a></section><div>ignored</div>"
+    ).encode("utf-8")
+    response = _ChunkedFakeUrlopenResponse(
+        [body[index : index + 2] for index in range(0, len(body), 2)]
+    )
+    monkeypatch.setattr(mikan_client_module, "urlopen", lambda request, timeout: response)
+
+    html = UrlopenMikanTransport().get_search_text(
+        "https://mikan.example/Home/Search", timeout=15
+    )
+
+    assert "ignored" not in html
+    assert _parse_candidate_cards(html, "https://mikan.example/Home/Search", "fixture")[0].title == "芙莉莲"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'<section class="not-candidates"><a href="/Home/Bangumi/7">x</a></section>tail',
+        b'<section class="related-recommendations"><a href="/Home/Bangumi/7">x</a>tail',
+    ],
+)
+def test_mikan_search_transport_falls_back_to_full_bounded_read(
+    monkeypatch: pytest.MonkeyPatch, body: bytes
+) -> None:
+    response = _ChunkedFakeUrlopenResponse([body[:12], body[12:], b""])
+    monkeypatch.setattr(mikan_client_module, "urlopen", lambda request, timeout: response)
+
+    assert UrlopenMikanTransport().get_search_text(
+        "https://mikan.example/Home/Search", timeout=15
+    ) == body.decode("utf-8")
 
 
 def test_mikan_urlopen_transport_stops_at_stream_hard_limit(
@@ -1236,6 +1311,34 @@ def test_mikan_candidate_search_parses_current_mikan_recommendation_links() -> N
     assert candidates[0].poster_url == (
         "https://mikanani.me/images/Bangumi/202307/SANITIZED.jpg?width=400"
     )
+
+
+def test_mikan_candidate_search_parses_only_explicit_public_total_episodes() -> None:
+    transport = FakeTransport(
+        """
+        <section class="related-recommendations">
+          <div class="bangumi-item" data-total-episodes="12">
+            <a href="/Home/Bangumi/100">有公开总集数</a>
+          </div>
+          <div class="bangumi-item">
+            <a href="/Home/Bangumi/200">缺少总集数</a>
+            <span>总集数：24 集</span>
+          </div>
+          <div class="bangumi-item" data-total-episodes="0">
+            <a href="/Home/Bangumi/300">异常元数据</a>
+            <span>第 3 集</span>
+          </div>
+        </section>
+        """
+    )
+    client = create_mikan_client(
+        MikanConfig(search_endpoint="https://mikanani.me/Home/Search", timeout_seconds=5),
+        transport=transport,
+    )
+
+    candidates = client.search_candidates("测试")
+
+    assert [candidate.total_episodes for candidate in candidates] == [12, 24, None]
 
 
 def test_mikan_candidate_search_rejects_unsafe_hrefs() -> None:

@@ -80,6 +80,60 @@ def test_settings_sections_use_boundaries_disclosure_and_button_semantics(
     )
 
 
+def test_disabled_controls_use_static_feedback_and_cannot_trigger_actions(
+    page: Page, live_server_url: str
+) -> None:
+    """US-171: disabled controls never masquerade as in-flight work."""
+    page.goto(f"{live_server_url}/index")
+
+    # Candidate search, batch accept, queue, and a representative draft control.
+    candidate = page.locator("#mikan-candidate-search-submit")
+    candidate.evaluate("element => element.disabled = true")
+    draft = page.locator("#batch-parse-submit")
+    draft.evaluate("element => element.disabled = true")
+    controls = [
+        candidate,
+        draft,
+        page.locator("#batch-accept-submit"),
+        page.locator("#batch-queue-refresh"),
+    ]
+
+    for control in controls:
+        expect(control).to_be_disabled()
+        expect(control).to_have_css("cursor", "default")
+        assert control.evaluate(
+            "element => window.getComputedStyle(element, '::before').animationName"
+        ) == "none"
+        assert control.evaluate(
+            """element => {
+                let calls = 0;
+                element.addEventListener('click', () => { calls += 1; });
+                element.click();
+                return calls;
+            }"""
+        ) == 0
+
+    page.goto(f"{live_server_url}/settings")
+    settings_button = page.locator("#settings-qbittorrent-test-submit")
+    settings_button.evaluate("element => element.disabled = true")
+    expect(settings_button).to_be_disabled()
+    expect(settings_button).to_have_css("cursor", "default")
+    assert settings_button.evaluate(
+        """element => {
+            let calls = 0;
+            element.addEventListener('click', () => { calls += 1; });
+            element.click();
+            return calls;
+        }"""
+    ) == 0
+
+    aria_disabled = page.locator("#settings-qbittorrent-test-submit")
+    aria_disabled.evaluate(
+        "element => { element.disabled = false; element.setAttribute('aria-disabled', 'true'); }"
+    )
+    expect(aria_disabled).to_have_css("cursor", "default")
+
+
 def test_request_detail_sections_are_grouped_and_actions_are_near_heading(
     page: Page, live_server_url: str, storage_dir: Path
 ) -> None:
@@ -756,9 +810,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
     ).click()
 
     page.once("dialog", lambda dialog: dialog.accept())
-    page.locator(".batch-draft-card", has_text="萌王S4").locator(
-        ".batch-card-accept"
-    ).click()
+    page.locator(".batch-detail-accept").click()
     page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
     first_card = page.locator(".batch-draft-card", has_text="萌王S4")
@@ -1205,9 +1257,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
     ).click()
 
     page.once("dialog", lambda dialog: dialog.accept())
-    page.locator(".batch-draft-card", has_text="萌王S4").locator(
-        ".batch-card-accept"
-    ).click()
+    page.locator(".batch-detail-accept").click()
     page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
     # 批量提交 → 单项失败，出现单项重试按钮
@@ -1631,9 +1681,9 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
         "偏好不可用，已回退默认流程"
     )
 
-    # 展开卡片查看偏好与审核面板、当前默认配置和搜索词来源。
+    # 通过共享详情查看偏好与审核、当前默认配置和搜索词来源。
     first_card.locator(".batch-card-expand").click()
-    review_text = first_card.locator(".batch-card-review").inner_text()
+    review_text = page.locator("#request-detail-container").inner_text()
     assert "偏好与审核" in review_text
     assert "偏好命中摘要" in review_text
     assert "字幕组偏好已作为可编辑默认值" in review_text

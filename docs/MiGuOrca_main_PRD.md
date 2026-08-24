@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.19 |
-| 文档状态 | Stage 22 Web UI 搜索工作台重构与真实候选闭环已完成 |
+| 当前版本 | v0.21 |
+| 文档状态 | Stage 23 已完成；Stage 24 正式番名与季数解析待规划 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -78,6 +78,8 @@ Stage 20 已完成批量接受与 Auto Bangumi 提交前队列：批量工作台
 Stage 21 已完成用户偏好与智能推荐闭环：用户可在 `/settings` 显式保存非敏感偏好（字幕组/筛选/命名/搜索修正开关），批量草案生成时对每个 item 应用偏好生成默认配置，并返回偏好命中、偏好警告、低置信度/多候选/冲突审核提示和搜索词来源等可审核元数据；用户明确提交的非敏感修正（raw_title、公开 canonical title、season_hint、公开 bangumi 元数据和 query_correction）会形成有界安全的搜索词增强记录，后续批量输入复用增强搜索词，失败时回退原搜索词。偏好与修正存储只保存非敏感字段，endpoint、token、cookie、Authorization header、magnet、raw HTML、raw RSS XML、原始响应体和本地绝对路径从偏好 JSON、API 响应、页面、URL、浏览器 storage、日志和 trace 中被拒绝或剥离。Web API 新增 `GET/POST /api/v1/preferences` 和 `GET/POST /api/v1/corrections`。Stage 21 保持 Stage 19/20 的人工审核与提交语义：AI 只生成候选标题和搜索词，偏好只生成可编辑默认值，用户仍需逐卡审核并显式接受；无偏好或增强失败时回退 Stage 19 默认流程（fake provider、手动候选选择、直连 URL/ID fallback 仍然可用）。
 
 Stage 22 已完成。单个与批量搜索继续复用 `_search_mikan_candidates`、公开候选序列化、候选缓存以及既有 MiKan 详情到 preview 链路，建立“标题解析 → 真实候选 FOUND/EMPTY/FAILED → 用户显式选择 → DRAFT/READY 草案”的可信状态契约：无候选不再生成空壳 `preview_request`，PARSED/EMPTY/FAILED 均不能操作草案。`/index` 已重构为可切换单个/批量模式的“创建订阅方案”工作台，两种结果统一位于独立面板，并由真实浏览器回归保护。执行记录见 `docs/MiGuOrca_stage22_web_search_workbench_PRD.md`。
+
+Stage 23 已完成。MiKan 封面现经服务端安全同源缓存（默认 7 天滑动 TTL、10 秒下载超时、5 MiB 上限）异步加载；脱敏大响应 fixture 证明候选一致后，搜索 transport 以 marker/结构感知提前停止；批量候选使用锚定触发按钮的单实例浮层，批量草案统一进入“订阅方案详情”，结果卡增加 `播出进度：待开发 / 总集数` 摘要，禁用按钮采用静态反馈。正式番名/季数解析进入 Stage 24，部署/配置向导顺延 Stage 25；流式封面代理仍为可选功能。
 
 ## 4. 第一阶段范围
 
@@ -153,10 +155,10 @@ Stage 22 已完成。单个与批量搜索继续复用 `_search_mikan_candidates
 
 | 模块编号 | 模块名称 | 当前状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
-| M00 | 入口与流程编排模块 | Stage 18 已实现真实 MiKan Web 主流程；Stage 19/20 已编排批量草案、接受与提交前队列；Stage 21 已接入偏好/搜索增强；Stage 22 已收敛单个/批量真实候选选择到草案生成链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
+| M00 | 入口与流程编排模块 | Stage 18～23 已实现真实候选、批量草案/队列、偏好/搜索增强、候选选择与统一草案详情链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
 | M01 | 用户输入与 Request 管理模块 | Stage 15 已实现 CLI/Web 确认、取消、受限修改；`ACCEPTED` Request 支持受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
 | M02 | 番剧搜索与匹配模块 | Stage 1 已确认；Stage 22 已明确标题解析/匹配成功不等于真实 MiKan 候选搜索成功 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
-| M03 | MiKan 数据源模块 | Stage 17 已实现详情页解析、direct URL/ID、候选搜索、候选缓存和推荐标签；Stage 18 已接入默认 Web 配置；Stage 21 已接入搜索词增强；Stage 22 已统一单个/批量公开候选契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
+| M03 | MiKan 数据源模块 | Stage 17～23 已实现详情、候选、缓存、搜索增强、同源安全封面、提前停止和可选总集数契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
 | M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
 | M05 | 字幕组评估模块 | Stage 1 已确认；Stage 21 已为 `select_subtitle_group` 增加排除列表过滤（先排除、再优先、最后 fallback） | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
 | M06 | 种子筛选规则模块 | Stage 15 已实现默认字面匹配、大小写不敏感与可选 `use_regex` / `case_sensitive` | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
@@ -164,9 +166,9 @@ Stage 22 已完成。单个与批量搜索继续复用 `_search_mikan_candidates
 | M08 | 用户偏好与规则配置模块 | Stage 21 已实现非敏感偏好契约与存储（字幕组/筛选/命名/搜索修正）、偏好 Web API、偏好 Web UI 和批量草案偏好应用；偏好与修正存储只保存非敏感字段 | P1 | docs/modules/M08-user-preference-rule-PRD.md |
 | M09 | Request 确认交互模块 | Stage 2 已实现 | P2 | docs/modules/M09-request-confirmation-PRD.md |
 | M10 | Auto Bangumi 集成模块 | Stage 4 已实现真实 HTTP adapter 与显式 CLI 提交路径；Stage 20 已复用现有 payload/client/脱敏契约实现批量顺序提交与失败项独立重试 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
-| M11 | 存储与状态管理模块 | Stage 15 已实现本地 JSON Request、历史和 AB 结果存储，以及 path-safe Request 删除；Stage 20 已新增脱敏提交前队列持久化（`queue_dir`） | P2 | docs/modules/M11-storage-state-PRD.md |
-| M12 | 日志与错误处理模块 | Stage 1 最小化 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 18～22 已接入真实搜索、批量工作台、提交前队列、偏好展示、单个/批量模式切换、独立结果面板、统一候选卡与真实搜索状态反馈 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 已实现 path-safe 封面缓存、滑动 TTL 与机会式清理 | P2 | docs/modules/M11-storage-state-PRD.md |
+| M12 | 日志与错误处理模块 | Stage 1 最小化；Stage 23 已约束封面下载、提前停止与缓存清理的脱敏错误 | P1 | docs/modules/M12-log-error-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 18～23 已接入真实搜索、批量工作台、队列、偏好、同源异步封面、候选浮层、统一草案详情、剧集摘要与禁用按钮静态反馈 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 12 已支持显式 AB、MiKan 与 qBittorrent 配置边界 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
@@ -222,8 +224,10 @@ M00 CLI 与流程编排
 | 第十九阶段 | 批量番剧输入、AI 名称解析和订阅草案卡片工作台（已完成） | M13、M00、M01、M03、M06 |
 | 第二十阶段 | 批量接受与 Auto Bangumi 提交前队列管理（已完成） | M13、M10、M11、M01 |
 | 第二十一阶段 | 用户偏好、字幕组偏好和搜索词增强闭环（已完成） | M08、M03、M05、M13 |
-| 第二十二阶段 | Web UI 搜索工作台重构与真实候选闭环（规划完成，待开发） | M13、M00、M02、M03、测试基础设施 |
-| 第二十三阶段 | 部署/配置向导可行性验证（远期可选，仅辅助配置，不替代 AB/qB） | M14、M13、M10、qBittorrent 集成边界 |
+| 第二十二阶段 | Web UI 搜索工作台重构与真实候选闭环（已完成） | M13、M00、M02、M03、测试基础设施 |
+| 第二十三阶段 | 媒体缓存、MiKan 读取优化与批量审核体验（规划完成，待开发） | M03、M11、M12、M13、测试基础设施 |
+| 第二十四阶段 | 正式番名与季数解析（待规划） | M00、M02、M03、M08、M13 |
+| 第二十五阶段 | 部署/配置向导可行性验证（远期可选，仅辅助配置，不替代 AB/qB） | M14、M13、M10、qBittorrent 集成边界 |
 
 ## 10. 主 PRD 已确认事项
 
@@ -270,9 +274,9 @@ M00 CLI 与流程编排
 
 ## 13. 下一步工作
 
-1. Stage 22 Web UI 搜索工作台重构与真实候选闭环：统一单个/批量模式切换与独立结果面板，建立 FOUND/EMPTY/FAILED 候选语义，禁止无候选空壳草案，修复真实 `PARSED` 与前端卡片动作不一致，并补齐生产状态形状的 Playwright 回归。执行 PRD 见 `docs/MiGuOrca_stage22_web_search_workbench_PRD.md`。
-2. Stage 23 部署/配置向导可行性验证保留为远期可选能力：评估配置检查、连接诊断、教程式向导和 Docker Compose 模板，而不是全自动运维 Agent。
-3. AI 番剧名解析与搜索词增强保持为可审核增强能力；必须保留手动搜索、候选选择和 MiKan URL/ID 直连兜底。
+1. Stage 23 媒体缓存、MiKan 读取优化与批量审核体验：实施安全同源封面缓存、搜索页有界提前停止、候选锚定浮层、统一草案详情、播出进度占位和禁用按钮反馈。执行 PRD 见 `docs/MiGuOrca_stage23_media_cache_search_ui_PRD.md`。
+2. Stage 24 正式番名与季数解析：专项解决 `萌王S4`、`无职转生s4` 等简称/季数到可审核官方搜索词的可靠转换；AI/规则仍不得自动选择最终合集。
+3. Stage 25 部署/配置向导可行性验证保留为远期可选能力；流式封面代理等未排期能力见 `docs/optional_features.md`。
 4. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 5. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
 6. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析、可编辑预览、偏好/修正存储和批量提交前队列不得把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
