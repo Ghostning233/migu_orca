@@ -145,13 +145,23 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 
 不包含：正式番名/季数解析、最新播出集数抓取、流式封面代理、后台 worker 或部署向导。
 
-## 7. Stage 24: 正式番名与季数解析
+## 7. Stage 24: AutoBangumi 真实认证与订阅兼容闭环
 
 目标：
 
-专项解决 `萌王S4`、`无职转生s4` 等简称、别名和季数表达无法可靠转换为官方搜索词的问题。该阶段待 Stage 23 完成后单独定稿，必须保留低置信度人工审核、手动搜索和 MiKan URL/ID fallback，且不得自动选择最终合集。
+修复 Stage 20 真实 adapter 与 AutoBangumi 3.1.18 实机协议不兼容的问题：默认用服务地址、用户名和密码登录，通过 token Cookie 调用只读状态与 `/api/v1/rss/subscribe`；保留新版 API Token/Bearer 模式，增加连接测试并接通单个/批量队列。
 
-## 8. Stage 25: 部署/配置向导可行性验证
+执行 PRD：`docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
+
+## 8. 未开发事项优先级池
+
+Stage 24 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.md` 的现行优先级选择下一项，再编写独立 Stage PRD，允许中途插入更高优先级修复。
+
+### 正式番名与季数解析
+
+专项解决 `萌王S4`、`无职转生s4` 等简称、别名和季数表达无法可靠转换为官方搜索词。必须保留低置信度人工审核、手动搜索和 MiKan URL/ID fallback，不得自动选择最终合集。
+
+### 部署/配置向导可行性验证
 
 目标：
 
@@ -178,17 +188,13 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 
 ## 9. 阶段数量判断
 
-新方向的核心产品闭环、可信搜索与审核体验需要 6 个主要 Stage：
+已明确完成或进入开发的核心产品阶段为：
 
 1. Stage 19：批量输入与订阅草案卡片工作台（已完成）。
 2. Stage 20：批量接受与 Auto Bangumi 提交前队列（已完成）。
 3. Stage 21：用户偏好与智能推荐闭环（已完成）。
 4. Stage 22：Web UI 搜索工作台重构与真实候选闭环（已完成）。
 5. Stage 23：媒体缓存、MiKan 读取优化与批量审核体验（已完成）。
-6. Stage 24：正式番名与季数解析（待规划）。
+6. Stage 24：AutoBangumi 真实认证与订阅兼容闭环（规划完成，待开发）。
 
-如果要覆盖“降低 Auto Bangumi/qBittorrent 配置门槛”，再增加 1 个远期可选 Stage：
-
-1. Stage 25：部署/配置向导可行性验证。
-
-因此，Stage 19 到 Stage 23 的基础功能与媒体/读取/UI 收敛已经完成；下一步由 Stage 24 解决正式番名与季数解析。若再覆盖配置痛点，则扩展到 Stage 25。流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
+因此，Stage 19 到 Stage 23 的基础功能与媒体/读取/UI 收敛已经完成；Stage 24 优先补齐真实 AutoBangumi 闭环。之后不统计或预留阶段数量，按 backlog 优先级动态规划；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。

@@ -50,3 +50,10 @@ config/user/default_rules.json
 ## 6. 后续阶段
 
 接入真实外部系统后，再根据部署方式确定用户配置目录、环境变量、密钥管理和配置优先级。
+
+## 7. Stage 24 AutoBangumi request-scoped 配置（规划）
+
+1. `auth_mode=password` 为默认，字段为 `base_url`、`username`、`password`；`auth_mode=api_token` 字段为 `base_url`、`token`。
+2. 两种模式字段互斥；base_url 仅允许 http/https 根地址，拒绝 userinfo、query、fragment，允许用户明确提供的局域网地址。
+3. 凭据只存在于当前 Web/CLI 请求和 client session，不进入配置目录、Request、队列、AB result、浏览器 storage、URL、日志或 trace。
+4. `fallback_enabled` 仍是 MiGuOrca 提交失败后的降级行为开关，不属于 AutoBangumi 认证字段。

@@ -104,10 +104,10 @@ uv run migu-orca "番剧名" --action accept --submit-ab --ab-config config/user
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
 | --- | --- | --- | --- |
-| Q-M10-01 | AB 是否提供稳定 API？ | 是 | Stage 4 通过真实 HTTP adapter 验证 |
-| Q-M10-02 | AB 创建订阅需要哪些真实字段？ | 是 | Stage 3 已有内部 payload，Stage 4 映射到真实 API |
-| Q-M10-03 | AB 认证方式是否只需 token？ | 是 | Stage 4 验证 |
-| Q-M10-04 | 创建订阅后如何确认成功？ | 是 | Stage 3 支持从 `id`、`subscription_id`、`ab_subscription_id` 读取，Stage 4 需对齐真实响应 |
+| Q-M10-01 | AB 是否提供稳定 API？ | 是 | 3.1.18 实机 OpenAPI 已确认；其他版本按 adapter 能力 fail closed |
+| Q-M10-02 | AB 创建订阅需要哪些真实字段？ | 是 | Stage 24 对齐 3.1.18 `{data: Bangumi, rss: RSSItem}` |
+| Q-M10-03 | AB 认证方式是否只需 token？ | 是 | 否；3.1.18 默认账号密码登录/Cookie，新版兼容 API Token/Bearer |
+| Q-M10-04 | 创建订阅后如何确认成功？ | 是 | 3.1.18 使用 `status=true`，外部订阅 ID 可选；其他 adapter 独立定义 |
 | Q-M10-05 | AB 降级 JSON 的 schema 如何定义？ | 否 | Stage 3 已有内部 fallback_config，后续可按真实 AB 导入能力调整 |
 | Q-M10-06 | AB 调用失败是否需要重试？ | 否 | 默认不自动重试 |
 
@@ -118,3 +118,12 @@ M10 不直接调用 qBittorrent。Auto Bangumi 创建订阅后的下载行为仍
 Stage 12 已在独立 qBittorrent 边界中实现显式连接测试，用于验证用户临时提供的 qBittorrent Web API 配置。该能力不属于 M10，不创建下载任务，不创建订阅，也不改变 AB 提交流程。
 
 如后续需要绕过 AB 直接调用 qBittorrent 启动下载或创建任务，应新增独立 Stage、独立验收标准和对应 Web UI 操作边界。
+
+## 9. Stage 24 真实兼容契约（规划）
+
+1. 现有 `endpoint + Bearer token + {title,rss_url,save_path,filter_rule}` 仅视为待替换的历史骨架，不是已验证真实契约。
+2. 默认 `password` adapter 接收服务根地址、用户名和密码：form 登录 `/api/v1/auth/login`，将返回 token 作为单次会话 Cookie，3.1.18 只读探测使用 `/api/v1/status`。
+3. 3.1.18 写入使用 `/api/v1/rss/subscribe` 与 `{data: Bangumi, rss: RSSItem}`；`status=true` 表示成功，外部订阅 ID 可为空。
+4. `api_token` adapter 使用 Bearer Header，但只有明确版本/契约证明后才允许写入；未知版本只能报告连接能力，不能猜测 payload。
+5. 单个、批量、retry/recover 复用同一 adapter/payload/result seam，并保持 Stage 20 不重复提交边界。
+6. 自动化只使用 fake transport；真实实例只允许只读烟雾，写入必须由用户在 Web UI 显式确认。

@@ -132,13 +132,21 @@ Stage 23 UI 调整要求（已完成）：
 7. disabled/`aria-disabled=true` 控件使用静态视觉和普通/default 鼠标，hover 不显示 spinner/无限动画；只有真实 `aria-busy=true` 才显示 loading。
 8. 新浮层、详情和封面端点继续遵守敏感值过滤与真实 Chromium 回归要求。
 
+Stage 24 UI 调整要求（规划）：
+
+1. Settings AutoBangumi 分区始终提供只读“测试连接”，不再要求先有 request_id；提交仍只对已接受 Request 展示并要求显式确认。
+2. 表单字段为服务地址和认证方式；默认账号密码模式显示用户名/密码，API Token 模式只显示 token，隐藏模式的敏感字段必须清空且不提交。
+3. 单个提交和批量队列使用同一认证组件/配置契约，不再把 endpoint 当作完整写 URL。
+4. 成功摘要只显示版本、认证模式、adapter 和是否支持提交；连接或提交成功后清空全部敏感字段。
+5. 真实 Chromium 覆盖切换、校验、连接测试、提交确认、成功清理、失败脱敏、键盘可访问性和窄屏布局。
+
 ## 4. 后续能力规划
 
 Web UI 后续可以支持：
 
 1. 字幕组和 RSS 源候选的更细粒度人工选择。
 2. 降级 JSON 下载或复制入口。
-3. Stage 25 部署/配置向导仅作为远期辅助能力，不作为 qBittorrent 下载或 Auto Bangumi 替代执行系统。
+3. 部署/配置向导仅作为 backlog 中的远期辅助能力，不预绑定 Stage，也不作为 qBittorrent 下载或 Auto Bangumi 替代执行系统。
 4. 认证、权限或远程部署保护，仅在出现多人使用或公网暴露场景后实现。
 
 ## 5. 待确认问题
