@@ -16,6 +16,7 @@ Started: 2026-08-24 09:30:00 CST
 - 完整 pytest 前删除测试运行残留的 `.migu_orca/storage`；该默认目录会污染批量解析与 Chromium 空列表断言。
 - 未开发工作统一在 backlog 按优先级排序，不提前绑定 Stage 编号；当前 Stage 完成后再选择最高优先级事项规划下一 Stage。
 - AutoBangumi 3.1 的订阅成功以响应 `status: true` 为准，订阅 ID 可以为空；3.1 的 `data`/`rss` body 应由纯 Request mapper 构造，filter 必须转换为等价正则或明确拒绝。
+- 所有 AutoBangumi 写入口必须经由同一 auth-mode dispatch，同时选择对应的 adapter 与 payload：password → legacy 3.1 Cookie + `{data,rss}`，api_token → Token compatibility adapter + fail-closed 写入。
 
 ## 2026-08-24 22:42:00 CST - US-173
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -78,4 +79,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - 共享认证表单可通过以 DOM id 前缀为参数的构造器同步模式可见性、校验、提交 payload 与成功后的敏感字段清理。
   - CSS 中 grid/flex 规则可能覆盖浏览器原生 `hidden`，认证模式切换的容器与按条件显示的按钮需明确为 `[hidden] { display: none; }`。
   - 浏览器测试使用 mock 的只读连接 API，验证页面、URL 与 Web Storage 不携带用户输入的凭据。
+---
+
+## 2026-08-25 00:22:00 CST - US-179
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 接通单项和批量（含 retry）的统一 AutoBangumi 写入编排：账号密码模式使用 3.1 登录/Cookie 与 `{data, rss}` 契约，API Token 模式维持不写入的 fail-closed 行为。
+- 增加 fake 3.1 transport 回归，覆盖 login → token Cookie → rss/subscribe，且 `status: true` 无外部 ID 仍成功；同步将遗留 Token 浏览器用例改为显式选择 API Token 模式。
+- Files changed: `src/ab_engine/controllers/{ab_http_client,subscription_payload}.py`, 单项/批量编排控制器及对应单元、Chromium 回归测试，`scripts/ralph/{prd,progress}.txt`。
+- **Learnings for future iterations:**
+  - 认证模式既决定客户端凭据隔离，也决定订阅 body；仅替换 client 或 payload 之一会产生不可用的跨契约组合。
+  - UI 默认认证模式改变后，测试旧 Token 场景必须先显式切换模式，避免向隐藏控件填值。
 ---

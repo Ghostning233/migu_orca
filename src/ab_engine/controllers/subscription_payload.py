@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import re
-from typing import Any
+from typing import Any, Literal
 
 from request_engine.controllers.request_controller import ACCEPTED
 from shared.errors import Stage1Error
@@ -65,6 +65,16 @@ def build_legacy_31_subscription_payload(request: dict[str, Any]) -> dict[str, A
             "parser": "mikan",
         },
     }
+
+
+def build_ab_submit_payload(
+    request: dict[str, Any], auth_mode: Literal["password", "api_token"]
+) -> dict[str, Any]:
+    """Build the verified subscription body for one authentication adapter."""
+
+    if auth_mode == "password":
+        return build_legacy_31_subscription_payload(request)
+    return build_ab_subscription_payload(request)
 
 
 def _legacy_31_filter(value: Any) -> str:

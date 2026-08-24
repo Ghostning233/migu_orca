@@ -4,7 +4,7 @@ from typing import Any, Mapping
 from urllib.error import HTTPError
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
-from ab_engine.controllers.ab_http_client import AutoBangumiHttpClient, create_auto_bangumi_http_client, create_legacy_3_1_auto_bangumi_client
+from ab_engine.controllers.ab_http_client import AutoBangumiHttpClient, create_auto_bangumi_http_client, create_auto_bangumi_submit_client, create_legacy_3_1_auto_bangumi_client
 from ab_engine.controllers.subscription_payload import build_legacy_31_subscription_payload
 from request_engine.controllers.request_controller import accept_request, build_pending_request
 from shared.errors import Stage1Error
@@ -94,3 +94,21 @@ def test_legacy_31_probe_and_submit_stay_cookie_isolated() -> None:
     assert client.create_subscription(_legacy_payload()) == {"status": True}
     assert all("Authorization" not in call["headers"] for call in transport.calls)
     assert all(call["endpoint"].startswith("http://auto-bangumi.local/") for call in transport.calls)
+
+
+def test_submit_client_factory_dispatches_password_mode_to_legacy_adapter() -> None:
+    transport = _RecordingTransport([
+        {"access_token": "secret-cookie"},
+        {"status": True},
+    ])
+
+    response = create_auto_bangumi_submit_client(
+        _password_config(), transport=transport
+    ).create_subscription(_legacy_payload())
+
+    assert response == {"status": True}
+    assert [call["endpoint"] for call in transport.calls] == [
+        "http://auto-bangumi.local/api/v1/auth/login",
+        "http://auto-bangumi.local/api/v1/rss/subscribe",
+    ]
+    assert transport.calls[1]["headers"]["Cookie"] == "token=secret-cookie"

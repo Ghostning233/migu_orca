@@ -193,6 +193,7 @@ class TestAutoBangumiSubmitEntry:
         request = _save_accepted_request(storage_dir, "葬送的芙莉莲", "req-ab-3")
         set_storage_preferences(page, storage_dir)
         page.goto(f"{live_server_url}/settings?request_id=req-ab-3#auto-bangumi")
+        page.select_option("#settings-ab-auth-mode", "api_token")
         page.fill("#settings-ab-endpoint", "http://auto-bangumi.local/api/subscriptions")
         page.fill("#settings-ab-token", "temporary-token")
         page.check("#settings-ab-fallback-enabled")
@@ -262,7 +263,8 @@ class TestAutoBangumiSubmitEntry:
         assert "确认提交此订阅方案到 Auto Bangumi" in dialog_messages[0]
         assert captured["body"]["storage_dir"] == str(storage_dir)
         assert captured["body"]["ab_config"] == {
-            "endpoint": "http://auto-bangumi.local/api/subscriptions",
+            "auth_mode": "api_token",
+            "base_url": "http://auto-bangumi.local/api/subscriptions",
             "token": "temporary-token",
             "fallback_enabled": True,
         }
@@ -285,6 +287,7 @@ class TestAutoBangumiSubmitEntry:
         _save_accepted_request(storage_dir, "葬送的芙莉莲", "req-ab-4")
         set_storage_preferences(page, storage_dir)
         page.goto(f"{live_server_url}/settings?request_id=req-ab-4#auto-bangumi")
+        page.select_option("#settings-ab-auth-mode", "api_token")
         page.fill("#settings-ab-endpoint", "http://auto-bangumi.local/api/subscriptions")
         page.fill("#settings-ab-token", "temporary-token")
 

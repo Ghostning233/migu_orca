@@ -8,6 +8,7 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
+from ab_engine.controllers.ab_client import AutoBangumiClient
 from shared.errors import Stage1Error
 
 
@@ -406,6 +407,28 @@ def create_legacy_3_1_auto_bangumi_client(
 ) -> LegacyAutoBangumi31Client:
     """Build the request-scoped password-login adapter for AutoBangumi 3.1.x."""
     return LegacyAutoBangumi31Client(config, transport=transport)
+
+
+def create_auto_bangumi_submit_client(
+    config: AutoBangumiConfig,
+    *,
+    transport: AutoBangumiHttpTransport | AutoBangumiLegacyTransport | None = None,
+) -> AutoBangumiClient:
+    """Build the write adapter matching the explicit authentication mode.
+
+    Password credentials are exclusively for the verified 3.1 login/Cookie
+    flow; Token credentials retain their fail-closed compatibility adapter.
+    Keeping this choice at the shared seam prevents single and batch submits
+    from drifting into different payload or credential contracts.
+    """
+
+    if config.auth_mode == "password":
+        if transport is None:
+            return create_legacy_3_1_auto_bangumi_client(config)
+        return create_legacy_3_1_auto_bangumi_client(config, transport=transport)
+    if transport is None:
+        return create_auto_bangumi_http_client(config)
+    return create_auto_bangumi_http_client(config, transport=transport)
 
 
 def _api_endpoint(base_url: str, path: str) -> str:

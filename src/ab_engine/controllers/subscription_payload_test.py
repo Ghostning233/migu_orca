@@ -4,6 +4,7 @@ import pytest
 
 from ab_engine.controllers.subscription_payload import (
     build_ab_subscription_payload,
+    build_ab_submit_payload,
     build_legacy_31_subscription_payload,
 )
 from request_engine.controllers.request_controller import (
@@ -129,6 +130,13 @@ def test_build_legacy_31_subscription_payload_maps_confirmed_request_to_real_con
             "parser": "mikan",
         },
     }
+
+
+def test_build_ab_submit_payload_selects_the_adapter_contract() -> None:
+    request = _accepted_request()
+
+    assert build_ab_submit_payload(request, "password") == build_legacy_31_subscription_payload(request)
+    assert build_ab_submit_payload(request, "api_token") == build_ab_subscription_payload(request)
 
 
 def test_build_legacy_31_subscription_payload_escapes_literal_filter_text() -> None:

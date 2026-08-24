@@ -11,7 +11,7 @@ from typing import Any, Literal, Sequence
 from ab_engine.controllers import ab_http_client
 from ab_engine.controllers.ab_client import AutoBangumiClient, submit_ab_subscription
 from ab_engine.controllers.ab_config import AutoBangumiConfig, load_ab_config
-from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
+from ab_engine.controllers.subscription_payload import build_ab_submit_payload
 from catalog_engine.controllers.catalog_controller import load_catalog, match_bangumi
 from mikan_engine.controllers import mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import MikanClient, MikanTransport
@@ -284,8 +284,8 @@ def apply_ab_submit_action(
 
         resolved_ab_config = ab_config or load_ab_config(ab_config_path)
         request = result["request"]
-        payload = build_ab_subscription_payload(request)
-        ab_client = client or ab_http_client.create_auto_bangumi_http_client(
+        payload = build_ab_submit_payload(request, resolved_ab_config.auth_mode)
+        ab_client = client or ab_http_client.create_auto_bangumi_submit_client(
             resolved_ab_config
         )
         ab_submit_result = submit_ab_subscription(
