@@ -11,7 +11,10 @@ from ab_engine.controllers.ab_http_client import (
     create_auto_bangumi_http_client,
     create_legacy_3_1_auto_bangumi_client,
 )
-from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
+from ab_engine.controllers.subscription_payload import (
+    build_ab_subscription_payload,
+    build_legacy_31_subscription_payload,
+)
 from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
@@ -107,6 +110,28 @@ class _LegacyRecordingTransport:
                 "endpoint": endpoint,
                 "headers": dict(headers),
                 "payload": dict(payload) if payload is not None else None,
+                "timeout": timeout,
+            }
+        )
+        result = self._responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    def post_json_same_origin(
+        self,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "method": "POST",
+                "endpoint": endpoint,
+                "headers": dict(headers),
+                "payload": payload,
                 "timeout": timeout,
             }
         )
@@ -245,6 +270,58 @@ def test_legacy_31_probe_rejects_missing_token_and_unknown_version_without_leaki
             raise AssertionError("expected Stage1Error")
         assert result["error_type"] == expected
         assert "secret-token" not in repr(result)
+
+
+def test_legacy_31_client_submits_contract_body_with_in_memory_cookie() -> None:
+    transport = _LegacyRecordingTransport(
+        [{"access_token": "secret-token"}, {"status": True}]
+    )
+    client = create_legacy_3_1_auto_bangumi_client(
+        _password_config(), transport=transport
+    )
+    payload = build_legacy_31_subscription_payload(_accepted_request())
+
+    assert client.create_subscription(payload) == {"status": True}
+    assert transport.calls == [
+        {
+            "method": "POST",
+            "endpoint": "http://auto-bangumi.local/api/v1/auth/login",
+            "headers": {
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            "payload": {"username": "admin", "password": "secret-password"},
+            "timeout": 30,
+        },
+        {
+            "method": "POST",
+            "endpoint": "http://auto-bangumi.local/api/v1/rss/subscribe",
+            "headers": {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Cookie": "token=secret-token",
+            },
+            "payload": payload,
+            "timeout": 30,
+        },
+    ]
+
+
+def test_legacy_31_client_rejects_failed_or_malformed_submit_response_without_secrets() -> None:
+    for response in ({"status": False}, {}, {"status": "true"}):
+        client = create_legacy_3_1_auto_bangumi_client(
+            _password_config(),
+            transport=_LegacyRecordingTransport([{"access_token": "secret-token"}, response]),
+        )
+        try:
+            client.create_subscription(build_legacy_31_subscription_payload(_accepted_request()))
+        except Stage1Error as exc:
+            result = exc.as_dict()
+        else:
+            raise AssertionError("expected Stage1Error")
+        assert result["error_type"] == "ab_submit_failed"
+        assert result["failed_step"] == "create_ab_subscription"
+        assert "secret" not in repr(result)
 
 
 def test_http_client_posts_prepared_payload_without_mutating_it(monkeypatch) -> None:

@@ -39,6 +39,16 @@ class AutoBangumiLegacyTransport(Protocol):
     ) -> dict[str, Any]:
         """Make one JSON API request without following redirects."""
 
+    def post_json_same_origin(
+        self,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        """POST a JSON request without exposing session credentials."""
+
 
 class UrlopenAutoBangumiHttpTransport:
     """urllib-backed HTTP transport for Auto Bangumi JSON requests."""
@@ -109,6 +119,32 @@ class UrlopenAutoBangumiHttpTransport:
         except TimeoutError as exc:
             raise _timeout_error("probe_ab_connection") from exc
         return _decode_response(response_body, step="probe_ab_connection")
+
+    def post_json_same_origin(
+        self,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: dict[str, Any],
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        request = Request(
+            endpoint,
+            data=json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8"),
+            headers=dict(headers),
+            method="POST",
+        )
+        try:
+            # A session Cookie must never be forwarded by a redirect.
+            with build_opener(_RejectRedirects()).open(request, timeout=timeout) as response:
+                response_body = response.read()
+        except HTTPError as exc:
+            raise _http_error_to_stage1_error(exc) from exc
+        except URLError as exc:
+            raise _network_error_to_stage1_error(exc) from exc
+        except TimeoutError as exc:
+            raise _timeout_error() from exc
+        return _decode_response(response_body, step="create_ab_subscription")
 
 
 class _RejectRedirects(HTTPRedirectHandler):
@@ -188,24 +224,11 @@ class LegacyAutoBangumi31Client:
                 "当前 Auto Bangumi 认证模式暂不支持此探测方式",
                 "probe_ab_connection",
             )
-        login = self._request_json(
-            "POST",
-            _api_endpoint(self._config.base_url, "/api/v1/auth/login"),
-            {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
-            {"username": self._config.username or "", "password": self._config.password or ""},
-        )
-        token = login.get("access_token")
-        if not isinstance(token, str) or not token.strip():
-            raise Stage1Error(
-                "invalid_ab_response",
-                "Auto Bangumi 登录响应无有效令牌",
-                "probe_ab_connection",
-            )
-        self._token = token.strip()
+        self._authenticate()
         status = self._request_json(
             "GET",
             _api_endpoint(self._config.base_url, "/api/v1/status"),
-            {"Accept": "application/json", "Cookie": f"token={self._token}"},
+            {"Accept": "application/json", "Cookie": self._session_cookie()},
         )
         version = _status_version(status)
         if not version.startswith("3.1."):
@@ -221,6 +244,48 @@ class LegacyAutoBangumi31Client:
             "adapter": "legacy_3_1",
             "submit_supported": True,
         }
+
+    def create_subscription(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Submit a prepared 3.1 ``{data: Bangumi, rss: RSSItem}`` body."""
+        self._validate_legacy_subscription_payload(payload)
+        self._authenticate()
+        response = self._post_json(
+            _api_endpoint(self._config.base_url, "/api/v1/rss/subscribe"),
+            {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Cookie": self._session_cookie(),
+            },
+            payload,
+        )
+        if response.get("status") is True:
+            return deepcopy(response)
+        raise Stage1Error(
+            "ab_submit_failed",
+            "Auto Bangumi 提交失败",
+            "create_ab_subscription",
+        )
+
+    def _authenticate(self) -> None:
+        login = self._request_json(
+            "POST",
+            _api_endpoint(self._config.base_url, "/api/v1/auth/login"),
+            {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"},
+            {"username": self._config.username or "", "password": self._config.password or ""},
+        )
+        token = login.get("access_token")
+        if not isinstance(token, str) or not token.strip():
+            raise Stage1Error(
+                "invalid_ab_response",
+                "Auto Bangumi 登录响应无有效令牌",
+                "probe_ab_connection",
+            )
+        self._token = token.strip()
+
+    def _session_cookie(self) -> str:
+        if self._token is None:
+            raise Stage1Error("ab_auth_failed", "Auto Bangumi 认证失败", "create_ab_subscription")
+        return f"token={self._token}"
 
     def _request_json(
         self,
@@ -248,6 +313,36 @@ class LegacyAutoBangumi31Client:
                 "probe_ab_connection",
                 {"category": "connection"},
             ) from exc
+
+    def _post_json(
+        self,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            return self._transport.post_json_same_origin(
+                endpoint, headers, deepcopy(payload), timeout=self._timeout
+            )
+        except Stage1Error:
+            raise
+        except HTTPError as exc:
+            raise _http_error_to_stage1_error(exc) from exc
+        except URLError as exc:
+            raise _network_error_to_stage1_error(exc) from exc
+        except (TimeoutError, ConnectionError) as exc:
+            raise _network_exception_to_stage1_error(exc) from exc
+
+    @staticmethod
+    def _validate_legacy_subscription_payload(payload: dict[str, Any]) -> None:
+        if not isinstance(payload.get("data"), dict) or not isinstance(
+            payload.get("rss"), dict
+        ):
+            raise Stage1Error(
+                "invalid_ab_payload",
+                "Auto Bangumi 3.1 payload 必须包含 data 和 rss 对象",
+                "create_ab_subscription",
+            )
 
 
 def create_auto_bangumi_http_client(

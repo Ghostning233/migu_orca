@@ -14,6 +14,7 @@ Started: 2026-08-24 09:30:00 CST
 - base_url、username、password、token、Cookie、Authorization header、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、Request/队列/AB result、日志、截图或 trace。
 - 完整 pytest 前删除测试运行残留的 `.migu_orca/storage`；该默认目录会污染批量解析与 Chromium 空列表断言。
 - 未开发工作统一在 backlog 按优先级排序，不提前绑定 Stage 编号；当前 Stage 完成后再选择最高优先级事项规划下一 Stage。
+- AutoBangumi 3.1 的订阅成功以响应 `status: true` 为准，订阅 ID 可以为空；3.1 的 `data`/`rss` body 应由纯 Request mapper 构造，filter 必须转换为等价正则或明确拒绝。
 
 ## 2026-08-24 22:42:00 CST - US-173
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -33,4 +34,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - 3.1 adapter 应保留独立的 `request_json` transport seam，登录表单和状态 Cookie 流程不与 API Token JSON 写入通道混用。
   - 完整 pytest 需从不存在的 `.migu_orca/storage` 开始，否则默认 storage 会使批量与浏览器测试产生互相污染。
+---
+
+## 2026-08-24 23:18:53 CST - US-175
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 新增已确认 Request 到 AutoBangumi 3.1 `{data: Bangumi, rss: RSSItem}` 的纯映射，并将筛选规则转换为等价正则；无法安全表达的规则会明确拒绝。
+- 3.1 adapter 现通过单次内存 Cookie 会话 POST `/api/v1/rss/subscribe`，将 `status: true`（无订阅 ID 亦可）视为成功，并拒绝重定向以防 Cookie 跨 origin。
+- Files changed: `src/ab_engine/controllers/subscription_payload.py`, `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_client.py`, `src/ab_engine/controllers/submit_result.py` and focused tests; `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - AutoBangumi 3.1 的 subscribe endpoint 接收命名 JSON body `{data, rss}`；不要发送旧的 `title/rss_url/filter_rule` 自定义结构。
+  - `status: true` 是 3.1 写入成功的唯一稳定信号，返回订阅 ID 不应作为成功前提。
+  - 带认证 Cookie 的 JSON POST 需要使用 no-redirect transport；标准 urllib redirect 行为不能作为安全边界。
 ---

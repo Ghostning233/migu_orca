@@ -63,11 +63,13 @@ def submit_ab_subscription(
         return ab_submit_failure(error, fallback_config=fallback_config)
 
 
-def _subscription_id(ab_response: dict[str, Any]) -> str:
+def _subscription_id(ab_response: dict[str, Any]) -> str | None:
     for field in ("id", "subscription_id", "ab_subscription_id"):
         value = ab_response.get(field)
         if isinstance(value, str) and value.strip():
             return value
+    if ab_response.get("status") is True:
+        return None
     raise Stage1Error(
         "invalid_ab_submit_result",
         "Auto Bangumi 响应缺少订阅 ID",

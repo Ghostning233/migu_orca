@@ -48,7 +48,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "不复用旧 title/rss_url/filter_rule 自定义 body。"
     },
     {

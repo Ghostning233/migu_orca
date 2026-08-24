@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
+from ab_engine.controllers.subscription_payload import (
+    build_ab_subscription_payload,
+    build_legacy_31_subscription_payload,
+)
 from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
@@ -106,3 +109,53 @@ def test_build_ab_subscription_payload_falls_back_to_input_title() -> None:
     payload = build_ab_subscription_payload(request)
 
     assert payload["title"] == "番剧"
+
+
+def test_build_legacy_31_subscription_payload_maps_confirmed_request_to_real_contract() -> None:
+    payload = build_legacy_31_subscription_payload(_accepted_request())
+
+    assert payload == {
+        "data": {
+            "official_title": "番剧 标准标题",
+            "title_raw": "番剧 标准标题",
+            "filter": "(?i)^(?=.*(?:1080p))(?!.*(?:SP)).*$",
+            "rss_link": "https://example.invalid/rss.xml",
+            "save_path": "番剧 标准标题",
+        },
+        "rss": {
+            "name": "番剧 标准标题",
+            "url": "https://example.invalid/rss.xml",
+            "aggregate": False,
+            "parser": "mikan",
+        },
+    }
+
+
+def test_build_legacy_31_subscription_payload_escapes_literal_filter_text() -> None:
+    request = _accepted_request()
+    request["confirmable_config"]["filter_rule"] = {
+        "must_contain": "[1080p]",
+        "must_not_contain": "v2?",
+        "use_regex": False,
+        "case_sensitive": True,
+    }
+
+    assert build_legacy_31_subscription_payload(request)["data"]["filter"] == (
+        "^(?=.*(?:\\[1080p\\]))(?!.*(?:v2\\?)).*$"
+    )
+
+
+def test_build_legacy_31_subscription_payload_refuses_invalid_regex_without_dropping_rule() -> None:
+    request = _accepted_request()
+    request["confirmable_config"]["filter_rule"]["use_regex"] = True
+    request["confirmable_config"]["filter_rule"]["must_contain"] = "("
+
+    with pytest.raises(Stage1Error) as error:
+        build_legacy_31_subscription_payload(request)
+
+    assert error.value.as_dict() == {
+        "error_type": "ab_filter_unsupported",
+        "error_message": "当前筛选规则无法兼容 Auto Bangumi 3.1",
+        "failed_step": "build_legacy_31_subscription_payload",
+        "details": {},
+    }
