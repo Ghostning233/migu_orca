@@ -5,6 +5,7 @@ Started: 2026-08-24 09:30:00 CST
 
 - Python 依赖、检查与测试统一通过 `uv`；Web 前端修改后运行 `node --check src/apps/migu_orca_web/static/app.js`，UI story 必须通过 `.agents/skills/dev-browser/SKILL.md` 在真实 Chromium 验证。
 - AutoBangumi 默认 `auth_mode=password`（base_url/username/password），兼容 `auth_mode=api_token`（base_url/token）；两种敏感字段互斥并严格 request-scoped。
+- 将 Web 的可选认证字段交给严格配置构造器前，必须使用 `model_dump(exclude_none=True)`，防止未选择模式的空字段被误判为混用凭据。
 - UI 只接收服务根地址；login/status/subscribe 路径由 M10 adapter 拼接。允许局域网地址，但认证 header/Cookie 禁止跨 origin 转发或危险重定向。
 - AutoBangumi 3.1.18 使用 form 登录 `/api/v1/auth/login`、token Cookie、只读 `/api/v1/status` 和写入 `/api/v1/rss/subscribe`；body 为 `{data: Bangumi, rss: RSSItem}`，成功以 `status=true` 判断且订阅 ID 可为空。
 - 新版 API Token/Bearer 必须 fail closed：只有明确 fixture/官方契约证明的 adapter 才能标记 `submit_supported=true`，不能把 legacy payload 用于未知版本。
@@ -13,4 +14,14 @@ Started: 2026-08-24 09:30:00 CST
 - base_url、username、password、token、Cookie、Authorization header、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、Request/队列/AB result、日志、截图或 trace。
 - 未开发工作统一在 backlog 按优先级排序，不提前绑定 Stage 编号；当前 Stage 完成后再选择最高优先级事项规划下一 Stage。
 
+---
+
+## 2026-08-24 22:42:00 CST - US-173
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 重构 AutoBangumi request-scoped 配置为服务根地址和显式 password/api_token 认证模式，并在 CLI、单个提交和批量提交入口复用同一构造器。
+- 规范化服务根地址，拒绝路径、userinfo、query、fragment、未知模式及混合凭据；配置加载错误不再回显路径或解析细节。
+- Files changed: `src/ab_engine/controllers/ab_config.py`, `src/ab_engine/controllers/ab_http_client.py`, `src/apps/migu_orca_web/views.py` and focused regression tests.
+- **Learnings for future iterations:**
+  - 模式可复用：Web 的可选认证字段需要 `model_dump(exclude_none=True)` 后再传入严格配置构造器，避免未选择模式的空字段被误判为混用凭据。
+  - 旧 HTTP adapter 只允许 api_token 模式继续使用；账号密码登录与固定 API 路径留给后续 legacy adapter 故事实现。
 ---

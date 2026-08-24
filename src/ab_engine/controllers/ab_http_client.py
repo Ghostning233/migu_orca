@@ -88,9 +88,15 @@ class AutoBangumiHttpClient:
         """Create a subscription from an already prepared AB payload."""
 
         validated_payload = _validate_subscription_payload(payload)
+        if self._config.auth_mode != "api_token" or not self._config.token:
+            raise Stage1Error(
+                "ab_submit_unsupported",
+                "当前 Auto Bangumi 认证模式暂不支持提交",
+                "create_ab_subscription",
+            )
         try:
             ab_response = self._transport.post_json(
-                self._config.endpoint,
+                self._config.base_url,
                 {
                     "Authorization": f"Bearer {self._config.token}",
                     "Content-Type": "application/json",

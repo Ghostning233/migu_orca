@@ -3,56 +3,58 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+from urllib.parse import urlsplit, urlunsplit
 
 from shared.errors import Stage1Error
 
 
 @dataclass(frozen=True)
 class AutoBangumiConfig:
-    endpoint: str
-    token: str
+    """Request-scoped AutoBangumi credentials and service root."""
+
+    base_url: str
+    auth_mode: Literal["password", "api_token"]
     fallback_enabled: bool
+    username: str | None = None
+    password: str | None = None
+    token: str | None = None
 
 
 def build_ab_config(data: dict[str, Any]) -> AutoBangumiConfig:
-    """Build Auto Bangumi config from an explicit object."""
+    """Validate an explicit request-scoped AutoBangumi configuration object."""
 
-    endpoint = data.get("endpoint")
-    token = data.get("token")
+    auth_mode = data.get("auth_mode", "password")
+    if auth_mode not in ("password", "api_token"):
+        _config_error("auth_mode")
+    base_url = _service_root(data.get("base_url"))
     fallback_enabled = data.get("fallback_enabled")
-
-    if not isinstance(endpoint, str) or not endpoint.strip():
-        raise Stage1Error(
-            "config_error",
-            "Auto Bangumi endpoint 必须是非空字符串",
-            "load_ab_config",
-            {"field": "endpoint"},
-        )
-    if not isinstance(token, str) or not token.strip():
-        raise Stage1Error(
-            "config_error",
-            "Auto Bangumi token 必须是非空字符串",
-            "load_ab_config",
-            {"field": "token"},
-        )
     if not isinstance(fallback_enabled, bool):
-        raise Stage1Error(
-            "config_error",
-            "Auto Bangumi fallback_enabled 必须是布尔值",
-            "load_ab_config",
-            {"field": "fallback_enabled"},
-        )
+        _config_error("fallback_enabled")
 
+    common_fields = {"auth_mode", "base_url", "fallback_enabled"}
+    mode_fields = {"username", "password"} if auth_mode == "password" else {"token"}
+    if set(data) - common_fields - mode_fields:
+        _config_error("auth_mode")
+
+    if auth_mode == "password":
+        return AutoBangumiConfig(
+            base_url=base_url,
+            auth_mode="password",
+            username=_required_secret_string(data.get("username"), "username"),
+            password=_required_secret_string(data.get("password"), "password"),
+            fallback_enabled=fallback_enabled,
+        )
     return AutoBangumiConfig(
-        endpoint=endpoint.strip(),
-        token=token.strip(),
+        base_url=base_url,
+        auth_mode="api_token",
+        token=_required_secret_string(data.get("token"), "token"),
         fallback_enabled=fallback_enabled,
     )
 
 
 def load_ab_config(path: Path) -> AutoBangumiConfig:
-    """Load the minimal Auto Bangumi system config from an explicit JSON path."""
+    """Load AutoBangumi config from an explicit JSON path (CLI only)."""
 
     data = _read_json(path)
     if not isinstance(data, dict):
@@ -65,26 +67,53 @@ def load_ab_config(path: Path) -> AutoBangumiConfig:
     return build_ab_config(data)
 
 
+def _service_root(value: Any) -> str:
+    if not isinstance(value, str) or not value.strip():
+        _config_error("base_url")
+    parsed = urlsplit(value.strip())
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+    ):
+        _config_error("base_url")
+    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+
+
+def _required_secret_string(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        _config_error(field)
+    return value.strip()
+
+
+def _config_error(field: str) -> None:
+    raise Stage1Error(
+        "config_error", "Auto Bangumi 配置无效", "load_ab_config", {"field": field}
+    )
+
+
 def _read_json(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
         raise Stage1Error(
             "config_error",
-            f"Auto Bangumi 配置文件不存在：{path}",
+            "Auto Bangumi 配置文件不存在",
             "load_ab_config",
         ) from exc
     except json.JSONDecodeError as exc:
         raise Stage1Error(
             "config_error",
-            f"Auto Bangumi 配置不是合法 JSON：{path}",
+            "Auto Bangumi 配置不是合法 JSON",
             "load_ab_config",
-            {"reason": str(exc)},
         ) from exc
     except OSError as exc:
         raise Stage1Error(
             "config_error",
-            f"无法读取 Auto Bangumi 配置：{path}",
+            "无法读取 Auto Bangumi 配置",
             "load_ab_config",
-            {"reason": str(exc)},
         ) from exc

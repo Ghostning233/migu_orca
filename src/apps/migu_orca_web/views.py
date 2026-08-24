@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from flask import Blueprint, Response, redirect, render_template, url_for
 from pydantic import BaseModel, Field, field_validator
@@ -374,25 +374,12 @@ class RequestPreviewSavePayload(BaseModel):
 
 
 class RequestAbConfigPayload(BaseModel):
-    endpoint: str
-    token: str
+    auth_mode: Literal["password", "api_token"] = "password"
+    base_url: str | None = None
+    username: str | None = None
+    password: str | None = None
+    token: str | None = None
     fallback_enabled: bool
-
-    @field_validator("endpoint")
-    @classmethod
-    def validate_endpoint(cls, value: str) -> str:
-        endpoint = value.strip()
-        if not endpoint:
-            raise ValueError("endpoint cannot be empty")
-        return endpoint
-
-    @field_validator("token")
-    @classmethod
-    def validate_token(cls, value: str) -> str:
-        token = value.strip()
-        if not token:
-            raise ValueError("token cannot be empty")
-        return token
 
 
 class RequestAbSubmitPayload(RequestActionPayload):
@@ -1526,7 +1513,7 @@ class BatchSubmitView(PostView):
         storage_dir = _storage_dir(payload.storage_dir)
         config = load_storage_config(storage_dir)
         queue = load_submission_queue(config, payload.batch_id)
-        ab_config = build_ab_config(payload.ab_config.model_dump())
+        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
         result = submit_batch_queue_items(
             batch_id=payload.batch_id,
             queue=queue,
@@ -1569,7 +1556,7 @@ class BatchRetryView(PostView):
         storage_dir = _storage_dir(payload.storage_dir)
         config = load_storage_config(storage_dir)
         queue = load_submission_queue(config, payload.batch_id)
-        ab_config = build_ab_config(payload.ab_config.model_dump())
+        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
         if not (payload.request_id or "").strip():
             raise Stage1Error(
                 "validation_error",
@@ -1802,7 +1789,7 @@ class RequestAbSubmitView(PostView):
         storage_dir = _storage_dir(payload.storage_dir)
         config = load_storage_config(storage_dir)
         request = load_request_snapshot(config, payload.request_id)
-        ab_config = build_ab_config(payload.ab_config.model_dump())
+        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
 
         result = apply_ab_submit_action(
             {"success": True, "request": request, "error": None},

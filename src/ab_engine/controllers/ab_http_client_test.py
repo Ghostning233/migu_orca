@@ -98,7 +98,8 @@ class _ExplodingConfig:
 
 def _config() -> AutoBangumiConfig:
     return AutoBangumiConfig(
-        endpoint="http://auto-bangumi.local/api/subscribe",
+        base_url="http://auto-bangumi.local",
+        auth_mode="api_token",
         token="secret-token",
         fallback_enabled=False,
     )
@@ -147,7 +148,7 @@ def test_http_client_posts_prepared_payload_without_mutating_it(monkeypatch) -> 
 
     request, timeout = sent_requests[0]
     assert response == {"id": "sub-123", "status": "created"}
-    assert request.full_url == "http://auto-bangumi.local/api/subscribe"
+    assert request.full_url == "http://auto-bangumi.local"
     assert request.get_method() == "POST"
     assert request.headers["Authorization"] == "Bearer secret-token"
     assert request.headers["Content-type"] == "application/json"
@@ -172,7 +173,7 @@ def test_http_client_uses_injected_transport_without_network() -> None:
     assert response == {"id": "sub-123", "status": "created"}
     assert transport.calls == [
         {
-            "endpoint": "http://auto-bangumi.local/api/subscribe",
+            "endpoint": "http://auto-bangumi.local",
             "headers": {
                 "Authorization": "Bearer secret-token",
                 "Content-Type": "application/json",

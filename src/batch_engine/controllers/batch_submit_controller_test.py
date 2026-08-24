@@ -170,7 +170,8 @@ def _queue_with_items(items: list[BatchQueueItem]) -> BatchSubmissionQueue:
 
 def _ab_config(**overrides) -> AutoBangumiConfig:
     values = {
-        "endpoint": "https://ab.example.com/api/subscription",
+        "base_url": "https://ab.example.com",
+        "auth_mode": "api_token",
         "token": "secret-token",
         "fallback_enabled": False,
     }

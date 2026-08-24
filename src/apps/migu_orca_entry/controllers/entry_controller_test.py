@@ -1025,7 +1025,7 @@ def test_main_can_submit_accepted_request_to_real_ab_client_factory(
     assert output["ab_submit_result"]["success"] is True
     assert output["request"]["ab_submit_result"] == output["ab_submit_result"]
     assert len(factory_configs) == 1
-    assert factory_configs[0].endpoint == "http://auto-bangumi.local"
+    assert factory_configs[0].base_url == "http://auto-bangumi.local"
     assert client.calls
 
 
@@ -1258,7 +1258,8 @@ def _ab_config(tmp_path: Path, *, fallback_enabled: bool) -> Path:
     path.write_text(
         json.dumps(
             {
-                "endpoint": "http://auto-bangumi.local",
+                "base_url": "http://auto-bangumi.local",
+                "auth_mode": "api_token",
                 "token": "secret-token",
                 "fallback_enabled": fallback_enabled,
             }

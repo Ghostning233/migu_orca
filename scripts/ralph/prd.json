@@ -16,7 +16,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "不要保留 endpoint=完整写 URL 的旧语义。"
     },
     {
