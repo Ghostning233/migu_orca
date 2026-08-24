@@ -12,9 +12,8 @@ Started: 2026-08-24 09:30:00 CST
 - 单个与批量提交复用现有 payload/client/result seam，并保持 Stage 20 `SUBMITTING`/`SUCCEEDED`/`RESULT_PERSIST_FAILED`、retry/recover 与不重复提交边界。
 - Ralph 只允许对真实 AutoBangumi 做登录、状态、版本和只读列表烟雾；创建订阅必须由用户在 Web UI 对已接受 Request 显式确认。
 - base_url、username、password、token、Cookie、Authorization header、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、Request/队列/AB result、日志、截图或 trace。
+- 完整 pytest 前删除测试运行残留的 `.migu_orca/storage`；该默认目录会污染批量解析与 Chromium 空列表断言。
 - 未开发工作统一在 backlog 按优先级排序，不提前绑定 Stage 编号；当前 Stage 完成后再选择最高优先级事项规划下一 Stage。
-
----
 
 ## 2026-08-24 22:42:00 CST - US-173
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -24,4 +23,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - 模式可复用：Web 的可选认证字段需要 `model_dump(exclude_none=True)` 后再传入严格配置构造器，避免未选择模式的空字段被误判为混用凭据。
   - 旧 HTTP adapter 只允许 api_token 模式继续使用；账号密码登录与固定 API 路径留给后续 legacy adapter 故事实现。
+---
+
+## 2026-08-24 23:08:37 CST - US-174
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 新增 AutoBangumi 3.1.x 密码登录 adapter：表单登录、实例内 token Cookie、只读状态版本探测和 3.1 兼容性判断；重定向 fail-closed，避免认证 Cookie 跨 origin 传递。
+- 为成功、认证失败、超时、网络失败、缺令牌和未知版本添加 fixture transport 覆盖；同步修复 Stage 24 配置契约变更后的脱敏响应断言。
+- Files changed: `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_http_client_test.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 3.1 adapter 应保留独立的 `request_json` transport seam，登录表单和状态 Cookie 流程不与 API Token JSON 写入通道混用。
+  - 完整 pytest 需从不存在的 `.migu_orca/storage` 开始，否则默认 storage 会使批量与浏览器测试产生互相污染。
 ---

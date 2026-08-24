@@ -4382,7 +4382,8 @@ def test_submit_ab_sanitizes_echoed_ab_response(
     assert payload["ok"] is True
     assert payload["result"]["ab_submit_result"]["ab_response"] == {
         "id": "sub-123",
-        "endpoint": "[redacted-url]",
+        "auth_mode": "api_[redacted]",
+        "base_url": "[redacted-url]",
         "[redacted]": "[redacted]",
     }
     assert "secret-token" not in str(payload)

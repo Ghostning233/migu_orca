@@ -9,6 +9,7 @@ from ab_engine.controllers.ab_config import AutoBangumiConfig
 from ab_engine.controllers.ab_http_client import (
     AutoBangumiHttpClient,
     create_auto_bangumi_http_client,
+    create_legacy_3_1_auto_bangumi_client,
 )
 from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
 from request_engine.controllers.request_controller import (
@@ -86,6 +87,35 @@ class _FailingTransport:
         raise self._error
 
 
+class _LegacyRecordingTransport:
+    def __init__(self, responses: list[dict[str, Any] | Exception]) -> None:
+        self._responses = responses
+        self.calls: list[dict[str, Any]] = []
+
+    def request_json(
+        self,
+        method: str,
+        endpoint: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, str] | None = None,
+        *,
+        timeout: float,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "method": method,
+                "endpoint": endpoint,
+                "headers": dict(headers),
+                "payload": dict(payload) if payload is not None else None,
+                "timeout": timeout,
+            }
+        )
+        result = self._responses.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+
 class _ExplodingConfig:
     @property
     def endpoint(self) -> str:
@@ -101,6 +131,16 @@ def _config() -> AutoBangumiConfig:
         base_url="http://auto-bangumi.local",
         auth_mode="api_token",
         token="secret-token",
+        fallback_enabled=False,
+    )
+
+
+def _password_config() -> AutoBangumiConfig:
+    return AutoBangumiConfig(
+        base_url="http://auto-bangumi.local",
+        auth_mode="password",
+        username="admin",
+        password="secret-password",
         fallback_enabled=False,
     )
 
@@ -130,6 +170,81 @@ def test_http_client_constructor_returns_protocol_compatible_client() -> None:
     client: AutoBangumiClient = create_auto_bangumi_http_client(_config())
 
     assert isinstance(client, AutoBangumiHttpClient)
+
+
+def test_legacy_31_probe_logs_in_then_reads_status_with_in_memory_cookie() -> None:
+    transport = _LegacyRecordingTransport(
+        [{"access_token": "secret-token"}, {"version": "3.1.18"}]
+    )
+    client = create_legacy_3_1_auto_bangumi_client(
+        _password_config(), transport=transport
+    )
+
+    assert client.probe() == {
+        "reachable": True,
+        "authenticated": True,
+        "version": "3.1.18",
+        "adapter": "legacy_3_1",
+        "submit_supported": True,
+    }
+    assert transport.calls == [
+        {
+            "method": "POST",
+            "endpoint": "http://auto-bangumi.local/api/v1/auth/login",
+            "headers": {
+                "Accept": "application/json",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            "payload": {"username": "admin", "password": "secret-password"},
+            "timeout": 30,
+        },
+        {
+            "method": "GET",
+            "endpoint": "http://auto-bangumi.local/api/v1/status",
+            "headers": {"Accept": "application/json", "Cookie": "token=secret-token"},
+            "payload": None,
+            "timeout": 30,
+        },
+    ]
+
+
+def test_legacy_31_probe_normalizes_auth_and_transport_failures_without_secrets() -> None:
+    for error, expected in [
+        (HTTPError("http://auto-bangumi.local/login", 401, "admin", {}, None), "ab_auth_failed"),
+        (TimeoutError("secret-password"), "ab_timeout"),
+        (URLError("secret-token"), "ab_connection_failed"),
+    ]:
+        client = create_legacy_3_1_auto_bangumi_client(
+            _password_config(), transport=_LegacyRecordingTransport([error])
+        )
+        try:
+            client.probe()
+        except Stage1Error as exc:
+            result = exc.as_dict()
+        else:
+            raise AssertionError("expected Stage1Error")
+        assert result["error_type"] == expected
+        assert result["failed_step"] == "probe_ab_connection"
+        assert "admin" not in repr(result)
+        assert "secret" not in repr(result)
+
+
+def test_legacy_31_probe_rejects_missing_token_and_unknown_version_without_leaking() -> None:
+    for responses, expected in [
+        ([{}], "invalid_ab_response"),
+        ([{"access_token": "secret-token"}, {"version": "4.0.0"}], "ab_unsupported_version"),
+    ]:
+        client = create_legacy_3_1_auto_bangumi_client(
+            _password_config(), transport=_LegacyRecordingTransport(responses)
+        )
+        try:
+            client.probe()
+        except Stage1Error as exc:
+            result = exc.as_dict()
+        else:
+            raise AssertionError("expected Stage1Error")
+        assert result["error_type"] == expected
+        assert "secret-token" not in repr(result)
 
 
 def test_http_client_posts_prepared_payload_without_mutating_it(monkeypatch) -> None:
