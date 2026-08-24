@@ -98,7 +98,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "审查纠正（必须单独提交）：修复 tests/browser/test_ui_quality.py::test_stage20_batch_retry_does_not_leak_sensitive_values。该用例若走 API Token，必须先显式切换认证方式再填写服务地址与 token；也可改用默认账号密码，但必须保留批量失败、单项 retry、成功后清空敏感字段和 request-scoped/脱敏断言。禁止 skip/xfail/放宽断言/无意义超时。使用 Playwright route/mock 隔离外部 AutoBangumi，并以真实 Chromium 验证；UI 使用用户可理解的中文文案。"
     },
     {

@@ -1261,6 +1261,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
     page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
 
     # 批量提交 → 单项失败，出现单项重试按钮
+    page.select_option("#batch-queue-ab-auth-mode", "api_token")
     page.fill("#batch-queue-ab-endpoint", "https://ab.example.invalid/api")
     page.fill("#batch-queue-ab-token", "stage20-user-typed-token")
     page.check("#batch-queue-ab-confirm")
@@ -1286,7 +1287,8 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
     assert retry_calls
     retry_payload = retry_calls[0]
     assert retry_payload["request_id"] == "req-stage20-sec"
-    assert retry_payload["ab_config"]["endpoint"] == "https://ab.example.invalid/api"
+    assert retry_payload["ab_config"]["auth_mode"] == "api_token"
+    assert retry_payload["ab_config"]["base_url"] == "https://ab.example.invalid/api"
     assert retry_payload["ab_config"]["token"] == "stage20-user-typed-token"
     assert retry_payload["confirm"] is True
     for value in sensitive_values:
