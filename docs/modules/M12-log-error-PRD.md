@@ -66,3 +66,10 @@ ErrorResult 独立于 Request。Stage 1 不通过 `FAILED` Request 表达流程�
 2. base_url、username、password、token、Cookie、Authorization header、原始响应体和完整失败 URL不得进入错误 details、日志或 trace。
 3. 登录/状态探测失败不得继续写入；未知版本或未证明的写契约必须 fail closed。
 4. 外部写结果不确定时继续使用 `SUBMITTING` / `RESULT_PERSIST_FAILED` 人工恢复，不自动重试。
+
+## 9. Stage 25 标题解析错误边界（已规划）
+
+1. 区分输入校验、季数冲突/越界、解析失败、单条查询失败、全部查询失败和正常空候选。
+2. provider/规则异常只返回稳定类别、字段、来源类别、输入长度和 recoverable，不回显异常原文或完整输入。
+3. 查询数量与长度必须有界；单条查询失败可继续 fallback，但全部失败不得伪装为 EMPTY。
+4. endpoint、token、Cookie、Authorization、raw HTML/RSS、原始响应、完整失败 URL和本地绝对路径不得进入解析/API/UI/log/trace。

@@ -83,6 +83,8 @@ Stage 23 已完成。MiKan 封面现经服务端安全同源缓存异步加载�
 
 Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 token Cookie、`/api/v1/status` 与 `/api/v1/rss/subscribe` 的 `{data, rss}` 契约，成功以 `status=true` 判断且订阅 ID 可为空；Settings 提供 request-scoped 只读连接测试，单个/批量队列复用同一 adapter/payload/result seam。API Token/Bearer 模式维持兼容但无已证明写契约时 fail closed。执行 PRD 见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。其他未开发事项只按 backlog 优先级排序，不预绑定 Stage 编号。
 
+Stage 25 已规划、待开发。单个与批量 MiKan 搜索将共享确定性正式番名/季数解析、结构化 season、有界 query plan 和可审核来源展示；parser 只生成搜索提示，真实合集仍由用户显式选择，只有选中候选公开证据或用户确认能证明的季数才能进入 Request、M07 与 M10。执行 PRD 见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
+
 ## 4. 第一阶段范围
 
 第一阶段目标是：**输入单个番剧名后，基于静态 MiKan/RSS 数据生成一条结构完整、状态为待确认的 Request。**
@@ -170,7 +172,7 @@ Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 
 | M10 | Auto Bangumi 集成模块 | Stage 24 已按 3.1.18 契约实现账号密码/Cookie、真实 subscribe payload/response，并保留 fail-closed Bearer 兼容模式 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 已实现 path-safe 封面缓存、滑动 TTL 与机会式清理 | P2 | docs/modules/M11-storage-state-PRD.md |
 | M12 | 日志与错误处理模块 | Stage 24 已覆盖 AB 认证、连接、协议兼容与规则转换的脱敏分类 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 24 已完成 AB 账号密码/API Token、连接测试和单批量提交界面 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 24 已完成 AB 界面；Stage 25 已规划解析来源、季数和实际搜索词展示 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 24 已定义 request-scoped AB 双认证配置 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
@@ -229,8 +231,9 @@ M00 CLI 与流程编排
 | 第二十二阶段 | Web UI 搜索工作台重构与真实候选闭环（已完成） | M13、M00、M02、M03、测试基础设施 |
 | 第二十三阶段 | 媒体缓存、MiKan 读取优化与批量审核体验（已完成） | M03、M11、M12、M13、测试基础设施 |
 | 第二十四阶段 | AutoBangumi 真实认证与订阅兼容闭环（已完成） | M10、M12、M13、M14、测试基础设施 |
+| 第二十五阶段 | 正式番名与季数解析（已规划，待开发） | M00、M02、M03、M07、M10、M12、M13、测试基础设施 |
 
-Stage 24 之后不预留阶段编号；从 backlog 中按当时优先级选择并单独规划。
+Stage 25 已从 backlog BL-018 选定并单独规划；Stage 25 之后不预留阶段编号。
 
 ## 10. 主 PRD 已确认事项
 
@@ -277,7 +280,7 @@ Stage 24 之后不预留阶段编号；从 backlog 中按当时优先级选择�
 
 ## 13. 下一步工作
 
-1. 正式番名与季数解析、部署/配置向导及条件触发事项在 `docs/backlog.md` 维护，流式封面代理在 `docs/optional_features.md` 维护，不提前绑定 Stage 编号；当前最高优先级待规划项为 BL-018。
+1. BL-018 已规划为 Stage 25 正式番名与季数解析；执行范围见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。其余部署/配置向导及条件触发事项继续在 `docs/backlog.md` 维护，流式封面代理在 `docs/optional_features.md` 维护。
 2. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
 3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。

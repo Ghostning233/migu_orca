@@ -153,15 +153,23 @@ Stage 19 当时未包含的事项及当前状态：
 
 执行 PRD：`docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
 
-## 8. 未开发事项优先级池
+## 8. Stage 25: 正式番名与季数解析（已规划，待开发）
 
-Stage 24 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.md` 的现行优先级选择下一项，再编写独立 Stage PRD，允许中途插入更高优先级修复。
+Stage 24 完成后已按 backlog 选择最高优先级未完成项 BL-018，并建立独立执行 PRD：`docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
-### 正式番名与季数解析
+规划目标：
 
-专项解决 `萌王S4`、`无职转生s4` 等简称、别名和季数表达无法可靠转换为官方搜索词。必须保留低置信度人工审核、手动搜索和 MiKan URL/ID fallback，不得自动选择最终合集。
+1. 用确定性规则解析器替换普通 Web 流程的 fake 默认，实现常见标题/季数表达第一至第九十九季的结构化解析。
+2. 单个与批量入口共享 parse → 有界 query plan → M03 candidate search 编排。
+3. 复用用户明确保存的公开修正和版本化别名，保留低置信度、冲突季数、手动搜索与 MiKan URL/ID fallback。
+4. 收敛解析来源、识别季度和实际搜索词 UI，修复“源名称：搜索词：...”标签叠加。
+5. parser 只生成搜索提示；真实合集仍由用户显式选择，只有可证明季数才能进入 Request、命名与 AutoBangumi 映射。
 
-这是当前正式 backlog 中最高优先级的未完成事项（BL-018）。真实 LLM provider（BL-021）不是前置条件；应先建立规则/provider 共用的稳定解析契约。
+真实 LLM provider、当前播出集数和新版 AutoBangumi Bearer 写契约不进入 Stage 25。
+
+## 9. 未开发事项优先级池
+
+Stage 25 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.md` 的现行优先级选择下一项，再编写独立 Stage PRD，允许中途插入更高优先级修复。
 
 ### 未排期与条件触发事项
 
@@ -195,7 +203,7 @@ Stage 24 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.m
 3. 未经确认写入外部系统配置。
 4. 自动创建下载任务或替代 Auto Bangumi 执行链路。
 
-## 9. 阶段数量判断
+## 10. 阶段数量判断
 
 已明确完成或进入开发的核心产品阶段为：
 
@@ -205,5 +213,6 @@ Stage 24 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.m
 4. Stage 22：Web UI 搜索工作台重构与真实候选闭环（已完成）。
 5. Stage 23：媒体缓存、MiKan 读取优化与批量审核体验（已完成）。
 6. Stage 24：AutoBangumi 真实认证与订阅兼容闭环（已完成）。
+7. Stage 25：正式番名与季数解析（已规划，待开发）。
 
-因此，Stage 19 到 Stage 24 的基础功能、媒体/读取/UI 收敛和真实 AutoBangumi 闭环已经完成。之后不统计或预留阶段数量，按 backlog 优先级动态规划；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
+因此，Stage 19 到 Stage 24 的基础功能、媒体/读取/UI 收敛和真实 AutoBangumi 闭环已经完成，Stage 25 已从 backlog 正式选定。Stage 25 之后不统计或预留阶段数量，按 backlog 优先级动态规划；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。

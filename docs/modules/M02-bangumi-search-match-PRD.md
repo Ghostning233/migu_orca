@@ -133,3 +133,11 @@ Stage 22 已明确 M02 的标题解析/本地匹配与 M03 真实 MiKan 候选�
 3. 只有带公开 `bangumi_id` 与规范化 `mikan_url` 的 M03 候选才可供用户显式选择。
 4. 低置信度、歧义或无候选必须保留人工审核语义，不得自动进入订阅草案或接受状态。
 5. 单个与批量入口复用同一边界，批量模式不能放宽候选真实性要求。
+
+## 13. Stage 25 正式番名与季数解析规划
+
+1. M02/批量 parser 输出结构化 normalized/base title、season、query plan、confidence、source 和 review hints；现有字符串字段如保留只能由该结构派生。
+2. 季数原语支持第一至第九十九季的常见 S/Season/第N季/期表达；无标记为 null，冲突、越界、Part/分割放送不得猜测。
+3. 查询来源顺序为用户公开修正、版本化别名、规则基础标题、原始输入 fallback，默认最多 8 项。
+4. 解析成功仍不等于 M03 候选存在；低置信度、多候选和冲突必须人工审核。
+5. 真实 LLM provider 不在 Stage 25；普通 Web 默认使用确定性 rule provider，fake provider 仅保留为测试 seam。
