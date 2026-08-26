@@ -1,0 +1,140 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage24-autobangumi-compatibility",
+  "description": "Stage 24：修复 AutoBangumi 真实认证与订阅契约，默认支持账号密码登录，并保留 API Token/Bearer 兼容模式。",
+  "userStories": [
+    {
+      "id": "US-173",
+      "title": "重构 AutoBangumi 配置与适配器契约",
+      "description": "作为开发者，我需要显式区分账号密码与 API Token 认证，使所有提交入口共享安全、可演进的配置契约。",
+      "acceptanceCriteria": [
+        "配置提供 password 与 api_token 两种互斥 auth_mode，默认 password；分别要求 base_url/username/password 与 base_url/token",
+        "base_url 仅允许 http/https 根地址并拒绝 userinfo、query、fragment；允许局域网地址且 API 路径由 adapter 内部拼接",
+        "未知模式、缺失字段或敏感字段混用返回稳定脱敏错误；CLI、单个 Web 与批量入口共享构造逻辑",
+        "凭据保持 request-scoped，不写入 Request、队列、AB result、浏览器 storage、URL 或日志",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "不要保留 endpoint=完整写 URL 的旧语义。"
+    },
+    {
+      "id": "US-174",
+      "title": "实现 AutoBangumi 3.1.18 登录会话与只读能力探测",
+      "description": "作为旧版 AutoBangumi 用户，我希望 MiGuOrca 用账号密码登录并安全保持单次 Cookie 会话。",
+      "acceptanceCriteria": [
+        "legacy_3_1 adapter 以 form-urlencoded POST /api/v1/auth/login，解析 access_token 并仅在当前 client/session 内作为 token Cookie 使用",
+        "实现 /api/v1/status 只读版本探测；认证 Cookie 不跟随跨 origin 重定向",
+        "fixture transport 覆盖成功、401/403、超时、网络失败、非法响应、缺 token 和未知版本",
+        "错误与日志不包含 base_url、username、password、token、Cookie、原始响应或完整失败 URL",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "自动化不得访问用户实机；实机只读测试留给 closeout。"
+    },
+    {
+      "id": "US-175",
+      "title": "实现 AutoBangumi 3.1.18 订阅 payload 与响应适配",
+      "description": "作为 AutoBangumi 3.1.18 用户，我希望已接受 Request 能按真实 RSS subscribe 契约提交。",
+      "acceptanceCriteria": [
+        "纯函数把已接受 Request 映射为 POST /api/v1/rss/subscribe 的 {data: Bangumi, rss: RSSItem}，RSS、路径与标题来自用户确认数据",
+        "筛选语义只能在可安全表达为 3.1.18 filter 字符串时提交；否则返回兼容性错误，不静默丢弃规则",
+        "status=true 视为成功且订阅 ID 可为空；status=false 或畸形响应映射为稳定脱敏失败",
+        "测试断言路径、body、Cookie 和结果契约，但不调用真实写接口",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "审查纠正（必须单独提交）：AutoBangumi 3.1.18 的 filter 是 re.search 命中即排除。must_contain 应生成不满足即命中的排除式，must_not_contain 应生成满足即命中的排除式，两者合并为 OR；空规则必须是永不匹配 (?!)；保留 regex/case 语义，非法或不可等价表达必须 ab_filter_unsupported。补充可执行行为测试。data 必须映射已确认且可证明的 season、selected_subtitle_group 到 group_name，并在可靠时映射 season_raw/dpi/source/subtitle；不能证明的非第一季 fail closed，禁止静默 season=1。单个/批量/retry 复用同 mapper。password {data,rss} 的 fallback 也须映射完整的稳定内部字段 title/rss_url/save_path/filter_rule，且排除所有凭据/服务地址/响应。添加单个和批量 password fallback 测试；不复用旧 title/rss_url/filter_rule 自定义 body。审查追加：只读取 accepted Request 的公开已确认标题；支持中文数字第一季至第九十九季（至少第二、第四、第十、第十二），结构化 matched_bangumi.season 优先；明显“第…季”而不能转换时必须稳定 fail closed，完全无标记才默认 1。构造完整 3.1 filter 后必须 re.compile；例如 (?i)1080p 嵌入后若无法等价转换即 ab_filter_unsupported，且 mapper 失败时单个/批量/retry 都不得调用 transport。"
+    },
+    {
+      "id": "US-176",
+      "title": "保留新版 API Token 与 Bearer 兼容模式",
+      "description": "作为新版 AutoBangumi 用户，我希望使用 API Token，同时不让未经验证的写契约被误报为可用。",
+      "acceptanceCriteria": [
+        "api_token adapter 使用 Authorization Bearer 且与 legacy Cookie adapter 隔离，不混合或跨 origin 转发凭据",
+        "能力探测区分 reachable/authenticated/submit_supported；只有明确契约覆盖的版本才允许写提交",
+        "未知版本或写契约返回连接成功但暂不支持提交，不套用 legacy payload",
+        "测试覆盖 Bearer、401/403、能力不足和凭据脱敏",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "无法证明新版写接口时必须 fail closed。"
+    },
+    {
+      "id": "US-177",
+      "title": "增加 AutoBangumi 只读连接测试 API",
+      "description": "作为用户，我希望提交前先验证服务地址和认证信息。",
+      "acceptanceCriteria": [
+        "新增 request-scoped 连接测试 API，复用统一配置/client seam，不要求 request_id且不调用写接口",
+        "成功只返回 reachable、公开 version、中文认证模式、adapter 与 submit_supported 等脱敏摘要",
+        "失败区分校验、认证、连接、超时、协议不兼容且不含完整地址、账号、密码、token、Cookie 或原始响应",
+        "API 测试覆盖两种认证模式及响应、日志、持久化安全边界",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "体验参考 qBittorrent 测试连接。"
+    },
+    {
+      "id": "US-178",
+      "title": "重构 Settings 与批量 AutoBangumi 认证界面",
+      "description": "作为用户，我希望默认用服务地址、账号和密码测试并提交，也可以切换 API Token。",
+      "acceptanceCriteria": [
+        "Settings 始终可测试连接；默认账号密码模式显示服务地址/用户名/密码，API Token 模式只显示服务地址/token",
+        "已接受 Request 显示单个提交；批量队列使用相同认证组件和 payload，不保留 endpoint/token 专用语义",
+        "测试与提交显示中文状态；提交需确认，连接或提交成功后清空敏感字段",
+        "敏感值不进入 DOM data attribute、URL、localStorage、sessionStorage、history、通知、截图或 trace",
+        "浏览器测试覆盖切换、校验、可访问性、成功清理、失败脱敏与窄屏布局",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "审查纠正（必须单独提交）：修复 tests/browser/test_ui_quality.py::test_stage20_batch_retry_does_not_leak_sensitive_values。该用例若走 API Token，必须先显式切换认证方式再填写服务地址与 token；也可改用默认账号密码，但必须保留批量失败、单项 retry、成功后清空敏感字段和 request-scoped/脱敏断言。禁止 skip/xfail/放宽断言/无意义超时。使用 Playwright route/mock 隔离外部 AutoBangumi，并以真实 Chromium 验证；UI 使用用户可理解的中文文案。"
+    },
+    {
+      "id": "US-179",
+      "title": "接通单个与批量真实提交编排",
+      "description": "作为用户，我希望单个和批量已接受 Request 都能通过同一真实 adapter 安全提交 AutoBangumi。",
+      "acceptanceCriteria": [
+        "单个 submit-ab、批量 submit/retry 统一使用新配置、client、payload 和结果 seam",
+        "fake 3.1.18 transport 端到端覆盖 login → Cookie → rss/subscribe → 脱敏成功，且无外部 ID也可成功",
+        "批量单项失败不阻塞后续项；SUBMITTING、SUCCEEDED、RESULT_PERSIST_FAILED、retry/recover 边界保持不变",
+        "自动化不访问真实写接口，成功项不会因刷新、接受或重试被重复提交",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "保持前台顺序编排，不引入 worker。"
+    },
+    {
+      "id": "US-180",
+      "title": "Stage 24 文档、安全回归与实机只读验收",
+      "description": "作为维护者，我需要以文档、完整回归和只读烟雾证明 AutoBangumi 链路可用且安全。",
+      "acceptanceCriteria": [
+        "同步 README、主 PRD、Future Stages、backlog、Stage 24 PRD 与 M10/M12/M13/M14；未开发任务只按优先级排序，不预绑定 Stage 编号",
+        "补充账号密码默认、API Token兼容、服务根地址、连接测试、3.1.18 支持范围和显式写确认的手动验收说明",
+        "安全回归证明 base_url、username、password、token、Cookie、Authorization、原始响应和完整失败 URL不进入响应、页面、URL、storage、日志、截图或 trace",
+        "允许对显式实例执行登录/状态/只读列表烟雾并记录脱敏摘要；Ralph 不调用真实订阅写接口",
+        "compileall、node --check、真实 Chromium browser suite 与完整 pytest 全部通过",
+        "Tests pass",
+        "Verify in browser using dev-browser skill",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "审查纠正（必须单独提交）：此前“测试通过”记录已被复审推翻。仅在 US-175 与 US-178 完成后，追加 progress（不得删除旧记录）说明复审结论、实际修复及精确测试结果；同步必要的 Stage 24/M10 文档。执行 compileall、node --check、pytest -m not browser、真实 Chromium、full pytest、diff/status/log；不做真实 AutoBangumi 写操作。实机凭据不得写进 progress、文档、测试或脚本。审查追加：US-175 完成后独立最终复审；将最终 prd.json 与 progress.txt 复制到 scripts/ralph/archive/2026-08-26-stage24-autobangumi-compatibility/，不得删除当前文件或创建下一 Stage PRD。"
+    }
+  ]
+}
+

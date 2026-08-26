@@ -1,0 +1,159 @@
+# Ralph Progress Log
+Started: 2026-08-24 09:30:00 CST
+
+## Codebase Patterns
+
+- Python 依赖、检查与测试统一通过 `uv`；Web 前端修改后运行 `node --check src/apps/migu_orca_web/static/app.js`，UI story 必须通过 `.agents/skills/dev-browser/SKILL.md` 在真实 Chromium 验证。
+- 只读连接测试应沿用“request-scoped config → controller safe summary → view allowlist”的边界：控制器绝不触发写接口，视图只公开可安全显示的能力字段。
+- AutoBangumi 默认 `auth_mode=password`（base_url/username/password），兼容 `auth_mode=api_token`（base_url/token）；两种敏感字段互斥并严格 request-scoped。
+- 将 Web 的可选认证字段交给严格配置构造器前，必须使用 `model_dump(exclude_none=True)`，防止未选择模式的空字段被误判为混用凭据。
+- UI 只接收服务根地址；login/status/subscribe 路径由 M10 adapter 拼接。允许局域网地址，但认证 header/Cookie 禁止跨 origin 转发或危险重定向。
+- AutoBangumi 3.1.18 使用 form 登录 `/api/v1/auth/login`、token Cookie、只读 `/api/v1/status` 和写入 `/api/v1/rss/subscribe`；body 为 `{data: Bangumi, rss: RSSItem}`，成功以 `status=true` 判断且订阅 ID 可为空。
+- 新版 API Token/Bearer 必须 fail closed：只有明确 fixture/官方契约证明的 adapter 才能标记 `submit_supported=true`，不能把 legacy payload 用于未知版本。
+- 单个与批量提交复用现有 payload/client/result seam，并保持 Stage 20 `SUBMITTING`/`SUCCEEDED`/`RESULT_PERSIST_FAILED`、retry/recover 与不重复提交边界。
+- Ralph 只允许对真实 AutoBangumi 做登录、状态、版本和只读列表烟雾；创建订阅必须由用户在 Web UI 对已接受 Request 显式确认。
+- base_url、username、password、token、Cookie、Authorization header、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、Request/队列/AB result、日志、截图或 trace。
+- 完整 pytest 前删除测试运行残留的 `.migu_orca/storage`；该默认目录会污染批量解析与 Chromium 空列表断言。
+- 未开发工作统一在 backlog 按优先级排序，不提前绑定 Stage 编号；当前 Stage 完成后再选择最高优先级事项规划下一 Stage。
+- AutoBangumi 3.1 的订阅成功以响应 `status: true` 为准，订阅 ID 可以为空；3.1 的 `data`/`rss` body 应由纯 Request mapper 构造，filter 必须转换为等价正则或明确拒绝。
+- 所有 AutoBangumi 写入口必须经由同一 auth-mode dispatch，同时选择对应的 adapter 与 payload：password → legacy 3.1 Cookie + `{data,rss}`，api_token → Token compatibility adapter + fail-closed 写入。
+- AutoBangumi 3.1 的 `filter` 是 `re.search` 命中即排除：将 MiGuOrca 的 `must_contain`（全部命中才接受）编码为“任一未命中”分支，将 `must_not_contain`（任一命中即排除）编码为命中分支并用 OR 合并；空规则使用永不匹配的 `(?!)`。
+- 组合用户正则以供外部系统执行时，必须编译最终表达式（不仅是各片段）；无法等价嵌入的 inline flag 等模式需在 transport 前稳定拒绝。
+
+## 2026-08-24 22:42:00 CST - US-173
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 重构 AutoBangumi request-scoped 配置为服务根地址和显式 password/api_token 认证模式，并在 CLI、单个提交和批量提交入口复用同一构造器。
+- 规范化服务根地址，拒绝路径、userinfo、query、fragment、未知模式及混合凭据；配置加载错误不再回显路径或解析细节。
+- Files changed: `src/ab_engine/controllers/ab_config.py`, `src/ab_engine/controllers/ab_http_client.py`, `src/apps/migu_orca_web/views.py` and focused regression tests.
+- **Learnings for future iterations:**
+  - 模式可复用：Web 的可选认证字段需要 `model_dump(exclude_none=True)` 后再传入严格配置构造器，避免未选择模式的空字段被误判为混用凭据。
+  - 旧 HTTP adapter 只允许 api_token 模式继续使用；账号密码登录与固定 API 路径留给后续 legacy adapter 故事实现。
+---
+
+## 2026-08-24 23:08:37 CST - US-174
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 新增 AutoBangumi 3.1.x 密码登录 adapter：表单登录、实例内 token Cookie、只读状态版本探测和 3.1 兼容性判断；重定向 fail-closed，避免认证 Cookie 跨 origin 传递。
+- 为成功、认证失败、超时、网络失败、缺令牌和未知版本添加 fixture transport 覆盖；同步修复 Stage 24 配置契约变更后的脱敏响应断言。
+- Files changed: `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_http_client_test.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 3.1 adapter 应保留独立的 `request_json` transport seam，登录表单和状态 Cookie 流程不与 API Token JSON 写入通道混用。
+  - 完整 pytest 需从不存在的 `.migu_orca/storage` 开始，否则默认 storage 会使批量与浏览器测试产生互相污染。
+---
+
+## 2026-08-24 23:18:53 CST - US-175
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 新增已确认 Request 到 AutoBangumi 3.1 `{data: Bangumi, rss: RSSItem}` 的纯映射，并将筛选规则转换为等价正则；无法安全表达的规则会明确拒绝。
+- 3.1 adapter 现通过单次内存 Cookie 会话 POST `/api/v1/rss/subscribe`，将 `status: true`（无订阅 ID 亦可）视为成功，并拒绝重定向以防 Cookie 跨 origin。
+- Files changed: `src/ab_engine/controllers/subscription_payload.py`, `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_client.py`, `src/ab_engine/controllers/submit_result.py` and focused tests; `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - AutoBangumi 3.1 的 subscribe endpoint 接收命名 JSON body `{data, rss}`；不要发送旧的 `title/rss_url/filter_rule` 自定义结构。
+  - `status: true` 是 3.1 写入成功的唯一稳定信号，返回订阅 ID 不应作为成功前提。
+  - 带认证 Cookie 的 JSON POST 需要使用 no-redirect transport；标准 urllib redirect 行为不能作为安全边界。
+---
+
+## 2026-08-24 23:34:38 CST - US-176
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 将 API Token/Bearer 适配器改为只读的 `/api/v1/status` 能力探测，返回 reachable、authenticated、version、adapter 和 `submit_supported: false` 的脱敏摘要。
+- 移除了未验证 Token 写契约对服务根地址的 POST；所有 Token 模式写提交现在稳定 fail closed，且不复用 3.1 Cookie/RSS body。
+- Files changed: `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_http_client_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - API Token 兼容适配器可安全执行同源 Bearer 的只读 status 探测；探测成功不表示具备提交能力，必须以 `submit_supported` 为准。
+  - 未有逐版本写契约和 fixture 覆盖时，Token 写提交必须在 transport 前 fail closed，避免错误复用 legacy 3.1 的 Cookie 或 payload。
+---
+
+## 2026-08-24 23:42:51 CST - US-177
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 新增 AutoBangumi request-scoped 只读连接测试 API，按认证模式复用现有 password 登录/status 与 API Token Bearer/status adapter，绝不调用订阅写接口。
+- 成功只返回可公开的连通性、认证状态、版本、中文认证模式、adapter 与提交能力；校验、认证、连接、超时和协议错误均使用脱敏统一信封。
+- Files changed: `src/ab_engine/controllers/ab_connection_controller.py`, `src/ab_engine/controllers/ab_connection_controller_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 只读连接测试可直接复用 `probe()` seam，并在 controller 层选取 password legacy 或 api_token adapter，避免 UI/API 各自分支认证逻辑。
+  - API 返回的连接摘要和错误 details 都应由 view 白名单过滤；禁止把 adapter 可能附带的 base_url、凭据或 Cookie 透传。
+  - 此故事没有 UI 交互改动；全量 pytest 已执行真实 Chromium 套件，下一条 UI 故事仍须按 dev-browser skill 新增针对性验证。
+---
+
+## 2026-08-25 00:03:00 CST - US-178
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 重构 Settings、单项提交和批量队列的 Auto Bangumi 表单：默认账号密码，支持 API Token 切换，并统一生成 request-scoped 新认证配置。
+- Settings 不再依赖 request_id 才可用；新增只读连接测试，成功后清空服务地址与全部认证字段；单项和批量提交继续保留明确确认。
+- Files changed: `src/apps/migu_orca_web/templates/migu_orca_web/{settings,index}.html`, `src/apps/migu_orca_web/static/{app,style}.css`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_actions.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 共享认证表单可通过以 DOM id 前缀为参数的构造器同步模式可见性、校验、提交 payload 与成功后的敏感字段清理。
+  - CSS 中 grid/flex 规则可能覆盖浏览器原生 `hidden`，认证模式切换的容器与按条件显示的按钮需明确为 `[hidden] { display: none; }`。
+  - 浏览器测试使用 mock 的只读连接 API，验证页面、URL 与 Web Storage 不携带用户输入的凭据。
+---
+
+## 2026-08-25 00:22:00 CST - US-179
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 接通单项和批量（含 retry）的统一 AutoBangumi 写入编排：账号密码模式使用 3.1 登录/Cookie 与 `{data, rss}` 契约，API Token 模式维持不写入的 fail-closed 行为。
+- 增加 fake 3.1 transport 回归，覆盖 login → token Cookie → rss/subscribe，且 `status: true` 无外部 ID 仍成功；同步将遗留 Token 浏览器用例改为显式选择 API Token 模式。
+- Files changed: `src/ab_engine/controllers/{ab_http_client,subscription_payload}.py`, 单项/批量编排控制器及对应单元、Chromium 回归测试，`scripts/ralph/{prd,progress}.txt`。
+- **Learnings for future iterations:**
+  - 认证模式既决定客户端凭据隔离，也决定订阅 body；仅替换 client 或 payload 之一会产生不可用的跨契约组合。
+  - UI 默认认证模式改变后，测试旧 Token 场景必须先显式切换模式，避免向隐藏控件填值。
+---
+
+## 2026-08-25 00:30:44 CST - US-180
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成 Stage 24 文档收尾：README、主 PRD、Future Stages、backlog、Stage PRD 与 M10/M12/M13/M14 已同步真实 AutoBangumi 3.1.18 认证、连接测试、submit 契约和完成状态。
+- 补充了不含凭据的手动只读验收说明；本轮未提供显式实例或凭据，因此没有进行实机烟雾，也没有调用任何真实订阅写接口。
+- Files changed: `README.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_future_stages.md`, `docs/backlog.md`, `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`, `docs/modules/M10-auto-bangumi-integration-PRD.md`, `docs/modules/M12-log-error-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `docs/modules/M14-system-config-PRD.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Stage closeout documentation must replace legacy endpoint/token wording in API examples and manual acceptance steps, not just update the current-stage status.
+  - AutoBangumi real-instance validation remains read-only unless a user explicitly confirms a write from the accepted-Request Web UI.
+  - Useful context: `uv run pytest -q`, `uv run pytest tests/browser/ -q`, `uv run python -m compileall -q src tests`, and `node --check src/apps/migu_orca_web/static/app.js` were run; Chromium uses fixture routes only.
+---
+
+## 2026-08-25 02:10:16 CST - US-175
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 根据复审结论修正 AutoBangumi 3.1.18 payload：filter 现在准确表达 MiGuOrca 的包含/排除、regex 与大小写语义；空规则使用 `(?!)`，非法正则稳定返回 `ab_filter_unsupported`。
+- `data` 现在映射已确认字幕组、可证明季数及可用的公开元数据；password 模式 fallback 从 `{data,rss}` 恢复稳定的 `title`、`rss_url`、`save_path` 与 `filter_rule`，不携带连接凭据或服务地址。
+- Files changed: `src/ab_engine/controllers/subscription_payload.py`, `src/ab_engine/controllers/fallback_config.py`, corresponding AutoBangumi, single-submit and batch-submit tests, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - AutoBangumi 3.1 的 filter 是排除表达式；不能沿用 MiGuOrca 的“包含即接受”正向正则。
+  - password-mode fallback 必须从 legacy `{data,rss}` 合同还原公开手工字段，不能退回旧的自定义请求 body。
+  - Useful context: `uv run python -m compileall -q src tests`、focused pytest（133 passed）和 `uv run pytest -q -m 'not browser'`（859 passed, 260 deselected）已通过；真实 Chromium 的 `test_a11y.py`（14 passed）已运行，整套 browser 调用受执行环境约 30 秒截断，需在无该限制的 CI/本地完成全套确认。
+---
+
+## 2026-08-25 02:28:03 CST - US-178
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成复审要求的批量单项重试 Chromium 安全回归修正：API Token 场景现在先显式切换认证方式，再填写服务根地址与 Token，并断言提交 payload 使用统一的 `auth_mode` / `base_url` 配置契约。
+- 保持批量失败、单项 retry、成功后清空敏感字段，以及 request-scoped 和脱敏断言全程覆盖。
+- Files changed: `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 默认认证方式为账号密码；使用 API Token 的浏览器流程必须先切换认证方式，不能向隐藏的 Token 控件直接填值。
+  - 真实 Chromium 安全回归应同时检查失败后的单项 retry 和成功后的敏感字段清理。
+  - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest tests/browser/ -q`（260 passed）和 `uv run pytest -q`（1119 passed）均已通过。
+---
+
+## 2026-08-25 02:40:35 CST - US-180
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成 Stage 24 收尾复审：确认此前 US-175 的 filter/payload 修复与 US-178 的 API Token 批量 retry Chromium 修复已纳入回归；现有 README、主 PRD、Future Stages、backlog、Stage 24 PRD 及 M10/M12/M13/M14 文档保持同步，并保留只读实机验收与禁止真实写订阅的边界。
+- Files changed: `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 全量 Chromium 运行时间会超过交互命令的输出窗口；应使用独立会话并以最终 pytest 摘要判定结果，不能把进度点当作通过。
+  - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest -q -m 'not browser'`（859 passed, 260 deselected）、`uv run pytest tests/browser/ -q`（260 passed）及 `uv run pytest -q`（1119 passed）均已通过；未执行真实 AutoBangumi 写操作。
+---
+
+## 2026-08-26 15:00:24 CST - US-175
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成复审追加的 payload 安全契约：只使用已接受 Request 中确认的公开标题，结构化 season 优先；支持中文第一至第九十九季，不能转换的显式“第…季”稳定 fail closed。
+- 完整 AutoBangumi 3.1 filter 现会在拼接后重新编译；如嵌入式全局 flag 无法等价表达，会返回 `ab_filter_unsupported`，且共享单项/批量/retry mapper 会在创建 client/transport 前停止。
+- Files changed: `src/ab_engine/controllers/subscription_payload.py`, `src/ab_engine/controllers/subscription_payload_test.py`, `src/batch_engine/controllers/batch_submit_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: 组合外部正则必须验证最终表达式，避免独立可编译的片段在嵌入后失效。
+  - Gotchas encountered: 原始用户输入不是已确认标题；缺少确认标题或无法证明的显式季数必须 fail closed。
+  - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest -q -m 'not browser'`（870 passed）、`uv run pytest tests/browser/ -q`（260 passed）及 `uv run pytest -q`（1130 passed）均已通过。
+---
+
+## 2026-08-26 15:20:00 CST - US-180
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成 Stage 24 最终复审：确认 US-175 的 filter/payload 安全修复与 US-178 的 API Token 批量 retry Chromium 修复均已纳入完整回归；既有 README、主 PRD、Future Stages、backlog、Stage 24 PRD 与 M10/M12/M13/M14 文档仍准确描述账号密码默认、API Token 兼容、服务根地址、只读连接测试及显式写确认边界。
+- 创建 Stage 24 最终 `prd.json` 与 `progress.txt` 归档；未执行真实 AutoBangumi 写操作，也未提供或记录任何实机凭据。
+- Files changed: `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/archive/2026-08-26-stage24-autobangumi-compatibility/{prd.json,progress.txt}`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Ralph 阶段收尾应在最终全量测试通过后归档当时的 PRD 与 progress，确保归档反映完成状态与精确验收记录。
+  - Gotchas encountered: 浏览器套件应使用可持续的终端会话等待最终 pytest 摘要，不能依据中途的进度点判断通过。
+  - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest -q -m 'not browser'`（870 passed, 260 deselected）、`uv run pytest tests/browser/ -q`（260 passed）及 `uv run pytest -q`（1130 passed）均已通过。
+---
+

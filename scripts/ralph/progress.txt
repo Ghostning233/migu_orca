@@ -145,3 +145,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Gotchas encountered: 原始用户输入不是已确认标题；缺少确认标题或无法证明的显式季数必须 fail closed。
   - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest -q -m 'not browser'`（870 passed）、`uv run pytest tests/browser/ -q`（260 passed）及 `uv run pytest -q`（1130 passed）均已通过。
 ---
+
+## 2026-08-26 15:20:00 CST - US-180
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成 Stage 24 最终复审：确认 US-175 的 filter/payload 安全修复与 US-178 的 API Token 批量 retry Chromium 修复均已纳入完整回归；既有 README、主 PRD、Future Stages、backlog、Stage 24 PRD 与 M10/M12/M13/M14 文档仍准确描述账号密码默认、API Token 兼容、服务根地址、只读连接测试及显式写确认边界。
+- 创建 Stage 24 最终 `prd.json` 与 `progress.txt` 归档；未执行真实 AutoBangumi 写操作，也未提供或记录任何实机凭据。
+- Files changed: `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/archive/2026-08-26-stage24-autobangumi-compatibility/{prd.json,progress.txt}`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Ralph 阶段收尾应在最终全量测试通过后归档当时的 PRD 与 progress，确保归档反映完成状态与精确验收记录。
+  - Gotchas encountered: 浏览器套件应使用可持续的终端会话等待最终 pytest 摘要，不能依据中途的进度点判断通过。
+  - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest -q -m 'not browser'`（870 passed, 260 deselected）、`uv run pytest tests/browser/ -q`（260 passed）及 `uv run pytest -q`（1130 passed）均已通过。
+---
