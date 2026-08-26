@@ -59,6 +59,7 @@ def _accepted_request(
         "input": {"raw_title": title},
         "source_info": {"matched_bangumi": {"title": title}},
         "confirmable_config": {
+            "selected_subtitle_group": "Loli",
             "selected_rss_url": "https://mikan.example.com/rss/sub",
             "expected_folder_name": title,
             "filter_rule": {},
@@ -170,7 +171,8 @@ def _queue_with_items(items: list[BatchQueueItem]) -> BatchSubmissionQueue:
 
 def _ab_config(**overrides) -> AutoBangumiConfig:
     values = {
-        "endpoint": "https://ab.example.com/api/subscription",
+        "base_url": "https://ab.example.com",
+        "auth_mode": "api_token",
         "token": "secret-token",
         "fallback_enabled": False,
     }
@@ -1338,6 +1340,44 @@ class TestSerialization:
 
 
 class TestComposeAbSubmitOne:
+    @pytest.mark.parametrize(
+        "filter_rule",
+        [
+            {
+                "must_contain": "(?i)1080p",
+                "must_not_contain": "",
+                "use_regex": True,
+                "case_sensitive": True,
+            },
+        ],
+    )
+    def test_composed_submit_one_rejects_unmappable_payload_before_transport(
+        self, monkeypatch: pytest.MonkeyPatch, filter_rule: dict
+    ) -> None:
+        """The single/batch/retry seam builds before creating a client."""
+        from batch_engine.controllers import batch_submit_controller
+
+        called = False
+
+        def fail_if_called(_config: object) -> object:
+            nonlocal called
+            called = True
+            raise AssertionError("invalid mapper output must not reach transport")
+
+        monkeypatch.setattr(
+            batch_submit_controller.ab_http_client,
+            "create_auto_bangumi_submit_client",
+            fail_if_called,
+        )
+        request = _accepted_request(request_id="req-1", title="葬送的芙莉莲")
+        request["confirmable_config"]["filter_rule"] = filter_rule
+
+        with pytest.raises(Stage1Error) as error:
+            compose_ab_submit_one()(request, _ab_config(auth_mode="password"))
+
+        assert error.value.error_type == "ab_filter_unsupported"
+        assert called is False
+
     def test_composed_submit_one_reuses_existing_ab_contract(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1346,7 +1386,7 @@ class TestComposeAbSubmitOne:
         client = FakeAutoBangumiClient()
         monkeypatch.setattr(
             batch_submit_controller.ab_http_client,
-            "create_auto_bangumi_http_client",
+            "create_auto_bangumi_submit_client",
             lambda config: client,
         )
 
@@ -1393,20 +1433,27 @@ class TestComposeAbSubmitOne:
         )
         monkeypatch.setattr(
             batch_submit_controller.ab_http_client,
-            "create_auto_bangumi_http_client",
+            "create_auto_bangumi_submit_client",
             lambda config: client,
         )
 
         submit_one = compose_ab_submit_one()
         ab_result = submit_one(
             _accepted_request(request_id="req-1", title="葬送的芙莉莲"),
-            _ab_config(fallback_enabled=True),
+            _ab_config(
+                auth_mode="password",
+                username="private-user",
+                password="private-password",
+                fallback_enabled=True,
+            ),
         )
 
         assert ab_result["success"] is False
         assert ab_result["error"]["error_type"] == "ab_submit_failed"
         assert ab_result["fallback_config"] is not None
         assert ab_result["fallback_config"]["title"] == "葬送的芙莉莲"
+        assert ab_result["fallback_config"]["rss_url"] == "https://mikan.example.com/rss/sub"
+        assert ab_result["fallback_config"]["filter_rule"] == {"legacy_31_filter": "(?!)"}
 
 
 class TestRetryBatchQueueItem:

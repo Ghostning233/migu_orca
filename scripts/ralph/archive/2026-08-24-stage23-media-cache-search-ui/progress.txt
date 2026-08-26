@@ -1,0 +1,99 @@
+# Ralph Progress Log
+Started: 2026-08-23 22:43:00 CST
+
+## Codebase Patterns
+
+- Python 依赖、检查与测试统一通过 `uv`；Web 前端修改后运行 `node --check src/apps/migu_orca_web/static/app.js`，UI story 必须通过 `.agents/skills/dev-browser/SKILL.md` 在真实 Chromium 验证。
+- 单个与批量候选继续复用 `_search_mikan_candidates`、公开候选序列化、候选缓存和现有 `mikan_bangumi` 详情到 preview 链路；不得另建 MiKan parser 或草案模型。
+- 封面缓存只能代理由受信 MiKan parser 产生并登记的图片来源，公共路由只接受 opaque key；禁止任意 URL、私网/环回、本地地址、路径穿越、异常重定向和开放代理。
+- Stage 23 封面缓存默认 7 天滑动 TTL、10 秒总下载超时、5 MiB 单图上限；原子写入、机会式节流清理，不引入后台 worker。流式代理不在本 Stage，见 `docs/optional_features.md`。
+- MiKan 搜索提前停止必须先用脱敏大 fixture 证明完整/提前读取候选完全一致，并覆盖 marker/UTF-8 跨 chunk与缺失 marker fallback；不得凭固定 1000 行直接截断生产响应。
+- 批量候选浮层全页同时最多一个，必须支持切换、点击外部/Escape 关闭、焦点返回和 viewport 约束；批量草案统一送入现有订阅方案详情，不在卡片内展开完整草案。
+- 剧集摘要固定使用 `播出进度：待开发 / <总集数或未知>`；总集数只解析明确公开元数据，不用种子/RSS推断当前最新播出集数。
+- disabled/`aria-disabled=true` 控件使用静态反馈和普通/default 鼠标；只有真实 `aria-busy=true` 才允许 loading 动画。
+- 同源封面加载失败时前端移除图片并保留稳定占位，候选操作不能依赖图片成功；Chromium 回归应断言仅请求 opaque poster endpoint，且额外候选字段不会进入页面。
+- 正式番名与季数解析不在 Stage 23，移交 Stage 24；AI/规则只生成可审核搜索词，不自动选择最终 MiKan 合集。
+- endpoint、token、cookie、Authorization header、raw HTML、raw RSS XML、magnet、原始图片 URL、原始响应体、完整失败 URL和本地绝对路径不得进入 API、页面、URL、浏览器 storage、持久化、日志、截图或 trace。
+
+---
+
+## 2026-08-24 00:00:00 CST - US-169
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Moved DRAFT/READY batch-card draft viewing into the shared subscription-detail panel, with focus/scroll, edit, save, accept, and safe context cleanup on deletion, re-search, and mode changes.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, browser and view tests, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch cards should only link to the shared detail panel; keep card grids independent of all detail content.
+---
+
+## 2026-08-23 23:12:52 CST - US-165
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added a versioned MiKan poster cache configuration and an atomic, bounded disk-cache repository with opaque SHA-256 keys, 7-day sliding TTL, and throttled cleanup.
+- Added focused tests for cache hit/miss, TTL renewal and expiration, traversal rejection, symlink safety, image/size validation, and failed atomic replacement cleanup.
+- Files changed: `src/mikan_engine/controllers/mikan_poster_cache.py`, `src/mikan_engine/controllers/mikan_poster_cache_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Poster storage is intentionally transport- and route-free in US-165; US-166 should register trusted parser-produced sources before exposing opaque keys.
+  - Cache time is injected through the repository clock, keeping TTL and cleanup tests deterministic.
+---
+
+## 2026-08-23 23:45:00 CST - US-166
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Replaced externally exposed MiKan poster URLs with registered opaque same-origin poster endpoints, backed by the Stage 23 disk cache.
+- Added SSRF checks for non-public addresses, disabled redirects, constrained accepted image types, and retained stable client-side poster placeholders with lazy asynchronous decoding.
+- Added cache-service safety tests and Chromium coverage for opaque lazy-loaded candidate posters.
+- Files changed: `src/mikan_engine/controllers/mikan_poster_service.py`, `src/mikan_engine/controllers/mikan_poster_service_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/views_test.py`, `tests/browser/test_mikan_candidates.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Parser-produced poster sources must stay process-local; candidate serialization registers them and only sends `/api/v1/mikan/posters/<opaque-key>` to the browser.
+  - Poster rendering is already shared between individual candidate cards and batch cards, so `loading=lazy` and `decoding=async` belong in both render paths.
+  - The full Chromium suite is slower than the command window; targeted candidate Chromium coverage and the batch workbench suite pass, while future closeout should run the suite in the project’s normal CI/interactive environment.
+---
+
+## 2026-08-23 23:29:47 CST - US-167
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added candidate-aware MiKan search streaming that stops after a complete related-candidate section, while retaining the existing bounded full-read behavior for missing or incomplete structure.
+- Added a de-identified large search-response fixture plus coverage for candidate equivalence, substantially fewer bytes read, UTF-8 and marker chunk boundaries, and safe fallback paths.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_client_test.py`, `src/mikan_engine/controllers/fixtures/mikan_search_large_response.html`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Candidate-aware transport behavior remains optional (`get_search_text`); existing injected transports continue using `get_text` and preserve the bounded fallback seam.
+  - The early-stop detector must require both a recognized candidate and the matching candidate-section close, with incremental UTF-8 decoding to remain safe across network chunks.
+---
+
+## 2026-08-24 00:18:00 CST - US-168
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Replaced the batch candidate panel with a single viewport-bounded anchored dialog, including an arrow, close control, anchor switching, outside-click/Escape dismissal, and keyboard focus transfer/return.
+- Kept the existing candidate selection, poster placeholder, and EMPTY/FAILED behaviors intact; re-search, card deletion, and search-mode changes safely clear the active dialog.
+- Added Chromium coverage for fixed positioning, single-instance anchor switching, independent card-grid height, focus behavior, Escape, and outside-click closure.
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch-candidate choices are a single fixed dialog keyed by `activeBatchCandidateItemId`; rerendering cards preserves the one-panel invariant while keeping card layout independent.
+  - UI browser validation runs through Playwright; the complete Chromium suite is 256 tests and may need persistent-session polling in this environment.
+---
+
+## 2026-08-24 00:05:16 CST - US-170
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Added the optional public `total_episodes` contract to MiKan candidates, details, cache copies, and API serialization; only explicit labelled or `data-total-episodes` metadata is accepted.
+- Rendered `播出进度：待开发 / N 集` or `播出进度：待开发 / 未知` in single-candidate, batch-candidate, and selected batch-result cards without inferring any current episode from seeds, RSS, or download state.
+- Added parser, cache, API, and Chromium coverage for explicit, missing, and malformed totals.
+- Files changed: `src/mikan_engine/controllers/mikan_client.py`, `src/mikan_engine/controllers/mikan_candidate_cache.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, related unit/browser tests, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Candidate card rendering is shared by individual search and batch popover choices; add public display metadata there once, then use `selected_candidate` for the batch result-card summary.
+  - Keep unknown external optional metadata untrusted in JavaScript: only positive integers receive the numeric display, everything else uses the stable unknown placeholder.
+---
+
+## 2026-08-24 00:15:31 CST - US-171
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Updated disabled and `aria-disabled` controls to use static feedback with a default cursor and no pseudo-element animation, while preserving request progress in the existing live status areas.
+- Prevented disabled navigation, tab, icon, secondary, and danger controls from inheriting hover/focus highlights.
+- Added Chromium regression coverage for candidate search, batch draft/accept, queue, and Settings controls, including native non-triggerability.
+- Files changed: `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_ui_quality.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Put loading feedback in the request's aria-live status; disabled controls are availability feedback and must remain static unless they explicitly carry `aria-busy=true`.
+---
+
+## 2026-08-24 00:26:53 CST - US-172
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- Closed Stage 23 documentation, added a Chromium regression for failed opaque posters and candidate-field filtering, and confirmed the existing cache/SSRF, non-image, size, path, popover, detail, and sensitive-data coverage.
+- Files changed: `README.md`, Stage/main/future/backlog/module PRDs, `docs/optional_features.md`, `tests/browser/test_mikan_candidates.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - A failed same-origin poster removes the image and retains the stable candidate placeholder; candidate selection remains available and only the opaque endpoint is requested.
+  - The Stage 23 closeout validation baseline is `uv run pytest tests/browser/ -q` (259 passed) plus `uv run pytest -q` (1102 passed); browser tests require `.migu_orca/storage` to be absent.
+---

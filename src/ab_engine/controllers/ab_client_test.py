@@ -52,6 +52,18 @@ def test_submit_ab_subscription_accepts_alternate_subscription_id_field() -> Non
     assert result["ab_subscription_id"] == "sub-123"
 
 
+def test_submit_ab_subscription_accepts_legacy_status_success_without_id() -> None:
+    result = submit_ab_subscription(FakeAutoBangumiClient(response={"status": True}), _payload())
+
+    assert result == {
+        "success": True,
+        "ab_subscription_id": None,
+        "ab_response": {"status": True},
+        "fallback_config": None,
+        "error": None,
+    }
+
+
 def test_submit_ab_subscription_converts_controlled_failure_to_submit_result() -> None:
     client = FakeAutoBangumiClient(
         error=Stage1Error(

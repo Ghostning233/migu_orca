@@ -1,150 +1,139 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage23-media-cache-search-ui",
-  "description": "MiGuOrca Stage 23：增加安全同源 MiKan 封面缓存与异步加载，在保证候选完整的前提下减少搜索页无用读取，并把批量候选改为锚定浮层、草案统一送入详情区，同时增加播出进度占位和友好的禁用按钮反馈。",
+  "branchName": "agent/stage24-autobangumi-compatibility",
+  "description": "Stage 24：修复 AutoBangumi 真实认证与订阅契约，默认支持账号密码登录，并保留 API Token/Bearer 兼容模式。",
   "userStories": [
     {
-      "id": "US-165",
-      "title": "建立安全封面缓存契约与存储",
-      "description": "作为部署者，我希望服务端安全缓存候选封面，从而避免客户端直接依赖 MiKan 图片域名。",
+      "id": "US-173",
+      "title": "重构 AutoBangumi 配置与适配器契约",
+      "description": "作为开发者，我需要显式区分账号密码与 API Token 认证，使所有提交入口共享安全、可演进的配置契约。",
       "acceptanceCriteria": [
-        "新增版本化封面缓存配置和 repository，默认 TTL 7 天、下载总超时 10 秒、单图上限 5 MiB",
-        "缓存 key 不可逆且文件名 path-safe，缓存目录由应用配置确定，任何请求参数都不能控制文件路径",
-        "缓存写入采用临时文件加原子替换，失败、中断、超限或非图片响应不留下半文件",
-        "机会式清理只删除明确缓存目录内超过 TTL 的普通缓存文件，并有节流避免每个请求全量扫描",
-        "单元测试覆盖命中、未命中、滑动续期、过期清理、路径穿越、符号链接、超限和原子写入失败",
+        "配置提供 password 与 api_token 两种互斥 auth_mode，默认 password；分别要求 base_url/username/password 与 base_url/token",
+        "base_url 仅允许 http/https 根地址并拒绝 userinfo、query、fragment；允许局域网地址且 API 路径由 adapter 内部拼接",
+        "未知模式、缺失字段或敏感字段混用返回稳定脱敏错误；CLI、单个 Web 与批量入口共享构造逻辑",
+        "凭据保持 request-scoped，不写入 Request、队列、AB result、浏览器 storage、URL 或日志",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "先实现存储和安全边界，不在本 story 添加公共图片代理路由。不得引入后台 worker。"
+      "notes": "不要保留 endpoint=完整写 URL 的旧语义。"
     },
     {
-      "id": "US-166",
-      "title": "接入同源封面端点与异步图片加载",
-      "description": "作为用户，我希望候选封面从 MiGuOrca 服务端加载，并且图片失败或变慢时不阻塞其他内容。",
+      "id": "US-174",
+      "title": "实现 AutoBangumi 3.1.18 登录会话与只读能力探测",
+      "description": "作为旧版 AutoBangumi 用户，我希望 MiGuOrca 用账号密码登录并安全保持单次 Cookie 会话。",
       "acceptanceCriteria": [
-        "候选响应提供同源 opaque poster URL，不把原始 MiKan poster URL 交给浏览器",
-        "封面端点只接受已登记 opaque key，不接受任意 URL，并阻止私网、环回、本地地址、异常重定向和开放代理行为",
-        "端点只返回白名单图片类型，缓存失败使用稳定占位或错误语义且不影响候选选择",
-        "单个和批量候选图片使用占位、loading=lazy、decoding=async，正文和操作先于图片可用",
-        "浏览器测试证明慢图片不阻塞页面交互，完成后显示，失败后保持占位",
-        "API、日志、URL、storage 和 trace 不泄露原始图片 URL、缓存绝对路径或外部响应内容",
-        "Verify in browser using dev-browser skill",
+        "legacy_3_1 adapter 以 form-urlencoded POST /api/v1/auth/login，解析 access_token 并仅在当前 client/session 内作为 token Cookie 使用",
+        "实现 /api/v1/status 只读版本探测；认证 Cookie 不跟随跨 origin 重定向",
+        "fixture transport 覆盖成功、401/403、超时、网络失败、非法响应、缺 token 和未知版本",
+        "错误与日志不包含 base_url、username、password、token、Cookie、原始响应或完整失败 URL",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "流式封面代理不在本 Stage，见 docs/optional_features.md。"
+      "notes": "自动化不得访问用户实机；实机只读测试留给 closeout。"
     },
     {
-      "id": "US-167",
-      "title": "优化 MiKan 搜索页有界提前停止",
-      "description": "作为用户，我希望系统只读取候选所需的搜索页内容，从而减少大页面带来的等待时间和流量。",
+      "id": "US-175",
+      "title": "实现 AutoBangumi 3.1.18 订阅 payload 与响应适配",
+      "description": "作为 AutoBangumi 3.1.18 用户，我希望已接受 Request 能按真实 RSS subscribe 契约提交。",
       "acceptanceCriteria": [
-        "增加当前 MiKan 页面结构的脱敏大响应 fixture，明确候选区域、候选结束位置和后续无关内容",
-        "实现 marker 或结构感知的 chunk 读取提前停止，覆盖标记与 UTF-8 字符跨 chunk，不使用未经证明的固定 1000 行生产截断",
-        "完整读取与提前停止解析出的候选标题、ID、顺序、封面和去重结果完全一致",
-        "标记缺失、候选结构未闭合或提前内容不足时安全回退现有有界读取，不返回伪空结果",
-        "测试断言提前停止读取字节数显著少于完整 fixture，并保留大小、超时和错误脱敏保护",
+        "纯函数把已接受 Request 映射为 POST /api/v1/rss/subscribe 的 {data: Bangumi, rss: RSSItem}，RSS、路径与标题来自用户确认数据",
+        "筛选语义只能在可安全表达为 3.1.18 filter 字符串时提交；否则返回兼容性错误，不静默丢弃规则",
+        "status=true 视为成功且订阅 ID 可为空；status=false 或畸形响应映射为稳定脱敏失败",
+        "测试断言路径、body、Cookie 和结果契约，但不调用真实写接口",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "必须先证明候选一致性和字节节省，再改生产 transport。"
+      "notes": "审查纠正（必须单独提交）：AutoBangumi 3.1.18 的 filter 是 re.search 命中即排除。must_contain 应生成不满足即命中的排除式，must_not_contain 应生成满足即命中的排除式，两者合并为 OR；空规则必须是永不匹配 (?!)；保留 regex/case 语义，非法或不可等价表达必须 ab_filter_unsupported。补充可执行行为测试。data 必须映射已确认且可证明的 season、selected_subtitle_group 到 group_name，并在可靠时映射 season_raw/dpi/source/subtitle；不能证明的非第一季 fail closed，禁止静默 season=1。单个/批量/retry 复用同 mapper。password {data,rss} 的 fallback 也须映射完整的稳定内部字段 title/rss_url/save_path/filter_rule，且排除所有凭据/服务地址/响应。添加单个和批量 password fallback 测试；不复用旧 title/rss_url/filter_rule 自定义 body。审查追加：只读取 accepted Request 的公开已确认标题；支持中文数字第一季至第九十九季（至少第二、第四、第十、第十二），结构化 matched_bangumi.season 优先；明显“第…季”而不能转换时必须稳定 fail closed，完全无标记才默认 1。构造完整 3.1 filter 后必须 re.compile；例如 (?i)1080p 嵌入后若无法等价转换即 ab_filter_unsupported，且 mapper 失败时单个/批量/retry 都不得调用 transport。"
     },
     {
-      "id": "US-168",
-      "title": "将批量候选改为锚定式单实例浮层",
-      "description": "作为用户，我希望候选显示在对应按钮附近并能方便关闭，从而不在结果区域制造嵌套滚动。",
+      "id": "US-176",
+      "title": "保留新版 API Token 与 Bearer 兼容模式",
+      "description": "作为新版 AutoBangumi 用户，我希望使用 API Token，同时不让未经验证的写契约被误报为可用。",
       "acceptanceCriteria": [
-        "查看候选打开带箭头且锚定触发按钮的单实例浮层，不作为结果 panel 普通文档流子块撑高布局",
-        "点击其他 FOUND 卡片切换锚点和候选，点击外部、Escape、模式切换、重新搜索或删除 active 卡片关闭浮层",
-        "打开和关闭正确维护 aria-expanded、aria-controls、焦点进入与返回，同时最多一个浮层",
-        "桌面优先按钮下方展示，空间不足时保持在 viewport，窄屏不产生横向溢出或结果 panel 内新增滚动条",
-        "候选选择、封面占位、EMPTY/FAILED 和安全过滤行为保持不变",
-        "Verify in browser using dev-browser skill",
+        "api_token adapter 使用 Authorization Bearer 且与 legacy Cookie adapter 隔离，不混合或跨 origin 转发凭据",
+        "能力探测区分 reachable/authenticated/submit_supported；只有明确契约覆盖的版本才允许写提交",
+        "未知版本或写契约返回连接成功但暂不支持提交，不套用 legacy payload",
+        "测试覆盖 Bearer、401/403、能力不足和凭据脱敏",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "优先使用原生 Popover API 或等价渐进增强；必须有 Chromium 行为回归。"
+      "notes": "无法证明新版写接口时必须 fail closed。"
     },
     {
-      "id": "US-169",
-      "title": "统一批量草案到订阅方案详情",
-      "description": "作为用户，我希望批量草案也在统一详情区域查看和操作，从而避免结果卡片过长或互相拉伸。",
+      "id": "US-177",
+      "title": "增加 AutoBangumi 只读连接测试 API",
+      "description": "作为用户，我希望提交前先验证服务地址和认证信息。",
       "acceptanceCriteria": [
-        "DRAFT/READY 卡片的查看草案把对应 preview/request 渲染到现有订阅方案详情，不在卡片内创建完整草案面板",
-        "打开详情后滚动或聚焦到详情标题，并保留修改、保存草案、接受和种子筛选展示能力",
-        "切换另一张卡片只更新详情目标，不改变其他卡片高度、选择状态、候选或队列状态",
-        "结果卡片布局相互独立，不因同一 grid row 其他卡片详情被拉长，窄屏同样稳定",
-        "删除当前卡片、重新搜索或模式切换时安全清理详情上下文",
-        "Verify in browser using dev-browser skill",
+        "新增 request-scoped 连接测试 API，复用统一配置/client seam，不要求 request_id且不调用写接口",
+        "成功只返回 reachable、公开 version、中文认证模式、adapter 与 submit_supported 等脱敏摘要",
+        "失败区分校验、认证、连接、超时、协议不兼容且不含完整地址、账号、密码、token、Cookie 或原始响应",
+        "API 测试覆盖两种认证模式及响应、日志、持久化安全边界",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "复用现有 preview/request 详情渲染与动作，不创建第二套草案模型。"
+      "notes": "体验参考 qBittorrent 测试连接。"
     },
     {
-      "id": "US-170",
-      "title": "增加总集数与播出进度占位",
-      "description": "作为用户，我希望在结果卡片看到紧凑的剧集摘要，从而为后续核对种子完整性建立位置和数据契约。",
+      "id": "US-178",
+      "title": "重构 Settings 与批量 AutoBangumi 认证界面",
+      "description": "作为用户，我希望默认用服务地址、账号和密码测试并提交，也可以切换 API Token。",
       "acceptanceCriteria": [
-        "M03 只在 MiKan 明确公开元数据存在时解析可选 total_episodes，缺失或非法值保持 null，不得猜测",
-        "公开候选、详情和卡片契约只增加非敏感可选总集数字段，不保存原始页面内容",
-        "卡片单行显示 播出进度：待开发 / N 集，总集数未知显示 播出进度：待开发 / 未知",
-        "不使用有效种子数、RSS 最大集数或下载状态推断最新播出集数",
-        "单元和浏览器测试覆盖有总集数、未知总集数和异常元数据",
-        "Verify in browser using dev-browser skill",
+        "Settings 始终可测试连接；默认账号密码模式显示服务地址/用户名/密码，API Token 模式只显示服务地址/token",
+        "已接受 Request 显示单个提交；批量队列使用相同认证组件和 payload，不保留 endpoint/token 专用语义",
+        "测试与提交显示中文状态；提交需确认，连接或提交成功后清空敏感字段",
+        "敏感值不进入 DOM data attribute、URL、localStorage、sessionStorage、history、通知、截图或 trace",
+        "浏览器测试覆盖切换、校验、可访问性、成功清理、失败脱敏与窄屏布局",
         "Tests pass",
+        "Verify in browser using dev-browser skill",
         "Typecheck passes"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "当前最新播出集数的数据源未定义，本 Stage 固定显示待开发。"
+      "notes": "审查纠正（必须单独提交）：修复 tests/browser/test_ui_quality.py::test_stage20_batch_retry_does_not_leak_sensitive_values。该用例若走 API Token，必须先显式切换认证方式再填写服务地址与 token；也可改用默认账号密码，但必须保留批量失败、单项 retry、成功后清空敏感字段和 request-scoped/脱敏断言。禁止 skip/xfail/放宽断言/无意义超时。使用 Playwright route/mock 隔离外部 AutoBangumi，并以真实 Chromium 验证；UI 使用用户可理解的中文文案。"
     },
     {
-      "id": "US-171",
-      "title": "统一禁用按钮的静态反馈",
-      "description": "作为用户，我希望不可点击按钮明确显示禁用状态而不是等待动画，从而不会误判系统仍在加载。",
+      "id": "US-179",
+      "title": "接通单个与批量真实提交编排",
+      "description": "作为用户，我希望单个和批量已接受 Request 都能通过同一真实 adapter 安全提交 AutoBangumi。",
       "acceptanceCriteria": [
-        "审计 index 与 settings 的按钮和链接式控件，disabled 或 aria-disabled=true 使用静态视觉和普通或 default 鼠标，不使用 progress 或 wait",
-        "禁用控件 hover 不出现 spinner、旋转伪元素、无限 animation 或可点击高亮，真实 aria-busy=true 状态仍可显示 loading",
-        "禁用状态保持足够对比度、可读标签和辅助技术语义，不只依赖颜色表达",
-        "Playwright 覆盖候选、草案、批量接受、队列和 Settings 代表控件的 computed style 与不可触发行为",
-        "Verify in browser using dev-browser skill",
+        "单个 submit-ab、批量 submit/retry 统一使用新配置、client、payload 和结果 seam",
+        "fake 3.1.18 transport 端到端覆盖 login → Cookie → rss/subscribe → 脱敏成功，且无外部 ID也可成功",
+        "批量单项失败不阻塞后续项；SUBMITTING、SUCCEEDED、RESULT_PERSIST_FAILED、retry/recover 边界保持不变",
+        "自动化不访问真实写接口，成功项不会因刷新、接受或重试被重复提交",
         "Tests pass",
         "Typecheck passes"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "不要全局移除真实异步操作使用的 loading 样式。"
+      "notes": "保持前台顺序编排，不引入 worker。"
     },
     {
-      "id": "US-172",
-      "title": "Stage 23 文档、安全回归与收尾",
-      "description": "作为维护者，我希望 Stage 23 的实现、测试、文档和后续边界一致，从而可安全交接番名解析专项。",
+      "id": "US-180",
+      "title": "Stage 24 文档、安全回归与实机只读验收",
+      "description": "作为维护者，我需要以文档、完整回归和只读烟雾证明 AutoBangumi 链路可用且安全。",
       "acceptanceCriteria": [
-        "同步 README、主 PRD、Future Stages、backlog、Stage 23 PRD、optional features 和受影响的 M00、M03、M11、M12、M13 模块 PRD并标记实际完成状态",
-        "文档明确 Stage 24 为正式番名与季数解析、部署配置向导顺延 Stage 25，流式封面代理仍为可选功能",
-        "端到端安全回归覆盖封面端点 SSRF、任意 URL、路径穿越、超限非图片、原始 URL缓存路径泄露，以及浮层详情敏感值过滤",
-        "README 本地验收覆盖封面缓存过期、异步图片、搜索提前停止、候选浮层、统一草案详情、播出进度占位和禁用按钮",
-        "node --check src/apps/migu_orca_web/static/app.js passes",
-        "真实 Chromium 浏览器套件全部执行通过且不得整体 skipped",
-        "Verify in browser using dev-browser skill",
+        "同步 README、主 PRD、Future Stages、backlog、Stage 24 PRD 与 M10/M12/M13/M14；未开发任务只按优先级排序，不预绑定 Stage 编号",
+        "补充账号密码默认、API Token兼容、服务根地址、连接测试、3.1.18 支持范围和显式写确认的手动验收说明",
+        "安全回归证明 base_url、username、password、token、Cookie、Authorization、原始响应和完整失败 URL不进入响应、页面、URL、storage、日志、截图或 trace",
+        "允许对显式实例执行登录/状态/只读列表烟雾并记录脱敏摘要；Ralph 不调用真实订阅写接口",
+        "compileall、node --check、真实 Chromium browser suite 与完整 pytest 全部通过",
         "Tests pass",
+        "Verify in browser using dev-browser skill",
         "Typecheck passes"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "Stage closeout story；US-165 至 US-171 全部完成后执行。"
+      "notes": "审查纠正（必须单独提交）：此前“测试通过”记录已被复审推翻。仅在 US-175 与 US-178 完成后，追加 progress（不得删除旧记录）说明复审结论、实际修复及精确测试结果；同步必要的 Stage 24/M10 文档。执行 compileall、node --check、pytest -m not browser、真实 Chromium、full pytest、diff/status/log；不做真实 AutoBangumi 写操作。实机凭据不得写进 progress、文档、测试或脚本。审查追加：US-175 完成后独立最终复审；将最终 prd.json 与 progress.txt 复制到 scripts/ralph/archive/2026-08-26-stage24-autobangumi-compatibility/，不得删除当前文件或创建下一 Stage PRD。"
     }
   ]
 }

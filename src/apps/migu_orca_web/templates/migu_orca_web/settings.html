@@ -328,44 +328,54 @@
           class="empty-state compact-state"
           aria-live="polite"
         >
-          从已确认订阅方案详情进入后，可在此提交到 Auto Bangumi；token 不会持久化。
+          可先测试 Auto Bangumi 连接；从已确认订阅方案详情进入后，可提交订阅方案。认证信息不会持久化。
         </div>
-        <form id="settings-ab-submit-form" class="settings-form" hidden>
+        <form id="settings-ab-submit-form" class="settings-form">
           <p class="field-help">
-            当前 request_id：<code id="settings-ab-request-id"></code>。仅已确认订阅方案可提交；endpoint 和 token 只用于本次请求，不写入浏览器存储、URL 或订阅方案 JSON。
+            <span id="settings-ab-request-context" hidden>当前 request_id：<code id="settings-ab-request-id"></code>。仅已确认订阅方案可提交。</span>
+            服务地址和认证信息只用于本次请求，不写入浏览器存储、URL 或订阅方案 JSON。
           </p>
 
-          <label for="settings-ab-endpoint">endpoint</label>
+          <label for="settings-ab-auth-mode">认证方式</label>
+          <select id="settings-ab-auth-mode" name="ab_auth_mode" aria-describedby="settings-ab-help settings-ab-error">
+            <option value="password" selected>账号密码</option>
+            <option value="api_token">API Token</option>
+          </select>
+
+          <label for="settings-ab-endpoint">服务地址</label>
           <input
             id="settings-ab-endpoint"
-            name="ab_submit_endpoint"
-            type="text"
+            name="ab_base_url"
+            type="url"
             autocomplete="off"
-            placeholder="Auto Bangumi API 地址"
+            placeholder="例如：局域网 Auto Bangumi 服务根地址"
             aria-describedby="settings-ab-help settings-ab-error"
           >
 
-          <label for="settings-ab-token">token</label>
+          <div id="settings-ab-password-fields">
+            <label for="settings-ab-username">用户名</label>
+            <input id="settings-ab-username" name="ab_username" type="text" autocomplete="username" aria-describedby="settings-ab-help settings-ab-error">
+            <label for="settings-ab-password">密码</label>
+            <input id="settings-ab-password" name="ab_password" type="password" autocomplete="current-password" aria-describedby="settings-ab-help settings-ab-error">
+          </div>
+          <div id="settings-ab-token-fields" hidden>
+          <label for="settings-ab-token">API Token</label>
           <input
             id="settings-ab-token"
-            name="ab_submit_token"
+            name="ab_token"
             type="password"
             autocomplete="off"
             placeholder="Auto Bangumi Token"
             aria-describedby="settings-ab-help settings-ab-error"
           >
-
+          </div>
           <label class="checkbox-row" for="settings-ab-fallback-enabled">
-            <input
-              id="settings-ab-fallback-enabled"
-              name="ab_submit_fallback_enabled"
-              type="checkbox"
-              value="true"
-            >
-            fallback_enabled
+            <input id="settings-ab-fallback-enabled" name="ab_submit_fallback_enabled" type="checkbox" value="true">
+            提交时启用备用兼容选项
           </label>
+
           <p id="settings-ab-help" class="field-help">
-            提交前需要确认；失败时只展示脱敏错误，成功后清空 endpoint 和 token。
+            默认使用账号密码；API Token 模式仅兼容只读连接探测。提交前需要确认；成功后清空认证信息。
           </p>
           <p id="settings-ab-error" class="field-error" role="alert" hidden></p>
 
@@ -378,6 +388,7 @@
           </div>
 
           <div class="notification-actions">
+            <button id="settings-ab-test-submit" class="secondary-button" type="button">测试连接</button>
             <button id="settings-ab-submit" class="primary-button" type="submit">
               提交 Auto Bangumi
             </button>

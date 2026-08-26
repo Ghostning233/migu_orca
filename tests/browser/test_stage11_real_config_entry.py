@@ -118,11 +118,12 @@ class TestStage11AutoBangumiBrowserRegressions:
 
         page.wait_for_url("**/settings?request_id=req-stage11-accepted#auto-bangumi")
         assert page.locator("#settings-ab-submit-form").is_visible()
+        page.select_option("#settings-ab-auth-mode", "api_token")
         assert page.locator("#settings-ab-token").get_attribute("type") == "password"
 
         dialogs: list[str] = []
         page.once("dialog", lambda dialog: (dialogs.append(dialog.message), dialog.dismiss()))
-        page.fill("#settings-ab-endpoint", "redacted-ab-entry")
+        page.fill("#settings-ab-endpoint", "http://redacted-ab-entry.invalid")
         page.fill("#settings-ab-token", SENSITIVE_TOKEN)
         page.locator("#settings-ab-submit").click()
         page.wait_for_timeout(300)
@@ -159,6 +160,7 @@ class TestStage11AutoBangumiBrowserRegressions:
         page.route("**/api/v1/requests/req-stage11-ab-fail/submit-ab**", _fail_submit)
         set_storage_preferences(page, storage_dir)
         page.goto(f"{live_server_url}/settings?request_id=req-stage11-ab-fail#auto-bangumi")
+        page.select_option("#settings-ab-auth-mode", "api_token")
         page.fill("#settings-ab-endpoint", SENSITIVE_ENDPOINT)
         page.fill("#settings-ab-token", SENSITIVE_TOKEN)
         page.once("dialog", lambda dialog: dialog.accept())

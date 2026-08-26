@@ -316,37 +316,45 @@
         <form id="batch-queue-submit-form" method="post" hidden>
           <h3>提交到 Auto Bangumi</h3>
           <p class="field-help">
-            endpoint 和 token 只用于本次请求，不写入浏览器存储、URL、history 或队列 JSON；提交成功后清空。已提交成功的项目会跳过重复提交。
+            服务地址和认证信息只用于本次请求，不写入浏览器存储、URL、history 或队列 JSON；提交成功后清空。已提交成功的项目会跳过重复提交。
           </p>
 
-          <label for="batch-queue-ab-endpoint">endpoint</label>
+          <label for="batch-queue-ab-auth-mode">认证方式</label>
+          <select id="batch-queue-ab-auth-mode" name="ab_auth_mode" aria-describedby="batch-queue-ab-help batch-queue-ab-error">
+            <option value="password" selected>账号密码</option>
+            <option value="api_token">API Token</option>
+          </select>
+          <label for="batch-queue-ab-endpoint">服务地址</label>
           <input
             id="batch-queue-ab-endpoint"
-            name="ab_submit_endpoint"
-            type="text"
+            name="ab_base_url"
+            type="url"
             autocomplete="off"
-            placeholder="Auto Bangumi API 地址"
+            placeholder="例如：局域网 Auto Bangumi 服务根地址"
             aria-describedby="batch-queue-ab-help batch-queue-ab-error"
           >
 
-          <label for="batch-queue-ab-token">token</label>
+          <div id="batch-queue-ab-password-fields">
+            <label for="batch-queue-ab-username">用户名</label>
+            <input id="batch-queue-ab-username" name="ab_username" type="text" autocomplete="username" aria-describedby="batch-queue-ab-help batch-queue-ab-error">
+            <label for="batch-queue-ab-password">密码</label>
+            <input id="batch-queue-ab-password" name="ab_password" type="password" autocomplete="current-password" aria-describedby="batch-queue-ab-help batch-queue-ab-error">
+          </div>
+          <div id="batch-queue-ab-token-fields" hidden>
+          <label for="batch-queue-ab-token">API Token</label>
           <input
             id="batch-queue-ab-token"
-            name="ab_submit_token"
+            name="ab_token"
             type="password"
             autocomplete="off"
             placeholder="Auto Bangumi Token"
             aria-describedby="batch-queue-ab-help batch-queue-ab-error"
           >
+          </div>
 
           <label class="checkbox-row" for="batch-queue-ab-fallback-enabled">
-            <input
-              id="batch-queue-ab-fallback-enabled"
-              name="ab_submit_fallback_enabled"
-              type="checkbox"
-              value="true"
-            >
-            fallback_enabled
+            <input id="batch-queue-ab-fallback-enabled" name="ab_submit_fallback_enabled" type="checkbox" value="true">
+            提交时启用备用兼容选项
           </label>
 
           <label class="checkbox-row" for="batch-queue-ab-confirm">
@@ -358,7 +366,7 @@
             我已确认将这些订阅方案提交到 Auto Bangumi
           </label>
           <p id="batch-queue-ab-help" class="field-help">
-            提交前需要勾选确认；失败时保留输入便于重试，成功后清空 endpoint 和 token。
+            提交前需要勾选确认；失败时保留输入便于重试，成功后清空认证信息。
           </p>
           <p id="batch-queue-ab-error" class="field-error" role="alert" hidden></p>
 

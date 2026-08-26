@@ -25,7 +25,7 @@ from typing import Any, Callable
 
 from ab_engine.controllers import ab_http_client
 from ab_engine.controllers.ab_client import submit_ab_subscription
-from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
+from ab_engine.controllers.subscription_payload import build_ab_submit_payload
 from batch_engine.controllers.batch_queue_controller import (
     NowFactory,
     complete_queue_item_submit,
@@ -694,8 +694,8 @@ def compose_ab_submit_one() -> SubmitOne:
     """
 
     def submit_one(request: dict[str, Any], ab_config: Any) -> dict[str, Any]:
-        payload = build_ab_subscription_payload(request)
-        client = ab_http_client.create_auto_bangumi_http_client(ab_config)
+        payload = build_ab_submit_payload(request, ab_config.auth_mode)
+        client = ab_http_client.create_auto_bangumi_submit_client(ab_config)
         return submit_ab_subscription(
             client,
             payload,

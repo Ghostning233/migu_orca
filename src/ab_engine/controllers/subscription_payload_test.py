@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
-from ab_engine.controllers.subscription_payload import build_ab_subscription_payload
+from ab_engine.controllers.subscription_payload import (
+    build_ab_subscription_payload,
+    build_ab_submit_payload,
+    build_legacy_31_subscription_payload,
+)
 from request_engine.controllers.request_controller import (
     accept_request,
     build_pending_request,
@@ -99,10 +105,180 @@ def test_build_ab_subscription_payload_does_not_mutate_or_retain_request_objects
     }
 
 
-def test_build_ab_subscription_payload_falls_back_to_input_title() -> None:
+def test_build_ab_subscription_payload_rejects_missing_confirmed_title() -> None:
     request = _accepted_request()
     request["source_info"]["matched_bangumi"]["title"] = ""
 
-    payload = build_ab_subscription_payload(request)
+    with pytest.raises(Stage1Error) as error:
+        build_ab_subscription_payload(request)
 
-    assert payload["title"] == "番剧"
+    assert error.value.error_type == "missing_ab_payload_field"
+
+
+def test_build_legacy_31_subscription_payload_maps_confirmed_request_to_real_contract() -> None:
+    payload = build_legacy_31_subscription_payload(_accepted_request())
+
+    assert payload == {
+        "data": {
+            "official_title": "番剧 标准标题",
+            "title_raw": "番剧 标准标题",
+            "season": 1,
+            "group_name": "Loli",
+            "filter": "(?is)(?:^(?!.*(?:1080p)).*$|.*(?:SP).*)",
+            "rss_link": "https://example.invalid/rss.xml",
+            "save_path": "番剧 标准标题",
+        },
+        "rss": {
+            "name": "番剧 标准标题",
+            "url": "https://example.invalid/rss.xml",
+            "aggregate": False,
+            "parser": "mikan",
+        },
+    }
+
+
+def test_build_ab_submit_payload_selects_the_adapter_contract() -> None:
+    request = _accepted_request()
+
+    assert build_ab_submit_payload(request, "password") == build_legacy_31_subscription_payload(request)
+    assert build_ab_submit_payload(request, "api_token") == build_ab_subscription_payload(request)
+
+
+def test_build_legacy_31_subscription_payload_preserves_filter_behavior() -> None:
+    request = _accepted_request()
+    request["confirmable_config"]["filter_rule"] = {
+        "must_contain": "1080p | 简体",
+        "must_not_contain": "v2?",
+        "use_regex": False,
+        "case_sensitive": False,
+    }
+
+    expression = build_legacy_31_subscription_payload(request)["data"]["filter"]
+    assert re.search(expression, "[Loli] 番剧 1080P 简体") is None
+    assert re.search(expression, "[Loli] 番剧 720p 简体") is not None
+    assert re.search(expression, "[Loli] 番剧 1080p 繁体") is not None
+    assert re.search(expression, "[Loli] 番剧 1080p 简体 v2?") is not None
+
+
+def test_build_legacy_31_subscription_payload_preserves_regex_and_case_semantics() -> None:
+    request = _accepted_request()
+    request["confirmable_config"]["filter_rule"] = {
+        "must_contain": "1080P",
+        "must_not_contain": "V2$",
+        "use_regex": True,
+        "case_sensitive": True,
+    }
+
+    expression = build_legacy_31_subscription_payload(request)["data"]["filter"]
+    assert re.search(expression, "1080P release") is None
+    assert re.search(expression, "1080p release") is not None
+    assert re.search(expression, "1080P release V2") is not None
+
+
+def test_build_legacy_31_subscription_payload_refuses_invalid_regex() -> None:
+    request = _accepted_request()
+    request["confirmable_config"]["filter_rule"] = {
+        "must_contain": "(",
+        "must_not_contain": "(",
+        "use_regex": True,
+        "case_sensitive": False,
+    }
+    with pytest.raises(Stage1Error, match="当前筛选规则无法兼容"):
+        build_legacy_31_subscription_payload(request)
+
+
+def test_build_legacy_31_subscription_payload_uses_empty_filter_to_allow_all_releases() -> None:
+    request = _accepted_request()
+    request["confirmable_config"]["filter_rule"] = {
+        "must_contain": "",
+        "must_not_contain": "",
+        "use_regex": False,
+        "case_sensitive": False,
+    }
+
+    assert build_legacy_31_subscription_payload(request)["data"]["filter"] == "(?!)"
+
+
+def test_build_legacy_31_subscription_payload_maps_proven_public_metadata() -> None:
+    request = _accepted_request()
+    request["source_info"]["matched_bangumi"].update(
+        {
+            "season": 4,
+            "season_raw": "第四季",
+            "dpi": "1080p",
+            "source": "mikan",
+            "subtitle": "简中",
+        }
+    )
+
+    data = build_legacy_31_subscription_payload(request)["data"]
+
+    assert data["season"] == 4
+    assert data["season_raw"] == "第四季"
+    assert data["dpi"] == "1080p"
+    assert data["source"] == "mikan"
+    assert data["subtitle"] == "简中"
+
+
+def test_build_legacy_31_subscription_payload_detects_a_nonfirst_season_from_title() -> None:
+    request = _accepted_request()
+    request["source_info"]["matched_bangumi"]["title"] = "番剧 第2季"
+
+    data = build_legacy_31_subscription_payload(request)["data"]
+
+    assert data["season"] == 2
+    assert data["season_raw"] == "第2季"
+
+
+@pytest.mark.parametrize(
+    ("marker", "season"),
+    [("第二季", 2), ("第四季", 4), ("第十季", 10), ("第十二季", 12), ("第九十九季", 99)],
+)
+def test_build_legacy_31_subscription_payload_parses_chinese_season_markers(
+    marker: str, season: int
+) -> None:
+    request = _accepted_request()
+    request["source_info"]["matched_bangumi"]["title"] = f"番剧 {marker}"
+
+    data = build_legacy_31_subscription_payload(request)["data"]
+
+    assert data["season"] == season
+    assert data["season_raw"] == marker
+
+
+@pytest.mark.parametrize("marker", ["第零季", "第一百季", "第百二季"])
+def test_build_legacy_31_subscription_payload_refuses_unprovable_explicit_season(
+    marker: str,
+) -> None:
+    request = _accepted_request()
+    request["source_info"]["matched_bangumi"]["title"] = f"番剧 {marker}"
+
+    with pytest.raises(Stage1Error) as error:
+        build_legacy_31_subscription_payload(request)
+
+    assert error.value.error_type == "ab_season_unsupported"
+
+
+def test_build_legacy_31_subscription_payload_uses_only_confirmed_title_for_season() -> None:
+    request = _accepted_request()
+    request["input"]["raw_title"] = "番剧 第十二季"
+
+    data = build_legacy_31_subscription_payload(request)["data"]
+
+    assert data["season"] == 1
+    assert "season_raw" not in data
+
+
+def test_build_legacy_31_subscription_payload_refuses_regex_invalid_after_embedding() -> None:
+    request = _accepted_request()
+    request["confirmable_config"]["filter_rule"] = {
+        "must_contain": "(?i)1080p",
+        "must_not_contain": "",
+        "use_regex": True,
+        "case_sensitive": True,
+    }
+
+    with pytest.raises(Stage1Error) as error:
+        build_legacy_31_subscription_payload(request)
+
+    assert error.value.error_type == "ab_filter_unsupported"

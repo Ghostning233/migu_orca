@@ -892,6 +892,11 @@ input[type="checkbox"] {
   gap: 12px;
 }
 
+.settings-form [hidden],
+#batch-queue-submit-form [hidden] {
+  display: none;
+}
+
 .compact-state {
   min-height: auto;
 }

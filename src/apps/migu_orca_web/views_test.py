@@ -8,6 +8,7 @@ from flask.testing import FlaskClient
 import pytest
 
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
+from ab_engine.controllers.ab_config import AutoBangumiConfig
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.controllers.anime_title_parser import FakeAnimeTitleParsingProvider
@@ -454,9 +455,13 @@ def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
     assert 'id="settings-ab-submit-form"' in html
     assert 'id="settings-ab-request-id"' in html
     assert 'id="settings-ab-endpoint"' in html
-    assert 'name="ab_submit_endpoint"' in html
+    assert 'name="ab_base_url"' in html
+    assert 'id="settings-ab-auth-mode"' in html
+    assert 'id="settings-ab-username"' in html
+    assert 'id="settings-ab-password"' in html
+    assert 'id="settings-ab-test-submit"' in html
     assert 'id="settings-ab-token"' in html
-    assert 'name="ab_submit_token"' in html
+    assert 'name="ab_token"' in html
     assert 'id="settings-ab-fallback-enabled"' in html
     assert 'name="ab_submit_fallback_enabled"' in html
     assert 'id="settings-ab-result"' in html
@@ -731,10 +736,9 @@ def test_static_app_script_wires_batch_queue_result_panel() -> None:
     assert "batch-queue-ab-confirm" in script
     assert "batch-queue-submit-button" in script
     assert "batch-queue-refresh" in script
-    assert "提交前必须填写 endpoint" in script
-    assert "提交前必须填写 token" in script
+    assert "请填写服务地址。" in script
+    assert "请填写 API Token。" in script
     assert "请勾选确认后再提交到 Auto Bangumi" in script
-    assert "提交前必须填写 endpoint" in script
     assert "正在提交队列到 Auto Bangumi" in script
     assert "Auto Bangumi 批量提交失败" in script
     assert "Auto Bangumi 单项重试失败" in script
@@ -1093,13 +1097,14 @@ def test_static_app_script_wires_explicit_ab_submit_form() -> None:
     assert "settingsAbFallbackInput" in script
     assert "initializeSettingsAbForm" in script
     assert "submitSettingsAb" in script
-    assert "提交 Auto Bangumi 前必须填写 endpoint。" in script
-    assert "提交 Auto Bangumi 前必须填写 token。" in script
+    assert "buildAbConfig" in script
+    assert "testSettingsAbConnection" in script
+    assert "请填写 API Token。" in script
     assert "确认提交此订阅方案到 Auto Bangumi？" in script
     assert '"/submit-ab"' in script
     assert "storage_dir: currentStorageDir() || null" in script
     assert "ab_config" in script
-    assert "fallback_enabled: settingsAbFallbackInput ? settingsAbFallbackInput.checked : false" in script
+    assert 'document.getElementById(prefix + "-fallback-enabled")' in script
     assert "Auto Bangumi 提交成功" in script
     assert "clearSettingsAbSensitiveFields" in script
     assert "secret-token" not in script
@@ -4183,7 +4188,8 @@ def test_submit_ab_accepts_request_scoped_config_and_persists_result(
         json={
             "storage_dir": str(storage_dir),
             "ab_config": {
-                "endpoint": "http://auto-bangumi.local/api/subscriptions",
+                "auth_mode": "api_token",
+                "base_url": "http://auto-bangumi.local",
                 "token": "secret-token",
                 "fallback_enabled": False,
             },
@@ -4213,7 +4219,7 @@ def test_submit_ab_accepts_request_scoped_config_and_persists_result(
     assert result["saved_ab_result"]["request_id"] == request["request_id"]
     assert saved_request.exists()
     assert saved_ab_result.exists()
-    assert factory_configs[0].endpoint == "http://auto-bangumi.local/api/subscriptions"
+    assert factory_configs[0].base_url == "http://auto-bangumi.local"
     assert factory_configs[0].token == "secret-token"
     assert client.calls
     assert "secret-token" not in saved_request.read_text(encoding="utf-8")
@@ -4235,7 +4241,8 @@ def test_submit_ab_persists_sanitized_fallback_failure(
             "create_ab_subscription",
             {
                 "Authorization": "Bearer secret-token",
-                "endpoint": "http://auto-bangumi.local/api",
+                "auth_mode": "api_token",
+                "base_url": "http://auto-bangumi.local",
             },
         )
     )
@@ -4249,7 +4256,8 @@ def test_submit_ab_persists_sanitized_fallback_failure(
         json={
             "storage_dir": str(storage_dir),
             "ab_config": {
-                "endpoint": "http://auto-bangumi.local/api",
+                "auth_mode": "api_token",
+                "base_url": "http://auto-bangumi.local",
                 "token": "secret-token",
                 "fallback_enabled": True,
             },
@@ -4294,7 +4302,8 @@ def test_submit_ab_rejects_missing_token_without_calling_ab(
         json={
             "storage_dir": str(tmp_path / "storage"),
             "ab_config": {
-                "endpoint": "http://auto-bangumi.local/api",
+                "auth_mode": "api_token",
+                "base_url": "http://auto-bangumi.local",
                 "fallback_enabled": False,
             },
         },
@@ -4303,11 +4312,11 @@ def test_submit_ab_rejects_missing_token_without_calling_ab(
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["ok"] is False
-    assert payload["error_type"] == "data_validation_errors"
-    assert any(
-        error["field"] == "ab_config.[redacted]"
-        for error in payload["error_data"]["errors"]
-    )
+    assert payload["error_type"] == "config_error"
+    assert payload["error_data"] == {
+        "failed_step": "load_ab_config",
+        "details": {"field": "[redacted]"},
+    }
     assert called is False
     assert "auto-bangumi.local" not in str(payload)
 
@@ -4320,7 +4329,8 @@ def test_submit_ab_rejects_non_accepted_request(tmp_path: Path) -> None:
         json={
             "storage_dir": str(tmp_path / "storage"),
             "ab_config": {
-                "endpoint": "http://auto-bangumi.local/api",
+                "auth_mode": "api_token",
+                "base_url": "http://auto-bangumi.local",
                 "token": "secret-token",
                 "fallback_enabled": False,
             },
@@ -4346,7 +4356,8 @@ def test_submit_ab_sanitizes_echoed_ab_response(
     client = FakeAutoBangumiClient(
         response={
             "id": "sub-123",
-            "endpoint": "http://auto-bangumi.local/api",
+            "auth_mode": "api_token",
+            "base_url": "http://auto-bangumi.local",
             "Authorization": "Bearer secret-token",
         }
     )
@@ -4360,7 +4371,8 @@ def test_submit_ab_sanitizes_echoed_ab_response(
         json={
             "storage_dir": str(storage_dir),
             "ab_config": {
-                "endpoint": "http://auto-bangumi.local/api",
+                "auth_mode": "api_token",
+                "base_url": "http://auto-bangumi.local",
                 "token": "secret-token",
                 "fallback_enabled": False,
             },
@@ -4375,13 +4387,70 @@ def test_submit_ab_sanitizes_echoed_ab_response(
     assert payload["ok"] is True
     assert payload["result"]["ab_submit_result"]["ab_response"] == {
         "id": "sub-123",
-        "endpoint": "[redacted-url]",
+        "auth_mode": "api_[redacted]",
+        "base_url": "[redacted-url]",
         "[redacted]": "[redacted]",
     }
     assert "secret-token" not in str(payload)
     assert "auto-bangumi.local" not in str(payload)
     assert "secret-token" not in saved_ab_result
     assert "auto-bangumi.local" not in saved_ab_result
+
+
+def test_autobangumi_test_connection_returns_safe_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_test_ab_connection(*, ab_config: AutoBangumiConfig) -> dict[str, Any]:
+        captured["config"] = ab_config
+        return {
+            "success": True,
+            "summary": {
+                "reachable": True,
+                "authenticated": True,
+                "version": "3.1.18",
+                "auth_mode": "账号密码",
+                "adapter": "legacy_3_1",
+                "submit_supported": True,
+                "base_url": "http://private-auto-bangumi.local",
+                "token": "secret-token",
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr("apps.migu_orca_web.views.test_ab_connection", fake_test_ab_connection)
+    response = _client().post(
+        "/api/v1/autobangumi/test-connection",
+        json={"ab_config": {"auth_mode": "password", "base_url": "http://private-auto-bangumi.local", "username": "private-user", "password": "private-password", "fallback_enabled": False}},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload == {"ok": True, "result": {"reachable": True, "authenticated": True, "version": "3.1.18", "auth_mode": "账号密码", "adapter": "legacy_3_1", "submit_supported": True}}
+    assert captured["config"].username == "private-user"
+    assert "private" not in str(payload)
+    assert "secret" not in str(payload)
+
+
+def test_autobangumi_test_connection_sanitizes_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.migu_orca_web.views.test_ab_connection",
+        lambda *, ab_config: {"success": False, "summary": None, "error": {"error_type": "ab_auth_failed", "error_message": "http://private-auto-bangumi.local token=secret-token", "failed_step": "probe_ab_connection", "details": {"username": "private-user", "password": "private-password", "cookie": "token=secret-token", "category": "auth"}}},
+    )
+    response = _client().post(
+        "/api/v1/autobangumi/test-connection",
+        json={"ab_config": {"auth_mode": "api_token", "base_url": "http://private-auto-bangumi.local", "token": "secret-token", "fallback_enabled": False}},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is False
+    assert payload["error_type"] == "ab_auth_failed"
+    assert payload["error_data"] == {"failed_step": "probe_ab_connection", "details": {"category": "auth"}}
+    assert "private" not in str(payload)
+    assert "secret" not in str(payload)
 
 
 def test_qbittorrent_test_connection_returns_safe_summary(
@@ -4625,7 +4694,8 @@ def _batch_submit_payload(storage_dir: Path) -> dict[str, Any]:
         "storage_dir": str(storage_dir),
         "confirm": True,
         "ab_config": {
-            "endpoint": "http://auto-bangumi.local/api",
+            "auth_mode": "api_token",
+            "base_url": "http://auto-bangumi.local",
             "token": "secret-token",
             "fallback_enabled": False,
         },
@@ -4974,7 +5044,8 @@ def test_batch_submit_api_requires_confirmation(tmp_path: Path) -> None:
         json={
             "storage_dir": str(storage_dir),
             "ab_config": {
-                "endpoint": "http://auto-bangumi.local/api",
+                "auth_mode": "api_token",
+                "base_url": "http://auto-bangumi.local",
                 "token": "secret-token",
                 "fallback_enabled": False,
             },
@@ -5078,7 +5149,7 @@ def test_batch_submit_api_submits_queue_items_successfully(
         == "ab_subscription_id=fake-ab-subscription; success=True"
     )
     assert len(client.calls) == 1
-    assert received_configs[0].endpoint == "http://auto-bangumi.local/api"
+    assert received_configs[0].base_url == "http://auto-bangumi.local"
     assert received_configs[0].token == "secret-token"
 
     # The request-scoped ab_config is never persisted into the queue storage.
@@ -5395,7 +5466,8 @@ def test_batch_retry_api_requires_confirmation(tmp_path: Path) -> None:
             "storage_dir": str(storage_dir),
             "request_id": "request-a",
             "ab_config": {
-                "endpoint": "http://auto-bangumi.local/api",
+                "auth_mode": "api_token",
+                "base_url": "http://auto-bangumi.local",
                 "token": "secret-token",
                 "fallback_enabled": False,
             },

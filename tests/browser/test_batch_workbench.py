@@ -1607,6 +1607,14 @@ class TestBatchAcceptWorkbench:
         expect(fail_card.locator(".batch-card-expand")).to_be_enabled()
 
 
+def _fill_batch_api_token_config(page: Page) -> None:
+    """Select the non-default Token mode for legacy batch submit scenarios."""
+
+    page.select_option("#batch-queue-ab-auth-mode", "api_token")
+    page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
+    page.fill("#batch-queue-ab-token", "ab-secret-token")
+
+
 def _accept_all_reviewable(
     page: Page,
     live_server_url: str,
@@ -1747,8 +1755,7 @@ class TestBatchQueuePanel:
         page.route("**/api/v1/batches/batch-browser/submit*", _submit)
         _accept_all_reviewable(page, live_server_url, ["item-queue"])
 
-        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
-        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        _fill_batch_api_token_config(page)
         page.check("#batch-queue-ab-fallback-enabled")
         page.check("#batch-queue-ab-confirm")
         page.click("#batch-queue-submit-button")
@@ -1785,7 +1792,8 @@ class TestBatchQueuePanel:
         expect(card.locator(".batch-card-queue-status")).to_contain_text("提交成功")
 
         payload = submitted[0]
-        assert payload["ab_config"]["endpoint"] == "https://ab.example/api"
+        assert payload["ab_config"]["auth_mode"] == "api_token"
+        assert payload["ab_config"]["base_url"] == "https://ab.example/api"
         assert payload["ab_config"]["token"] == "ab-secret-token"
         assert payload["ab_config"]["fallback_enabled"] is True
         assert payload["confirm"] is True
@@ -1832,8 +1840,7 @@ class TestBatchQueuePanel:
         _accept_all_reviewable(
             page, live_server_url, ["item-ok", "item-fail", "item-retry"]
         )
-        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
-        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        _fill_batch_api_token_config(page)
         page.check("#batch-queue-ab-confirm")
         page.click("#batch-queue-submit-button")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -1897,8 +1904,7 @@ class TestBatchQueuePanel:
 
         page.route("**/api/v1/batches/batch-browser/submit*", _submit_fail)
         _accept_all_reviewable(page, live_server_url, ["item-queue"])
-        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
-        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        _fill_batch_api_token_config(page)
         page.check("#batch-queue-ab-confirm")
         page.click("#batch-queue-submit-button")
         page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
@@ -1930,8 +1936,7 @@ class TestBatchQueuePanel:
         _accept_all_reviewable(
             page, live_server_url, ["item-queue"], batch_id="test-slow-submit"
         )
-        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
-        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        _fill_batch_api_token_config(page)
         page.check("#batch-queue-ab-confirm")
         page.click("#batch-queue-submit-button")
 
@@ -2162,8 +2167,7 @@ class TestBatchQueueRetry:
         page.route("**/api/v1/batches/batch-browser/retry*", _retry)
         _open_queue_with_items(page, live_server_url, [failed])
 
-        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
-        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        _fill_batch_api_token_config(page)
         page.check("#batch-queue-ab-confirm")
         page.click(
             '.batch-queue-item[data-item-id="item-fail"] .batch-queue-item-retry'
@@ -2188,7 +2192,8 @@ class TestBatchQueueRetry:
 
         payload = retry_calls[0]
         assert payload["request_id"] == "req-fail"
-        assert payload["ab_config"]["endpoint"] == "https://ab.example/api"
+        assert payload["ab_config"]["auth_mode"] == "api_token"
+        assert payload["ab_config"]["base_url"] == "https://ab.example/api"
         assert payload["ab_config"]["token"] == "ab-secret-token"
         assert payload["confirm"] is True
         # 敏感配置不进入 DOM
@@ -2234,8 +2239,7 @@ class TestBatchQueueRetry:
         page.route("**/api/v1/batches/batch-browser/retry*", _retry)
         _open_queue_with_items(page, live_server_url, [failed, sibling])
 
-        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
-        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        _fill_batch_api_token_config(page)
         page.check("#batch-queue-ab-confirm")
         page.click(
             '.batch-queue-item[data-item-id="item-fail"] .batch-queue-item-retry'
@@ -2287,8 +2291,7 @@ class TestBatchQueueRetry:
         page.route("**/api/v1/batches/batch-browser/retry*", _retry_fail)
         _open_queue_with_items(page, live_server_url, [failed])
 
-        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
-        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        _fill_batch_api_token_config(page)
         page.check("#batch-queue-ab-confirm")
         page.click(
             '.batch-queue-item[data-item-id="item-fail"] .batch-queue-item-retry'
@@ -2331,8 +2334,7 @@ class TestBatchQueueRetry:
             batch_id="test-slow-retry",
         )
         _open_queue_with_items(page, live_server_url, [failed], batch_id="test-slow-retry")
-        page.fill("#batch-queue-ab-endpoint", "https://ab.example/api")
-        page.fill("#batch-queue-ab-token", "ab-secret-token")
+        _fill_batch_api_token_config(page)
         page.check("#batch-queue-ab-confirm")
         page.click(
             '.batch-queue-item[data-item-id="item-fail"] .batch-queue-item-retry'

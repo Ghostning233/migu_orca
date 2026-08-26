@@ -7,13 +7,13 @@ from shared.errors import Stage1Error
 
 
 def ab_submit_success(
-    ab_subscription_id: str,
+    ab_subscription_id: str | None,
     ab_response: dict[str, Any],
 ) -> dict[str, Any]:
     """Build the stable Auto Bangumi submit success result."""
 
-    clean_subscription_id = ab_subscription_id.strip()
-    if not clean_subscription_id:
+    clean_subscription_id = ab_subscription_id.strip() if ab_subscription_id else None
+    if ab_subscription_id is not None and not clean_subscription_id:
         raise Stage1Error(
             "invalid_ab_submit_result",
             "Auto Bangumi subscription id 不能为空",
