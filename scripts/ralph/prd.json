@@ -16,7 +16,7 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先建立模型和纯序列化契约；解析成功不等于真实 MiKan 候选存在。"
     },
     {

@@ -14,3 +14,15 @@ Started: 2026-08-26 17:20:00 CST
 - endpoint、token、Cookie、Authorization、账号密码、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL和本地绝对路径不得进入解析结果、查询计划、API、页面、storage、日志、截图或 trace。
 - 浏览器测试使用 Playwright route/fixture 隔离外部依赖；运行完整 browser/full pytest 前确认仓库根 `.migu_orca/storage` 不存在。
 - 每个 Ralph story 独立提交，只将当前完成 story 的 `passes` 改为 true，并在本文件末尾追加实现、文件和精确测试记录。
+---
+
+## 2026-08-26 22:22:50 CST - US-181
+Thread: https://codex.openai.com/threads/unknown
+- 建立不可变、JSON 安全的标题解析契约：规范化标题、基础标题、季数、查询计划、审核提示和固定来源枚举。
+- 未知 provider 来源安全降级为 `fallback`，兼容的 `search_queries` 与 query plan 一致，并覆盖长度、季数、数量与 priority 边界。
+- Files changed: `src/batch_engine/models/__init__.py`, `src/batch_engine/controllers/anime_title_parser_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`。
+- **Learnings for future iterations:**
+  - 解析结果的公开序列字段使用 tuple；API 边界统一调用 `to_dict()` 取得 JSON-safe list/dict。
+  - 来源必须通过 `AnimeTitleParseSource` 白名单归一化，不能回显 provider 自定义字符串。
+  - 完整 pytest 会继续执行 Playwright 浏览器套件，耗时显著长于核心单元测试。
+---
