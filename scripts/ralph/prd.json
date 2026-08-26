@@ -33,7 +33,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "明确区分无标记与显式但无法证明；搜索 parser 不默认第一季。"
     },
     {

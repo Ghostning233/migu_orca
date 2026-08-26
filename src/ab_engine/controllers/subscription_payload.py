@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from request_engine.controllers.request_controller import ACCEPTED
 from shared.errors import Stage1Error
+from shared.title_season import parse_title_season
 
 
 def build_ab_subscription_payload(request: dict[str, Any]) -> dict[str, Any]:
@@ -209,23 +210,15 @@ def _legacy_31_season(
     # confirmation data.  Never infer season from the original free-form
     # input, which may differ from the user's confirmed selection.
     del title_raw
-    chinese_match = re.search(r"第\s*([^\s季]+)\s*季", official_title)
-    if chinese_match:
-        season = _parse_chinese_or_arabic_season(chinese_match.group(1))
-        if season is None:
-            raise Stage1Error(
-                "ab_season_unsupported",
-                "当前番剧季数无法兼容 Auto Bangumi 3.1",
-                "build_legacy_31_subscription_payload",
-            )
-        return season, chinese_match.group(0)
-    match = re.search(
-        r"(?<![A-Za-z0-9])[Ss]([1-9][0-9]?)(?![0-9])|\bSeason\s+([1-9][0-9]?)\b",
-        official_title,
-        re.IGNORECASE,
-    )
-    if match:
-        return int(next(group for group in match.groups() if group)), match.group(0)
+    parsed = parse_title_season(official_title)
+    if parsed.season is not None:
+        return parsed.season, parsed.season_marker
+    if parsed.review_hints:
+        raise Stage1Error(
+            "ab_season_unsupported",
+            "当前番剧季数无法兼容 Auto Bangumi 3.1",
+            "build_legacy_31_subscription_payload",
+        )
     return 1, None
 
 

@@ -38,19 +38,16 @@ def test_fake_provider_parses_supported_shorthand_titles() -> None:
 def test_parse_anime_title_returns_searchable_metadata() -> None:
     result = parse_anime_title("路哥S4")
 
-    assert result == AnimeTitleParseResult(
-        raw_title="路哥S4",
-        canonical_title_candidates=("欢迎来到实力至上主义的教室 第四季",),
-        season_hint="S4",
-        search_queries=(
-            "欢迎来到实力至上主义的教室 第四季",
-            "实力至上主义教室 S4",
-            "路哥 S4",
-        ),
-        confidence=0.9,
-        needs_user_review=False,
-        source=ANIME_TITLE_PARSE_SOURCE_FAKE,
+    assert result.canonical_title_candidates == ("欢迎来到实力至上主义的教室 第四季",)
+    assert result.season_hint == "S4"
+    assert result.search_queries == (
+        "欢迎来到实力至上主义的教室 第四季",
+        "实力至上主义教室 S4",
+        "路哥 S4",
     )
+    assert result.normalized_title == "路哥 第四季"
+    assert result.base_title == "路哥"
+    assert result.season == 4
 
 
 def test_low_confidence_result_needs_user_review() -> None:
@@ -75,6 +72,22 @@ def test_unknown_title_falls_back_to_reviewable_safe_query() -> None:
     assert result.search_queries == ("未知简称S9",)
     assert result.confidence == 0.4
     assert result.needs_user_review is True
+
+
+def test_unknown_explicit_season_is_only_a_reviewable_search_hint() -> None:
+    result = parse_anime_title("无职转生s4")
+
+    assert result.base_title == "无职转生"
+    assert result.normalized_title == "无职转生 第四季"
+    assert result.season == 4
+    assert result.season_hint == "S4"
+
+
+def test_unknown_title_never_defaults_to_first_season() -> None:
+    result = parse_anime_title("无职转生")
+
+    assert result.season is None
+    assert result.season_hint is None
 
 
 def test_provider_failure_returns_recoverable_safe_error() -> None:

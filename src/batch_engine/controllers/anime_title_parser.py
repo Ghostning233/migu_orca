@@ -5,6 +5,7 @@ from typing import Protocol
 
 from batch_engine.models import ANIME_TITLE_PARSE_SOURCE_FAKE, AnimeTitleParseResult
 from shared.errors import Stage1Error
+from shared.title_season import parse_title_season
 
 
 LOW_CONFIDENCE_THRESHOLD = 0.7
@@ -150,15 +151,20 @@ def _normalize_result(raw_title: str, result: AnimeTitleParseResult) -> AnimeTit
             {"provider_source": result.source or "unknown"},
         )
     confidence = max(0.0, min(1.0, float(result.confidence)))
+    season_parse = parse_title_season(raw_title)
     return AnimeTitleParseResult(
         raw_title=raw_title,
         canonical_title_candidates=candidates,
-        season_hint=result.season_hint,
+        season_hint=season_parse.season_hint,
         search_queries=queries,
         confidence=confidence,
         needs_user_review=result.needs_user_review
         or _needs_user_review(candidates, confidence),
         source=result.source,
+        normalized_title=season_parse.normalized_title,
+        base_title=season_parse.base_title,
+        season=season_parse.season,
+        review_hints=tuple(dict.fromkeys((*result.review_hints, *season_parse.review_hints))),
     )
 
 
