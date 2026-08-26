@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from flask import Blueprint, Response, redirect, render_template, url_for
 from pydantic import BaseModel, Field, field_validator
@@ -39,6 +39,10 @@ from batch_engine.controllers.batch_draft_controller import (
     update_batch_item_status,
 )
 from batch_engine.controllers.batch_queue_controller import serialize_queue
+from batch_engine.controllers.candidate_search_orchestrator import (
+    CandidateSearchOutcome,
+    search_parsed_candidates,
+)
 from batch_engine.controllers.batch_submit_controller import (
     compose_ab_submit_one,
     recover_batch_queue_item,
@@ -619,6 +623,22 @@ def _search_batch_item_candidates(
             seen.add(key)
             candidates.append(candidate)
     return candidates
+
+
+def _search_candidates_from_parse_result(
+    parse_result: AnimeTitleParseResult,
+    mikan_config: MikanConfig,
+    *,
+    search_one: Callable[[str], list[dict[str, object]]] | None = None,
+) -> CandidateSearchOutcome[dict[str, object]]:
+    """Use the one shared parsed-plan fallback policy for both API flows."""
+
+    run_query = search_one or (lambda query: _search_mikan_candidates(query, mikan_config))
+    return search_parsed_candidates(
+        parse_result,
+        run_query,
+        lambda candidate: (candidate.get("bangumi_id"), candidate.get("mikan_url")),
+    )
 
 
 def _load_preferences_for_batch(
@@ -1246,10 +1266,15 @@ class MikanCandidateSearchView(PostView):
         assert isinstance(self.request_validator_model, MikanCandidateSearchPayload)
         payload = self.request_validator_model
         mikan_config = _resolve_mikan_config(payload.mikan_config)
-        candidates = _search_mikan_candidates(payload.query, mikan_config)
+        parse_result = parse_anime_title(payload.query)
+        searched = _search_candidates_from_parse_result(parse_result, mikan_config)
+        if searched.status == BATCH_ITEM_STATUS_FAILED:
+            raise searched.error or Stage1Error(
+                "mikan_search_failed", "MiKan 候选搜索失败", "mikan_search"
+            )
         return {
             "query": payload.query,
-            "candidates": candidates,
+            "candidates": list(searched.candidates),
         }
 
 
@@ -1349,13 +1374,20 @@ class BatchParseView(PostView):
                 {"field": "raw_input"},
             )
 
-        provider = _batch_title_parsing_provider()
         mikan_config = _resolve_mikan_config(self.request_validator_model.mikan_config)
         config = load_storage_config(
             _storage_dir(self.request_validator_model.storage_dir)
         )
         preferences = _load_preferences_for_batch(config)
         corrections = _load_corrections_for_batch(config)
+        # Keep the explicit provider seam used by batch tests. Saved corrections
+        # are part of the same rule-provider query plan rather than a second
+        # search fallback implementation.
+        provider = (
+            RuleAnimeTitleParsingProvider(corrections=corrections)
+            if corrections
+            else _batch_title_parsing_provider()
+        )
         serialized_items: list[dict[str, object]] = []
         for item in batch.items:
             try:
@@ -1402,13 +1434,15 @@ class BatchParseView(PostView):
             enhanced_queries = _enhanced_entries_for_item(
                 item.raw_title, parse_result, corrections
             )
-            try:
-                candidates = _search_batch_item_candidates_enhanced(
-                    enhanced_queries,
-                    parse_result.search_queries,
-                    mikan_config,
+            searched = _search_candidates_from_parse_result(
+                parse_result,
+                mikan_config,
+                search_one=lambda query: _search_batch_item_candidates([query], mikan_config),
+            )
+            if searched.status == BATCH_ITEM_STATUS_FAILED:
+                exc = searched.error or Stage1Error(
+                    "mikan_search_failed", "MiKan 候选搜索失败", "mikan_search"
                 )
-            except Stage1Error as exc:
                 failed_batch = update_batch_item_status(
                     batch,
                     item.item_id,
@@ -1448,6 +1482,8 @@ class BatchParseView(PostView):
                     )
                 )
                 continue
+
+            candidates = list(searched.candidates)
 
             candidate_status = (
                 BATCH_ITEM_STATUS_FOUND

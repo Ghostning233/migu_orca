@@ -3187,7 +3187,7 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
     ]
 
 
-def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_others(
+def test_batch_parse_api_tolerates_one_candidate_search_failure_without_blocking_others(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _MappedCandidateSearchClient(
@@ -3237,22 +3237,16 @@ def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_
     assert payload["ok"] is True
     assert [item["status"] for item in items] == [
         BATCH_ITEM_STATUS_FOUND,
-        BATCH_ITEM_STATUS_FAILED,
+        BATCH_ITEM_STATUS_EMPTY,
     ]
     assert items[0]["candidates"][0]["bangumi_id"] == "4001"
     assert items[1]["raw_title"] == "杖剑谭S2"
     assert items[1]["canonical_title_candidates"] == ["杖与剑的魔剑谭"]
     assert items[1]["candidates"] == []
-    assert items[1]["error"]["error_type"] == "mikan_timeout"
-    assert items[1]["error"]["failed_step"] == "mikan_search"
-    assert items[1]["error"]["details"] == {
-        "url": "[redacted-url]",
-        "[redacted]": "[redacted]",
-    }
-    # US-154: a search failure must be flagged for review with a Chinese hint,
-    # but it never leaks the redacted URL/cookie from the search error.
+    assert "error" not in items[1]
+    # A later successful empty fallback makes the final state EMPTY, while the
+    # failed query remains non-blocking and its sensitive detail is not exposed.
     assert items[1]["needs_user_review"] is True
-    assert any("候选搜索失败" in hint for hint in items[1]["review_hints"])
     assert "secret-token" not in body
     assert "session-cookie" not in body
     assert "https://mikan.example/Home/Search" not in body
@@ -3632,46 +3626,18 @@ def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert item["status"] == BATCH_ITEM_STATUS_FOUND
-    # The enhanced queries are searched first; the original queries are never
-    # searched because the enhanced search already found candidates.
-    assert client.searches == [
-        "欢迎来到实力至上主义的教室 第四季",
-        "欢迎来到实力至上主义的教室 第4季",
-        "欢迎来到实力至上主义的教室 S4",
-        "欢迎来到实力至上主义的教室 Season 4",
-        "欢迎来到实力至上主义的教室",
-    ]
-    assert item["enhanced_search_queries"] == [
-        {
-            "query": "欢迎来到实力至上主义的教室 第四季",
-                "original_query": "实力至上主义教室 第四季",
-            "source": "correction:query",
-        },
-        {
-            "query": "欢迎来到实力至上主义的教室 第4季",
-                "original_query": "实力至上主义教室 第四季",
-            "source": "correction:query",
-        },
-        {
-            "query": "欢迎来到实力至上主义的教室 S4",
-                "original_query": "实力至上主义教室 第四季",
-            "source": "correction:query",
-        },
-        {
-            "query": "欢迎来到实力至上主义的教室 Season 4",
-                "original_query": "实力至上主义教室 第四季",
-            "source": "correction:query",
-        },
-        {
-            "query": "欢迎来到实力至上主义的教室",
-                "original_query": "实力至上主义教室 第四季",
-            "source": "correction:canonical",
-        },
-    ]
+    # One high-priority correction query found candidates, so weaker variants
+    # are not sent to MiKan.
+    assert client.searches == ["欢迎来到实力至上主义的教室 第四季"]
+    assert item["enhanced_search_queries"][0] == {
+        "query": "欢迎来到实力至上主义的教室 第四季",
+        "original_query": "欢迎来到实力至上主义的教室 第四季",
+        "source": "correction:query",
+    }
     assert item["candidates"][0]["bangumi_id"] == "4001"
 
 
-def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_nothing(
+def test_batch_parse_api_falls_back_through_the_unified_correction_plan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3709,15 +3675,12 @@ def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_noth
     assert response.status_code == 200
     assert payload["ok"] is True
     assert item["status"] == BATCH_ITEM_STATUS_FOUND
-    # The enhanced queries are searched first, then the original queries on
-    # fallback. The repeated first query is served from the candidate cache, so
-    # it is not searched twice through the client.
-    assert client.searches[:5] == [
+    # The correction and original fallbacks share one bounded plan.
+    assert client.searches[:4] == [
         "欢迎来到实力至上主义的教室 第四季",
+        "实力至上主义教室 第四季",
         "欢迎来到实力至上主义的教室 第4季",
         "欢迎来到实力至上主义的教室 S4",
-        "欢迎来到实力至上主义的教室 Season 4",
-        "欢迎来到实力至上主义的教室",
     ]
     assert client.searches[-1] == "路哥S4"
     assert item["candidates"][0]["bangumi_id"] == "4001"

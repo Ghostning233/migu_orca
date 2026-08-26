@@ -51,3 +51,14 @@ Thread: https://codex.openai.com/threads/unknown
   - 规则正式标题不携带 parser season 事实；季数只作为搜索词生成，后续候选选择仍须以公开 MiKan 证据或用户确认落库。
   - Non-browser regression: `uv run pytest -q -m 'not browser'` passed (893 passed, 260 deselected); Chromium suite was launched with `uv run pytest tests/browser/ -q`.
 ---
+
+## 2026-08-26 22:58:45 CST - US-184
+Thread: https://codex.openai.com/threads/unknown
+- 抽取共享的 parse → bounded query plan → MiKan 候选搜索编排，并同时接入单个候选 API 与批量解析；高优先级命中后停止弱回退，单条失败继续后续查询。
+- 以公开 `bangumi_id`/`mikan_url` 做稳定候选去重；全部失败为 FAILED，至少一次成功但无结果为 EMPTY，且批量条目互不阻断。
+- Files changed: `src/batch_engine/controllers/candidate_search_orchestrator.py`, `src/batch_engine/controllers/candidate_search_orchestrator_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 共享编排只接收 search callback 与公开 identity 函数；MiKan 客户端、缓存和 API 序列化仍留在 Web view 边界。
+  - 某个 fallback 抛错但后续查询成功为空时，最终状态是 EMPTY；只有所有查询都失败才是 FAILED。
+  - 保存的标题修正应注入 `RuleAnimeTitleParsingProvider`，使其成为同一个正式 query plan，而不是额外的搜索循环。
+---
