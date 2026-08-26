@@ -30,7 +30,7 @@ Stage 21 的目标不是让 AI 自动替用户做最终决定，而是把用户�
 ## 4. 非目标
 
 1. 不实现 AI 自动接受、自动选择最终 MiKan 合集或自动提交 Auto Bangumi。
-2. 不在本阶段强制接入真实 LLM provider；真实 provider 的供应商选择、密钥管理和成本控制另行评估。
+2. 不在本阶段强制接入真实 LLM provider；真实 provider 的供应商选择、密钥管理和成本控制已登记为 backlog BL-021，另行评估。
 3. 不实现用户观看行为、下载行为或隐式行为追踪。
 4. 不实现复杂账号、多人 profile、权限系统或云端同步。
 5. 不创建 qBittorrent 下载任务，不绕过 Auto Bangumi，不引入后台 worker。

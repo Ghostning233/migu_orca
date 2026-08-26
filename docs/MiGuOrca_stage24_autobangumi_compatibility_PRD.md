@@ -38,7 +38,7 @@ Stage 24 的目标是让已经跑通的 Request 创建/接受/队列流程能够
 2. 不管理 AutoBangumi 用户、API token、配置、RSS 列表或已有番剧。
 3. 不在自动化测试中对用户实机创建、修改或删除订阅。
 4. 不直接创建 qBittorrent 下载任务，不绕过 AutoBangumi。
-5. 不实现正式番名/季度解析、部署向导或流式封面代理；这些事项只在 backlog 中按优先级管理，不预绑定 Stage 编号。
+5. 不实现正式番名/季度解析、部署向导或流式封面代理；分别由 backlog BL-018、BL-014 与 `docs/optional_features.md` OF-001 管理。新版 Bearer 写兼容登记为条件触发的 BL-022；这些事项不预绑定 Stage 编号。
 
 ## 5. 产品决策
 

@@ -277,8 +277,9 @@ Stage 24 之后不预留阶段编号；从 backlog 中按当时优先级选择�
 
 ## 13. 下一步工作
 
-1. 正式番名与季数解析、部署/配置向导和流式封面代理等未开发事项只在 `docs/backlog.md` / `docs/optional_features.md` 按优先级维护，不提前绑定 Stage 编号。
-4. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
-5. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
-6. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析、可编辑预览、偏好/修正存储和批量提交前队列不得把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
-7. 每次阶段推进继续使用 `uv run pytest`、`uv run python -m compileall -q src tests` 和 Web UI 的 `node --check` 验证；UI story 必须执行 `uv run pytest tests/browser/ -q`。
+1. 正式番名与季数解析、部署/配置向导及条件触发事项在 `docs/backlog.md` 维护，流式封面代理在 `docs/optional_features.md` 维护，不提前绑定 Stage 编号；当前最高优先级待规划项为 BL-018。
+2. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
+3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
+4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
+5. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析、可编辑预览、偏好/修正存储和批量提交前队列不得把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
+6. 每次阶段推进继续使用 `uv run pytest`、`uv run python -m compileall -q src tests` 和 Web UI 的 `node --check` 验证；UI story 必须执行 `uv run pytest tests/browser/ -q`。

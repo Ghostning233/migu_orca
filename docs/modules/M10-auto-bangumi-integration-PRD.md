@@ -128,6 +128,6 @@ Stage 12 已在独立 qBittorrent 边界中实现显式连接测试，用于验�
 1. 旧 `endpoint + Bearer token + {title,rss_url,save_path,filter_rule}` 不再是有效提交契约。
 2. 默认 `password` adapter 接收服务根地址、用户名和密码：form 登录 `/api/v1/auth/login`，将返回 token 作为单次会话 Cookie，3.1.18 只读探测使用 `/api/v1/status`。
 3. 3.1.18 写入使用 `/api/v1/rss/subscribe` 与 `{data: Bangumi, rss: RSSItem}`；`status=true` 表示成功，外部订阅 ID 可为空。
-4. `api_token` adapter 使用 Bearer Header，但只有明确版本/契约证明后才允许写入；未知版本只能报告连接能力，不能猜测 payload。
+4. `api_token` adapter 使用 Bearer Header，但只有明确版本/契约证明后才允许写入；未知版本只能报告连接能力，不能猜测 payload。后续写兼容工作登记为 backlog BL-022，未满足触发条件前继续 fail closed。
 5. 单个、批量、retry/recover 复用同一 adapter/payload/result seam，并保持 Stage 20 不重复提交边界。
 6. 自动化只使用 fake transport；真实实例只允许只读烟雾，写入必须由用户在 Web UI 显式确认。

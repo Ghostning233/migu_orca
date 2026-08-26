@@ -24,7 +24,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - Stage 20/24 已把批量接受、全接受、提交前队列和 Auto Bangumi 顺序提交接入 `/index`：批量工作台提供单卡接受、可勾选选择、批量接受和全接受入口，明确显示选中数量和不可接受原因；已接受卡片进入独立追踪的提交前队列，`#batch-queue-panel` 展示队列项目标题、中文状态（待提交/提交中/提交成功/提交失败/可重试）、尝试次数和脱敏结果摘要；提交前表单使用服务地址与默认账号密码（可切换 API Token）、fallback 和显式确认，提交成功后清空敏感输入；失败项可独立重试，成功项不会被重复提交。批量提交采用前台顺序编排，不引入后台 worker，刷新后通过 URL `batch_id` 恢复队列状态。
 - Stage 19 已把批量新番订阅前置工作台接入 `/index`：批量输入按非空行生成独立条目，AI 名称解析 fake provider 和 provider seam 输出候选标题/搜索词，批量 API 对每个条目独立搜索 MiKan 候选，卡片网格支持删除、展开、单卡修改回流和单卡接受。
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
-- Stage 24 AutoBangumi 真实认证与订阅兼容闭环已完成。正式番名与季度解析、部署/配置向导和流式封面代理等未开发事项只在 backlog 中按优先级排序，不预绑定 Stage 编号。
+- Stage 24 AutoBangumi 真实认证与订阅兼容闭环已完成。正式番名与季度解析、部署/配置向导及其他条件触发事项记录在 `docs/backlog.md`；流式封面代理记录在 `docs/optional_features.md`。未开发事项不预绑定 Stage 编号，当前最高优先级待规划项为 BL-018。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。

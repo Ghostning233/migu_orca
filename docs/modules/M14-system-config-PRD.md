@@ -49,7 +49,7 @@ config/user/default_rules.json
 
 ## 6. 后续阶段
 
-接入真实外部系统后，再根据部署方式确定用户配置目录、环境变量、密钥管理和配置优先级。
+接入真实外部系统后，再根据部署方式确定用户配置目录、环境变量、密钥管理和配置优先级；相关配置/部署向导可行性登记为远期 backlog BL-014。
 
 ## 7. Stage 24 AutoBangumi request-scoped 配置（已完成）
 

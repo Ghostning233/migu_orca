@@ -39,7 +39,7 @@ Stage 22 必须先恢复搜索结果的可信度，再重构布局。标题解�
 ## 4. 非目标
 
 1. 不实现 AI 自动选择最终 MiKan 合集、自动接受卡片或自动提交 Auto Bangumi。
-2. 不接入真实 LLM provider；继续保留 provider seam 和 fake provider。
+2. 不接入真实 LLM provider；继续保留 provider seam 和 fake provider，生产接入另记为 backlog BL-021。
 3. 不重新实现 MiKan parser、详情解析、RSS 解析、筛选、命名或 Request 生命周期。
 4. 不创建 qBittorrent 下载任务，不绕过 Auto Bangumi，不引入后台 worker。
 5. 不在本阶段实现 SSE/WebSocket 等流式基础设施；除非现有请求可观测到真实逐项进度，否则只展示请求级真实状态。
@@ -242,4 +242,4 @@ Stage 22 完成标志（已达成）：用户能在一个清晰的创建订阅�
 
 Stage 22 后续人工验收确认，下一阶段调整为 Stage 23「媒体缓存、MiKan 读取优化与批量审核体验」（见 `docs/MiGuOrca_stage23_media_cache_search_ui_PRD.md`）：服务端安全缓存封面、减少搜索大响应无用读取、将候选改为锚定浮层、将草案统一送入详情区，并收敛剧集摘要与禁用按钮反馈。
 
-正式番名与季数解析、部署/配置向导和流式封面代理等未开发事项由 backlog 按优先级管理，不再预绑定 Stage 编号。
+正式番名与季数解析、部署/配置向导等未开发事项由 backlog 管理；流式封面代理由 `docs/optional_features.md` 管理，不再预绑定 Stage 编号。
