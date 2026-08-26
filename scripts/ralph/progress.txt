@@ -18,6 +18,7 @@ Started: 2026-08-24 09:30:00 CST
 - AutoBangumi 3.1 的订阅成功以响应 `status: true` 为准，订阅 ID 可以为空；3.1 的 `data`/`rss` body 应由纯 Request mapper 构造，filter 必须转换为等价正则或明确拒绝。
 - 所有 AutoBangumi 写入口必须经由同一 auth-mode dispatch，同时选择对应的 adapter 与 payload：password → legacy 3.1 Cookie + `{data,rss}`，api_token → Token compatibility adapter + fail-closed 写入。
 - AutoBangumi 3.1 的 `filter` 是 `re.search` 命中即排除：将 MiGuOrca 的 `must_contain`（全部命中才接受）编码为“任一未命中”分支，将 `must_not_contain`（任一命中即排除）编码为命中分支并用 OR 合并；空规则使用永不匹配的 `(?!)`。
+- 组合用户正则以供外部系统执行时，必须编译最终表达式（不仅是各片段）；无法等价嵌入的 inline flag 等模式需在 transport 前稳定拒绝。
 
 ## 2026-08-24 22:42:00 CST - US-173
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -132,4 +133,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - 全量 Chromium 运行时间会超过交互命令的输出窗口；应使用独立会话并以最终 pytest 摘要判定结果，不能把进度点当作通过。
   - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest -q -m 'not browser'`（859 passed, 260 deselected）、`uv run pytest tests/browser/ -q`（260 passed）及 `uv run pytest -q`（1119 passed）均已通过；未执行真实 AutoBangumi 写操作。
+---
+
+## 2026-08-26 15:00:24 CST - US-175
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- 完成复审追加的 payload 安全契约：只使用已接受 Request 中确认的公开标题，结构化 season 优先；支持中文第一至第九十九季，不能转换的显式“第…季”稳定 fail closed。
+- 完整 AutoBangumi 3.1 filter 现会在拼接后重新编译；如嵌入式全局 flag 无法等价表达，会返回 `ab_filter_unsupported`，且共享单项/批量/retry mapper 会在创建 client/transport 前停止。
+- Files changed: `src/ab_engine/controllers/subscription_payload.py`, `src/ab_engine/controllers/subscription_payload_test.py`, `src/batch_engine/controllers/batch_submit_controller_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: 组合外部正则必须验证最终表达式，避免独立可编译的片段在嵌入后失效。
+  - Gotchas encountered: 原始用户输入不是已确认标题；缺少确认标题或无法证明的显式季数必须 fail closed。
+  - Useful context: `uv run python -m compileall -q src tests`、`node --check src/apps/migu_orca_web/static/app.js`、`uv run pytest -q -m 'not browser'`（870 passed）、`uv run pytest tests/browser/ -q`（260 passed）及 `uv run pytest -q`（1130 passed）均已通过。
 ---

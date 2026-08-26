@@ -1340,6 +1340,44 @@ class TestSerialization:
 
 
 class TestComposeAbSubmitOne:
+    @pytest.mark.parametrize(
+        "filter_rule",
+        [
+            {
+                "must_contain": "(?i)1080p",
+                "must_not_contain": "",
+                "use_regex": True,
+                "case_sensitive": True,
+            },
+        ],
+    )
+    def test_composed_submit_one_rejects_unmappable_payload_before_transport(
+        self, monkeypatch: pytest.MonkeyPatch, filter_rule: dict
+    ) -> None:
+        """The single/batch/retry seam builds before creating a client."""
+        from batch_engine.controllers import batch_submit_controller
+
+        called = False
+
+        def fail_if_called(_config: object) -> object:
+            nonlocal called
+            called = True
+            raise AssertionError("invalid mapper output must not reach transport")
+
+        monkeypatch.setattr(
+            batch_submit_controller.ab_http_client,
+            "create_auto_bangumi_submit_client",
+            fail_if_called,
+        )
+        request = _accepted_request(request_id="req-1", title="葬送的芙莉莲")
+        request["confirmable_config"]["filter_rule"] = filter_rule
+
+        with pytest.raises(Stage1Error) as error:
+            compose_ab_submit_one()(request, _ab_config(auth_mode="password"))
+
+        assert error.value.error_type == "ab_filter_unsupported"
+        assert called is False
+
     def test_composed_submit_one_reuses_existing_ab_contract(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

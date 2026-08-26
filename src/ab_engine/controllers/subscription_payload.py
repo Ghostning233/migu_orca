@@ -31,7 +31,7 @@ def build_ab_subscription_payload(request: dict[str, Any]) -> dict[str, Any]:
     )
 
     return {
-        "title": _request_title(request),
+        "title": _required_string(_request_title(request), "title"),
         "rss_url": rss_url,
         "save_path": folder_name,
         "filter_rule": deepcopy(confirmable.get("filter_rule", {})),
@@ -48,7 +48,7 @@ def build_legacy_31_subscription_payload(request: dict[str, Any]) -> dict[str, A
 
     payload = build_ab_subscription_payload(request)
     official_title = _required_string(payload["title"], "title")
-    title_raw = _raw_title(request) or official_title
+    title_raw = official_title
     rss_url = _required_string(payload["rss_url"], "rss_url")
     save_path = _required_string(payload["save_path"], "save_path")
     subtitle_group = _required_string(
@@ -142,7 +142,20 @@ def _legacy_31_filter(value: Any) -> str:
     excluded_exclusion = [
         f".*(?:{term}).*" for term in prepared[len(contains_terms) :]
     ]
-    return f"{flags}(?:{'|'.join([*contains_exclusion, *excluded_exclusion])})"
+    expression = f"{flags}(?:{'|'.join([*contains_exclusion, *excluded_exclusion])})"
+    try:
+        # A regex may compile in isolation but be invalid once placed in the
+        # exclusion expression (for example a global inline flag such as
+        # ``(?i)``).  AutoBangumi receives the complete expression, so prove
+        # that exact expression is valid before allowing a write attempt.
+        re.compile(expression)
+    except re.error as exc:
+        raise Stage1Error(
+            "ab_filter_unsupported",
+            "当前筛选规则无法兼容 Auto Bangumi 3.1",
+            "build_legacy_31_subscription_payload",
+        ) from exc
+    return expression
 
 
 def _filter_string(value: dict[str, Any], field: str) -> str:
@@ -192,15 +205,48 @@ def _legacy_31_season(
         ):
             raw = bangumi.get("season_raw")
             return explicit, raw.strip() if isinstance(raw, str) and raw.strip() else None
-    for text in (official_title, title_raw):
-        match = re.search(
-            r"第\s*([1-9][0-9]?)\s*季|(?<![A-Za-z0-9])[Ss]([1-9][0-9]?)(?![0-9])|\bSeason\s+([1-9][0-9]?)\b",
-            text,
-            re.IGNORECASE,
-        )
-        if match:
-            return int(next(group for group in match.groups() if group)), match.group(0)
+    # Only the canonical title retained in the accepted Request is public
+    # confirmation data.  Never infer season from the original free-form
+    # input, which may differ from the user's confirmed selection.
+    del title_raw
+    chinese_match = re.search(r"第\s*([^\s季]+)\s*季", official_title)
+    if chinese_match:
+        season = _parse_chinese_or_arabic_season(chinese_match.group(1))
+        if season is None:
+            raise Stage1Error(
+                "ab_season_unsupported",
+                "当前番剧季数无法兼容 Auto Bangumi 3.1",
+                "build_legacy_31_subscription_payload",
+            )
+        return season, chinese_match.group(0)
+    match = re.search(
+        r"(?<![A-Za-z0-9])[Ss]([1-9][0-9]?)(?![0-9])|\bSeason\s+([1-9][0-9]?)\b",
+        official_title,
+        re.IGNORECASE,
+    )
+    if match:
+        return int(next(group for group in match.groups() if group)), match.group(0)
     return 1, None
+
+
+def _parse_chinese_or_arabic_season(value: str) -> int | None:
+    """Parse explicit ``第…季`` markers from one through ninety-nine."""
+
+    if value.isascii() and value.isdecimal():
+        number = int(value)
+        return number if 1 <= number <= 99 else None
+    digits = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if value in digits:
+        return digits[value]
+    if value == "十":
+        return 10
+    if len(value) == 2 and value[0] == "十" and value[1] in digits:
+        return 10 + digits[value[1]]
+    if len(value) == 2 and value[0] in digits and value[1] == "十":
+        return digits[value[0]] * 10
+    if len(value) == 3 and value[0] in digits and value[1] == "十" and value[2] in digits:
+        return digits[value[0]] * 10 + digits[value[2]]
+    return None
 
 
 def _legacy_31_optional_metadata(bangumi: Any) -> dict[str, str]:
@@ -219,9 +265,6 @@ def _request_title(request: dict[str, Any]) -> str | None:
     title = matched.get("title")
     if isinstance(title, str) and title.strip():
         return title.strip()
-    raw_title = _raw_title(request)
-    if raw_title:
-        return raw_title
     return None
 
 

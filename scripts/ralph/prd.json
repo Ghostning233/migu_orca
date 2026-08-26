@@ -49,7 +49,7 @@
       ],
       "priority": 3,
       "passes": true,
-      "notes": "审查纠正（必须单独提交）：AutoBangumi 3.1.18 的 filter 是 re.search 命中即排除。must_contain 应生成不满足即命中的排除式，must_not_contain 应生成满足即命中的排除式，两者合并为 OR；空规则必须是永不匹配 (?!)；保留 regex/case 语义，非法或不可等价表达必须 ab_filter_unsupported。补充可执行行为测试。data 必须映射已确认且可证明的 season、selected_subtitle_group 到 group_name，并在可靠时映射 season_raw/dpi/source/subtitle；不能证明的非第一季 fail closed，禁止静默 season=1。单个/批量/retry 复用同 mapper。password {data,rss} 的 fallback 也须映射完整的稳定内部字段 title/rss_url/save_path/filter_rule，且排除所有凭据/服务地址/响应。添加单个和批量 password fallback 测试；不复用旧 title/rss_url/filter_rule 自定义 body。"
+      "notes": "审查纠正（必须单独提交）：AutoBangumi 3.1.18 的 filter 是 re.search 命中即排除。must_contain 应生成不满足即命中的排除式，must_not_contain 应生成满足即命中的排除式，两者合并为 OR；空规则必须是永不匹配 (?!)；保留 regex/case 语义，非法或不可等价表达必须 ab_filter_unsupported。补充可执行行为测试。data 必须映射已确认且可证明的 season、selected_subtitle_group 到 group_name，并在可靠时映射 season_raw/dpi/source/subtitle；不能证明的非第一季 fail closed，禁止静默 season=1。单个/批量/retry 复用同 mapper。password {data,rss} 的 fallback 也须映射完整的稳定内部字段 title/rss_url/save_path/filter_rule，且排除所有凭据/服务地址/响应。添加单个和批量 password fallback 测试；不复用旧 title/rss_url/filter_rule 自定义 body。审查追加：只读取 accepted Request 的公开已确认标题；支持中文数字第一季至第九十九季（至少第二、第四、第十、第十二），结构化 matched_bangumi.season 优先；明显“第…季”而不能转换时必须稳定 fail closed，完全无标记才默认 1。构造完整 3.1 filter 后必须 re.compile；例如 (?i)1080p 嵌入后若无法等价转换即 ab_filter_unsupported，且 mapper 失败时单个/批量/retry 都不得调用 transport。"
     },
     {
       "id": "US-176",
@@ -132,8 +132,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "审查纠正（必须单独提交）：此前“测试通过”记录已被复审推翻。仅在 US-175 与 US-178 完成后，追加 progress（不得删除旧记录）说明复审结论、实际修复及精确测试结果；同步必要的 Stage 24/M10 文档。执行 compileall、node --check、pytest -m not browser、真实 Chromium、full pytest、diff/status/log；不做真实 AutoBangumi 写操作。实机凭据不得写进 progress、文档、测试或脚本。"
+      "passes": false,
+      "notes": "审查纠正（必须单独提交）：此前“测试通过”记录已被复审推翻。仅在 US-175 与 US-178 完成后，追加 progress（不得删除旧记录）说明复审结论、实际修复及精确测试结果；同步必要的 Stage 24/M10 文档。执行 compileall、node --check、pytest -m not browser、真实 Chromium、full pytest、diff/status/log；不做真实 AutoBangumi 写操作。实机凭据不得写进 progress、文档、测试或脚本。审查追加：US-175 完成后独立最终复审；将最终 prd.json 与 progress.txt 复制到 scripts/ralph/archive/2026-08-26-stage24-autobangumi-compatibility/，不得删除当前文件或创建下一 Stage PRD。"
     }
   ]
 }
