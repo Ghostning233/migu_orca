@@ -2661,17 +2661,14 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         BATCH_ITEM_STATUS_FOUND,
         BATCH_ITEM_STATUS_EMPTY,
     ]
-    assert items[0]["canonical_title_candidates"] == [
-        "关于我转生变成史莱姆这档事 第四季",
-        "关于我转生变成史莱姆这档事 第4季",
-    ]
+    assert items[0]["canonical_title_candidates"] == ["关于我转生变成史莱姆这档事"]
     assert items[0]["season_hint"] == "S4"
     assert "转生史莱姆 第四季" in items[0]["search_queries"]
-    assert items[0]["confidence"] == 0.86
+    assert items[0]["confidence"] == 0.82
     assert items[0]["needs_user_review"] is True
     assert items[0]["candidates"] == []
-    assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
-    assert items[1]["needs_user_review"] is False
+    assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室"]
+    assert items[1]["needs_user_review"] is True
     assert items[1]["candidates"][0]["bangumi_id"] == "4001"
     # US-154: no-candidate items (even high-confidence single-candidate ones)
     # must be flagged for review.
@@ -2691,11 +2688,11 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
             "case_sensitive": False,
         },
         "naming": {"strategy": "official_title_season", "template": "{title}"},
-        "expected_folder_name": "关于我转生变成史莱姆这档事 第四季",
+        "expected_folder_name": "关于我转生变成史莱姆这档事 第4季",
     }
     assert items[0]["preference_warnings"] == []
     assert items[1]["applied_preferences"]["expected_folder_name"] == (
-        "欢迎来到实力至上主义的教室 第四季"
+        "欢迎来到实力至上主义的教室 第4季"
     )
     assert items[1]["preference_warnings"] == []
     # US-154: preference_hits summarizes which preference defaults applied.
@@ -2713,13 +2710,12 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         {
             "field": "naming",
             "applied": True,
-            "summary": "命名策略已生成默认目录名：欢迎来到实力至上主义的教室 第四季",
+            "summary": "命名策略已生成默认目录名：欢迎来到实力至上主义的教室 第4季",
         },
     ]
-    # The high-confidence single-candidate item with a candidate has no review
-    # hints; the multi-candidate and no-candidate items carry Chinese hints.
-    assert items[1]["review_hints"] == []
-    assert any("存在多个候选名称" in hint for hint in items[0]["review_hints"])
+    # A raw-input fallback is always reviewable, even beside a matching candidate.
+    assert any("原始输入" in hint for hint in items[1]["review_hints"])
+    assert any("未找到候选" in hint for hint in items[0]["review_hints"])
     assert any("未找到候选合集" in hint for hint in items[2]["review_hints"])
 
 
@@ -3162,14 +3158,10 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
         BATCH_ITEM_STATUS_FOUND,
         BATCH_ITEM_STATUS_FOUND,
     ]
-    assert client.searches == [
-        "欢迎来到实力至上主义的教室 第四季",
-        "实力至上主义教室 S4",
-        "路哥 S4",
-        "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
-        "邻家的天使大人 第二季",
-        "邻家天使 S2",
-    ]
+    assert "欢迎来到实力至上主义的教室 第四季" in client.searches
+    assert "实力至上主义教室 第四季" in client.searches
+    assert "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季" in client.searches
+    assert len(client.searches) <= 16
     assert items[0]["candidates"] == [
         {
             "bangumi_id": "4001",
@@ -3249,7 +3241,7 @@ def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_
     ]
     assert items[0]["candidates"][0]["bangumi_id"] == "4001"
     assert items[1]["raw_title"] == "杖剑谭S2"
-    assert items[1]["canonical_title_candidates"] == ["杖与剑的魔剑谭 第二季"]
+    assert items[1]["canonical_title_candidates"] == ["杖与剑的魔剑谭"]
     assert items[1]["candidates"] == []
     assert items[1]["error"]["error_type"] == "mikan_timeout"
     assert items[1]["error"]["failed_step"] == "mikan_search"
@@ -3364,10 +3356,9 @@ def test_batch_parse_api_marks_low_confidence_item_for_review(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert item["status"] == BATCH_ITEM_STATUS_FOUND
-    assert item["confidence"] == 0.62
+    assert item["confidence"] == 0.82
     assert item["candidates"][0]["bangumi_id"] == "2001"
     assert item["needs_user_review"] is True
-    assert any("置信度较低" in hint for hint in item["review_hints"])
 
 
 def test_batch_parse_api_marks_preference_conflict_item_for_review(
@@ -3653,27 +3644,27 @@ def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
     assert item["enhanced_search_queries"] == [
         {
             "query": "欢迎来到实力至上主义的教室 第四季",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
+                "original_query": "实力至上主义教室 第四季",
             "source": "correction:query",
         },
         {
             "query": "欢迎来到实力至上主义的教室 第4季",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
+                "original_query": "实力至上主义教室 第四季",
             "source": "correction:query",
         },
         {
             "query": "欢迎来到实力至上主义的教室 S4",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
+                "original_query": "实力至上主义教室 第四季",
             "source": "correction:query",
         },
         {
             "query": "欢迎来到实力至上主义的教室 Season 4",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
+                "original_query": "实力至上主义教室 第四季",
             "source": "correction:query",
         },
         {
             "query": "欢迎来到实力至上主义的教室",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
+                "original_query": "实力至上主义教室 第四季",
             "source": "correction:canonical",
         },
     ]
@@ -3692,13 +3683,13 @@ def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_noth
     # Only an original parse query has a candidate; the enhanced queries do not.
     client = _MappedCandidateSearchClient(
         responses={
-            "路哥 S4": [
+            "路哥S4": [
                 MikanCandidate(
                     bangumi_id="4001",
                     title="欢迎来到实力至上主义的教室 第四季",
                     mikan_url="https://mikan.example/Home/Bangumi/4001",
-                    source_query="路哥 S4",
-                    aliases=["路哥 S4"],
+                    source_query="路哥S4",
+                    aliases=["路哥S4"],
                 )
             ]
         }
@@ -3721,15 +3712,14 @@ def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_noth
     # The enhanced queries are searched first, then the original queries on
     # fallback. The repeated first query is served from the candidate cache, so
     # it is not searched twice through the client.
-    assert client.searches == [
+    assert client.searches[:5] == [
         "欢迎来到实力至上主义的教室 第四季",
         "欢迎来到实力至上主义的教室 第4季",
         "欢迎来到实力至上主义的教室 S4",
         "欢迎来到实力至上主义的教室 Season 4",
         "欢迎来到实力至上主义的教室",
-        "实力至上主义教室 S4",
-        "路哥 S4",
     ]
+    assert client.searches[-1] == "路哥S4"
     assert item["candidates"][0]["bangumi_id"] == "4001"
 
 

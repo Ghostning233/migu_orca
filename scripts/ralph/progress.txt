@@ -3,6 +3,7 @@ Started: 2026-08-26 17:20:00 CST
 
 ## Codebase Patterns
 
+- 普通解析路径使用 `RuleAnimeTitleParsingProvider`；`FakeAnimeTitleParsingProvider` 仅用于显式测试注入。规则查询按 correction → alias → rule → fallback 排序，使用 NFKC/空白/casefold 去重，并限制为 8 条。
 - Python 依赖、检查与测试统一通过 `uv`；Web 前端修改后运行 `node --check src/apps/migu_orca_web/static/app.js`，UI story 必须读取 `.agents/skills/dev-browser/SKILL.md` 并在真实 Chromium 验证。
 - 标题解析结果只是搜索计划，不是真实 MiKan 候选；只有 M03 返回公开 `bangumi_id` 与规范化 `mikan_url` 的候选才可由用户显式选择并进入 preview。
 - 单个 `/api/v1/mikan/candidates` 与批量 `/api/v1/batches/parse` 必须复用同一 parse → bounded query plan → candidate search 编排，不得复制第二套 MiKan parser、fallback 或候选序列化。
@@ -38,4 +39,15 @@ Thread: https://codex.openai.com/threads/unknown
   - Season number parsing and its display spelling are different concerns: use the shared parser for the number, and retain `season_marker` only where a legacy accepted-payload field needs the public original spelling.
   - `AnimeTitleParseResult.season` remains a search hint; later candidate-selection work must require public MiKan evidence or explicit user confirmation before persisting it.
   - Full pytest and the browser subset were run with a clean `.migu_orca/storage`; no UI implementation changed in this story.
+---
+
+## 2026-08-26 23:20:00 CST - US-183
+Thread: https://codex.openai.com/threads/unknown
+- 新增默认确定性规则标题 provider，支持正式标题、别名、用户修正、季数四种公开拼写，以及有来源和优先级的最多八条查询计划。
+- Web 批量解析默认改用规则 provider；fake provider 保留为测试显式注入。未知标题和查询截断继续要求人工核对，所有查询经 Unicode/空白规范化稳定去重。
+- Files changed: `src/batch_engine/controllers/anime_title_parser.py`, `src/batch_engine/controllers/anime_title_parser_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 解析 query plan 的单条来源由 `AnimeTitleQuery` 保留；规范化结果时必须重建该 plan，不能仅从 `search_queries` 重建，否则会丢失 correction/alias 来源。
+  - 规则正式标题不携带 parser season 事实；季数只作为搜索词生成，后续候选选择仍须以公开 MiKan 证据或用户确认落库。
+  - Non-browser regression: `uv run pytest -q -m 'not browser'` passed (893 passed, 260 deselected); Chromium suite was launched with `uv run pytest tests/browser/ -q`.
 ---

@@ -50,7 +50,7 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "真实 LLM provider 不在本 Stage；用户修正与别名只生成候选搜索词，不自动定案。"
     },
     {

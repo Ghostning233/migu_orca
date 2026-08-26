@@ -24,7 +24,7 @@ from apps.migu_orca_entry.controllers.entry_controller import (
 )
 from batch_engine.controllers.anime_title_parser import (
     AnimeTitleParsingProvider,
-    FakeAnimeTitleParsingProvider,
+    RuleAnimeTitleParsingProvider,
     parse_anime_title,
 )
 from batch_engine.controllers.batch_accept_controller import (
@@ -452,7 +452,7 @@ def _resolve_mikan_config(explicit: RequestMikanConfigPayload | None) -> MikanCo
 
 
 def _batch_title_parsing_provider() -> AnimeTitleParsingProvider:
-    return FakeAnimeTitleParsingProvider()
+    return RuleAnimeTitleParsingProvider()
 
 
 def _serialize_batch_parse_result(

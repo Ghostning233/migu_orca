@@ -6,6 +6,7 @@ import pytest
 
 from batch_engine.controllers.anime_title_parser import (
     FakeAnimeTitleParsingProvider,
+    RuleAnimeTitleParsingProvider,
     parse_anime_title,
 )
 from batch_engine.models import (
@@ -35,42 +36,40 @@ def test_fake_provider_parses_supported_shorthand_titles() -> None:
     assert {result.source for result in results} == {ANIME_TITLE_PARSE_SOURCE_FAKE}
 
 
-def test_parse_anime_title_returns_searchable_metadata() -> None:
+def test_default_parser_uses_deterministic_rules_not_the_fake_provider() -> None:
     result = parse_anime_title("路哥S4")
 
-    assert result.canonical_title_candidates == ("欢迎来到实力至上主义的教室 第四季",)
+    assert result.canonical_title_candidates == ("欢迎来到实力至上主义的教室",)
     assert result.season_hint == "S4"
-    assert result.search_queries == (
-        "欢迎来到实力至上主义的教室 第四季",
-        "实力至上主义教室 S4",
-        "路哥 S4",
-    )
+    assert result.source is AnimeTitleParseSource.ALIAS
+    assert result.search_queries[:2] == ("实力至上主义教室 第四季", "欢迎来到实力至上主义的教室 第4季")
+    assert {entry.source for entry in result.query_plan} >= {AnimeTitleParseSource.ALIAS, AnimeTitleParseSource.RULE, AnimeTitleParseSource.FALLBACK}
     assert result.normalized_title == "路哥 第四季"
     assert result.base_title == "路哥"
     assert result.season == 4
 
 
-def test_low_confidence_result_needs_user_review() -> None:
+def test_known_rule_alias_is_high_confidence() -> None:
     result = parse_anime_title("杖剑谭S2")
 
-    assert result.confidence < 0.7
-    assert result.needs_user_review is True
+    assert result.confidence >= 0.7
+    assert result.needs_user_review is False
 
 
-def test_multiple_candidates_need_user_review() -> None:
+def test_known_alias_has_one_conservative_canonical_candidate() -> None:
     result = parse_anime_title("萌王S4")
 
-    assert len(result.canonical_title_candidates) == 2
-    assert result.needs_user_review is True
+    assert result.canonical_title_candidates == ("关于我转生变成史莱姆这档事",)
+    assert result.needs_user_review is False
 
 
 def test_unknown_title_falls_back_to_reviewable_safe_query() -> None:
     result = parse_anime_title("  未知简称S9  ")
 
     assert result.raw_title == "  未知简称S9  "
-    assert result.canonical_title_candidates == ("未知简称S9",)
-    assert result.search_queries == ("未知简称S9",)
-    assert result.confidence == 0.4
+    assert result.canonical_title_candidates == ("未知简称",)
+    assert result.search_queries[-1] == "未知简称S9"
+    assert result.confidence == 0.45
     assert result.needs_user_review is True
 
 
@@ -88,6 +87,44 @@ def test_unknown_title_never_defaults_to_first_season() -> None:
 
     assert result.season is None
     assert result.season_hint is None
+
+
+def test_rule_provider_orders_correction_alias_rule_and_fallback_queries() -> None:
+    from shared.models import TitleCorrection
+
+    result = parse_anime_title(
+        " 萌王Ｓ4 ",
+        RuleAnimeTitleParsingProvider(
+            corrections=[TitleCorrection(raw_title="萌王S4", canonical_title="转生史莱姆", query_correction="Tensei Slime")]
+        ),
+    )
+
+    assert result.search_queries == (
+        "Tensei Slime",
+        "转生史莱姆 第四季",
+        "转生史莱姆 第4季",
+        "转生史莱姆 S4",
+        "转生史莱姆 Season 4",
+        "萌王S4",
+    )
+    assert [entry.source for entry in result.query_plan] == [
+        AnimeTitleParseSource.CORRECTION,
+        AnimeTitleParseSource.ALIAS,
+        AnimeTitleParseSource.RULE,
+        AnimeTitleParseSource.RULE,
+        AnimeTitleParseSource.RULE,
+        AnimeTitleParseSource.FALLBACK,
+    ]
+    assert result.needs_user_review is False
+
+
+def test_rule_provider_keeps_unknown_and_overlong_query_plans_reviewable_and_bounded() -> None:
+    result = parse_anime_title("未知标题" * 40)
+
+    assert len(result.query_plan) <= 8
+    assert result.source is AnimeTitleParseSource.RULE
+    assert result.needs_user_review is True
+    assert "未识别正式别名，请人工核对" in result.review_hints
 
 
 def test_provider_failure_returns_recoverable_safe_error() -> None:
