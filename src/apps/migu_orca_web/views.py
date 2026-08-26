@@ -85,6 +85,7 @@ from request_engine.controllers.request_controller import (
     summarize_request,
 )
 from shared.errors import Stage1Error
+from shared.season_evidence import attach_selected_candidate_season, candidate_season_evidence
 from shared.models import EntryRequest, TitleCorrection, VersionedUserPreference
 from storage_engine.controllers.correction_repository import (
     build_correction_from_api,
@@ -320,6 +321,8 @@ class RequestCreatePayload(BaseModel):
     mikan_bangumi: str | None = None
     storage_dir: str | None = None
     save_request: bool = False
+    season_confirmation: int | None = None
+    candidate_aliases: list[str] = Field(default_factory=list)
 
     @field_validator("title")
     @classmethod
@@ -346,6 +349,25 @@ class RequestCreatePayload(BaseModel):
         if not direct_entry:
             raise ValueError("mikan_bangumi cannot be empty")
         return direct_entry
+
+    @field_validator("season_confirmation")
+    @classmethod
+    def validate_season_confirmation(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not 1 <= value <= 99:
+            raise ValueError("season_confirmation must be between 1 and 99")
+        return value
+
+    @field_validator("candidate_aliases")
+    @classmethod
+    def validate_candidate_aliases(cls, value: list[str]) -> list[str]:
+        if len(value) > 20:
+            raise ValueError("candidate_aliases cannot exceed 20 entries")
+        aliases = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        if len(aliases) != len(value) or any(len(item) > 200 for item in aliases):
+            raise ValueError("candidate_aliases must contain short non-empty strings")
+        return aliases
 
 
 class RequestActionPayload(BaseModel):
@@ -638,6 +660,23 @@ def _serialize_candidate(candidate: MikanCandidate, query: str) -> dict[str, obj
     if candidate.total_episodes is not None:
         serialized["total_episodes"] = candidate.total_episodes
     return serialized
+
+
+def _with_candidate_season_evidence(
+    candidate: dict[str, object], parse_result: AnimeTitleParseResult
+) -> dict[str, object]:
+    """Add a public review summary without treating parser output as fact."""
+    result = dict(candidate)
+    if parse_result.season is None:
+        return result
+    title = result.get("title")
+    aliases = result.get("aliases")
+    result["season_evidence"] = candidate_season_evidence(
+        title if isinstance(title, str) else "",
+        aliases if isinstance(aliases, list) else (),
+        parse_result.season,
+    )
+    return result
 
 
 def _search_mikan_candidates(
@@ -1238,6 +1277,12 @@ class RequestCreateView(PostView):
         )
         if not result["success"]:
             _raise_result_error(result)
+        matched = result["request"].get("source_info", {}).get("matched_bangumi")
+        if isinstance(matched, dict):
+            matched["aliases"] = list(payload.candidate_aliases)
+        result["request"] = attach_selected_candidate_season(
+            result["request"], payload.season_confirmation
+        )
 
         result = apply_request_save_action(
             result,
@@ -1328,7 +1373,10 @@ class MikanCandidateSearchView(PostView):
             "status": searched.status,
             "parse_result": _serialize_parse_summary(parse_result),
             "attempted_queries": _serialize_attempted_queries(parse_result, searched),
-            "candidates": list(searched.candidates),
+            "candidates": [
+                _with_candidate_season_evidence(candidate, parse_result)
+                for candidate in searched.candidates
+            ],
         }
         if searched.status == BATCH_ITEM_STATUS_FAILED:
             result["error"] = _serialize_title_search_error(
@@ -1544,7 +1592,10 @@ class BatchParseView(PostView):
                 )
                 continue
 
-            candidates = list(searched.candidates)
+            candidates = [
+                _with_candidate_season_evidence(candidate, parse_result)
+                for candidate in searched.candidates
+            ]
 
             candidate_status = (
                 BATCH_ITEM_STATUS_FOUND

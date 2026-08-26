@@ -102,7 +102,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "parser season 是搜索提示，不是已接受 Request 的事实；候选冲突不得自动覆盖。"
     },
     {

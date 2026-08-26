@@ -104,6 +104,11 @@ class TestCandidateSearchStates:
                     "poster_url": "/api/v1/mikan/posters/" + "a" * 64,
                     "source_query": "芙莉莲",
                     "aliases": ["Frieren EN"],
+                    "season_evidence": {
+                        "status": "NEEDS_CONFIRMATION",
+                        "season": 4,
+                        "requires_review": True,
+                    },
                 },
                 {
                     "bangumi_id": "3072",
@@ -139,6 +144,13 @@ class TestCandidateSearchStates:
         assert "MiKan ID: 2353" in text
         assert "MiKan ID: 3072" in text
         assert "搜索词：芙莉莲" in text
+        confirmation = page.locator(".candidate-season-confirmation input")
+        expect(confirmation).not_to_be_checked()
+        expect(page.locator(".candidate-season-confirmation")).to_contain_text(
+            "我确认此合集为第4季"
+        )
+        confirmation.check()
+        expect(confirmation).to_be_checked()
         expect(
             page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
         ).to_have_attribute(

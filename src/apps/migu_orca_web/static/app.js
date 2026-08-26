@@ -3276,6 +3276,33 @@
     source.textContent = "搜索词：" + safeText(candidate.source_query || opts.query);
     item.appendChild(source);
 
+    const seasonEvidence = candidate && candidate.season_evidence;
+    if (seasonEvidence && seasonEvidence.status === "NEEDS_CONFIRMATION") {
+      const season = Number(seasonEvidence.season);
+      const label = document.createElement("label");
+      label.className = "candidate-season-confirmation";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.addEventListener("change", function () {
+        candidate.season_confirmation = input.checked && season >= 1 && season <= 99
+          ? season
+          : null;
+      });
+      label.append(
+        input,
+        document.createTextNode(" 我确认此合集为第" + season + "季（候选标题未提供季数证据）"),
+      );
+      item.appendChild(label);
+    } else if (seasonEvidence && seasonEvidence.status === "CONFLICT") {
+      const warning = document.createElement("p");
+      warning.className = "candidate-season-conflict";
+      warning.textContent = "候选合集季数与搜索识别结果冲突，请先人工核对。";
+      item.appendChild(warning);
+      if (opts.chooseButton) {
+        opts.chooseButton.disabled = true;
+      }
+    }
+
     if (opts.chooseButton) {
       item.appendChild(opts.chooseButton);
     }
@@ -3421,8 +3448,12 @@
         title: candidate.title || "未命名合集",
         source: "mikan",
         mikan_bangumi: candidate.mikan_url,
+        candidate_aliases: Array.isArray(candidate.aliases) ? candidate.aliases : [],
         storage_dir: currentStorageDir() || null,
         save_request: false,
+        ...(Number.isInteger(candidate.season_confirmation)
+          ? {season_confirmation: candidate.season_confirmation}
+          : {}),
       }),
     });
   }

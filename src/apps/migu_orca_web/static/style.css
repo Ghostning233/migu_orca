@@ -763,6 +763,17 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.candidate-season-confirmation,
+.candidate-season-conflict {
+  display: block;
+  margin: 0.5rem 0;
+  color: var(--text-color, #243447);
+}
+
+.candidate-season-conflict {
+  color: #a5382d;
+}
+
 .batch-candidate-feedback {
   color: #586273;
   font-size: 0.86rem;

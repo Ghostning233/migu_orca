@@ -2476,8 +2476,11 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
             "mikan_url": "https://mikan.example/Home/Bangumi/3072",
             "poster_url": None,
             "source_query": "咒术回战 第三季",
-            "aliases": [],
-            "recommendation": "推荐：第 3 季",
+                "aliases": [],
+                "recommendation": "推荐：第 3 季",
+                "season_evidence": {
+                    "status": "PROVEN", "season": 3, "requires_review": False,
+                },
         },
         {
             "bangumi_id": "3071",
@@ -2485,8 +2488,11 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
             "mikan_url": "https://mikan.example/Home/Bangumi/3071",
             "poster_url": None,
             "source_query": "咒术回战 第三季",
-            "aliases": [],
-            "recommendation": "季数不符",
+                "aliases": [],
+                "recommendation": "季数不符",
+                "season_evidence": {
+                    "status": "CONFLICT", "season": None, "requires_review": True,
+                },
         },
     ]
 
@@ -3198,8 +3204,11 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
             "mikan_url": "https://mikan.example/Home/Bangumi/4001",
             "poster_url": None,
             "source_query": "欢迎来到实力至上主义的教室 第四季",
-            "aliases": ["路哥 S4"],
-            "recommendation": "推荐：第 4 季",
+                "aliases": ["路哥 S4"],
+                "recommendation": "推荐：第 4 季",
+                "season_evidence": {
+                    "status": "PROVEN", "season": 4, "requires_review": False,
+                },
         }
     ]
     assert items[1]["candidates"] == [
@@ -3210,8 +3219,11 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
             "poster_url": "/api/v1/mikan/posters/"
             + poster_cache_key("https://mikan.example/images/2002.jpg"),
             "source_query": "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
-            "aliases": [],
-            "recommendation": "推荐：第 2 季",
+                "aliases": [],
+                "recommendation": "推荐：第 2 季",
+                "season_evidence": {
+                    "status": "PROVEN", "season": 2, "requires_review": False,
+                },
         }
     ]
 

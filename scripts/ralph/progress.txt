@@ -13,6 +13,7 @@ Started: 2026-08-26 17:20:00 CST
 - 查询计划必须有界、稳定去重并保留来源/priority；高优先级查询有真实候选后停止弱 fallback，单条查询失败不阻断当前 item 的后续 fallback。
 - 用户明确保存的公开 `TitleCorrection` 可优先生成搜索词，但不能自动选择 MiKan 合集；无修正、读取失败或规则低置信度时保留原始输入与 MiKan URL/ID fallback。
 - parser 的 canonical title/season 是可审核提示。只有选中候选公开标题/元数据或用户显式确认能证明的 season 才能进入 Request、M07 命名和 M10 payload；冲突时保持审核并 fail closed。
+- 候选选择后的季数必须通过 `shared.season_evidence`：候选公开标题/别名可证明时自动写入；没有公开季数标记时必须提交明确 `season_confirmation`；冲突则拒绝生成草案。
 - Web UI 的解析来源通过固定中文白名单展示；不要拼接内部 source code，也不要产生“源名称：搜索词：...”之类嵌套标签。
 - endpoint、token、Cookie、Authorization、账号密码、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL和本地绝对路径不得进入解析结果、查询计划、API、页面、storage、日志、截图或 trace。
 - 浏览器测试使用 Playwright route/fixture 隔离外部依赖；运行完整 browser/full pytest 前确认仓库根 `.migu_orca/storage` 不存在。
@@ -73,4 +74,15 @@ Thread: https://codex.openai.com/threads/unknown
   - API 兼容迁移可新增嵌套 `parse_result`，同时保留既有扁平解析字段，且两者均应来自同一 `AnimeTitleParseResult.to_dict()` 白名单。
   - 搜索失败也应作为有状态、可审核的结果；错误 details 只能包含稳定 category/field/length/recoverable，不能复用外部错误 details。
   - Full quality checks: `uv run python -m compileall -q src tests`, `uv run pytest src/apps/migu_orca_web/views_test.py -q` (170 passed), `uv run pytest -q` (1156 passed), and `git diff --check`.
+---
+
+## 2026-08-26 23:16:19 CST - US-186
+Thread: https://codex.openai.com/threads/unknown
+- 新增共享候选季数证据规则：解析季数仅作搜索提示；真实 MiKan 候选的公开标题/别名一致时才自动写入季数，无标记候选需要用户显式确认，冲突直接 fail closed。
+- 单个与批量候选响应均返回可审核的季数证据；候选卡片为无证据的非第一季提供默认未勾选确认框，确认值随既有候选 → preview 链路提交。Request 始终以候选公开标题/别名为准，M07/M10 因而只消费已证明或明确确认的字段。
+- Files changed: `src/shared/season_evidence.py`, `src/shared/season_evidence_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_mikan_candidates.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 选择候选时将其公开 aliases 随请求传递，才能让服务端用同一证据原语判断别名中已明确的季数，而不会采用 parser canonical title。
+  - `season_evidence` 仅在 parser 提供季数提示时加入候选 API，以保持无季数客户端的既有候选字段稳定。
+  - Browser validation used Playwright with mocked candidate search; full-suite processes must not be started concurrently because both include browser coverage.
 ---
