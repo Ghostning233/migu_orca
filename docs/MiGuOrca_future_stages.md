@@ -49,11 +49,11 @@ MiGuOrca 使用 AI 名称解析和 MiKan 搜索生成可审核订阅草案
 
 用户可以完成“输入多行简称 -> 生成卡片 -> 删除错误项 -> 展开检查 -> 修改单卡 -> 接受单卡”的闭环。
 
-不包含，移交后续 Stage：
+Stage 19 当时未包含的事项及当前状态：
 
-1. 全接受后的并发 Auto Bangumi 提交队列。
-2. 真实 LLM provider 的完整生产配置。
-3. 部署 Auto Bangumi 或 qBittorrent。
+1. 批量接受和 Auto Bangumi 提交前队列已在 Stage 20 完成；最终采用前台顺序提交，不采用并发队列或后台 worker。
+2. 真实 LLM provider 的完整生产配置登记为 BL-021，尚未排期，不是名称解析或 MiKan 搜索的必需依赖。
+3. 不自动部署 Auto Bangumi 或 qBittorrent；BL-014 仅评估配置检查、连接诊断、教程和用户自行使用的模板。
 
 ## 3. Stage 20: 批量接受与 Auto Bangumi 提交前队列（已完成）
 
@@ -160,6 +160,15 @@ Stage 24 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.m
 ### 正式番名与季数解析
 
 专项解决 `萌王S4`、`无职转生s4` 等简称、别名和季数表达无法可靠转换为官方搜索词。必须保留低置信度人工审核、手动搜索和 MiKan URL/ID fallback，不得自动选择最终合集。
+
+这是当前正式 backlog 中最高优先级的未完成事项（BL-018）。真实 LLM provider（BL-021）不是前置条件；应先建立规则/provider 共用的稳定解析契约。
+
+### 未排期与条件触发事项
+
+1. BL-020 当前最新播出集数：先证明公开稳定的数据源，不使用种子/RSS/下载状态猜测。
+2. BL-021 真实 LLM 名称解析 provider：独立评估供应商、密钥、成本和 fallback。
+3. BL-022 新版 AutoBangumi API Token/Bearer 写契约：仅在目标版本和写契约可证明时排期，未知契约继续 fail closed。
+4. OF-001 流式封面代理：保留在 `docs/optional_features.md`，仅当真实慢网测试证明现有缓存体验不足时考虑。
 
 ### 部署/配置向导可行性验证
 

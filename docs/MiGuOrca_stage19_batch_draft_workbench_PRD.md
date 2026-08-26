@@ -46,7 +46,7 @@ Stage 18 已完成单番剧真实 MiKan 主流程：用户输入番剧标题，�
 3. 不自动部署 Auto Bangumi 或 qBittorrent。
 4. 不让 AI 静默决定最终 MiKan 合集。
 5. 不要求 AI 解析 100% 正确。
-6. 不在本阶段完成全接受后的并发 Auto Bangumi 提交队列；该能力放入 Stage 20。
+6. 不在本阶段完成批量接受或 Auto Bangumi 提交前队列；该能力在 Stage 20 最终以显式前台顺序提交实现，不采用并发队列或后台 worker。
 
 ## 5. 产品决策
 
@@ -251,7 +251,7 @@ Stage 19 的 Ralph 执行队列见 `scripts/ralph/prd.json`。每个 story 必�
 2. 接受动作复用现有 Request accept 能力或等价状态转换，成功后当前卡片状态显示为 `已接受`。
 3. 已接受卡片不再展示删除前无需确认的危险操作；如仍允许删除，必须经显式确认。
 4. 接受某一卡片不改变同批次其他卡片状态。
-5. 本 story 不实现全接受、批量接受或并发 Auto Bangumi 提交队列。
+5. 本 story 不实现全接受、批量接受或 Auto Bangumi 提交前队列；这些能力由 Stage 20 的前台顺序编排实现。
 6. 浏览器测试覆盖单卡接受、状态中文展示和其他卡片不变。
 7. Tests pass。
 8. Typecheck passes。
