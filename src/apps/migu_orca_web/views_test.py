@@ -2127,6 +2127,26 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert payload["result"]["query"] == "芙莉莲"
+    assert payload["result"]["status"] == BATCH_ITEM_STATUS_FOUND
+    assert payload["result"]["parse_result"] == {
+        "raw_title": "芙莉莲",
+        "normalized_title": "芙莉莲",
+        "base_title": "芙莉莲",
+        "canonical_title_candidates": ["芙莉莲"],
+        "season": None,
+        "season_hint": None,
+        "query_plan": [
+            {"query": "芙莉莲", "source": "rule", "priority": 1},
+        ],
+        "search_queries": ["芙莉莲"],
+        "source": "rule",
+        "confidence": 0.45,
+        "needs_user_review": True,
+        "review_hints": ["未识别正式别名，请人工核对"],
+    }
+    assert payload["result"]["attempted_queries"] == [
+        {"query": "芙莉莲", "source": "rule", "priority": 1},
+    ]
     assert payload["result"]["candidates"] == [
         {
             "bangumi_id": "2353",
@@ -2342,9 +2362,12 @@ def test_candidate_search_api_returns_sanitized_mikan_errors(
 
     payload = response.get_json()
     assert response.status_code == 200
-    assert payload["ok"] is False
-    assert payload["error_type"] == expected_error_type
-    assert payload["error_data"]["failed_step"] == expected_failed_step
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert result["status"] == BATCH_ITEM_STATUS_FAILED
+    assert result["error"]["error_type"] == expected_error_type
+    assert result["error"]["failed_step"] == expected_failed_step
+    assert set(result["error"]["details"]) <= {"category", "field", "length", "recoverable"}
     assert client.searches == ["芙莉莲"]
 
 
@@ -2662,6 +2685,12 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         BATCH_ITEM_STATUS_EMPTY,
     ]
     assert items[0]["canonical_title_candidates"] == ["关于我转生变成史莱姆这档事"]
+    assert items[0]["parse_result"]["season"] == 4
+    assert items[0]["parse_result"]["source"] == "alias"
+    assert items[0]["attempted_queries"] == [
+        {"query": entry["query"], "source": entry["source"], "priority": entry["priority"]}
+        for entry in items[0]["parse_result"]["query_plan"]
+    ]
     assert items[0]["season_hint"] == "S4"
     assert "转生史莱姆 第四季" in items[0]["search_queries"]
     assert items[0]["confidence"] == 0.82
@@ -2804,8 +2833,8 @@ def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
     assert item["status"] == BATCH_ITEM_STATUS_FAILED
     assert item["error"]["error_message"] == "AI 名称解析失败，请检查该条目后重试"
     assert item["error"]["details"] == {
-        "raw_title_length": 4,
-        "provider_source": "fake",
+        "category": "title_parse",
+        "length": 4,
         "recoverable": True,
     }
     assert "secret-token" not in body

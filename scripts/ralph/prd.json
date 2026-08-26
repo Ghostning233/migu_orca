@@ -84,7 +84,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "公共响应使用白名单序列化，不透传 provider 任意 details。"
     },
     {

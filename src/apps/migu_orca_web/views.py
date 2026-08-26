@@ -472,6 +472,7 @@ def _serialize_batch_parse_result(
     review_hints: list[str] | None = None,
     enhanced_search_queries: list[dict[str, object]] | None = None,
     preview_request: dict[str, object] | None = None,
+    attempted_queries: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "item_id": item.item_id,
@@ -487,6 +488,10 @@ def _serialize_batch_parse_result(
             else needs_user_review
         ),
         "source": parse_result.source,
+        # The nested contract is the shared API representation.  The older
+        # top-level fields remain for existing clients during the migration.
+        "parse_result": _serialize_parse_summary(parse_result),
+        "attempted_queries": list(attempted_queries or []),
         "candidates": candidates or [],
         "applied_preferences": applied_preferences,
         "preference_hits": preference_hits,
@@ -496,7 +501,7 @@ def _serialize_batch_parse_result(
         "preview_request": preview_request,
     }
     if error is not None:
-        result["error"] = _optional_error(error)
+        result["error"] = _serialize_title_search_error(error)
     return result
 
 
@@ -520,13 +525,63 @@ def _serialize_failed_batch_item(
         "confidence": 0.0,
         "needs_user_review": True,
         "source": "unknown",
+        "parse_result": None,
+        "attempted_queries": [],
         "candidates": [],
         "applied_preferences": applied_preferences,
         "preference_hits": preference_hits,
         "preference_warnings": list(preference_warnings or []),
         "review_hints": list(review_hints or []),
         "enhanced_search_queries": list(enhanced_search_queries or []),
-        "error": _optional_error(error),
+        "error": _serialize_title_search_error(error),
+    }
+
+
+def _serialize_parse_summary(parse_result: AnimeTitleParseResult) -> dict[str, object]:
+    """Expose the immutable parse model through its whitelist serializer."""
+
+    return parse_result.to_dict()
+
+
+def _serialize_attempted_queries(
+    parse_result: AnimeTitleParseResult,
+    outcome: CandidateSearchOutcome[object],
+) -> list[dict[str, object]]:
+    """Return only plan-backed, publicly reviewable queries actually run."""
+
+    attempted = set(outcome.attempted_queries)
+    return [entry.to_dict() for entry in parse_result.query_plan if entry.query in attempted]
+
+
+def _serialize_title_search_error(error: Stage1Error) -> dict[str, object]:
+    """Keep parser/search errors useful without reflecting provider details."""
+
+    error_type = error.error_type
+    category = (
+        "title_parse" if error_type.startswith("ai_title_parse") else "mikan_search"
+        if error_type.startswith("mikan_") else "validation"
+        if error_type.startswith("invalid_") else "processing"
+    )
+    details: dict[str, object] = {
+        "category": category,
+        "recoverable": category != "validation",
+    }
+    raw_details = error.details or {}
+    field = raw_details.get("field")
+    length = raw_details.get("length", raw_details.get("raw_title_length"))
+    if isinstance(field, str) and field:
+        details["field"] = field
+    if isinstance(length, int) and length >= 0:
+        details["length"] = length
+    return {
+        "error_type": error_type,
+        "error_message": (
+            "AI 名称解析失败，请检查该条目后重试"
+            if category == "title_parse"
+            else "MiKan 候选搜索失败"
+        ),
+        "failed_step": error.failed_step,
+        "details": details,
     }
 
 
@@ -1268,14 +1323,19 @@ class MikanCandidateSearchView(PostView):
         mikan_config = _resolve_mikan_config(payload.mikan_config)
         parse_result = parse_anime_title(payload.query)
         searched = _search_candidates_from_parse_result(parse_result, mikan_config)
-        if searched.status == BATCH_ITEM_STATUS_FAILED:
-            raise searched.error or Stage1Error(
-                "mikan_search_failed", "MiKan 候选搜索失败", "mikan_search"
-            )
-        return {
+        result: dict[str, object] = {
             "query": payload.query,
+            "status": searched.status,
+            "parse_result": _serialize_parse_summary(parse_result),
+            "attempted_queries": _serialize_attempted_queries(parse_result, searched),
             "candidates": list(searched.candidates),
         }
+        if searched.status == BATCH_ITEM_STATUS_FAILED:
+            result["error"] = _serialize_title_search_error(
+                searched.error
+                or Stage1Error("mikan_search_failed", "MiKan 候选搜索失败", "mikan_search")
+            )
+        return result
 
 
 @api_blueprint.get("/api/v1/mikan/posters/<key>")
@@ -1479,6 +1539,7 @@ class BatchParseView(PostView):
                         needs_user_review=review.needs_user_review,
                         review_hints=review.review_hints,
                         enhanced_search_queries=enhanced_queries,
+                        attempted_queries=_serialize_attempted_queries(parse_result, searched),
                     )
                 )
                 continue
@@ -1524,6 +1585,7 @@ class BatchParseView(PostView):
                     needs_user_review=review.needs_user_review,
                     review_hints=review.review_hints,
                     enhanced_search_queries=enhanced_queries,
+                    attempted_queries=_serialize_attempted_queries(parse_result, searched),
                 )
             )
 
