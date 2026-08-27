@@ -46,6 +46,36 @@ def _candidate_result_json(query: str, candidates: list[dict[str, Any]]) -> str:
     )
 
 
+def _candidate_result_with_parse_json(
+    query: str, candidates: list[dict[str, Any]]
+) -> str:
+    return json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "query": query,
+                "candidates": candidates,
+                "parse_result": {
+                    "normalized_title": "无职转生 第四季",
+                    "base_title": "无职转生",
+                    "season": 4,
+                    "source": "alias",
+                    "needs_user_review": True,
+                    "review_hints": ["别名匹配结果，请人工核对。"],
+                    "query_plan": [
+                        {"query": "无职转生 第四季", "source": "alias", "priority": 1},
+                        {"query": "无职转生 S4", "source": "rule", "priority": 2},
+                    ],
+                },
+                "attempted_queries": [
+                    {"query": "无职转生 第四季", "source": "alias", "priority": 1}
+                ],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
 class TestDefaultFixtureDoesNotUseRealMikan:
     """AC: /index 主流程是真实 MiKan 候选搜索；fixture 生成保留在开发/离线测试区域."""
 
@@ -168,6 +198,41 @@ class TestCandidateSearchStates:
 
         # The query input is preserved after a successful search.
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
+
+    def test_candidate_search_renders_auditable_parse_summary(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        body = _candidate_result_with_parse_json(
+            "无职转生s4",
+            [
+                {
+                    "bangumi_id": "2353",
+                    "title": "无职转生 第四季",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+                    "poster_url": None,
+                    "source_query": "无职转生 第四季",
+                    "aliases": [],
+                }
+            ],
+        )
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(status=200, content_type="application/json", body=body),
+        )
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="无职转生s4")
+        page.click("#mikan-candidate-search-submit")
+
+        summary = page.locator("#mikan-candidate-search-result .title-parse-summary")
+        expect(summary).to_contain_text("识别标题")
+        expect(summary).to_contain_text("无职转生 第四季")
+        expect(summary).to_contain_text("识别季度")
+        expect(summary).to_contain_text("第4季")
+        expect(summary).to_contain_text("解析来源")
+        expect(summary).to_contain_text("别名匹配")
+        expect(summary).to_contain_text("实际搜索词")
+        expect(summary).to_contain_text("需人工核对")
+        assert "alias" not in summary.inner_text()
 
     def test_candidate_cards_show_explicit_or_unknown_episode_progress(
         self, page: Page, live_server_url: str, storage_dir: Path

@@ -1294,15 +1294,118 @@
   function batchCardSourceName(row) {
     const selectedCandidate = row.selected_candidate || null;
     if (selectedCandidate) {
-      const candidate = selectedCandidate;
-      const source = safeText(candidate.source_query || candidate.bangumi_id);
-      return source ? "MiKan：" + source : "MiKan 候选";
+      return "已选 MiKan 合集";
     }
-    const queries = Array.isArray(row.search_queries) ? row.search_queries : [];
-    if (queries.length) {
-      return "搜索词：" + safeText(queries[0]);
+    return "MiKan 候选搜索";
+  }
+
+  const titleParseSourceLabels = {
+    correction: "用户修正",
+    rule: "规则识别",
+    alias: "别名匹配",
+    fallback: "原始标题回退",
+    fake: "测试解析",
+  };
+
+  function titleParseSourceLabel(source) {
+    const value = String(source || "");
+    return Object.prototype.hasOwnProperty.call(titleParseSourceLabels, value)
+      ? titleParseSourceLabels[value]
+      : "原始标题回退";
+  }
+
+  function titleParseData(result) {
+    const parse = result && result.parse_result;
+    if (parse && typeof parse === "object") {
+      return parse;
     }
-    return safeText(row.source) || "待解析";
+    return null;
+  }
+
+  function titleParseReviewHints(result, parse) {
+    const hints = [];
+    for (const source of [parse && parse.review_hints, result && result.review_hints]) {
+      if (!Array.isArray(source)) {
+        continue;
+      }
+      for (const hint of source) {
+        const text = safeText(hint).trim();
+        if (text && !hints.includes(text)) {
+          hints.push(text);
+        }
+      }
+    }
+    return hints;
+  }
+
+  // This block consumes only the API's public parse summary and actual query
+  // list.  It is intentionally shared by single and batch results so their
+  // explanations cannot drift apart or reflect provider-owned fields.
+  function renderTitleParseSummary(result) {
+    const parse = titleParseData(result);
+    if (!parse) {
+      return null;
+    }
+    const block = document.createElement("section");
+    block.className = "title-parse-summary";
+    block.setAttribute("aria-label", "标题解析摘要");
+
+    const heading = document.createElement("h3");
+    heading.textContent = "标题解析摘要";
+    block.appendChild(heading);
+
+    const season = Number(parse.season);
+    const recognizedTitle = safeText(parse.normalized_title || parse.base_title || result.raw_title);
+    const rows = [
+      ["识别标题", recognizedTitle || "未识别"],
+      ["识别季度", Number.isInteger(season) && season >= 1 && season <= 99 ? "第" + season + "季" : "未识别"],
+      ["解析来源", titleParseSourceLabel(parse.source)],
+    ];
+    block.appendChild(detailList(rows));
+
+    const attempted = Array.isArray(result && result.attempted_queries)
+      ? result.attempted_queries
+      : [];
+    const queryPlan = attempted.length ? attempted : (Array.isArray(parse.query_plan) ? parse.query_plan : []);
+    const queryHeading = document.createElement("h4");
+    queryHeading.textContent = attempted.length ? "实际搜索词" : "计划搜索词";
+    block.appendChild(queryHeading);
+    if (queryPlan.length) {
+      const queries = document.createElement("ul");
+      queries.className = "title-parse-query-list";
+      for (const entry of queryPlan) {
+        const query = entry && typeof entry === "object" ? entry.query : entry;
+        const text = safeText(query).trim();
+        if (!text) {
+          continue;
+        }
+        const item = document.createElement("li");
+        item.textContent = text;
+        queries.appendChild(item);
+      }
+      if (queries.childElementCount) {
+        block.appendChild(queries);
+      }
+    }
+
+    const hints = titleParseReviewHints(result, parse);
+    if (parse.needs_user_review === true && !hints.length) {
+      hints.push("该解析结果需要人工核对。");
+    }
+    if (hints.length) {
+      const hintHeading = document.createElement("h4");
+      hintHeading.textContent = "需人工核对";
+      block.appendChild(hintHeading);
+      const list = document.createElement("ul");
+      list.className = "title-parse-review-hints";
+      for (const hint of hints) {
+        const item = document.createElement("li");
+        item.textContent = hint;
+        list.appendChild(item);
+      }
+      block.appendChild(list);
+    }
+    return block;
   }
 
   function batchCardSeedSummary(row) {
@@ -2260,7 +2363,7 @@
 
     const source = document.createElement("div");
     source.className = "batch-card-source";
-    source.textContent = "源名称：" + batchCardSourceName(row);
+    source.textContent = "候选来源：" + batchCardSourceName(row);
 
     const preference = document.createElement("div");
     preference.className = "batch-card-preference";
@@ -2342,6 +2445,10 @@
     ];
     if (candidateFeedback) {
       children.push(candidateFeedback);
+    }
+    const parseSummary = renderTitleParseSummary(row);
+    if (parseSummary) {
+      children.push(parseSummary);
     }
     if (row.accept_feedback && row.accept_feedback.reason) {
       const reason = document.createElement("div");
@@ -3309,7 +3416,7 @@
     return item;
   }
 
-  function renderCandidateCards(candidates, query) {
+  function renderCandidateCards(candidates, query, searchResult) {
     const cards = Array.isArray(candidates) ? candidates : [];
     if (!cards.length) {
       setCandidateSearchResult(
@@ -3333,6 +3440,10 @@
         generateRequestFromCandidate(candidate);
       });
       list.appendChild(renderCandidateCard(candidate, {query: query, chooseButton: chooseButton}));
+    }
+    const parseSummary = renderTitleParseSummary(searchResult);
+    if (parseSummary) {
+      candidateSearchResult.appendChild(parseSummary);
     }
     candidateSearchResult.appendChild(list);
   }
@@ -3367,7 +3478,7 @@
         body: JSON.stringify(payload),
       });
       const candidates = (result && result.candidates) || [];
-      renderCandidateCards(candidates, result.query || payload.query);
+      renderCandidateCards(candidates, result.query || payload.query, result);
       showNotification(
         "success",
         candidates.length ? "候选搜索完成" : "未找到候选合集",

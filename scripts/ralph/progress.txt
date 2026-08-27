@@ -20,6 +20,16 @@ Started: 2026-08-26 17:20:00 CST
 - 每个 Ralph story 独立提交，只将当前完成 story 的 `passes` 改为 true，并在本文件末尾追加实现、文件和精确测试记录。
 ---
 
+## 2026-08-27 13:40:00 CST - US-187
+Thread: https://codex.openai.com/threads/unknown
+- 单个候选结果与批量卡片复用同一可审核解析摘要，展示识别标题、季数、中文来源、实际搜索词和人工核对提示；候选来源标签不再叠加搜索词或内部枚举。
+- 保持 EMPTY/FAILED 原有手动操作边界，未增加自动选择、保存、接受或提交；全部外部候选由 Playwright route fixture 隔离。
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_mikan_candidates.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - UI 直接消费 US-185 的白名单 `parse_result`/`attempted_queries`，只展示固定中文来源标签，不渲染内部 source code。
+  - Browser verification: `node --check src/apps/migu_orca_web/static/app.js` and `uv run pytest tests/browser/test_mikan_candidates.py tests/browser/test_batch_workbench.py -q` passed (74 passed).
+---
+
 ## 2026-08-26 22:22:50 CST - US-181
 Thread: https://codex.openai.com/threads/unknown
 - 建立不可变、JSON 安全的标题解析契约：规范化标题、基础标题、季数、查询计划、审核提示和固定来源枚举。

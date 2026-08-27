@@ -121,7 +121,7 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "使用现有单实例候选浮层和统一详情，不重做 Stage 22/23 布局。"
     },
     {
