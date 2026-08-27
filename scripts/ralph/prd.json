@@ -144,7 +144,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "自动化只用 fixture/fake transport/Playwright route，不访问真实外部系统；归档必须反映最终全 true 状态。"
     }
   ]

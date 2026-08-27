@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台，目标是在 MiKanProject 与 Auto Bangumi 之间提供 MiKan 订阅源发现、筛选预览、批量草案审核与提交辅助能力。
 
-Stage 25「正式番名与季数解析」已完成规划、等待 Ralph 开发：单个与批量搜索将共用确定性标题/季数解析、有界查询计划和可审核来源展示；真实 MiKan 合集仍由用户显式选择，只有可证明季数才能进入 Request、命名与 AutoBangumi 映射。规划见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
+Stage 25「正式番名与季数解析」已完成：单个与批量搜索共用确定性标题/季数解析、有界查询计划和可审核来源展示；真实 MiKan 合集仍由用户显式选择，只有可证明季数才能进入 Request、命名与 AutoBangumi 映射。实现与验收见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
 Stage 24「AutoBangumi 真实认证与订阅兼容闭环」已完成：默认以服务地址、用户名和密码登录兼容 AutoBangumi 3.1.18，同时保留新版 API Token/Bearer 兼容模式；Settings 提供只读连接测试，单个与批量已接受 Request 复用经验证的 `/api/v1/rss/subscribe` 映射和提交编排。执行范围见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
 
@@ -412,7 +412,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 ## Ralph 开发流
 
-- 当前活跃 Ralph PRD：Stage 25，正式番名与季数解析（已规划，待开发）
+- 当前 Ralph PRD：Stage 25，正式番名与季数解析（已完成，已归档）
 - 最近完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
 - 前一完成阶段：Stage 23，媒体缓存、MiKan 读取优化与批量审核体验
 - 前一完成阶段：Stage 22，Web UI 搜索工作台重构与真实候选闭环

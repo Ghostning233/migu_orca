@@ -1,0 +1,151 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "agent/stage25-title-season-parsing",
+  "description": "Stage 25：为单个与批量 MiKan 搜索建立共享的正式番名、季数解析、有界查询计划和可审核 UI，并确保只有可证明季数进入下游。",
+  "userStories": [
+    {
+      "id": "US-181",
+      "title": "建立结构化标题解析与查询计划契约",
+      "description": "作为开发者，我希望标题解析结果具有统一、可演进且可审核的数据结构，使单个、批量、UI 和下游不再各自解释字符串。",
+      "acceptanceCriteria": [
+        "扩展 AnimeTitleParseResult 或等价模型，表达 normalized/base title、结构化 season、query plan、来源、置信度和 review hints",
+        "定义稳定来源枚举与中文展示白名单；未知来源安全降级，不回显任意 provider 字符串",
+        "兼容字段 season_hint/search_queries 如保留，只能从新结构单向派生，并有迁移测试",
+        "模型校验标题/查询长度、季数范围、查询数量、priority 与空值，输出不可变且可 JSON 序列化",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "先建立模型和纯序列化契约；解析成功不等于真实 MiKan 候选存在。"
+    },
+    {
+      "id": "US-182",
+      "title": "实现确定性季数解析与规范化",
+      "description": "作为用户，我希望系统正确理解标题中的常见季数表达，并在冲突或无法证明时要求我核对。",
+      "acceptanceCriteria": [
+        "纯函数支持 1～99 的 S/s、Season、第N季/期、中文数字季/期及合理空白/全角数字",
+        "无职转生s4 能拆成基础标题无职转生和 season 4，并生成规范化第四季",
+        "无季数标记返回 null，不默认第一季；0、100+、不完整标记、Part/分割放送不得静默映射",
+        "多个一致标记可去重；冲突标记返回审核提示且不生成可信 season number",
+        "title parser、search enhancer、命名和 AB 所需季数工具复用同一原语或明确适配层，不保留互相矛盾的复制逻辑",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "明确区分无标记与显式但无法证明；搜索 parser 不默认第一季。"
+    },
+    {
+      "id": "US-183",
+      "title": "实现正式标题、别名与有界查询计划",
+      "description": "作为用户，我希望简称和季数被转换成一组有序、可解释的 MiKan 搜索词，同时未知简称仍能安全回退。",
+      "acceptanceCriteria": [
+        "新增默认确定性 rule provider；普通 Web 流程不再默认 fake provider，fake 只保留测试/显式注入",
+        "按 correction → 版本化别名 → 基础标题 → 原始输入生成查询，输出来源与 priority，Unicode/空白规范化后稳定去重",
+        "季数查询至少覆盖中文正式形式、阿拉伯数字季、S 和 Season 形式，整体默认不超过 8 项",
+        "未知别名、多个 canonical candidates、低置信度或查询截断设置审核提示，不伪造高置信度正式标题",
+        "萌王S4、无职转生s4、中日文/罗马字修正、普通无季标题和恶意超长输入有行为测试",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "真实 LLM provider 不在本 Stage；用户修正与别名只生成候选搜索词，不自动定案。"
+    },
+    {
+      "id": "US-184",
+      "title": "统一单个与批量候选搜索编排",
+      "description": "作为用户，我希望单个搜索和批量搜索对相同输入使用相同解析与 fallback，从而得到一致结果。",
+      "acceptanceCriteria": [
+        "抽取共享 parse → query plan → M03 candidate search 编排，供单个 candidates API 与批量 parse API 复用",
+        "按 query priority 分层 fallback；高优先级得到候选后停止弱 fallback，单条查询失败不阻断后续查询",
+        "全部查询失败返回 FAILED；至少一次成功但全空返回 EMPTY；候选按公开 identity 稳定去重并保留实际 source query",
+        "每个 item 最多执行有界查询数；批量单项失败不阻断其他 item，缓存与 Stage 23 提前停止行为保持不变",
+        "不自动选择唯一候选，不生成空壳 preview，不访问真实外部服务",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "不得为单个和批量保留两套 fallback 或候选去重规则。"
+    },
+    {
+      "id": "US-185",
+      "title": "扩展单个与批量 API 的可审核解析摘要",
+      "description": "作为 API/UI 使用者，我希望看到系统识别的标题、季数、来源和实际查询，从而可以判断结果是否可信。",
+      "acceptanceCriteria": [
+        "单个与批量响应共享解析摘要和 attempted query 结构，同时保持现有候选公开字段兼容",
+        "API 明确区分 PARSED/FOUND/EMPTY/FAILED；解析成功不等于候选存在，EMPTY 不附带可接受 preview",
+        "correction、rule、alias、fallback 来源通过固定枚举输出；错误 details 只含稳定类别、字段、长度和 recoverable",
+        "旧客户端需要的 query、search_queries 等字段如保留，有明确兼容测试；不得出现相互矛盾的数据",
+        "API 响应、日志与测试证明不包含外部敏感值、raw HTML/RSS、完整失败 URL或本地绝对路径",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "公共响应使用白名单序列化，不透传 provider 任意 details。"
+    },
+    {
+      "id": "US-186",
+      "title": "约束候选选择后的季数证据与下游传播",
+      "description": "作为用户，我希望搜索提示不会被误当成已确认季数，从而避免文件夹名或 AutoBangumi 订阅到错误季度。",
+      "acceptanceCriteria": [
+        "选择真实 MiKan 候选后，preview 以候选公开 title/aliases/ID/URL 为准，不允许 parser canonical title 覆盖",
+        "只有候选公开标题/结构化元数据与解析一致或用户显式确认时，才写入 matched_bangumi season/season_raw",
+        "候选缺少季数证据但 parser 有可信 season 时，UI/API 提供默认未确认的 1～99 季数确认字段；只有用户显式确认才写入",
+        "候选与解析季数冲突时保留公开证据和审核提示，不自动修改 folder name 或 AB season；用户必须先明确解决冲突",
+        "M07 与 M10 继续只消费 accepted Request 中的可证明字段；无法证明的显式非第一季 fail closed",
+        "单个、批量、保存草案、接受、retry 使用同一证据规则并有回归测试",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "parser season 是搜索提示，不是已接受 Request 的事实；候选冲突不得自动覆盖。"
+    },
+    {
+      "id": "US-187",
+      "title": "收敛解析与搜索结果 Web UI",
+      "description": "作为用户，我希望清楚看到系统如何理解标题和季数，并在不确定时方便手动纠正。",
+      "acceptanceCriteria": [
+        "单个与批量结果展示统一的识别标题、识别季度、中文解析来源、实际搜索词和审核提示",
+        "修复源名称：搜索词：标签叠加；候选来源只显示一次且不泄露内部枚举",
+        "低置信度、多别名、季数冲突、原始输入 fallback、查询截断和候选冲突显示需人工核对",
+        "EMPTY/FAILED 保留手动重试与 MiKan URL/ID fallback；任何结果都不会自动选择、保存、接受或提交",
+        "Playwright 覆盖单个/批量、无职转生s4、无季标题、冲突季数、EMPTY/FAILED、窄屏、键盘与敏感值过滤",
+        "node --check src/apps/migu_orca_web/static/app.js passes",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "使用现有单实例候选浮层和统一详情，不重做 Stage 22/23 布局。"
+    },
+    {
+      "id": "US-188",
+      "title": "Stage 25 文档、安全回归与收尾",
+      "description": "作为维护者，我希望 Stage 25 的实现、文档和测试一致，并留下可直接审查的 Ralph 归档。",
+      "acceptanceCriteria": [
+        "同步 README、主 PRD、Future Stages、backlog、Stage 25 PRD 与 M00/M02/M03/M07/M10/M12/M13；BL-018 标记实际完成状态",
+        "README 手动验收覆盖规则解析、季数冲突、单个/批量一致性、来源展示、EMPTY/FAILED 和直连 fallback",
+        "安全回归证明查询数量有界，解析/API/UI/storage/log/trace 不泄露外部敏感值或原始外部内容",
+        "将最终 prd.json 与 progress.txt 归档到 scripts/ralph/archive/<date>-stage25-title-season-parsing/，不创建下一 Stage PRD",
+        "uv run python -m compileall -q src tests passes",
+        "node --check src/apps/migu_orca_web/static/app.js passes",
+        "uv run pytest -q -m not browser passes",
+        "uv run pytest tests/browser/ -q 在真实 Chromium 全部通过且不得整体 skip",
+        "uv run pytest -q passes",
+        "git diff --check、工作区和提交历史检查通过",
+        "Verify in browser using dev-browser skill",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "自动化只用 fixture/fake transport/Playwright route，不访问真实外部系统；归档必须反映最终全 true 状态。"
+    }
+  ]
+}

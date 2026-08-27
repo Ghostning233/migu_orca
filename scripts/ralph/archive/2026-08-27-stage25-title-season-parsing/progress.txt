@@ -1,0 +1,107 @@
+# Ralph Progress Log
+Started: 2026-08-26 17:20:00 CST
+
+## Codebase Patterns
+
+- 普通解析路径使用 `RuleAnimeTitleParsingProvider`；`FakeAnimeTitleParsingProvider` 仅用于显式测试注入。规则查询按 correction → alias → rule → fallback 排序，使用 NFKC/空白/casefold 去重，并限制为 8 条。
+- Python 依赖、检查与测试统一通过 `uv`；Web 前端修改后运行 `node --check src/apps/migu_orca_web/static/app.js`，UI story 必须读取 `.agents/skills/dev-browser/SKILL.md` 并在真实 Chromium 验证。
+- 标题解析结果只是搜索计划，不是真实 MiKan 候选；只有 M03 返回公开 `bangumi_id` 与规范化 `mikan_url` 的候选才可由用户显式选择并进入 preview。
+- 单个 `/api/v1/mikan/candidates` 与批量 `/api/v1/batches/parse` 必须复用同一 parse → bounded query plan → candidate search 编排，不得复制第二套 MiKan parser、fallback 或候选序列化。
+- 解析 API 的新结构应使用 `AnimeTitleParseResult.to_dict()` 作为白名单 `parse_result`，并暂保留旧扁平字段；搜索错误 details 仅输出 category/field/length/recoverable。
+- 季数解析使用共享结构化原语，范围 1～99；无标记保持 null，冲突、越界、Part/分割放送等无法证明的表达必须人工审核，不得默认第一季。
+- 跨模块季数判断统一使用 `shared.title_season.parse_title_season()`；它只返回可证明的 1～99 季数，保留原始 marker 供已接受元数据兼容，并提供稳定的中文规范化标题。
+- 查询计划必须有界、稳定去重并保留来源/priority；高优先级查询有真实候选后停止弱 fallback，单条查询失败不阻断当前 item 的后续 fallback。
+- 用户明确保存的公开 `TitleCorrection` 可优先生成搜索词，但不能自动选择 MiKan 合集；无修正、读取失败或规则低置信度时保留原始输入与 MiKan URL/ID fallback。
+- parser 的 canonical title/season 是可审核提示。只有选中候选公开标题/元数据或用户显式确认能证明的 season 才能进入 Request、M07 命名和 M10 payload；冲突时保持审核并 fail closed。
+- 候选选择后的季数必须通过 `shared.season_evidence`：候选公开标题/别名可证明时自动写入；没有公开季数标记时必须提交明确 `season_confirmation`；冲突则拒绝生成草案。
+- Web UI 的解析来源通过固定中文白名单展示；不要拼接内部 source code，也不要产生“源名称：搜索词：...”之类嵌套标签。
+- endpoint、token、Cookie、Authorization、账号密码、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL和本地绝对路径不得进入解析结果、查询计划、API、页面、storage、日志、截图或 trace。
+- 浏览器测试使用 Playwright route/fixture 隔离外部依赖；运行完整 browser/full pytest 前确认仓库根 `.migu_orca/storage` 不存在。
+- 每个 Ralph story 独立提交，只将当前完成 story 的 `passes` 改为 true，并在本文件末尾追加实现、文件和精确测试记录。
+---
+
+## 2026-08-27 13:45:00 CST - US-188
+Thread: https://codex.openai.com/threads/unknown
+- 完成 Stage 25 文档状态同步、安全回归与 Ralph 归档；BL-018 已标记为完成，未触发真实 MiKan、AutoBangumi 或 qBittorrent 操作。
+- 归档当前 PRD 和进度日志至 `scripts/ralph/archive/2026-08-27-stage25-title-season-parsing/`；当前 Ralph 文件保留在原处。
+- Files changed: `README.md`, `docs/backlog.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/archive/2026-08-27-stage25-title-season-parsing/`.
+- **Learnings for future iterations:**
+  - BL-018 已提供确定性规则、显式候选证据与人工确认边界；真实 LLM 解析仍属于后续独立能力。
+---
+
+## 2026-08-27 13:40:00 CST - US-187
+Thread: https://codex.openai.com/threads/unknown
+- 单个候选结果与批量卡片复用同一可审核解析摘要，展示识别标题、季数、中文来源、实际搜索词和人工核对提示；候选来源标签不再叠加搜索词或内部枚举。
+- 保持 EMPTY/FAILED 原有手动操作边界，未增加自动选择、保存、接受或提交；全部外部候选由 Playwright route fixture 隔离。
+- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_mikan_candidates.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - UI 直接消费 US-185 的白名单 `parse_result`/`attempted_queries`，只展示固定中文来源标签，不渲染内部 source code。
+  - Browser verification: `node --check src/apps/migu_orca_web/static/app.js` and `uv run pytest tests/browser/test_mikan_candidates.py tests/browser/test_batch_workbench.py -q` passed (74 passed).
+---
+
+## 2026-08-26 22:22:50 CST - US-181
+Thread: https://codex.openai.com/threads/unknown
+- 建立不可变、JSON 安全的标题解析契约：规范化标题、基础标题、季数、查询计划、审核提示和固定来源枚举。
+- 未知 provider 来源安全降级为 `fallback`，兼容的 `search_queries` 与 query plan 一致，并覆盖长度、季数、数量与 priority 边界。
+- Files changed: `src/batch_engine/models/__init__.py`, `src/batch_engine/controllers/anime_title_parser_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`。
+- **Learnings for future iterations:**
+  - 解析结果的公开序列字段使用 tuple；API 边界统一调用 `to_dict()` 取得 JSON-safe list/dict。
+  - 来源必须通过 `AnimeTitleParseSource` 白名单归一化，不能回显 provider 自定义字符串。
+  - 完整 pytest 会继续执行 Playwright 浏览器套件，耗时显著长于核心单元测试。
+---
+
+## 2026-08-26 22:31:47 CST - US-182
+Thread: https://codex.openai.com/threads/unknown
+- 新增保守、纯函数的共享季数解析：支持 S/s、Season、第 N 季/期、中文数字与全角数字，并将 `无职转生s4` 规范化为 `无职转生 第四季`。
+- 对无标记保持空季数；冲突、0/100+、不完整标记、Part/分割放送返回人工审核提示，绝不默认第一季。
+- 搜索增强、命名默认值和 AutoBangumi 3.1 payload 改为复用此原语；payload 仍保留候选标题中的原始季数 marker。
+- Files changed: `src/shared/title_season.py`, `src/shared/title_season_test.py`, `src/batch_engine/controllers/anime_title_parser.py`, `src/batch_engine/controllers/search_enhancer.py`, `src/batch_engine/controllers/preference_applicator.py`, `src/ab_engine/controllers/subscription_payload.py`, associated parser tests, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Season number parsing and its display spelling are different concerns: use the shared parser for the number, and retain `season_marker` only where a legacy accepted-payload field needs the public original spelling.
+  - `AnimeTitleParseResult.season` remains a search hint; later candidate-selection work must require public MiKan evidence or explicit user confirmation before persisting it.
+  - Full pytest and the browser subset were run with a clean `.migu_orca/storage`; no UI implementation changed in this story.
+---
+
+## 2026-08-26 23:20:00 CST - US-183
+Thread: https://codex.openai.com/threads/unknown
+- 新增默认确定性规则标题 provider，支持正式标题、别名、用户修正、季数四种公开拼写，以及有来源和优先级的最多八条查询计划。
+- Web 批量解析默认改用规则 provider；fake provider 保留为测试显式注入。未知标题和查询截断继续要求人工核对，所有查询经 Unicode/空白规范化稳定去重。
+- Files changed: `src/batch_engine/controllers/anime_title_parser.py`, `src/batch_engine/controllers/anime_title_parser_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 解析 query plan 的单条来源由 `AnimeTitleQuery` 保留；规范化结果时必须重建该 plan，不能仅从 `search_queries` 重建，否则会丢失 correction/alias 来源。
+  - 规则正式标题不携带 parser season 事实；季数只作为搜索词生成，后续候选选择仍须以公开 MiKan 证据或用户确认落库。
+  - Non-browser regression: `uv run pytest -q -m 'not browser'` passed (893 passed, 260 deselected); Chromium suite was launched with `uv run pytest tests/browser/ -q`.
+---
+
+## 2026-08-26 22:58:45 CST - US-184
+Thread: https://codex.openai.com/threads/unknown
+- 抽取共享的 parse → bounded query plan → MiKan 候选搜索编排，并同时接入单个候选 API 与批量解析；高优先级命中后停止弱回退，单条失败继续后续查询。
+- 以公开 `bangumi_id`/`mikan_url` 做稳定候选去重；全部失败为 FAILED，至少一次成功但无结果为 EMPTY，且批量条目互不阻断。
+- Files changed: `src/batch_engine/controllers/candidate_search_orchestrator.py`, `src/batch_engine/controllers/candidate_search_orchestrator_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 共享编排只接收 search callback 与公开 identity 函数；MiKan 客户端、缓存和 API 序列化仍留在 Web view 边界。
+  - 某个 fallback 抛错但后续查询成功为空时，最终状态是 EMPTY；只有所有查询都失败才是 FAILED。
+  - 保存的标题修正应注入 `RuleAnimeTitleParsingProvider`，使其成为同一个正式 query plan，而不是额外的搜索循环。
+---
+
+## 2026-08-26 23:06:17 CST - US-185
+Thread: https://codex.openai.com/threads/unknown
+- 为单个 MiKan 候选搜索和批量解析增加相同的白名单 `parse_result` 摘要、实际 `attempted_queries` 和明确的 FOUND/EMPTY/FAILED 状态；保留原有顶层兼容字段。
+- 将标题解析和 MiKan 搜索失败详情收敛为稳定的类别、字段、长度和可恢复标记，避免回显 provider 或外部响应详情；单个搜索失败现以可审核 FAILED 结果返回。
+- Files changed: `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - API 兼容迁移可新增嵌套 `parse_result`，同时保留既有扁平解析字段，且两者均应来自同一 `AnimeTitleParseResult.to_dict()` 白名单。
+  - 搜索失败也应作为有状态、可审核的结果；错误 details 只能包含稳定 category/field/length/recoverable，不能复用外部错误 details。
+  - Full quality checks: `uv run python -m compileall -q src tests`, `uv run pytest src/apps/migu_orca_web/views_test.py -q` (170 passed), `uv run pytest -q` (1156 passed), and `git diff --check`.
+---
+
+## 2026-08-26 23:16:19 CST - US-186
+Thread: https://codex.openai.com/threads/unknown
+- 新增共享候选季数证据规则：解析季数仅作搜索提示；真实 MiKan 候选的公开标题/别名一致时才自动写入季数，无标记候选需要用户显式确认，冲突直接 fail closed。
+- 单个与批量候选响应均返回可审核的季数证据；候选卡片为无证据的非第一季提供默认未勾选确认框，确认值随既有候选 → preview 链路提交。Request 始终以候选公开标题/别名为准，M07/M10 因而只消费已证明或明确确认的字段。
+- Files changed: `src/shared/season_evidence.py`, `src/shared/season_evidence_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_mikan_candidates.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - 选择候选时将其公开 aliases 随请求传递，才能让服务端用同一证据原语判断别名中已明确的季数，而不会采用 parser canonical title。
+  - `season_evidence` 仅在 parser 提供季数提示时加入候选 API，以保持无季数客户端的既有候选字段稳定。
+  - Browser validation used Playwright with mocked candidate search; full-suite processes must not be started concurrently because both include browser coverage.
+---
