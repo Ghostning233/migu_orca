@@ -156,3 +156,19 @@ Thread: https://codex.openai.com/threads/unknown
 - 最终验证：`uv run python -m compileall -q src tests` 通过；`node --check src/apps/migu_orca_web/static/app.js` 通过；`uv run pytest -q -m "not browser"`（916 passed，262 deselected）；`uv run pytest tests/browser/ -q`（262 passed，真实 Chromium）；`uv run pytest -q`（1178 passed）；`git diff --check` 通过。
 - 未执行真实 MiKan、AutoBangumi 或 qBittorrent 写操作；真实 AutoBangumi 海报效果仍须由用户在真实实例显式创建时人工复验。
 ---
+
+## 2026-08-27 16:10:00 CST - Stage 25 二次静态复审重新打开
+Thread: https://codex.openai.com/threads/unknown
+- 此前全通过结论再次被复审推翻：US-186、US-187 与 US-188 恢复为未完成。历史记录保持不变，本条仅追加复审结论。
+- US-186：URL 键的全局候选季数提示无 TTL、容量、搜索上下文隔离和一次性消费，可能跨请求污染；改用有界、过期、与候选 URL 绑定的一次性 opaque 上下文。
+- US-187：异步候选生成结束后曾无条件启用全部按钮，须依据候选业务禁用原因与 in-flight 状态统一重算，并以多候选 Chromium 成功/失败回归保护。
+- US-188：Stage 25 PRD 与主 PRD仍写“待开发”，须同步完成状态并重建最终归档。
+- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 操作；外部系统仅限 fixture、fake transport 与 Playwright route。
+---
+
+## 2026-08-27 16:20:00 CST - US-186
+Thread: https://codex.openai.com/threads/unknown
+- 二次复审修复：移除 URL 键全局季数提示，改为仅在 `NEEDS_CONFIRMATION` 候选响应中签发的 opaque context。服务端 store 使用 5 分钟 TTL、128 条 FIFO 上限、详情解析后的 MiKan URL 绑定和首次消费；过期、逐出、URL 不匹配或重放均不再产生季数提示。
+- Request 继续由服务端 MiKan 详情重建；仅有效 context 携带 parser season 进入共享 `attach_selected_candidate_season`，客户端 aliases、海报和展示字段不构成事实。无季数的普通直连兼容路径不携带 context，保持合法的第一季默认行为。
+- 验证：`uv run pytest src/apps/migu_orca_web/views_test.py src/shared/season_evidence_test.py src/ab_engine/controllers/subscription_payload_test.py -q`（208 passed）；`git diff --check` 通过。
+---

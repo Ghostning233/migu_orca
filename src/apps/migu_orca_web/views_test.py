@@ -128,9 +128,9 @@ def _clear_candidate_cache() -> None:
     from mikan_engine.controllers.mikan_candidate_cache import candidate_search_cache
 
     candidate_search_cache.clear()
-    from apps.migu_orca_web.views import _trusted_candidate_season_hints
+    from apps.migu_orca_web.views import candidate_selection_contexts
 
-    _trusted_candidate_season_hints.clear()
+    candidate_selection_contexts.clear()
 
 
 class _FakeMikanTransport:
@@ -1976,13 +1976,14 @@ def test_create_request_does_not_trust_client_candidate_aliases_for_season(
     assert "某番 S4" not in response.get_data(as_text=True)
 
 
-def test_create_request_requires_server_cached_confirmation_for_nonfirst_candidate(
+def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from apps.migu_orca_web.views import _trusted_candidate_season_hints
+    from apps.migu_orca_web.views import candidate_selection_contexts
 
     mikan_url = "https://mikan.example/Home/Bangumi/45"
-    _trusted_candidate_season_hints[mikan_url] = 4
+    rejected_context = candidate_selection_contexts.issue(mikan_url, 4)
+    context = candidate_selection_contexts.issue(mikan_url, 4)
 
     def fake_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
         return {
@@ -2000,16 +2001,38 @@ def test_create_request_requires_server_cached_confirmation_for_nonfirst_candida
     monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fake_generate_request)
     payload = {"title": "公开标题", "source": "mikan", "mikan_bangumi": mikan_url, "save_request": False}
 
-    rejected = _client().post("/api/v1/requests", json=payload)
-    confirmed = _client().post("/api/v1/requests", json={**payload, "season_confirmation": 4})
+    rejected = _client().post(
+        "/api/v1/requests", json={**payload, "candidate_context": rejected_context}
+    )
+    confirmed = _client().post(
+        "/api/v1/requests",
+        json={**payload, "season_confirmation": 4, "candidate_context": context},
+    )
 
-    assert _trusted_candidate_season_hints[mikan_url] == 4
     assert rejected.status_code == 200
     assert rejected.get_json()["ok"] is False
     assert "season_confirmation_required" in str(rejected.get_json())
     matched = confirmed.get_json()["result"]["request"]["source_info"]["matched_bangumi"]
     assert matched["season"] == 4
     assert matched["season_evidence"] == "user_confirmed"
+    assert len(candidate_selection_contexts) == 0
+
+
+def test_candidate_context_is_bound_to_url_expired_and_capacity_limited() -> None:
+    from apps.migu_orca_web.views import CandidateSelectionContextStore
+
+    now = [0.0]
+    contexts = CandidateSelectionContextStore(ttl_seconds=10, max_entries=2, now=lambda: now[0])
+    first = contexts.issue("https://mikan.example/Home/Bangumi/1", 2)
+    second = contexts.issue("https://mikan.example/Home/Bangumi/2", 3)
+    third = contexts.issue("https://mikan.example/Home/Bangumi/3", 4)
+
+    assert len(contexts) == 2
+    assert contexts.consume(first, "https://mikan.example/Home/Bangumi/1") == (False, None)
+    assert contexts.consume(second, "https://mikan.example/Home/Bangumi/other") == (False, None)
+    now[0] = 11.0
+    assert contexts.consume(third, "https://mikan.example/Home/Bangumi/3") == (False, None)
+    assert len(contexts) == 0
 
 
 def test_create_request_rejects_invalid_mikan_direct_entry(

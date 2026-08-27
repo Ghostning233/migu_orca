@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from secrets import token_urlsafe
+from time import monotonic
 from typing import Any, Callable, Literal
 
 from flask import Blueprint, Response, redirect, render_template, url_for
@@ -118,10 +122,56 @@ from storage_engine.controllers.storage_config import StorageConfig, load_storag
 
 api_blueprint = Blueprint("migu_orca_web_api", __name__)
 poster_service = MikanPosterService()
-# Ephemeral server-owned evidence keyed by a sanitized MiKan URL. It is built
-# only while serializing a server search response and is never persisted or
-# accepted back from browser display fields.
-_trusted_candidate_season_hints: dict[str, int] = {}
+
+
+@dataclass(frozen=True)
+class _CandidateSelectionContext:
+    mikan_url: str
+    season: int | None
+    created_at: float
+
+
+class CandidateSelectionContextStore:
+    """Bounded, expiring, one-time capability for a reviewed candidate choice."""
+
+    def __init__(self, *, ttl_seconds: float = 300.0, max_entries: int = 128, now: Callable[[], float] | None = None) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._max_entries = max_entries
+        self._now = now or monotonic
+        self._entries: OrderedDict[str, _CandidateSelectionContext] = OrderedDict()
+
+    def issue(self, mikan_url: str, season: int | None) -> str:
+        self._purge()
+        while len(self._entries) >= self._max_entries:
+            self._entries.popitem(last=False)
+        token = token_urlsafe(24)
+        self._entries[token] = _CandidateSelectionContext(mikan_url, season, self._now())
+        return token
+
+    def consume(self, token: str | None, mikan_url: str) -> tuple[bool, int | None]:
+        self._purge()
+        if not token:
+            return False, None
+        context = self._entries.pop(token, None)
+        if context is None or context.mikan_url != mikan_url:
+            return False, None
+        return True, context.season
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+    def __len__(self) -> int:
+        self._purge()
+        return len(self._entries)
+
+    def _purge(self) -> None:
+        threshold = self._now() - self._ttl_seconds
+        for token, context in list(self._entries.items()):
+            if context.created_at <= threshold:
+                del self._entries[token]
+
+
+candidate_selection_contexts = CandidateSelectionContextStore()
 web_blueprint = Blueprint(
     "migu_orca_web",
     __name__,
@@ -326,6 +376,7 @@ class RequestCreatePayload(BaseModel):
     storage_dir: str | None = None
     save_request: bool = False
     season_confirmation: int | None = None
+    candidate_context: str | None = None
 
     @field_validator("title")
     @classmethod
@@ -348,10 +399,10 @@ class RequestCreatePayload(BaseModel):
     def validate_mikan_bangumi(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        direct_entry = value.strip()
-        if not direct_entry:
+        bangumi = value.strip()
+        if not bangumi:
             raise ValueError("mikan_bangumi cannot be empty")
-        return direct_entry
+        return bangumi
 
     @field_validator("season_confirmation")
     @classmethod
@@ -361,6 +412,16 @@ class RequestCreatePayload(BaseModel):
         if isinstance(value, bool) or not 1 <= value <= 99:
             raise ValueError("season_confirmation must be between 1 and 99")
         return value
+
+    @field_validator("candidate_context")
+    @classmethod
+    def validate_candidate_context(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        token = value.strip()
+        if not token or len(token) > 128 or not token.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("candidate_context is invalid")
+        return token
 
 class RequestActionPayload(BaseModel):
     """Base payload for confirm/cancel/modify operations. `request_id` comes from URL path."""
@@ -670,8 +731,13 @@ def _with_candidate_season_evidence(
     )
     result["season_evidence"] = evidence
     mikan_url = result.get("mikan_url")
-    if isinstance(mikan_url, str) and evidence.get("status") == "NEEDS_CONFIRMATION":
-        _trusted_candidate_season_hints[mikan_url] = parse_result.season.number
+    if isinstance(mikan_url, str) and evidence["status"] == "NEEDS_CONFIRMATION":
+        # This opaque, bounded, one-time context is the only path by which a
+        # parser hint can reach a selected request. Browser-display fields are
+        # never trusted as season evidence.
+        result["candidate_context"] = candidate_selection_contexts.issue(
+            mikan_url, parse_result.season.number
+        )
     return result
 
 
@@ -1278,7 +1344,16 @@ class RequestCreateView(PostView):
         if isinstance(matched, dict):
             mikan_url = matched.get("mikan_url")
             if isinstance(mikan_url, str):
-                trusted_hint = _trusted_candidate_season_hints.get(mikan_url)
+                context_found, trusted_hint = candidate_selection_contexts.consume(
+                    payload.candidate_context, mikan_url
+                )
+                if payload.candidate_context is not None and not context_found:
+                    raise Stage1Error(
+                        "candidate_context_invalid",
+                        "候选上下文已失效，请重新搜索并选择合集",
+                        "selected_candidate_context",
+                        {"field": "candidate_context"},
+                    )
         result["request"] = attach_selected_candidate_season(
             result["request"], trusted_hint, payload.season_confirmation
         )
