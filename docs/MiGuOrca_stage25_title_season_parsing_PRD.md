@@ -7,7 +7,7 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 25 PRD：正式番名与季数解析 |
 | 文档类型 | Stage PRD |
-| 当前状态 | 已规划，待开发 |
+| 当前状态 | 已完成 |
 | 创建日期 | 2026-08-26 |
 | Backlog | BL-018 |
 | 依赖阶段 | Stage 19、Stage 21、Stage 22、Stage 23、Stage 24 |

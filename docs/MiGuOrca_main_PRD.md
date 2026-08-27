@@ -83,7 +83,7 @@ Stage 23 已完成。MiKan 封面现经服务端安全同源缓存异步加载�
 
 Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 token Cookie、`/api/v1/status` 与 `/api/v1/rss/subscribe` 的 `{data, rss}` 契约，成功以 `status=true` 判断且订阅 ID 可为空；Settings 提供 request-scoped 只读连接测试，单个/批量队列复用同一 adapter/payload/result seam。API Token/Bearer 模式维持兼容但无已证明写契约时 fail closed。执行 PRD 见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。其他未开发事项只按 backlog 优先级排序，不预绑定 Stage 编号。
 
-Stage 25 已规划、待开发。单个与批量 MiKan 搜索将共享确定性正式番名/季数解析、结构化 season、有界 query plan 和可审核来源展示；parser 只生成搜索提示，真实合集仍由用户显式选择，只有选中候选公开证据或用户确认能证明的季数才能进入 Request、M07 与 M10。执行 PRD 见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
+Stage 25 已完成。单个与批量 MiKan 搜索共享确定性正式番名/季数解析、结构化 season、有界 query plan 和可审核来源展示；parser 只生成搜索提示，真实合集仍由用户显式选择，只有选中候选公开证据或用户确认能证明的季数才能进入 Request、M07 与 M10。执行 PRD 见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
 ## 4. 第一阶段范围
 
@@ -159,10 +159,10 @@ Stage 25 已规划、待开发。单个与批量 MiKan 搜索将共享确定性�
 
 | 模块编号 | 模块名称 | 当前状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
-| M00 | 入口与流程编排模块 | Stage 18～23 已实现真实候选、批量草案/队列、偏好/搜索增强、候选选择与统一草案详情链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
+| M00 | 入口与流程编排模块 | Stage 18～25 已实现真实候选、批量草案/队列、偏好/搜索增强、候选选择、结构化季数与统一草案详情链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
 | M01 | 用户输入与 Request 管理模块 | Stage 15 已实现 CLI/Web 确认、取消、受限修改；`ACCEPTED` Request 支持受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
-| M02 | 番剧搜索与匹配模块 | Stage 1 已确认；Stage 22 已明确标题解析/匹配成功不等于真实 MiKan 候选搜索成功 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
-| M03 | MiKan 数据源模块 | Stage 17～23 已实现详情、候选、缓存、搜索增强、同源安全封面、提前停止和可选总集数契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
+| M02 | 番剧搜索与匹配模块 | Stage 25 已实现确定性标题/季数解析与有界查询计划；解析成功不等于真实 MiKan 候选搜索成功 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
+| M03 | MiKan 数据源模块 | Stage 17～25 已实现详情、候选、缓存、共享查询计划、同源安全封面、提前停止和可选总集数契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
 | M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
 | M05 | 字幕组评估模块 | Stage 1 已确认；Stage 21 已为 `select_subtitle_group` 增加排除列表过滤（先排除、再优先、最后 fallback） | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
 | M06 | 种子筛选规则模块 | Stage 15 已实现默认字面匹配、大小写不敏感与可选 `use_regex` / `case_sensitive` | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
@@ -172,7 +172,7 @@ Stage 25 已规划、待开发。单个与批量 MiKan 搜索将共享确定性�
 | M10 | Auto Bangumi 集成模块 | Stage 24 已按 3.1.18 契约实现账号密码/Cookie、真实 subscribe payload/response，并保留 fail-closed Bearer 兼容模式 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 已实现 path-safe 封面缓存、滑动 TTL 与机会式清理 | P2 | docs/modules/M11-storage-state-PRD.md |
 | M12 | 日志与错误处理模块 | Stage 24 已覆盖 AB 认证、连接、协议兼容与规则转换的脱敏分类 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 24 已完成 AB 界面；Stage 25 已规划解析来源、季数和实际搜索词展示 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 25 已完成 AB 界面、解析来源、结构化季数和实际搜索词展示 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 24 已定义 request-scoped AB 双认证配置 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
@@ -231,9 +231,9 @@ M00 CLI 与流程编排
 | 第二十二阶段 | Web UI 搜索工作台重构与真实候选闭环（已完成） | M13、M00、M02、M03、测试基础设施 |
 | 第二十三阶段 | 媒体缓存、MiKan 读取优化与批量审核体验（已完成） | M03、M11、M12、M13、测试基础设施 |
 | 第二十四阶段 | AutoBangumi 真实认证与订阅兼容闭环（已完成） | M10、M12、M13、M14、测试基础设施 |
-| 第二十五阶段 | 正式番名与季数解析（已规划，待开发） | M00、M02、M03、M07、M10、M12、M13、测试基础设施 |
+| 第二十五阶段 | 正式番名与季数解析（已完成） | M00、M02、M03、M07、M10、M12、M13、测试基础设施 |
 
-Stage 25 已从 backlog BL-018 选定并单独规划；Stage 25 之后不预留阶段编号。
+Stage 25 已完成 BL-018；Stage 25 之后不预留阶段编号。
 
 ## 10. 主 PRD 已确认事项
 

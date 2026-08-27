@@ -134,7 +134,7 @@ Stage 22 已明确 M02 的标题解析/本地匹配与 M03 真实 MiKan 候选�
 4. 低置信度、歧义或无候选必须保留人工审核语义，不得自动进入订阅草案或接受状态。
 5. 单个与批量入口复用同一边界，批量模式不能放宽候选真实性要求。
 
-## 13. Stage 25 正式番名与季数解析规划
+## 13. Stage 25 正式番名与季数解析（已完成）
 
 1. M02/批量 parser 输出结构化 normalized/base title、season、query plan、confidence、source 和 review hints；现有字符串字段如保留只能由该结构派生。
 2. 季数原语支持第一至第九十九季的常见 S/Season/第N季/期表达；无标记为 null，冲突、越界、Part/分割放送不得猜测。

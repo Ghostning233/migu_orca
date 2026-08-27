@@ -179,3 +179,11 @@ Thread: https://codex.openai.com/threads/unknown
 - 真实 Chromium fixture 回归覆盖多候选：选择一个正常候选完成成功请求和失败请求后，未确认与冲突候选仍不可选；未使用真实外部系统。
 - 验证：`node --check src/apps/migu_orca_web/static/app.js`；`uv run pytest tests/browser/test_mikan_candidates.py -q`（36 passed，真实 Chromium）。
 ---
+
+## 2026-08-27 16:40:00 CST - US-188
+Thread: https://codex.openai.com/threads/unknown
+- 二次复审收尾：Stage 25 PRD、主 PRD阶段叙述/路线图与 M00/M02/M03/M13 均改为“已完成”，消除与 README、future stages、backlog 和已完成 Ralph 状态相矛盾的“已规划、待开发”表述。
+- 归档将由活动 `scripts/ralph/prd.json` 与 `progress.txt` 原样重建至 `scripts/ralph/archive/2026-08-27-stage25-title-season-parsing/`，确保最终全 true 状态字节一致；不创建下一 Stage PRD。
+- 完整验证：`uv run python -m compileall -q src tests` 通过；`node --check src/apps/migu_orca_web/static/app.js` 通过；`uv run pytest -q -m "not browser"`（917 passed，263 deselected）；`uv run pytest tests/browser/ -q`（263 passed，真实 Chromium）；`uv run pytest -q`（1180 passed）。
+- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 写操作；AutoBangumi 海报最终视觉效果仍须由用户在真实实例显式创建时人工复验。
+---
