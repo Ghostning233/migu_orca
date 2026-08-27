@@ -134,3 +134,10 @@ Thread: https://codex.openai.com/threads/unknown
 - correction 保留优先级，同时限制每个修正字段的季数展开以留出 rule 与 raw fallback；`attempted_queries` 直接记录同一 plan 的 transport 调用顺序。
 - 验证：`uv run pytest src/batch_engine/controllers/anime_title_parser_test.py src/batch_engine/controllers/candidate_search_orchestrator_test.py -q`（22 passed）。
 ---
+
+## 2026-08-27 15:20:00 CST - US-186
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：POST Request 不再接受或写入客户端 `candidate_aliases`；Request 始终通过服务端 MiKan 详情重建 title、URL 与可选海报。候选搜索产生的非第一季确认提示只在服务端短期公共候选记录中延续，未确认时拒绝生成草案。
+- AutoBangumi 3.1.18 legacy mapper 新增可选 `data.poster_link`：只接受服务端解析、规范 HTTP(S)、无 userinfo/控制字符的公开原始海报 URL；本地 opaque poster 路由、非法 URL 与客户端伪造字段均被忽略。
+- 验证：`uv run pytest -q -m "not browser"`（916 passed，262 deselected）；`uv run pytest src/shared/season_evidence_test.py src/ab_engine/controllers/subscription_payload_test.py src/apps/migu_orca_web/views_test.py -q`（207 passed）。
+---

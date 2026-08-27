@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 import re
+from urllib.parse import urlparse
 from typing import Any, Literal
 
 from request_engine.controllers.request_controller import ACCEPTED
@@ -59,6 +60,7 @@ def build_legacy_31_subscription_payload(request: dict[str, Any]) -> dict[str, A
     bangumi = request.get("source_info", {}).get("matched_bangumi", {})
     season, season_raw = _legacy_31_season(bangumi, official_title, title_raw)
     optional_metadata = _legacy_31_optional_metadata(bangumi)
+    poster_link = _legacy_31_poster_link(bangumi)
     return {
         "data": {
             # These are the public fields AutoBangumi 3.1 uses to identify a
@@ -71,6 +73,7 @@ def build_legacy_31_subscription_payload(request: dict[str, Any]) -> dict[str, A
             "filter": _legacy_31_filter(payload["filter_rule"]),
             "rss_link": rss_url,
             "save_path": save_path,
+            "poster_link": poster_link,
             **({"season_raw": season_raw} if season_raw else {}),
             **optional_metadata,
         },
@@ -250,6 +253,26 @@ def _legacy_31_optional_metadata(bangumi: Any) -> dict[str, str]:
         for field in ("dpi", "source", "subtitle")
         if isinstance((value := bangumi.get(field)), str) and value.strip()
     }
+
+
+def _legacy_31_poster_link(bangumi: Any) -> str | None:
+    """Return only a server-trusted public source poster for AB 3.1.18."""
+    if not isinstance(bangumi, dict):
+        return None
+    value = bangumi.get("poster_url")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidate = value.strip()
+    parsed = urlparse(candidate)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or any(ord(char) < 32 or ord(char) == 127 for char in candidate)
+    ):
+        return None
+    return candidate
 
 
 def _request_title(request: dict[str, Any]) -> str | None:

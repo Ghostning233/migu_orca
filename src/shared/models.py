@@ -31,6 +31,9 @@ class MatchedBangumi:
     aliases: list[str]
     mikan_url: str
     match_score: float
+    # Server-parsed public MiKan source URL only. Browser-facing opaque poster
+    # routes and client supplied values never enter this field.
+    poster_url: str | None = None
 
 
 @dataclass(frozen=True)

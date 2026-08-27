@@ -34,6 +34,7 @@ def _parse_result(
         confidence=0.9,
         needs_user_review=False,
         source="fake",
+        season=int(season_hint[1:]) if season_hint and season_hint.startswith("S") else None,
     )
 
 
@@ -274,6 +275,7 @@ def _review_parse_result(
         confidence=confidence,
         needs_user_review=needs_user_review,
         source="fake",
+        season=1,
     )
 
 

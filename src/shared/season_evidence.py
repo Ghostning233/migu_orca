@@ -41,13 +41,13 @@ def candidate_season_evidence(
 
 
 def attach_selected_candidate_season(
-    request: dict[str, Any], confirmed_season: int | None
+    request: dict[str, Any], parser_season: int | None, confirmed_season: int | None
 ) -> dict[str, Any]:
     """Attach only candidate-proven or explicitly-confirmed season metadata.
 
-    ``request`` has already been built from a real MiKan detail page, so its
-    title is the selected candidate's public title.  This helper never sees or
-    copies parser canonical titles into the Request.
+    ``parser_season`` is read only from a server-created candidate-search
+    record. ``request`` itself has already been rebuilt from a real MiKan detail
+    page, so browser aliases and other display fields cannot become evidence.
     """
     source_info = request.get("source_info")
     matched = source_info.get("matched_bangumi") if isinstance(source_info, dict) else None
@@ -58,7 +58,7 @@ def attach_selected_candidate_season(
     evidence = candidate_season_evidence(
         title if isinstance(title, str) else "",
         aliases if isinstance(aliases, list) else (),
-        confirmed_season,
+        parser_season,
     )
     status = evidence["status"]
     if status == "CONFLICT":
@@ -78,11 +78,18 @@ def attach_selected_candidate_season(
                 "season_evidence": "candidate_public_title",
             }
         )
-    elif status == "NEEDS_CONFIRMATION" and confirmed_season is not None:
+    elif status == "NEEDS_CONFIRMATION":
+        if confirmed_season != parser_season:
+            raise Stage1Error(
+                "season_confirmation_required",
+                "该候选缺少可证明季数，请明确确认后再生成订阅草案",
+                "selected_candidate_season",
+                {"field": "season_confirmation"},
+            )
         matched.update(
             {
-                "season": confirmed_season,
-                "season_raw": f"第{confirmed_season}季",
+                "season": parser_season,
+                "season_raw": f"第{parser_season}季",
                 "season_evidence": "user_confirmed",
             }
         )

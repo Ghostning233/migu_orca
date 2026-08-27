@@ -117,6 +117,7 @@ def generate_request(
                 aliases=[],
                 mikan_url=detail.mikan_url,
                 match_score=1.0,
+                poster_url=detail.poster_url,
             )
             rss_sources = real_mikan_client.list_rss_sources_from_detail(detail)
         else:

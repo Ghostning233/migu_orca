@@ -128,6 +128,9 @@ def _clear_candidate_cache() -> None:
     from mikan_engine.controllers.mikan_candidate_cache import candidate_search_cache
 
     candidate_search_cache.clear()
+    from apps.migu_orca_web.views import _trusted_candidate_season_hints
+
+    _trusted_candidate_season_hints.clear()
 
 
 class _FakeMikanTransport:
@@ -1927,6 +1930,88 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
     assert "mikan_bangumi" not in saved_path.read_text(encoding="utf-8")
 
 
+def test_create_request_does_not_trust_client_candidate_aliases_for_season(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "success": True,
+            "request": {
+                "request_id": "preview-id",
+                "status": "PENDING_CONFIRM",
+                "input": {"raw_title": "公开标题"},
+                "source_info": {
+                    "matched_bangumi": {
+                        "title": "公开标题",
+                        "aliases": [],
+                        "mikan_url": "https://mikan.example/Home/Bangumi/44",
+                        "match_score": 1.0,
+                        "poster_url": None,
+                    },
+                    "rss_sources": [],
+                },
+                "confirmable_config": {},
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fake_generate_request)
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "公开标题",
+            "source": "mikan",
+            "mikan_bangumi": "https://mikan.example/Home/Bangumi/44",
+            "candidate_aliases": ["某番 S4"],
+            "poster_url": "/api/v1/mikan/posters/forged",
+            "save_request": False,
+        },
+    )
+
+    matched = response.get_json()["result"]["request"]["source_info"]["matched_bangumi"]
+    assert response.status_code == 200
+    assert matched["aliases"] == []
+    assert matched["poster_url"] is None
+    assert "season" not in matched
+    assert "某番 S4" not in response.get_data(as_text=True)
+
+
+def test_create_request_requires_server_cached_confirmation_for_nonfirst_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps.migu_orca_web.views import _trusted_candidate_season_hints
+
+    mikan_url = "https://mikan.example/Home/Bangumi/45"
+    _trusted_candidate_season_hints[mikan_url] = 4
+
+    def fake_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "success": True,
+            "request": {
+                "request_id": "preview-id",
+                "status": "PENDING_CONFIRM",
+                "input": {"raw_title": "公开标题"},
+                "source_info": {"matched_bangumi": {"title": "公开标题", "aliases": [], "mikan_url": mikan_url, "match_score": 1.0}, "rss_sources": []},
+                "confirmable_config": {},
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fake_generate_request)
+    payload = {"title": "公开标题", "source": "mikan", "mikan_bangumi": mikan_url, "save_request": False}
+
+    rejected = _client().post("/api/v1/requests", json=payload)
+    confirmed = _client().post("/api/v1/requests", json={**payload, "season_confirmation": 4})
+
+    assert _trusted_candidate_season_hints[mikan_url] == 4
+    assert rejected.status_code == 200
+    assert rejected.get_json()["ok"] is False
+    assert "season_confirmation_required" in str(rejected.get_json())
+    matched = confirmed.get_json()["result"]["request"]["source_info"]["matched_bangumi"]
+    assert matched["season"] == 4
+    assert matched["season_evidence"] == "user_confirmed"
+
+
 def test_create_request_rejects_invalid_mikan_direct_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2133,7 +2218,8 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
         "normalized_title": "芙莉莲",
         "base_title": "芙莉莲",
         "canonical_title_candidates": ["芙莉莲"],
-        "season": None,
+        "season": {"number": None, "raw": None, "normalized": None, "source": "none"},
+        "season_number": None,
         "season_hint": None,
         "query_plan": [
             {"query": "芙莉莲", "source": "rule", "priority": 1},
@@ -2691,7 +2777,8 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         BATCH_ITEM_STATUS_EMPTY,
     ]
     assert items[0]["canonical_title_candidates"] == ["关于我转生变成史莱姆这档事"]
-    assert items[0]["parse_result"]["season"] == 4
+    assert items[0]["parse_result"]["season"]["number"] == 4
+    assert items[0]["parse_result"]["season_number"] == 4
     assert items[0]["parse_result"]["source"] == "alias"
     assert items[0]["attempted_queries"] == [
         {"query": entry["query"], "source": entry["source"], "priority": entry["priority"]}

@@ -102,8 +102,8 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "parser season 是搜索提示，不是已接受 Request 的事实；候选冲突不得自动覆盖。2026-08-27 静态复审重新打开：客户端 aliases 不能成为可信证据；未确认非第一季须 fail closed；可信 MiKan 原始 poster_url 须可选传播至 AutoBangumi 3.1.18 poster_link。"
+      "passes": true,
+      "notes": "parser season 是搜索提示，不是已接受 Request 的事实；候选冲突不得自动覆盖。2026-08-27 静态复审重新打开：客户端 aliases 不能成为可信证据；未确认非第一季须 fail closed；可信 MiKan 原始 poster_url 须可选传播至 AutoBangumi 3.1.18 poster_link。复审修复完成：候选提示仅由服务端缓存延续、详情重新读取为唯一事实来源，海报仅传播校验后的公开原始 URL。"
     },
     {
       "id": "US-187",

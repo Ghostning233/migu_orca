@@ -118,6 +118,10 @@ from storage_engine.controllers.storage_config import StorageConfig, load_storag
 
 api_blueprint = Blueprint("migu_orca_web_api", __name__)
 poster_service = MikanPosterService()
+# Ephemeral server-owned evidence keyed by a sanitized MiKan URL. It is built
+# only while serializing a server search response and is never persisted or
+# accepted back from browser display fields.
+_trusted_candidate_season_hints: dict[str, int] = {}
 web_blueprint = Blueprint(
     "migu_orca_web",
     __name__,
@@ -322,7 +326,6 @@ class RequestCreatePayload(BaseModel):
     storage_dir: str | None = None
     save_request: bool = False
     season_confirmation: int | None = None
-    candidate_aliases: list[str] = Field(default_factory=list)
 
     @field_validator("title")
     @classmethod
@@ -358,17 +361,6 @@ class RequestCreatePayload(BaseModel):
         if isinstance(value, bool) or not 1 <= value <= 99:
             raise ValueError("season_confirmation must be between 1 and 99")
         return value
-
-    @field_validator("candidate_aliases")
-    @classmethod
-    def validate_candidate_aliases(cls, value: list[str]) -> list[str]:
-        if len(value) > 20:
-            raise ValueError("candidate_aliases cannot exceed 20 entries")
-        aliases = [item.strip() for item in value if isinstance(item, str) and item.strip()]
-        if len(aliases) != len(value) or any(len(item) > 200 for item in aliases):
-            raise ValueError("candidate_aliases must contain short non-empty strings")
-        return aliases
-
 
 class RequestActionPayload(BaseModel):
     """Base payload for confirm/cancel/modify operations. `request_id` comes from URL path."""
@@ -671,11 +663,15 @@ def _with_candidate_season_evidence(
         return result
     title = result.get("title")
     aliases = result.get("aliases")
-    result["season_evidence"] = candidate_season_evidence(
+    evidence = candidate_season_evidence(
         title if isinstance(title, str) else "",
         aliases if isinstance(aliases, list) else (),
         parse_result.season.number,
     )
+    result["season_evidence"] = evidence
+    mikan_url = result.get("mikan_url")
+    if isinstance(mikan_url, str) and evidence.get("status") == "NEEDS_CONFIRMATION":
+        _trusted_candidate_season_hints[mikan_url] = parse_result.season.number
     return result
 
 
@@ -1278,10 +1274,13 @@ class RequestCreateView(PostView):
         if not result["success"]:
             _raise_result_error(result)
         matched = result["request"].get("source_info", {}).get("matched_bangumi")
+        trusted_hint = None
         if isinstance(matched, dict):
-            matched["aliases"] = list(payload.candidate_aliases)
+            mikan_url = matched.get("mikan_url")
+            if isinstance(mikan_url, str):
+                trusted_hint = _trusted_candidate_season_hints.get(mikan_url)
         result["request"] = attach_selected_candidate_season(
-            result["request"], payload.season_confirmation
+            result["request"], trusted_hint, payload.season_confirmation
         )
 
         result = apply_request_save_action(
