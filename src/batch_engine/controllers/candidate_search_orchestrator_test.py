@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from batch_engine.controllers.anime_title_parser import parse_anime_title
+from batch_engine.controllers.anime_title_parser import RuleAnimeTitleParsingProvider, parse_anime_title
 from batch_engine.controllers.candidate_search_orchestrator import search_parsed_candidates
 from shared.errors import Stage1Error
+from shared.models import TitleCorrection
 
 
 def test_stops_after_first_priority_with_candidates_and_stably_deduplicates() -> None:
@@ -52,3 +53,31 @@ def test_all_failed_and_all_empty_are_distinct() -> None:
     assert failed.error is not None
     assert empty.status == "EMPTY"
     assert empty.error is None
+
+
+def test_correction_season_hint_display_plan_equals_actual_transport_order() -> None:
+    parsed = parse_anime_title(
+        "frieren",
+        RuleAnimeTitleParsingProvider(
+            corrections=[
+                TitleCorrection(
+                    raw_title="frieren",
+                    canonical_title="Frieren: Beyond Journey's End",
+                    query_correction="Sousou no Frieren",
+                    season_hint="S2",
+                )
+            ]
+        ),
+    )
+    calls: list[str] = []
+
+    result = search_parsed_candidates(
+        parsed,
+        lambda query: calls.append(query) or [],
+        lambda candidate: candidate,
+    )
+
+    assert result.status == "EMPTY"
+    assert calls == list(parsed.search_queries)
+    assert result.attempted_queries == tuple(calls)
+    assert "Sousou no Frieren 第二季" in calls

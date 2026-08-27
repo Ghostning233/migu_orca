@@ -50,8 +50,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "真实 LLM provider 不在本 Stage；用户修正与别名只生成候选搜索词，不自动定案。2026-08-27 静态复审重新打开：已保存 correction 的 season_hint 必须进入同一实际 query plan，展示与 transport 调用顺序一致。"
+      "passes": true,
+      "notes": "真实 LLM provider 不在本 Stage；用户修正与别名只生成候选搜索词，不自动定案。2026-08-27 静态复审重新打开：已保存 correction 的 season_hint 必须进入同一实际 query plan，展示与 transport 调用顺序一致；复审修复完成，修正 seasonal query 与 canonical/query correction 均由唯一 plan 驱动。"
     },
     {
       "id": "US-184",

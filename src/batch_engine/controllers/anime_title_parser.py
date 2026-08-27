@@ -51,7 +51,16 @@ class RuleAnimeTitleParsingProvider:
         canonical, aliases = known or (parsed.base_title, ())
         plan: list[tuple[str, AnimeTitleParseSource]] = []
         if correction is not None:
-            plan.append((correction.query_correction or correction.canonical_title, AnimeTitleParseSource.CORRECTION))
+            # A stored hint is an explicit search preference, not a confirmed
+            # Request fact.  It must nevertheless be part of this one plan so
+            # both displayed and attempted correction variants are identical.
+            correction_season = _season_hint_number(correction.season_hint) or parsed.season
+            for correction_title in (correction.query_correction, correction.canonical_title):
+                if correction_title:
+                    plan.extend(
+                        (query, AnimeTitleParseSource.CORRECTION)
+                        for query in _queries_with_optional_season(correction_title, correction_season)
+                    )
             canonical = correction.canonical_title
         for alias in aliases:
             plan.append((_with_season(alias, parsed.season), AnimeTitleParseSource.ALIAS))
@@ -141,6 +150,17 @@ def _normalize_result(raw_title: str, result: AnimeTitleParseResult) -> AnimeTit
 
 def _canonical_queries(title: str, season: int | None) -> list[str]:
     return [_with_season(title, form) for form in season_variants(season)] if season else [title]
+
+
+def _queries_with_optional_season(title: str, season: int | None) -> list[str]:
+    # Corrections must not consume the bounded plan and starve alias/rule/raw
+    # fallback. A saved season hint therefore yields one stable normalized
+    # spelling per correction field; rule entries retain the complete set.
+    return [_with_season(title, season_variants(season)[-1])] if season else [title]
+
+
+def _season_hint_number(value: str | None) -> int | None:
+    return parse_title_season(value or "").season
 
 
 def _season_contract(parsed: object) -> AnimeTitleSeason:

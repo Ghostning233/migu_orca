@@ -127,3 +127,10 @@ Thread: https://codex.openai.com/threads/unknown
 - `S2 第百季`、`S2 第100季`、`S2 S`、`S2 Part 2` 与“第二季 分割放送”均不生成可信季数，冲突 marker 同样 fail closed。
 - 验证：`uv run pytest src/shared/title_season_test.py src/batch_engine/controllers/anime_title_parser_test.py -q`（37 passed）。
 ---
+
+## 2026-08-27 14:50:00 CST - US-183
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：已保存 correction 的 canonical title、query_correction 和可证明 season_hint 现在均加入 `RuleAnimeTitleParsingProvider` 的唯一有界 query plan；不再由旧 search enhancer 单独展示或搜索。
+- correction 保留优先级，同时限制每个修正字段的季数展开以留出 rule 与 raw fallback；`attempted_queries` 直接记录同一 plan 的 transport 调用顺序。
+- 验证：`uv run pytest src/batch_engine/controllers/anime_title_parser_test.py src/batch_engine/controllers/candidate_search_orchestrator_test.py -q`（22 passed）。
+---

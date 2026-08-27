@@ -100,7 +100,7 @@ def test_rule_provider_orders_correction_alias_rule_and_fallback_queries() -> No
     )
 
     assert result.search_queries == (
-        "Tensei Slime",
+        "Tensei Slime 第四季",
         "转生史莱姆 第四季",
         "转生史莱姆 第4季",
         "转生史莱姆 S4",
@@ -109,13 +109,44 @@ def test_rule_provider_orders_correction_alias_rule_and_fallback_queries() -> No
     )
     assert [entry.source for entry in result.query_plan] == [
         AnimeTitleParseSource.CORRECTION,
-        AnimeTitleParseSource.ALIAS,
+        AnimeTitleParseSource.CORRECTION,
         AnimeTitleParseSource.RULE,
         AnimeTitleParseSource.RULE,
         AnimeTitleParseSource.RULE,
         AnimeTitleParseSource.FALLBACK,
     ]
     assert result.needs_user_review is False
+
+
+@pytest.mark.parametrize(
+    ("raw_title", "canonical", "query_correction", "expected_prefix"),
+    [
+        ("芙莉莲", "葬送的芙莉莲", "葬送的芙莉莲", "葬送的芙莉莲 第二季"),
+        ("frieren", "Frieren: Beyond Journey's End", "Sousou no Frieren", "Sousou no Frieren 第二季"),
+    ],
+)
+def test_correction_season_hint_is_in_the_actual_shared_query_plan(
+    raw_title: str, canonical: str, query_correction: str, expected_prefix: str
+) -> None:
+    from shared.models import TitleCorrection
+
+    result = parse_anime_title(
+        raw_title,
+        RuleAnimeTitleParsingProvider(
+            corrections=[
+                TitleCorrection(
+                    raw_title=raw_title,
+                    canonical_title=canonical,
+                    query_correction=query_correction,
+                    season_hint="S2",
+                )
+            ]
+        ),
+    )
+
+    assert result.query_plan[0].source is AnimeTitleParseSource.CORRECTION
+    assert expected_prefix in result.search_queries
+    assert result.search_queries == tuple(entry.query for entry in result.query_plan)
 
 
 def test_rule_provider_keeps_unknown_and_overlong_query_plans_reviewable_and_bounded() -> None:
