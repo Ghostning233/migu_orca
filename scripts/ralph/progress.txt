@@ -105,3 +105,11 @@ Thread: https://codex.openai.com/threads/unknown
   - `season_evidence` 仅在 parser 提供季数提示时加入候选 API，以保持无季数客户端的既有候选字段稳定。
   - Browser validation used Playwright with mocked candidate search; full-suite processes must not be started concurrently because both include browser coverage.
 ---
+
+## 2026-08-27 14:20:00 CST - Stage 25 静态复审重新打开
+Thread: https://codex.openai.com/threads/unknown
+- 复审推翻此前的完成状态：US-181、US-182、US-183、US-186、US-187 与 US-188 已恢复为未完成，后续按一 story 一提交重新验收。
+- 历史中 US-187/US-188 记录曾被错误置于较早位置；保留全部原始记录，本条仅追加顺序更正与复审结论。
+- 复审范围包括结构化 season 公共契约、混合不支持标记、correction season_hint 的唯一查询计划、候选证据信任边界、未确认非第一季、可信海报传播、UI 确认状态和最终归档。
+- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 操作；外部系统后续继续只使用 fixture、fake transport 与 Playwright route。
+---
