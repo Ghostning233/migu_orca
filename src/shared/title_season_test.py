@@ -43,3 +43,28 @@ def test_parse_title_season_requires_review_for_conflicting_markers() -> None:
 
     assert result.season is None
     assert result.review_hints == ("识别到冲突季数，请人工核对",)
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "番剧 S2 第百季",
+        "番剧 S2 第100季",
+        "番剧 S2 S",
+        "番剧 S2 Part 2",
+        "番剧 第二季 分割放送",
+    ],
+)
+def test_parse_title_season_does_not_hide_mixed_unprovable_markers(title: str) -> None:
+    result = parse_title_season(title)
+
+    assert result.season is None
+    assert result.season_hint is None
+    assert result.review_hints == ("季数标记无法确认，请人工核对",)
+
+
+def test_parse_title_season_deduplicates_consistent_markers() -> None:
+    result = parse_title_season("番剧 S2 第二季")
+
+    assert result.season == 2
+    assert result.review_hints == ()

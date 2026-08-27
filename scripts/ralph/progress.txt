@@ -120,3 +120,10 @@ Thread: https://codex.openai.com/threads/unknown
 - API 与 Web UI 共同消费结构化 season；无法证明时保持 number/raw/normalized 为空且 source 为固定 `none`，不保留相互矛盾的整数事实。
 - 验证：`uv run pytest src/shared/title_season_test.py src/batch_engine/controllers/anime_title_parser_test.py -q`（37 passed）。
 ---
+
+## 2026-08-27 14:38:00 CST - US-182
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：共享季数 parser 现在逐段识别未被合法 marker 覆盖的不完整标记，且 Part/分割放送即使与合法数字共存也会保留人工审核；一致的重复 marker 仍可去重。
+- `S2 第百季`、`S2 第100季`、`S2 S`、`S2 Part 2` 与“第二季 分割放送”均不生成可信季数，冲突 marker 同样 fail closed。
+- 验证：`uv run pytest src/shared/title_season_test.py src/batch_engine/controllers/anime_title_parser_test.py -q`（37 passed）。
+---

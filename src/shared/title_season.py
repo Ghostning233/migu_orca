@@ -41,13 +41,22 @@ def parse_title_season(title: str) -> TitleSeasonParse:
     numbers = {_marker_number(match) for match in matches}
     valid_numbers = {number for number in numbers if number is not None and 1 <= number <= 99}
     has_invalid = any(number is None or not 1 <= number <= 99 for number in numbers)
-    unsupported = bool(_UNSUPPORTED_MARKER_RE.search(normalized)) and not matches
-    part_only = bool(_PART_MARKER_RE.search(normalized)) and not matches
+    # A legal marker must never hide another incomplete/non-season marker in
+    # the same title.  Compare spans rather than using a title-wide ``matches``
+    # guard: ``S2 S`` still contains an unsupported trailing ``S``.
+    matched_spans = tuple(match.span() for match in matches)
+    unsupported = any(
+        not _span_is_covered(match.span(), matched_spans)
+        for match in _UNSUPPORTED_MARKER_RE.finditer(normalized)
+    )
+    # Part/分割放送 is not a season fact even when the title also contains a
+    # valid S-number.  Keep an explicit review boundary in every such case.
+    part_only = bool(_PART_MARKER_RE.search(normalized))
 
     hints: list[str] = []
     season: int | None = None
     marker: re.Match[str] | None = None
-    if len(valid_numbers) == 1 and not has_invalid:
+    if len(valid_numbers) == 1 and not has_invalid and not unsupported and not part_only:
         season = valid_numbers.pop()
         marker = matches[0]
     elif len(valid_numbers) > 1:
@@ -81,6 +90,10 @@ def _marker_number(match: re.Match[str]) -> int | None:
     if number is not None:
         return int(number)
     return _chinese_to_int(match.group("chinese_number") or "")
+
+
+def _span_is_covered(span: tuple[int, int], covered_spans: tuple[tuple[int, int], ...]) -> bool:
+    return any(start <= span[0] and span[1] <= end for start, end in covered_spans)
 
 
 def _normalize(value: str) -> str:
