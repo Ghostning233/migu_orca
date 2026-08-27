@@ -3384,6 +3384,10 @@
     item.appendChild(source);
 
     const seasonEvidence = candidate && candidate.season_evidence;
+    if (opts.chooseButton) {
+      opts.chooseButton._candidateSelection = candidate;
+      syncCandidateSelectButton(opts.chooseButton, candidate, false);
+    }
     if (seasonEvidence && seasonEvidence.status === "NEEDS_CONFIRMATION") {
       const season = Number(seasonEvidence.season);
       const label = document.createElement("label");
@@ -3394,16 +3398,14 @@
       const helpId = "candidate-season-confirmation-help-" + safeText(candidate.bangumi_id || "unknown");
       input.setAttribute("aria-describedby", helpId);
       if (opts.chooseButton) {
-        opts.chooseButton.disabled = true;
-        opts.chooseButton.setAttribute("aria-disabled", "true");
+        syncCandidateSelectButton(opts.chooseButton, candidate, false);
       }
       input.addEventListener("change", function () {
         candidate.season_confirmation = input.checked && season >= 1 && season <= 99
           ? season
           : null;
         if (opts.chooseButton) {
-          opts.chooseButton.disabled = !input.checked || batchAcceptInFlight;
-          opts.chooseButton.setAttribute("aria-disabled", String(opts.chooseButton.disabled));
+          syncCandidateSelectButton(opts.chooseButton, candidate, false);
         }
       });
       const help = document.createElement("span");
@@ -3420,7 +3422,7 @@
       warning.textContent = "候选合集季数与搜索识别结果冲突，请先人工核对。";
       item.appendChild(warning);
       if (opts.chooseButton) {
-        opts.chooseButton.disabled = true;
+        syncCandidateSelectButton(opts.chooseButton, candidate, false);
       }
     }
 
@@ -3531,8 +3533,28 @@
   function setCandidateSelectionInFlight(isInFlight) {
     const buttons = document.querySelectorAll(".candidate-select");
     for (const button of buttons) {
-      button.disabled = isInFlight;
+      syncCandidateSelectButton(button, button._candidateSelection, isInFlight);
     }
+  }
+
+  function candidateSelectionIsBlocked(candidate) {
+    const evidence = candidate && candidate.season_evidence;
+    if (!evidence) {
+      return false;
+    }
+    if (evidence.status === "CONFLICT") {
+      return true;
+    }
+    return evidence.status === "NEEDS_CONFIRMATION" && !Number.isInteger(candidate.season_confirmation);
+  }
+
+  function syncCandidateSelectButton(button, candidate, isInFlight) {
+    if (!button) {
+      return;
+    }
+    const disabled = Boolean(isInFlight) || candidateSelectionIsBlocked(candidate);
+    button.disabled = disabled;
+    button.setAttribute("aria-disabled", String(disabled));
   }
 
   async function generateRequestFromCandidate(candidate) {
@@ -3573,6 +3595,7 @@
         title: candidate.title || "未命名合集",
         source: "mikan",
         mikan_bangumi: candidate.mikan_url,
+        ...(typeof candidate.candidate_context === "string" ? {candidate_context: candidate.candidate_context} : {}),
         storage_dir: currentStorageDir() || null,
         save_request: false,
         ...(Number.isInteger(candidate.season_confirmation)
@@ -3662,8 +3685,8 @@
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
           title: query || "MiKan 直连合集",
-          source: "mikan",
-          mikan_bangumi: fallbackValue,
+        source: "mikan",
+        mikan_bangumi: fallbackValue,
           storage_dir: currentStorageDir() || null,
           save_request: false,
         }),

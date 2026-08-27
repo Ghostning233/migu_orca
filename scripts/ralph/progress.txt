@@ -172,3 +172,10 @@ Thread: https://codex.openai.com/threads/unknown
 - Request 继续由服务端 MiKan 详情重建；仅有效 context 携带 parser season 进入共享 `attach_selected_candidate_season`，客户端 aliases、海报和展示字段不构成事实。无季数的普通直连兼容路径不携带 context，保持合法的第一季默认行为。
 - 验证：`uv run pytest src/apps/migu_orca_web/views_test.py src/shared/season_evidence_test.py src/ab_engine/controllers/subscription_payload_test.py -q`（208 passed）；`git diff --check` 通过。
 ---
+
+## 2026-08-27 16:25:00 CST - US-187
+Thread: https://codex.openai.com/threads/unknown
+- 二次复审修复：候选选择按钮现保存关联候选，并经单一状态函数同时计算 in-flight、`NEEDS_CONFIRMATION` 未勾选及 `CONFLICT` 三种禁用原因；异步成功或失败收尾不再无条件解锁所有按钮，`disabled` 与 `aria-disabled` 始终同步。
+- 真实 Chromium fixture 回归覆盖多候选：选择一个正常候选完成成功请求和失败请求后，未确认与冲突候选仍不可选；未使用真实外部系统。
+- 验证：`node --check src/apps/migu_orca_web/static/app.js`；`uv run pytest tests/browser/test_mikan_candidates.py -q`（36 passed，真实 Chromium）。
+---

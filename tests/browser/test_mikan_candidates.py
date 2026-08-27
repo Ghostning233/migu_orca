@@ -988,6 +988,100 @@ class TestCandidateManualSelection:
         expect(page.locator(".candidate-card")).to_have_count(1)
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
 
+    def test_async_selection_restores_each_candidates_business_disabled_state(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """A completed request must not unlock unconfirmed/conflicting cards."""
+        candidates = [
+            _candidate(
+                bangumi_id="normal",
+                title="葬送的芙莉莲",
+                mikan_url="https://mikan.example/Home/Bangumi/1",
+            ),
+            {
+                **_candidate(
+                    bangumi_id="needs-review",
+                    title="待确认候选",
+                    mikan_url="https://mikan.example/Home/Bangumi/2",
+                ),
+                "candidate_context": "opaque-candidate-context",
+                "season_evidence": {
+                    "status": "NEEDS_CONFIRMATION",
+                    "season": 4,
+                    "requires_review": True,
+                },
+            },
+            {
+                **_candidate(
+                    bangumi_id="conflict",
+                    title="冲突候选",
+                    mikan_url="https://mikan.example/Home/Bangumi/3",
+                ),
+                "season_evidence": {
+                    "status": "CONFLICT",
+                    "season": None,
+                    "requires_review": True,
+                },
+            },
+        ]
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json("葬送的芙莉莲", candidates),
+            ),
+        )
+        attempts = 0
+        preview = _preview_request("葬送的芙莉莲", "req-state-recompute")
+
+        def _request_handler(route: Any, request: Any) -> None:
+            nonlocal attempts
+            if request.method != "POST":
+                route.continue_()
+                return
+            attempts += 1
+            if attempts == 1:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=_preview_result_json(preview),
+                )
+                return
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"ok": false, "error_type": "mikan_parse_failed", "error_message": "fixture failure"}',
+            )
+
+        page.route("**/api/v1/requests", _request_handler)
+        set_storage_preferences(page, storage_dir, save_request=False)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="葬送的芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+
+        cards = page.locator(".candidate-card")
+        normal = cards.nth(0).locator(".candidate-select")
+        unconfirmed = cards.nth(1).locator(".candidate-select")
+        conflict = cards.nth(2).locator(".candidate-select")
+        expect(normal).to_be_enabled()
+        expect(unconfirmed).to_be_disabled()
+        expect(conflict).to_be_disabled()
+
+        normal.click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        expect(unconfirmed).to_be_disabled()
+        expect(unconfirmed).to_have_attribute("aria-disabled", "true")
+        expect(conflict).to_be_disabled()
+        expect(conflict).to_have_attribute("aria-disabled", "true")
+
+        normal.click()
+        expect(page.locator("#page-notification")).to_contain_text("生成失败")
+        expect(unconfirmed).to_be_disabled()
+        expect(unconfirmed).to_have_attribute("aria-disabled", "true")
+        expect(conflict).to_be_disabled()
+        expect(conflict).to_have_attribute("aria-disabled", "true")
+
 
 class TestCandidateSelectionSensitiveBoundary:
     """AC: 候选选择不得把 raw HTML、raw RSS、cookie、token 写入任何持久面."""
