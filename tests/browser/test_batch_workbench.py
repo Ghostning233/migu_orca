@@ -25,7 +25,7 @@ def test_batch_result_renders_the_same_auditable_parse_summary(
     item["parse_result"] = {
         "normalized_title": "无职转生 第四季",
         "base_title": "无职转生",
-        "season": 4,
+        "season": {"number": 4, "raw": "s4", "normalized": "第四季", "source": "title_marker"},
         "source": "rule",
         "needs_user_review": True,
         "review_hints": ["原始输入需人工核对。"],
@@ -573,7 +573,6 @@ class TestBatchWorkbenchEntry:
                 "title": "关于我转生变成史莱姆这档事 第四季",
                 "source": "mikan",
                 "mikan_bangumi": "https://mikan.example/Home/Bangumi/item-found",
-                "candidate_aliases": [],
                 "storage_dir": None,
                 "save_request": False,
             }

@@ -3390,15 +3390,29 @@
       label.className = "candidate-season-confirmation";
       const input = document.createElement("input");
       input.type = "checkbox";
+      input.checked = false;
+      const helpId = "candidate-season-confirmation-help-" + safeText(candidate.bangumi_id || "unknown");
+      input.setAttribute("aria-describedby", helpId);
+      if (opts.chooseButton) {
+        opts.chooseButton.disabled = true;
+        opts.chooseButton.setAttribute("aria-disabled", "true");
+      }
       input.addEventListener("change", function () {
         candidate.season_confirmation = input.checked && season >= 1 && season <= 99
           ? season
           : null;
+        if (opts.chooseButton) {
+          opts.chooseButton.disabled = !input.checked || batchAcceptInFlight;
+          opts.chooseButton.setAttribute("aria-disabled", String(opts.chooseButton.disabled));
+        }
       });
+      const help = document.createElement("span");
+      help.id = helpId;
       label.append(
         input,
-        document.createTextNode(" 我确认此合集为第" + season + "季（候选标题未提供季数证据）"),
+        help,
       );
+      help.textContent = " 我确认此合集为第" + season + "季（候选标题未提供季数证据）";
       item.appendChild(label);
     } else if (seasonEvidence && seasonEvidence.status === "CONFLICT") {
       const warning = document.createElement("p");
@@ -3559,7 +3573,6 @@
         title: candidate.title || "未命名合集",
         source: "mikan",
         mikan_bangumi: candidate.mikan_url,
-        candidate_aliases: Array.isArray(candidate.aliases) ? candidate.aliases : [],
         storage_dir: currentStorageDir() || null,
         save_request: false,
         ...(Number.isInteger(candidate.season_confirmation)

@@ -141,3 +141,10 @@ Thread: https://codex.openai.com/threads/unknown
 - AutoBangumi 3.1.18 legacy mapper 新增可选 `data.poster_link`：只接受服务端解析、规范 HTTP(S)、无 userinfo/控制字符的公开原始海报 URL；本地 opaque poster 路由、非法 URL 与客户端伪造字段均被忽略。
 - 验证：`uv run pytest -q -m "not browser"`（916 passed，262 deselected）；`uv run pytest src/shared/season_evidence_test.py src/ab_engine/controllers/subscription_payload_test.py src/apps/migu_orca_web/views_test.py -q`（207 passed）。
 ---
+
+## 2026-08-27 15:28:00 CST - US-187
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：候选为 `NEEDS_CONFIRMATION` 时，“选择此合集”默认 disabled，并带同步 `aria-disabled`；勾选明确确认后才启用，取消勾选立即恢复禁用。候选冲突仍保持不可选择。
+- Chromium fixture 测试迁移到结构化 season 契约，并断言确认控件默认、切换与 API body 不再带客户端 aliases；解析摘要继续只展示实际查询。
+- 验证：`node --check src/apps/migu_orca_web/static/app.js`；针对确认、批量候选与结构化摘要的 Chromium tests（4 passed）。
+---

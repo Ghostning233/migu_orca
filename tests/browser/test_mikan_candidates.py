@@ -58,7 +58,7 @@ def _candidate_result_with_parse_json(
                 "parse_result": {
                     "normalized_title": "无职转生 第四季",
                     "base_title": "无职转生",
-                    "season": 4,
+                    "season": {"number": 4, "raw": "s4", "normalized": "第四季", "source": "title_marker"},
                     "source": "alias",
                     "needs_user_review": True,
                     "review_hints": ["别名匹配结果，请人工核对。"],
@@ -176,11 +176,18 @@ class TestCandidateSearchStates:
         assert "搜索词：芙莉莲" in text
         confirmation = page.locator(".candidate-season-confirmation input")
         expect(confirmation).not_to_be_checked()
+        choose_button = page.locator(".candidate-card").nth(0).locator(".candidate-select")
+        expect(choose_button).to_be_disabled()
+        expect(choose_button).to_have_attribute("aria-disabled", "true")
         expect(page.locator(".candidate-season-confirmation")).to_contain_text(
             "我确认此合集为第4季"
         )
         confirmation.check()
         expect(confirmation).to_be_checked()
+        expect(choose_button).to_be_enabled()
+        expect(choose_button).to_have_attribute("aria-disabled", "false")
+        confirmation.uncheck()
+        expect(choose_button).to_be_disabled()
         expect(
             page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
         ).to_have_attribute(
