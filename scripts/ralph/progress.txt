@@ -113,3 +113,10 @@ Thread: https://codex.openai.com/threads/unknown
 - 复审范围包括结构化 season 公共契约、混合不支持标记、correction season_hint 的唯一查询计划、候选证据信任边界、未确认非第一季、可信海报传播、UI 确认状态和最终归档。
 - 未执行真实 MiKan、AutoBangumi 或 qBittorrent 操作；外部系统后续继续只使用 fixture、fake transport 与 Playwright route。
 ---
+
+## 2026-08-27 14:35:00 CST - US-181
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：`AnimeTitleParseResult.to_dict()` 的 `season` 现为不可变 JSON-safe 的 `number/raw/normalized/source` 对象；兼容 `season_number` 和 `season_hint` 均只从该对象导出。
+- API 与 Web UI 共同消费结构化 season；无法证明时保持 number/raw/normalized 为空且 source 为固定 `none`，不保留相互矛盾的整数事实。
+- 验证：`uv run pytest src/shared/title_season_test.py src/batch_engine/controllers/anime_title_parser_test.py -q`（37 passed）。
+---

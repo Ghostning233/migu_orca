@@ -45,6 +45,46 @@ class AnimeTitleParseSource(StrEnum):
     FAKE = ANIME_TITLE_PARSE_SOURCE_FAKE
 
 
+class AnimeTitleSeasonSource(StrEnum):
+    """Whitelisted origin for the public, reviewable season contract."""
+
+    TITLE_MARKER = "title_marker"
+    NONE = "none"
+
+
+@dataclass(frozen=True)
+class AnimeTitleSeason:
+    """Immutable JSON-safe season evidence owned by the title parser.
+
+    ``number`` is absent whenever the parser cannot prove a one-to-ninety-nine
+    season.  Legacy ``season_hint`` is derived from this object only.
+    """
+
+    number: int | None
+    raw: str | None = None
+    normalized: str | None = None
+    source: AnimeTitleSeasonSource | str = AnimeTitleSeasonSource.NONE
+
+    def __post_init__(self) -> None:
+        source = AnimeTitleSeasonSource(self.source)
+        if self.number is None:
+            if self.raw is not None or self.normalized is not None or source is not AnimeTitleSeasonSource.NONE:
+                raise ValueError("unproven season must use the none source without values")
+        else:
+            if not isinstance(self.number, int) or isinstance(self.number, bool) or not 1 <= self.number <= 99:
+                raise ValueError("season number must be between 1 and 99")
+            if not isinstance(self.raw, str) or not self.raw.strip() or not isinstance(self.normalized, str) or not self.normalized.strip():
+                raise ValueError("proven season requires raw and normalized public values")
+            if source is AnimeTitleSeasonSource.NONE:
+                raise ValueError("proven season requires a non-none source")
+            object.__setattr__(self, "raw", self.raw.strip())
+            object.__setattr__(self, "normalized", self.normalized.strip())
+        object.__setattr__(self, "source", source)
+
+    def to_dict(self) -> dict[str, int | str | None]:
+        return {"number": self.number, "raw": self.raw, "normalized": self.normalized, "source": self.source.value}
+
+
 ANIME_TITLE_PARSE_SOURCE_LABELS = {
     AnimeTitleParseSource.CORRECTION: "用户修正",
     AnimeTitleParseSource.RULE: "规则识别",
@@ -109,7 +149,7 @@ class AnimeTitleParseResult:
     source: AnimeTitleParseSource | str
     normalized_title: str | None = None
     base_title: str | None = None
-    season: int | None = None
+    season: AnimeTitleSeason | int | None = None
     query_plan: tuple[AnimeTitleQuery, ...] = ()
     review_hints: tuple[str, ...] = ()
 
@@ -125,8 +165,10 @@ class AnimeTitleParseResult:
             raise ValueError("search_queries exceeds the query-plan limit")
         if not 0.0 <= float(self.confidence) <= 1.0:
             raise ValueError("confidence must be between 0 and 1")
-        if self.season is not None and not 1 <= self.season <= 99:
-            raise ValueError("season must be between 1 and 99")
+        season = _coerce_anime_title_season(self.season)
+        derived_hint = f"S{season.number}" if season.number is not None else None
+        # Provider/legacy input may carry an arbitrary hint.  Never preserve it:
+        # the public compatibility field is derived from the structured object.
         normalized_title = (self.normalized_title or raw_title).strip()
         base_title = (self.base_title or normalized_title).strip()
         if not normalized_title or not base_title:
@@ -151,6 +193,8 @@ class AnimeTitleParseResult:
         object.__setattr__(self, "source", coerce_anime_title_parse_source(self.source))
         object.__setattr__(self, "normalized_title", normalized_title)
         object.__setattr__(self, "base_title", base_title)
+        object.__setattr__(self, "season", season)
+        object.__setattr__(self, "season_hint", derived_hint)
         object.__setattr__(self, "query_plan", plan)
         object.__setattr__(self, "review_hints", hints)
 
@@ -162,7 +206,10 @@ class AnimeTitleParseResult:
             "normalized_title": self.normalized_title,
             "base_title": self.base_title,
             "canonical_title_candidates": list(self.canonical_title_candidates),
-            "season": self.season,
+            "season": self.season.to_dict(),
+            # Transitional scalar for older clients. It is derived exclusively
+            # from the structured public season object above.
+            "season_number": self.season.number,
             "season_hint": self.season_hint,
             "query_plan": [entry.to_dict() for entry in self.query_plan],
             # Kept for existing callers; this is always derived from query_plan.
@@ -189,6 +236,16 @@ def _immutable_texts(
     return tuple(normalized)
 
 
+def _coerce_anime_title_season(value: AnimeTitleSeason | int | None) -> AnimeTitleSeason:
+    if isinstance(value, AnimeTitleSeason):
+        return value
+    if value is None:
+        return AnimeTitleSeason(None)
+    if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 99:
+        raise ValueError("season must be between 1 and 99")
+    return AnimeTitleSeason(value, f"S{value}", f"第{value}季", AnimeTitleSeasonSource.TITLE_MARKER)
+
+
 __all__ = [
     "ANIME_TITLE_PARSE_SOURCE_FAKE",
     "ANIME_TITLE_PARSE_SOURCE_ALIAS",
@@ -197,6 +254,8 @@ __all__ = [
     "ANIME_TITLE_PARSE_SOURCE_LABELS",
     "ANIME_TITLE_PARSE_SOURCE_RULE",
     "AnimeTitleParseSource",
+    "AnimeTitleSeason",
+    "AnimeTitleSeasonSource",
     "AnimeTitleQuery",
     "AnimeTitleParseResult",
     "BATCH_ITEM_STATUS_FAILED",

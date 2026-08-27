@@ -46,7 +46,7 @@ def test_default_parser_uses_deterministic_rules_not_the_fake_provider() -> None
     assert {entry.source for entry in result.query_plan} >= {AnimeTitleParseSource.ALIAS, AnimeTitleParseSource.RULE, AnimeTitleParseSource.FALLBACK}
     assert result.normalized_title == "路哥 第四季"
     assert result.base_title == "路哥"
-    assert result.season == 4
+    assert result.season.number == 4
 
 
 def test_known_rule_alias_is_high_confidence() -> None:
@@ -78,14 +78,14 @@ def test_unknown_explicit_season_is_only_a_reviewable_search_hint() -> None:
 
     assert result.base_title == "无职转生"
     assert result.normalized_title == "无职转生 第四季"
-    assert result.season == 4
+    assert result.season.number == 4
     assert result.season_hint == "S4"
 
 
 def test_unknown_title_never_defaults_to_first_season() -> None:
     result = parse_anime_title("无职转生")
 
-    assert result.season is None
+    assert result.season.number is None
     assert result.season_hint is None
 
 
@@ -222,6 +222,14 @@ def test_parse_result_is_immutable_json_safe_and_derives_legacy_queries() -> Non
         result.search_queries.append("不允许")  # type: ignore[attr-defined]
     payload = result.to_dict()
     assert json.loads(json.dumps(payload)) == payload
+    assert payload["season"] == {
+        "number": 4,
+        "raw": "S4",
+        "normalized": "第4季",
+        "source": "title_marker",
+    }
+    assert payload["season_number"] == 4
+    assert payload["season_hint"] == "S4"
     assert payload["search_queries"] == [entry["query"] for entry in payload["query_plan"]]
 
 

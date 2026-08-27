@@ -8,6 +8,8 @@ from batch_engine.models import (
     AnimeTitleParseResult,
     AnimeTitleParseSource,
     AnimeTitleQuery,
+    AnimeTitleSeason,
+    AnimeTitleSeasonSource,
     MAX_ANIME_TITLE_QUERY_COUNT,
 )
 from shared.errors import Stage1Error
@@ -74,7 +76,7 @@ class RuleAnimeTitleParsingProvider:
             source=query_plan[0].source,
             normalized_title=parsed.normalized_title,
             base_title=parsed.base_title,
-            season=parsed.season,
+            season=_season_contract(parsed),
             review_hints=tuple(dict.fromkeys(hints)),
         )
 
@@ -104,7 +106,7 @@ class FakeAnimeTitleParsingProvider:
             raw_title=raw_title, canonical_title_candidates=[canonical], season_hint=parsed.season_hint,
             search_queries=[canonical, _normalized(raw_title)], confidence=confidence,
             needs_user_review=confidence < LOW_CONFIDENCE_THRESHOLD, source=ANIME_TITLE_PARSE_SOURCE_FAKE,
-            normalized_title=parsed.normalized_title, base_title=parsed.base_title, season=parsed.season,
+            normalized_title=parsed.normalized_title, base_title=parsed.base_title, season=_season_contract(parsed),
             review_hints=parsed.review_hints,
         )
 
@@ -133,12 +135,23 @@ def _normalize_result(raw_title: str, result: AnimeTitleParseResult) -> AnimeTit
         search_queries=[entry.query for entry in plan], query_plan=tuple(plan), confidence=confidence,
         needs_user_review=result.needs_user_review or _needs_user_review(candidates, confidence) or bool(hints),
         source=plan[0].source, normalized_title=season_parse.normalized_title,
-        base_title=season_parse.base_title, season=season_parse.season, review_hints=hints,
+        base_title=season_parse.base_title, season=_season_contract(season_parse), review_hints=hints,
     )
 
 
 def _canonical_queries(title: str, season: int | None) -> list[str]:
     return [_with_season(title, form) for form in season_variants(season)] if season else [title]
+
+
+def _season_contract(parsed: object) -> AnimeTitleSeason:
+    """Convert the shared parser result into the public immutable API contract."""
+
+    number = getattr(parsed, "season", None)
+    marker = getattr(parsed, "season_marker", None)
+    if number is None:
+        return AnimeTitleSeason(None)
+    normalized = season_variants(number)[-1]
+    return AnimeTitleSeason(number, marker or f"S{number}", normalized, AnimeTitleSeasonSource.TITLE_MARKER)
 
 
 def _with_season(title: str, form: str | int | None) -> str:

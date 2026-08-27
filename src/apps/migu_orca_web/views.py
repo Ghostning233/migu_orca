@@ -667,14 +667,14 @@ def _with_candidate_season_evidence(
 ) -> dict[str, object]:
     """Add a public review summary without treating parser output as fact."""
     result = dict(candidate)
-    if parse_result.season is None:
+    if parse_result.season.number is None:
         return result
     title = result.get("title")
     aliases = result.get("aliases")
     result["season_evidence"] = candidate_season_evidence(
         title if isinstance(title, str) else "",
         aliases if isinstance(aliases, list) else (),
-        parse_result.season,
+        parse_result.season.number,
     )
     return result
 

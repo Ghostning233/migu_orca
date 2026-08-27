@@ -1354,7 +1354,7 @@
     heading.textContent = "标题解析摘要";
     block.appendChild(heading);
 
-    const season = Number(parse.season);
+    const season = Number(parse.season && parse.season.number);
     const recognizedTitle = safeText(parse.normalized_title || parse.base_title || result.raw_title);
     const rows = [
       ["识别标题", recognizedTitle || "未识别"],

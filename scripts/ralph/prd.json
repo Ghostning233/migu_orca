@@ -16,8 +16,8 @@
         "Typecheck passes"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "先建立模型和纯序列化契约；解析成功不等于真实 MiKan 候选存在。2026-08-27 静态复审重新打开：season 公共契约仍只输出整数，须改为不可变结构化 number/raw/normalized/source，兼容字段只能单向派生。"
+      "passes": true,
+      "notes": "先建立模型和纯序列化契约；解析成功不等于真实 MiKan 候选存在。2026-08-27 静态复审重新打开：season 公共契约仍只输出整数，须改为不可变结构化 number/raw/normalized/source，兼容字段只能单向派生；复审修复完成，公共 season 现为不可变 number/raw/normalized/source，season_hint 与 season_number 仅单向派生。"
     },
     {
       "id": "US-182",
