@@ -119,4 +119,4 @@ generate_folder_name(matched_bangumi, selected_subtitle_group, folder_name_hint 
 | Q-M07-04 | 后续 AB 季度编号如何生成？ | 否 | BL-018 只提供可证明的结构化季数，M10 继续 fail closed |
 | Q-M07-05 | 后续 folder_name_hint 是否直接覆盖系统命名？ | 否 | 后续阶段定义 |
 
-Stage 25 规划边界：parser 的 title/season 只是搜索建议；M07 只使用用户选中候选和已确认 Request 中可证明的公开标题/季数。候选与 parser 季数冲突时不自动改名，继续由用户审核。
+Stage 25 实际边界：parser 的 title/season 只是搜索建议；M07 只使用用户选中候选和已确认 Request 中可证明的公开标题/季数。候选与 parser 季数冲突时不自动改名；候选缺少非第一季公开证据时必须明确确认。

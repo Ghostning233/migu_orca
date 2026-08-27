@@ -2,7 +2,7 @@
 
 MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台，目标是在 MiKanProject 与 Auto Bangumi 之间提供 MiKan 订阅源发现、筛选预览、批量草案审核与提交辅助能力。
 
-Stage 25「正式番名与季数解析」已完成：单个与批量搜索共用确定性标题/季数解析、有界查询计划和可审核来源展示；真实 MiKan 合集仍由用户显式选择，只有可证明季数才能进入 Request、命名与 AutoBangumi 映射。实现与验收见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
+Stage 25「正式番名与季数解析」已完成：单个与批量搜索共用结构化 season（`number/raw/normalized/source`）、确定性解析和有界查询计划；真实 MiKan 合集仍由用户显式选择，非第一季缺少候选公开证据时必须明确确认。AutoBangumi 3.1.18 可选使用服务端解析并校验的 MiKan 原始海报作为 `poster_link`，绝不使用浏览器 opaque 代理地址。实现与验收见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
 Stage 24「AutoBangumi 真实认证与订阅兼容闭环」已完成：默认以服务地址、用户名和密码登录兼容 AutoBangumi 3.1.18，同时保留新版 API Token/Bearer 兼容模式；Settings 提供只读连接测试，单个与批量已接受 Request 复用经验证的 `/api/v1/rss/subscribe` 映射和提交编排。执行范围见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
 
@@ -26,7 +26,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - Stage 20/24 已把批量接受、全接受、提交前队列和 Auto Bangumi 顺序提交接入 `/index`：批量工作台提供单卡接受、可勾选选择、批量接受和全接受入口，明确显示选中数量和不可接受原因；已接受卡片进入独立追踪的提交前队列，`#batch-queue-panel` 展示队列项目标题、中文状态（待提交/提交中/提交成功/提交失败/可重试）、尝试次数和脱敏结果摘要；提交前表单使用服务地址与默认账号密码（可切换 API Token）、fallback 和显式确认，提交成功后清空敏感输入；失败项可独立重试，成功项不会被重复提交。批量提交采用前台顺序编排，不引入后台 worker，刷新后通过 URL `batch_id` 恢复队列状态。
 - Stage 19 已把批量新番订阅前置工作台接入 `/index`：批量输入按非空行生成独立条目，AI 名称解析 fake provider 和 provider seam 输出候选标题/搜索词，批量 API 对每个条目独立搜索 MiKan 候选，卡片网格支持删除、展开、单卡修改回流和单卡接受。
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
-- Stage 24 AutoBangumi 真实认证与订阅兼容闭环已完成；随后已从 backlog 选定 BL-018 并规划为 Stage 25。部署/配置向导及其他条件触发事项继续记录在 `docs/backlog.md`，流式封面代理记录在 `docs/optional_features.md`；除已选定的 Stage 25 外，不为未开发事项预留 Stage 编号。
+- Stage 24 AutoBangumi 真实认证与订阅兼容闭环与 Stage 25 BL-018 均已完成。部署/配置向导及其他条件触发事项继续记录在 `docs/backlog.md`，流式封面代理记录在 `docs/optional_features.md`；后续阶段按 backlog 动态规划。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
@@ -92,7 +92,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - `--submit-ab` 必须和 `--action accept`、`--ab-config <path>` 显式组合使用；未传 `--submit-ab` 时不会触发 Auto Bangumi 提交流程，也不会实例化真实 HTTP client。
 - AB config 使用服务根地址和显式认证模式：默认 `password` 使用 `base_url`、用户名和密码登录并保持单次 Cookie 会话；兼容 `api_token` 使用 `base_url` 和 Bearer token。两种凭据互斥，固定 API 路径由 adapter 拼接，所有凭据只用于当前请求。
   - `fallback_enabled`：提交失败时是否在 `ab_submit_result.fallback_config` 中输出可人工处理的降级 JSON。
-- AutoBangumi 3.1.18 client 通过 form 登录 `/api/v1/auth/login`，以单次 Cookie 会话调用 `/api/v1/status` 和 `/api/v1/rss/subscribe`；订阅 body 为 `{data: Bangumi, rss: RSSItem}`，`status=true` 即成功且外部订阅 ID 可为空。API Token adapter 仅在已证明的写契约下提交，当前未知版本一律 fail closed。
+- AutoBangumi 3.1.18 client 通过 form 登录 `/api/v1/auth/login`，以单次 Cookie 会话调用 `/api/v1/status` 和 `/api/v1/rss/subscribe`；订阅 body 为 `{data: Bangumi, rss: RSSItem}`，`status=true` 即成功且外部订阅 ID 可为空。`data.poster_link` 仅可来自服务端从 MiKan 页面解析、规范化并校验的公开 HTTP(S) 原始海报 URL；缺失海报不阻断订阅，opaque 同源代理 URL 与客户端字段均不会传播。API Token adapter 仅在已证明的写契约下提交，当前未知版本一律 fail closed。
 - Web UI 真实 Auto Bangumi 配置只在当前提交中使用，不能写入 storage JSON、状态历史、浏览器 `localStorage` / `sessionStorage`、URL query、日志、截图或测试 trace。
 - qBittorrent 配置同样必须保持 request-scoped：endpoint、username、password、cookie、SID、敏感路径和原始响应体不能写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图、测试 trace 或 API 响应。
 - Stage 15 允许 Settings 将非敏感 Storage 偏好写入浏览器 `localStorage`，键名为 `miguOrca.web.storageDir` 和 `miguOrca.web.saveRequest`；URL query 只能携带 `request_id` 等非敏感上下文。缺省 `saveRequest` 表示开发/离线 fixture 生成默认保存，显式 `"false"` 表示预览模式；真实 MiKan 候选选择与直连 fallback 始终生成可编辑预览草案，与 `saveRequest` 偏好无关。
@@ -413,7 +413,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 ## Ralph 开发流
 
 - 当前 Ralph PRD：Stage 25，正式番名与季数解析（已完成，已归档）
-- 最近完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
+- 最近完成阶段：Stage 25，正式番名与季数解析
 - 前一完成阶段：Stage 23，媒体缓存、MiKan 读取优化与批量审核体验
 - 前一完成阶段：Stage 22，Web UI 搜索工作台重构与真实候选闭环
 - 前一完成阶段：Stage 21，用户偏好与智能推荐闭环 PRD
@@ -429,8 +429,8 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- Stage 25 规划：`docs/MiGuOrca_stage25_title_season_parsing_PRD.md`；执行分支 `agent/stage25-title-season-parsing`，Ralph stories 为 US-181～US-188
-- 后续待办：`docs/backlog.md`；除已选定的 Stage 25 外，不为未开发事项预留 Stage 编号
+- Stage 25 执行：`docs/MiGuOrca_stage25_title_season_parsing_PRD.md`；执行分支 `agent/stage25-title-season-parsing`，Ralph stories 为 US-181～US-188
+- 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
 - Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`

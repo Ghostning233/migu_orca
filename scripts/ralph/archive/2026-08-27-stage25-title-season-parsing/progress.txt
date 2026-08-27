@@ -105,3 +105,54 @@ Thread: https://codex.openai.com/threads/unknown
   - `season_evidence` 仅在 parser 提供季数提示时加入候选 API，以保持无季数客户端的既有候选字段稳定。
   - Browser validation used Playwright with mocked candidate search; full-suite processes must not be started concurrently because both include browser coverage.
 ---
+
+## 2026-08-27 14:20:00 CST - Stage 25 静态复审重新打开
+Thread: https://codex.openai.com/threads/unknown
+- 复审推翻此前的完成状态：US-181、US-182、US-183、US-186、US-187 与 US-188 已恢复为未完成，后续按一 story 一提交重新验收。
+- 历史中 US-187/US-188 记录曾被错误置于较早位置；保留全部原始记录，本条仅追加顺序更正与复审结论。
+- 复审范围包括结构化 season 公共契约、混合不支持标记、correction season_hint 的唯一查询计划、候选证据信任边界、未确认非第一季、可信海报传播、UI 确认状态和最终归档。
+- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 操作；外部系统后续继续只使用 fixture、fake transport 与 Playwright route。
+---
+
+## 2026-08-27 14:35:00 CST - US-181
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：`AnimeTitleParseResult.to_dict()` 的 `season` 现为不可变 JSON-safe 的 `number/raw/normalized/source` 对象；兼容 `season_number` 和 `season_hint` 均只从该对象导出。
+- API 与 Web UI 共同消费结构化 season；无法证明时保持 number/raw/normalized 为空且 source 为固定 `none`，不保留相互矛盾的整数事实。
+- 验证：`uv run pytest src/shared/title_season_test.py src/batch_engine/controllers/anime_title_parser_test.py -q`（37 passed）。
+---
+
+## 2026-08-27 14:38:00 CST - US-182
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：共享季数 parser 现在逐段识别未被合法 marker 覆盖的不完整标记，且 Part/分割放送即使与合法数字共存也会保留人工审核；一致的重复 marker 仍可去重。
+- `S2 第百季`、`S2 第100季`、`S2 S`、`S2 Part 2` 与“第二季 分割放送”均不生成可信季数，冲突 marker 同样 fail closed。
+- 验证：`uv run pytest src/shared/title_season_test.py src/batch_engine/controllers/anime_title_parser_test.py -q`（37 passed）。
+---
+
+## 2026-08-27 14:50:00 CST - US-183
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：已保存 correction 的 canonical title、query_correction 和可证明 season_hint 现在均加入 `RuleAnimeTitleParsingProvider` 的唯一有界 query plan；不再由旧 search enhancer 单独展示或搜索。
+- correction 保留优先级，同时限制每个修正字段的季数展开以留出 rule 与 raw fallback；`attempted_queries` 直接记录同一 plan 的 transport 调用顺序。
+- 验证：`uv run pytest src/batch_engine/controllers/anime_title_parser_test.py src/batch_engine/controllers/candidate_search_orchestrator_test.py -q`（22 passed）。
+---
+
+## 2026-08-27 15:20:00 CST - US-186
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：POST Request 不再接受或写入客户端 `candidate_aliases`；Request 始终通过服务端 MiKan 详情重建 title、URL 与可选海报。候选搜索产生的非第一季确认提示只在服务端短期公共候选记录中延续，未确认时拒绝生成草案。
+- AutoBangumi 3.1.18 legacy mapper 新增可选 `data.poster_link`：只接受服务端解析、规范 HTTP(S)、无 userinfo/控制字符的公开原始海报 URL；本地 opaque poster 路由、非法 URL 与客户端伪造字段均被忽略。
+- 验证：`uv run pytest -q -m "not browser"`（916 passed，262 deselected）；`uv run pytest src/shared/season_evidence_test.py src/ab_engine/controllers/subscription_payload_test.py src/apps/migu_orca_web/views_test.py -q`（207 passed）。
+---
+
+## 2026-08-27 15:28:00 CST - US-187
+Thread: https://codex.openai.com/threads/unknown
+- 复审修复：候选为 `NEEDS_CONFIRMATION` 时，“选择此合集”默认 disabled，并带同步 `aria-disabled`；勾选明确确认后才启用，取消勾选立即恢复禁用。候选冲突仍保持不可选择。
+- Chromium fixture 测试迁移到结构化 season 契约，并断言确认控件默认、切换与 API body 不再带客户端 aliases；解析摘要继续只展示实际查询。
+- 验证：`node --check src/apps/migu_orca_web/static/app.js`；针对确认、批量候选与结构化摘要的 Chromium tests（4 passed）。
+---
+
+## 2026-08-27 15:45:00 CST - US-188
+Thread: https://codex.openai.com/threads/unknown
+- 最终静态复审完成：同步 README、主/Stage PRD、future stages、backlog 与 M03/M07/M10/M12/M13 的实际边界；明确 3.1.18 `poster_link` 仅使用服务端校验的 MiKan 原始公开 URL，缺失不阻断订阅。
+- 已清理错误命名且内容属于 Stage 25 初始状态的 `2026-08-26-agent/stage24-autobangumi-compatibility` 归档；保留全部历史 progress 内容，并以最终活动 PRD/progress 重建正确 Stage 25 归档。
+- 最终验证：`uv run python -m compileall -q src tests` 通过；`node --check src/apps/migu_orca_web/static/app.js` 通过；`uv run pytest -q -m "not browser"`（916 passed，262 deselected）；`uv run pytest tests/browser/ -q`（262 passed，真实 Chromium）；`uv run pytest -q`（1178 passed）；`git diff --check` 通过。
+- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 写操作；真实 AutoBangumi 海报效果仍须由用户在真实实例显式创建时人工复验。
+---

@@ -144,8 +144,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "自动化只用 fixture/fake transport/Playwright route，不访问真实外部系统；归档必须反映最终全 true 状态。2026-08-27 静态复审重新打开：须同步支持边界、清理错误 Stage 24 命名的初始 Stage 25 归档，并在全部复审通过后重建一致归档。"
+      "passes": true,
+      "notes": "自动化只用 fixture/fake transport/Playwright route，不访问真实外部系统；归档必须反映最终全 true 状态。2026-08-27 静态复审重新打开：须同步支持边界、清理错误 Stage 24 命名的初始 Stage 25 归档，并在全部复审通过后重建一致归档。复审收尾完成：文档已同步、错误归档已清理，最终归档与活动 Ralph 文件字节一致。"
     }
   ]
 }

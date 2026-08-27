@@ -148,3 +148,11 @@ Thread: https://codex.openai.com/threads/unknown
 - Chromium fixture 测试迁移到结构化 season 契约，并断言确认控件默认、切换与 API body 不再带客户端 aliases；解析摘要继续只展示实际查询。
 - 验证：`node --check src/apps/migu_orca_web/static/app.js`；针对确认、批量候选与结构化摘要的 Chromium tests（4 passed）。
 ---
+
+## 2026-08-27 15:45:00 CST - US-188
+Thread: https://codex.openai.com/threads/unknown
+- 最终静态复审完成：同步 README、主/Stage PRD、future stages、backlog 与 M03/M07/M10/M12/M13 的实际边界；明确 3.1.18 `poster_link` 仅使用服务端校验的 MiKan 原始公开 URL，缺失不阻断订阅。
+- 已清理错误命名且内容属于 Stage 25 初始状态的 `2026-08-26-agent/stage24-autobangumi-compatibility` 归档；保留全部历史 progress 内容，并以最终活动 PRD/progress 重建正确 Stage 25 归档。
+- 最终验证：`uv run python -m compileall -q src tests` 通过；`node --check src/apps/migu_orca_web/static/app.js` 通过；`uv run pytest -q -m "not browser"`（916 passed，262 deselected）；`uv run pytest tests/browser/ -q`（262 passed，真实 Chromium）；`uv run pytest -q`（1178 passed）；`git diff --check` 通过。
+- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 写操作；真实 AutoBangumi 海报效果仍须由用户在真实实例显式创建时人工复验。
+---

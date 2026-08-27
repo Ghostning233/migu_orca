@@ -280,7 +280,7 @@ Stage 25 已从 backlog BL-018 选定并单独规划；Stage 25 之后不预留�
 
 ## 13. 下一步工作
 
-1. BL-018 已规划为 Stage 25 正式番名与季数解析；执行范围见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。其余部署/配置向导及条件触发事项继续在 `docs/backlog.md` 维护，流式封面代理在 `docs/optional_features.md` 维护。
+1. BL-018 已由 Stage 25 正式番名与季数解析完成；执行范围见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。其余部署/配置向导及条件触发事项继续在 `docs/backlog.md` 维护，流式封面代理在 `docs/optional_features.md` 维护。
 2. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
 3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。

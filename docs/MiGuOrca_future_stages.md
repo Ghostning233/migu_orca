@@ -153,9 +153,9 @@ Stage 19 当时未包含的事项及当前状态：
 
 执行 PRD：`docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
 
-## 8. Stage 25: 正式番名与季数解析（已规划，待开发）
+## 8. Stage 25: 正式番名与季数解析（已完成）
 
-Stage 24 完成后已按 backlog 选择最高优先级未完成项 BL-018，并建立独立执行 PRD：`docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
+Stage 24 完成后已按 backlog 选择 BL-018，并完成独立执行 PRD：`docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
 规划目标：
 
@@ -163,7 +163,8 @@ Stage 24 完成后已按 backlog 选择最高优先级未完成项 BL-018，并�
 2. 单个与批量入口共享 parse → 有界 query plan → M03 candidate search 编排。
 3. 复用用户明确保存的公开修正和版本化别名，保留低置信度、冲突季数、手动搜索与 MiKan URL/ID fallback。
 4. 收敛解析来源、识别季度和实际搜索词 UI，修复“源名称：搜索词：...”标签叠加。
-5. parser 只生成搜索提示；真实合集仍由用户显式选择，只有可证明季数才能进入 Request、命名与 AutoBangumi 映射。
+5. parser 只生成搜索提示；真实合集仍由用户显式选择，候选无非第一季公开证据时必须明确确认，只有可证明季数才能进入 Request、命名与 AutoBangumi 映射。
+6. AutoBangumi 3.1.18 的可选 `poster_link` 只使用服务端读取并校验的 MiKan 原始公开海报 URL；浏览器 opaque 封面地址不会下传，缺失海报不阻断订阅。
 
 真实 LLM provider、当前播出集数和新版 AutoBangumi Bearer 写契约不进入 Stage 25。
 
@@ -213,6 +214,6 @@ Stage 25 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.m
 4. Stage 22：Web UI 搜索工作台重构与真实候选闭环（已完成）。
 5. Stage 23：媒体缓存、MiKan 读取优化与批量审核体验（已完成）。
 6. Stage 24：AutoBangumi 真实认证与订阅兼容闭环（已完成）。
-7. Stage 25：正式番名与季数解析（已规划，待开发）。
+7. Stage 25：正式番名与季数解析（已完成）。
 
 因此，Stage 19 到 Stage 24 的基础功能、媒体/读取/UI 收敛和真实 AutoBangumi 闭环已经完成，Stage 25 已从 backlog 正式选定。Stage 25 之后不统计或预留阶段数量，按 backlog 优先级动态规划；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。

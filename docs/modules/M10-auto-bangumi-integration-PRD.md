@@ -132,4 +132,4 @@ Stage 12 已在独立 qBittorrent 边界中实现显式连接测试，用于验�
 5. 单个、批量、retry/recover 复用同一 adapter/payload/result seam，并保持 Stage 20 不重复提交边界。
 6. 自动化只使用 fake transport；真实实例只允许只读烟雾，写入必须由用户在 Web UI 显式确认。
 
-Stage 25 规划边界：标题 parser 的 season hint 不得直接进入 AutoBangumi payload。M10 只消费 accepted Request 中由真实候选公开标题/元数据或用户显式确认支持的 `season` / `season_raw`；冲突或无法证明的显式非第一季继续 fail closed。
+Stage 25 实际边界：标题 parser 的 season hint 不得直接进入 AutoBangumi payload。M10 只消费 accepted Request 中由真实候选公开标题/元数据或用户显式确认支持的 `season` / `season_raw`；冲突或无法证明的显式非第一季继续 fail closed。3.1.18 的可选 `data.poster_link` 只使用服务端校验过的 MiKan 原始公开 HTTP(S) 海报 URL；缺失时为空且不阻断订阅，opaque 代理地址或客户端字段绝不传播。

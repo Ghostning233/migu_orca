@@ -292,4 +292,4 @@ Stage 19 已建立 `AnimeTitleParsingProvider` 和离线 fake provider，Stage 2
 6. 每个 story 完成后更新自身 `passes` 并追加 progress；不得提前把后续 story 标记完成。
 7. 自动化不访问真实 MiKan、AutoBangumi 或 qBittorrent，不创建真实订阅或下载任务。
 
-Stage 25 完成标志：单个和批量输入能通过同一确定性解析与有界查询计划理解常见标题/季数表达；用户可以看见识别依据和实际搜索词，在歧义或冲突时得到明确人工审核提示；真实候选仍由用户显式选择，只有可证明季数才进入 Request、命名与 AutoBangumi 映射。
+Stage 25 完成标志：单个和批量输入能通过同一确定性解析与有界查询计划理解常见标题/季数表达；公开 API 的 season 使用不可变 `number/raw/normalized/source` 契约，兼容字段仅单向派生；用户可以看见识别依据和实际搜索词，在歧义、混合不支持标记或冲突时得到明确人工审核提示；真实候选仍由用户显式选择，缺少非第一季公开证据时须明确确认，只有可证明季数才进入 Request、命名与 AutoBangumi 映射。AutoBangumi 3.1.18 的可选海报字段只传播服务端校验后的 MiKan 原始公开 URL。
