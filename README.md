@@ -99,9 +99,9 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - 筛选规则默认按普通字符匹配：规则文本以字面子串（substring）形式出现在种子名中才算命中，大小写不敏感；`use_regex=true` 才按正则编译，`case_sensitive=true` 才区分大小写。筛选规则是用户输入的非密文字符串，允许写入 saved Request，但错误消息不得包含本地存储路径或原始外部响应。
 - 真实 MiKan 合集详情页解析和 direct URL/ID 入口已在 Stage 16 完成；搜索候选展示、手动选择、候选缓存和推荐标签已在 Stage 17 完成；真实 MiKan 搜索收敛为 Web 主流程、默认 MiKan 配置、直连兜底勾选框、可编辑预览订阅草案、中文状态和 Seeds 分组展示已在 Stage 18 完成；批量输入、AI 名称解析 seam、批量候选搜索、订阅草案卡片、单卡修改回流和单卡接受已在 Stage 19 完成；批量接受、全接受、提交前队列、Auto Bangumi 顺序提交和失败项独立重试已在 Stage 20 完成；非敏感偏好保存/应用、审核元数据展示、用户修正驱动的搜索词增强和偏好管理 Web UI 已在 Stage 21 完成。Stage 20 的队列只保存非敏感元数据，endpoint/token/cookie/Authorization header/原始响应体/完整 RSS URL/magnet/本地绝对路径从不进入队列 JSON、Request snapshot、API 响应、浏览器 storage、URL、日志、截图或 trace；批量提交采用前台顺序编排，不创建 qBittorrent 下载任务，不绕过 Auto Bangumi，不引入后台常驻 worker。Stage 21 的偏好与修正存储只保存非敏感字段，endpoint/token/cookie/Authorization header/magnet/raw HTML/raw RSS XML/原始响应体/完整失败 URL/本地绝对路径从不进入偏好 JSON、修正 JSON、API 响应、页面、URL、浏览器 storage、日志或 trace；`load_user_preferences` 对未知键在加载时剥离，偏好表单只提交已定义的非敏感字段，被拒绝的敏感输入回退到上次有效值。
 
-## Stage 15 Flask Web UI
+## Web UI 与 API
 
-Stage 15 继续使用 Stage 7 引入的本地 Flask Web UI / 管理界面 MVP，并在 Stage 8 可用性、Stage 9 浏览器自动化、Stage 10 Request 操作入口、Stage 11 显式真实 MiKan / Auto Bangumi 配置入口、Stage 12 qBittorrent 显式连接测试、Stage 13 Settings 信息架构和 Stage 14 Request 可操作性修复基础上，补齐 `ACCEPTED` Request 的修改与删除能力，并将筛选规则默认语义从正则优化为大小写不敏感的字面字符匹配，同时提供显式 `使用正则` 与 `大小写敏感` 选项。它复用现有 CLI 编排、真实 Auto Bangumi HTTP client adapter、qBittorrent connection-test controller 与 Stage 6 本地 JSON 存储能力，不改变 `migu-orca` CLI 默认行为，也不引入 React/Vite 等前端构建链。
+当前 Web UI 延续 Stage 7 引入的本地 Flask 管理界面，并已累积接入 Settings、真实 MiKan 候选、可编辑预览、批量草案、提交前队列、偏好、媒体缓存、AutoBangumi 3.1.18 兼容和 Stage 25 标题季数解析。页面仍由 Flask/Jinja 提供，并由原生 JavaScript 驱动；尚未引入独立前端构建链。业务操作统一通过 `/api/v1/*` JSON API 编排，CLI 默认行为保持不变。
 
 启动方式：
 
@@ -414,6 +414,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 - 当前 Ralph PRD：Stage 25，正式番名与季数解析（已完成，已归档）
 - 最近完成阶段：Stage 25，正式番名与季数解析
+- 前一完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
 - 前一完成阶段：Stage 23，媒体缓存、MiKan 读取优化与批量审核体验
 - 前一完成阶段：Stage 22，Web UI 搜索工作台重构与真实候选闭环
 - 前一完成阶段：Stage 21，用户偏好与智能推荐闭环 PRD
@@ -555,6 +556,7 @@ uv run pytest -m "not browser"
 
 ## 参考文档
 
+- [文档索引](docs/README.md)
 - [主 PRD](docs/MiGuOrca_main_PRD.md)
 - [Stage 1 实现规格](docs/design/stage1-spec.md)
 - [架构与目录约定](docs/design/architecture.md)

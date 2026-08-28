@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.22 |
-| 文档状态 | Stage 24 AutoBangumi 真实认证与订阅兼容闭环已完成 |
+| 当前版本 | v0.25 |
+| 文档状态 | Stage 25 正式番名与季数解析已完成 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -67,7 +67,7 @@ MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台
 
 MiGuOrca 不做 Auto Bangumi 或 qBittorrent 的替代品，不建立绕过 Auto Bangumi 的长期订阅执行系统，也不直接创建 qBittorrent 下载任务。下载执行和长期订阅执行由 Auto Bangumi / qBittorrent 负责；MiGuOrca 聚焦订阅前判断、批量编排和用户可审核配置生成。
 
-当前已完成 Stage 21：离线 Request 生成、Request 确认/取消/受限修改、已保存 Request 安全删除、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、qBittorrent 显式连接测试入口、Web UI Settings 信息架构拆分、Web UI Request 可操作性修复、Web UI ACCEPTED 管理与筛选语义优化、真实 MiKan 合集详情页解析与直连 URL/ID 入口、真实 MiKan 搜索候选合集展示与用户手动选择、真实 MiKan Web 主流程收敛、批量新番订阅草案工作台、批量接受与 Auto Bangumi 提交前队列，以及用户偏好与智能推荐闭环。CLI 可通过 `--source mikan --mikan-config <path> --mikan-bangumi <url-or-id>` 直接解析已选中 MiKan `Home/Bangumi/<id>` 合集并绕过搜索；Web API `POST /api/v1/requests` 支持 request-scoped `mikan_bangumi` 字段。详情页 parser 会输出安全结构化元数据，优先返回字幕组级 RSS，番剧级 RSS 仅作为 `全部字幕组` fallback。Stage 17 新增 request-scoped 候选搜索 Web API `POST /api/v1/mikan/candidates`，并在 `/index` Request 生成流程中接入候选卡片展示、`选择此合集` 手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签；候选选择与直连 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路，不自动选择、不自动生成，即使只有一个候选也必须用户显式点击。Stage 20 新增批量接受/全接受、提交前队列、Auto Bangumi 顺序提交和失败项独立重试（Web API `POST /api/v1/batches/<batch_id>/accept|queue|submit|retry`）；队列只保存非敏感元数据，提交配置 request-scoped，批量提交不创建 qBittorrent 下载任务、不绕过 Auto Bangumi、不引入后台常驻 worker。Stage 21 新增非敏感用户偏好存储与 Web API（`GET/POST /api/v1/preferences`）、非敏感标题修正存储与 Web API（`GET/POST /api/v1/corrections`）、`/settings` 偏好管理面板、批量草案偏好应用、偏好命中/低置信度审核元数据和搜索词增强；偏好与修正存储只保存非敏感字段，AI 只生成候选，用户仍需逐卡审核并显式接受，无偏好或增强失败时回退 Stage 19 默认流程。
+当前已完成到 Stage 25：离线 Request 生成、确认/取消/受限修改和安全删除、真实 MiKan 数据源与候选选择、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、qBittorrent 显式连接测试、批量草案与 AutoBangumi 提交前队列、用户偏好与修正闭环、媒体缓存、AutoBangumi 3.1.18 认证兼容，以及单个/批量共享的正式番名和结构化季数解析。CLI 可通过 `--source mikan --mikan-config <path> --mikan-bangumi <url-or-id>` 直接解析已选中 MiKan `Home/Bangumi/<id>` 合集并绕过搜索；Web API `POST /api/v1/requests` 支持 request-scoped `mikan_bangumi` 字段。真实合集始终由用户显式选择，只有公开候选证据或用户明确确认的季数才能进入 Request、命名和 AutoBangumi 映射。
 
 Stage 18 已完成真实 MiKan 主流程收敛：普通 Web 用户在 `/index` 只输入番剧标题，系统使用默认 MiKan 配置（endpoint 等价于 `https://mikanani.me/Home/Search`，timeout 15 秒）搜索候选合集并展示卡片；选择合集或使用直连 URL/ID fallback 后，默认先生成可编辑订阅草案预览，用户可修改字幕组、筛选规则和文件夹名，再保存为正式订阅方案。fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程：Web UI 中的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。Stage 18 已从普通 UI 移除 `search_endpoint`、`timeout_seconds`、`query` 等技术字段，改用中文业务文案（订阅方案/订阅草案/待确认/已确认/已取消），并将 Seeds 区调整为有效种子优先、完整种子按字幕组分组、排除种子最后。
 
