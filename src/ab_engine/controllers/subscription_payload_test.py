@@ -127,6 +127,7 @@ def test_build_legacy_31_subscription_payload_maps_confirmed_request_to_real_con
             "filter": "(?is)(?:^(?!.*(?:1080p)).*$|.*(?:SP).*)",
             "rss_link": "https://example.invalid/rss.xml",
             "save_path": "番剧 标准标题",
+            "poster_link": None,
         },
         "rss": {
             "name": "番剧 标准标题",
@@ -218,6 +219,34 @@ def test_build_legacy_31_subscription_payload_maps_proven_public_metadata() -> N
     assert data["dpi"] == "1080p"
     assert data["source"] == "mikan"
     assert data["subtitle"] == "简中"
+
+
+def test_build_legacy_31_subscription_payload_propagates_only_trusted_public_poster() -> None:
+    request = _accepted_request()
+    request["source_info"]["matched_bangumi"]["poster_url"] = "https://mikan.example/images/public-cover.jpg"
+
+    assert build_legacy_31_subscription_payload(request)["data"]["poster_link"] == "https://mikan.example/images/public-cover.jpg"
+
+
+@pytest.mark.parametrize(
+    "poster_url",
+    [
+        "/api/v1/mikan/posters/opaque-key",
+        "javascript:alert(1)",
+        "https://user:password@mikan.example/cover.jpg",
+        "https://mikan.example/cover.jpg\nsecret",
+    ],
+)
+def test_build_legacy_31_subscription_payload_omits_invalid_or_opaque_poster(
+    poster_url: str,
+) -> None:
+    request = _accepted_request()
+    request["source_info"]["matched_bangumi"]["poster_url"] = poster_url
+
+    payload = build_legacy_31_subscription_payload(request)
+
+    assert payload["data"]["poster_link"] is None
+    assert "password" not in str(payload)
 
 
 def test_build_legacy_31_subscription_payload_detects_a_nonfirst_season_from_title() -> None:

@@ -156,6 +156,8 @@ Stage 17 已将搜索结果候选卡片接入 Web UI `/index`，并且即使只�
 
 正式番名与季数解析登记为 backlog BL-018；真实 LLM provider 登记为 BL-021，且只允许作为可选增强模块生成多个搜索词。无 API key、无付费能力或 LLM 失败时，M00 仍必须可以通过规则解析、Stage 17 手动候选选择或 Stage 16 直连 URL/ID 完成真实 MiKan 流程。
 
+Stage 25 已将单个与批量入口收敛到共享的 `parse → bounded query plan → M03 candidate search` 编排。parser 只生成可审核搜索提示，不生成真实候选；M00 只有在用户选择带公开 MiKan identity 的候选后才进入详情解析和 preview。
+
 ## 12. Stage 18 编排状态（已完成）
 
 Stage 18 已把真实 MiKan 收敛为 Web 主流程：

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from batch_engine.controllers.anime_title_parser import (
     FakeAnimeTitleParsingProvider,
+    RuleAnimeTitleParsingProvider,
     parse_anime_title,
 )
-from batch_engine.models import ANIME_TITLE_PARSE_SOURCE_FAKE, AnimeTitleParseResult
+from batch_engine.models import (
+    ANIME_TITLE_PARSE_SOURCE_FAKE,
+    AnimeTitleParseResult,
+    AnimeTitleParseSource,
+    AnimeTitleQuery,
+)
 from shared.errors import Stage1Error
 
 
@@ -28,46 +36,126 @@ def test_fake_provider_parses_supported_shorthand_titles() -> None:
     assert {result.source for result in results} == {ANIME_TITLE_PARSE_SOURCE_FAKE}
 
 
-def test_parse_anime_title_returns_searchable_metadata() -> None:
+def test_default_parser_uses_deterministic_rules_not_the_fake_provider() -> None:
     result = parse_anime_title("路哥S4")
 
-    assert result == AnimeTitleParseResult(
-        raw_title="路哥S4",
-        canonical_title_candidates=["欢迎来到实力至上主义的教室 第四季"],
-        season_hint="S4",
-        search_queries=[
-            "欢迎来到实力至上主义的教室 第四季",
-            "实力至上主义教室 S4",
-            "路哥 S4",
-        ],
-        confidence=0.9,
-        needs_user_review=False,
-        source=ANIME_TITLE_PARSE_SOURCE_FAKE,
-    )
+    assert result.canonical_title_candidates == ("欢迎来到实力至上主义的教室",)
+    assert result.season_hint == "S4"
+    assert result.source is AnimeTitleParseSource.ALIAS
+    assert result.search_queries[:2] == ("实力至上主义教室 第四季", "欢迎来到实力至上主义的教室 第4季")
+    assert {entry.source for entry in result.query_plan} >= {AnimeTitleParseSource.ALIAS, AnimeTitleParseSource.RULE, AnimeTitleParseSource.FALLBACK}
+    assert result.normalized_title == "路哥 第四季"
+    assert result.base_title == "路哥"
+    assert result.season.number == 4
 
 
-def test_low_confidence_result_needs_user_review() -> None:
+def test_known_rule_alias_is_high_confidence() -> None:
     result = parse_anime_title("杖剑谭S2")
 
-    assert result.confidence < 0.7
-    assert result.needs_user_review is True
+    assert result.confidence >= 0.7
+    assert result.needs_user_review is False
 
 
-def test_multiple_candidates_need_user_review() -> None:
+def test_known_alias_has_one_conservative_canonical_candidate() -> None:
     result = parse_anime_title("萌王S4")
 
-    assert len(result.canonical_title_candidates) == 2
-    assert result.needs_user_review is True
+    assert result.canonical_title_candidates == ("关于我转生变成史莱姆这档事",)
+    assert result.needs_user_review is False
 
 
 def test_unknown_title_falls_back_to_reviewable_safe_query() -> None:
     result = parse_anime_title("  未知简称S9  ")
 
     assert result.raw_title == "  未知简称S9  "
-    assert result.canonical_title_candidates == ["未知简称S9"]
-    assert result.search_queries == ["未知简称S9"]
-    assert result.confidence == 0.4
+    assert result.canonical_title_candidates == ("未知简称",)
+    assert result.search_queries[-1] == "未知简称S9"
+    assert result.confidence == 0.45
     assert result.needs_user_review is True
+
+
+def test_unknown_explicit_season_is_only_a_reviewable_search_hint() -> None:
+    result = parse_anime_title("无职转生s4")
+
+    assert result.base_title == "无职转生"
+    assert result.normalized_title == "无职转生 第四季"
+    assert result.season.number == 4
+    assert result.season_hint == "S4"
+
+
+def test_unknown_title_never_defaults_to_first_season() -> None:
+    result = parse_anime_title("无职转生")
+
+    assert result.season.number is None
+    assert result.season_hint is None
+
+
+def test_rule_provider_orders_correction_alias_rule_and_fallback_queries() -> None:
+    from shared.models import TitleCorrection
+
+    result = parse_anime_title(
+        " 萌王Ｓ4 ",
+        RuleAnimeTitleParsingProvider(
+            corrections=[TitleCorrection(raw_title="萌王S4", canonical_title="转生史莱姆", query_correction="Tensei Slime")]
+        ),
+    )
+
+    assert result.search_queries == (
+        "Tensei Slime 第四季",
+        "转生史莱姆 第四季",
+        "转生史莱姆 第4季",
+        "转生史莱姆 S4",
+        "转生史莱姆 Season 4",
+        "萌王S4",
+    )
+    assert [entry.source for entry in result.query_plan] == [
+        AnimeTitleParseSource.CORRECTION,
+        AnimeTitleParseSource.CORRECTION,
+        AnimeTitleParseSource.RULE,
+        AnimeTitleParseSource.RULE,
+        AnimeTitleParseSource.RULE,
+        AnimeTitleParseSource.FALLBACK,
+    ]
+    assert result.needs_user_review is False
+
+
+@pytest.mark.parametrize(
+    ("raw_title", "canonical", "query_correction", "expected_prefix"),
+    [
+        ("芙莉莲", "葬送的芙莉莲", "葬送的芙莉莲", "葬送的芙莉莲 第二季"),
+        ("frieren", "Frieren: Beyond Journey's End", "Sousou no Frieren", "Sousou no Frieren 第二季"),
+    ],
+)
+def test_correction_season_hint_is_in_the_actual_shared_query_plan(
+    raw_title: str, canonical: str, query_correction: str, expected_prefix: str
+) -> None:
+    from shared.models import TitleCorrection
+
+    result = parse_anime_title(
+        raw_title,
+        RuleAnimeTitleParsingProvider(
+            corrections=[
+                TitleCorrection(
+                    raw_title=raw_title,
+                    canonical_title=canonical,
+                    query_correction=query_correction,
+                    season_hint="S2",
+                )
+            ]
+        ),
+    )
+
+    assert result.query_plan[0].source is AnimeTitleParseSource.CORRECTION
+    assert expected_prefix in result.search_queries
+    assert result.search_queries == tuple(entry.query for entry in result.query_plan)
+
+
+def test_rule_provider_keeps_unknown_and_overlong_query_plans_reviewable_and_bounded() -> None:
+    result = parse_anime_title("未知标题" * 40)
+
+    assert len(result.query_plan) <= 8
+    assert result.source is AnimeTitleParseSource.RULE
+    assert result.needs_user_review is True
+    assert "未识别正式别名，请人工核对" in result.review_hints
 
 
 def test_provider_failure_returns_recoverable_safe_error() -> None:
@@ -123,10 +211,10 @@ def test_provider_result_is_normalized_and_marks_ambiguous_output_for_review() -
         def parse(self, raw_title: str) -> AnimeTitleParseResult:
             return AnimeTitleParseResult(
                 raw_title="provider raw",
-                canonical_title_candidates=[" 候选A ", "候选A", "候选B"],
+                canonical_title_candidates=["候选A", "候选B"],
                 season_hint="S2",
-                search_queries=[" 候选A ", "", "候选A", "候选B"],
-                confidence=1.4,
+                search_queries=["候选A", "候选B"],
+                confidence=1.0,
                 needs_user_review=False,
                 source="custom",
             )
@@ -134,7 +222,64 @@ def test_provider_result_is_normalized_and_marks_ambiguous_output_for_review() -
     result = parse_anime_title("原始输入", DuplicateProvider())
 
     assert result.raw_title == "原始输入"
-    assert result.canonical_title_candidates == ["候选A", "候选B"]
-    assert result.search_queries == ["候选A", "候选B"]
+    assert result.canonical_title_candidates == ("候选A", "候选B")
+    assert result.search_queries == ("候选A", "候选B")
     assert result.confidence == 1.0
     assert result.needs_user_review is True
+    assert result.source is AnimeTitleParseSource.FALLBACK
+
+
+def test_parse_result_is_immutable_json_safe_and_derives_legacy_queries() -> None:
+    result = AnimeTitleParseResult(
+        raw_title="  无职转生s4  ",
+        canonical_title_candidates=["无职转生 第四季"],
+        season_hint="S4",
+        search_queries=["无职转生 第四季", "无职转生 S4"],
+        confidence=0.8,
+        needs_user_review=False,
+        source="untrusted-provider-detail",
+        normalized_title="无职转生s4",
+        base_title="无职转生",
+        season=4,
+        review_hints=["请核对"],
+    )
+
+    assert result.source is AnimeTitleParseSource.FALLBACK
+    assert result.query_plan == (
+        AnimeTitleQuery("无职转生 第四季", AnimeTitleParseSource.FALLBACK, 1),
+        AnimeTitleQuery("无职转生 S4", AnimeTitleParseSource.FALLBACK, 2),
+    )
+    with pytest.raises(AttributeError):
+        result.search_queries.append("不允许")  # type: ignore[attr-defined]
+    payload = result.to_dict()
+    assert json.loads(json.dumps(payload)) == payload
+    assert payload["season"] == {
+        "number": 4,
+        "raw": "S4",
+        "normalized": "第4季",
+        "source": "title_marker",
+    }
+    assert payload["season_number"] == 4
+    assert payload["season_hint"] == "S4"
+    assert payload["search_queries"] == [entry["query"] for entry in payload["query_plan"]]
+
+
+@pytest.mark.parametrize(
+    ("season", "query_count"),
+    [(0, 1), (100, 1), (1, 9)],
+)
+def test_parse_result_rejects_out_of_bounds_season_and_query_plan(
+    season: int, query_count: int
+) -> None:
+    queries = [f"查询 {index}" for index in range(query_count)]
+    with pytest.raises(ValueError):
+        AnimeTitleParseResult(
+            raw_title="测试标题",
+            canonical_title_candidates=["测试标题"],
+            season_hint=None,
+            search_queries=queries,
+            confidence=0.5,
+            needs_user_review=True,
+            source=AnimeTitleParseSource.RULE,
+            season=season,
+        )

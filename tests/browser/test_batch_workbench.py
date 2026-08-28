@@ -18,6 +18,47 @@ from tests.browser.conftest import set_storage_preferences
 pytestmark = pytest.mark.browser
 
 
+def test_batch_result_renders_the_same_auditable_parse_summary(
+    page: Page, live_server_url: str
+) -> None:
+    item = _batch_item("item-parse-summary", "无职转生s4", status="EMPTY")
+    item["parse_result"] = {
+        "normalized_title": "无职转生 第四季",
+        "base_title": "无职转生",
+        "season": {"number": 4, "raw": "s4", "normalized": "第四季", "source": "title_marker"},
+        "source": "rule",
+        "needs_user_review": True,
+        "review_hints": ["原始输入需人工核对。"],
+        "query_plan": [
+            {"query": "无职转生 第四季", "source": "rule", "priority": 1},
+        ],
+    }
+    item["attempted_queries"] = [
+        {"query": "无职转生 第四季", "source": "rule", "priority": 1},
+    ]
+
+    page.route(
+        "**/api/v1/batches/parse",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=_batch_parse_result([item]),
+        ),
+    )
+    page.goto(f"{live_server_url}/index")
+    page.get_by_role("tab", name="批量搜索").click()
+    page.fill("#batch-raw-input", "无职转生s4")
+    page.click("#batch-parse-submit")
+
+    summary = page.locator(".batch-draft-card .title-parse-summary")
+    expect(summary).to_contain_text("无职转生 第四季")
+    expect(summary).to_contain_text("第4季")
+    expect(summary).to_contain_text("规则识别")
+    expect(summary).to_contain_text("实际搜索词")
+    expect(summary).to_contain_text("需人工核对")
+    assert "源名称：搜索词：" not in page.locator(".batch-draft-card").inner_text()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_corrections_save(page: Page) -> Any:
     """Isolate the user-correction save the front end fires after a successful
@@ -631,7 +672,7 @@ class TestBatchWorkbenchEntry:
         assert "萌王S4" in result_text
         assert "路哥S4" in result_text
         assert "关于我转生变成史莱姆这档事 第四季" in result_text
-        assert "源名称：搜索词：萌王 第四季" in result_text
+        assert "候选来源：MiKan 候选搜索" in result_text
         assert "有效种子数：待展开" in result_text
         assert "已解析" in result_text
         assert "搜索失败" in result_text

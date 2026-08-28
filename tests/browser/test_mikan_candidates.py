@@ -46,6 +46,36 @@ def _candidate_result_json(query: str, candidates: list[dict[str, Any]]) -> str:
     )
 
 
+def _candidate_result_with_parse_json(
+    query: str, candidates: list[dict[str, Any]]
+) -> str:
+    return json.dumps(
+        {
+            "ok": True,
+            "result": {
+                "query": query,
+                "candidates": candidates,
+                "parse_result": {
+                    "normalized_title": "无职转生 第四季",
+                    "base_title": "无职转生",
+                    "season": {"number": 4, "raw": "s4", "normalized": "第四季", "source": "title_marker"},
+                    "source": "alias",
+                    "needs_user_review": True,
+                    "review_hints": ["别名匹配结果，请人工核对。"],
+                    "query_plan": [
+                        {"query": "无职转生 第四季", "source": "alias", "priority": 1},
+                        {"query": "无职转生 S4", "source": "rule", "priority": 2},
+                    ],
+                },
+                "attempted_queries": [
+                    {"query": "无职转生 第四季", "source": "alias", "priority": 1}
+                ],
+            },
+        },
+        ensure_ascii=False,
+    )
+
+
 class TestDefaultFixtureDoesNotUseRealMikan:
     """AC: /index 主流程是真实 MiKan 候选搜索；fixture 生成保留在开发/离线测试区域."""
 
@@ -104,6 +134,11 @@ class TestCandidateSearchStates:
                     "poster_url": "/api/v1/mikan/posters/" + "a" * 64,
                     "source_query": "芙莉莲",
                     "aliases": ["Frieren EN"],
+                    "season_evidence": {
+                        "status": "NEEDS_CONFIRMATION",
+                        "season": 4,
+                        "requires_review": True,
+                    },
                 },
                 {
                     "bangumi_id": "3072",
@@ -139,6 +174,20 @@ class TestCandidateSearchStates:
         assert "MiKan ID: 2353" in text
         assert "MiKan ID: 3072" in text
         assert "搜索词：芙莉莲" in text
+        confirmation = page.locator(".candidate-season-confirmation input")
+        expect(confirmation).not_to_be_checked()
+        choose_button = page.locator(".candidate-card").nth(0).locator(".candidate-select")
+        expect(choose_button).to_be_disabled()
+        expect(choose_button).to_have_attribute("aria-disabled", "true")
+        expect(page.locator(".candidate-season-confirmation")).to_contain_text(
+            "我确认此合集为第4季"
+        )
+        confirmation.check()
+        expect(confirmation).to_be_checked()
+        expect(choose_button).to_be_enabled()
+        expect(choose_button).to_have_attribute("aria-disabled", "false")
+        confirmation.uncheck()
+        expect(choose_button).to_be_disabled()
         expect(
             page.locator(".candidate-card").nth(0).locator("img.candidate-poster")
         ).to_have_attribute(
@@ -156,6 +205,41 @@ class TestCandidateSearchStates:
 
         # The query input is preserved after a successful search.
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
+
+    def test_candidate_search_renders_auditable_parse_summary(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        body = _candidate_result_with_parse_json(
+            "无职转生s4",
+            [
+                {
+                    "bangumi_id": "2353",
+                    "title": "无职转生 第四季",
+                    "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+                    "poster_url": None,
+                    "source_query": "无职转生 第四季",
+                    "aliases": [],
+                }
+            ],
+        )
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(status=200, content_type="application/json", body=body),
+        )
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="无职转生s4")
+        page.click("#mikan-candidate-search-submit")
+
+        summary = page.locator("#mikan-candidate-search-result .title-parse-summary")
+        expect(summary).to_contain_text("识别标题")
+        expect(summary).to_contain_text("无职转生 第四季")
+        expect(summary).to_contain_text("识别季度")
+        expect(summary).to_contain_text("第4季")
+        expect(summary).to_contain_text("解析来源")
+        expect(summary).to_contain_text("别名匹配")
+        expect(summary).to_contain_text("实际搜索词")
+        expect(summary).to_contain_text("需人工核对")
+        assert "alias" not in summary.inner_text()
 
     def test_candidate_cards_show_explicit_or_unknown_episode_progress(
         self, page: Page, live_server_url: str, storage_dir: Path
@@ -903,6 +987,100 @@ class TestCandidateManualSelection:
         # Candidate list and the search input are preserved for retry.
         expect(page.locator(".candidate-card")).to_have_count(1)
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
+
+    def test_async_selection_restores_each_candidates_business_disabled_state(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """A completed request must not unlock unconfirmed/conflicting cards."""
+        candidates = [
+            _candidate(
+                bangumi_id="normal",
+                title="葬送的芙莉莲",
+                mikan_url="https://mikan.example/Home/Bangumi/1",
+            ),
+            {
+                **_candidate(
+                    bangumi_id="needs-review",
+                    title="待确认候选",
+                    mikan_url="https://mikan.example/Home/Bangumi/2",
+                ),
+                "candidate_context": "opaque-candidate-context",
+                "season_evidence": {
+                    "status": "NEEDS_CONFIRMATION",
+                    "season": 4,
+                    "requires_review": True,
+                },
+            },
+            {
+                **_candidate(
+                    bangumi_id="conflict",
+                    title="冲突候选",
+                    mikan_url="https://mikan.example/Home/Bangumi/3",
+                ),
+                "season_evidence": {
+                    "status": "CONFLICT",
+                    "season": None,
+                    "requires_review": True,
+                },
+            },
+        ]
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json("葬送的芙莉莲", candidates),
+            ),
+        )
+        attempts = 0
+        preview = _preview_request("葬送的芙莉莲", "req-state-recompute")
+
+        def _request_handler(route: Any, request: Any) -> None:
+            nonlocal attempts
+            if request.method != "POST":
+                route.continue_()
+                return
+            attempts += 1
+            if attempts == 1:
+                route.fulfill(
+                    status=200,
+                    content_type="application/json",
+                    body=_preview_result_json(preview),
+                )
+                return
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body='{"ok": false, "error_type": "mikan_parse_failed", "error_message": "fixture failure"}',
+            )
+
+        page.route("**/api/v1/requests", _request_handler)
+        set_storage_preferences(page, storage_dir, save_request=False)
+        _open_candidate_search(page, live_server_url)
+        _fill_candidate_search(page, query="葬送的芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+
+        cards = page.locator(".candidate-card")
+        normal = cards.nth(0).locator(".candidate-select")
+        unconfirmed = cards.nth(1).locator(".candidate-select")
+        conflict = cards.nth(2).locator(".candidate-select")
+        expect(normal).to_be_enabled()
+        expect(unconfirmed).to_be_disabled()
+        expect(conflict).to_be_disabled()
+
+        normal.click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+        expect(unconfirmed).to_be_disabled()
+        expect(unconfirmed).to_have_attribute("aria-disabled", "true")
+        expect(conflict).to_be_disabled()
+        expect(conflict).to_have_attribute("aria-disabled", "true")
+
+        normal.click()
+        expect(page.locator("#page-notification")).to_contain_text("生成失败")
+        expect(unconfirmed).to_be_disabled()
+        expect(unconfirmed).to_have_attribute("aria-disabled", "true")
+        expect(conflict).to_be_disabled()
+        expect(conflict).to_have_attribute("aria-disabled", "true")
 
 
 class TestCandidateSelectionSensitiveBoundary:

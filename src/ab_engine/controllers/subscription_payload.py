@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from copy import deepcopy
 import re
+from urllib.parse import urlparse
 from typing import Any, Literal
 
 from request_engine.controllers.request_controller import ACCEPTED
 from shared.errors import Stage1Error
+from shared.title_season import parse_title_season
 
 
 def build_ab_subscription_payload(request: dict[str, Any]) -> dict[str, Any]:
@@ -58,6 +60,7 @@ def build_legacy_31_subscription_payload(request: dict[str, Any]) -> dict[str, A
     bangumi = request.get("source_info", {}).get("matched_bangumi", {})
     season, season_raw = _legacy_31_season(bangumi, official_title, title_raw)
     optional_metadata = _legacy_31_optional_metadata(bangumi)
+    poster_link = _legacy_31_poster_link(bangumi)
     return {
         "data": {
             # These are the public fields AutoBangumi 3.1 uses to identify a
@@ -70,6 +73,7 @@ def build_legacy_31_subscription_payload(request: dict[str, Any]) -> dict[str, A
             "filter": _legacy_31_filter(payload["filter_rule"]),
             "rss_link": rss_url,
             "save_path": save_path,
+            "poster_link": poster_link,
             **({"season_raw": season_raw} if season_raw else {}),
             **optional_metadata,
         },
@@ -209,23 +213,15 @@ def _legacy_31_season(
     # confirmation data.  Never infer season from the original free-form
     # input, which may differ from the user's confirmed selection.
     del title_raw
-    chinese_match = re.search(r"第\s*([^\s季]+)\s*季", official_title)
-    if chinese_match:
-        season = _parse_chinese_or_arabic_season(chinese_match.group(1))
-        if season is None:
-            raise Stage1Error(
-                "ab_season_unsupported",
-                "当前番剧季数无法兼容 Auto Bangumi 3.1",
-                "build_legacy_31_subscription_payload",
-            )
-        return season, chinese_match.group(0)
-    match = re.search(
-        r"(?<![A-Za-z0-9])[Ss]([1-9][0-9]?)(?![0-9])|\bSeason\s+([1-9][0-9]?)\b",
-        official_title,
-        re.IGNORECASE,
-    )
-    if match:
-        return int(next(group for group in match.groups() if group)), match.group(0)
+    parsed = parse_title_season(official_title)
+    if parsed.season is not None:
+        return parsed.season, parsed.season_marker
+    if parsed.review_hints:
+        raise Stage1Error(
+            "ab_season_unsupported",
+            "当前番剧季数无法兼容 Auto Bangumi 3.1",
+            "build_legacy_31_subscription_payload",
+        )
     return 1, None
 
 
@@ -257,6 +253,26 @@ def _legacy_31_optional_metadata(bangumi: Any) -> dict[str, str]:
         for field in ("dpi", "source", "subtitle")
         if isinstance((value := bangumi.get(field)), str) and value.strip()
     }
+
+
+def _legacy_31_poster_link(bangumi: Any) -> str | None:
+    """Return only a server-trusted public source poster for AB 3.1.18."""
+    if not isinstance(bangumi, dict):
+        return None
+    value = bangumi.get("poster_url")
+    if not isinstance(value, str) or not value.strip():
+        return None
+    candidate = value.strip()
+    parsed = urlparse(candidate)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username is not None
+        or parsed.password is not None
+        or any(ord(char) < 32 or ord(char) == 127 for char in candidate)
+    ):
+        return None
+    return candidate
 
 
 def _request_title(request: dict[str, Any]) -> str | None:

@@ -1,126 +1,96 @@
 # MiGuOrca 架构与目录约定
 
-## 1. 目标
+## 1. 当前形态
 
-项目采用模块化单体结构。架构首先服务于当前可验证行为，只有在职责具有独立变化
-原因时才拆分模块，不要求 PRD 模块与 Python 包一一对应。
-
-## 2. 分层
+项目采用本地优先的模块化单体结构。Flask 同时提供服务端页面与 JSON API，CLI 和 Web API 复用业务 engine 与存储适配器。当前不包含独立前端构建链、数据库、后台 worker 或多用户认证系统。
 
 ```text
-CLI / 后续 UI
-       ↓
-apps：用例编排
-       ↓
-engines：业务能力
-       ↓
-shared / 外部适配
+CLI                     Flask/Jinja + 原生 JavaScript
+ │                                  │
+ └──────────── apps / Web API ──────┘
+                    │
+        batch / request / source 编排
+                    │
+   engines + shared contracts + external adapters
+                    │
+     本地 JSON storage / MiKan / AutoBangumi / qB
 ```
 
-- `apps` 接收输入、调用 engine、转换输出，不实现具体规则。
-- `*_engine` 封装一组高内聚业务能力。
-- `shared` 只存放跨 engine 契约、错误、配置和日志等基础能力。
-- 外部系统接入后放在对应 engine 的适配目录，不让领域规则直接依赖网络客户端。
+## 2. 分层职责
 
-## 3. 当前目录
+- `apps`：接收 CLI 或 HTTP 输入，编排用例并转换输出，不复制 engine 内的业务规则。
+- `extensions/flask_api`：统一 JSON envelope、Pydantic 请求校验和异常脱敏。
+- `*_engine`：封装业务能力、外部系统适配器和对应模型。
+- `shared`：跨 engine 契约、错误、配置、日志、标题季数等基础能力。
+- `tests/browser`：使用 Playwright 在真实 Chromium 验证 Web 用户旅程，默认以 fixture 和 route fake 隔离外部系统。
 
-```text
-src/
-  apps/
-    migu_orca_entry/
-      controllers/
+## 3. 当前目录与职责
 
-  catalog_engine/
-    controllers/
-    models/
+| 目录 | 主要责任 |
+| --- | --- |
+| `apps/migu_orca_entry` | CLI、Request 生成总编排、显式 AutoBangumi 提交入口 |
+| `apps/migu_orca_web` | Flask 页面、JSON API、Web 请求/响应适配与静态前端资源 |
+| `extensions/flask_api` | API envelope、校验、异常转换和错误脱敏 |
+| `batch_engine` | 批量输入、标题解析、查询计划、偏好应用、接受与提交队列 |
+| `catalog_engine` | 静态 fixture catalog 与标题匹配 |
+| `mikan_engine` | 真实 MiKan 搜索/详情/RSS 读取、候选缓存和安全封面缓存 |
+| `rss_engine` | RSS 解析与种子筛选 |
+| `subscription_engine` | 字幕组选择与文件夹命名 |
+| `request_engine` | Request 契约、确认、取消、受限修改和摘要 |
+| `ab_engine` | AutoBangumi 配置、认证 adapter、payload 与提交结果 |
+| `qbittorrent_engine` | qBittorrent 配置和显式只读连接测试 |
+| `storage_engine` | Request、history、AB result、queue、preference、correction 的本地 JSON 存储 |
+| `shared` | 跨模块模型、错误、安全日志、标题季数与候选季数证据 |
 
-  rss_engine/
-    controllers/
-    models/
+## 4. 依赖规则
 
-  subscription_engine/
-    controllers/
-    models/
+1. `apps` 可以依赖 engine、`shared` 和 Web extension。
+2. `shared` 不得依赖 `apps` 或具体 engine。
+3. engine 不得反向依赖 `apps`。
+4. engine 之间只在已有明确用例关系时直接依赖；跨模块稳定数据优先放入 `shared` 契约。
+5. 外部 HTTP、认证与存储细节留在对应 adapter/repository，不进入纯规则函数。
+6. 不在多个 engine 中复制标题季数、Request 状态或提交状态模型。
 
-  request_engine/
-    controllers/
-    models/
+当前存在的跨 engine 依赖包括 Request 使用订阅命名、RSS 使用 MiKan transport 数据、批量接受/提交使用 Request 与 AutoBangumi 能力、storage queue repository 使用批量队列模型。这些是现有用例关系，不代表可以任意增加双向依赖。
 
-  ab_engine/
-    controllers/
+## 5. Web 边界现状
 
-  shared/
-    config.py
-    errors.py
-    logging.py
-    models.py
-```
+Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程上仍未前后端分离：
 
-职责映射：
+- `/index` 与 `/settings` 由 Jinja 模板渲染。
+- 两个页面共用 `static/app.js` 和 `static/style.css`。
+- API 请求模型、序列化辅助和路由主要集中在 `apps/migu_orca_web/views.py`。
+- `docs/api/` 尚无正式 OpenAPI 契约。
 
-| 代码模块 | PRD 职责 | 当前责任 |
-| --- | --- | --- |
-| `apps/migu_orca_entry` | M00 | CLI、流程编排、统一结果、显式 AB 提交入口 |
-| `catalog_engine` | M02、M03 | 静态候选读取、标题匹配 |
-| `rss_engine` | M04、M06 | RSS 解析、正则筛选 |
-| `subscription_engine` | M05、M07 | 字幕组选择、文件夹名 |
-| `request_engine` | M01、M09 | Request 契约、快照组装、确认、取消、受限修改 |
-| `ab_engine` | M10 | AB 提交结果契约、payload 映射、fake client、fallback JSON、AB config 读取 |
-| `shared/config.py` | M08、M14 的最小子集 | 用户 JSON 与默认路径 |
-| `shared/logging.py` | M12 的最小子集 | 标准库日志初始化 |
+因此后续前端工程化应先固化 API 契约和服务端安全边界，再渐进替换页面；不得在没有兼容层的情况下同时重写 API 与全部用户旅程。
 
-M11 已作为 `storage_engine` 实现本地 JSON 存储，M13 已作为 Flask Web UI 实现本地管理界面。真实 Auto Bangumi HTTP adapter 已在 `ab_engine` 的 client 协议边界内实现，不反向污染 Request 生成和确认逻辑。
+## 6. 状态与持久化
 
-## 4. 拆分规则
+- 默认运行数据位于 `.migu_orca/storage`，不应提交 Git。
+- Request、history、AB result、queue、preference 和 correction 分目录保存为 JSON。
+- 候选缓存、候选选择 context 等短期状态当前位于单进程内存，不能假定天然支持多 worker。
+- AutoBangumi 与 qBittorrent 凭据保持 request-scoped，不进入持久化、URL、浏览器 storage、日志或测试产物。
 
-满足下列任一条件时，可以新增或拆分 engine：
+## 7. 测试与质量门禁
 
-1. 出现独立外部系统适配边界；
-2. 规则有独立发布或替换需求；
-3. 模块已经形成明显的数据和行为内聚；
-4. 当前合并导致循环依赖或无法独立测试。
-
-不得仅因 PRD 有独立编号就创建 engine。
-
-## 5. 依赖规则
-
-1. `apps` 可以依赖所有 Stage 1 engine 和 `shared`。
-2. engine 可以依赖 `shared`。
-3. engine 之间优先通过 `shared.models` 中的契约传值。
-4. engine 不得反向依赖 `apps`。
-5. `shared` 不得依赖任何 engine。
-6. 不在多个 engine 中复制同名数据模型。
-
-## 6. Controller 与 Model
-
-- Controller 是 engine 的公开业务入口。
-- Model 是 engine 私有模型；跨 engine 模型放在 `shared.models`。
-- Stage 1 不预建 `services`、`clients`、`repositories` 等空目录。
-- 当真实 API、认证或存储出现后，再根据实际调用边界增加这些目录。
-
-## 7. 测试
-
-当前延续既有约定：测试文件与被测文件放在同一目录，使用 `*_test.py`。
-
-测试分为：
-
-- 纯规则单元测试；
-- fixture 解析测试；
-- 入口端到端测试。
-
-所有测试使用：
+测试包括纯规则单元测试、fixture 解析、API/入口测试和 Playwright 浏览器测试。统一命令为：
 
 ```bash
-uv run pytest
+uv run python -m compileall -q src tests
+uv run pytest -q
+uv run pytest tests/browser/ -q
+node --check src/apps/migu_orca_web/static/app.js
 ```
 
-## 8. 配置与运行数据
+浏览器不可用时允许明确记录 skip 原因，但不得把整体 skip 当作 UI Stage 的完成证据。
 
-- 仓库内默认 fixture：`config/system/`、`fixtures/rss/`。
-- 仓库内用户示例配置：`config/user/`。
-- 日志目录仅在显式启用文件日志时使用。
-- 运行时生成的日志不提交 Git。
+## 8. 拆分原则
 
-## 9. 后续演进
+满足以下条件之一时再拆分模块：
 
-真实 MiKan 接入优先作为 `catalog_engine` 的新适配器；Auto Bangumi 已形成独立 `ab_engine` 和稳定提交契约，下一步应只替换真实 HTTP client adapter 注入点；持久化状态机在 M11 阶段设计，不反向扩大 Request 快照的职责。
+1. 出现独立外部系统适配边界。
+2. 规则具有独立变化、替换或测试需求。
+3. 当前文件已经同时承担 schema、路由、编排和序列化等多种职责。
+4. 现有依赖导致循环、并发状态不安全或无法独立验证。
+
+拆分应保持行为兼容和安全边界，不仅为了目录数量或 PRD 编号创建空层次。

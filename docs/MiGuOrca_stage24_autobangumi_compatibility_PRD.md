@@ -161,7 +161,7 @@ Settings 的 AutoBangumi 分区在没有 `request_id` 时也显示“测试连�
 6. 自动化不访问真实 AutoBangumi 写接口；实机只读烟雾不输出或持久化凭据。
 7. README、主 PRD、Future Stages、backlog、Stage 24 PRD 和 M10/M12/M13/M14 文档一致。
 
-Stage 24 完成标志（已达成）：用户在 Settings 填写服务地址和默认账号密码即可先验证 AutoBangumi 连接，再对已接受 Request 显式提交；3.1.18 使用经过验证的 Cookie 与 RSS subscribe 契约，新版 token 模式具有明确能力边界；单个/批量队列保持幂等与脱敏，且任何凭据都不落盘。
+Stage 24 完成标志（已达成）：用户在 Settings 填写服务地址和默认账号密码即可先验证 AutoBangumi 连接，再对已接受 Request 显式提交；3.1.18 使用经过验证的 Cookie 与 RSS subscribe 契约，新版 token 模式具有明确能力边界；单个/批量队列保持幂等与脱敏，且任何凭据都不落盘。Stage 25 补充的 `poster_link` 为可选字段，只来自服务端校验的 MiKan 原始公开海报 URL，缺失不阻断提交。
 
 ## 11. 手动只读验收
 

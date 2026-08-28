@@ -128,6 +128,9 @@ def _clear_candidate_cache() -> None:
     from mikan_engine.controllers.mikan_candidate_cache import candidate_search_cache
 
     candidate_search_cache.clear()
+    from apps.migu_orca_web.views import candidate_selection_contexts
+
+    candidate_selection_contexts.clear()
 
 
 class _FakeMikanTransport:
@@ -1927,6 +1930,111 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
     assert "mikan_bangumi" not in saved_path.read_text(encoding="utf-8")
 
 
+def test_create_request_does_not_trust_client_candidate_aliases_for_season(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "success": True,
+            "request": {
+                "request_id": "preview-id",
+                "status": "PENDING_CONFIRM",
+                "input": {"raw_title": "公开标题"},
+                "source_info": {
+                    "matched_bangumi": {
+                        "title": "公开标题",
+                        "aliases": [],
+                        "mikan_url": "https://mikan.example/Home/Bangumi/44",
+                        "match_score": 1.0,
+                        "poster_url": None,
+                    },
+                    "rss_sources": [],
+                },
+                "confirmable_config": {},
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fake_generate_request)
+    response = _client().post(
+        "/api/v1/requests",
+        json={
+            "title": "公开标题",
+            "source": "mikan",
+            "mikan_bangumi": "https://mikan.example/Home/Bangumi/44",
+            "candidate_aliases": ["某番 S4"],
+            "poster_url": "/api/v1/mikan/posters/forged",
+            "save_request": False,
+        },
+    )
+
+    matched = response.get_json()["result"]["request"]["source_info"]["matched_bangumi"]
+    assert response.status_code == 200
+    assert matched["aliases"] == []
+    assert matched["poster_url"] is None
+    assert "season" not in matched
+    assert "某番 S4" not in response.get_data(as_text=True)
+
+
+def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps.migu_orca_web.views import candidate_selection_contexts
+
+    mikan_url = "https://mikan.example/Home/Bangumi/45"
+    rejected_context = candidate_selection_contexts.issue(mikan_url, 4)
+    context = candidate_selection_contexts.issue(mikan_url, 4)
+
+    def fake_generate_request(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "success": True,
+            "request": {
+                "request_id": "preview-id",
+                "status": "PENDING_CONFIRM",
+                "input": {"raw_title": "公开标题"},
+                "source_info": {"matched_bangumi": {"title": "公开标题", "aliases": [], "mikan_url": mikan_url, "match_score": 1.0}, "rss_sources": []},
+                "confirmable_config": {},
+            },
+            "error": None,
+        }
+
+    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fake_generate_request)
+    payload = {"title": "公开标题", "source": "mikan", "mikan_bangumi": mikan_url, "save_request": False}
+
+    rejected = _client().post(
+        "/api/v1/requests", json={**payload, "candidate_context": rejected_context}
+    )
+    confirmed = _client().post(
+        "/api/v1/requests",
+        json={**payload, "season_confirmation": 4, "candidate_context": context},
+    )
+
+    assert rejected.status_code == 200
+    assert rejected.get_json()["ok"] is False
+    assert "season_confirmation_required" in str(rejected.get_json())
+    matched = confirmed.get_json()["result"]["request"]["source_info"]["matched_bangumi"]
+    assert matched["season"] == 4
+    assert matched["season_evidence"] == "user_confirmed"
+    assert len(candidate_selection_contexts) == 0
+
+
+def test_candidate_context_is_bound_to_url_expired_and_capacity_limited() -> None:
+    from apps.migu_orca_web.views import CandidateSelectionContextStore
+
+    now = [0.0]
+    contexts = CandidateSelectionContextStore(ttl_seconds=10, max_entries=2, now=lambda: now[0])
+    first = contexts.issue("https://mikan.example/Home/Bangumi/1", 2)
+    second = contexts.issue("https://mikan.example/Home/Bangumi/2", 3)
+    third = contexts.issue("https://mikan.example/Home/Bangumi/3", 4)
+
+    assert len(contexts) == 2
+    assert contexts.consume(first, "https://mikan.example/Home/Bangumi/1") == (False, None)
+    assert contexts.consume(second, "https://mikan.example/Home/Bangumi/other") == (False, None)
+    now[0] = 11.0
+    assert contexts.consume(third, "https://mikan.example/Home/Bangumi/3") == (False, None)
+    assert len(contexts) == 0
+
+
 def test_create_request_rejects_invalid_mikan_direct_entry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2127,6 +2235,27 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert payload["result"]["query"] == "芙莉莲"
+    assert payload["result"]["status"] == BATCH_ITEM_STATUS_FOUND
+    assert payload["result"]["parse_result"] == {
+        "raw_title": "芙莉莲",
+        "normalized_title": "芙莉莲",
+        "base_title": "芙莉莲",
+        "canonical_title_candidates": ["芙莉莲"],
+        "season": {"number": None, "raw": None, "normalized": None, "source": "none"},
+        "season_number": None,
+        "season_hint": None,
+        "query_plan": [
+            {"query": "芙莉莲", "source": "rule", "priority": 1},
+        ],
+        "search_queries": ["芙莉莲"],
+        "source": "rule",
+        "confidence": 0.45,
+        "needs_user_review": True,
+        "review_hints": ["未识别正式别名，请人工核对"],
+    }
+    assert payload["result"]["attempted_queries"] == [
+        {"query": "芙莉莲", "source": "rule", "priority": 1},
+    ]
     assert payload["result"]["candidates"] == [
         {
             "bangumi_id": "2353",
@@ -2342,9 +2471,12 @@ def test_candidate_search_api_returns_sanitized_mikan_errors(
 
     payload = response.get_json()
     assert response.status_code == 200
-    assert payload["ok"] is False
-    assert payload["error_type"] == expected_error_type
-    assert payload["error_data"]["failed_step"] == expected_failed_step
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert result["status"] == BATCH_ITEM_STATUS_FAILED
+    assert result["error"]["error_type"] == expected_error_type
+    assert result["error"]["failed_step"] == expected_failed_step
+    assert set(result["error"]["details"]) <= {"category", "field", "length", "recoverable"}
     assert client.searches == ["芙莉莲"]
 
 
@@ -2453,8 +2585,11 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
             "mikan_url": "https://mikan.example/Home/Bangumi/3072",
             "poster_url": None,
             "source_query": "咒术回战 第三季",
-            "aliases": [],
-            "recommendation": "推荐：第 3 季",
+                "aliases": [],
+                "recommendation": "推荐：第 3 季",
+                "season_evidence": {
+                    "status": "PROVEN", "season": 3, "requires_review": False,
+                },
         },
         {
             "bangumi_id": "3071",
@@ -2462,8 +2597,11 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
             "mikan_url": "https://mikan.example/Home/Bangumi/3071",
             "poster_url": None,
             "source_query": "咒术回战 第三季",
-            "aliases": [],
-            "recommendation": "季数不符",
+                "aliases": [],
+                "recommendation": "季数不符",
+                "season_evidence": {
+                    "status": "CONFLICT", "season": None, "requires_review": True,
+                },
         },
     ]
 
@@ -2661,17 +2799,21 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         BATCH_ITEM_STATUS_FOUND,
         BATCH_ITEM_STATUS_EMPTY,
     ]
-    assert items[0]["canonical_title_candidates"] == [
-        "关于我转生变成史莱姆这档事 第四季",
-        "关于我转生变成史莱姆这档事 第4季",
+    assert items[0]["canonical_title_candidates"] == ["关于我转生变成史莱姆这档事"]
+    assert items[0]["parse_result"]["season"]["number"] == 4
+    assert items[0]["parse_result"]["season_number"] == 4
+    assert items[0]["parse_result"]["source"] == "alias"
+    assert items[0]["attempted_queries"] == [
+        {"query": entry["query"], "source": entry["source"], "priority": entry["priority"]}
+        for entry in items[0]["parse_result"]["query_plan"]
     ]
     assert items[0]["season_hint"] == "S4"
     assert "转生史莱姆 第四季" in items[0]["search_queries"]
-    assert items[0]["confidence"] == 0.86
+    assert items[0]["confidence"] == 0.82
     assert items[0]["needs_user_review"] is True
     assert items[0]["candidates"] == []
-    assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室 第四季"]
-    assert items[1]["needs_user_review"] is False
+    assert items[1]["canonical_title_candidates"] == ["欢迎来到实力至上主义的教室"]
+    assert items[1]["needs_user_review"] is True
     assert items[1]["candidates"][0]["bangumi_id"] == "4001"
     # US-154: no-candidate items (even high-confidence single-candidate ones)
     # must be flagged for review.
@@ -2691,11 +2833,11 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
             "case_sensitive": False,
         },
         "naming": {"strategy": "official_title_season", "template": "{title}"},
-        "expected_folder_name": "关于我转生变成史莱姆这档事 第四季",
+        "expected_folder_name": "关于我转生变成史莱姆这档事 第4季",
     }
     assert items[0]["preference_warnings"] == []
     assert items[1]["applied_preferences"]["expected_folder_name"] == (
-        "欢迎来到实力至上主义的教室 第四季"
+        "欢迎来到实力至上主义的教室 第4季"
     )
     assert items[1]["preference_warnings"] == []
     # US-154: preference_hits summarizes which preference defaults applied.
@@ -2713,13 +2855,12 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         {
             "field": "naming",
             "applied": True,
-            "summary": "命名策略已生成默认目录名：欢迎来到实力至上主义的教室 第四季",
+            "summary": "命名策略已生成默认目录名：欢迎来到实力至上主义的教室 第4季",
         },
     ]
-    # The high-confidence single-candidate item with a candidate has no review
-    # hints; the multi-candidate and no-candidate items carry Chinese hints.
-    assert items[1]["review_hints"] == []
-    assert any("存在多个候选名称" in hint for hint in items[0]["review_hints"])
+    # A raw-input fallback is always reviewable, even beside a matching candidate.
+    assert any("原始输入" in hint for hint in items[1]["review_hints"])
+    assert any("未找到候选" in hint for hint in items[0]["review_hints"])
     assert any("未找到候选合集" in hint for hint in items[2]["review_hints"])
 
 
@@ -2808,8 +2949,8 @@ def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
     assert item["status"] == BATCH_ITEM_STATUS_FAILED
     assert item["error"]["error_message"] == "AI 名称解析失败，请检查该条目后重试"
     assert item["error"]["details"] == {
-        "raw_title_length": 4,
-        "provider_source": "fake",
+        "category": "title_parse",
+        "length": 4,
         "recoverable": True,
     }
     assert "secret-token" not in body
@@ -3162,14 +3303,10 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
         BATCH_ITEM_STATUS_FOUND,
         BATCH_ITEM_STATUS_FOUND,
     ]
-    assert client.searches == [
-        "欢迎来到实力至上主义的教室 第四季",
-        "实力至上主义教室 S4",
-        "路哥 S4",
-        "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
-        "邻家的天使大人 第二季",
-        "邻家天使 S2",
-    ]
+    assert "欢迎来到实力至上主义的教室 第四季" in client.searches
+    assert "实力至上主义教室 第四季" in client.searches
+    assert "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季" in client.searches
+    assert len(client.searches) <= 16
     assert items[0]["candidates"] == [
         {
             "bangumi_id": "4001",
@@ -3177,8 +3314,11 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
             "mikan_url": "https://mikan.example/Home/Bangumi/4001",
             "poster_url": None,
             "source_query": "欢迎来到实力至上主义的教室 第四季",
-            "aliases": ["路哥 S4"],
-            "recommendation": "推荐：第 4 季",
+                "aliases": ["路哥 S4"],
+                "recommendation": "推荐：第 4 季",
+                "season_evidence": {
+                    "status": "PROVEN", "season": 4, "requires_review": False,
+                },
         }
     ]
     assert items[1]["candidates"] == [
@@ -3189,13 +3329,16 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
             "poster_url": "/api/v1/mikan/posters/"
             + poster_cache_key("https://mikan.example/images/2002.jpg"),
             "source_query": "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
-            "aliases": [],
-            "recommendation": "推荐：第 2 季",
+                "aliases": [],
+                "recommendation": "推荐：第 2 季",
+                "season_evidence": {
+                    "status": "PROVEN", "season": 2, "requires_review": False,
+                },
         }
     ]
 
 
-def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_others(
+def test_batch_parse_api_tolerates_one_candidate_search_failure_without_blocking_others(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     client = _MappedCandidateSearchClient(
@@ -3245,22 +3388,16 @@ def test_batch_parse_api_marks_single_candidate_search_failure_without_blocking_
     assert payload["ok"] is True
     assert [item["status"] for item in items] == [
         BATCH_ITEM_STATUS_FOUND,
-        BATCH_ITEM_STATUS_FAILED,
+        BATCH_ITEM_STATUS_EMPTY,
     ]
     assert items[0]["candidates"][0]["bangumi_id"] == "4001"
     assert items[1]["raw_title"] == "杖剑谭S2"
-    assert items[1]["canonical_title_candidates"] == ["杖与剑的魔剑谭 第二季"]
+    assert items[1]["canonical_title_candidates"] == ["杖与剑的魔剑谭"]
     assert items[1]["candidates"] == []
-    assert items[1]["error"]["error_type"] == "mikan_timeout"
-    assert items[1]["error"]["failed_step"] == "mikan_search"
-    assert items[1]["error"]["details"] == {
-        "url": "[redacted-url]",
-        "[redacted]": "[redacted]",
-    }
-    # US-154: a search failure must be flagged for review with a Chinese hint,
-    # but it never leaks the redacted URL/cookie from the search error.
+    assert "error" not in items[1]
+    # A later successful empty fallback makes the final state EMPTY, while the
+    # failed query remains non-blocking and its sensitive detail is not exposed.
     assert items[1]["needs_user_review"] is True
-    assert any("候选搜索失败" in hint for hint in items[1]["review_hints"])
     assert "secret-token" not in body
     assert "session-cookie" not in body
     assert "https://mikan.example/Home/Search" not in body
@@ -3364,10 +3501,9 @@ def test_batch_parse_api_marks_low_confidence_item_for_review(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert item["status"] == BATCH_ITEM_STATUS_FOUND
-    assert item["confidence"] == 0.62
+    assert item["confidence"] == 0.82
     assert item["candidates"][0]["bangumi_id"] == "2001"
     assert item["needs_user_review"] is True
-    assert any("置信度较低" in hint for hint in item["review_hints"])
 
 
 def test_batch_parse_api_marks_preference_conflict_item_for_review(
@@ -3641,46 +3777,18 @@ def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
     assert response.status_code == 200
     assert payload["ok"] is True
     assert item["status"] == BATCH_ITEM_STATUS_FOUND
-    # The enhanced queries are searched first; the original queries are never
-    # searched because the enhanced search already found candidates.
-    assert client.searches == [
-        "欢迎来到实力至上主义的教室 第四季",
-        "欢迎来到实力至上主义的教室 第4季",
-        "欢迎来到实力至上主义的教室 S4",
-        "欢迎来到实力至上主义的教室 Season 4",
-        "欢迎来到实力至上主义的教室",
-    ]
-    assert item["enhanced_search_queries"] == [
-        {
-            "query": "欢迎来到实力至上主义的教室 第四季",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
-            "source": "correction:query",
-        },
-        {
-            "query": "欢迎来到实力至上主义的教室 第4季",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
-            "source": "correction:query",
-        },
-        {
-            "query": "欢迎来到实力至上主义的教室 S4",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
-            "source": "correction:query",
-        },
-        {
-            "query": "欢迎来到实力至上主义的教室 Season 4",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
-            "source": "correction:query",
-        },
-        {
-            "query": "欢迎来到实力至上主义的教室",
-            "original_query": "欢迎来到实力至上主义的教室 第四季",
-            "source": "correction:canonical",
-        },
-    ]
+    # One high-priority correction query found candidates, so weaker variants
+    # are not sent to MiKan.
+    assert client.searches == ["欢迎来到实力至上主义的教室 第四季"]
+    assert item["enhanced_search_queries"][0] == {
+        "query": "欢迎来到实力至上主义的教室 第四季",
+        "original_query": "欢迎来到实力至上主义的教室 第四季",
+        "source": "correction:query",
+    }
     assert item["candidates"][0]["bangumi_id"] == "4001"
 
 
-def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_nothing(
+def test_batch_parse_api_falls_back_through_the_unified_correction_plan(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3692,13 +3800,13 @@ def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_noth
     # Only an original parse query has a candidate; the enhanced queries do not.
     client = _MappedCandidateSearchClient(
         responses={
-            "路哥 S4": [
+            "路哥S4": [
                 MikanCandidate(
                     bangumi_id="4001",
                     title="欢迎来到实力至上主义的教室 第四季",
                     mikan_url="https://mikan.example/Home/Bangumi/4001",
-                    source_query="路哥 S4",
-                    aliases=["路哥 S4"],
+                    source_query="路哥S4",
+                    aliases=["路哥S4"],
                 )
             ]
         }
@@ -3718,18 +3826,14 @@ def test_batch_parse_api_falls_back_to_original_queries_when_enhanced_finds_noth
     assert response.status_code == 200
     assert payload["ok"] is True
     assert item["status"] == BATCH_ITEM_STATUS_FOUND
-    # The enhanced queries are searched first, then the original queries on
-    # fallback. The repeated first query is served from the candidate cache, so
-    # it is not searched twice through the client.
-    assert client.searches == [
+    # The correction and original fallbacks share one bounded plan.
+    assert client.searches[:4] == [
         "欢迎来到实力至上主义的教室 第四季",
+        "实力至上主义教室 第四季",
         "欢迎来到实力至上主义的教室 第4季",
         "欢迎来到实力至上主义的教室 S4",
-        "欢迎来到实力至上主义的教室 Season 4",
-        "欢迎来到实力至上主义的教室",
-        "实力至上主义教室 S4",
-        "路哥 S4",
     ]
+    assert client.searches[-1] == "路哥S4"
     assert item["candidates"][0]["bangumi_id"] == "4001"
 
 

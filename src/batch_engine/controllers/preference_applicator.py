@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 
 from batch_engine.controllers.anime_title_parser import LOW_CONFIDENCE_THRESHOLD
@@ -11,6 +10,7 @@ from batch_engine.models import (
 )
 from shared.errors import Stage1Error
 from shared.models import NamingPreference, VersionedUserPreference
+from shared.title_season import parse_title_season
 from subscription_engine.controllers.subscription_controller import generate_folder_name
 
 
@@ -283,14 +283,6 @@ def apply_preferences_to_item(
     )
 
 
-#: A season marker already present in a title, so the season hint is not
-#: appended a second time (第四季 / 第4季 / S2 / Season 2).
-_SEASON_MARKER_RE = re.compile(
-    r"第\s*[0-9一二三四五六七八九十百]+\s*季|[Ss]\d{1,2}|Season\s*\d+",
-    re.IGNORECASE,
-)
-
-
 def _naming_title(
     raw_title: str,
     parse_result: AnimeTitleParseResult,
@@ -311,17 +303,10 @@ def _naming_title(
 
 
 def _append_season_hint(base: str, season_hint: str | None) -> str:
-    hint = (season_hint or "").strip()
-    if not hint or _SEASON_MARKER_RE.search(base):
+    parsed = parse_title_season(season_hint or "")
+    if parsed.season is None or parse_title_season(base).season is not None:
         return base
-    suffix = hint
-    season_match = re.fullmatch(r"[Ss](\d{1,2})", hint)
-    if season_match:
-        suffix = "第" + str(int(season_match.group(1))) + "季"
-    season_match = re.fullmatch(r"Season\s*(\d+)", hint, re.IGNORECASE)
-    if season_match:
-        suffix = "第" + str(int(season_match.group(1))) + "季"
-    return f"{base} {suffix}".strip()
+    return f"{base} 第{parsed.season}季".strip()
 
 
 __all__ = [

@@ -1289,9 +1289,25 @@ def _poster_url_from_attrs(attrs: dict[str, str], base_url: str) -> str | None:
         return None
     absolute_url = urljoin(base_url, src)
     parsed = urlparse(absolute_url)
-    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+    if not _is_safe_public_poster_url(parsed):
         return None
     return urlunparse(parsed)
+
+
+def _is_safe_public_poster_url(parsed: object) -> bool:
+    """Accept only normal public HTTP(S) cover URLs from server-read MiKan HTML."""
+    scheme = getattr(parsed, "scheme", "")
+    netloc = getattr(parsed, "netloc", "")
+    username = getattr(parsed, "username", None)
+    password = getattr(parsed, "password", None)
+    values = (getattr(parsed, field, "") for field in ("path", "params", "query", "fragment"))
+    return (
+        scheme in {"http", "https"}
+        and bool(netloc)
+        and username is None
+        and password is None
+        and all(not any(ord(char) < 32 or ord(char) == 127 for char in value) for value in values)
+    )
 
 
 def _rss_query_subgroup_id(rss_url: str) -> str | None:

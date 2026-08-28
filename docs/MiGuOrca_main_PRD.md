@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.22 |
-| 文档状态 | Stage 24 AutoBangumi 真实认证与订阅兼容闭环已完成 |
+| 当前版本 | v0.25 |
+| 文档状态 | Stage 25 正式番名与季数解析已完成 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -67,7 +67,7 @@ MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台
 
 MiGuOrca 不做 Auto Bangumi 或 qBittorrent 的替代品，不建立绕过 Auto Bangumi 的长期订阅执行系统，也不直接创建 qBittorrent 下载任务。下载执行和长期订阅执行由 Auto Bangumi / qBittorrent 负责；MiGuOrca 聚焦订阅前判断、批量编排和用户可审核配置生成。
 
-当前已完成 Stage 21：离线 Request 生成、Request 确认/取消/受限修改、已保存 Request 安全删除、真实 Auto Bangumi HTTP adapter、显式真实 MiKan 数据源、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、Web UI Request 操作入口、qBittorrent 显式连接测试入口、Web UI Settings 信息架构拆分、Web UI Request 可操作性修复、Web UI ACCEPTED 管理与筛选语义优化、真实 MiKan 合集详情页解析与直连 URL/ID 入口、真实 MiKan 搜索候选合集展示与用户手动选择、真实 MiKan Web 主流程收敛、批量新番订阅草案工作台、批量接受与 Auto Bangumi 提交前队列，以及用户偏好与智能推荐闭环。CLI 可通过 `--source mikan --mikan-config <path> --mikan-bangumi <url-or-id>` 直接解析已选中 MiKan `Home/Bangumi/<id>` 合集并绕过搜索；Web API `POST /api/v1/requests` 支持 request-scoped `mikan_bangumi` 字段。详情页 parser 会输出安全结构化元数据，优先返回字幕组级 RSS，番剧级 RSS 仅作为 `全部字幕组` fallback。Stage 17 新增 request-scoped 候选搜索 Web API `POST /api/v1/mikan/candidates`，并在 `/index` Request 生成流程中接入候选卡片展示、`选择此合集` 手动选择、直连 URL/ID fallback、进程内候选缓存和 display-only 推荐标签；候选选择与直连 fallback 都复用 Stage 16 `mikan_bangumi` 详情解析链路，不自动选择、不自动生成，即使只有一个候选也必须用户显式点击。Stage 20 新增批量接受/全接受、提交前队列、Auto Bangumi 顺序提交和失败项独立重试（Web API `POST /api/v1/batches/<batch_id>/accept|queue|submit|retry`）；队列只保存非敏感元数据，提交配置 request-scoped，批量提交不创建 qBittorrent 下载任务、不绕过 Auto Bangumi、不引入后台常驻 worker。Stage 21 新增非敏感用户偏好存储与 Web API（`GET/POST /api/v1/preferences`）、非敏感标题修正存储与 Web API（`GET/POST /api/v1/corrections`）、`/settings` 偏好管理面板、批量草案偏好应用、偏好命中/低置信度审核元数据和搜索词增强；偏好与修正存储只保存非敏感字段，AI 只生成候选，用户仍需逐卡审核并显式接受，无偏好或增强失败时回退 Stage 19 默认流程。
+当前已完成到 Stage 25：离线 Request 生成、确认/取消/受限修改和安全删除、真实 MiKan 数据源与候选选择、本地 JSON 持久化、Flask Web UI、浏览器自动化测试、qBittorrent 显式连接测试、批量草案与 AutoBangumi 提交前队列、用户偏好与修正闭环、媒体缓存、AutoBangumi 3.1.18 认证兼容，以及单个/批量共享的正式番名和结构化季数解析。CLI 可通过 `--source mikan --mikan-config <path> --mikan-bangumi <url-or-id>` 直接解析已选中 MiKan `Home/Bangumi/<id>` 合集并绕过搜索；Web API `POST /api/v1/requests` 支持 request-scoped `mikan_bangumi` 字段。真实合集始终由用户显式选择，只有公开候选证据或用户明确确认的季数才能进入 Request、命名和 AutoBangumi 映射。
 
 Stage 18 已完成真实 MiKan 主流程收敛：普通 Web 用户在 `/index` 只输入番剧标题，系统使用默认 MiKan 配置（endpoint 等价于 `https://mikanani.me/Home/Search`，timeout 15 秒）搜索候选合集并展示卡片；选择合集或使用直连 URL/ID fallback 后，默认先生成可编辑订阅草案预览，用户可修改字幕组、筛选规则和文件夹名，再保存为正式订阅方案。fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程：Web UI 中的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。Stage 18 已从普通 UI 移除 `search_endpoint`、`timeout_seconds`、`query` 等技术字段，改用中文业务文案（订阅方案/订阅草案/待确认/已确认/已取消），并将 Seeds 区调整为有效种子优先、完整种子按字幕组分组、排除种子最后。
 
@@ -82,6 +82,8 @@ Stage 22 已完成。单个与批量搜索继续复用 `_search_mikan_candidates
 Stage 23 已完成。MiKan 封面现经服务端安全同源缓存异步加载，搜索 transport 以结构感知提前停止，批量候选/草案布局、剧集摘要和禁用按钮反馈均已收敛。
 
 Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 token Cookie、`/api/v1/status` 与 `/api/v1/rss/subscribe` 的 `{data, rss}` 契约，成功以 `status=true` 判断且订阅 ID 可为空；Settings 提供 request-scoped 只读连接测试，单个/批量队列复用同一 adapter/payload/result seam。API Token/Bearer 模式维持兼容但无已证明写契约时 fail closed。执行 PRD 见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。其他未开发事项只按 backlog 优先级排序，不预绑定 Stage 编号。
+
+Stage 25 已完成。单个与批量 MiKan 搜索共享确定性正式番名/季数解析、结构化 season、有界 query plan 和可审核来源展示；parser 只生成搜索提示，真实合集仍由用户显式选择，只有选中候选公开证据或用户确认能证明的季数才能进入 Request、M07 与 M10。执行 PRD 见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
 ## 4. 第一阶段范围
 
@@ -157,10 +159,10 @@ Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 
 
 | 模块编号 | 模块名称 | 当前状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
-| M00 | 入口与流程编排模块 | Stage 18～23 已实现真实候选、批量草案/队列、偏好/搜索增强、候选选择与统一草案详情链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
+| M00 | 入口与流程编排模块 | Stage 18～25 已实现真实候选、批量草案/队列、偏好/搜索增强、候选选择、结构化季数与统一草案详情链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
 | M01 | 用户输入与 Request 管理模块 | Stage 15 已实现 CLI/Web 确认、取消、受限修改；`ACCEPTED` Request 支持受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
-| M02 | 番剧搜索与匹配模块 | Stage 1 已确认；Stage 22 已明确标题解析/匹配成功不等于真实 MiKan 候选搜索成功 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
-| M03 | MiKan 数据源模块 | Stage 17～23 已实现详情、候选、缓存、搜索增强、同源安全封面、提前停止和可选总集数契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
+| M02 | 番剧搜索与匹配模块 | Stage 25 已实现确定性标题/季数解析与有界查询计划；解析成功不等于真实 MiKan 候选搜索成功 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
+| M03 | MiKan 数据源模块 | Stage 17～25 已实现详情、候选、缓存、共享查询计划、同源安全封面、提前停止和可选总集数契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
 | M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
 | M05 | 字幕组评估模块 | Stage 1 已确认；Stage 21 已为 `select_subtitle_group` 增加排除列表过滤（先排除、再优先、最后 fallback） | P1 | docs/modules/M05-subtitle-group-evaluation-PRD.md |
 | M06 | 种子筛选规则模块 | Stage 15 已实现默认字面匹配、大小写不敏感与可选 `use_regex` / `case_sensitive` | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
@@ -170,7 +172,7 @@ Stage 24 已完成。AutoBangumi 3.1.18 默认使用账号密码登录、单次 
 | M10 | Auto Bangumi 集成模块 | Stage 24 已按 3.1.18 契约实现账号密码/Cookie、真实 subscribe payload/response，并保留 fail-closed Bearer 兼容模式 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
 | M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 已实现 path-safe 封面缓存、滑动 TTL 与机会式清理 | P2 | docs/modules/M11-storage-state-PRD.md |
 | M12 | 日志与错误处理模块 | Stage 24 已覆盖 AB 认证、连接、协议兼容与规则转换的脱敏分类 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 24 已完成 AB 账号密码/API Token、连接测试和单批量提交界面 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 25 已完成 AB 界面、解析来源、结构化季数和实际搜索词展示 | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 24 已定义 request-scoped AB 双认证配置 | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
@@ -229,8 +231,9 @@ M00 CLI 与流程编排
 | 第二十二阶段 | Web UI 搜索工作台重构与真实候选闭环（已完成） | M13、M00、M02、M03、测试基础设施 |
 | 第二十三阶段 | 媒体缓存、MiKan 读取优化与批量审核体验（已完成） | M03、M11、M12、M13、测试基础设施 |
 | 第二十四阶段 | AutoBangumi 真实认证与订阅兼容闭环（已完成） | M10、M12、M13、M14、测试基础设施 |
+| 第二十五阶段 | 正式番名与季数解析（已完成） | M00、M02、M03、M07、M10、M12、M13、测试基础设施 |
 
-Stage 24 之后不预留阶段编号；从 backlog 中按当时优先级选择并单独规划。
+Stage 25 已完成 BL-018；Stage 25 之后不预留阶段编号。
 
 ## 10. 主 PRD 已确认事项
 
@@ -277,7 +280,7 @@ Stage 24 之后不预留阶段编号；从 backlog 中按当时优先级选择�
 
 ## 13. 下一步工作
 
-1. 正式番名与季数解析、部署/配置向导及条件触发事项在 `docs/backlog.md` 维护，流式封面代理在 `docs/optional_features.md` 维护，不提前绑定 Stage 编号；当前最高优先级待规划项为 BL-018。
+1. BL-018 已由 Stage 25 正式番名与季数解析完成；执行范围见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。其余部署/配置向导及条件触发事项继续在 `docs/backlog.md` 维护，流式封面代理在 `docs/optional_features.md` 维护。
 2. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
 3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。

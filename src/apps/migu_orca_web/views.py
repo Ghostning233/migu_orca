@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections import OrderedDict
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from secrets import token_urlsafe
+from time import monotonic
+from typing import Any, Callable, Literal
 
 from flask import Blueprint, Response, redirect, render_template, url_for
 from pydantic import BaseModel, Field, field_validator
@@ -24,7 +28,7 @@ from apps.migu_orca_entry.controllers.entry_controller import (
 )
 from batch_engine.controllers.anime_title_parser import (
     AnimeTitleParsingProvider,
-    FakeAnimeTitleParsingProvider,
+    RuleAnimeTitleParsingProvider,
     parse_anime_title,
 )
 from batch_engine.controllers.batch_accept_controller import (
@@ -39,6 +43,10 @@ from batch_engine.controllers.batch_draft_controller import (
     update_batch_item_status,
 )
 from batch_engine.controllers.batch_queue_controller import serialize_queue
+from batch_engine.controllers.candidate_search_orchestrator import (
+    CandidateSearchOutcome,
+    search_parsed_candidates,
+)
 from batch_engine.controllers.batch_submit_controller import (
     compose_ab_submit_one,
     recover_batch_queue_item,
@@ -81,6 +89,7 @@ from request_engine.controllers.request_controller import (
     summarize_request,
 )
 from shared.errors import Stage1Error
+from shared.season_evidence import attach_selected_candidate_season, candidate_season_evidence
 from shared.models import EntryRequest, TitleCorrection, VersionedUserPreference
 from storage_engine.controllers.correction_repository import (
     build_correction_from_api,
@@ -113,6 +122,56 @@ from storage_engine.controllers.storage_config import StorageConfig, load_storag
 
 api_blueprint = Blueprint("migu_orca_web_api", __name__)
 poster_service = MikanPosterService()
+
+
+@dataclass(frozen=True)
+class _CandidateSelectionContext:
+    mikan_url: str
+    season: int | None
+    created_at: float
+
+
+class CandidateSelectionContextStore:
+    """Bounded, expiring, one-time capability for a reviewed candidate choice."""
+
+    def __init__(self, *, ttl_seconds: float = 300.0, max_entries: int = 128, now: Callable[[], float] | None = None) -> None:
+        self._ttl_seconds = ttl_seconds
+        self._max_entries = max_entries
+        self._now = now or monotonic
+        self._entries: OrderedDict[str, _CandidateSelectionContext] = OrderedDict()
+
+    def issue(self, mikan_url: str, season: int | None) -> str:
+        self._purge()
+        while len(self._entries) >= self._max_entries:
+            self._entries.popitem(last=False)
+        token = token_urlsafe(24)
+        self._entries[token] = _CandidateSelectionContext(mikan_url, season, self._now())
+        return token
+
+    def consume(self, token: str | None, mikan_url: str) -> tuple[bool, int | None]:
+        self._purge()
+        if not token:
+            return False, None
+        context = self._entries.pop(token, None)
+        if context is None or context.mikan_url != mikan_url:
+            return False, None
+        return True, context.season
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+    def __len__(self) -> int:
+        self._purge()
+        return len(self._entries)
+
+    def _purge(self) -> None:
+        threshold = self._now() - self._ttl_seconds
+        for token, context in list(self._entries.items()):
+            if context.created_at <= threshold:
+                del self._entries[token]
+
+
+candidate_selection_contexts = CandidateSelectionContextStore()
 web_blueprint = Blueprint(
     "migu_orca_web",
     __name__,
@@ -316,6 +375,8 @@ class RequestCreatePayload(BaseModel):
     mikan_bangumi: str | None = None
     storage_dir: str | None = None
     save_request: bool = False
+    season_confirmation: int | None = None
+    candidate_context: str | None = None
 
     @field_validator("title")
     @classmethod
@@ -338,11 +399,29 @@ class RequestCreatePayload(BaseModel):
     def validate_mikan_bangumi(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        direct_entry = value.strip()
-        if not direct_entry:
+        bangumi = value.strip()
+        if not bangumi:
             raise ValueError("mikan_bangumi cannot be empty")
-        return direct_entry
+        return bangumi
 
+    @field_validator("season_confirmation")
+    @classmethod
+    def validate_season_confirmation(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if isinstance(value, bool) or not 1 <= value <= 99:
+            raise ValueError("season_confirmation must be between 1 and 99")
+        return value
+
+    @field_validator("candidate_context")
+    @classmethod
+    def validate_candidate_context(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        token = value.strip()
+        if not token or len(token) > 128 or not token.replace("-", "").replace("_", "").isalnum():
+            raise ValueError("candidate_context is invalid")
+        return token
 
 class RequestActionPayload(BaseModel):
     """Base payload for confirm/cancel/modify operations. `request_id` comes from URL path."""
@@ -452,7 +531,7 @@ def _resolve_mikan_config(explicit: RequestMikanConfigPayload | None) -> MikanCo
 
 
 def _batch_title_parsing_provider() -> AnimeTitleParsingProvider:
-    return FakeAnimeTitleParsingProvider()
+    return RuleAnimeTitleParsingProvider()
 
 
 def _serialize_batch_parse_result(
@@ -468,6 +547,7 @@ def _serialize_batch_parse_result(
     review_hints: list[str] | None = None,
     enhanced_search_queries: list[dict[str, object]] | None = None,
     preview_request: dict[str, object] | None = None,
+    attempted_queries: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "item_id": item.item_id,
@@ -483,6 +563,10 @@ def _serialize_batch_parse_result(
             else needs_user_review
         ),
         "source": parse_result.source,
+        # The nested contract is the shared API representation.  The older
+        # top-level fields remain for existing clients during the migration.
+        "parse_result": _serialize_parse_summary(parse_result),
+        "attempted_queries": list(attempted_queries or []),
         "candidates": candidates or [],
         "applied_preferences": applied_preferences,
         "preference_hits": preference_hits,
@@ -492,7 +576,7 @@ def _serialize_batch_parse_result(
         "preview_request": preview_request,
     }
     if error is not None:
-        result["error"] = _optional_error(error)
+        result["error"] = _serialize_title_search_error(error)
     return result
 
 
@@ -516,13 +600,63 @@ def _serialize_failed_batch_item(
         "confidence": 0.0,
         "needs_user_review": True,
         "source": "unknown",
+        "parse_result": None,
+        "attempted_queries": [],
         "candidates": [],
         "applied_preferences": applied_preferences,
         "preference_hits": preference_hits,
         "preference_warnings": list(preference_warnings or []),
         "review_hints": list(review_hints or []),
         "enhanced_search_queries": list(enhanced_search_queries or []),
-        "error": _optional_error(error),
+        "error": _serialize_title_search_error(error),
+    }
+
+
+def _serialize_parse_summary(parse_result: AnimeTitleParseResult) -> dict[str, object]:
+    """Expose the immutable parse model through its whitelist serializer."""
+
+    return parse_result.to_dict()
+
+
+def _serialize_attempted_queries(
+    parse_result: AnimeTitleParseResult,
+    outcome: CandidateSearchOutcome[object],
+) -> list[dict[str, object]]:
+    """Return only plan-backed, publicly reviewable queries actually run."""
+
+    attempted = set(outcome.attempted_queries)
+    return [entry.to_dict() for entry in parse_result.query_plan if entry.query in attempted]
+
+
+def _serialize_title_search_error(error: Stage1Error) -> dict[str, object]:
+    """Keep parser/search errors useful without reflecting provider details."""
+
+    error_type = error.error_type
+    category = (
+        "title_parse" if error_type.startswith("ai_title_parse") else "mikan_search"
+        if error_type.startswith("mikan_") else "validation"
+        if error_type.startswith("invalid_") else "processing"
+    )
+    details: dict[str, object] = {
+        "category": category,
+        "recoverable": category != "validation",
+    }
+    raw_details = error.details or {}
+    field = raw_details.get("field")
+    length = raw_details.get("length", raw_details.get("raw_title_length"))
+    if isinstance(field, str) and field:
+        details["field"] = field
+    if isinstance(length, int) and length >= 0:
+        details["length"] = length
+    return {
+        "error_type": error_type,
+        "error_message": (
+            "AI 名称解析失败，请检查该条目后重试"
+            if category == "title_parse"
+            else "MiKan 候选搜索失败"
+        ),
+        "failed_step": error.failed_step,
+        "details": details,
     }
 
 
@@ -581,6 +715,32 @@ def _serialize_candidate(candidate: MikanCandidate, query: str) -> dict[str, obj
     return serialized
 
 
+def _with_candidate_season_evidence(
+    candidate: dict[str, object], parse_result: AnimeTitleParseResult
+) -> dict[str, object]:
+    """Add a public review summary without treating parser output as fact."""
+    result = dict(candidate)
+    if parse_result.season.number is None:
+        return result
+    title = result.get("title")
+    aliases = result.get("aliases")
+    evidence = candidate_season_evidence(
+        title if isinstance(title, str) else "",
+        aliases if isinstance(aliases, list) else (),
+        parse_result.season.number,
+    )
+    result["season_evidence"] = evidence
+    mikan_url = result.get("mikan_url")
+    if isinstance(mikan_url, str) and evidence["status"] == "NEEDS_CONFIRMATION":
+        # This opaque, bounded, one-time context is the only path by which a
+        # parser hint can reach a selected request. Browser-display fields are
+        # never trusted as season evidence.
+        result["candidate_context"] = candidate_selection_contexts.issue(
+            mikan_url, parse_result.season.number
+        )
+    return result
+
+
 def _search_mikan_candidates(
     query: str,
     mikan_config: MikanConfig,
@@ -619,6 +779,22 @@ def _search_batch_item_candidates(
             seen.add(key)
             candidates.append(candidate)
     return candidates
+
+
+def _search_candidates_from_parse_result(
+    parse_result: AnimeTitleParseResult,
+    mikan_config: MikanConfig,
+    *,
+    search_one: Callable[[str], list[dict[str, object]]] | None = None,
+) -> CandidateSearchOutcome[dict[str, object]]:
+    """Use the one shared parsed-plan fallback policy for both API flows."""
+
+    run_query = search_one or (lambda query: _search_mikan_candidates(query, mikan_config))
+    return search_parsed_candidates(
+        parse_result,
+        run_query,
+        lambda candidate: (candidate.get("bangumi_id"), candidate.get("mikan_url")),
+    )
 
 
 def _load_preferences_for_batch(
@@ -1163,6 +1339,24 @@ class RequestCreateView(PostView):
         )
         if not result["success"]:
             _raise_result_error(result)
+        matched = result["request"].get("source_info", {}).get("matched_bangumi")
+        trusted_hint = None
+        if isinstance(matched, dict):
+            mikan_url = matched.get("mikan_url")
+            if isinstance(mikan_url, str):
+                context_found, trusted_hint = candidate_selection_contexts.consume(
+                    payload.candidate_context, mikan_url
+                )
+                if payload.candidate_context is not None and not context_found:
+                    raise Stage1Error(
+                        "candidate_context_invalid",
+                        "候选上下文已失效，请重新搜索并选择合集",
+                        "selected_candidate_context",
+                        {"field": "candidate_context"},
+                    )
+        result["request"] = attach_selected_candidate_season(
+            result["request"], trusted_hint, payload.season_confirmation
+        )
 
         result = apply_request_save_action(
             result,
@@ -1246,11 +1440,24 @@ class MikanCandidateSearchView(PostView):
         assert isinstance(self.request_validator_model, MikanCandidateSearchPayload)
         payload = self.request_validator_model
         mikan_config = _resolve_mikan_config(payload.mikan_config)
-        candidates = _search_mikan_candidates(payload.query, mikan_config)
-        return {
+        parse_result = parse_anime_title(payload.query)
+        searched = _search_candidates_from_parse_result(parse_result, mikan_config)
+        result: dict[str, object] = {
             "query": payload.query,
-            "candidates": candidates,
+            "status": searched.status,
+            "parse_result": _serialize_parse_summary(parse_result),
+            "attempted_queries": _serialize_attempted_queries(parse_result, searched),
+            "candidates": [
+                _with_candidate_season_evidence(candidate, parse_result)
+                for candidate in searched.candidates
+            ],
         }
+        if searched.status == BATCH_ITEM_STATUS_FAILED:
+            result["error"] = _serialize_title_search_error(
+                searched.error
+                or Stage1Error("mikan_search_failed", "MiKan 候选搜索失败", "mikan_search")
+            )
+        return result
 
 
 @api_blueprint.get("/api/v1/mikan/posters/<key>")
@@ -1349,13 +1556,20 @@ class BatchParseView(PostView):
                 {"field": "raw_input"},
             )
 
-        provider = _batch_title_parsing_provider()
         mikan_config = _resolve_mikan_config(self.request_validator_model.mikan_config)
         config = load_storage_config(
             _storage_dir(self.request_validator_model.storage_dir)
         )
         preferences = _load_preferences_for_batch(config)
         corrections = _load_corrections_for_batch(config)
+        # Keep the explicit provider seam used by batch tests. Saved corrections
+        # are part of the same rule-provider query plan rather than a second
+        # search fallback implementation.
+        provider = (
+            RuleAnimeTitleParsingProvider(corrections=corrections)
+            if corrections
+            else _batch_title_parsing_provider()
+        )
         serialized_items: list[dict[str, object]] = []
         for item in batch.items:
             try:
@@ -1402,13 +1616,15 @@ class BatchParseView(PostView):
             enhanced_queries = _enhanced_entries_for_item(
                 item.raw_title, parse_result, corrections
             )
-            try:
-                candidates = _search_batch_item_candidates_enhanced(
-                    enhanced_queries,
-                    parse_result.search_queries,
-                    mikan_config,
+            searched = _search_candidates_from_parse_result(
+                parse_result,
+                mikan_config,
+                search_one=lambda query: _search_batch_item_candidates([query], mikan_config),
+            )
+            if searched.status == BATCH_ITEM_STATUS_FAILED:
+                exc = searched.error or Stage1Error(
+                    "mikan_search_failed", "MiKan 候选搜索失败", "mikan_search"
                 )
-            except Stage1Error as exc:
                 failed_batch = update_batch_item_status(
                     batch,
                     item.item_id,
@@ -1445,9 +1661,15 @@ class BatchParseView(PostView):
                         needs_user_review=review.needs_user_review,
                         review_hints=review.review_hints,
                         enhanced_search_queries=enhanced_queries,
+                        attempted_queries=_serialize_attempted_queries(parse_result, searched),
                     )
                 )
                 continue
+
+            candidates = [
+                _with_candidate_season_evidence(candidate, parse_result)
+                for candidate in searched.candidates
+            ]
 
             candidate_status = (
                 BATCH_ITEM_STATUS_FOUND
@@ -1488,6 +1710,7 @@ class BatchParseView(PostView):
                     needs_user_review=review.needs_user_review,
                     review_hints=review.review_hints,
                     enhanced_search_queries=enhanced_queries,
+                    attempted_queries=_serialize_attempted_queries(parse_result, searched),
                 )
             )
 

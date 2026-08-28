@@ -1,24 +1,7 @@
 from __future__ import annotations
 
-import re
-
 from shared.models import TitleCorrection
-
-#: Season marker that can already appear in a title (第四季 / 第4季 / S2 /
-#: Season 2), so ``_replace_or_append_season`` can swap it for another form.
-_SEASON_MARKER_RE = re.compile(
-    r"第\s*[0-9一二三四五六七八九十百]+\s*季|\b[Ss]\d{1,2}\b|"
-    r"\bSeason\s*\d{1,2}\b",
-    re.IGNORECASE,
-)
-
-#: Individual season-hint shapes used to extract the season number.
-_SEASON_S_RE = re.compile(r"^[Ss](\d{1,2})$")
-_SEASON_SEASON_RE = re.compile(r"^Season\s*(\d{1,2})$", re.IGNORECASE)
-_SEASON_CN_NUMERIC_RE = re.compile(r"^第\s*(\d{1,2})\s*季$")
-_SEASON_CN_IDEOGRAPH_RE = re.compile(r"^第\s*([一二三四五六七八九十百]+)\s*季$")
-
-_CN_DIGITS = "零一二三四五六七八九"
+from shared.title_season import parse_title_season, season_variants
 
 
 def enhance_search_queries(
@@ -104,95 +87,21 @@ def _find_correction(
 def _season_variants(title: str, season_hint: str | None) -> list[str]:
     """Return the original title plus its alternative season forms."""
     forms = [title]
-    season_number = _extract_season_number(season_hint)
+    season_number = parse_title_season(season_hint or "").season
     if season_number is not None:
-        for alt in _season_alt_forms(season_number):
+        for alt in season_variants(season_number):
             variant = _replace_or_append_season(title, alt)
             if variant and variant != title:
                 forms.append(variant)
     return _non_empty_unique(forms)
 
 
-def _extract_season_number(season_hint: str | None) -> int | None:
-    hint = (season_hint or "").strip()
-    match = _SEASON_S_RE.match(hint)
-    if match:
-        return int(match.group(1))
-    match = _SEASON_SEASON_RE.match(hint)
-    if match:
-        return int(match.group(1))
-    match = _SEASON_CN_NUMERIC_RE.match(hint)
-    if match:
-        return int(match.group(1))
-    match = _SEASON_CN_IDEOGRAPH_RE.match(hint)
-    if match:
-        return _chinese_to_arabic(match.group(1))
-    return None
-
-
-def _season_alt_forms(season_number: int) -> list[str]:
-    """Return the alternative public season forms for a season number."""
-    forms: list[str] = [f"第{season_number}季", f"S{season_number}", f"Season {season_number}"]
-    chinese = _to_chinese_numeral(season_number)
-    if chinese and f"第{chinese}季" not in forms:
-        forms.append(f"第{chinese}季")
-    return forms
-
-
 def _replace_or_append_season(title: str, alt: str) -> str:
     """Replace an existing season marker in ``title`` with ``alt`` or append it."""
-    match = _SEASON_MARKER_RE.search(title)
-    if match:
-        return (title[: match.start()] + alt + title[match.end() :]).strip()
+    parsed = parse_title_season(title)
+    if parsed.season is not None:
+        return f"{parsed.base_title} {alt}".strip()
     return f"{title} {alt}".strip()
-
-
-def _to_chinese_numeral(number: int) -> str:
-    if not 1 <= number <= 99:
-        return str(number)
-    if number < 10:
-        return _CN_DIGITS[number]
-    if number == 10:
-        return "十"
-    tens, ones = divmod(number, 10)
-    prefix = "十" if tens == 1 else _CN_DIGITS[tens] + "十"
-    if ones == 0:
-        return prefix
-    return prefix + _CN_DIGITS[ones]
-
-
-def _chinese_to_arabic(text: str) -> int | None:
-    if not text:
-        return None
-    if len(text) == 1:
-        value = _CN_DIGITS.find(text)
-        return value if value >= 0 else None
-    value = 0
-    if text.startswith("十"):
-        value = 10
-        text = text[1:]
-    elif text.endswith("十"):
-        tens = _CN_DIGITS.find(text[0])
-        if tens <= 0:
-            return None
-        value = tens * 10
-        text = text[:-1]
-    else:
-        parts = text.split("十")
-        if len(parts) != 2:
-            return None
-        tens = _CN_DIGITS.find(parts[0])
-        ones = _CN_DIGITS.find(parts[1])
-        if tens <= 0 or ones < 0:
-            return None
-        value = tens * 10 + ones
-        text = ""
-    if text:
-        ones = _CN_DIGITS.find(text)
-        if ones < 0:
-            return None
-        value += ones
-    return value if value > 0 else None
 
 
 def _non_empty_unique(values: list[str]) -> list[str]:

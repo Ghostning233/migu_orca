@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import Protocol
+from typing import Protocol, Sequence
+import unicodedata
 
-from batch_engine.models import ANIME_TITLE_PARSE_SOURCE_FAKE, AnimeTitleParseResult
+from batch_engine.models import (
+    ANIME_TITLE_PARSE_SOURCE_FAKE,
+    AnimeTitleParseResult,
+    AnimeTitleParseSource,
+    AnimeTitleQuery,
+    AnimeTitleSeason,
+    AnimeTitleSeasonSource,
+    MAX_ANIME_TITLE_QUERY_COUNT,
+)
 from shared.errors import Stage1Error
+from shared.models import TitleCorrection
+from shared.title_season import parse_title_season, season_variants
 
 
 LOW_CONFIDENCE_THRESHOLD = 0.7
@@ -15,66 +25,79 @@ class AnimeTitleParsingProvider(Protocol):
         """Parse a shorthand anime title into reviewable search metadata."""
 
 
+class RuleAnimeTitleParsingProvider:
+    """Offline deterministic parser used by normal application flows.
+
+    The alias table is intentionally small and conservative: it only plans
+    searches and never asserts that a MiKan collection has been selected.
+    """
+
+    _ALIASES: dict[str, tuple[str, tuple[str, ...]]] = {
+        "萌王": ("关于我转生变成史莱姆这档事", ("转生史莱姆",)),
+        "路哥": ("欢迎来到实力至上主义的教室", ("实力至上主义教室",)),
+        "杖剑谭": ("杖与剑的魔剑谭", ()),
+        "邻家天使": ("关于邻家的天使大人不知不觉把我惯成了废人这档子事", ("邻家的天使大人",)),
+    }
+
+    def __init__(self, *, corrections: Sequence[TitleCorrection] = ()) -> None:
+        self._corrections = tuple(corrections)
+
+    def parse(self, raw_title: str) -> AnimeTitleParseResult:
+        if not raw_title.strip():
+            raise Stage1Error("invalid_input", "番剧名称不能为空", "ai_title_parse", {"field": "raw_title"})
+        parsed = parse_title_season(raw_title)
+        correction = _find_correction(raw_title, self._corrections)
+        known = self._ALIASES.get(_key(parsed.base_title))
+        canonical, aliases = known or (parsed.base_title, ())
+        plan: list[tuple[str, AnimeTitleParseSource]] = []
+        if correction is not None:
+            # A stored hint is an explicit search preference, not a confirmed
+            # Request fact.  It must nevertheless be part of this one plan so
+            # both displayed and attempted correction variants are identical.
+            correction_season = _season_hint_number(correction.season_hint) or parsed.season
+            for correction_title in (correction.query_correction, correction.canonical_title):
+                if correction_title:
+                    plan.extend(
+                        (query, AnimeTitleParseSource.CORRECTION)
+                        for query in _queries_with_optional_season(correction_title, correction_season)
+                    )
+            canonical = correction.canonical_title
+        for alias in aliases:
+            plan.append((_with_season(alias, parsed.season), AnimeTitleParseSource.ALIAS))
+        plan.extend((query, AnimeTitleParseSource.RULE) for query in _canonical_queries(canonical, parsed.season))
+        plan.append((_normalized(raw_title), AnimeTitleParseSource.FALLBACK))
+        deduped = _dedupe_plan(plan)
+        query_plan = _bounded_query_plan(deduped)
+        hints = list(parsed.review_hints)
+        if correction is None and known is None:
+            hints.append("未识别正式别名，请人工核对")
+        if len(deduped) > len(query_plan):
+            hints.append("搜索词已截断，请人工核对")
+        confidence = 0.92 if correction else (0.82 if known else 0.45)
+        return AnimeTitleParseResult(
+            raw_title=raw_title,
+            canonical_title_candidates=[canonical],
+            season_hint=parsed.season_hint,
+            search_queries=[entry.query for entry in query_plan],
+            query_plan=tuple(query_plan),
+            confidence=confidence,
+            needs_user_review=bool(hints) or confidence < LOW_CONFIDENCE_THRESHOLD,
+            source=query_plan[0].source,
+            normalized_title=parsed.normalized_title,
+            base_title=parsed.base_title,
+            season=_season_contract(parsed),
+            review_hints=tuple(dict.fromkeys(hints)),
+        )
+
+
 class FakeAnimeTitleParsingProvider:
-    """Deterministic offline parser for tests and local batch-workbench flows."""
+    """Deterministic fixture provider; use only through explicit injection."""
 
     _MAPPINGS = {
-        "萌王S4": AnimeTitleParseResult(
-            raw_title="萌王S4",
-            canonical_title_candidates=[
-                "关于我转生变成史莱姆这档事 第四季",
-                "关于我转生变成史莱姆这档事 第4季",
-            ],
-            season_hint="S4",
-            search_queries=[
-                "关于我转生变成史莱姆这档事 第四季",
-                "转生史莱姆 第四季",
-                "萌王 S4",
-            ],
-            confidence=0.86,
-            needs_user_review=True,
-            source=ANIME_TITLE_PARSE_SOURCE_FAKE,
-        ),
-        "路哥S4": AnimeTitleParseResult(
-            raw_title="路哥S4",
-            canonical_title_candidates=["欢迎来到实力至上主义的教室 第四季"],
-            season_hint="S4",
-            search_queries=[
-                "欢迎来到实力至上主义的教室 第四季",
-                "实力至上主义教室 S4",
-                "路哥 S4",
-            ],
-            confidence=0.9,
-            needs_user_review=False,
-            source=ANIME_TITLE_PARSE_SOURCE_FAKE,
-        ),
-        "杖剑谭S2": AnimeTitleParseResult(
-            raw_title="杖剑谭S2",
-            canonical_title_candidates=["杖与剑的魔剑谭 第二季"],
-            season_hint="S2",
-            search_queries=[
-                "杖与剑的魔剑谭 第二季",
-                "杖剑谭 S2",
-            ],
-            confidence=0.62,
-            needs_user_review=True,
-            source=ANIME_TITLE_PARSE_SOURCE_FAKE,
-        ),
-        "邻家天使S2": AnimeTitleParseResult(
-            raw_title="邻家天使S2",
-            canonical_title_candidates=[
-                "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季"
-            ],
-            season_hint="S2",
-            search_queries=[
-                "关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季",
-                "邻家的天使大人 第二季",
-                "邻家天使 S2",
-            ],
-            confidence=0.88,
-            needs_user_review=False,
-            source=ANIME_TITLE_PARSE_SOURCE_FAKE,
-        ),
+        "萌王S4": ("关于我转生变成史莱姆这档事 第四季", 0.86),
+        "路哥S4": ("欢迎来到实力至上主义的教室 第四季", 0.9),
+        "杖剑谭S2": ("杖与剑的魔剑谭 第二季", 0.62),
+        "邻家天使S2": ("关于邻家的天使大人不知不觉把我惯成了废人这档子事 第二季", 0.88),
     }
 
     def __init__(self, *, fail_titles: set[str] | None = None) -> None:
@@ -83,33 +106,22 @@ class FakeAnimeTitleParsingProvider:
     def parse(self, raw_title: str) -> AnimeTitleParseResult:
         normalized = raw_title.strip()
         if not normalized:
-            raise Stage1Error(
-                "invalid_input",
-                "番剧名称不能为空",
-                "ai_title_parse",
-                {"field": "raw_title"},
-            )
+            raise Stage1Error("invalid_input", "番剧名称不能为空", "ai_title_parse", {"field": "raw_title"})
         if normalized in self._fail_titles:
-            raise _safe_provider_error(normalized)
-
-        mapped = self._MAPPINGS.get(normalized)
-        if mapped is None:
-            return _result(
-                raw_title=raw_title,
-                canonical_title_candidates=[normalized],
-                season_hint=None,
-                search_queries=[normalized],
-                confidence=0.4,
-                source=ANIME_TITLE_PARSE_SOURCE_FAKE,
-            )
-        return replace(mapped, raw_title=raw_title)
+            raise _safe_provider_error(raw_title)
+        parsed = parse_title_season(raw_title)
+        canonical, confidence = self._MAPPINGS.get(normalized, (parsed.base_title, 0.4))
+        return AnimeTitleParseResult(
+            raw_title=raw_title, canonical_title_candidates=[canonical], season_hint=parsed.season_hint,
+            search_queries=[canonical, _normalized(raw_title)], confidence=confidence,
+            needs_user_review=confidence < LOW_CONFIDENCE_THRESHOLD, source=ANIME_TITLE_PARSE_SOURCE_FAKE,
+            normalized_title=parsed.normalized_title, base_title=parsed.base_title, season=_season_contract(parsed),
+            review_hints=parsed.review_hints,
+        )
 
 
-def parse_anime_title(
-    raw_title: str,
-    provider: AnimeTitleParsingProvider | None = None,
-) -> AnimeTitleParseResult:
-    parser = provider or FakeAnimeTitleParsingProvider()
+def parse_anime_title(raw_title: str, provider: AnimeTitleParsingProvider | None = None) -> AnimeTitleParseResult:
+    parser = provider or RuleAnimeTitleParsingProvider()
     try:
         result = parser.parse(raw_title)
     except Stage1Error as exc:
@@ -119,92 +131,99 @@ def parse_anime_title(
     return _normalize_result(raw_title, result)
 
 
-def _result(
-    *,
-    raw_title: str,
-    canonical_title_candidates: list[str],
-    season_hint: str | None,
-    search_queries: list[str],
-    confidence: float,
-    source: str,
-) -> AnimeTitleParseResult:
-    return AnimeTitleParseResult(
-        raw_title=raw_title,
-        canonical_title_candidates=canonical_title_candidates,
-        season_hint=season_hint,
-        search_queries=search_queries,
-        confidence=confidence,
-        needs_user_review=_needs_user_review(canonical_title_candidates, confidence),
-        source=source,
-    )
-
-
 def _normalize_result(raw_title: str, result: AnimeTitleParseResult) -> AnimeTitleParseResult:
     candidates = _non_empty_unique(result.canonical_title_candidates)
-    queries = _non_empty_unique(result.search_queries)
-    if not candidates or not queries:
-        raise Stage1Error(
-            "ai_title_parse_failed",
-            "AI 名称解析未返回可用搜索词",
-            "ai_title_parse",
-            {"provider_source": result.source or "unknown"},
-        )
+    plan = _bounded_query_plan([(entry.query, entry.source) for entry in result.query_plan])
+    if not candidates or not plan:
+        raise Stage1Error("ai_title_parse_failed", "名称解析未返回可用搜索词", "ai_title_parse", {"provider_source": result.source.value})
     confidence = max(0.0, min(1.0, float(result.confidence)))
+    season_parse = parse_title_season(raw_title)
+    hints = tuple(dict.fromkeys((*result.review_hints, *season_parse.review_hints)))
     return AnimeTitleParseResult(
-        raw_title=raw_title,
-        canonical_title_candidates=candidates,
-        season_hint=result.season_hint,
-        search_queries=queries,
-        confidence=confidence,
-        needs_user_review=result.needs_user_review
-        or _needs_user_review(candidates, confidence),
-        source=result.source,
+        raw_title=raw_title, canonical_title_candidates=candidates, season_hint=season_parse.season_hint,
+        search_queries=[entry.query for entry in plan], query_plan=tuple(plan), confidence=confidence,
+        needs_user_review=result.needs_user_review or _needs_user_review(candidates, confidence) or bool(hints),
+        source=plan[0].source, normalized_title=season_parse.normalized_title,
+        base_title=season_parse.base_title, season=_season_contract(season_parse), review_hints=hints,
     )
+
+
+def _canonical_queries(title: str, season: int | None) -> list[str]:
+    return [_with_season(title, form) for form in season_variants(season)] if season else [title]
+
+
+def _queries_with_optional_season(title: str, season: int | None) -> list[str]:
+    # Corrections must not consume the bounded plan and starve alias/rule/raw
+    # fallback. A saved season hint therefore yields one stable normalized
+    # spelling per correction field; rule entries retain the complete set.
+    return [_with_season(title, season_variants(season)[-1])] if season else [title]
+
+
+def _season_hint_number(value: str | None) -> int | None:
+    return parse_title_season(value or "").season
+
+
+def _season_contract(parsed: object) -> AnimeTitleSeason:
+    """Convert the shared parser result into the public immutable API contract."""
+
+    number = getattr(parsed, "season", None)
+    marker = getattr(parsed, "season_marker", None)
+    if number is None:
+        return AnimeTitleSeason(None)
+    normalized = season_variants(number)[-1]
+    return AnimeTitleSeason(number, marker or f"S{number}", normalized, AnimeTitleSeasonSource.TITLE_MARKER)
+
+
+def _with_season(title: str, form: str | int | None) -> str:
+    if isinstance(form, int):
+        variants = season_variants(form)
+        form = variants[-1] if variants else ""
+    parsed = parse_title_season(title)
+    base = parsed.base_title if parsed.season is not None else _normalized(title)
+    return f"{base} {form}".strip() if form else base
+
+
+def _bounded_query_plan(entries: Sequence[tuple[str, AnimeTitleParseSource]]) -> list[AnimeTitleQuery]:
+    return [AnimeTitleQuery(query, source, index) for index, (query, source) in enumerate(_dedupe_plan(entries)[:MAX_ANIME_TITLE_QUERY_COUNT], 1)]
+
+
+def _dedupe_plan(entries: Sequence[tuple[str, AnimeTitleParseSource]]) -> list[tuple[str, AnimeTitleParseSource]]:
+    result: list[tuple[str, AnimeTitleParseSource]] = []
+    seen: set[str] = set()
+    for query, source in entries:
+        normalized = _normalized(query)
+        if normalized and normalized.casefold() not in seen:
+            seen.add(normalized.casefold())
+            result.append((normalized, source))
+    return result
+
+
+def _find_correction(raw_title: str, corrections: Sequence[TitleCorrection]) -> TitleCorrection | None:
+    return next((item for item in corrections if _key(item.raw_title) == _key(raw_title)), None)
+
+
+def _key(value: str) -> str:
+    return _normalized(value).casefold()
+
+
+def _normalized(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFKC", value).split())
 
 
 def _needs_user_review(candidates: list[str], confidence: float) -> bool:
     return confidence < LOW_CONFIDENCE_THRESHOLD or len(candidates) != 1
 
 
-def _non_empty_unique(values: list[str]) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        text = value.strip()
-        if text and text not in seen:
-            deduped.append(text)
-            seen.add(text)
-    return deduped
+def _non_empty_unique(values: Sequence[str]) -> list[str]:
+    return list(dict.fromkeys(value.strip() for value in values if value.strip()))
 
 
 def _safe_provider_error(raw_title: str) -> Stage1Error:
-    return Stage1Error(
-        "ai_title_parse_failed",
-        "AI 名称解析失败，请检查该条目后重试",
-        "ai_title_parse",
-        {
-            "raw_title_length": len(raw_title),
-            "provider_source": ANIME_TITLE_PARSE_SOURCE_FAKE,
-            "recoverable": True,
-        },
-    )
+    return Stage1Error("ai_title_parse_failed", "AI 名称解析失败，请检查该条目后重试", "ai_title_parse", {"raw_title_length": len(raw_title), "provider_source": ANIME_TITLE_PARSE_SOURCE_FAKE, "recoverable": True})
 
 
 def _sanitize_provider_exception(error: Stage1Error) -> Stage1Error:
-    return Stage1Error(
-        error.error_type or "ai_title_parse_failed",
-        error.message or "AI 名称解析失败，请检查该条目后重试",
-        "ai_title_parse",
-        {
-            "provider_source": "unknown",
-            "recoverable": True,
-        },
-    )
+    return Stage1Error(error.error_type or "ai_title_parse_failed", error.message or "AI 名称解析失败，请检查该条目后重试", "ai_title_parse", {"provider_source": "unknown", "recoverable": True})
 
 
-__all__ = [
-    "AnimeTitleParsingProvider",
-    "FakeAnimeTitleParsingProvider",
-    "LOW_CONFIDENCE_THRESHOLD",
-    "parse_anime_title",
-]
+__all__ = ["AnimeTitleParsingProvider", "FakeAnimeTitleParsingProvider", "LOW_CONFIDENCE_THRESHOLD", "RuleAnimeTitleParsingProvider", "parse_anime_title"]
