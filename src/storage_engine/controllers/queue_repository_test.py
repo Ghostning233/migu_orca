@@ -7,7 +7,6 @@ import pytest
 from batch_engine.controllers.batch_queue_controller import (
     create_submission_queue,
     enqueue_item,
-    serialize_queue,
 )
 from batch_engine.models import (
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,

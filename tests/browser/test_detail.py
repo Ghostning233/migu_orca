@@ -6,15 +6,14 @@ from pathlib import Path
 import pytest
 from playwright.sync_api import Page, expect
 
+from request_engine.controllers.request_controller import accept_request
+from storage_engine.controllers.request_repository import save_request_snapshot
+from storage_engine.controllers.storage_config import load_storage_config
 from tests.browser.conftest import (
     create_saved_request,
     open_dev_fixture_panel,
     set_storage_preferences,
 )
-from request_engine.controllers.request_controller import accept_request
-from storage_engine.controllers.request_repository import save_request_snapshot
-from storage_engine.controllers.storage_config import load_storage_config
-
 
 pytestmark = pytest.mark.browser
 

@@ -112,7 +112,7 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "CI 不得保存凭据、真实 endpoint、trace 或包含敏感数据的失败产物。"
     },
     {

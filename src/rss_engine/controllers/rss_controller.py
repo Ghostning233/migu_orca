@@ -19,7 +19,6 @@ from shared.models import (
     RssSource,
 )
 
-
 DEFAULT_RSS_TIMEOUT_SECONDS = 10.0
 
 

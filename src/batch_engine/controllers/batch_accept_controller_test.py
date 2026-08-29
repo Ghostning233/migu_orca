@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 from batch_engine.controllers.batch_accept_controller import (
     ACCEPT_OUTCOME_ACCEPTED,

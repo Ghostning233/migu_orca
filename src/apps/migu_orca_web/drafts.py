@@ -32,10 +32,11 @@ Security/robustness properties
 """
 
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from secrets import token_urlsafe
 from time import monotonic
-from typing import Any, Callable
+from typing import Any
 
 #: Reason codes returned by the store so routes can pick a stable error type.
 REASON_OK = "ok"

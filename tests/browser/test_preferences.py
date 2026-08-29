@@ -14,7 +14,6 @@ from storage_engine.controllers.queue_repository import save_submission_queue
 from storage_engine.controllers.storage_config import load_storage_config
 from tests.browser.conftest import create_saved_request, set_storage_preferences
 
-
 pytestmark = pytest.mark.browser
 
 

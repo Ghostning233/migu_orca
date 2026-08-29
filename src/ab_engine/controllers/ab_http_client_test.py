@@ -1,10 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 from urllib.error import HTTPError
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
-from ab_engine.controllers.ab_http_client import AutoBangumiHttpClient, create_auto_bangumi_http_client, create_auto_bangumi_submit_client, create_legacy_3_1_auto_bangumi_client
+from ab_engine.controllers.ab_http_client import (
+    AutoBangumiHttpClient,
+    create_auto_bangumi_http_client,
+    create_auto_bangumi_submit_client,
+    create_legacy_3_1_auto_bangumi_client,
+)
 from ab_engine.controllers.subscription_payload import build_legacy_31_subscription_payload
 from request_engine.controllers.request_controller import accept_request, build_pending_request
 from shared.errors import Stage1Error

@@ -8,11 +8,9 @@ import pytest
 from playwright.sync_api import Page, Request, expect
 
 from tests.browser.conftest import (
-    create_saved_request,
     open_dev_fixture_panel,
     set_storage_preferences,
 )
-
 
 pytestmark = pytest.mark.browser
 

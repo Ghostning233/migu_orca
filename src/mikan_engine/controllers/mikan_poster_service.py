@@ -1,10 +1,10 @@
 """Trusted, same-origin retrieval for MiKan poster cache entries."""
 from __future__ import annotations
 
+import socket
 from collections.abc import Callable
 from ipaddress import ip_address
 from pathlib import Path
-import socket
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -15,7 +15,6 @@ from mikan_engine.controllers.mikan_poster_cache import (
     poster_cache_key,
 )
 from shared.errors import Stage1Error
-
 
 _IMAGE_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 

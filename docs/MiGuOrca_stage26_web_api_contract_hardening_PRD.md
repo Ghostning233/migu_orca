@@ -222,6 +222,16 @@ src/apps/migu_orca_web/
 - CI 执行 compileall、非浏览器测试、JS 语法检查、OpenAPI 漂移和差异检查。
 - 可用 runner 执行真实 Chromium 套件；不可用不能静默视为通过。
 - 文档明确 local-only 默认、readiness 语义和远程暴露限制。
+- 已实现（2026-08-30）：新增 `.github/workflows/ci.yml`（checks job：compileall → ruff
+  静态检查 → 非浏览器 pytest → `node --check` → OpenAPI 漂移 → `git diff --check`；
+  browser job：`playwright install --with-deps chromium` + 真实 Chromium 套件，
+  `MIGU_ORCA_CI=1` 下浏览器不可用直接失败，不静默 skip）。引入 `ruff` 作为 Python 静态
+  检查（`pyproject.toml` `[tool.ruff.lint]`：F/E4/E7/E9/W/I/UP/B/SIM，排除 E402/E501/
+  B009/UP046/UP047/UP031 并记录理由），并修复全部存量违规；compileall 降级为纯语法
+  检查，不再冒充静态检查。`/readiness` 拆分为就绪探针（服务端 storage 根目录可创建/可写
+  才 200，否则 503 `{ok: false, result: "storage_unavailable"}`），`/healthz` 保持纯存活
+  探针；两者都不访问真实外部系统。README 新增「本地部署基线」：默认 local-only、
+  未认证禁止直接暴露公网、storage 根目录、健康/就绪语义与 CI 门禁。
 
 ### US-196：Stage 26 兼容回归与文档收尾
 

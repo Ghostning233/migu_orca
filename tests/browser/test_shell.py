@@ -5,7 +5,6 @@ from playwright.sync_api import Page
 
 from tests.browser.conftest import open_dev_fixture_panel
 
-
 pytestmark = pytest.mark.browser
 
 

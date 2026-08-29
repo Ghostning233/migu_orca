@@ -11,15 +11,23 @@ external transports without touching real MiKan/AutoBangumi/qBittorrent.
 
 import os
 import re
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from apps.migu_orca_entry.controllers.entry_controller import (
+    _build_history_event,
     apply_confirmation_action,
     apply_request_save_action,
-    _build_history_event,
+)
+from apps.migu_orca_web.schemas import RequestMikanConfigPayload
+from apps.migu_orca_web.serializers import (
+    _optional_error,
+    _raise_result_error,
+    _sanitize_ab_submit_result,
+    _serialize_candidate,
 )
 from batch_engine.controllers.anime_title_parser import (
     AnimeTitleParsingProvider,
@@ -73,14 +81,6 @@ from storage_engine.controllers.storage_config import (
     DEFAULT_STORAGE_DIR,
     StorageConfig,
     load_storage_config,
-)
-
-from apps.migu_orca_web.schemas import RequestMikanConfigPayload
-from apps.migu_orca_web.serializers import (
-    _optional_error,
-    _raise_result_error,
-    _sanitize_ab_submit_result,
-    _serialize_candidate,
 )
 
 

@@ -7,10 +7,9 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.browser.conftest import open_dev_fixture_panel, preview_result_json, set_storage_preferences
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from shared.models import EntryRequest
-
+from tests.browser.conftest import open_dev_fixture_panel, preview_result_json, set_storage_preferences
 
 pytestmark = pytest.mark.browser
 

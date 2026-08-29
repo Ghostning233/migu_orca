@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-from typing import Protocol, Sequence
 import unicodedata
+from collections.abc import Sequence
+from typing import Protocol
 
 from batch_engine.models import (
     ANIME_TITLE_PARSE_SOURCE_FAKE,
+    MAX_ANIME_TITLE_QUERY_COUNT,
     AnimeTitleParseResult,
     AnimeTitleParseSource,
     AnimeTitleQuery,
     AnimeTitleSeason,
     AnimeTitleSeasonSource,
-    MAX_ANIME_TITLE_QUERY_COUNT,
 )
 from shared.errors import Stage1Error
 from shared.models import TitleCorrection
 from shared.title_season import parse_title_season, season_variants
-
 
 LOW_CONFIDENCE_THRESHOLD = 0.7
 

@@ -20,8 +20,9 @@ live only in the request-scoped ``ab_config`` and never reach the queue.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from ab_engine.controllers import ab_http_client
 from ab_engine.controllers.ab_client import submit_ab_subscription

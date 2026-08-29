@@ -55,7 +55,9 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 
 - 安装依赖：`uv sync`
 - 运行测试：`uv run pytest`
-- 类型/语法检查：`uv run python -m compileall -q src`
+- 语法检查：`uv run python -m compileall -q src tests`（只证明可编译，不是静态检查）
+- 静态检查：`uv run ruff check src tests`（US-195 引入；pyflakes/bugbear/pyupgrade 规则，
+  配置见 `pyproject.toml` 的 `[tool.ruff.lint]`。编译通过≠静态通过，CI 两者都跑）
 - 运行入口命令：`uv run migu-orca "咒术回战第三季"`
 - 生成/检查 OpenAPI 契约：`uv run migu-orca-openapi` / `uv run migu-orca-openapi --check`（漂移检查，CI 使用）
 - 启动 Flask Web UI：`uv run flask --app wsgi:app run`
@@ -118,7 +120,11 @@ uv run flask --app wsgi:app run
 - `GET /index?request_id=<id>`：打开 Request 工作台并恢复指定 Request 详情。
 - `GET /settings`：服务端渲染 Settings 页面。
 - `GET /Settings`：重定向到 `/settings`。
-- `GET /healthz`、`GET /readiness`：健康检查。
+- `GET /healthz`：存活探针。只证明 Flask 进程在服务，不做任何存储或外部系统工作。
+- `GET /readiness`：就绪探针（US-195）。进程在服务**且**服务端 Web storage 根目录可用
+  （可创建/可写）时返回 200 `{"ok": true, "result": "ok"}`；storage 不可用时返回 503
+  `{"ok": false, "result": "storage_unavailable"}`。只触碰本地存储布局，绝不探测或写入
+  真实 MiKan / AutoBangumi / qBittorrent。
 
 `/index` 页面包含真实 MiKan 候选搜索主表单、可编辑预览订阅草案、本地 Request 列表、URL 可恢复的详情区域、状态历史和 AB 提交结果摘要。页面提供共享顶部导航、运行模式摘要、非空标题浏览器校验、提交中按钮状态、Settings Storage 偏好只读摘要、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、可见取消/修改表单、窄屏单列布局和基础无障碍标记。候选选择与直连 fallback 默认生成 `订阅草案（未保存）` 预览，不展示确认、取消、删除或 Auto Bangumi 提交动作；预览提供可编辑表单（字幕组、包含/排除规则、使用正则、大小写敏感、folder_name），`应用修改` 通过 dry-run 预览修改端点重算当前选中字幕组的有效/排除种子展示，`保存草案` 持久化修改后的订阅方案并同步 `request_id` 到 URL 进入待确认流程。已保存 `ACCEPTED` Request 详情展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作，`删除` 前必须经浏览器确认框确认。Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区按 有效种子（默认可见并标注当前选中字幕组）-> 完整种子（按字幕组分组，默认折叠）-> 排除种子（默认折叠）的顺序展示。`/settings` 页面包含 Storage 偏好、数据源、qBittorrent 和 Auto Bangumi 分区；Storage 偏好只写入浏览器 `localStorage`，qBittorrent 连接测试表单直接显示，Auto Bangumi 按 `request_id` 上下文渐进展示，提交前必须显式确认。页面和 API 都不应展示 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径。
 
@@ -330,6 +336,24 @@ Stage 21 新增偏好与修正端点（非敏感表面，只提交已定义的�
 Stage 21 偏好/修正 API 的安全边界：endpoint、token、Authorization header、cookie、magnet、raw HTML、raw RSS XML、原始响应体、完整失败 URL 和本地绝对路径不会出现在偏好 JSON、修正 JSON、API 响应、页面、URL、浏览器 storage、日志或 trace 中；偏好与修正只作为批量草案的可编辑默认值和可审核搜索词来源，AI 不自动选择最终 MiKan 合集，不自动接受卡片。
 
 **外部 Auto Bangumi 幂等性限制（剩余风险）**：MiGuOrca 的批量提交通过「提交前持久化 `SUBMITTING` + 成功后标记 `SUCCEEDED`」避免已到达 Auto Bangumi 的项目被自动重试，并通过 `recover` 端点提供人工核验恢复；但 Auto Bangumi 自身不提供幂等创建订阅语义，以下场景仍可能产生重复订阅，需人工核对：1) 进程在 Auto Bangumi 已成功创建订阅、但 MiGuOrca 尚未把结果写入 Request/ab_results 前中断——磁盘队列停留在 `SUBMITTING`，不会被自动重试；若没有明确结果，用户需在 `recover` 核验弹窗中选择「已创建订阅」或「未创建订阅」；若 Request 中已保存 `success=true`，则可自动恢复为成功，若已保存 `success=false`，则按错误类型恢复为失败或可重试；2) 单项结果持久化失败进入 `RESULT_PERSIST_FAILED`，用户在 `recover` 中核验 Auto Bangumi 侧状态后选择「已创建/未创建」恢复，**不可**直接点重试。除此之外，`SUCCEEDED` 项目在任何路径下都不会再次调用 Auto Bangumi，`RESULT_PERSIST_FAILED` 与无明确结果的 `SUBMITTING` 项目永远不会被自动重试。
+
+### 本地部署基线（US-195）
+
+- **默认 local-only**：`uv run flask --app wsgi:app run` 只监听 `127.0.0.1:5000`。Web UI
+  没有内置认证/授权，且页面与 API 只面向本机单用户工作流。
+- **未认证时禁止直接暴露公网**：不要在不加任何反向代理认证的情况下把本应用直接暴露到
+  公网或不可信网络。如需远程访问，必须在前面放置强制认证的代理（如带 Basic Auth /
+  OIDC 的反向代理），并保持 storage 与敏感配置只在服务端。否则任何能访问页面的人都能
+  读取/修改本地订阅方案并触发对 Auto Bangumi / qBittorrent 的写操作。
+- **服务端 storage 根目录**：Web API 只能使用服务端允许的 storage 根目录
+  （默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖），浏览器只能选择
+  根目录下的相对 profile（US-193）。CLI `--storage-dir` 是独立信任边界。
+- **健康/就绪探针**：`/healthz` 只报告进程存活；`/readiness` 额外确认服务端 storage 根
+  目录可创建/可写（503 表示 storage 不可用）。两者都不访问真实外部系统。
+- **CI 门禁**：`.github/workflows/ci.yml` 在每次 push/PR 执行
+  compileall → ruff 静态检查 → 非浏览器 pytest → `node --check` → OpenAPI 漂移检查 →
+  `git diff --check`；真实 Chromium 套件在单独 job 运行，`MIGU_ORCA_CI=1` 下浏览器不可用
+  会**失败**而不是静默 skip。CI 不保存凭据、真实 endpoint、trace 或含敏感数据的失败产物。
 
 ### 本地验收流程
 

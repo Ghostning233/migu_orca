@@ -7,18 +7,17 @@ only non-sensitive user preferences and title corrections through the shared
 storage repositories.
 """
 
+from apps.migu_orca_web.blueprints import api_blueprint
+from apps.migu_orca_web.schemas import (
+    CorrectionQuery,
+    CorrectionSavePayload,
+    PreferenceQuery,
+    PreferenceSavePayload,
+)
+from apps.migu_orca_web.services import _storage_dir
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from shared.errors import Stage1Error
-
-from apps.migu_orca_web.blueprints import api_blueprint
-from apps.migu_orca_web.schemas import (
-    PreferenceQuery,
-    PreferenceSavePayload,
-    CorrectionQuery,
-    CorrectionSavePayload,
-)
-from apps.migu_orca_web.services import _storage_dir
 from storage_engine.controllers.correction_repository import (
     build_correction_from_api,
     load_corrections,

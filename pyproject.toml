@@ -13,7 +13,27 @@ dependencies = [
 dev = [
     "pytest>=9.0.0",
     "pytest-playwright>=0.8.0",
+    "ruff>=0.16,<1",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+# US-195 static check: ruff catches real issues (undefined names, unused
+# imports, bugbear pitfalls, pyupgrade modernizations) with low churn.
+# Deliberately *not* enabled:
+# - E402: this codebase puts the module docstring after `from __future__`
+#   (a project-wide style; moving it would churn every module).
+# - E501: line length is intentionally not enforced (long Chinese UI strings
+#   and fixture lines).
+# - B009: `getattr(obj, "attr", default)` is used deliberately for duck-typed
+#   responses (urllib internals, Playwright routes).
+# - UP046/UP047: PEP 695 generics are a stylistic upgrade, not a correctness fix.
+# - UP031: the two `%`-format call sites in browser tests are fixture seeds.
+select = ["F", "E4", "E7", "E9", "W", "I", "UP", "B", "SIM"]
+ignore = ["E402", "E501", "B009", "UP046", "UP047", "UP031"]
 
 [project.scripts]
 migu-orca = "apps.migu_orca_entry.controllers.entry_controller:main"

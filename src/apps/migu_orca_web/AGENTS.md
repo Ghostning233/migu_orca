@@ -77,3 +77,15 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `save_preview_handler(calls?)`（消费 draft 并返回保存结果），批量卡片 mock 用
   `issue_draft_id(preview_request)` 给每个 `preview_request` 补 draft_id。
 - 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.4 与 OpenAPI 注册表。
+
+## 静态检查与就绪探针（US-195）
+
+- 静态检查是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：
+  F/E4/E7/E9/W/I/UP/B/SIM，排除 E402/E501/B009/UP046/UP047/UP031）。新增代码必须通过
+  ruff；`compileall` 只是语法检查，不替代静态检查。
+- 就绪探针 `src/apps/healthz/views.py:readiness` 通过 `services._web_storage_root()` +
+  `ensure_storage_layout(load_storage_config(...))` 检查服务端 storage 根目录；`healthz`
+  是纯存活探针。两者都不访问真实外部系统；测试用 `set_web_storage_root(tmp_path)` 隔离，
+  避免创建仓库根 `.migu_orca/storage`。
+- CI（`.github/workflows/ci.yml`）在 `MIGU_ORCA_CI=1` 下浏览器不可用会失败而不是静默
+  skip；浏览器测试 conftest 的 `pytest_collection_modifyitems` 处理该逻辑。

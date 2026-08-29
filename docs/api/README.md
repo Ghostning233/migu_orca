@@ -48,3 +48,11 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
 Stage 27 TypeScript 前端只通过本 OpenAPI/DTO 生成客户端类型，不导入旧
 `app.js` 内部状态。生成后按 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`
 handoff 使用。
+
+## 健康/就绪探针（非 /api/v1 契约）
+
+- `GET /healthz`：存活探针，只证明 Flask 进程在服务。
+- `GET /readiness`（US-195）：就绪探针，服务端 Web storage 根目录可创建/可写才返回
+  200 `{"ok": true, "result": "ok"}`；storage 不可用返回 503
+  `{"ok": false, "result": "storage_unavailable"}`。两者都不访问真实外部系统。
+- 这两个端点不属于 `/api/v1` OpenAPI 契约（见 `endpoint_inventory.md` §2 页面路由对照）。

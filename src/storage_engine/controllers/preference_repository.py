@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -107,9 +108,7 @@ def contains_sensitive_value(text: str, *, allow_relative_paths: bool = False) -
         return True
     if _SENSITIVE_KEY_VALUE_RE.search(text):
         return True
-    if _SENSITIVE_KEYWORDS.search(text):
-        return True
-    return False
+    return bool(_SENSITIVE_KEYWORDS.search(text))
 
 
 def validate_preferences(
@@ -276,10 +275,8 @@ def save_user_preferences(
         ) from exc
     finally:
         if temp_path.exists():
-            try:
+            with contextlib.suppress(OSError):
                 temp_path.unlink()
-            except OSError:
-                pass
 
     return {
         "storage": "local_json",

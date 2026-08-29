@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
+from copy import deepcopy
 
 import pytest
 
@@ -27,7 +27,6 @@ from batch_engine.controllers.batch_submit_controller import (
     SUBMIT_OUTCOME_SKIPPED,
     SUBMIT_OUTCOME_SUCCEEDED,
     SUBMIT_PERSIST_ERROR_TYPE,
-    BatchSubmitItemResult,
     compose_ab_submit_one,
     recover_batch_queue_item,
     retry_batch_queue_item,

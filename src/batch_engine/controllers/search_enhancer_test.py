@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from shared.models import BangumiCorrectionMetadata, TitleCorrection
 from batch_engine.controllers.search_enhancer import enhance_search_queries
+from shared.models import BangumiCorrectionMetadata, TitleCorrection
 
 
 def _correction() -> TitleCorrection:

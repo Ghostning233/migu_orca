@@ -87,13 +87,24 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
 测试包括纯规则单元测试、fixture 解析、API/入口测试和 Playwright 浏览器测试。统一命令为：
 
 ```bash
-uv run python -m compileall -q src tests
-uv run pytest -q
-uv run pytest tests/browser/ -q
+uv run python -m compileall -q src tests   # 语法检查（只证明可编译）
+uv run ruff check src tests                # Python 静态检查（US-195，pyproject.toml [tool.ruff.lint]）
+uv run pytest -q -m "not browser"          # 非浏览器测试
+uv run pytest tests/browser/ -q            # 真实 Chromium 浏览器套件
 node --check src/apps/migu_orca_web/static/app.js
+uv run migu-orca-openapi --check           # OpenAPI 漂移检查
+git diff --check
 ```
 
-浏览器不可用时允许明确记录 skip 原因，但不得把整体 skip 当作 UI Stage 的完成证据。
+- `compileall` 只是语法检查，**不是**静态检查；静态检查由 `ruff` 承担（pyflakes/
+  bugbear/pyupgrade 等规则，见 `pyproject.toml`）。CI（`.github/workflows/ci.yml`）
+  依次执行全部上述命令；真实 Chromium 套件在单独 job 运行，`MIGU_ORCA_CI=1` 下浏览器
+  不可用会**失败**而不是静默 skip。
+- 浏览器不可用时允许明确记录 skip 原因，但不得把整体 skip 当作 UI Stage 的完成证据。
+- 健康/就绪探针：`/healthz` 只证明进程存活；`/readiness` 额外校验服务端 Web storage
+  根目录可创建/可写（不可用返回 503 `{ok: false, result: "storage_unavailable"}`）。
+  两者都不访问真实 MiKan / AutoBangumi / qBittorrent。
+- 部署基线：默认 local-only（`flask run` 只监听 127.0.0.1）；未认证时禁止直接暴露公网。
 
 ## 8. 拆分原则
 

@@ -18,8 +18,9 @@ Chinese reason; and one item's failure never blocks the rest of the batch.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Callable, Sequence
+from typing import Any
 
 from batch_engine.controllers.batch_queue_controller import (
     IdFactory,

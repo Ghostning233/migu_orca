@@ -14,11 +14,9 @@ from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.models import EntryRequest
 from tests.browser.conftest import (
     issue_draft_id,
-    preview_result_json,
     save_preview_handler,
     set_storage_preferences,
 )
-
 
 pytestmark = pytest.mark.browser
 

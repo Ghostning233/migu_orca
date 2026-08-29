@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from html.parser import HTMLParser
 import re
 from codecs import getincrementaldecoder
+from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from time import monotonic
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -13,7 +13,6 @@ from urllib.request import Request, urlopen
 from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.errors import Stage1Error
 from shared.models import BangumiCandidate, MatchedBangumi, RssSource
-
 
 # MiKan search pages can include large episode result tables in addition to
 # bangumi candidates. Keep a bounded read, but allow broad queries to finish.
@@ -108,7 +107,7 @@ class UrlopenMikanTransport:
         url: str,
         *,
         timeout: float,
-        stop_detector: "_MikanCandidateSectionDetector | None" = None,
+        stop_detector: _MikanCandidateSectionDetector | None = None,
     ) -> str:
         started_at = monotonic()
         max_deadline = started_at + MAX_MIKAN_STREAM_SECONDS
@@ -1141,7 +1140,7 @@ class _MikanBangumiPageParser(HTMLParser):
             for group_name in group_names
         ]
 
-    def _rows_with_sources(self) -> list["_MikanPageRow"]:
+    def _rows_with_sources(self) -> list[_MikanPageRow]:
         rows = list(self._completed_rows)
         if self._current_row is not None:
             rows.append(self._current_row)

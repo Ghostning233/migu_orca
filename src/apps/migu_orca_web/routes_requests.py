@@ -6,25 +6,16 @@ Migrated from ``views.py`` without behavior change. URL, methods and endpoint
 names are identical; the golden contract tests protect this compatibility.
 """
 
-from extensions.flask_api import class_route
-from extensions.flask_api.views import GetView, PostView
+from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_entry.controllers.entry_controller import (
+    _build_history_event,
+    _confirmation_history_details,
     apply_ab_submit_action,
     apply_confirmation_action,
     apply_modify_action,
     apply_request_save_action,
     generate_request,
-    _build_history_event,
-    _confirmation_history_details,
 )
-from request_engine.controllers.request_controller import (
-    PENDING_CONFIRM,
-    summarize_request,
-)
-from shared.errors import Stage1Error
-from shared.models import EntryRequest
-from shared.season_evidence import attach_selected_candidate_season
-
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.contexts import candidate_selection_contexts
 from apps.migu_orca_web.drafts import (
@@ -34,33 +25,41 @@ from apps.migu_orca_web.drafts import (
     draft_store,
 )
 from apps.migu_orca_web.schemas import (
-    RequestListQuery,
-    RequestDetailQuery,
-    RequestCreatePayload,
+    RequestAbSubmitPayload,
     RequestActionPayload,
     RequestCancelPayload,
+    RequestCreatePayload,
+    RequestDetailQuery,
+    RequestListQuery,
     RequestModifyPayload,
     RequestPreviewModifyPayload,
     RequestPreviewSavePayload,
-    RequestAbSubmitPayload,
 )
 from apps.migu_orca_web.serializers import (
     _raise_result_error,
     _sanitize_ab_submit_result,
 )
 from apps.migu_orca_web.services import (
-    _storage_dir,
-    _resolve_mikan_config,
-    _load_history_section,
     _load_ab_result_section,
+    _load_history_section,
+    _resolve_mikan_config,
+    _storage_dir,
 )
+from extensions.flask_api import class_route
+from extensions.flask_api.views import GetView, PostView
+from request_engine.controllers.request_controller import (
+    PENDING_CONFIRM,
+    summarize_request,
+)
+from shared.errors import Stage1Error
+from shared.models import EntryRequest
+from shared.season_evidence import attach_selected_candidate_season
 from storage_engine.controllers.request_repository import (
     delete_request_snapshot,
     list_request_snapshots,
     load_request_snapshot,
 )
 from storage_engine.controllers.storage_config import load_storage_config
-from ab_engine.controllers.ab_config import build_ab_config
 
 
 def _draft_store_error(reason: str) -> Stage1Error:

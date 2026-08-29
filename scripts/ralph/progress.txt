@@ -29,6 +29,11 @@
 - OpenAPI 契约在 `docs/api/openapi.json`，由 `uv run migu-orca-openapi` 确定性生成（`--check` 做漂移检查）；端点注册表在 `src/apps/migu_orca_web/openapi_gen.py` 的 `_ENDPOINTS`，新增/删除 `/api/v1` 端点必须同步注册表，否则 `tests/api_contract/test_openapi_generation.py` 失败。
 - 公开响应 DTO 在 `src/apps/migu_orca_web/api_contract.py`，全部 `extra="forbid"`；`_ENDPOINTS` 的 `success` 字段引用 DTO（或少量内联 dict，如 request list）。
 - pydantic v2 `model_json_schema()` 会输出 `$defs` + `$ref`；OpenAPI 生成时用 `_dereference` 内联，避免输出带本地 ref 的文档（客户端生成器更易消费）。
+- Python 静态检查（US-195）是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：F/E4/E7/E9/W/I/UP/B/SIM，`line-length=120`，排除 E402/E501/B009/UP046/UP047/UP031 并记录理由）；`compileall` 只是语法检查，不冒充静态检查。
+- 质量门禁（US-195）：`.github/workflows/ci.yml` 每次 push/PR 执行 compileall → ruff → 非浏览器 pytest → `node --check` → `migu-orca-openapi --check` → `git diff --check`；真实 Chromium 套件在单独 job，`MIGU_ORCA_CI=1` 下浏览器不可用直接失败（conftest `pytest_collection_modifyitems` 抛 RuntimeError）而非静默 skip。
+- 健康/就绪探针：`/healthz` 纯存活；`/readiness` 用 `services._web_storage_root()` + `ensure_storage_layout(load_storage_config(...))` 校验服务端 storage 根，失败 503 `{"ok": false, "result": "storage_unavailable"}`；两者都不访问真实外部系统。readiness 测试必须 `set_web_storage_root(tmp_path)` 避免污染仓库 `.migu_orca/storage`。
+- 修改「仅作再导出」的 import（如 views.py 的 `api_blueprint`）时，ruff --fix 会误删；保留并加 `# noqa: F401` 注明用途。UP037（去引号注解）只在有 `from __future__ import annotations` 的文件安全。
+
 
 ## 2026-08-29 10:30:00 CST - US-189
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -157,3 +162,22 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 前端 `currentDraftId` 必须在「渲染已保存请求」与「清空批量详情上下文」时置 null，否则切到已保存详情后误用旧 draft_id。
   - `RequestPreviewSaveResultDTO` 不能再继承 `RequestCreateResultDTO`（后者新增了 draft_id，而保存响应没有 draft_id）；改为独立定义相同字段。
   - 旧测试大量断言 `saved_calls[0]["request"]["request_id"]`，US-194 后 preview-save/modify 的 payload 只含 draft_id，断言改为 `saved_calls[0]["draft_id"]` + `"request" not in payload`。
+
+## 2026-08-30 07:30:00 CST - US-195
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 建立 P0 CI 门禁、Python 静态检查与 local-only 部署基线：每次 push/PR 自动执行 compileall → ruff → 非浏览器 pytest → node --check → OpenAPI 漂移 → git diff --check；真实 Chromium 套件在单独 job 运行，CI 下浏览器不可用直接失败而非静默 skip。
+- 新增 `.github/workflows/ci.yml`：`checks` job（astral-sh/setup-uv + setup-python + setup-node，跑全部静态与契约门禁）+ `browser` job（`uv run playwright install --with-deps chromium` + `MIGU_ORCA_CI=1` 跑 tests/browser/）。CI 不保存凭据/真实 endpoint/trace/敏感失败产物。
+- 引入 `ruff` 作为 Python 静态检查（`pyproject.toml` `[tool.ruff.lint]`：F/E4/E7/E9/W/I/UP/B/SIM，`line-length=120`，排除 E402/E501/B009/UP046/UP047/UP031 并在注释记录理由）；加入 dev 依赖（uv.lock 更新），修复全部存量违规（约 116 处：I001 排序、F401 未用导入、UP035/037/012/043 现代化、SIM105/108/210/103 简化、F821 补 pytest 导入）。compileall 降级为纯语法检查，不再冒充静态检查。
+- `src/apps/healthz/views.py`：`/healthz` 保持纯存活探针；`/readiness` 拆分为就绪探针——用 `services._web_storage_root()` + `ensure_storage_layout(load_storage_config(...))` 校验服务端 storage 根目录可创建/可写，失败返回 503 `{"ok": false, "result": "storage_unavailable"}`（不回显路径/敏感值）；两者都不访问真实 MiKan/AB/qB。
+- 测试：`src/apps/healthz/views_test.py` 新增 3 个测试（成功路径用 tmp storage root 避免污染仓库 `.migu_orca/storage`、外部 client 工厂全部 monkeypatch 抛错证明不触碰外部系统、503 失败 envelope 不回显路径）；`tests/browser/test_infrastructure.py` 新增 `test_readiness_reports_ready`；`tests/browser/conftest.py` 在 `MIGU_ORCA_CI=1` 且浏览器不可用时 collection 抛错（不静默 skip）。
+- 文档：README「开发约定」区分 compileall/ruff、「Web UI 与 API」healthz/readiness 语义、新增「本地部署基线」（默认 local-only、未认证禁止直接暴露公网、storage 根目录、健康/就绪探针、CI 门禁）；stage PRD US-195 段、`docs/design/architecture.md` §7、`docs/api/README.md`、`endpoint_inventory.md` §2、`src/apps/migu_orca_web/AGENTS.md` 同步。
+- 质量检查：compileall、ruff、完整 pytest（1019 非浏览器 + 269 真实 Chromium 全绿，含新增 readiness 测试）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
+- Files changed: `.github/workflows/ci.yml`（新）、`pyproject.toml`、`uv.lock`、`src/apps/healthz/views.py`+`views_test.py`、`tests/browser/conftest.py`+`test_infrastructure.py`、`README.md`、`docs/design/architecture.md`、`docs/api/README.md`+`endpoint_inventory.md`、stage PRD、`AGENTS.md`、`scripts/ralph/prd.json`+`progress.txt`，以及 ruff 自动修复的 ~60 个源/测试文件（导入排序、未用导入、UP 现代化、SIM 简化）。
+- **Learnings for future iterations:**
+  - `ruff check --fix` 会移除「仅作再导出」的 import（views.py 的 `api_blueprint` 被 F401 当未用），破坏 `apps.migu_orca_web.__init__` 的再导出；这类 import 必须保留并加 `# noqa: F401` 注释说明用途。
+  - ruff 的 UP037（去引号注解）只在该文件有 `from __future__ import annotations` 时才安全；本仓库全部相关文件都有，且无 `get_type_hints`/`__annotations__` 运行时求值，全套测试通过证明安全。
+  - ruff E501/E402 在本仓库是项目风格（docstring 在 `from __future__` 之后、长中文 UI 字符串），不是正确性问题；在 `[tool.ruff.lint].ignore` 记录理由比强改 ~750 行更符合「适合当前代码」。
+  - 浏览器测试 conftest 的 skip 逻辑在 CI 下要抛 `RuntimeError` 而非静默 skip；`MIGU_ORCA_CI=1` 环境变量是 CI job 与本地运行的开关。
+  - `/readiness` 探针测试必须把 `_web_storage_root` 指到 tmp，否则成功路径会在仓库根创建 `.migu_orca/storage` 挂掉后续浏览器测试（复用 US-193 的 `set_web_storage_root` seam）。
+  - CI 里 `uv sync --all-groups` 会把 ruff/pytest/playwright 都装上；`astral-sh/setup-uv` + `actions/setup-python`（python-version-file 指向 `.python-version`）是 uv 项目标准组合。
+  - `playwright install --with-deps chromium` 在 ubuntu-latest 上能装全系统库；本地沙箱用 `.agents/.chromium-libs` + 同一 bash 命令内 `ln -sfn` 到 `/tmp/chromium-libs`。

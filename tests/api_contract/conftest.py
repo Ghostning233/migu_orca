@@ -50,9 +50,9 @@ def _reset_shared_state() -> None:
     These singletons are shared across tests, so contract tests must never
     observe entries written by earlier tests.
     """
-    from mikan_engine.controllers.mikan_candidate_cache import candidate_search_cache
     from apps.migu_orca_web.contexts import candidate_selection_contexts
     from apps.migu_orca_web.drafts import draft_store
+    from mikan_engine.controllers.mikan_candidate_cache import candidate_search_cache
 
     candidate_search_cache.clear()
     candidate_selection_contexts.clear()

@@ -20,13 +20,16 @@ from flask import redirect, render_template, url_for
 # import side effect is intentional. Order matters only for readability, not
 # for URL resolution.
 from apps.migu_orca_web import (  # noqa: F401
-    routes_requests,
-    routes_mikan,
     routes_batches,
-    routes_settings,
     routes_connections,
+    routes_mikan,
+    routes_requests,
+    routes_settings,
 )
-from apps.migu_orca_web.blueprints import api_blueprint, web_blueprint
+from apps.migu_orca_web.blueprints import (  # noqa: F401 - api_blueprint is re-exported for apps.migu_orca_web.__init__
+    api_blueprint,
+    web_blueprint,
+)
 from apps.migu_orca_web.contexts import (  # noqa: F401
     CandidateSelectionContextStore,
     candidate_selection_contexts,

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
-from copy import deepcopy
-from datetime import UTC, datetime
 import json
 import logging
+from collections.abc import Sequence
+from copy import deepcopy
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, Sequence
+from typing import Any, Literal
 
 from ab_engine.controllers import ab_http_client
 from ab_engine.controllers.ab_client import AutoBangumiClient, submit_ab_subscription
@@ -45,7 +46,6 @@ from subscription_engine.controllers.subscription_controller import (
     generate_folder_name,
     select_subtitle_group,
 )
-
 
 LOGGER = logging.getLogger(__name__)
 SourceMode = Literal["static_fixture", "mikan_http"]

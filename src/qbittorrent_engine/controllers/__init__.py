@@ -6,15 +6,15 @@ from qbittorrent_engine.controllers.qbittorrent_client import (
     QBittorrentTransport,
     create_qbittorrent_client,
 )
-from qbittorrent_engine.controllers.qbittorrent_controller import (
-    QBittorrentClientFactory,
-    QBittorrentConnectionClient,
-    test_qbittorrent_connection,
-)
 from qbittorrent_engine.controllers.qbittorrent_config import (
     QBittorrentConfig,
     build_qbittorrent_config,
     load_qbittorrent_config,
+)
+from qbittorrent_engine.controllers.qbittorrent_controller import (
+    QBittorrentClientFactory,
+    QBittorrentConnectionClient,
+    test_qbittorrent_connection,
 )
 
 __all__ = [

@@ -16,7 +16,6 @@ from tests.browser.conftest import (
     set_storage_preferences,
 )
 
-
 pytestmark = pytest.mark.browser
 
 

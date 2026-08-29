@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import json
-from typing import Any, Literal, Mapping, Protocol
+from collections.abc import Mapping
+from copy import deepcopy
+from typing import Any, Literal, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener, urlopen
 
-from ab_engine.controllers.ab_config import AutoBangumiConfig
 from ab_engine.controllers.ab_client import AutoBangumiClient
+from ab_engine.controllers.ab_config import AutoBangumiConfig
 from shared.errors import Stage1Error
 
 

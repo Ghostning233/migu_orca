@@ -18,14 +18,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 from apps.base import create_app
 from apps.migu_orca_web import openapi_gen
 from apps.migu_orca_web.openapi_gen import (
-    DEFAULT_OUTPUT,
-    generate_openapi,
     _ENDPOINTS,
+    generate_openapi,
 )
 
 DOC_PATH = (

@@ -8,8 +8,6 @@ import pytest
 
 from shared.errors import Stage1Error
 from shared.models import (
-    NAMING_STRATEGIES,
-    SUBTITLE_GROUP_FALLBACKS,
     FilterDefaults,
     NamingPreference,
     SearchPreference,
@@ -699,10 +697,11 @@ def _with_field(
         return replace(base, subtitle_groups=group)
     if field in ("must_contain", "must_not_contain"):
         fd = base.filter_defaults
-        if field == "must_contain":
-            fd = replace(fd, must_contain=value)
-        else:
-            fd = replace(fd, must_not_contain=value)
+        fd = (
+            replace(fd, must_contain=value)
+            if field == "must_contain"
+            else replace(fd, must_not_contain=value)
+        )
         return replace(base, filter_defaults=fd)
     if field == "template":
         return replace(base, naming=replace(base.naming, template=value))

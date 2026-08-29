@@ -14,7 +14,6 @@ from batch_engine.models import (
 )
 from shared.errors import Stage1Error
 
-
 Candidate = TypeVar("Candidate")
 
 

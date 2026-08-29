@@ -9,10 +9,10 @@ route modules and tests can import it without the page/registration module.
 """
 
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from secrets import token_urlsafe
 from time import monotonic
-from typing import Callable
 
 
 @dataclass(frozen=True)

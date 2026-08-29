@@ -18,7 +18,6 @@ from dataclasses import dataclass
 from mikan_engine.controllers.mikan_client import MikanCandidate
 from mikan_engine.controllers.mikan_config import MikanConfig
 
-
 DEFAULT_CANDIDATE_CACHE_TTL_SECONDS = 300.0
 DEFAULT_CANDIDATE_CACHE_MAX_ENTRIES = 128
 

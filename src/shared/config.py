@@ -7,7 +7,6 @@ from typing import Any
 from shared.errors import Stage1Error
 from shared.models import FilterRule, UserPreference
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CATALOG_PATH = PROJECT_ROOT / "config/system/static_mikan_sources.json"
 DEFAULT_USER_CONFIG_PATH = PROJECT_ROOT / "config/user/default_rules.json"

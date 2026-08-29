@@ -166,7 +166,7 @@ def _example_value(prop: dict[str, Any], *, required: bool) -> Any:
         return prop["default"]
     prop_type = prop.get("type")
     if prop_type == "boolean":
-        return True if required else False
+        return bool(required)
     if prop_type == "number":
         return 1
     if prop_type == "integer":
@@ -993,10 +993,11 @@ def main(argv: list[str] | None = None) -> int:
         argv.remove("--check")
         current = generate_openapi()
         expected_text = json.dumps(current, ensure_ascii=False, indent=2) + "\n"
-        if DEFAULT_OUTPUT.exists():
-            actual = DEFAULT_OUTPUT.read_text(encoding="utf-8")
-        else:
-            actual = None
+        actual = (
+            DEFAULT_OUTPUT.read_text(encoding="utf-8")
+            if DEFAULT_OUTPUT.exists()
+            else None
+        )
         if actual == expected_text:
             print("OpenAPI up to date.")
             return 0

@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import socket
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 import pytest
 
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
-from shared.models import EntryRequest
-
 
 CHROMIUM_LIB_DIRS = (
     Path("/tmp/chromium-libs/usr/lib/x86_64-linux-gnu"),
@@ -111,9 +111,23 @@ def is_browser_available() -> bool:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Auto-skip browser tests when no browser binary is available."""
+    """Auto-skip browser tests when no browser binary is available.
+
+    US-195: in CI the browser suite must *not* be silently skipped — a UI
+    change cannot count as verified without a real Chromium run. When
+    ``MIGU_ORCA_CI=1`` is set and the browser is unavailable, collection fails
+    loudly instead of skipping.
+    """
     if is_browser_available():
         return
+    if os.environ.get("MIGU_ORCA_CI") == "1" and any(
+        "browser" in item.keywords for item in items
+    ):
+        raise RuntimeError(
+            "Browser binary or system libraries unavailable in CI. "
+            "Run './script/setup-browser-deps.sh' (or install Chromium deps) "
+            "before the browser job — a skipped browser suite is not a pass."
+        )
     skip_browser = pytest.mark.skip(
         reason="Browser binary or system libraries unavailable. "
         "Run './script/setup-browser-deps.sh' or install Chromium system deps."
@@ -192,7 +206,7 @@ def _register_test_routes(app: Any) -> None:
 
 
 @pytest.fixture(scope="session")
-def live_server_url(app: Any) -> Generator[str, None, None]:
+def live_server_url(app: Any) -> Generator[str]:
     """Start the Flask app on a random port and return its base URL.
 
     The server runs for the entire test session and is killed when the session ends.
@@ -241,8 +255,8 @@ def _web_storage_root(tmp_path: Path) -> None:
     then selects the *relative profile* ``storage`` instead of an absolute
     tmp path, keeping absolute paths out of API payloads/URLs/localStorage.
     """
-    from apps.migu_orca_web.services import set_web_storage_root
     from apps.migu_orca_web.drafts import draft_store
+    from apps.migu_orca_web.services import set_web_storage_root
 
     set_web_storage_root(tmp_path)
     draft_store.clear()

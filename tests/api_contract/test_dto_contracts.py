@@ -34,9 +34,6 @@ from apps.migu_orca_web.api_contract import (
     RequestPreviewSaveResultDTO,
     RequestSummaryDTO,
 )
-from batch_engine.controllers.batch_accept_controller import (
-    serialize_batch_accept_result,
-)
 from batch_engine.controllers.batch_draft_controller import create_batch_draft
 from batch_engine.controllers.batch_queue_controller import serialize_queue
 from batch_engine.models import BatchSubmissionQueue

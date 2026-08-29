@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from flask.testing import FlaskClient
 import pytest
+from flask.testing import FlaskClient
 
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
 from ab_engine.controllers.ab_config import AutoBangumiConfig
@@ -22,7 +22,6 @@ from batch_engine.models import (
     BATCH_ITEM_STATUS_EMPTY,
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_FOUND,
-    BATCH_QUEUE_STATUS_FAILED,
     BATCH_QUEUE_STATUS_READY_TO_SUBMIT,
     BATCH_QUEUE_STATUS_RETRYABLE,
     BATCH_QUEUE_STATUS_SUCCEEDED,
@@ -53,7 +52,6 @@ from shared.models import (
     SubtitleGroupPreference,
     VersionedUserPreference,
 )
-from storage_engine.controllers.preference_repository import save_user_preferences
 from storage_engine.controllers.ab_result_repository import (
     load_ab_submit_result,
     save_ab_submit_result,
@@ -62,14 +60,15 @@ from storage_engine.controllers.history_repository import (
     append_status_history,
     load_status_history,
 )
+from storage_engine.controllers.preference_repository import save_user_preferences
+from storage_engine.controllers.queue_repository import (
+    load_submission_queue,
+    save_submission_queue,
+)
 from storage_engine.controllers.request_repository import (
     delete_request_snapshot,
     load_request_snapshot,
     save_request_snapshot,
-)
-from storage_engine.controllers.queue_repository import (
-    load_submission_queue,
-    save_submission_queue,
 )
 from storage_engine.controllers.storage_config import load_storage_config
 
@@ -1439,7 +1438,7 @@ def test_web_storage_root_can_be_overridden_server_side(
     tmp_path: Path,
 ) -> None:
     """Server-side override must not be client-controllable; it is a test seam."""
-    from apps.migu_orca_web.services import set_web_storage_root, _storage_dir
+    from apps.migu_orca_web.services import _storage_dir, set_web_storage_root
 
     override = tmp_path / "custom-root"
     set_web_storage_root(override)

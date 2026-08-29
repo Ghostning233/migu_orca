@@ -75,7 +75,9 @@
 
 页面路由（非 JSON API，供对照）：`GET /` → 302 `/index`；`GET /index`；
 `GET /Settings` → 302 `/settings`；`GET /settings`；`GET /migu-orca-static/<path:filename>`；
-`GET /healthz`；`GET /readiness`。
+`GET /healthz`（存活探针）；`GET /readiness`（就绪探针，US-195：服务端 Web storage
+根目录可创建/可写才 200，否则 503 `{"ok": false, "result": "storage_unavailable"}`；
+两者都不访问真实外部系统）。
 
 ## 3. 端点族明细
 

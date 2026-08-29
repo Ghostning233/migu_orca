@@ -6,7 +6,6 @@ from pathlib import Path
 from shared.config import PROJECT_ROOT
 from shared.errors import Stage1Error
 
-
 DEFAULT_STORAGE_DIR = PROJECT_ROOT / ".migu_orca" / "storage"
 
 
