@@ -27,6 +27,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - Stage 19 已把批量新番订阅前置工作台接入 `/index`：批量输入按非空行生成独立条目，AI 名称解析 fake provider 和 provider seam 输出候选标题/搜索词，批量 API 对每个条目独立搜索 MiKan 候选，卡片网格支持删除、展开、单卡修改回流和单卡接受。
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
 - Stage 24 AutoBangumi 真实认证与订阅兼容闭环与 Stage 25 BL-018 均已完成。部署/配置向导及其他条件触发事项继续记录在 `docs/backlog.md`，流式封面代理记录在 `docs/optional_features.md`；后续阶段按 backlog 动态规划。
+- Stage 26「Web API 契约固化与服务端边界治理」已规划为前端工程化迁移前的 P0 阶段：先建立响应 DTO、OpenAPI、正确 HTTP 状态、Web storage 根目录限制和服务端权威 draft，不在本阶段更换页面框架。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
@@ -412,7 +413,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 ## Ralph 开发流
 
-- 当前 Ralph PRD：Stage 25，正式番名与季数解析（已完成，已归档）
+- 当前 Ralph PRD：Stage 26，Web API 契约固化与服务端边界治理（已规划，待开发）
 - 最近完成阶段：Stage 25，正式番名与季数解析
 - 前一完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
 - 前一完成阶段：Stage 23，媒体缓存、MiKan 读取优化与批量审核体验
@@ -430,7 +431,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- Stage 25 执行：`docs/MiGuOrca_stage25_title_season_parsing_PRD.md`；执行分支 `agent/stage25-title-season-parsing`，Ralph stories 为 US-181～US-188
+- Stage 26 规划：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`

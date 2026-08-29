@@ -168,9 +168,23 @@ Stage 24 完成后已按 backlog 选择 BL-018，并完成独立执行 PRD：`do
 
 真实 LLM provider、当前播出集数和新版 AutoBangumi Bearer 写契约不进入 Stage 25。
 
-## 9. 未开发事项优先级池
+## 9. Stage 26：Web API 契约固化与服务端边界治理（已规划）
 
-Stage 25 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.md` 的现行优先级选择下一项，再编写独立 Stage PRD，允许中途插入更高优先级修复。
+Stage 25 已完成并合入 `main`。下一阶段选择 BL-023，先为近期前端大幅重构建立 P0 后端边界，执行 PRD 为 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。
+
+主要目标：
+
+1. 冻结 `/api/v1` 请求、响应、错误和敏感值契约，增加 Pydantic 响应 DTO 与 OpenAPI。
+2. 拆分当前集中的 Web schema、serializer、service、context 和 route 职责。
+3. 建立正确 HTTP 状态，同时兼容现有 JSON envelope 和旧页面。
+4. 限制 Web storage 根目录，用服务端权威 draft 替代客户端完整 Request 持久化。
+5. 明确 local-only 默认部署，建立 CI、契约漂移与真实 Chromium 门禁。
+
+Stage 26 不引入新前端框架、不改变主要页面设计；前端工程化迁移作为 Stage 26 完成后的独立 Stage。
+
+## 10. 未开发事项优先级池
+
+除已经规划的 Stage 26 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
 
 ### 未排期与条件触发事项
 
@@ -204,7 +218,7 @@ Stage 25 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.m
 3. 未经确认写入外部系统配置。
 4. 自动创建下载任务或替代 Auto Bangumi 执行链路。
 
-## 10. 阶段数量判断
+## 11. 阶段数量判断
 
 已明确完成或进入开发的核心产品阶段为：
 
@@ -215,5 +229,6 @@ Stage 25 之后不提前指定 Stage 编号。每轮完成后按 `docs/backlog.m
 5. Stage 23：媒体缓存、MiKan 读取优化与批量审核体验（已完成）。
 6. Stage 24：AutoBangumi 真实认证与订阅兼容闭环（已完成）。
 7. Stage 25：正式番名与季数解析（已完成）。
+8. Stage 26：Web API 契约固化与服务端边界治理（已规划）。
 
-因此，Stage 19 到 Stage 24 的基础功能、媒体/读取/UI 收敛和真实 AutoBangumi 闭环已经完成，Stage 25 已从 backlog 正式选定。Stage 25 之后不统计或预留阶段数量，按 backlog 优先级动态规划；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
+因此，Stage 19 到 Stage 25 的产品闭环已经完成，Stage 26 作为前端工程化迁移前的 P0 基础阶段进入规划。除 Stage 26 及其明确 handoff 外，不继续预留更多阶段编号；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。

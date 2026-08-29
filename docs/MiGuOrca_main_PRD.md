@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.25 |
-| 文档状态 | Stage 25 正式番名与季数解析已完成 |
+| 当前版本 | v0.26 |
+| 文档状态 | Stage 25 已完成；Stage 26 Web API 契约与边界治理已规划 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -232,8 +232,9 @@ M00 CLI 与流程编排
 | 第二十三阶段 | 媒体缓存、MiKan 读取优化与批量审核体验（已完成） | M03、M11、M12、M13、测试基础设施 |
 | 第二十四阶段 | AutoBangumi 真实认证与订阅兼容闭环（已完成） | M10、M12、M13、M14、测试基础设施 |
 | 第二十五阶段 | 正式番名与季数解析（已完成） | M00、M02、M03、M07、M10、M12、M13、测试基础设施 |
+| 第二十六阶段 | Web API 契约固化与服务端边界治理（已规划） | M00、M01、M11、M12、M13、M14、测试与 CI 基础设施 |
 
-Stage 25 已完成 BL-018；Stage 25 之后不预留阶段编号。
+Stage 25 已完成 BL-018；Stage 26 已选择 BL-023，为后续前端工程化迁移先固化 API 与服务端安全边界。
 
 ## 10. 主 PRD 已确认事项
 
@@ -280,7 +281,7 @@ Stage 25 已完成 BL-018；Stage 25 之后不预留阶段编号。
 
 ## 13. 下一步工作
 
-1. BL-018 已由 Stage 25 正式番名与季数解析完成；执行范围见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。其余部署/配置向导及条件触发事项继续在 `docs/backlog.md` 维护，流式封面代理在 `docs/optional_features.md` 维护。
+1. BL-023 已规划为 Stage 26 Web API 契约固化与服务端边界治理；执行范围见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。Stage 26 不重构页面视觉，不引入新前端框架。
 2. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
 3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
