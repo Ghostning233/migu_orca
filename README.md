@@ -412,6 +412,14 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 ## Ralph 开发流
 
+> **⚠️ 本项目的 Ralph 是经过魔改的版本**，与上游 Ralph Wiggum 循环（仅 `amp` / `claude` / `codex`）不同：
+>
+> - 新增 **`--tool dsh`**：通过 DeepSeek Harness（DSH）的 headless profile 运行 Ralph 循环，是本项目当前推荐的开发方式。
+> - 新增 **`--provider` / `--model`** 参数，可显式指定 DSH 的 LLM provider 与模型（如 Command Code 的 `commandcode` / `deepseek/deepseek-v4-flash`，或 DeepSeek 官方 API 的 `deepseek-official` / `deepseek-v4-flash`）。
+> - 首次运行会自动向 DSH headless profile 幂等安装 Command Code provider，并在每轮结束时自动清理临时 settings，不修改全局 `$DSH_HOME/settings.yaml`。
+>
+> 魔改用法详见下方「使用 DSH 运行 Ralph」小节；`amp` / `claude` / `codex` 三个原始工具分支保持兼容可用。
+
 - 当前 Ralph PRD：Stage 25，正式番名与季数解析（已完成，已归档）
 - 最近完成阶段：Stage 25，正式番名与季数解析
 - 前一完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
