@@ -57,6 +57,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - 运行测试：`uv run pytest`
 - 类型/语法检查：`uv run python -m compileall -q src`
 - 运行入口命令：`uv run migu-orca "咒术回战第三季"`
+- 生成/检查 OpenAPI 契约：`uv run migu-orca-openapi` / `uv run migu-orca-openapi --check`（漂移检查，CI 使用）
 - 启动 Flask Web UI：`uv run flask --app wsgi:app run`
 - 接受 Request：`uv run migu-orca "咒术回战第三季" --action accept`
 - 生成并保存 Request：`uv run migu-orca "咒术回战第三季" --save-request --storage-dir .migu_orca/storage`

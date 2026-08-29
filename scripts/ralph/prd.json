@@ -32,7 +32,7 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "DTO 和 OpenAPI 是 Stage 27 的唯一生成类型来源。"
     },
     {

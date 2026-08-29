@@ -17,6 +17,9 @@
 - 旧前端 `static/app.js` 的 localStorage key 只有 `miguOrca.web.storageDir`/`miguOrca.web.saveRequest`，URL 状态参数只有 `request_id`/`batch_id`；`tests/api_contract/test_frontend_dependencies.py` 冻结了这些契约。
 - `GET /api/v1/mikan/posters/<key>` 是函数视图，不经过 `APIBaseView` envelope 包装；其 `Stage1Error`（`invalid_poster_key`/`poster_not_found` 等）在 TESTING 模式直接上抛、非 TESTING 变成 Flask 500 HTML。US-192 修正 HTTP 状态时需把它纳入统一错误处理。
 - 批量 retry/recover 对「队列不存在」返回 `queue_not_found`（`load_submission_queue` 直接抛），对「队列存在但 request_id 未知」才返回 `queue_item_not_found`。
+- OpenAPI 契约在 `docs/api/openapi.json`，由 `uv run migu-orca-openapi` 确定性生成（`--check` 做漂移检查）；端点注册表在 `src/apps/migu_orca_web/openapi_gen.py` 的 `_ENDPOINTS`，新增/删除 `/api/v1` 端点必须同步注册表，否则 `tests/api_contract/test_openapi_generation.py` 失败。
+- 公开响应 DTO 在 `src/apps/migu_orca_web/api_contract.py`，全部 `extra="forbid"`；`_ENDPOINTS` 的 `success` 字段引用 DTO（或少量内联 dict，如 request list）。
+- pydantic v2 `model_json_schema()` 会输出 `$defs` + `$ref`；OpenAPI 生成时用 `_dereference` 内联，避免输出带本地 ref 的文档（客户端生成器更易消费）。
 
 ## 2026-08-29 10:30:00 CST - US-189
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -41,4 +44,22 @@ Thread: https://codex.openai.com/threads/unknown
 - **Learnings for future iterations:**
   - 现有 API 行为和浏览器旅程覆盖充分，适合用 golden contract 保护后渐进拆分，不适合同时重写后端和前端。
   - `views.py`、客户端完整 preview Request 和浏览器任意 storage_dir 是前端迁移前必须优先治理的服务端边界。
+---
+
+## 2026-08-29 12:00:00 CST - US-190
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 建立公开响应 DTO 与确定性 OpenAPI 契约，作为 Stage 27 TypeScript 前端的唯一生成类型来源。
+- 新增 `src/apps/migu_orca_web/api_contract.py`：成功/失败 envelope DTO（`ApiOkEnvelope`/`ApiErrorEnvelope`）与每端点族 result DTO，全部 `extra="forbid"` 拒绝未知字段；`ok_result()` 帮助函数可选按 DTO 校验后返回 envelope。
+- 新增 `src/apps/migu_orca_web/openapi_gen.py`：从 Flask url_map + `_ENDPOINTS` 注册表确定性生成 OpenAPI 3.1（24 个操作全覆盖）；`--check` 漂移检查；`migu-orca-openapi` console script（pyproject.toml）。
+- 生成 `docs/api/openapi.json`（~170KB）与 `docs/api/README.md`；示例全部虚构脱敏（`example.invalid`），凭据字段标 `x-request-scoped`，海报端点声明 image/jpeg|png|gif|webp content type。
+- 生命周期文档：`endpoint_inventory.md` §5.4 补充 draft_id（US-194 预告），OpenAPI info description 引用；README/docs README 更新命令。
+- 新增测试：`tests/api_contract/test_dto_contracts.py`（16 个 DTO 拒绝未知/敏感字段）、`test_openapi_generation.py`（8 个：url_map 全覆盖、注册表一致性、确定性、脱敏示例、poster content type、漂移 CLI）。
+- 质量检查：compileall、完整 pytest（1250 passed，含真实 Chromium 263 个浏览器测试）、node --check、OpenAPI --check、git diff --check 全绿。
+- Files changed: `src/apps/migu_orca_web/api_contract.py`、`openapi_gen.py`、`docs/api/openapi.json`、`docs/api/README.md`、`docs/api/endpoint_inventory.md`、`docs/README.md`、`README.md`、`pyproject.toml`、`.gitignore`、`tests/api_contract/test_dto_contracts.py`、`test_openapi_generation.py`。
+- **Learnings for future iterations:**
+  - pydantic v2 `model_json_schema()` 输出 `$defs` + `$ref`；OpenAPI 生成需 `_dereference` 内联，否则文档带本地 ref。
+  - `_ENDPOINTS` 注册表 key 用 url_map 的 `<param>` 形式（`<path:request_id>`/`<batch_id>`/`<key>`），OpenAPI 路径再规范化为 `{param}`；url_map 的 `request_id` 是 `<path:request_id>` 不是 `<request_id>`。
+  - `extra="forbid"` DTO 中 `dict[str, Any]` 字段（request 快照/parse_result/queue item 等）内部仍接受任意 key；DTO 只保证 envelope 与顶层 result key 白名单，深层脱敏由现有 serializer 负责。
+  - `migu-orca-openapi` console script 需 `uv pip install -e .` 重装后生效；模块方式 `uv run python -m apps.migu_orca_web.openapi_gen` 始终可用。
+  - 浏览器测试环境：`.agents/.chromium-libs`（从 .deb 提取的 Chromium 系统库）被 gitignore；运行时需 `ln -s` 到 `/tmp/chromium-libs`（conftest 硬编码路径），否则浏览器测试整体 skip。
 ---

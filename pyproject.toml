@@ -17,6 +17,7 @@ dev = [
 
 [project.scripts]
 migu-orca = "apps.migu_orca_entry.controllers.entry_controller:main"
+migu-orca-openapi = "apps.migu_orca_web.openapi_gen:main"
 
 [tool.pytest.ini_options]
 minversion = "7.0"

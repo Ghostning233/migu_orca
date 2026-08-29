@@ -37,4 +37,4 @@ Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已�
 3. 主 PRD、future stages 与模块 PRD。
 4. 历史 Stage PRD、归档 progress 和早期设计规格。
 
-`docs/api/` 当前只保留目录占位，尚无正式 OpenAPI 契约；不能把 README 中的接口示例当作完整、可生成客户端的 API 规范。
+`docs/api/` 提供正式 OpenAPI 契约（`openapi.json`，由确定性脚本生成，覆盖全部 `/api/v1` 端点）、端点清单与敏感值边界（`endpoint_inventory.md`）；README 中的接口示例仅作用法示意，不作为完整、可生成客户端的 API 规范。

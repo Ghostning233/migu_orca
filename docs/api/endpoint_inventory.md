@@ -2,8 +2,8 @@
 
 > 本文档是 Stage 26 US-189 的产物：在拆分 `views.py` 或改动 HTTP 状态语义**之前**，
 > 先把现有 `/api/v1` 行为、敏感值边界和旧前端依赖冻结成可审查、可自动核对的事实基线。
-> 它**不是** OpenAPI 契约（US-190 会基于 Pydantic DTO 生成 `docs/api/openapi.json`），
-> 也不替代 README 的示例用法。
+> 它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
+> 见 `docs/api/README.md`），也不替代 README 的示例用法。
 >
 > 自动核对：`tests/api_contract/test_inventory_consistency.py` 会把本清单与 Flask
 > 实际 `url_map` 逐一比对，任何新端点漏记都会导致测试失败。
@@ -184,7 +184,7 @@ US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为�
 - `?batch_id=<id>`：批量队列恢复状态（`syncBatchIdToUrl`，pushState）。
 - `?storage_dir=<path>`：通过 `apiPath()` 追加到 GET 请求（当前语义，US-193 治理）。
 
-### 5.4 生命周期（US-190 需在 OpenAPI 中记录）
+### 5.4 生命周期（US-190 在 OpenAPI 中记录）
 
 - **request_id**：`POST /api/v1/requests` 生成 → 保存后进入待确认流程（PENDING_CONFIRM）→
   accept/cancel/modify/delete/submit-ab；删除后 `request_not_found`。
@@ -194,9 +194,15 @@ US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为�
 - **candidate_context**：`POST /api/v1/mikan/candidates` 在季数需确认时签发（`CandidateSelectionContextStore`，
   TTL 300s、容量 128、单次消费、绑定 mikan_url）；`POST /api/v1/requests` 用
   `candidate_context` + `season_confirmation` 消费，失效 → `candidate_context_invalid`。
+- **draft_id**（US-194 引入，当前 preview 流程尚无服务端 draft）：候选与直连生成将签发
+  opaque `draft_id`，服务端保存权威 PENDING_CONFIRM 草案；preview-modify 只收
+  `draft_id` + 允许 patch，preview-save 只消费有效 `draft_id`；draft store 有
+  TTL、容量上限、一次性保存与重放保护。当前 `preview-modify`/`preview-save` 仍接收
+  客户端完整 Request（旧前端兼容），完整 Request、draft 内容与外部敏感配置绝不进入
+  URL 或 browser storage。
 - **poster key**：`_serialize_candidate` 通过 `poster_service.register` 签发，同源代理读取，进程内注册表。
 
-## 6. 测试证明（US-189 验收）
+## 6. 测试证明
 
 - `tests/api_contract/test_inventory_consistency.py`：清单 ↔ 实际 `url_map` 自动核对，
   漏记端点即失败；不访问真实 MiKan/AutoBangumi/qBittorrent。
@@ -204,3 +210,6 @@ US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为�
   业务失败与脱敏错误 golden contract（全部基于 fake/隔离，无真实外部写操作）。
 - `tests/api_contract/test_frontend_dependencies.py`：冻结 localStorage key、URL 参数与
   前端 fetch 依赖；改动这些契约会立即失败。
+- `tests/api_contract/test_dto_contracts.py`（US-190）：公开响应 DTO 拒绝未知/敏感字段。
+- `tests/api_contract/test_openapi_generation.py`（US-190）：OpenAPI 覆盖全部端点、
+  确定性生成、脱敏示例、海报二进制 content type 与漂移检查。
