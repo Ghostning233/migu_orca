@@ -435,6 +435,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
 - Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`
+- Ralph 循环命令（DSH / DeepSeek Harness）：`./scripts/ralph/ralph.sh --tool dsh --provider commandcode --model deepseek/deepseek-v4-flash 7`
 
 ### Ralph 阶段开发规范
 
@@ -455,7 +456,7 @@ Ralph 运行过程中由下属 Agent 产生的本地中间提交不强制使用�
 
 ### 使用 Claude 运行 Ralph
 
-当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex` 选择执行工具。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
+当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex|dsh` 选择执行工具。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
 
 Claude 模型可以通过命令行参数显式指定。当前仓库里可直接运行的示例是：
 
@@ -478,6 +479,28 @@ RALPH_MODEL=deepseek-v4-flash ./scripts/ralph/ralph.sh --tool claude 7
 如果你的 Claude 环境已经为别名做了额外映射，也可以换成对应别名；但在本仓库当前环境中，`deepseek-v4-flash` 是可直接运行的模型名。
 
 `--model` 目前只会传递给 Claude 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
+
+### 使用 DSH 运行 Ralph
+
+`--tool dsh` 通过 DeepSeek Harness 的 headless profile（`dsh --profile headless`）运行 Ralph 循环：每轮把 `scripts/ralph/prompt.md` 作为一次性任务提交，headless 完成整轮开发后把最终 assistant 消息（含 `<promise>COMPLETE</promise>` 完成标记）写到 stdout，脚本据此判断是否全部 story 完成。
+
+默认模型来自 `$DSH_HOME/settings.yaml` 的 `agent-default-model` 段。当前项目常用配置是 Command Code 的 `deepseek/deepseek-v4-flash`：
+
+```bash
+./scripts/ralph/ralph.sh --tool dsh --provider commandcode --model deepseek/deepseek-v4-flash 7
+```
+
+- `--provider` 指定 DSH LLM provider。`commandcode`（Command Code API，需 headless profile 安装 `@mars-sea/dsh-commandcode-provider`，脚本首次运行会自动安装）与 `deepseek-official`（DeepSeek 官方 API）均已配置凭据。
+- `--model` 是模型标识符，原样写入临时 settings 覆盖（不做拆分）。注意保留 provider 自己的前缀约定：`commandcode` 需要 `deepseek/deepseek-v4-flash` 这种带 `deepseek/` 前缀的完整标识；`deepseek-official` 用裸名 `deepseek-v4-flash` 即可。
+- 只传 `--model` 时，provider 自动沿用全局 settings.yaml 的默认值；显式传 `--provider` 时两者都必须给出。
+- 未传 `--provider`/`--model` 时完全沿用全局 settings.yaml，不生成任何临时覆盖。
+- 临时 settings/patch 文件位于系统临时目录，运行结束自动清理，不会修改 `$DSH_HOME/settings.yaml`。
+
+也可以通过环境变量指定：
+
+```bash
+RALPH_PROVIDER=commandcode RALPH_MODEL=deepseek/deepseek-v4-flash ./scripts/ralph/ralph.sh --tool dsh 7
+```
 
 Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app factory、Blueprint registry、统一 JSON API 响应层、Pydantic 校验、Request 查询/生成 API、服务端渲染 Web UI、状态历史展示和 AB 提交结果展示，同时保持默认 CLI 流程不隐式写入磁盘。
 
