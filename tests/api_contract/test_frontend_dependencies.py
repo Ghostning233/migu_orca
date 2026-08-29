@@ -54,9 +54,15 @@ def test_url_state_parameters_are_frozen(client: FlaskClient) -> None:
     assert 'url.searchParams.set("batch_id", batchId)' in script
     assert 'url.searchParams.delete("batch_id")' in script
 
-    # storage_dir is appended as a query string to GET API calls (current
-    # contract; US-193 will migrate it to a server-allowed profile).
+    # storage_dir is appended as a query string to GET API calls. US-193: the
+    # value is a server-constrained relative profile, so the frontend sanitizes
+    # absolute/legacy paths before they ever reach the URL or localStorage.
     assert 'return "?storage_dir=" + encodeURIComponent(storageDir)' in script
+    assert "function sanitizeStorageProfile" in script
+    assert "function isAbsoluteStorageProfile" in script
+    # US-193: legacy absolute-path localStorage values are dropped on load.
+    assert "savedStorageDir !== storageDirPreference" in script
+    assert "removePreference(preferenceKeys.storageDir)" in script
 
     # The frontend must never push sensitive config into the URL.
     for sensitive in ("token", "password", "cookie", "ab_config", "qbittorrent_config"):

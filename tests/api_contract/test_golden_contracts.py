@@ -76,7 +76,7 @@ def test_golden_request_list_success(client: FlaskClient, tmp_path: Path) -> Non
     saved_request(tmp_path, "芙莉莲", "request-1")
 
     response = client.get(
-        "/api/v1/requests", query_string={"storage_dir": str(tmp_path / "storage")}
+        "/api/v1/requests", query_string={"storage_dir": "storage"}
     )
 
     payload = response.get_json()
@@ -101,7 +101,7 @@ def test_golden_request_detail_success(client: FlaskClient, tmp_path: Path) -> N
 
     response = client.get(
         "/api/v1/requests/request-1",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -117,7 +117,7 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
         "/api/v1/requests",
         json={
             "title": "芙莉莲",
-            "storage_dir": str(tmp_path / "storage"),
+            "storage_dir": "storage",
             "save_request": False,
         },
     )
@@ -209,7 +209,7 @@ def test_golden_request_actions_error_sanitized(
     """A failed storage write must never leak absolute paths or tokens."""
     response = client.post(
         "/api/v1/requests/request-1/accept",
-        json={"storage_dir": str(tmp_path / "storage")},
+        json={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -220,12 +220,89 @@ def test_golden_request_actions_error_sanitized(
     assert str(tmp_path) not in serialized
 
 
+def test_golden_invalid_storage_dir_absolute_path_rejected(
+    client: FlaskClient,
+) -> None:
+    """US-193: the browser can never select an arbitrary server path."""
+    response = client.get(
+        "/api/v1/requests",
+        query_string={"storage_dir": "/etc/migu-orca/private"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_storage_dir"
+    assert payload["error_message"] == "storage_dir 必须是服务器允许根目录下的相对目录"
+    assert payload["error_data"]["details"] == {
+        "field": "storage_dir",
+        "reason": "absolute_path_not_allowed",
+    }
+    # The raw absolute path must never be echoed back.
+    assert "/etc/migu-orca/private" not in str(payload)
+
+
+def test_golden_invalid_storage_dir_windows_drive_rejected(
+    client: FlaskClient,
+) -> None:
+    response = client.get(
+        "/api/v1/requests",
+        query_string={"storage_dir": "C:\\Users\\evil\\storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_storage_dir"
+    assert "C:" not in str(payload)
+
+
+def test_golden_invalid_storage_dir_traversal_rejected(
+    client: FlaskClient,
+) -> None:
+    """Path traversal must never escape the server-allowed storage root."""
+    response = client.get(
+        "/api/v1/requests",
+        query_string={"storage_dir": ".."},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_storage_dir"
+    assert payload["error_data"]["details"]["reason"] == "escape_attempt"
+
+
+def test_golden_invalid_storage_dir_symlink_escape_rejected(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """A profile symlink pointing outside the root is rejected (resolve check)."""
+    # The Web storage root is tmp_path; create the escape target OUTSIDE it.
+    outside = tmp_path.parent / "outside-secret"
+    outside.mkdir(exist_ok=True)
+    link = tmp_path / "storage" / "escape"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside, target_is_directory=True)
+
+    response = client.get(
+        "/api/v1/requests",
+        query_string={"storage_dir": "storage/escape"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_storage_dir"
+    serialized = str(payload)
+    assert str(outside) not in serialized
+
+
 def test_golden_delete_success_shape(client: FlaskClient, tmp_path: Path) -> None:
     saved_request(tmp_path, "芙莉莲", "request-1")
 
     response = client.post(
         "/api/v1/requests/request-1/delete",
-        json={"storage_dir": str(tmp_path / "storage")},
+        json={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -423,7 +500,7 @@ def test_golden_batch_parse_failed_item_error_sanitized(
 def test_golden_batch_queue_read_success(client: FlaskClient, tmp_path: Path) -> None:
     response = client.get(
         "/api/v1/batches/nonexistent/queue",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -448,7 +525,7 @@ def test_golden_batch_accept_reports_unacceptable_item(
                     "title": "示例标题",
                 }
             ],
-            "storage_dir": str(tmp_path / "storage"),
+            "storage_dir": "storage",
         },
     )
 
@@ -545,7 +622,7 @@ def test_golden_batch_retry_unknown_item(client: FlaskClient) -> None:
 def test_golden_preferences_read_defaults(client: FlaskClient, tmp_path: Path) -> None:
     response = client.get(
         "/api/v1/preferences",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -586,7 +663,7 @@ def test_golden_preferences_save_rejects_sensitive_value(
     response = client.post(
         "/api/v1/preferences",
         json={
-            "storage_dir": str(tmp_path / "storage"),
+            "storage_dir": "storage",
             "preferences": {
                 "subtitle_groups": {"preferred": ["https://secret.example"]}
             },
@@ -604,7 +681,7 @@ def test_golden_preferences_save_rejects_sensitive_value(
 def test_golden_corrections_read_empty(client: FlaskClient, tmp_path: Path) -> None:
     response = client.get(
         "/api/v1/corrections",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -763,7 +840,7 @@ def test_golden_submit_ab_rejects_non_accepted(
     response = client.post(
         "/api/v1/requests/request-1/submit-ab",
         json={
-            "storage_dir": str(tmp_path / "storage"),
+            "storage_dir": "storage",
             "ab_config": {
                 "auth_mode": "api_token",
                 "base_url": "http://private-ab.example",
@@ -818,7 +895,7 @@ def test_golden_submit_ab_success_sanitizes_ab_result(
     response = client.post(
         "/api/v1/requests/request-1/submit-ab",
         json={
-            "storage_dir": str(tmp_path / "storage"),
+            "storage_dir": "storage",
             "ab_config": {
                 "auth_mode": "api_token",
                 "base_url": "http://private-ab.example",

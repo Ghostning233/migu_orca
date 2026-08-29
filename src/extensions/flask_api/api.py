@@ -56,6 +56,7 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     "invalid_poster",
     "invalid_poster_key",
     "invalid_cancel_reason",
+    "invalid_storage_dir",
     "queue_not_found",
     "config_error",
 }

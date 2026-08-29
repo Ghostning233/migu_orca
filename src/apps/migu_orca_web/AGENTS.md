@@ -46,3 +46,15 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 
 - 外部 endpoint、token、cookie、password、raw HTML/RSS、完整失败 URL、magnet、本地绝对路径不得进入 API 展示、storage、URL、browser storage、日志或 trace。
 - 新增响应字段时走 `serializers.py` 的白名单/脱敏路径，不要直接回传 engine dict。
+
+## Web storage 根目录（US-193）
+
+- Web API 的 `storage_dir` 只能选择服务端根目录下的**相对 profile**；解析统一在
+  `services._storage_dir`（`_WEB_STORAGE_ROOT` 为服务端根，默认 `.migu_orca/storage`，
+  可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 环境变量覆盖，测试用 `services.set_web_storage_root`）。
+- 绝对路径（Unix `/...`、Windows `C:\...`）、`..` 穿越、符号链接逃逸 → 400
+  `invalid_storage_dir`，details 只含 `field`/`reason`，绝不回显原始路径。
+- CLI `--storage-dir` 是不同信任边界（显式本地路径），不要用 Web 解析器约束它。
+- 浏览器测试：`set_storage_preferences` 存 profile 名（`storage_dir.name`），server 端
+  `_web_storage_root` fixture 指向 tmp 父目录；不要往 localStorage/URL/payload 里放绝对路径。
+- 修改 `_error_http_status` 或 `_ENDPOINTS` 的 errors 后必须重生成 `docs/api/openapi.json`。

@@ -23,7 +23,7 @@
 - **HTTP 状态语义（US-192 修正）**：envelope 形状不变，状态码按 `error_type` 分类
   （`extensions/flask_api/api.py:_error_http_status`，与 OpenAPI 注册表一致）：
   - `400`：客户端输入/状态不可用（`data_validation_errors`、`validation_error`、
-    `invalid_*`、`config_error`、`queue_not_found`）。
+    `invalid_*`、`config_error`、`queue_not_found`、`invalid_storage_dir`）。
   - `404`：资源不存在（`request_not_found`、`queue_item_not_found`、`poster_not_found`）。
   - `409`：状态冲突/一次性上下文失效/重放（`invalid_request_status`、`request_cancelled`、
     `season_evidence_conflict`、`season_confirmation_required`、`candidate_context_invalid`；
@@ -81,8 +81,9 @@
 
 ### 3.1 Requests（`/api/v1/requests`）
 
-公共查询参数（所有 Requests 端点）：`storage_dir`（可选字符串，当前可指向任意本地路径，
-US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为不受影响）。
+公共查询参数（所有 Requests 端点）：`storage_dir`（可选字符串；US-193 起为服务端允许
+根目录下的相对目录 profile，拒绝绝对路径/穿越/符号链接逃逸并返回 400 `invalid_storage_dir`；
+CLI 显式 `--storage-dir` 行为不受影响）。
 
 | 端点 | 请求字段 | 成功 `result` | 业务失败示例 |
 | --- | --- | --- | --- |
@@ -163,12 +164,17 @@ US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为�
 
 - `mikan_config`、`mikan_bangumi`、`ab_config`、`qbittorrent_config`、`candidate_context`。
 
-### 4.3 已治理的问题（US-192 统一错误处理）
+### 4.3 已治理的问题（US-192 统一错误处理 / US-193 Web storage 根目录）
 
 - `GET /api/v1/mikan/posters/<key>` 是**函数视图**（非 class-based view），US-192 已把
   它纳入统一错误处理：`poster_service.get` 抛出的 `Stage1Error`（`invalid_poster_key`、
   `poster_not_found`、`poster_unavailable`、`invalid_poster`）现在转换为 JSON envelope +
   分类状态码（`_error_http_status`），不再在 TESTING 上抛或变成 500 HTML。
+- US-193：Web API 的 `storage_dir` 从任意本地路径收紧为服务端根目录下的相对 profile。
+  默认根为仓库 `.migu_orca/storage`，部署可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖（仅服务端）。
+  绝对路径（Unix/Windows 盘符）、`..` 穿越与符号链接逃逸统一返回 400 `invalid_storage_dir`，
+  details 只含 `field`/`reason`，绝不回显原始路径。旧前端在 localStorage 中的绝对路径旧值
+  会被自动忽略并回退默认根目录。
 
 ## 5. 旧前端依赖（已冻结）
 
@@ -195,7 +201,8 @@ US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为�
 
 ### 5.2 localStorage key（仅这两个，均为非敏感浏览器偏好）
 
-- `miguOrca.web.storageDir`（自定义 storage_dir 字符串；US-193 迁移为服务端允许 profile）
+- `miguOrca.web.storageDir`（相对 storage profile 字符串；US-193 起只存服务端允许根目录下的
+  相对目录名，绝对路径旧值在读取时被忽略并回退默认根目录）
 - `miguOrca.web.saveRequest`（`"true"`/`"false"`）
 
 其它敏感值（endpoint/token/cookie/密码/qBittorrent 凭据）**绝不**写入 localStorage/sessionStorage。
@@ -204,7 +211,8 @@ US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为�
 
 - `?request_id=<id>`：详情选择状态（`syncRequestIdToUrl`，pushState/replaceState）。
 - `?batch_id=<id>`：批量队列恢复状态（`syncBatchIdToUrl`，pushState）。
-- `?storage_dir=<path>`：通过 `apiPath()` 追加到 GET 请求（当前语义，US-193 治理）。
+- `?storage_dir=<profile>`：通过 `apiPath()` 追加到 GET 请求（US-193 起为相对 profile，
+  绝不携带绝对路径）。
 
 ### 5.4 生命周期（US-190 在 OpenAPI 中记录）
 

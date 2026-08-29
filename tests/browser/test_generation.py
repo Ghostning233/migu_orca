@@ -107,7 +107,7 @@ class TestGenerateWithoutSave:
     """AC: 填写有效标题并保持 save_request 未勾选时，生成成功通知出现."""
 
     def test_generate_success_notification(self, page: Page, live_server_url: str) -> None:
-        set_storage_preferences(page, "/tmp/migu-orca-browser-preview", save_request=False)
+        set_storage_preferences(page, "preview-profile", save_request=False)
         page.goto(f"{live_server_url}/index")
         open_dev_fixture_panel(page)
 
@@ -271,7 +271,7 @@ class TestDefaultGenerateOperableSavedRequest:
             window.localStorage.setItem("miguOrca.web.storageDir", %s);
             window.localStorage.removeItem("miguOrca.web.saveRequest");
             """
-            % json.dumps(str(storage_root))
+            % json.dumps(storage_root.name)
         )
 
     def _generate_default_request(
@@ -377,7 +377,7 @@ class TestBrowserPreferences:
     ) -> None:
         page.goto(f"{live_server_url}/settings")
 
-        custom_dir = "/tmp/test-migu-storage"
+        custom_dir = "backups"
         page.fill("#settings-storage-dir", custom_dir)
         page.check("#settings-save-request")
         page.click("#storage-preferences-save")
@@ -393,7 +393,7 @@ class TestBrowserPreferences:
     ) -> None:
         page.goto(f"{live_server_url}/settings")
 
-        page.fill("#settings-storage-dir", "/tmp/some-dir")
+        page.fill("#settings-storage-dir", "some-dir")
         page.check("#settings-save-request")
         page.click("#storage-preferences-save")
 
@@ -417,14 +417,14 @@ class TestBrowserPreferences:
 
         summary = page.locator("#storage-preference-summary")
         text = summary.inner_text()
-        assert str(storage_dir) in text
+        assert storage_dir.name in text
         assert "默认保存订阅方案 JSON" in text
 
     def test_cleared_settings_preferences_restore_index_defaults(
         self, page: Page, live_server_url: str
     ) -> None:
         page.goto(f"{live_server_url}/settings")
-        page.fill("#settings-storage-dir", "/tmp/cleared-migu-storage")
+        page.fill("#settings-storage-dir", "cleared-dir")
         page.check("#settings-save-request")
         page.click("#storage-preferences-save")
         page.click("#storage-preferences-clear")
@@ -432,5 +432,53 @@ class TestBrowserPreferences:
         page.goto(f"{live_server_url}/index")
         summary = page.locator("#storage-preference-summary")
         text = summary.inner_text()
-        assert "默认 `.migu_orca/storage`" in text
+        assert "默认服务器 storage 根目录" in text
         assert "默认保存订阅方案 JSON" in text
+
+    def test_legacy_absolute_storage_dir_is_ignored_and_falls_back_to_default(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """US-193: an old localStorage absolute path must be ignored (smooth
+        migration) and never leak into the UI, URL, or API payload."""
+        page.add_init_script(
+            """
+            window.localStorage.setItem("miguOrca.web.storageDir", %s);
+            window.localStorage.setItem("miguOrca.web.saveRequest", "true");
+            """
+            % json.dumps("/tmp/legacy-migu-absolute-path")
+        )
+        page.goto(f"{live_server_url}/index")
+
+        summary = page.locator("#storage-preference-summary")
+        text = summary.inner_text()
+        assert "默认服务器 storage 根目录" in text
+        assert "/tmp/legacy-migu-absolute-path" not in text
+
+        # The sanitized value never enters the URL query on API calls.
+        page.wait_for_selector("#storage-preference-summary")
+        assert "storage_dir=" not in page.url
+
+        # localStorage was re-seeded on load (the unsafe value is dropped).
+        stored = page.evaluate(
+            "() => window.localStorage.getItem('miguOrca.web.storageDir')"
+        )
+        assert stored is None or stored == ""
+
+    def test_absolute_storage_dir_entered_in_settings_is_ignored(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """US-193: entering an absolute path in Settings falls back to default
+        instead of being persisted to localStorage."""
+        page.goto(f"{live_server_url}/settings")
+        page.fill("#settings-storage-dir", "/etc/migu-orca/evil")
+        page.check("#settings-save-request")
+        page.click("#storage-preferences-save")
+        page.wait_for_timeout(300)
+
+        assert page.locator("#settings-storage-dir").input_value() == ""
+        assert page.locator("#settings-save-request").is_checked()
+        stored = page.evaluate(
+            "() => window.localStorage.getItem('miguOrca.web.storageDir')"
+        )
+        assert stored is None or stored == ""
+        assert "etc" not in page.locator("body").inner_text()

@@ -77,6 +77,10 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
 - Request、history、AB result、queue、preference 和 correction 分目录保存为 JSON。
 - 候选缓存、候选选择 context 等短期状态当前位于单进程内存，不能假定天然支持多 worker。
 - AutoBangumi 与 qBittorrent 凭据保持 request-scoped，不进入持久化、URL、浏览器 storage、日志或测试产物。
+- Web 与 CLI 使用不同 storage 信任边界（US-193）：CLI 继续接受显式 `--storage-dir`；
+  Web API 的 `storage_dir` 只能选择服务端根目录下的相对 profile（默认 `.migu_orca/storage`，
+  可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 服务端覆盖），绝对路径/穿越/符号链接逃逸返回 400
+  `invalid_storage_dir`，错误 details 不回显原始路径。
 
 ## 7. 测试与质量门禁
 

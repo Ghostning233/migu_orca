@@ -29,6 +29,21 @@ def client() -> FlaskClient:
 
 
 @pytest.fixture(autouse=True)
+def _web_storage_root(tmp_path: Path) -> None:
+    """US-193: point the Web storage root at the test tmp dir.
+
+    Contract tests pass *relative profile* names (e.g. ``storage``) as
+    ``storage_dir``; the server resolves them under this root so absolute
+    tmp paths never appear in API payloads/URLs.
+    """
+    from apps.migu_orca_web.services import set_web_storage_root
+
+    set_web_storage_root(tmp_path)
+    yield
+    set_web_storage_root(None)
+
+
+@pytest.fixture(autouse=True)
 def _reset_shared_state() -> None:
     """Reset the process-level candidate cache and selection contexts.
 

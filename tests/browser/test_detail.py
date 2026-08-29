@@ -261,7 +261,7 @@ class TestAutoBangumiSubmitEntry:
 
         assert dialog_messages
         assert "确认提交此订阅方案到 Auto Bangumi" in dialog_messages[0]
-        assert captured["body"]["storage_dir"] == str(storage_dir)
+        assert captured["body"]["storage_dir"] == storage_dir.name
         assert captured["body"]["ab_config"] == {
             "auth_mode": "api_token",
             "base_url": "http://auto-bangumi.local/api/subscriptions",

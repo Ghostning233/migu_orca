@@ -19,7 +19,7 @@ registered Flask ``url_map`` plus explicit per-endpoint schemas in
 
 Security rules applied here:
 
-- ``storage_dir`` (and any other request-scoped value) is marked
+- ``storage_dir`` (a server-constrained relative profile; see US-193) is marked
   ``writeOnly``/request-only; it never appears in example responses.
 - Credential fields (``password``/``token``) are flagged
   ``x-request-scoped: true`` and their examples use only placeholders.
@@ -57,6 +57,12 @@ from apps.migu_orca_web.api_contract import (
 
 OPENAPI_VERSION = "3.1.0"
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[3] / "docs" / "api" / "openapi.json"
+
+# US-193: every endpoint that accepts ``storage_dir`` rejects absolute paths /
+# traversal / symlink escapes with the same stable 400 error.
+_STORAGE_DIR_ERRORS: dict[str, dict[str, str]] = {
+    "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
+}
 
 
 def _schema(model: type[BaseModel]) -> dict[str, Any]:
@@ -199,17 +205,18 @@ def _example_value(prop: dict[str, Any], *, required: bool) -> Any:
 _ENDPOINTS: dict[str, dict[str, Any]] = {
     "GET /api/v1/requests": {
         "summary": "列出所有已保存订阅方案摘要",
-        "description": "返回每个已保存 Request 的公开摘要（request_id、状态、标题、字幕组与种子统计）。storage_dir 仅用于开发/测试时选择服务器允许的存储范围。",
+        "description": "返回每个已保存 Request 的公开摘要（request_id、状态、标题、字幕组与种子统计）。storage_dir 为服务端允许根目录下的相对目录 profile。",
         "parameters": [
             {
                 "name": "storage_dir",
                 "in": "query",
                 "required": False,
-                "description": "存储目录（当前语义，US-193 将收紧为服务端允许范围）。",
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
                 "schema": {"type": "string"},
             }
         ],
         "success": {"requests": [{}]},
+        "errors": _STORAGE_DIR_ERRORS,
     },
     "GET /api/v1/requests/<path:request_id>": {
         "summary": "查看单个订阅方案详情",
@@ -226,11 +233,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "name": "storage_dir",
                 "in": "query",
                 "required": False,
-                "description": "存储目录（当前语义，US-193 将收紧为服务端允许范围）。",
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
                 "schema": {"type": "string"},
             },
         ],
         "success": RequestDetailResultDTO,
+        "errors": _STORAGE_DIR_ERRORS,
     },
     "POST /api/v1/requests": {
         "summary": "生成订阅方案（可保存）",
@@ -278,7 +286,10 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
         "success": RequestCreateResultDTO,
         "errors": {
-            "400": {"data_validation_errors": "请求参数校验失败"},
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
             "409": {
                 "candidate_context_invalid": "候选上下文已失效或已被消费",
                 "invalid_request_status": "状态冲突",
@@ -300,11 +311,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "object",
                     "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
                 },
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": RequestPreviewModifyResultDTO,
         "errors": {
-            "400": {"invalid_modify_patch_field": "补丁包含不可修改字段"},
+            "400": {
+                "invalid_modify_patch_field": "补丁包含不可修改字段",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
         },
     },
     "POST /api/v1/requests/preview-save": {
@@ -317,11 +332,13 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "request": {
                     "type": "object",
                     "description": "完整预览草案（仅 PENDING_CONFIRM 可保存）。",
-                }
+                },
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": RequestPreviewSaveResultDTO,
         "errors": {
+            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
             "409": {"invalid_request_status": "只有待确认的订阅草案可以保存"},
         },
     },
@@ -330,11 +347,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "requestBody": {
             "type": "object",
             "properties": {
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"}
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"}
             },
         },
         "success": RequestActionResultDTO,
         "errors": {
+            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
             "404": {"request_not_found": "订阅方案不存在"},
             "409": {"invalid_request_status": "状态冲突"},
         },
@@ -345,11 +363,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "type": "object",
             "properties": {
                 "cancel_reason": {"type": "string"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": RequestActionResultDTO,
         "errors": {
+            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
             "404": {"request_not_found": "订阅方案不存在"},
             "409": {"invalid_request_status": "状态冲突"},
         },
@@ -364,12 +383,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "object",
                     "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": RequestActionResultDTO,
         "errors": {
-            "400": {"invalid_modify_patch_field": "补丁包含不可修改字段"},
+            "400": {
+                "invalid_modify_patch_field": "补丁包含不可修改字段",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
             "404": {"request_not_found": "订阅方案不存在"},
         },
     },
@@ -378,11 +400,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "requestBody": {
             "type": "object",
             "properties": {
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"}
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"}
             },
         },
         "success": RequestDeleteResultDTO,
         "errors": {
+            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
             "404": {"request_not_found": "订阅方案不存在"},
         },
     },
@@ -421,11 +444,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     },
                     "required": ["auth_mode", "fallback_enabled"],
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": RequestAbSubmitResultDTO,
         "errors": {
+            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
             "404": {"request_not_found": "订阅方案不存在"},
             "409": {"invalid_request_status": "只有已确认订阅方案可以提交"},
         },
@@ -489,8 +513,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     },
     "GET /api/v1/preferences": {
         "summary": "读取用户偏好",
+        "parameters": [
+            {
+                "name": "storage_dir",
+                "in": "query",
+                "required": False,
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                "schema": {"type": "string"},
+            }
+        ],
         "success": PreferenceResultDTO,
-        "errors": {"500": {"storage_json_error": "偏好文件损坏"}},
+        "errors": {
+            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
+            "500": {"storage_json_error": "偏好文件损坏"},
+        },
     },
     "POST /api/v1/preferences": {
         "summary": "保存用户偏好",
@@ -502,17 +538,30 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "object",
                     "description": "非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。",
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": PreferenceResultDTO,
         "errors": {
-            "400": {"validation_error": "偏好配置不合法"},
+            "400": {
+                "validation_error": "偏好配置不合法",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
         },
     },
     "GET /api/v1/corrections": {
         "summary": "读取标题修正列表",
+        "parameters": [
+            {
+                "name": "storage_dir",
+                "in": "query",
+                "required": False,
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                "schema": {"type": "string"},
+            }
+        ],
         "success": CorrectionsResultDTO,
+        "errors": _STORAGE_DIR_ERRORS,
     },
     "POST /api/v1/corrections": {
         "summary": "保存一条标题修正",
@@ -524,12 +573,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "object",
                     "description": "非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。",
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": CorrectionsResultDTO,
         "errors": {
-            "400": {"validation_error": "修正内容不合法"},
+            "400": {
+                "validation_error": "修正内容不合法",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
         },
     },
     "POST /api/v1/batches/parse": {
@@ -549,12 +601,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                         "timeout_seconds": {"type": "number"},
                     },
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": BatchParseResultDTO,
         "errors": {
-            "400": {"validation_error": "请至少输入一个番剧名称"},
+            "400": {
+                "validation_error": "请至少输入一个番剧名称",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
         },
     },
     "POST /api/v1/batches/<batch_id>/accept": {
@@ -580,10 +635,11 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "items": {"type": "string"},
                     "description": "可选：只接受指定卡片（缺省接受全部）。",
                 },
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": BatchAcceptResultDTO,
+        "errors": _STORAGE_DIR_ERRORS,
     },
     "GET /api/v1/batches/<batch_id>/queue": {
         "summary": "读取提交前队列",
@@ -598,11 +654,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "name": "storage_dir",
                 "in": "query",
                 "required": False,
-                "description": "存储目录（US-193 收紧）。",
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
                 "schema": {"type": "string"},
             },
         ],
         "success": BatchQueueResultDTO,
+        "errors": _STORAGE_DIR_ERRORS,
     },
     "POST /api/v1/batches/<batch_id>/submit": {
         "summary": "提交队列到 Auto Bangumi",
@@ -625,7 +682,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "required": ["auth_mode", "fallback_enabled"],
                 },
                 "confirm": {"type": "boolean", "description": "显式用户确认。"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": BatchSubmitResultDTO,
@@ -633,6 +690,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "400": {
                 "validation_error": "缺少 ab_config 或 confirm",
                 "queue_not_found": "队列不存在",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
             },
         },
     },
@@ -657,7 +715,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "required": ["auth_mode", "fallback_enabled"],
                 },
                 "confirm": {"type": "boolean"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": BatchSubmitResultDTO,
@@ -665,6 +723,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "400": {
                 "validation_error": "缺少 ab_config/confirm/request_id",
                 "queue_not_found": "队列不存在",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
             },
             "404": {"queue_item_not_found": "队列中不存在该 request_id"},
         },
@@ -681,12 +740,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "enum": ["auto", "succeeded", "failed"],
                 },
                 "confirm": {"type": "boolean"},
-                "storage_dir": {"type": "string", "description": "存储目录（US-193 收紧）。"},
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
         },
         "success": BatchSubmitResultDTO,
         "errors": {
-            "400": {"validation_error": "action 非法或缺少确认"},
+            "400": {
+                "validation_error": "action 非法或缺少确认",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
             "404": {"queue_item_not_found": "队列中不存在该 request_id"},
         },
     },

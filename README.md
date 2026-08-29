@@ -151,10 +151,10 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 }
 ```
 
-当前 API：
+当前 API（US-193 起 `storage_dir` 是服务端允许根目录下的**相对 profile**，未传时使用默认根目录；CLI 的显式 `--storage-dir` 路径行为不变）：
 
-- `GET /api/v1/requests?storage_dir=.migu_orca/storage`：列出已保存 Request 摘要。未传 `storage_dir` 时使用默认 `.migu_orca/storage`。
-- `GET /api/v1/requests/<request_id>?storage_dir=.migu_orca/storage`：读取完整 Request snapshot，并附带可用的 `history` 与 `ab_result` 只读数据。
+- `GET /api/v1/requests`：列出已保存 Request 摘要。未传 `storage_dir` 时使用默认 storage 根目录。
+- `GET /api/v1/requests/<request_id>`：读取完整 Request snapshot，并附带可用的 `history` 与 `ab_result` 只读数据。
 - `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source`、可选 `mikan_config` 和 request-scoped `mikan_bangumi`。`source` 默认为 `static-fixture`；显式传入 `source: "mikan"` 时会构造真实 MiKan client，未传 `mikan_config` 时使用系统默认 MiKan 配置。存在 `mikan_bangumi` 时会直接解析指定 MiKan `Home/Bangumi/<id>` URL 或 ID 并跳过搜索；该字段不写入浏览器 storage、URL 或持久配置。API 层仍以显式 `save_request: true` 写入本地 storage；Web UI 候选选择与直连 fallback 默认发送 `save_request: false` 生成可编辑预览草案，`POST /api/v1/requests/preview-modify` 对未保存草案执行 dry-run 修改并重算种子，`POST /api/v1/requests/preview-save` 将修改后的 `PENDING_CONFIRM` 草案写入本地 storage 进入待确认流程。
 
 `POST /api/v1/requests` 示例：
@@ -162,7 +162,7 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 ```json
 {
   "title": "咒术回战第三季",
-  "storage_dir": ".migu_orca/storage",
+  "storage_dir": "backups",
   "save_request": true
 }
 ```
@@ -177,7 +177,7 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
     "search_endpoint": "https://mikan.example/Home/Search",
     "timeout_seconds": 10
   },
-  "storage_dir": ".migu_orca/storage",
+  "storage_dir": "backups",
   "save_request": true
 }
 ```
@@ -192,24 +192,24 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
     "search_endpoint": "https://mikan.example/Home/Search",
     "timeout_seconds": 10
   },
-  "storage_dir": ".migu_orca/storage",
+  "storage_dir": "backups",
   "save_request": true
 }
 ```
 
 Stage 10 新增 Request 操作端点（确认/取消仅 PENDING_CONFIRM 状态可操作；修改同时接受 PENDING_CONFIRM 与 ACCEPTED）：
 
-- `POST /api/v1/requests/<request_id>/accept?storage_dir=.migu_orca/storage`：确认 Request，状态变更为 ACCEPTED。
-- `POST /api/v1/requests/<request_id>/cancel?storage_dir=.migu_orca/storage`：取消 Request，请求体可含 `cancel_reason` 字段。
-- `POST /api/v1/requests/<request_id>/modify?storage_dir=.migu_orca/storage`：修改 Request，请求体含 `patch` 对象（允许字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`）。修改 `ACCEPTED` Request 后状态保持 `ACCEPTED` 不回落为 `PENDING_CONFIRM`，并记录 `MODIFY` history 事件；修改后重新计算有效/排除 Seeds。
+- `POST /api/v1/requests/<request_id>/accept`：确认 Request，状态变更为 ACCEPTED。
+- `POST /api/v1/requests/<request_id>/cancel`：取消 Request，请求体可含 `cancel_reason` 字段。
+- `POST /api/v1/requests/<request_id>/modify`：修改 Request，请求体含 `patch` 对象（允许字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`）。修改 `ACCEPTED` Request 后状态保持 `ACCEPTED` 不回落为 `PENDING_CONFIRM`，并记录 `MODIFY` history 事件；修改后重新计算有效/排除 Seeds。
 
 Stage 15 新增已保存 Request 删除端点：
 
-- `POST /api/v1/requests/<path:request_id>/delete?storage_dir=.migu_orca/storage`：删除 `requests/<request_id>.json`。request_id 必须来自 URL 路径，payload 只允许携带 `storage_dir` 等现有非敏感上下文；删除函数拒绝空值、路径片段和路径穿越，返回统一脱敏错误，且响应只返回被删除 request_id 和安全摘要，不返回已删除 snapshot 的原始 JSON。删除成功后列表不再包含该 request_id，详情加载该 request_id 返回 `request_not_found`。
+- `POST /api/v1/requests/<path:request_id>/delete`：删除 `requests/<request_id>.json`。request_id 必须来自 URL 路径，payload 只允许携带 `storage_dir` 等现有非敏感上下文；删除函数拒绝空值、路径片段和路径穿越，返回统一脱敏错误，且响应只返回被删除 request_id 和安全摘要，不返回已删除 snapshot 的原始 JSON。删除成功后列表不再包含该 request_id，详情加载该 request_id 返回 `request_not_found`。
 
 Stage 11 新增真实配置入口端点：
 
-- `POST /api/v1/requests/<request_id>/submit-ab?storage_dir=.migu_orca/storage`：对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交。请求体必须包含 request-scoped `ab_config`：默认账号密码模式为 `auth_mode`、`base_url`、`username`、`password`、`fallback_enabled`，API Token 模式为 `auth_mode`、`base_url`、`token`、`fallback_enabled`。提交结果会以脱敏形式写回 Request snapshot 和 `ab_results/`；服务地址、用户名、密码、token、Authorization header、cookie 和完整 URL 不应出现在 API 响应、日志或本地存储中。
+- `POST /api/v1/requests/<request_id>/submit-ab`：对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交。请求体必须包含 request-scoped `ab_config`：默认账号密码模式为 `auth_mode`、`base_url`、`username`、`password`、`fallback_enabled`，API Token 模式为 `auth_mode`、`base_url`、`token`、`fallback_enabled`。提交结果会以脱敏形式写回 Request snapshot 和 `ab_results/`；服务地址、用户名、密码、token、Authorization header、cookie 和完整 URL 不应出现在 API 响应、日志或本地存储中。
 
 Stage 12 引入、Stage 13 迁移到 Settings 使用的 qBittorrent 显式连接测试端点：
 
@@ -218,7 +218,7 @@ Stage 12 引入、Stage 13 迁移到 Settings 使用的 qBittorrent 显式连接
 取消示例：
 
 ```bash
-curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/cancel?storage_dir=.migu_orca/storage' \
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/cancel' \
   -H 'Content-Type: application/json' \
   -d '{"cancel_reason": "不想追了"}'
 ```
@@ -226,7 +226,7 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/cancel?storage_dir=.mig
 修改示例：
 
 ```bash
-curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify?storage_dir=.migu_orca/storage' \
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify' \
   -H 'Content-Type: application/json' \
   -d '{"patch": {"expected_folder_name": "自定义目录"}}'
 ```
@@ -234,7 +234,7 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify?storage_dir=.mig
 显式 Auto Bangumi 提交示例：
 
 ```bash
-curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/submit-ab?storage_dir=.migu_orca/storage' \
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/submit-ab' \
   -H 'Content-Type: application/json' \
   -d '{"ab_config": {"auth_mode": "password", "base_url": "http://auto-bangumi.local", "username": "replace-with-username", "password": "replace-with-password", "fallback_enabled": true}}'
 ```
@@ -369,8 +369,8 @@ Stage 21 偏好/修正 API 的安全边界：endpoint、token、Authorization he
 18. 通过 API 验证本地列表和详情：
 
    ```bash
-   curl 'http://127.0.0.1:5000/api/v1/requests?storage_dir=.migu_orca/storage'
-   curl 'http://127.0.0.1:5000/api/v1/requests/<request_id>?storage_dir=.migu_orca/storage'
+   curl 'http://127.0.0.1:5000/api/v1/requests'
+   curl 'http://127.0.0.1:5000/api/v1/requests/<request_id>'
    ```
 
 19. 验证 Stage 22 创建订阅方案工作台：主区标题为「创建订阅方案」，可用键盘或鼠标在「单个搜索 / 批量搜索」之间切换；一次只显示当前输入，结果始终位于独占一行的 `#search-results-panel`。切换后另一模式旧结果不应冒充当前结果。单个及批量 FOUND 候选均展示公开标题、MiKan ID、匹配提示和封面或明确占位；即使仅有一个候选，也必须点击「选择此合集」后才生成订阅草案。批量按原始输入分组，绝不默认选择第一个候选。EMPTY 显示「未找到匹配的 MiKan 合集」，FAILED 显示可重试的脱敏错误，两者及仅 PARSED 条目均不可展开、修改、保存或接受；选择真实候选并完成详情解析后才进入可编辑的 DRAFT/READY 草案。搜索开始、完成、无结果和失败反馈使用 aria-live 状态区；搜索中相关输入、模式切换和提交操作禁用，结束后恢复。页面底部「开发 / 离线测试」中的 `Fixture 生成` 默认收起，普通路径不会触发 fixture 生成。

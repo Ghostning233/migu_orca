@@ -38,17 +38,18 @@
             非敏感浏览器偏好；仅写入当前浏览器 localStorage，不保存外部系统配置或凭据。
           </p>
 
-          <label for="settings-storage-dir">默认 storage_dir</label>
+          <label for="settings-storage-dir">默认 storage profile</label>
           <input
             id="settings-storage-dir"
             name="storage_dir"
             type="text"
-            placeholder=".migu_orca/storage"
+            placeholder="例如 backups（相对服务器 storage 根目录）"
             aria-describedby="settings-storage-dir-help"
             autocomplete="off"
           >
           <p id="settings-storage-dir-help" class="field-help">
-            留空时订阅方案工作台使用默认 `.migu_orca/storage`。
+            留空时订阅方案工作台使用服务器默认 storage 根目录。只能填写服务器允许根目录下的
+            相对目录名（profile），不能填写绝对路径；不安全的旧值会自动回退到默认根目录。
           </p>
 
           <label class="checkbox-row" for="settings-save-request">

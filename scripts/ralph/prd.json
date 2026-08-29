@@ -80,7 +80,7 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Web 与 CLI 使用不同信任边界，不为兼容浏览器任意路径牺牲服务端安全。"
     },
     {

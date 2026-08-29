@@ -231,10 +231,39 @@
     }
   }
 
+  function isAbsoluteStorageProfile(value) {
+    // US-193: storage_dir is now a server-constrained relative profile. Any
+    // legacy localStorage value that is an absolute path (Unix or Windows
+    // drive) must not be sent to the API, stored, or shown.
+    const text = String(value || "").trim();
+    if (!text) {
+      return false;
+    }
+    if (text.charAt(0) === "/") {
+      return true;
+    }
+    return /^[a-zA-Z]:[\\/]/.test(text);
+  }
+
+  function sanitizeStorageProfile(value) {
+    // Legacy absolute paths fall back to the server default profile (empty).
+    // Only a safe relative profile name is kept for localStorage/URL/payload.
+    const text = String(value || "").trim();
+    if (isAbsoluteStorageProfile(text)) {
+      return "";
+    }
+    // Reject traversal escapes client-side too, so a ``..`` profile never
+    // reaches the server (the server also rejects it defensively).
+    if (text.split("/").indexOf("..") !== -1 || text.split("\\").indexOf("..") !== -1) {
+      return "";
+    }
+    return text;
+  }
+
   function restoreWebPreferences() {
     const savedStorageDir = readPreference(preferenceKeys.storageDir);
     const savedSaveRequest = readPreference(preferenceKeys.saveRequest);
-    storageDirPreference = savedStorageDir || "";
+    storageDirPreference = sanitizeStorageProfile(savedStorageDir);
     saveRequestPreference =
       savedSaveRequest === null ? true : savedSaveRequest === "true";
     if (settingsStorageInput) {
@@ -242,6 +271,15 @@
     }
     if (settingsSaveInput) {
       settingsSaveInput.checked = saveRequestPreference;
+    }
+    // US-193 smooth migration: drop an unsafe legacy absolute-path value from
+    // localStorage so it can never leak into later API payloads/URLs.
+    if (savedStorageDir && savedStorageDir !== storageDirPreference) {
+      if (storageDirPreference) {
+        writePreference(preferenceKeys.storageDir, storageDirPreference);
+      } else {
+        removePreference(preferenceKeys.storageDir);
+      }
     }
     updateStoragePreferenceSummary();
     updateStoragePreferencesStatus("已读取浏览器偏好。", "empty-state compact-state");
@@ -252,8 +290,8 @@
       return;
     }
     const storageText = storageDirPreference
-      ? "自定义 storage_dir：" + storageDirPreference
-      : "默认 `.migu_orca/storage`";
+      ? "storage profile：" + storageDirPreference
+      : "默认服务器 storage 根目录";
     const saveText = saveRequestPreference
       ? "默认保存订阅方案 JSON"
       : "默认只生成预览";
@@ -270,7 +308,7 @@
   }
 
   function currentStorageDir() {
-    return storageDirPreference.trim();
+    return sanitizeStorageProfile(storageDirPreference);
   }
 
   function currentSaveRequest() {
@@ -301,14 +339,18 @@
       event.preventDefault();
     }
     const preferences = readSettingsFormPreferences();
-    applyPreferenceValues(preferences.storageDir, preferences.saveRequest);
+    const safeStorageDir = sanitizeStorageProfile(preferences.storageDir);
+    applyPreferenceValues(safeStorageDir, preferences.saveRequest);
     if (storageDirPreference) {
       writePreference(preferenceKeys.storageDir, storageDirPreference);
     } else {
       removePreference(preferenceKeys.storageDir);
     }
     writePreference(preferenceKeys.saveRequest, String(saveRequestPreference));
-    updateStoragePreferencesStatus("偏好已保存。", "success-state compact-state");
+    const migrationNote = safeStorageDir !== preferences.storageDir
+      ? "（已忽略不安全的 storage profile，改用服务器默认根目录）"
+      : "";
+    updateStoragePreferencesStatus("偏好已保存。" + migrationNote, "success-state compact-state");
   }
 
   function clearWebPreferences() {
@@ -316,7 +358,7 @@
     removePreference(preferenceKeys.saveRequest);
     applyPreferenceValues("", true);
     updateStoragePreferencesStatus(
-      "偏好已清除；订阅方案工作台将使用默认 `.migu_orca/storage` 并保存订阅方案 JSON。",
+      "偏好已清除；订阅方案工作台将使用服务器默认 storage 根目录并保存订阅方案 JSON。",
       "empty-state compact-state",
     );
   }

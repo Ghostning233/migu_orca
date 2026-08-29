@@ -232,6 +232,22 @@ def storage_dir(tmp_path: Path) -> Path:
     return tmp_path / "storage"
 
 
+@pytest.fixture(autouse=True)
+def _web_storage_root(tmp_path: Path) -> None:
+    """US-193: point the Web storage root at the per-test tmp dir.
+
+    The browser server runs in-process, so the server-side storage root must be
+    the same tmp parent the ``storage_dir`` fixture lives under. The browser
+    then selects the *relative profile* ``storage`` instead of an absolute
+    tmp path, keeping absolute paths out of API payloads/URLs/localStorage.
+    """
+    from apps.migu_orca_web.services import set_web_storage_root
+
+    set_web_storage_root(tmp_path)
+    yield
+    set_web_storage_root(None)
+
+
 def create_saved_request(storage_root: Path, title: str, request_id: str) -> dict[str, Any]:
     """Generate and save a Request to temporary storage for browser tests.
 
@@ -249,8 +265,14 @@ def create_saved_request(storage_root: Path, title: str, request_id: str) -> dic
 def set_storage_preferences(
     page: Any, storage_root: Path | str, *, save_request: bool = False
 ) -> None:
-    """Seed non-sensitive Settings preferences before loading Web UI pages."""
-    storage_dir_json = json.dumps(str(storage_root))
+    """Seed non-sensitive Settings preferences before loading Web UI pages.
+
+    US-193: localStorage holds a *relative profile* under the server storage
+    root (e.g. ``storage``), never an absolute path. A Path argument is treated
+    as a tmp-based storage dir whose profile is its basename.
+    """
+    profile = storage_root.name if isinstance(storage_root, Path) else str(storage_root)
+    storage_dir_json = json.dumps(profile)
     save_request_json = json.dumps(save_request)
     page.add_init_script(
         f"""

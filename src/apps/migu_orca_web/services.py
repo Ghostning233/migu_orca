@@ -9,6 +9,8 @@ rules. Keeping the seams importable here is what lets API tests monkeypatch
 external transports without touching real MiKan/AutoBangumi/qBittorrent.
 """
 
+import os
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -67,7 +69,11 @@ from storage_engine.controllers.request_repository import (
     load_request_snapshot,
     save_request_snapshot,
 )
-from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
+from storage_engine.controllers.storage_config import (
+    DEFAULT_STORAGE_DIR,
+    StorageConfig,
+    load_storage_config,
+)
 
 from apps.migu_orca_web.schemas import RequestMikanConfigPayload
 from apps.migu_orca_web.serializers import (
@@ -79,9 +85,81 @@ from apps.migu_orca_web.serializers import (
 
 
 def _storage_dir(value: str | None) -> Path | None:
+    """Resolve a client-supplied ``storage_dir`` against the Web storage root.
+
+    US-193: the browser may only select a *relative profile* under the
+    server-controlled storage root (``_WEB_STORAGE_ROOT``). Empty means the root
+    itself. Absolute paths, Windows drive paths, traversal (``..``) and symlink
+    escapes are rejected with a stable ``invalid_storage_dir`` error (400); the
+    error details never echo the raw value (which could be an absolute path).
+    """
     if value is None or not value.strip():
         return None
-    return Path(value.strip())
+    profile = value.strip()
+
+    # Reject absolute paths up front (Unix absolute or Windows drive root) so
+    # the raw value is never resolved against the server filesystem.
+    if profile.startswith("/") or _WINDOWS_DRIVE_RE.match(profile):
+        raise Stage1Error(
+            "invalid_storage_dir",
+            "storage_dir 必须是服务器允许根目录下的相对目录",
+            "resolve_web_storage_dir",
+            {"field": "storage_dir", "reason": "absolute_path_not_allowed"},
+        )
+
+    root = _WEB_STORAGE_ROOT
+    candidate = (root / profile).resolve()
+    if candidate != root and not candidate.is_relative_to(root):
+        raise Stage1Error(
+            "invalid_storage_dir",
+            "storage_dir 必须位于服务器允许的存储根目录内",
+            "resolve_web_storage_dir",
+            {"field": "storage_dir", "reason": "escape_attempt"},
+        )
+    return candidate
+
+
+# ---------------------------------------------------------------------------
+# Web storage root (US-193)
+# ---------------------------------------------------------------------------
+# The Web API must never let the browser select an arbitrary server path. All
+# requests resolve ``storage_dir`` against a server-side storage root; the
+# client may only choose a *relative profile* under that root. The default root
+# is the same local storage directory the CLI uses. Deployments may override it
+# with ``MIGU_ORCA_WEB_STORAGE_ROOT`` (server-side environment only — never
+# client-controlled, never reflected into API responses, logs or browser
+# storage).
+_WINDOWS_DRIVE_RE = re.compile(r"^[a-zA-Z]:[\\/]")
+
+_DEFAULT_WEB_STORAGE_ROOT = os.environ.get("MIGU_ORCA_WEB_STORAGE_ROOT", "").strip()
+
+_WEB_STORAGE_ROOT: Path = (
+    Path(_DEFAULT_WEB_STORAGE_ROOT).expanduser().resolve()
+    if _DEFAULT_WEB_STORAGE_ROOT
+    else DEFAULT_STORAGE_DIR
+)
+
+
+def set_web_storage_root(root: Path | None) -> None:
+    """Override the server-side Web storage root (test seam / runtime config).
+
+    Server-side only: the browser never controls this value. ``None`` restores
+    the default root.
+    """
+    global _WEB_STORAGE_ROOT
+    if root is None:
+        _WEB_STORAGE_ROOT = (
+            Path(_DEFAULT_WEB_STORAGE_ROOT).expanduser().resolve()
+            if _DEFAULT_WEB_STORAGE_ROOT
+            else DEFAULT_STORAGE_DIR
+        )
+        return
+    _WEB_STORAGE_ROOT = root.expanduser().resolve()
+
+
+def _web_storage_root() -> Path:
+    """Return the resolved server-side Web storage root (for docs/tests)."""
+    return _WEB_STORAGE_ROOT
 
 
 def _resolve_mikan_config(explicit: RequestMikanConfigPayload | None) -> MikanConfig:

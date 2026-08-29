@@ -19,6 +19,8 @@
 - 旧前端 `static/app.js` 的 fetchJson 已兼容非 2xx JSON、非 JSON body 与网络失败（中文安全回退）；新增失败 mock 时用 `route.fulfill(status=..., json=...)` 或 `content_type="text/html"` 模拟。
 - API 端点清单与 golden contract 测试位于 `docs/api/endpoint_inventory.md` + `tests/api_contract/`；新增/删除 `/api/v1` 端点必须同步这两处，否则 `test_inventory_consistency.py` 失败。
 - 旧前端 `static/app.js` 的 localStorage key 只有 `miguOrca.web.storageDir`/`miguOrca.web.saveRequest`，URL 状态参数只有 `request_id`/`batch_id`；`tests/api_contract/test_frontend_dependencies.py` 冻结了这些契约。
+- Web `storage_dir` 是服务端根目录下的相对 profile（`services._storage_dir`，默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖，测试用 `set_web_storage_root`）；绝对路径/穿越/符号链接逃逸 → 400 `invalid_storage_dir`，details 不回显原始路径；CLI `--storage-dir` 是独立信任边界不受此约束。
+- 改 Web API 测试的 storage 时：views/api_contract/browser 三处都有 autouse `_web_storage_root` fixture 指向 tmp，API-facing `storage_dir` 传相对 profile 名；浏览器 `set_storage_preferences` 用 `storage_dir.name`，localStorage 断言也用 `storage_dir.name`。
 - `GET /api/v1/mikan/posters/<key>` 是二进制函数视图，不经过 `APIBaseView` envelope 包装；US-192 起在 `routes_mikan.py` 内 try/except `Stage1Error` 转 JSON envelope + `_error_http_status` 状态（畸形 key 400、未注册 404、上游取图失败 502）。
 - 批量 retry/recover 对「队列不存在」返回 `queue_not_found`（`load_submission_queue` 直接抛），对「队列存在但 request_id 未知」才返回 `queue_item_not_found`。
 - OpenAPI 契约在 `docs/api/openapi.json`，由 `uv run migu-orca-openapi` 确定性生成（`--check` 做漂移检查）；端点注册表在 `src/apps/migu_orca_web/openapi_gen.py` 的 `_ENDPOINTS`，新增/删除 `/api/v1` 端点必须同步注册表，否则 `tests/api_contract/test_openapi_generation.py` 失败。
@@ -109,4 +111,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 海报 key 是 64 位 hex；畸形 key 走 `invalid_poster_key`（400），格式合法但未注册走 `poster_not_found`（404）——测试两种都要覆盖。
   - 浏览器测试 mock 非 2xx 时用 `route.fulfill(status=..., json=...)` 或 `content_type="application/json"`；非 JSON body 用 `content_type="text/html"`，前端会回退中文安全文案。
   - 前端 fetchJson 必须在 `await response.json()` 之前检查 content-type，否则非 JSON 错误体（代理 HTML）会抛 JSON parse 异常打断错误展示。
+---
+
+## 2026-08-30 03:45:00 CST - US-193
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 收紧 Web storage 根目录：浏览器只能选择服务端允许根目录下的相对 profile，绝对路径/穿越/符号链接逃逸返回 400 `invalid_storage_dir`，错误 details 不回显原始路径；CLI `--storage-dir` 显式路径行为不变。
+- 服务端（`src/apps/migu_orca_web/services.py`）：`_storage_dir(value)` 改为相对 profile 解析器——空值 → 默认根；Unix `/...` 与 Windows 盘符（`^[a-zA-Z]:[\\/]`）→ 400；`(root/profile).resolve()` 后 `is_relative_to(root)` 校验拒绝 `..` 穿越与符号链接逃逸。`_WEB_STORAGE_ROOT` 默认 `DEFAULT_STORAGE_DIR`（`.migu_orca/storage`），可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 环境变量服务端覆盖；`set_web_storage_root(root|None)` 是测试 seam。
+- `extensions/flask_api/api.py`：`invalid_storage_dir` 加入 `_HTTP_BAD_REQUEST_ERROR_TYPES`（400）；`api_test.py` 加映射单测。
+- 前端（`static/app.js` + `settings.html` + `index.html`）：`isAbsoluteStorageProfile`/`sanitizeStorageProfile` 在读取/保存/发送前丢弃绝对路径与 `..`；`restoreWebPreferences` 发现旧 localStorage 绝对路径值自动清除（平滑迁移）；Settings 输入从「默认 storage_dir」改为「storage profile（相对服务器根目录）」，summary 文案改为「默认服务器 storage 根目录」。
+- OpenAPI：`openapi_gen.py` 新增 `_STORAGE_DIR_ERRORS` 常量，全部接受 `storage_dir` 的端点 errors 声明 `invalid_storage_dir`（400），preferences/corrections GET 补充 storage_dir 参数声明；重生成 `docs/api/openapi.json`（含 27 处 invalid_storage_dir）。
+- 测试迁移：`views_test.py`/`tests/api_contract/conftest.py`/`tests/browser/conftest.py` 新增 autouse `_web_storage_root` fixture（`set_web_storage_root(tmp_path)`），所有 API-facing `storage_dir` 值从绝对 tmp 路径改为相对 profile（`"storage"`/`"migu-state"`/`storage_dir.name`）；`set_storage_preferences` 只存 profile 名。新增 golden contract（绝对路径/Windows 盘符/穿越/符号链接 4 类 `invalid_storage_dir` 拒绝 + 不回显）、`_storage_dir` 解析器 6 个单测、浏览器 2 个旧值迁移测试。
+- 文档：`endpoint_inventory.md` §1/§3.1/§4.3/§5.2/§5.3、`docs/api/README.md`、`architecture.md` §6、stage PRD US-193 段、README Web API 示例（去掉 `?storage_dir=.migu_orca/storage` 路径式 query）、`AGENTS.md` 新增 Web storage 根目录约定。
+- 质量检查：compileall、完整 pytest（1001 非浏览器 + 268 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
+- Files changed: `services.py`、`extensions/flask_api/api.py`+`api_test.py`、`openapi_gen.py`、`static/app.js`、`templates/index.html`+`settings.html`、`views_test.py`、`tests/api_contract/`（conftest+golden+frontend_dependencies）、`tests/browser/`（conftest+generation+shell+actions+detail+ui_quality+mikan_candidates）、`docs/api/openapi.json`+`endpoint_inventory.md`+`README.md`、`docs/design/architecture.md`、stage PRD、`README.md`、`AGENTS.md`、`scripts/ralph/prd.json`、`progress.txt`。
+- **Learnings for future iterations:**
+  - `_storage_dir` 是 Web 路由的统一存储 seam：改语义只需动这一处，routes_* 全部自动生效；CLI 的 `--storage-dir`（entry_controller）是不同信任边界，不要用 Web 解析器约束。
+  - `sanitize_error_data` 的正则会命中子串（如 `outside` 里的 `sid` → `[redacted]`），错误 reason 标记要避开敏感关键词子串（用 `escape_attempt` 而非 `outside_allowed_root`）。
+  - 浏览器测试的 server 是 in-process 线程，`set_web_storage_root` fixture 必须在**每个测试函数**内设置（tmp_path 按函数隔离），不能只放 session fixture。
+  - `set_storage_preferences(page, storage_root)` 对 Path 参数用 `storage_root.name` 作为 profile；绝对路径断言（`"miguOrca.web.storageDir": str(storage_dir)`）全部改为 `storage_dir.name`。
+  - localStorage 里的旧绝对路径值不会自动消失：`restoreWebPreferences` 需主动 `removePreference`/覆写，否则「迁移」只是不发送、不清理，浏览器测试断言 localStorage 时仍会看到旧值。
+  - OpenAPI `_ENDPOINTS` 中接受 `storage_dir` 的端点（含 preview-modify/save、preferences/corrections GET）要同步声明参数与 `invalid_storage_dir` 错误，否则文档与实现不一致。
 ---

@@ -571,7 +571,7 @@ class TestCandidateSearchSensitiveBoundary:
             )"""
         )
         assert local_storage == {
-            "miguOrca.web.storageDir": str(storage_dir),
+            "miguOrca.web.storageDir": storage_dir.name,
             "miguOrca.web.saveRequest": "true",
         }
 

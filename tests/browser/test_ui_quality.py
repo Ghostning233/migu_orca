@@ -279,7 +279,7 @@ def test_stage14_sensitive_settings_values_do_not_persist_or_leak(
         )"""
     )
     assert local_storage == {
-        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.storageDir": storage_dir.name,
         "miguOrca.web.saveRequest": "true",
     }
     assert json.loads(storage_json)["source_info"]
@@ -423,7 +423,7 @@ def test_stage15_accepted_modify_delete_do_not_leak_sensitive_values(
         )"""
     )
     assert local_storage == {
-        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.storageDir": storage_dir.name,
         "miguOrca.web.saveRequest": "false",
     }
 
@@ -578,7 +578,7 @@ def test_stage18_mikan_primary_flow_does_not_leak_sensitive_values(
         )"""
     )
     assert local_storage == {
-        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.storageDir": storage_dir.name,
         "miguOrca.web.saveRequest": "false",
     }
 
@@ -821,12 +821,12 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
     assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-stage19-sec"
     # US-146：accept 请求体按 BatchAcceptPayload 契约携带 items（含
     # item_id/request_id/title，均为公开字段）与 storage_dir；设置了 storage
-    # 偏好时 storage_dir 为路径值（URL query 经 apiPath 同样携带），属于功能
-    # 参数，不属于 sensitive_values。
+    # 偏好时 storage_dir 为相对 profile（URL query 经 apiPath 同样携带），属于
+    # 功能参数，不属于 sensitive_values。
     assert accept_calls
     assert accept_calls[0]["items"][0]["item_id"] == "item-sec"
     assert accept_calls[0]["items"][0]["request_id"] == "req-stage19-sec"
-    assert accept_calls[0]["storage_dir"] == str(storage_dir)
+    assert accept_calls[0]["storage_dir"] == storage_dir.name
 
     browser_state = page.evaluate(
         """() => ({
@@ -858,7 +858,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
         )"""
     )
     assert local_storage == {
-        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.storageDir": storage_dir.name,
         "miguOrca.web.saveRequest": "false",
     }
 
@@ -1409,7 +1409,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
         return page.request.post(
             f"{live_server_url}/api/v1/corrections",
             data=json.dumps(
-                {"storage_dir": str(storage_dir), "correction": correction},
+                {"storage_dir": storage_dir.name, "correction": correction},
                 ensure_ascii=False,
             ),
             headers={"Content-Type": "application/json"},
@@ -1447,7 +1447,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
 
     get_body = page.request.get(
         f"{live_server_url}/api/v1/corrections",
-        params={"storage_dir": str(storage_dir)},
+        params={"storage_dir": storage_dir.name},
     ).text()
     get_corrections = json.loads(get_body)["result"]["corrections"]
     assert get_corrections[0]["raw_title"] == "萌王S4"

@@ -199,6 +199,10 @@ src/apps/migu_orca_web/
 - Web API 拒绝允许根目录外的绝对路径、穿越和符号链接逃逸。
 - CLI 显式 storage 路径行为不变。
 - Settings 从任意路径语义迁移为服务端允许的安全 profile/相对目录语义。
+- 已实现（2026-08-30）：`services._storage_dir` 改为相对 profile 解析器（默认根
+  `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 服务端覆盖）；新增
+  `invalid_storage_dir`（400）；旧前端 `app.js` 对 localStorage 中的绝对路径旧值自动
+  回退默认根目录；OpenAPI、契约测试、浏览器测试与文档同步更新。
 
 ### US-194：建立服务端权威 draft 生命周期
 

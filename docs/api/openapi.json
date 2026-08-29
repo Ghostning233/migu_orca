@@ -420,7 +420,7 @@
             }
           },
           "400": {
-            "description": "validation_error: 请至少输入一个番剧名称",
+            "description": "validation_error: 请至少输入一个番剧名称 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -501,7 +501,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -568,8 +568,73 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "storage_dir",
+            "in": "query",
+            "required": false,
+            "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       },
       "post": {
         "summary": "保存一条标题修正",
@@ -623,7 +688,7 @@
             }
           },
           "400": {
-            "description": "validation_error: 修正内容不合法",
+            "description": "validation_error: 修正内容不合法 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -693,7 +758,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -971,6 +1036,60 @@
               }
             }
           },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
           "500": {
             "description": "storage_json_error: 偏好文件损坏",
             "content": {
@@ -1025,7 +1144,18 @@
               }
             }
           }
-        }
+        },
+        "parameters": [
+          {
+            "name": "storage_dir",
+            "in": "query",
+            "required": false,
+            "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       },
       "post": {
         "summary": "保存用户偏好",
@@ -1101,7 +1231,7 @@
             }
           },
           "400": {
-            "description": "validation_error: 偏好配置不合法",
+            "description": "validation_error: 偏好配置不合法 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -1171,7 +1301,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -1457,7 +1587,7 @@
     "/api/v1/requests": {
       "get": {
         "summary": "列出所有已保存订阅方案摘要",
-        "description": "返回每个已保存 Request 的公开摘要（request_id、状态、标题、字幕组与种子统计）。storage_dir 仅用于开发/测试时选择服务器允许的存储范围。",
+        "description": "返回每个已保存 Request 的公开摘要（request_id、状态、标题、字幕组与种子统计）。storage_dir 为服务端允许根目录下的相对目录 profile。",
         "operationId": "getRequests",
         "responses": {
           "200": {
@@ -1495,6 +1625,60 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -1502,7 +1686,7 @@
             "name": "storage_dir",
             "in": "query",
             "required": false,
-            "description": "存储目录（当前语义，US-193 将收紧为服务端允许范围）。",
+            "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
             "schema": {
               "type": "string"
             }
@@ -1675,7 +1859,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -2006,7 +2190,7 @@
             }
           },
           "400": {
-            "description": "invalid_modify_patch_field: 补丁包含不可修改字段",
+            "description": "invalid_modify_patch_field: 补丁包含不可修改字段 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -2078,6 +2262,10 @@
                   "patch": {
                     "type": "object",
                     "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。"
+                  },
+                  "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -2258,6 +2446,60 @@
               }
             }
           },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
           "409": {
             "description": "invalid_request_status: 只有待确认的订阅草案可以保存",
             "content": {
@@ -2326,6 +2568,10 @@
                   "request": {
                     "type": "object",
                     "description": "完整预览草案（仅 PENDING_CONFIRM 可保存）。"
+                  },
+                  "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -2411,6 +2657,60 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2453,7 +2753,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -2532,6 +2832,60 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -2547,7 +2901,7 @@
             "name": "storage_dir",
             "in": "query",
             "required": false,
-            "description": "存储目录（US-193 收紧）。",
+            "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
             "schema": {
               "type": "string"
             }
@@ -2631,7 +2985,7 @@
             }
           },
           "400": {
-            "description": "validation_error: action 非法或缺少确认",
+            "description": "validation_error: action 非法或缺少确认 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -2767,7 +3121,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -2858,7 +3212,7 @@
             }
           },
           "400": {
-            "description": "validation_error: 缺少 ab_config/confirm/request_id / queue_not_found: 队列不存在",
+            "description": "validation_error: 缺少 ab_config/confirm/request_id / queue_not_found: 队列不存在 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -3022,7 +3376,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -3112,7 +3466,7 @@
             }
           },
           "400": {
-            "description": "validation_error: 缺少 ab_config 或 confirm / queue_not_found: 队列不存在",
+            "description": "validation_error: 缺少 ab_config 或 confirm / queue_not_found: 队列不存在 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -3220,7 +3574,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -3353,6 +3707,60 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3369,7 +3777,7 @@
             "name": "storage_dir",
             "in": "query",
             "required": false,
-            "description": "存储目录（当前语义，US-193 将收紧为服务端允许范围）。",
+            "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
             "schema": {
               "type": "string"
             }
@@ -3544,6 +3952,60 @@
               }
             }
           },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
           "404": {
             "description": "request_not_found: 订阅方案不存在",
             "content": {
@@ -3662,7 +4124,7 @@
                 "properties": {
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -3840,6 +4302,60 @@
               }
             }
           },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
           "404": {
             "description": "request_not_found: 订阅方案不存在",
             "content": {
@@ -3961,7 +4477,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -4044,6 +4560,60 @@
               }
             }
           },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
           "404": {
             "description": "request_not_found: 订阅方案不存在",
             "content": {
@@ -4108,7 +4678,7 @@
                 "properties": {
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -4287,7 +4857,7 @@
             }
           },
           "400": {
-            "description": "invalid_modify_patch_field: 补丁包含不可修改字段",
+            "description": "invalid_modify_patch_field: 补丁包含不可修改字段 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -4411,7 +4981,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
@@ -4611,6 +5181,60 @@
               }
             }
           },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
           "404": {
             "description": "request_not_found: 订阅方案不存在",
             "content": {
@@ -4768,7 +5392,7 @@
                   },
                   "storage_dir": {
                     "type": "string",
-                    "description": "存储目录（US-193 收紧）。"
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },

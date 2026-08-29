@@ -184,7 +184,7 @@ class TestAutoBangumiSubmitFlow:
         assert "browser-secret-token" not in captured["url"]
         assert "ab-endpoint-value" not in captured["url"]
         assert captured["payload"] == {
-            "storage_dir": str(storage_dir),
+            "storage_dir": storage_dir.name,
             "ab_config": {
                 "auth_mode": "password",
                 "base_url": "http://ab.example.invalid",

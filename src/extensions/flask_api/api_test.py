@@ -74,6 +74,7 @@ def test_error_http_status_maps_semantic_categories() -> None:
     assert _error_http_status("invalid_input") == 400
     assert _error_http_status("config_error") == 400
     assert _error_http_status("queue_not_found") == 400
+    assert _error_http_status("invalid_storage_dir") == 400
     # Missing resources → 404
     assert _error_http_status("request_not_found") == 404
     assert _error_http_status("queue_item_not_found") == 404

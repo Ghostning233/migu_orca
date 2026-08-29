@@ -133,6 +133,26 @@ def _clear_candidate_cache() -> None:
     candidate_selection_contexts.clear()
 
 
+@pytest.fixture(autouse=True)
+def _web_storage_root(tmp_path: Path) -> None:
+    """US-193: point the Web storage root at the test tmp dir.
+
+    Web API tests pass *relative profile* names (e.g. ``storage``) as
+    ``storage_dir``; the server resolves them under this root so absolute
+    tmp paths never appear in API payloads/URLs.
+    """
+    from apps.migu_orca_web.services import set_web_storage_root
+
+    set_web_storage_root(tmp_path)
+    yield
+    set_web_storage_root(None)
+
+
+def _profile(tmp_path: Path, name: str = "storage") -> str:
+    """Return the relative Web storage profile for a tmp-based storage dir."""
+    return name
+
+
 class _FakeMikanTransport:
     def __init__(self, responses: dict[str, str] | None = None, error: Stage1Error | None = None) -> None:
         self.responses = responses or {}
@@ -324,7 +344,7 @@ def test_index_serves_web_ui_shell() -> None:
     assert 'name="storage_dir"' not in html
     assert 'name="save_request"' not in html
     assert 'id="storage-preference-summary"' in html
-    assert "当前使用默认 `.migu_orca/storage`" in html
+    assert "服务器默认 storage 根目录" in html
     assert "前往 Settings" in html
     assert 'id="request-form-error"' in html
     assert 'role="alert"' in html
@@ -1343,11 +1363,89 @@ def test_list_requests_returns_empty_list_for_missing_storage_dir(
 ) -> None:
     response = _client().get(
         "/api/v1/requests",
-        query_string={"storage_dir": str(tmp_path / "missing-storage")},
+        query_string={"storage_dir": "missing-storage"},
     )
 
     assert response.status_code == 200
     assert response.get_json() == {"ok": True, "result": {"requests": []}}
+
+
+# --- US-193: Web storage root / profile resolution ---
+
+
+def test_storage_dir_resolver_maps_relative_profile_under_root(
+    tmp_path: Path,
+) -> None:
+    """A relative profile resolves under the server storage root."""
+    from apps.migu_orca_web.services import _storage_dir
+
+    resolved = _storage_dir("storage")
+    assert resolved == (tmp_path / "storage").resolve()
+    assert _storage_dir("") is None
+    assert _storage_dir(None) is None
+    assert _storage_dir("  ") is None
+
+
+def test_storage_dir_resolver_rejects_absolute_path(
+    tmp_path: Path,
+) -> None:
+    from apps.migu_orca_web.services import _storage_dir
+
+    for bad in ("/etc/migu-orca", "/tmp/x", "C:\\Users\\evil"):
+        with pytest.raises(Stage1Error) as exc_info:
+            _storage_dir(bad)
+        assert exc_info.value.error_type == "invalid_storage_dir"
+        assert exc_info.value.details["reason"] == "absolute_path_not_allowed"
+        # The raw value must never leak into the error.
+        assert bad not in str(exc_info.value.details)
+
+
+def test_storage_dir_resolver_rejects_traversal_escape(tmp_path: Path) -> None:
+    from apps.migu_orca_web.services import _storage_dir
+
+    for bad in ("..", "../..", "a/../../b", "storage/../../../x"):
+        with pytest.raises(Stage1Error) as exc_info:
+            _storage_dir(bad)
+        assert exc_info.value.error_type == "invalid_storage_dir"
+        assert exc_info.value.details["reason"] == "escape_attempt"
+
+
+def test_storage_dir_resolver_rejects_symlink_escape(tmp_path: Path) -> None:
+    from apps.migu_orca_web.services import _storage_dir
+
+    outside = tmp_path.parent / "web-storage-outside"
+    outside.mkdir(exist_ok=True)
+    link = tmp_path / "storage" / "escape"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    link.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(Stage1Error) as exc_info:
+        _storage_dir("storage/escape")
+    assert exc_info.value.error_type == "invalid_storage_dir"
+    assert exc_info.value.details["reason"] == "escape_attempt"
+
+
+def test_storage_dir_resolver_allows_nested_relative_profile(tmp_path: Path) -> None:
+    from apps.migu_orca_web.services import _storage_dir
+
+    resolved = _storage_dir("user-one/deep")
+    assert resolved == (tmp_path / "user-one" / "deep").resolve()
+
+
+def test_web_storage_root_can_be_overridden_server_side(
+    tmp_path: Path,
+) -> None:
+    """Server-side override must not be client-controllable; it is a test seam."""
+    from apps.migu_orca_web.services import set_web_storage_root, _storage_dir
+
+    override = tmp_path / "custom-root"
+    set_web_storage_root(override)
+    try:
+        assert _storage_dir("profile") == (override / "profile").resolve()
+        with pytest.raises(Stage1Error):
+            _storage_dir(str(tmp_path / "other"))
+    finally:
+        set_web_storage_root(None)
 
 
 def test_list_requests_returns_saved_request_summaries(tmp_path: Path) -> None:
@@ -1356,7 +1454,7 @@ def test_list_requests_returns_saved_request_summaries(tmp_path: Path) -> None:
 
     response = _client().get(
         "/api/v1/requests",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     assert response.status_code == 200
@@ -1376,7 +1474,7 @@ def test_get_request_detail_returns_complete_saved_snapshot(tmp_path: Path) -> N
 
     response = _client().get(
         "/api/v1/requests/request-1",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     assert response.status_code == 200
@@ -1418,7 +1516,7 @@ def test_get_request_detail_returns_saved_history_and_ab_result(
 
     response = _client().get(
         "/api/v1/requests/request-1",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1447,7 +1545,7 @@ def test_get_request_detail_treats_damaged_history_as_nonfatal(
 
     response = _client().get(
         "/api/v1/requests/request-1",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1470,7 +1568,7 @@ def test_get_request_detail_treats_damaged_ab_result_as_nonfatal(
 
     response = _client().get(
         "/api/v1/requests/request-1",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1488,7 +1586,7 @@ def test_get_request_detail_returns_unified_error_for_missing_request(
 ) -> None:
     response = _client().get(
         "/api/v1/requests/missing-request",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1510,7 +1608,7 @@ def test_get_request_detail_rejects_path_fragments_without_leaking_storage_path(
 ) -> None:
     response = _client().get(
         "/api/v1/requests/nested%2Frequest",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1536,7 +1634,7 @@ def test_list_requests_returns_unified_error_for_damaged_snapshot(
 
     response = _client().get(
         "/api/v1/requests",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1556,7 +1654,7 @@ def test_delete_request_removes_saved_request_and_refreshes_list_and_detail(
 
     response = _client().post(
         f"/api/v1/requests/{request['request_id']}/delete",
-        json={"storage_dir": str(storage_dir)},
+        json={"storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -1575,13 +1673,13 @@ def test_delete_request_removes_saved_request_and_refreshes_list_and_detail(
 
     list_response = _client().get(
         "/api/v1/requests",
-        query_string={"storage_dir": str(storage_dir)},
+        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
     )
     assert list_response.get_json() == {"ok": True, "result": {"requests": []}}
 
     detail_response = _client().get(
         "/api/v1/requests/request-1",
-        query_string={"storage_dir": str(storage_dir)},
+        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
     )
     assert detail_response.get_json() == {
         "ok": False,
@@ -1600,7 +1698,7 @@ def test_delete_request_returns_unified_error_for_missing_request(
 ) -> None:
     response = _client().post(
         "/api/v1/requests/missing-request/delete",
-        json={"storage_dir": str(tmp_path / "storage")},
+        json={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1622,7 +1720,7 @@ def test_delete_request_rejects_path_fragments_without_leaking_storage_path(
 ) -> None:
     response = _client().post(
         "/api/v1/requests/nested%2Frequest/delete",
-        json={"storage_dir": str(tmp_path / "storage")},
+        json={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1662,7 +1760,7 @@ def test_delete_request_returns_unified_error_for_delete_failure(
 
     response = _client().post(
         "/api/v1/requests/request-1/delete",
-        json={"storage_dir": str(tmp_path / "storage")},
+        json={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -1686,7 +1784,7 @@ def test_modify_accepted_request_preserves_status_and_records_history(
     response = _client().post(
         f"/api/v1/requests/{request['request_id']}/modify",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "patch": patch,
         },
     )
@@ -1703,7 +1801,7 @@ def test_modify_accepted_request_preserves_status_and_records_history(
 
     detail_response = _client().get(
         f"/api/v1/requests/{request['request_id']}",
-        query_string={"storage_dir": str(storage_dir)},
+        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
     )
     detail = detail_response.get_json()
     assert detail["ok"] is True
@@ -1730,7 +1828,7 @@ def test_modify_accepted_request_recomputes_seeds_and_rejects_cancelled(
     response = _client().post(
         f"/api/v1/requests/{request['request_id']}/modify",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "patch": {"filter_rule": {"must_contain": "01", "must_not_contain": ""}},
         },
     )
@@ -1750,7 +1848,7 @@ def test_modify_accepted_request_recomputes_seeds_and_rejects_cancelled(
     cancel_response = _client().post(
         f"/api/v1/requests/{cancelled['request_id']}/modify",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "patch": {"expected_folder_name": "不应成功"},
         },
     )
@@ -1768,7 +1866,7 @@ def test_create_request_generates_without_writing_storage(tmp_path: Path) -> Non
         "/api/v1/requests",
         json={
             "title": "芙莉莲",
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "save_request": False,
         },
     )
@@ -1907,7 +2005,7 @@ def test_create_request_accepts_request_scoped_mikan_direct_entry(
                 "timeout_seconds": 5,
             },
             "mikan_bangumi": "123",
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "save_request": True,
         },
     )
@@ -2989,7 +3087,7 @@ def test_batch_parse_api_applies_saved_preferences_from_storage_dir(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "萌王S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     item = response.get_json()["result"]["items"][0]
@@ -3043,7 +3141,7 @@ def test_batch_parse_api_empty_result_has_no_preview_request(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "萌王S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     item = response.get_json()["result"]["items"][0]
@@ -3065,7 +3163,7 @@ def test_batch_parse_api_empty_result_has_no_preview_without_preferences(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "萌王S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     item = response.get_json()["result"]["items"][0]
@@ -3090,7 +3188,7 @@ def test_batch_parse_api_failed_item_has_no_preview_request(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "萌王S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     item = response.get_json()["result"]["items"][0]
@@ -3115,7 +3213,7 @@ def test_batch_parse_api_falls_back_when_preference_file_is_damaged(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "萌王S4\n路哥S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "萌王S4\n路哥S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -3157,7 +3255,7 @@ def test_batch_parse_api_failed_item_keeps_applied_preferences_config(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "萌王S4\n杖剑谭S2", "storage_dir": str(storage_dir)},
+        json={"raw_input": "萌王S4\n杖剑谭S2", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     items = response.get_json()["result"]["items"]
@@ -3215,7 +3313,7 @@ def test_batch_parse_api_preference_response_never_leaks_sensitive_values(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "萌王S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "萌王S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -3557,7 +3655,7 @@ def test_batch_parse_api_marks_preference_conflict_item_for_review(
         "/api/v1/batches/parse",
         json={
             "raw_input": "路哥S4",
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
         },
     )
 
@@ -3593,10 +3691,10 @@ def _correction_payload() -> dict[str, Any]:
 
 
 def _correction_save_body(
-    storage_dir: Path,
+    storage_profile: str,
     correction: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    body: dict[str, Any] = {"storage_dir": str(storage_dir)}
+    body: dict[str, Any] = {"storage_dir": storage_profile}
     if correction is not None:
         body["correction"] = correction
     return body
@@ -3605,7 +3703,7 @@ def _correction_save_body(
 def test_correction_api_reads_empty_list_when_missing(tmp_path: Path) -> None:
     storage_dir = tmp_path / "storage"
 
-    response = _client().get(f"/api/v1/corrections?storage_dir={storage_dir}")
+    response = _client().get(f"/api/v1/corrections?storage_dir={_profile(tmp_path, storage_dir.name)}")
 
     payload = response.get_json()
     assert response.status_code == 200
@@ -3621,7 +3719,7 @@ def test_correction_api_save_returns_normalized_list_and_persists(
 
     response = _client().post(
         "/api/v1/corrections",
-        json=_correction_save_body(storage_dir, payload),
+        json=_correction_save_body(_profile(tmp_path, storage_dir.name), payload),
     )
 
     result = response.get_json()
@@ -3647,7 +3745,7 @@ def test_correction_api_save_uses_latest_version_for_same_raw_title(
     storage_dir = tmp_path / "storage"
     _client().post(
         "/api/v1/corrections",
-        json=_correction_save_body(storage_dir, _correction_payload()),
+        json=_correction_save_body(_profile(tmp_path, storage_dir.name), _correction_payload()),
     )
     updated = {
         **_correction_payload(),
@@ -3656,10 +3754,10 @@ def test_correction_api_save_uses_latest_version_for_same_raw_title(
     }
     _client().post(
         "/api/v1/corrections",
-        json=_correction_save_body(storage_dir, updated),
+        json=_correction_save_body(_profile(tmp_path, storage_dir.name), updated),
     )
 
-    response = _client().get(f"/api/v1/corrections?storage_dir={storage_dir}")
+    response = _client().get(f"/api/v1/corrections?storage_dir={_profile(tmp_path, storage_dir.name)}")
 
     corrections = response.get_json()["result"]["corrections"]
     assert len(corrections) == 1
@@ -3671,7 +3769,7 @@ def test_correction_api_save_rejects_missing_correction(tmp_path: Path) -> None:
 
     response = _client().post(
         "/api/v1/corrections",
-        json=_correction_save_body(storage_dir, None),
+        json=_correction_save_body(_profile(tmp_path, storage_dir.name), None),
     )
 
     payload = response.get_json()
@@ -3687,7 +3785,7 @@ def test_correction_api_save_rejects_invalid_correction(tmp_path: Path) -> None:
     response = _client().post(
         "/api/v1/corrections",
         json=_correction_save_body(
-            storage_dir, {"canonical_title": "葬送的芙莉莲"}
+            _profile(tmp_path, storage_dir.name), {"canonical_title": "葬送的芙莉莲"}
         ),
     )
 
@@ -3705,7 +3803,7 @@ def test_correction_api_save_rejects_unknown_field_without_writing(
     response = _client().post(
         "/api/v1/corrections",
         json=_correction_save_body(
-            storage_dir, {**_correction_payload(), "token": "secret"}
+            _profile(tmp_path, storage_dir.name), {**_correction_payload(), "token": "secret"}
         ),
     )
 
@@ -3726,7 +3824,7 @@ def test_correction_api_save_rejects_sensitive_value_without_writing(
     response = _client().post(
         "/api/v1/corrections",
         json=_correction_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {**_correction_payload(), "query_correction": "https://mikan.example/api"},
         ),
     )
@@ -3747,7 +3845,7 @@ def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
     storage_dir = tmp_path / "storage"
     _client().post(
         "/api/v1/corrections",
-        json=_correction_save_body(storage_dir, _correction_payload()),
+        json=_correction_save_body(_profile(tmp_path, storage_dir.name), _correction_payload()),
     )
     client = _MappedCandidateSearchClient(
         responses={
@@ -3769,7 +3867,7 @@ def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "路哥S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -3795,7 +3893,7 @@ def test_batch_parse_api_falls_back_through_the_unified_correction_plan(
     storage_dir = tmp_path / "storage"
     _client().post(
         "/api/v1/corrections",
-        json=_correction_save_body(storage_dir, _correction_payload()),
+        json=_correction_save_body(_profile(tmp_path, storage_dir.name), _correction_payload()),
     )
     # Only an original parse query has a candidate; the enhanced queries do not.
     client = _MappedCandidateSearchClient(
@@ -3818,7 +3916,7 @@ def test_batch_parse_api_falls_back_through_the_unified_correction_plan(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "路哥S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -3854,7 +3952,7 @@ def test_batch_parse_api_falls_back_to_original_queries_when_corrections_file_da
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "萌王S4\n路哥S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "萌王S4\n路哥S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -3894,7 +3992,7 @@ def test_batch_parse_api_does_not_leak_poisoned_corrections(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "路哥S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -3915,7 +4013,7 @@ def test_batch_parse_api_failed_search_keeps_enhanced_queries_for_review(
     storage_dir = tmp_path / "storage"
     _client().post(
         "/api/v1/corrections",
-        json=_correction_save_body(storage_dir, _correction_payload()),
+        json=_correction_save_body(_profile(tmp_path, storage_dir.name), _correction_payload()),
     )
     # Enhanced queries find nothing, and the original-query fallback raises.
     client = _MappedCandidateSearchClient()
@@ -3934,7 +4032,7 @@ def test_batch_parse_api_failed_search_keeps_enhanced_queries_for_review(
 
     response = _client().post(
         "/api/v1/batches/parse",
-        json={"raw_input": "路哥S4", "storage_dir": str(storage_dir)},
+        json={"raw_input": "路哥S4", "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -4041,7 +4139,7 @@ def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
         "/api/v1/requests",
         json={
             "title": "芙莉莲",
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "save_request": True,
         },
     )
@@ -4150,7 +4248,7 @@ def test_preview_save_persists_draft_and_enters_confirmation_flow(tmp_path: Path
 
     response = _client().post(
         "/api/v1/requests/preview-save",
-        json={"request": preview, "storage_dir": str(storage_dir)},
+        json={"request": preview, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -4252,7 +4350,7 @@ def test_create_request_returns_unified_error_for_save_failure(
         "/api/v1/requests",
         json={
             "title": "芙莉莲",
-            "storage_dir": str(tmp_path / "storage"),
+            "storage_dir": "storage",
             "save_request": True,
         },
     )
@@ -4290,7 +4388,7 @@ def test_submit_ab_accepts_request_scoped_config_and_persists_result(
     response = _client().post(
         f"/api/v1/requests/{request['request_id']}/submit-ab",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "ab_config": {
                 "auth_mode": "api_token",
                 "base_url": "http://auto-bangumi.local",
@@ -4358,7 +4456,7 @@ def test_submit_ab_persists_sanitized_fallback_failure(
     response = _client().post(
         f"/api/v1/requests/{request['request_id']}/submit-ab",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "ab_config": {
                 "auth_mode": "api_token",
                 "base_url": "http://auto-bangumi.local",
@@ -4404,7 +4502,7 @@ def test_submit_ab_rejects_missing_token_without_calling_ab(
     response = _client().post(
         f"/api/v1/requests/{request['request_id']}/submit-ab",
         json={
-            "storage_dir": str(tmp_path / "storage"),
+            "storage_dir": "storage",
             "ab_config": {
                 "auth_mode": "api_token",
                 "base_url": "http://auto-bangumi.local",
@@ -4431,7 +4529,7 @@ def test_submit_ab_rejects_non_accepted_request(tmp_path: Path) -> None:
     response = _client().post(
         f"/api/v1/requests/{request['request_id']}/submit-ab",
         json={
-            "storage_dir": str(tmp_path / "storage"),
+            "storage_dir": "storage",
             "ab_config": {
                 "auth_mode": "api_token",
                 "base_url": "http://auto-bangumi.local",
@@ -4473,7 +4571,7 @@ def test_submit_ab_sanitizes_echoed_ab_response(
     response = _client().post(
         f"/api/v1/requests/{request['request_id']}/submit-ab",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "ab_config": {
                 "auth_mode": "api_token",
                 "base_url": "http://auto-bangumi.local",
@@ -4789,16 +4887,16 @@ def _batch_accept(
     """POST the batch accept endpoint and return the raw test response."""
     payload: dict[str, Any] = {
         "items": items,
-        "storage_dir": str(storage_dir),
+        "storage_dir": storage_dir.name,
     }
     if item_ids is not None:
         payload["item_ids"] = item_ids
     return client.post(f"/api/v1/batches/{batch_id}/accept", json=payload)
 
 
-def _batch_submit_payload(storage_dir: Path) -> dict[str, Any]:
+def _batch_submit_payload(storage_profile: str) -> dict[str, Any]:
     return {
-        "storage_dir": str(storage_dir),
+        "storage_dir": storage_profile,
         "confirm": True,
         "ab_config": {
             "auth_mode": "api_token",
@@ -5081,7 +5179,7 @@ def test_batch_queue_api_returns_sanitized_queue(tmp_path: Path) -> None:
 
     response = _client().get(
         "/api/v1/batches/batch-1/queue",
-        query_string={"storage_dir": str(storage_dir)},
+        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -5104,7 +5202,7 @@ def test_batch_queue_api_returns_sanitized_queue(tmp_path: Path) -> None:
 def test_batch_queue_api_returns_none_when_queue_missing(tmp_path: Path) -> None:
     response = _client().get(
         "/api/v1/batches/batch-missing/queue",
-        query_string={"storage_dir": str(tmp_path / "storage")},
+        query_string={"storage_dir": "storage"},
     )
 
     payload = response.get_json()
@@ -5133,7 +5231,7 @@ def test_batch_queue_api_does_not_leak_sensitive_values(tmp_path: Path) -> None:
 
     response = _client().get(
         "/api/v1/batches/batch-1/queue",
-        query_string={"storage_dir": str(storage_dir)},
+        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     body = response.get_data(as_text=True)
@@ -5149,7 +5247,7 @@ def test_batch_submit_api_requires_confirmation(tmp_path: Path) -> None:
     response = _client().post(
         "/api/v1/batches/batch-1/submit",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "ab_config": {
                 "auth_mode": "api_token",
                 "base_url": "http://auto-bangumi.local",
@@ -5178,7 +5276,7 @@ def test_batch_submit_api_requires_ab_config(tmp_path: Path) -> None:
 
     response = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json={"storage_dir": str(storage_dir), "confirm": True},
+        json={"storage_dir": _profile(tmp_path, storage_dir.name), "confirm": True},
     )
 
     payload = response.get_json()
@@ -5221,7 +5319,7 @@ def test_batch_submit_api_submits_queue_items_successfully(
 
     response = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
 
     payload = response.get_json()
@@ -5298,7 +5396,7 @@ def test_batch_submit_api_single_failure_does_not_block_others(
 
     response = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
 
     payload = response.get_json()
@@ -5338,7 +5436,7 @@ def test_batch_submit_api_skips_already_succeeded_items(
         lambda _config: client,
     )
 
-    submit_payload = _batch_submit_payload(storage_dir)
+    submit_payload = _batch_submit_payload(_profile(tmp_path, storage_dir.name))
     first = _client().post("/api/v1/batches/batch-1/submit", json=submit_payload)
     second = _client().post("/api/v1/batches/batch-1/submit", json=submit_payload)
 
@@ -5367,7 +5465,7 @@ def test_batch_submit_api_returns_queue_not_found_for_missing_queue(
 ) -> None:
     response = _client().post(
         "/api/v1/batches/batch-missing/submit",
-        json=_batch_submit_payload(tmp_path / "storage"),
+        json=_batch_submit_payload("storage"),
     )
 
     payload = response.get_json()
@@ -5409,7 +5507,7 @@ def test_batch_submit_api_does_not_leak_sensitive_values(
 
     response = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
 
     body = response.get_data(as_text=True)
@@ -5442,7 +5540,7 @@ def test_batch_submit_api_persists_ab_result_into_request_and_ab_results(
 
     response = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
     payload = response.get_json()
     assert response.status_code == 200
@@ -5469,7 +5567,7 @@ def test_batch_submit_api_persists_ab_result_into_request_and_ab_results(
     # The Request detail API can read and show the result.
     detail = _client().get(
         "/api/v1/requests/request-a",
-        query_string={"storage_dir": str(storage_dir)},
+        query_string={"storage_dir": _profile(tmp_path, storage_dir.name)},
     ).get_json()
     assert detail["ok"] is True
     assert detail["result"]["ab_result"]["available"] is True
@@ -5518,7 +5616,7 @@ def test_batch_submit_api_persists_failed_ab_result(
 
     response = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
     payload = response.get_json()
     assert payload["ok"] is True
@@ -5545,7 +5643,7 @@ def test_batch_retry_api_requires_ab_config(tmp_path: Path) -> None:
     response = _client().post(
         "/api/v1/batches/batch-1/retry",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "request_id": "request-a",
             "confirm": True,
         },
@@ -5570,7 +5668,7 @@ def test_batch_retry_api_requires_confirmation(tmp_path: Path) -> None:
     response = _client().post(
         "/api/v1/batches/batch-1/retry",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "request_id": "request-a",
             "ab_config": {
                 "auth_mode": "api_token",
@@ -5622,7 +5720,7 @@ def test_batch_retry_api_retries_failed_item_successfully(
     )
     first = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
     first_result = first.get_json()["result"]
     assert first_result["items"][0]["status"] == "failed"
@@ -5635,7 +5733,7 @@ def test_batch_retry_api_retries_failed_item_successfully(
     )
     response = _client().post(
         "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(storage_dir), "request_id": "request-a"},
+        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-a"},
     )
 
     payload = response.get_json()
@@ -5704,13 +5802,13 @@ def test_batch_retry_api_failure_keeps_retryable_status_and_increments_attempts(
     )
     first = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
     assert first.get_json()["result"]["items"][0]["status"] == "retryable"
 
     response = _client().post(
         "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(storage_dir), "request_id": "request-a"},
+        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-a"},
     )
 
     payload = response.get_json()
@@ -5755,7 +5853,7 @@ def test_batch_retry_api_skips_succeeded_items_without_resubmit(
     )
     first = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
     assert first.get_json()["result"]["items"][0]["status"] == "succeeded"
 
@@ -5766,7 +5864,7 @@ def test_batch_retry_api_skips_succeeded_items_without_resubmit(
     )
     response = _client().post(
         "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(storage_dir), "request_id": "request-a"},
+        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-a"},
     )
 
     payload = response.get_json()
@@ -5801,7 +5899,7 @@ def test_batch_retry_api_returns_queue_item_not_found_for_unknown_request_id(
 
     response = _client().post(
         "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(storage_dir), "request_id": "request-missing"},
+        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-missing"},
     )
 
     payload = response.get_json()
@@ -5850,7 +5948,7 @@ def test_batch_retry_api_does_not_leak_sensitive_values(
     )
     first = _client().post(
         "/api/v1/batches/batch-1/submit",
-        json=_batch_submit_payload(storage_dir),
+        json=_batch_submit_payload(_profile(tmp_path, storage_dir.name)),
     )
     assert first.get_json()["result"]["items"][0]["status"] == "failed"
 
@@ -5860,7 +5958,7 @@ def test_batch_retry_api_does_not_leak_sensitive_values(
     )
     response = _client().post(
         "/api/v1/batches/batch-1/retry",
-        json={**_batch_submit_payload(storage_dir), "request_id": "request-a"},
+        json={**_batch_submit_payload(_profile(tmp_path, storage_dir.name)), "request_id": "request-a"},
     )
 
     body = response.get_data(as_text=True)
@@ -5966,7 +6064,7 @@ def test_batch_recover_api_auto_recovers_submitting_to_succeeded(
     response = _client().post(
         "/api/v1/batches/batch-1/recover",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "request_id": "request-a",
             "action": "auto",
         },
@@ -5997,7 +6095,7 @@ def test_batch_recover_api_auto_returns_needs_manual_without_result(
     response = _client().post(
         "/api/v1/batches/batch-1/recover",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "request_id": "request-a",
             "action": "auto",
         },
@@ -6022,7 +6120,7 @@ def test_batch_recover_api_manual_succeeded_requires_confirm(
     response = _client().post(
         "/api/v1/batches/batch-1/recover",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "request_id": "request-a",
             "action": "succeeded",
         },
@@ -6036,7 +6134,7 @@ def test_batch_recover_api_manual_succeeded_requires_confirm(
     response = _client().post(
         "/api/v1/batches/batch-1/recover",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "request_id": "request-a",
             "action": "succeeded",
             "confirm": True,
@@ -6058,7 +6156,7 @@ def test_batch_recover_api_manual_failed_resolves_result_persist_failed(
     response = _client().post(
         "/api/v1/batches/batch-1/recover",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "request_id": "request-a",
             "action": "failed",
             "confirm": True,
@@ -6081,7 +6179,7 @@ def test_batch_recover_api_rejects_invalid_action(tmp_path: Path) -> None:
     response = _client().post(
         "/api/v1/batches/batch-1/recover",
         json={
-            "storage_dir": str(storage_dir),
+            "storage_dir": _profile(tmp_path, storage_dir.name),
             "request_id": "request-a",
             "action": "invalid",
         },
@@ -6094,10 +6192,10 @@ def test_batch_recover_api_rejects_invalid_action(tmp_path: Path) -> None:
 
 
 def _preferences_save_body(
-    storage_dir: Path,
+    storage_profile: str,
     preferences: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    body: dict[str, Any] = {"storage_dir": str(storage_dir)}
+    body: dict[str, Any] = {"storage_dir": storage_profile}
     if preferences is not None:
         body["preferences"] = preferences
     return body
@@ -6126,7 +6224,7 @@ def test_preference_api_reads_defaults_when_missing(tmp_path: Path) -> None:
     storage_dir = tmp_path / "storage"
 
     response = _client().get(
-        f"/api/v1/preferences?storage_dir={storage_dir}"
+        f"/api/v1/preferences?storage_dir={_profile(tmp_path, storage_dir.name)}"
     )
 
     payload = response.get_json()
@@ -6154,11 +6252,11 @@ def test_preference_api_reads_saved_preferences(tmp_path: Path) -> None:
     storage_dir = tmp_path / "storage"
     _client().post(
         "/api/v1/preferences",
-        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+        json=_preferences_save_body(_profile(tmp_path, storage_dir.name), _full_preferences_payload()),
     )
 
     response = _client().get(
-        f"/api/v1/preferences?storage_dir={storage_dir}"
+        f"/api/v1/preferences?storage_dir={_profile(tmp_path, storage_dir.name)}"
     )
 
     payload = response.get_json()
@@ -6174,7 +6272,7 @@ def test_preference_api_save_returns_normalized_preferences_and_persists(
 
     response = _client().post(
         "/api/v1/preferences",
-        json=_preferences_save_body(storage_dir, payload),
+        json=_preferences_save_body(_profile(tmp_path, storage_dir.name), payload),
     )
 
     result = response.get_json()
@@ -6198,12 +6296,12 @@ def test_preference_api_save_accepts_empty_payload_as_reset(
     storage_dir = tmp_path / "storage"
     _client().post(
         "/api/v1/preferences",
-        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+        json=_preferences_save_body(_profile(tmp_path, storage_dir.name), _full_preferences_payload()),
     )
 
     response = _client().post(
         "/api/v1/preferences",
-        json=_preferences_save_body(storage_dir, {}),
+        json=_preferences_save_body(_profile(tmp_path, storage_dir.name), {}),
     )
 
     result = response.get_json()
@@ -6218,7 +6316,7 @@ def test_preference_api_save_rejects_missing_preferences(tmp_path: Path) -> None
 
     response = _client().post(
         "/api/v1/preferences",
-        json=_preferences_save_body(storage_dir, None),
+        json=_preferences_save_body(_profile(tmp_path, storage_dir.name), None),
     )
 
     payload = response.get_json()
@@ -6233,7 +6331,7 @@ def test_preference_api_save_rejects_non_object_payload(tmp_path: Path) -> None:
 
     response = _client().post(
         "/api/v1/preferences",
-        json=_preferences_save_body(storage_dir, ["Loli"]),
+        json=_preferences_save_body(_profile(tmp_path, storage_dir.name), ["Loli"]),
     )
 
     payload = response.get_json()
@@ -6250,7 +6348,7 @@ def test_preference_api_save_rejects_unknown_field_without_leaking(
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {
                 "subtitle_groups": {"preferred": ["Loli"]},
                 "endpoint": "https://secret-endpoint.example/api",
@@ -6273,7 +6371,7 @@ def test_preference_api_save_rejects_empty_string_list_item(
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {"subtitle_groups": {"preferred": [""]}},
         ),
     )
@@ -6295,7 +6393,7 @@ def test_preference_api_save_rejects_duplicate_subtitle_groups(
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {"subtitle_groups": {"preferred": ["Loli", "Loli"]}},
         ),
     )
@@ -6315,7 +6413,7 @@ def test_preference_api_save_rejects_group_in_both_lists(tmp_path: Path) -> None
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {
                 "subtitle_groups": {
                     "preferred": ["Loli"],
@@ -6340,7 +6438,7 @@ def test_preference_api_save_rejects_invalid_fallback_enum(
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {"subtitle_groups": {"fallback": "auto"}},
         ),
     )
@@ -6361,7 +6459,7 @@ def test_preference_api_save_rejects_invalid_naming_strategy(
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {"naming": {"strategy": "random"}},
         ),
     )
@@ -6380,7 +6478,7 @@ def test_preference_api_save_rejects_non_boolean_filter_flag(
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {"filter_defaults": {"use_regex": "yes"}},
         ),
     )
@@ -6399,7 +6497,7 @@ def test_preference_api_save_rejects_overlong_string(tmp_path: Path) -> None:
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {"subtitle_groups": {"preferred": ["长" * 101]}},
         ),
     )
@@ -6416,7 +6514,7 @@ def test_preference_api_save_rejects_sensitive_values(tmp_path: Path) -> None:
     response = _client().post(
         "/api/v1/preferences",
         json=_preferences_save_body(
-            storage_dir,
+            _profile(tmp_path, storage_dir.name),
             {"subtitle_groups": {"preferred": ["https://mikan.example/Home/Search"]}},
         ),
     )
@@ -6436,7 +6534,7 @@ def test_preference_api_save_does_not_leak_sensitive_values(tmp_path: Path) -> N
 
     response = _client().post(
         "/api/v1/preferences",
-        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+        json=_preferences_save_body(_profile(tmp_path, storage_dir.name), _full_preferences_payload()),
     )
 
     body = response.get_data(as_text=True)
@@ -6481,7 +6579,7 @@ def test_preference_api_save_storage_failure_returns_chinese_envelope(
 
     response = _client().post(
         "/api/v1/preferences",
-        json=_preferences_save_body(storage_dir, _full_preferences_payload()),
+        json=_preferences_save_body(_profile(tmp_path, storage_dir.name), _full_preferences_payload()),
     )
 
     payload = response.get_json()
