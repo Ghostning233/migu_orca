@@ -115,6 +115,41 @@ def test_request_preview_modify_save_accept_cancel_share_shape() -> None:
         assert dto.model_validate(base) is not None
 
 
+def test_request_create_dto_accepts_draft_id_for_unsaved_preview() -> None:
+    """US-194: an unsaved generation returns an opaque draft_id."""
+    request = _generated_request()
+    payload = {
+        "request": request,
+        "summary": _summary(request),
+        "draft_id": "opaque-draft-token",
+    }
+    validated = RequestCreateResultDTO.model_validate(payload)
+    assert validated.draft_id == "opaque-draft-token"
+
+
+def test_request_preview_modify_dto_accepts_draft_id() -> None:
+    """US-194: preview-modify returns the same draft_id for the next call."""
+    request = _generated_request()
+    payload = {
+        "request": request,
+        "summary": _summary(request),
+        "draft_id": "opaque-draft-token",
+    }
+    validated = RequestPreviewModifyResultDTO.model_validate(payload)
+    assert validated.draft_id == "opaque-draft-token"
+
+
+def test_request_preview_save_dto_rejects_draft_id() -> None:
+    """US-194: preview-save consumes the draft; the response has no draft_id."""
+    request = _generated_request()
+    base = {"request": request, "summary": _summary(request)}
+    assert RequestPreviewSaveResultDTO.model_validate(base) is not None
+    with pytest.raises(ValidationError):
+        RequestPreviewSaveResultDTO.model_validate(
+            {**base, "draft_id": "opaque-draft-token"}
+        )
+
+
 def test_request_ab_submit_dto_requires_top_level_ab_result() -> None:
     """submit-ab adds a top-level ``ab_submit_result`` the base DTO lacks."""
     request = _generated_request()

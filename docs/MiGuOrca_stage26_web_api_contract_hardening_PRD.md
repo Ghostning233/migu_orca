@@ -209,6 +209,13 @@ src/apps/migu_orca_web/
 - 候选与直连生成返回 opaque `draft_id`。
 - preview modify/save 使用服务端草案和允许 patch，不再信任客户端完整 Request。
 - TTL、容量、消费、过期、重放和失败恢复有单元/API/浏览器回归。
+- 已实现（2026-08-30）：新增 `apps/migu_orca_web/drafts.py`（`DraftStore`，TTL 30 分钟、
+  容量 128、自动清理、一次性保存 + 重放保护）；`POST /api/v1/requests`
+  （`save_request=false`）签发 `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch
+  并回写同一 draft_id；`preview-save` 一次性消费 draft_id 落盘；失效/重放统一 409
+  `draft_expired`/`draft_evicted`/`draft_replayed`（错误不回显 draft_id/草案内容）；
+  旧前端 `app.js` 在内存持有 `currentDraftId`/`row.draft_id`，完整 Request 不再作为
+  权威快照提交；OpenAPI、DTO、契约测试、浏览器测试与文档同步更新。
 
 ### US-195：增加 P0 CI、静态检查与部署基线
 

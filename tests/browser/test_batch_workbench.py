@@ -12,7 +12,12 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from mikan_engine.controllers.mikan_client import create_mikan_client
 from mikan_engine.controllers.mikan_config import MikanConfig
 from shared.models import EntryRequest
-from tests.browser.conftest import set_storage_preferences
+from tests.browser.conftest import (
+    issue_draft_id,
+    preview_result_json,
+    save_preview_handler,
+    set_storage_preferences,
+)
 
 
 pytestmark = pytest.mark.browser
@@ -151,6 +156,10 @@ def _batch_item(
         "source_info": source_info,
         "preview_request": preview_request,
     }
+    # US-194: a card with a preview_request needs a server-authoritative
+    # draft_id so the real preview-modify/preview-save backend accepts it.
+    if preview_request is not None:
+        item["draft_id"] = issue_draft_id(preview_request)
     if applied_preferences is not _UNDEFINED:
         item["applied_preferences"] = applied_preferences
     if preference_hits is not _UNDEFINED:
@@ -1028,7 +1037,10 @@ class TestBatchWorkbenchEntry:
         after = page.locator("#request-detail-container").inner_text()
         assert "咒术回战" in before
         assert "咒术回战" in after
-        assert calls and calls[0]["request"]["request_id"] == "req-batch-fail"
+        # US-194: preview-modify carries only the opaque draft_id, never the
+        # full Request snapshot.
+        assert calls and isinstance(calls[0]["draft_id"], str)
+        assert "request" not in calls[0]
 
     def test_batch_card_accept_updates_only_current_card(
         self, page: Page, live_server_url: str
@@ -1059,23 +1071,7 @@ class TestBatchWorkbenchEntry:
             )
 
         def _save_preview(route: Any, request: Any) -> None:
-            payload = json.loads(request.post_data or "{}")
-            saved_calls.append(payload)
-            saved = dict(payload["request"])
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "result": {
-                            "request": saved,
-                            "summary": {"request_id": saved["request_id"]},
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            )
+            save_preview_handler(saved_calls)(route, request)
 
         def _accept(route: Any, request: Any) -> None:
             accept_calls.append(json.loads(request.post_data or "{}"))
@@ -1104,7 +1100,10 @@ class TestBatchWorkbenchEntry:
         expect(first_card.locator(".batch-card-expand")).to_be_disabled()
         expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
         expect(second_card.locator(".batch-card-delete")).to_be_visible()
-        assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-batch-accept"
+        # US-194: preview-save carries only the opaque draft_id, never the full
+        # Request snapshot; the server resolves the request from its store.
+        assert saved_calls and isinstance(saved_calls[0]["draft_id"], str)
+        assert "request" not in saved_calls[0]
         assert accept_calls and accept_calls[0]["items"][0]["item_id"] == "item-accept"
         assert accept_calls[0]["storage_dir"] is None
         assert "item_ids" not in accept_calls[0]
@@ -1134,22 +1133,7 @@ class TestBatchWorkbenchEntry:
             )
 
         def _save_preview(route: Any, request: Any) -> None:
-            payload = json.loads(request.post_data or "{}")
-            saved = dict(payload["request"])
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "result": {
-                            "request": saved,
-                            "summary": {"request_id": saved["request_id"]},
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            )
+            save_preview_handler()(route, request)
 
         page.route("**/api/v1/batches/parse", _fulfill_batch)
         page.route("**/api/v1/requests/preview-save", _save_preview)
@@ -1337,22 +1321,7 @@ class TestBatchAcceptWorkbench:
             )
 
         def _save_preview(route: Any, request: Any) -> None:
-            payload = json.loads(request.post_data or "{}")
-            saved = dict(payload["request"])
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "result": {
-                            "request": saved,
-                            "summary": {"request_id": saved["request_id"]},
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            )
+            save_preview_handler()(route, request)
 
         def _accept(route: Any, request: Any) -> None:
             accept_calls.append(json.loads(request.post_data or "{}"))
@@ -1424,22 +1393,7 @@ class TestBatchAcceptWorkbench:
             )
 
         def _save_preview(route: Any, request: Any) -> None:
-            payload = json.loads(request.post_data or "{}")
-            saved = dict(payload["request"])
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "result": {
-                            "request": saved,
-                            "summary": {"request_id": saved["request_id"]},
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            )
+            save_preview_handler()(route, request)
 
         def _accept(route: Any, request: Any) -> None:
             accept_calls.append(json.loads(request.post_data or "{}"))
@@ -1535,22 +1489,7 @@ class TestBatchAcceptWorkbench:
             )
 
         def _save_preview(route: Any, request: Any) -> None:
-            payload = json.loads(request.post_data or "{}")
-            saved = dict(payload["request"])
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "result": {
-                            "request": saved,
-                            "summary": {"request_id": saved["request_id"]},
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            )
+            save_preview_handler()(route, request)
 
         page.route("**/api/v1/batches/parse", _fulfill_batch)
         page.route("**/api/v1/requests/preview-save", _save_preview)
@@ -1604,22 +1543,7 @@ class TestBatchAcceptWorkbench:
             )
 
         def _save_preview(route: Any, request: Any) -> None:
-            payload = json.loads(request.post_data or "{}")
-            saved = dict(payload["request"])
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "result": {
-                            "request": saved,
-                            "summary": {"request_id": saved["request_id"]},
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            )
+            save_preview_handler()(route, request)
 
         def _accept(route: Any, request: Any) -> None:
             _accept_route_handler({"item-ok"})(route, request)
@@ -1687,22 +1611,7 @@ def _accept_all_reviewable(
         )
 
     def _save_preview(route: Any, request: Any) -> None:
-        payload = json.loads(request.post_data or "{}")
-        saved = dict(payload["request"])
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "ok": True,
-                    "result": {
-                        "request": saved,
-                        "summary": {"request_id": saved["request_id"]},
-                    },
-                },
-                ensure_ascii=False,
-            ),
-        )
+        save_preview_handler()(route, request)
 
     def _queue_get(route: Any, request: Any) -> None:
         route.fulfill(

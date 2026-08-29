@@ -131,6 +131,9 @@ def _clear_candidate_cache() -> None:
     from apps.migu_orca_web.contexts import candidate_selection_contexts
 
     candidate_selection_contexts.clear()
+    from apps.migu_orca_web.drafts import draft_store
+
+    draft_store.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -4158,15 +4161,25 @@ def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
     assert saved_path.exists()
 
 
+def _issue_draft(client: FlaskClient, title: str = "咒术回战") -> str:
+    """Generate an unsaved preview draft and return its opaque draft_id."""
+    response = client.post(
+        "/api/v1/requests",
+        json={"title": title, "save_request": False},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert isinstance(payload["result"]["draft_id"], str)
+    return payload["result"]["draft_id"]
+
+
 def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
-    preview = generate_request(EntryRequest(raw_title="咒术回战"))["request"]
-    original_filter = preview["confirmable_config"]["filter_rule"]
-    assert original_filter["must_not_contain"] == ""
+    draft_id = _issue_draft(_client(), "咒术回战")
 
     response = _client().post(
         "/api/v1/requests/preview-modify",
         json={
-            "request": preview,
+            "draft_id": draft_id,
             "patch": {
                 "filter_rule": {
                     "must_not_contain": "V2",
@@ -4182,6 +4195,8 @@ def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
     assert payload["ok"] is True
     modified = payload["result"]["request"]
     assert modified["confirmable_config"]["filter_rule"]["must_not_contain"] == "V2"
+    # US-194: the modify result keeps the same draft_id so the client can save.
+    assert payload["result"]["draft_id"] == draft_id
     # The preview is recomputed in memory and never written to storage.
     assert not (tmp_path / "storage").exists()
 
@@ -4201,15 +4216,22 @@ def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
 
 
 def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None:
-    preview = generate_request(EntryRequest(raw_title="咒术回战"))["request"]
+    client = _client()
+    draft_id = _issue_draft(client, "咒术回战")
+    # The stored draft's groups mirror the fixture; read them via the response.
+    issued = client.post(
+        "/api/v1/requests",
+        json={"title": "咒术回战", "save_request": False},
+    ).get_json()["result"]
+    preview = issued["request"]
     groups = {s["subtitle_group"] for s in preview["source_info"]["rss_sources"]}
     current = preview["confirmable_config"]["selected_subtitle_group"]
     other = next(g for g in groups if g != current)
 
-    response = _client().post(
+    response = client.post(
         "/api/v1/requests/preview-modify",
         json={
-            "request": preview,
+            "draft_id": draft_id,
             "patch": {"selected_subtitle_group": other},
         },
     )
@@ -4229,11 +4251,11 @@ def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None
 
 
 def test_preview_modify_rejects_invalid_patch_field() -> None:
-    preview = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    draft_id = _issue_draft(_client(), "芙莉莲")
 
     response = _client().post(
         "/api/v1/requests/preview-modify",
-        json={"request": preview, "patch": {"illegal_field": "x"}},
+        json={"draft_id": draft_id, "patch": {"illegal_field": "x"}},
     )
 
     payload = response.get_json()
@@ -4242,13 +4264,32 @@ def test_preview_modify_rejects_invalid_patch_field() -> None:
     assert payload["error_type"] == "invalid_modify_patch_field"
 
 
+def test_preview_modify_rejects_unknown_draft() -> None:
+    response = _client().post(
+        "/api/v1/requests/preview-modify",
+        json={"draft_id": "not-issued", "patch": {"expected_folder_name": "x"}},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_expired"
+    assert payload["error_message"] == "订阅草案已过期或不存在，请重新生成"
+
+
 def test_preview_save_persists_draft_and_enters_confirmation_flow(tmp_path: Path) -> None:
     storage_dir = tmp_path / "storage"
-    preview = generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
+    client = _client()
+    issued = client.post(
+        "/api/v1/requests",
+        json={"title": "芙莉莲", "save_request": False},
+    ).get_json()["result"]
+    draft_id = issued["draft_id"]
+    preview = issued["request"]
 
-    response = _client().post(
+    response = client.post(
         "/api/v1/requests/preview-save",
-        json={"request": preview, "storage_dir": _profile(tmp_path, storage_dir.name)},
+        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -4267,20 +4308,26 @@ def test_preview_save_persists_draft_and_enters_confirmation_flow(tmp_path: Path
     assert saved_path.exists()
 
 
-def test_preview_save_rejects_non_pending_status() -> None:
-    accepted = accept_request(
-        generate_request(EntryRequest(raw_title="芙莉莲"))["request"]
-    )
+def test_preview_save_rejects_replayed_draft(tmp_path: Path) -> None:
+    """A saved draft is consumed; a second save of the same id is a 409."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id = _issue_draft(client, "芙莉莲")
 
-    response = _client().post(
+    first = client.post(
         "/api/v1/requests/preview-save",
-        json={"request": accepted},
+        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
+    assert first.status_code == 200
 
-    payload = response.get_json()
-    assert response.status_code == 409
+    second = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    payload = second.get_json()
+    assert second.status_code == 409
     assert payload["ok"] is False
-    assert payload["error_type"] == "invalid_request_status"
+    assert payload["error_type"] == "draft_replayed"
 
 
 def test_create_request_returns_validation_error_for_missing_title() -> None:

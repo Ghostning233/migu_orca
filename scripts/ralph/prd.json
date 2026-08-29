@@ -96,7 +96,7 @@
         "Tests pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "复用现有 modify/save 业务规则；不要在 context store 中创造第二套 Request 规则。"
     },
     {

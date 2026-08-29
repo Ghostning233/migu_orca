@@ -89,9 +89,9 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | --- | --- | --- | --- |
 | GET `/api/v1/requests` | `storage_dir?` | `{"requests": [summary...]}` | 损坏 snapshot → `storage_json_error` |
 | GET `/api/v1/requests/<request_id>` | `request_id`（路径）、`storage_dir?` | `{"request": <snapshot>, "history": {available, events, error}, "ab_result": {available, record, error}}` | 缺失 → `request_not_found`；路径片段 → `invalid_request_id` |
-| POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`save_request`（默认 false）、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "saved_request"?}` | `data_validation_errors`（title 缺失）；`candidate_context_invalid`；保存失败 → `storage_error` |
-| POST `/api/v1/requests/preview-modify` | `request`（完整预览草案）、`patch`、`storage_dir?` | `{"request", "summary"}` | `invalid_modify_patch_field` |
-| POST `/api/v1/requests/preview-save` | `request`（完整预览草案）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 非 PENDING_CONFIRM → `invalid_request_status` |
+| POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`save_request`（默认 false）、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "saved_request"?}`；`save_request=false` 时另含 `draft_id`（US-194 服务端权威草案的 opaque id） | `data_validation_errors`（title 缺失）；`candidate_context_invalid`；保存失败 → `storage_error` |
+| POST `/api/v1/requests/preview-modify` | `draft_id`（US-194，不再收完整 `request`）、`patch`、`storage_dir?` | `{"request", "summary", "draft_id"}` | `invalid_modify_patch_field`；draft 失效 → `draft_expired`/`draft_evicted`/`draft_replayed`（409） |
+| POST `/api/v1/requests/preview-save` | `draft_id`（US-194，一次性消费）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | draft 失效/重放 → `draft_expired`/`draft_evicted`/`draft_replayed`（409） |
 | POST `/api/v1/requests/<request_id>/accept` | `request_id`（路径）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 缺失 → `request_not_found`；状态冲突 → `invalid_request_status` |
 | POST `/api/v1/requests/<request_id>/cancel` | `request_id`（路径）、`cancel_reason?`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 同上 |
 | POST `/api/v1/requests/<request_id>/modify` | `request_id`（路径）、`patch`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | `invalid_modify_patch_field` |
@@ -162,7 +162,9 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 
 ### 4.2 request-scoped 配置（不进入 storage JSON / 浏览器 storage / URL / 日志 / trace）
 
-- `mikan_config`、`mikan_bangumi`、`ab_config`、`qbittorrent_config`、`candidate_context`。
+- `mikan_config`、`mikan_bangumi`、`ab_config`、`qbittorrent_config`、`candidate_context`、
+  `draft_id`（US-194：draft 内容由服务端持有，客户端只持有 opaque id，绝不进入 URL /
+  browser storage / 日志 / trace）。
 
 ### 4.3 已治理的问题（US-192 统一错误处理 / US-193 Web storage 根目录）
 
@@ -175,6 +177,10 @@ CLI 显式 `--storage-dir` 行为不受影响）。
   绝对路径（Unix/Windows 盘符）、`..` 穿越与符号链接逃逸统一返回 400 `invalid_storage_dir`，
   details 只含 `field`/`reason`，绝不回显原始路径。旧前端在 localStorage 中的绝对路径旧值
   会被自动忽略并回退默认根目录。
+- US-194：`preview-modify`/`preview-save` 不再接收客户端完整 Request，只接受服务端签发的
+  `draft_id`；未保存草案由 `DraftStore`（`apps/migu_orca_web/drafts.py`）持有，TTL 30 分钟、
+  容量 128、一次性保存与重放保护，失效/重放统一 409 `draft_expired`/`draft_evicted`/
+  `draft_replayed`，错误 details 不回显 draft_id 或草案内容。
 
 ## 5. 旧前端依赖（已冻结）
 
@@ -218,18 +224,20 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 
 - **request_id**：`POST /api/v1/requests` 生成 → 保存后进入待确认流程（PENDING_CONFIRM）→
   accept/cancel/modify/delete/submit-ab；删除后 `request_not_found`。
-  预览草案（`save_request: false`）只有内存 `request`，`preview-save` 后才获得持久 request_id。
+  预览草案（`save_request: false`）由服务端权威 draft 持有（见 draft_id），
+  `preview-save` 消费 draft 后才获得持久 request_id。
 - **batch_id**：`POST /api/v1/batches/parse` 返回 → accept 建立队列 → queue/submit/retry/recover
   通过 URL `batch_id` 恢复；服务端不持久化解析后的批量（客户端回传卡片）。
 - **candidate_context**：`POST /api/v1/mikan/candidates` 在季数需确认时签发（`CandidateSelectionContextStore`，
   TTL 300s、容量 128、单次消费、绑定 mikan_url）；`POST /api/v1/requests` 用
   `candidate_context` + `season_confirmation` 消费，失效 → `candidate_context_invalid`。
-- **draft_id**（US-194 引入，当前 preview 流程尚无服务端 draft）：候选与直连生成将签发
-  opaque `draft_id`，服务端保存权威 PENDING_CONFIRM 草案；preview-modify 只收
-  `draft_id` + 允许 patch，preview-save 只消费有效 `draft_id`；draft store 有
-  TTL、容量上限、一次性保存与重放保护。当前 `preview-modify`/`preview-save` 仍接收
-  客户端完整 Request（旧前端兼容），完整 Request、draft 内容与外部敏感配置绝不进入
-  URL 或 browser storage。
+- **draft_id**（US-194）：候选与直连生成（`save_request=false`）签发 opaque `draft_id`，
+  服务端在 `DraftStore`（`apps/migu_orca_web/drafts.py`）保存权威 PENDING_CONFIRM 草案；
+  `preview-modify` 只收 `draft_id` + 允许 patch（返回更新草案与同一 draft_id），
+  `preview-save` 一次性消费有效 `draft_id`（重放 → 409 `draft_replayed`）。draft store 有
+  TTL（默认 30 分钟）、容量上限（128）、自动清理与一次性保存/重放保护；过期/逐出/未知
+  → 409 `draft_expired`/`draft_evicted`。客户端**不再**提交完整 Request；draft 内容与
+  外部敏感配置绝不进入 URL、browser storage、日志、截图或 trace，API 只暴露 opaque id。
 - **poster key**：`_serialize_candidate` 通过 `poster_service.register` 签发，同源代理读取，进程内注册表。
 
 ## 6. 测试证明

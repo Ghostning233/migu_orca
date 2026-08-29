@@ -155,7 +155,7 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 
 - `GET /api/v1/requests`：列出已保存 Request 摘要。未传 `storage_dir` 时使用默认 storage 根目录。
 - `GET /api/v1/requests/<request_id>`：读取完整 Request snapshot，并附带可用的 `history` 与 `ab_result` 只读数据。
-- `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source`、可选 `mikan_config` 和 request-scoped `mikan_bangumi`。`source` 默认为 `static-fixture`；显式传入 `source: "mikan"` 时会构造真实 MiKan client，未传 `mikan_config` 时使用系统默认 MiKan 配置。存在 `mikan_bangumi` 时会直接解析指定 MiKan `Home/Bangumi/<id>` URL 或 ID 并跳过搜索；该字段不写入浏览器 storage、URL 或持久配置。API 层仍以显式 `save_request: true` 写入本地 storage；Web UI 候选选择与直连 fallback 默认发送 `save_request: false` 生成可编辑预览草案，`POST /api/v1/requests/preview-modify` 对未保存草案执行 dry-run 修改并重算种子，`POST /api/v1/requests/preview-save` 将修改后的 `PENDING_CONFIRM` 草案写入本地 storage 进入待确认流程。
+- `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source`、可选 `mikan_config` 和 request-scoped `mikan_bangumi`。`source` 默认为 `static-fixture`；显式传入 `source: "mikan"` 时会构造真实 MiKan client，未传 `mikan_config` 时使用系统默认 MiKan 配置。存在 `mikan_bangumi` 时会直接解析指定 MiKan `Home/Bangumi/<id>` URL 或 ID 并跳过搜索；该字段不写入浏览器 storage、URL 或持久配置。API 层仍以显式 `save_request: true` 写入本地 storage；Web UI 候选选择与直连 fallback 默认发送 `save_request: false` 生成可编辑预览草案——服务端在 `DraftStore` 持有权威 `PENDING_CONFIRM` 草案并签发 opaque `draft_id`（US-194），`POST /api/v1/requests/preview-modify` 只接受 `draft_id` + 允许 patch 做 dry-run 修改并重算种子，`POST /api/v1/requests/preview-save` 一次性消费 `draft_id` 将草案写入本地 storage 进入待确认流程；draft 失效/重放返回 409 `draft_expired`/`draft_replayed`，客户端只持有 id，完整 Request 与草案内容绝不进入 URL 或浏览器 storage。
 
 `POST /api/v1/requests` 示例：
 

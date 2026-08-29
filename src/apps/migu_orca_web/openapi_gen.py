@@ -242,7 +242,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     },
     "POST /api/v1/requests": {
         "summary": "生成订阅方案（可保存）",
-        "description": "按标题生成 Request。save_request=false 时仅返回内存预览；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
+        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id（US-194：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
         "requestBody": {
             "type": "object",
             "properties": {
@@ -298,14 +298,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     },
     "POST /api/v1/requests/preview-modify": {
         "summary": "内存中修改未保存草案",
-        "description": "接收客户端完整预览草案与允许 patch，返回更新后的内存草案与摘要（不落盘）。US-194 将改为只接收 draft_id 与允许 patch。",
+        "description": "US-194：只接受服务端签发的 draft_id 与允许 patch，返回更新后的内存草案与摘要（不落盘）。客户端不得提交完整 Request 作为权威快照。",
         "requestBody": {
             "type": "object",
-            "required": ["request", "patch"],
+            "required": ["draft_id", "patch"],
             "properties": {
-                "request": {
-                    "type": "object",
-                    "description": "完整预览草案（US-194 起改为服务端权威 draft）。",
+                "draft_id": {
+                    "type": "string",
+                    "description": "生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。",
+                    "x-request-scoped": True,
                 },
                 "patch": {
                     "type": "object",
@@ -320,18 +321,24 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "invalid_modify_patch_field": "补丁包含不可修改字段",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
             },
+            "409": {
+                "draft_expired": "订阅草案已过期或不存在，请重新生成",
+                "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
+                "draft_replayed": "订阅草案已被保存，请勿重复保存",
+            },
         },
     },
     "POST /api/v1/requests/preview-save": {
         "summary": "保存未修改的预览草案",
-        "description": "仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
+        "description": "US-194：消费服务端权威 draft_id（一次性，重放保护），仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
         "requestBody": {
             "type": "object",
-            "required": ["request"],
+            "required": ["draft_id"],
             "properties": {
-                "request": {
-                    "type": "object",
-                    "description": "完整预览草案（仅 PENDING_CONFIRM 可保存）。",
+                "draft_id": {
+                    "type": "string",
+                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存后失效）。",
+                    "x-request-scoped": True,
                 },
                 "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
@@ -339,7 +346,12 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "success": RequestPreviewSaveResultDTO,
         "errors": {
             "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
-            "409": {"invalid_request_status": "只有待确认的订阅草案可以保存"},
+            "409": {
+                "invalid_request_status": "只有待确认的订阅草案可以保存",
+                "draft_expired": "订阅草案已过期或不存在，请重新生成",
+                "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
+                "draft_replayed": "订阅草案已被保存，请勿重复保存",
+            },
         },
     },
     "POST /api/v1/requests/<path:request_id>/accept": {

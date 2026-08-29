@@ -84,6 +84,11 @@ def test_error_http_status_maps_semantic_categories() -> None:
     assert _error_http_status("request_cancelled") == 409
     assert _error_http_status("season_evidence_conflict") == 409
     assert _error_http_status("candidate_context_invalid") == 409
+    # US-194 draft store failures → 409 (expired/evicted/replayed/mismatch).
+    assert _error_http_status("draft_expired") == 409
+    assert _error_http_status("draft_evicted") == 409
+    assert _error_http_status("draft_replayed") == 409
+    assert _error_http_status("draft_mismatch") == 409
     # External auth → 401
     assert _error_http_status("ab_auth_failed") == 401
     assert _error_http_status("qbittorrent_auth_failed") == 401

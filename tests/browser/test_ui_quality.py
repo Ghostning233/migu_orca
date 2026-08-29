@@ -9,7 +9,10 @@ from playwright.sync_api import Page, Request, expect
 
 from tests.browser.conftest import (
     create_saved_request,
+    issue_draft_id,
     open_dev_fixture_panel,
+    preview_result_json,
+    save_preview_handler,
     set_storage_preferences,
 )
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
@@ -488,20 +491,14 @@ def test_stage18_mikan_primary_flow_does_not_leak_sensitive_values(
 
     # Return an unsaved static-fixture preview draft for the generation POST so
     # the flow renders the editable preview without any live MiKan network read.
+    # US-194: the mock issues the draft into the in-process draft store and
+    # returns the opaque draft_id the real backend would, so the real
+    # preview-modify/preview-save backend works.
     preview = {
         **generate_request(EntryRequest(raw_title="葬送的芙莉莲"))["request"],
         "request_id": "req-stage18-sec",
     }
-    preview_body = json.dumps(
-        {
-            "ok": True,
-            "result": {
-                "request": preview,
-                "summary": summarize_request(preview),
-            },
-        },
-        ensure_ascii=False,
-    )
+    preview_body = preview_result_json(preview)
 
     def _fulfill_generation(route: object, request: Request) -> None:
         if getattr(request, "method") != "POST":
@@ -683,6 +680,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
                             ],
                         },
                         "preview_request": first_preview,
+                        "draft_id": issue_draft_id(first_preview),
                         "provider_response": {
                             "endpoint": sensitive_values[0],
                             "token": sensitive_values[1],
@@ -703,6 +701,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
                         "confirmable_config": None,
                         "source_info": None,
                         "preview_request": second_preview,
+                        "draft_id": issue_draft_id(second_preview),
                     },
                 ],
             },
@@ -717,23 +716,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
         route.fulfill(status=200, content_type="application/json", body=batch_body)
 
     def _save_preview(route: Any, request: Request) -> None:
-        payload = json.loads(request.post_data or "{}")
-        saved_calls.append(payload)
-        saved = dict(payload["request"])
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "ok": True,
-                    "result": {
-                        "request": saved,
-                        "summary": {"request_id": saved["request_id"]},
-                    },
-                },
-                ensure_ascii=False,
-            ),
-        )
+        save_preview_handler(saved_calls)(route, request)
 
     def _accept(route: Any, request: Request) -> None:
         # US-146：单卡接受与批量接受统一走批次接受 API（POST
@@ -818,7 +801,8 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
     expect(first_card.locator(".batch-card-status")).to_contain_text("已接受")
     expect(first_card.locator(".batch-card-delete")).to_be_hidden()
     expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
-    assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-stage19-sec"
+    assert saved_calls and isinstance(saved_calls[0]["draft_id"], str)
+    assert "request" not in saved_calls[0]
     # US-146：accept 请求体按 BatchAcceptPayload 契约携带 items（含
     # item_id/request_id/title，均为公开字段）与 storage_dir；设置了 storage
     # 偏好时 storage_dir 为相对 profile（URL query 经 apiPath 同样携带），属于
@@ -976,6 +960,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
                             ],
                         },
                         "preview_request": first_preview,
+                        "draft_id": issue_draft_id(first_preview),
                         # provider_response 是 LLM 提供商的响应，包含全部敏感值；
                         # 它们只允许存在于预览/请求快照，绝不能进入任何响应边界。
                         "provider_response": {
@@ -1000,6 +985,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
                         "confirmable_config": None,
                         "source_info": None,
                         "preview_request": second_preview,
+                        "draft_id": issue_draft_id(second_preview),
                     },
                 ],
             },
@@ -1053,23 +1039,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
         route.fulfill(status=200, content_type="application/json", body=batch_body)
 
     def _save_preview(route: Any, request: Request) -> None:
-        payload = json.loads(request.post_data or "{}")
-        saved_calls.append(payload)
-        saved = dict(payload["request"])
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "ok": True,
-                    "result": {
-                        "request": saved,
-                        "summary": {"request_id": saved["request_id"]},
-                    },
-                },
-                ensure_ascii=False,
-            ),
-        )
+        save_preview_handler(saved_calls)(route, request)
 
     def _queue_item_payload(
         *,
@@ -1618,6 +1588,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
                             ],
                         },
                         "preview_request": first_preview,
+                        "draft_id": issue_draft_id(first_preview),
                         # provider_response 是 LLM 提供商的响应，包含全部敏感值；
                         # 它们只允许存在于预览/请求快照，绝不能进入任何响应边界。
                         "provider_response": {
@@ -1649,6 +1620,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
                         "confirmable_config": None,
                         "source_info": None,
                         "preview_request": second_preview,
+                        "draft_id": issue_draft_id(second_preview),
                     },
                 ],
             },

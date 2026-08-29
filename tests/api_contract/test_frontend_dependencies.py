@@ -108,6 +108,37 @@ def test_all_api_fetch_urls_are_covered(client: FlaskClient) -> None:
     assert "https://" not in script
 
 
+def test_preview_send_only_draft_id_not_full_request(client: FlaskClient) -> None:
+    """US-194: the frontend sends draft_id to preview-modify/save, never the
+    full Request snapshot, and never persists the draft_id."""
+    script = _script(client)
+
+    # preview-modify body carries draft_id + patch.
+    modify = script[script.index("async function previewModify"):]
+    modify = modify[: modify.index("function updateCurrentPreviewRequest")]
+    assert 'draft_id: draftId' in modify
+    assert 'patch: patch || {}' in modify
+    assert "request: request" not in modify
+
+    # preview-save body carries only draft_id.
+    save = script[script.index("async function savePreviewDraftRequest"):]
+    save = save[: save.index("function batchCardSavedRequest")]
+    assert 'draft_id: draftId' in save
+    assert "request:" not in save.split("body: JSON.stringify(")[1][:200]
+
+    # The draft id is kept in memory only, never written to localStorage:
+    # no localStorage access happens inside the draft_id management code, and
+    # the two frozen keys remain the only browser-storage keys.
+    draft_zone = script[script.index("let currentDraftId"):script.index("function searchModeButtons")]
+    assert "localStorage" not in draft_zone
+    for match in re.finditer(r'(?:getItem|setItem|removeItem)\(\s*"([^"]+)"', script):
+        key = match.group(1)
+        assert key in {
+            "miguOrca.web.storageDir",
+            "miguOrca.web.saveRequest",
+        }, f"unexpected localStorage key: {key}"
+
+
 def test_fetch_json_handles_the_shared_envelope(client: FlaskClient) -> None:
     """fetchJson consumes the frozen {ok, result}/{ok, error_*} envelope.
 

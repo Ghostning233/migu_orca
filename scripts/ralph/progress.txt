@@ -10,6 +10,9 @@
 - Pydantic DTO 与确定性 OpenAPI 是 Stage 27 的公开契约；响应 serializer 使用白名单，不让任意 engine dict 或敏感未知字段穿透。
 - Web storage 和 CLI storage 使用不同信任边界：CLI 保留显式路径，Web 只能使用服务端允许根目录/profile。
 - 未保存草案由服务端权威 draft 管理；客户端只持有 opaque ID 和允许 patch，不能把完整 Request 作为可信持久化输入。
+- 服务端权威草案实现（US-194）：`apps/migu_orca_web/drafts.py` 的 `DraftStore`（TTL 30 分钟、容量 128、一次性保存 + 重放保护）；查找返回 `(value, reason)` 区分 expired/evicted/replayed/unknown → 409 `draft_expired`/`draft_evicted`/`draft_replayed`；错误 details 不回显 draft_id。前端只在内存持有 `currentDraftId`/`row.draft_id`，绝不写 URL/browser storage。
+- 浏览器测试 mock 未保存草案：生成响应必须用 conftest `preview_result_json(request)`（内部 `draft_store.issue` 签发真实 draft），批量卡片 mock 用 `issue_draft_id(preview_request)` 补 draft_id，preview-save mock 用 `save_preview_handler(calls?)`（消费 draft 返回保存结果）；否则真实 preview-save 后端 409。
+- DraftStore 是进程级单例，views/api_contract/browser 的 autouse fixture 都要 `draft_store.clear()`。
 - 外部 endpoint、username、password、token、cookie、Authorization、SID、raw HTML、raw RSS XML、原始响应体、完整失败 URL、magnet 和本地绝对路径不得进入 API 展示、storage、URL、browser storage、日志、截图或 trace。
 - UI story 必须读取 `.agents/skills/dev-browser/SKILL.md` 并用真实 Chromium 验证；浏览器整体 skip 不能作为 UI 完成证据。
 - 浏览器测试使用 fixture/Playwright route 隔离外部服务；不得自动向真实 AutoBangumi、qBittorrent 或 MiKan 执行写操作。
@@ -132,3 +135,25 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - localStorage 里的旧绝对路径值不会自动消失：`restoreWebPreferences` 需主动 `removePreference`/覆写，否则「迁移」只是不发送、不清理，浏览器测试断言 localStorage 时仍会看到旧值。
   - OpenAPI `_ENDPOINTS` 中接受 `storage_dir` 的端点（含 preview-modify/save、preferences/corrections GET）要同步声明参数与 `invalid_storage_dir` 错误，否则文档与实现不一致。
 ---
+## 2026-08-30 05:05:00 CST - US-194
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 建立服务端权威 draft 生命周期：未保存草案由服务端持有，客户端只持 opaque `draft_id`，不再把完整 Request 作为权威快照提交。
+- 新增 `src/apps/migu_orca_web/drafts.py`：`DraftStore`（进程内单例 `draft_store`，TTL 30 分钟、容量 128、自动清理、一次性保存 + 重放保护），查找返回 `(value, reason)`（ok/expired/evicted/replayed/unknown）以便路由映射稳定 409。
+- `schemas.py`：`RequestPreviewModifyPayload`/`RequestPreviewSavePayload` 从 `request` 改为 `draft_id`（+ patch）。
+- `routes_requests.py`：`POST /api/v1/requests`（`save_request=false`）签发 `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch（`draft_store.get` 不消费，成功后 `update` 回写最新草案并回传同一 draft_id）；`preview-save` 用 `consume_for_save` 一次性消费；`_draft_store_error` 把 expired/unknown → `draft_expired`、evicted → `draft_evicted`、replayed → `draft_replayed`（均 409，details 不回显 draft_id）。
+- `api_contract.py`：`RequestCreateResultDTO`/`RequestPreviewModifyResultDTO` 增加可选 `draft_id`；`RequestPreviewSaveResultDTO` 独立（保存后无 draft_id）。
+- 前端 `static/app.js`：新增 `currentDraftId`（内存，不落 localStorage/URL）；生成响应带 `draft_id` 时记录；`previewModify`/`savePreviewDraftRequest` 只发 `draft_id`；批量卡片 `row.draft_id` 随生成/修改维护，接受/保存后清除；`notifyApiError` 对 `draft_*` 错误追加「请重新生成订阅草案后再试」指引。
+- OpenAPI：`_ENDPOINTS` 更新 preview-modify/save 的 requestBody（draft_id + x-request-scoped）与 409 draft_* errors；重生成 `docs/api/openapi.json`。
+- 测试：新增 `tests/api_contract/test_draft_store.py`（9 个 DraftStore 单测：issue/get/consume 一次性/update/TTL/容量逐出/重放/clear）；`test_golden_contracts.py` 更新 create 成功断言 draft_id、preview-modify/save 用 draft_id、新增 save 一次性消费 + 未知 draft 409；`views_test.py` 更新 5 个 preview 测试用 `_issue_draft` 辅助并新增重放/未知 draft 测试；`api_test.py` 加 draft_* → 409 映射断言；`test_dto_contracts.py` 加 draft_id DTO 测试；`test_frontend_dependencies.py` 新增「preview 只发 draft_id 不发完整 request、draft_id 不落 localStorage」断言。
+- 浏览器测试：conftest 新增 `preview_result_json(request)`（签发真实 draft 并返回 draft_id）、`issue_draft_id(preview_request)`（批量卡片 mock 补 draft_id）、`save_preview_handler(calls?)`（消费 draft 返回保存结果）；`_batch_item` 对带 preview_request 的卡片自动补 draft_id；`test_batch_workbench`/`test_ui_quality` 的 `_save_preview` 全部替换为 `save_preview_handler`，断言改为校验 payload 只含 draft_id。
+- 文档：`endpoint_inventory.md` §3.1/§4.2/§4.3/§5.4、`docs/api/README.md`、`README.md`、stage PRD US-194 段、`AGENTS.md`（新增 DraftStore 模块与浏览器测试 seam 约定）。
+- 质量检查：compileall、完整 pytest（1017 非浏览器 + 268 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
+- Files changed: `src/apps/migu_orca_web/drafts.py`（新）、`routes_requests.py`、`schemas.py`、`api_contract.py`、`openapi_gen.py`、`static/app.js`、`views_test.py`、`extensions/flask_api/api_test.py`、`tests/api_contract/`（conftest+golden+dto+frontend_dependencies+draft_store）、`tests/browser/`（conftest+batch_workbench+mikan_candidates+fixture_mode+ui_quality）、`docs/api/endpoint_inventory.md`+`README.md`+`openapi.json`、`README.md`、stage PRD、`AGENTS.md`、`scripts/ralph/prd.json`+`progress.txt`。
+- **Learnings for future iterations:**
+  - DraftStore 的 `get` 与 `consume_for_save` 返回 `(value, reason)` 而非裸值，路由才能区分 expired/evicted/replayed/unknown 并映射稳定 409；仅用「None」无法区分「被保存过（重放）」与「从未签发」。
+  - 一次性保存用 tombstone（`_tombstones: draft_id -> (reason, at)`）记录已消费 id，且 tombstone 也按 TTL 清理，否则「重放」语义会永久残留或误报。
+  - 浏览器测试 mock 生成响应必须用 `preview_result_json(request)`（内部 `draft_store.issue`），否则前端 `currentDraftId` 为 null，真实 preview-save 后端 409；批量卡片 mock 必须给每个 `preview_request` 补 `issue_draft_id(...)`。
+  - 手工探针（非测试）直接调 preview-save 且不传 storage_dir 会写仓库根 `.migu_orca/storage`（`load_storage_config(None)` 默认根），跑浏览器套件前必须 `rm -rf .migu_orca/storage`。
+  - 前端 `currentDraftId` 必须在「渲染已保存请求」与「清空批量详情上下文」时置 null，否则切到已保存详情后误用旧 draft_id。
+  - `RequestPreviewSaveResultDTO` 不能再继承 `RequestCreateResultDTO`（后者新增了 draft_id，而保存响应没有 draft_id）；改为独立定义相同字段。
+  - 旧测试大量断言 `saved_calls[0]["request"]["request_id"]`，US-194 后 preview-save/modify 的 payload 只含 draft_id，断言改为 `saved_calls[0]["draft_id"]` + `"request" not in payload`。

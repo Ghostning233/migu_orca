@@ -31,8 +31,10 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
   `extensions/flask_api/api.py:_error_http_status` 分类保持一致。
 - 示例全部使用虚构脱敏值；`example.invalid` 是文档保留域。
 - 凭据/外部配置字段（`mikan_config`、`ab_config`、`qbittorrent_config`、
-  `candidate_context`）标记为 `x-request-scoped: true`：
+  `candidate_context`、`draft_id`）标记为 `x-request-scoped: true`：
   request-scoped，绝不进入 storage JSON、URL、浏览器 storage、日志或 trace。
+  US-194：未保存草案由服务端权威持有，客户端只持有 opaque `draft_id`，
+  `preview-modify`/`preview-save` 不再接受客户端完整 Request。
 - `storage_dir`（US-193 起）是服务端允许根目录下的**相对 profile**：拒绝绝对路径/
   穿越/符号链接逃逸（400 `invalid_storage_dir`），details 不回显原始路径。
 - 海报二进制端点 `GET /api/v1/mikan/posters/{key}` 单独声明

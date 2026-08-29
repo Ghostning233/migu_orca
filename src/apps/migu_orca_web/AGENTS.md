@@ -9,6 +9,8 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - `serializers.py`：响应序列化与脱敏白名单（`_serialize_*`、`_sanitize_*`、`_strip_sensitive_result_fields`）。
 - `services.py`：用例编排与存储 seam（`_storage_dir`、`_resolve_mikan_config`、`_search_*`、`_build_batch_*`），复用 engine/repository，不复制业务规则。
 - `contexts.py`：短期候选选择上下文（`candidate_selection_contexts` / `CandidateSelectionContextStore`）。
+- `drafts.py`（US-194）：服务端权威未保存草案存储（`draft_store` / `DraftStore`，TTL 30 分钟、
+  容量 128、一次性保存与重放保护）；`preview-modify`/`preview-save` 只接受 opaque `draft_id`。
 - `routes_requests.py` / `routes_mikan.py` / `routes_batches.py` / `routes_settings.py` / `routes_connections.py`：按端点族注册 `/api/v1` 路由。
 - `views.py`：仅保留 Jinja 页面路由 + 导入 route 模块（导入副作用即注册端点）+ 再导出 blueprints；同时为测试兼容再导出 `CandidateSelectionContextStore` / `candidate_selection_contexts`。
 - `__init__.py` 的 `blueprints = [web_blueprint, api_blueprint]` 由 `apps/registry.py` 消费。
@@ -58,3 +60,20 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - 浏览器测试：`set_storage_preferences` 存 profile 名（`storage_dir.name`），server 端
   `_web_storage_root` fixture 指向 tmp 父目录；不要往 localStorage/URL/payload 里放绝对路径。
 - 修改 `_error_http_status` 或 `_ENDPOINTS` 的 errors 后必须重生成 `docs/api/openapi.json`。
+
+## 服务端权威草案（US-194）
+
+- 未保存预览草案由服务端 `drafts.py:DraftStore` 持有（进程内单例 `draft_store`，TTL 30 分钟、
+  容量 128、自动清理、一次性保存 + 重放保护）。`POST /api/v1/requests`（`save_request=false`）
+  在响应里签发 opaque `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch 并回写同一
+  draft_id；`preview-save` 一次性消费 `draft_id` 后落盘。
+- 客户端**绝不**把完整 Request 作为权威快照提交；前端只在内存持有 `draft_id`
+  （`app.js` 的 `currentDraftId` / 批量卡片的 `row.draft_id`），不写 URL/browser storage。
+- 失败语义统一 409：`draft_expired`（过期/未知）、`draft_evicted`（容量满）、
+  `draft_replayed`（重复保存）；错误 details 不回显 draft_id 或草案内容。
+- 测试：`DraftStore` 是进程级单例，必须在 `views_test`/`api_contract`/`browser` 的
+  autouse fixture 里 `draft_store.clear()`；浏览器 mock 用 conftest 的
+  `preview_result_json(request)`（签发真实 draft 并返回 draft_id）与
+  `save_preview_handler(calls?)`（消费 draft 并返回保存结果），批量卡片 mock 用
+  `issue_draft_id(preview_request)` 给每个 `preview_request` 补 draft_id。
+- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.4 与 OpenAPI 注册表。

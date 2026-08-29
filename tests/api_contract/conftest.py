@@ -52,9 +52,11 @@ def _reset_shared_state() -> None:
     """
     from mikan_engine.controllers.mikan_candidate_cache import candidate_search_cache
     from apps.migu_orca_web.contexts import candidate_selection_contexts
+    from apps.migu_orca_web.drafts import draft_store
 
     candidate_search_cache.clear()
     candidate_selection_contexts.clear()
+    draft_store.clear()
     yield
 
 

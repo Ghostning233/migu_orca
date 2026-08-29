@@ -89,15 +89,21 @@ class RequestCreateResultDTO(_StrictBase):
     request: dict[str, Any]
     summary: RequestSummaryDTO
     saved_request: dict[str, Any] | None = None
+    draft_id: str | None = None
 
 
 class RequestPreviewModifyResultDTO(_StrictBase):
     request: dict[str, Any]
     summary: RequestSummaryDTO
+    draft_id: str | None = None
 
 
-class RequestPreviewSaveResultDTO(RequestCreateResultDTO):
-    """preview-save result equals the create result shape."""
+class RequestPreviewSaveResultDTO(_StrictBase):
+    """preview-save result equals the create result shape (draft consumed)."""
+
+    request: dict[str, Any]
+    summary: RequestSummaryDTO
+    saved_request: dict[str, Any] | None = None
 
 
 class RequestActionResultDTO(RequestCreateResultDTO):

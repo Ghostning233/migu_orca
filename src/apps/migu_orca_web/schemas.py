@@ -271,17 +271,26 @@ class RequestModifyPayload(RequestActionPayload):
 
 
 class RequestPreviewModifyPayload(BaseModel):
-    """Recompute an unsaved preview request in memory (no persistence)."""
+    """Recompute an unsaved preview request in memory (no persistence).
 
-    request: dict[str, Any]
+    US-194: the server is authoritative for unsaved drafts. The client sends
+    only the opaque ``draft_id`` it received from generation (or a previous
+    modify) plus an allowed patch; it never sends the full Request snapshot.
+    """
+
+    draft_id: str
     patch: dict[str, Any]
     storage_dir: str | None = None
 
 
 class RequestPreviewSavePayload(BaseModel):
-    """Persist an unsaved, already-modified preview draft."""
+    """Persist an unsaved, already-modified preview draft.
 
-    request: dict[str, Any]
+    US-194: ``draft_id`` is a one-time capability. The server consumes it
+    atomically, so saving the same draft twice is a replay (409).
+    """
+
+    draft_id: str
     storage_dir: str | None = None
 
 

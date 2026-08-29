@@ -1695,7 +1695,7 @@
       },
       "post": {
         "summary": "生成订阅方案（可保存）",
-        "description": "按标题生成 Request。save_request=false 时仅返回内存预览；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
+        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id（US-194：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
         "operationId": "postRequests",
         "responses": {
           "200": {
@@ -1825,6 +1825,18 @@
                           ],
                           "default": null,
                           "title": "Saved Request"
+                        },
+                        "draft_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Id"
                         }
                       },
                       "required": [
@@ -1852,7 +1864,8 @@
                       "expected_folder_name": "示例",
                       "warnings": []
                     },
-                    "saved_request": null
+                    "saved_request": null,
+                    "draft_id": null
                   }
                 }
               }
@@ -2040,7 +2053,7 @@
     "/api/v1/requests/preview-modify": {
       "post": {
         "summary": "内存中修改未保存草案",
-        "description": "接收客户端完整预览草案与允许 patch，返回更新后的内存草案与摘要（不落盘）。US-194 将改为只接收 draft_id 与允许 patch。",
+        "description": "US-194：只接受服务端签发的 draft_id 与允许 patch，返回更新后的内存草案与摘要（不落盘）。客户端不得提交完整 Request 作为权威快照。",
         "operationId": "postRequestspreviewmodify",
         "responses": {
           "200": {
@@ -2157,6 +2170,18 @@
                           ],
                           "title": "RequestSummaryDTO",
                           "type": "object"
+                        },
+                        "draft_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Id"
                         }
                       },
                       "required": [
@@ -2183,7 +2208,8 @@
                       "effective_seed_count": 1,
                       "expected_folder_name": "示例",
                       "warnings": []
-                    }
+                    },
+                    "draft_id": null
                   }
                 }
               }
@@ -2242,6 +2268,60 @@
                 }
               }
             }
+          },
+          "409": {
+            "description": "draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "draft_expired",
+                  "error_message": "订阅草案已过期或不存在，请重新生成",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -2251,13 +2331,14 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "request",
+                  "draft_id",
                   "patch"
                 ],
                 "properties": {
-                  "request": {
-                    "type": "object",
-                    "description": "完整预览草案（US-194 起改为服务端权威 draft）。"
+                  "draft_id": {
+                    "type": "string",
+                    "description": "生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。",
+                    "x-request-scoped": true
                   },
                   "patch": {
                     "type": "object",
@@ -2270,7 +2351,6 @@
                 }
               },
               "example": {
-                "request": {},
                 "patch": {}
               }
             }
@@ -2282,7 +2362,7 @@
     "/api/v1/requests/preview-save": {
       "post": {
         "summary": "保存未修改的预览草案",
-        "description": "仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
+        "description": "US-194：消费服务端权威 draft_id（一次性，重放保护），仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
         "operationId": "postRequestspreviewsave",
         "responses": {
           "200": {
@@ -2302,7 +2382,7 @@
                     },
                     "result": {
                       "additionalProperties": false,
-                      "description": "preview-save result equals the create result shape.",
+                      "description": "preview-save result equals the create result shape (draft consumed).",
                       "properties": {
                         "request": {
                           "additionalProperties": true,
@@ -2501,7 +2581,7 @@
             }
           },
           "409": {
-            "description": "invalid_request_status: 只有待确认的订阅草案可以保存",
+            "description": "invalid_request_status: 只有待确认的订阅草案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存",
             "content": {
               "application/json": {
                 "schema": {
@@ -2562,12 +2642,13 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "request"
+                  "draft_id"
                 ],
                 "properties": {
-                  "request": {
-                    "type": "object",
-                    "description": "完整预览草案（仅 PENDING_CONFIRM 可保存）。"
+                  "draft_id": {
+                    "type": "string",
+                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存后失效）。",
+                    "x-request-scoped": true
                   },
                   "storage_dir": {
                     "type": "string",
@@ -2575,9 +2656,7 @@
                   }
                 }
               },
-              "example": {
-                "request": {}
-              }
+              "example": {}
             }
           },
           "description": "保存未修改的预览草案"
@@ -3919,6 +3998,18 @@
                           ],
                           "default": null,
                           "title": "Saved Request"
+                        },
+                        "draft_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Id"
                         }
                       },
                       "required": [
@@ -3946,7 +4037,8 @@
                       "expected_folder_name": "示例",
                       "warnings": []
                     },
-                    "saved_request": null
+                    "saved_request": null,
+                    "draft_id": null
                   }
                 }
               }
@@ -4269,6 +4361,18 @@
                           ],
                           "default": null,
                           "title": "Saved Request"
+                        },
+                        "draft_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Id"
                         }
                       },
                       "required": [
@@ -4296,7 +4400,8 @@
                       "expected_folder_name": "示例",
                       "warnings": []
                     },
-                    "saved_request": null
+                    "saved_request": null,
+                    "draft_id": null
                   }
                 }
               }
@@ -4823,6 +4928,18 @@
                           ],
                           "default": null,
                           "title": "Saved Request"
+                        },
+                        "draft_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Id"
                         }
                       },
                       "required": [
@@ -4850,7 +4967,8 @@
                       "expected_folder_name": "示例",
                       "warnings": []
                     },
-                    "saved_request": null
+                    "saved_request": null,
+                    "draft_id": null
                   }
                 }
               }
@@ -5128,6 +5246,18 @@
                           "default": null,
                           "title": "Saved Request"
                         },
+                        "draft_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Id"
+                        },
                         "ab_submit_result": {
                           "additionalProperties": true,
                           "title": "Ab Submit Result",
@@ -5174,6 +5304,7 @@
                       "warnings": []
                     },
                     "saved_request": null,
+                    "draft_id": null,
                     "ab_submit_result": {},
                     "saved_ab_result": null
                   }

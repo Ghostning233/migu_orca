@@ -125,12 +125,16 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["ok"] is True
-    assert set(payload["result"]) == {"request", "summary"}
+    # US-194: an unsaved generation returns an opaque draft_id (server owns the
+    # authoritative draft) alongside the display snapshot.
+    assert set(payload["result"]) == {"request", "summary", "draft_id"}
     assert payload["result"]["request"]["input"]["raw_title"] == "芙莉莲"
     assert payload["result"]["request"]["status"] == "PENDING_CONFIRM"
     assert payload["result"]["summary"] == summarize_request(
         payload["result"]["request"]
     )
+    assert isinstance(payload["result"]["draft_id"], str)
+    assert len(payload["result"]["draft_id"]) >= 16
     # Preview generation never writes storage unless save_request=true.
     assert not (tmp_path / "storage").exists()
 
@@ -168,11 +172,24 @@ def test_golden_request_detail_business_failure(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"request_id": "missing-request"}
 
 
+def _issue_preview_draft(client: FlaskClient, title: str = "芙莉莲") -> str:
+    """Generate an unsaved preview draft and return its opaque draft_id."""
+    response = client.post(
+        "/api/v1/requests",
+        json={"title": title, "save_request": False},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    return payload["result"]["draft_id"]
+
+
 def test_golden_preview_modify_rejects_illegal_patch(client: FlaskClient) -> None:
+    draft_id = _issue_preview_draft(client)
+
     response = client.post(
         "/api/v1/requests/preview-modify",
         json={
-            "request": {"status": "PENDING_CONFIRM", "input": {"raw_title": "x"}},
+            "draft_id": draft_id,
             "patch": {"bogus_field": 1},
         },
     )
@@ -190,17 +207,60 @@ def test_golden_preview_modify_rejects_illegal_patch(client: FlaskClient) -> Non
 
 
 def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
+    # A draft is always PENDING_CONFIRM server-side; a *client-supplied* full
+    # Request is no longer accepted (US-194). Missing draft_id is a validation
+    # error; a consumed/unknown draft is a 409.
     response = client.post(
         "/api/v1/requests/preview-save",
-        json={"request": {"status": "ACCEPTED"}},
+        json={},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(e["field"] == "draft_id" for e in payload["error_data"]["errors"])
+
+
+def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
+    """US-194: preview-save is one-shot; a second save is a 409 replay."""
+    draft_id = _issue_preview_draft(client)
+
+    first = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id},
+    )
+    assert first.status_code == 200
+    assert first.get_json()["ok"] is True
+    assert first.get_json()["result"]["request"]["status"] == "PENDING_CONFIRM"
+
+    second = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id},
+    )
+    payload = second.get_json()
+    assert second.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_replayed"
+    assert payload["error_message"] == "订阅草案已被保存，请勿重复保存"
+    assert payload["error_data"]["details"] == {"field": "draft_id"}
+
+
+def test_golden_preview_save_rejects_unknown_draft(client: FlaskClient) -> None:
+    """A never-issued / expired draft id is a stable 409, never a leak."""
+    response = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": "forged-or-expired-draft-id"},
     )
 
     payload = response.get_json()
     assert response.status_code == 409
     assert payload["ok"] is False
-    assert payload["error_type"] == "invalid_request_status"
-    assert payload["error_message"] == "只有待确认的订阅草案可以保存"
-    assert payload["error_data"]["details"] == {"status": "ACCEPTED"}
+    assert payload["error_type"] == "draft_expired"
+    assert payload["error_message"] == "订阅草案已过期或不存在，请重新生成"
+    assert payload["error_data"]["details"] == {"field": "draft_id"}
+    # The raw draft id is never echoed back.
+    assert "forged-or-expired-draft-id" not in str(payload)
 
 
 def test_golden_request_actions_error_sanitized(

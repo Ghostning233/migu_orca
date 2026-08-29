@@ -27,6 +27,12 @@ from shared.season_evidence import attach_selected_candidate_season
 
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.contexts import candidate_selection_contexts
+from apps.migu_orca_web.drafts import (
+    REASON_EVICTED,
+    REASON_OK,
+    REASON_REPLAYED,
+    draft_store,
+)
 from apps.migu_orca_web.schemas import (
     RequestListQuery,
     RequestDetailQuery,
@@ -55,6 +61,36 @@ from storage_engine.controllers.request_repository import (
 )
 from storage_engine.controllers.storage_config import load_storage_config
 from ab_engine.controllers.ab_config import build_ab_config
+
+
+def _draft_store_error(reason: str) -> Stage1Error:
+    """Map a DraftStore lookup reason to a stable 409 draft_* error.
+
+    US-194: expired/evicted/replayed/mismatched drafts are state conflicts
+    (409) with a Chinese message telling the user to regenerate, never a leak
+    of draft content or an absolute path.
+    """
+    if reason == REASON_REPLAYED:
+        return Stage1Error(
+            "draft_replayed",
+            "订阅草案已被保存，请勿重复保存",
+            "consume_preview_draft",
+            {"field": "draft_id"},
+        )
+    if reason == REASON_EVICTED:
+        return Stage1Error(
+            "draft_evicted",
+            "订阅草案已失效（服务器容量已满），请重新生成",
+            "load_preview_draft",
+            {"field": "draft_id"},
+        )
+    # expired / unknown both mean "not usable anymore, regenerate".
+    return Stage1Error(
+        "draft_expired",
+        "订阅草案已过期或不存在，请重新生成",
+        "load_preview_draft",
+        {"field": "draft_id"},
+    )
 
 
 @class_route(api_blueprint, "/api/v1/requests", methods=["GET"])
@@ -138,6 +174,13 @@ class RequestCreateView(PostView):
         }
         if "saved_request" in result:
             response["saved_request"] = result["saved_request"]
+        elif not payload.save_request:
+            # US-194: an unsaved draft is server-authoritative. Store it in the
+            # bounded draft store and hand the client only an opaque draft_id;
+            # preview-modify/preview-save reference this id instead of a
+            # client-supplied full Request. The draft itself never enters URL,
+            # browser storage, history, logs or screenshots.
+            response["draft_id"] = draft_store.issue(request)
         return response
 
 
@@ -148,19 +191,26 @@ class RequestPreviewModifyView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestPreviewModifyPayload)
         payload = self.request_validator_model
-        # The preview request is an in-memory generated draft (status
-        # PENDING_CONFIRM but never written to storage). modify_request
-        # recomputes per-source seed filters and the selected group's effective
-        # seeds without saving, so the UI can show live seed updates before the
-        # user decides to persist the draft.
+        # US-194: the server is the authority for unsaved drafts. The client
+        # only holds an opaque draft_id and an allowed patch; the authoritative
+        # PENDING_CONFIRM draft lives in the bounded draft store and is never
+        # trusted from the client. modify_request recomputes per-source seed
+        # filters and the selected group's effective seeds without saving, so
+        # the UI can show live seed updates before the user saves the draft.
+        draft, draft_reason = draft_store.get(payload.draft_id)
+        if draft is None or draft_reason != REASON_OK:
+            raise _draft_store_error(draft_reason)
         result = apply_modify_action(
-            {"success": True, "request": payload.request, "error": None},
+            {"success": True, "request": draft, "error": None},
             payload.patch,
         )
         if not result["success"]:
             _raise_result_error(result)
         req = result["request"]
-        return {"request": req, "summary": summarize_request(req)}
+        # Keep the server-side draft in sync so preview-save persists the
+        # modified state the user just reviewed.
+        draft_store.update(payload.draft_id, req)
+        return {"request": req, "summary": summarize_request(req), "draft_id": payload.draft_id}
 
 
 @class_route(api_blueprint, "/api/v1/requests/preview-save", methods=["POST"])
@@ -170,7 +220,12 @@ class RequestPreviewSaveView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestPreviewSavePayload)
         payload = self.request_validator_model
-        request = payload.request
+        # US-194: preview-save consumes a valid draft_id once (replay
+        # protection). The authoritative draft content never comes from the
+        # client; a stale/expired/already-saved id returns a stable 409.
+        request, save_reason = draft_store.consume_for_save(payload.draft_id)
+        if request is None or save_reason != REASON_OK:
+            raise _draft_store_error(save_reason)
         # Only a PENDING_CONFIRM draft may be saved; this keeps the saved object
         # entering the existing confirmation flow (accept/cancel/modify/delete).
         if request.get("status") != PENDING_CONFIRM:
