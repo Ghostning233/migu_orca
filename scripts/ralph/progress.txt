@@ -2,6 +2,8 @@
 
 ## Codebase Patterns
 
+- `_storage_dir` 空值（`None|""|"  "`）必须返回 `_WEB_STORAGE_ROOT` 本身，**绝不**返回 `None`：`load_storage_config(None)` 会回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖（含生产 `MIGU_ORCA_WEB_STORAGE_ROOT`）。新增/修改取 `_storage_dir(...)` 的端点后，用「不传 storage_dir 的保存请求」回归验证写入服务端根而非仓库根。
+- 完整测试跑完必须检查仓库根 `.migu_orca/storage` 是否被创建——被创建说明有路径绕过了服务端 root，会连锁挂掉浏览器空列表测试（US-196 靠此信号发现 US-193 回归）。
 - Python 依赖、检查与测试统一通过 `uv`；不要直接使用系统 Python。
 - Web API 成功/失败继续使用 `{ok, result}` / `{ok, error_type, error_message, error_data}` envelope；Stage 26 可修正 HTTP 状态，但必须保持 envelope 兼容。
 - Web 适配层按职责拆分：`schemas.py`（请求模型）、`api_contract.py`（响应 DTO）、`serializers.py`（脱敏白名单）、`services.py`（编排与存储 seam）、`contexts.py`（短期上下文）、`routes_*.py`（按端点族）、`views.py`（仅页面路由 + Blueprint 组装）；route 模块「导入即注册」，`views.py` 必须 import 全部 `routes_*`。
@@ -181,3 +183,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - `/readiness` 探针测试必须把 `_web_storage_root` 指到 tmp，否则成功路径会在仓库根创建 `.migu_orca/storage` 挂掉后续浏览器测试（复用 US-193 的 `set_web_storage_root` seam）。
   - CI 里 `uv sync --all-groups` 会把 ruff/pytest/playwright 都装上；`astral-sh/setup-uv` + `actions/setup-python`（python-version-file 指向 `.python-version`）是 uv 项目标准组合。
   - `playwright install --with-deps chromium` 在 ubuntu-latest 上能装全系统库；本地沙箱用 `.agents/.chromium-libs` + 同一 bash 命令内 `ln -sfn` 到 `/tmp/chromium-libs`。
+
+## 2026-08-30 06:30:00 CST - US-196
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Stage 26 收尾：完整单元/API/CLI 与真实 Chromium 用户旅程回归通过，README、主 PRD、架构、M11/M13/M14、backlog、future stages、docs/api 与 Stage 27 handoff 全部同步为「Stage 26 已完成」，并归档 Stage 26 prd/progress。
+- **安全回归发现并修复 US-193 回归**：`services._storage_dir(None|""|"  ")` 原来返回 `None`，所有 Web 路由随后调用 `load_storage_config(None)` 回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖（含生产 `MIGU_ORCA_WEB_STORAGE_ROOT`）——完整非浏览器 pytest 会把请求写到仓库根并污染后续浏览器空列表测试。修复：空值返回 `_WEB_STORAGE_ROOT` 本身；新增 golden contract `test_golden_request_create_without_storage_dir_uses_server_root`（不传 storage_dir 的 `save_request=true` 写入服务端根 tmp，且 `DEFAULT_STORAGE_DIR` 不被创建）；views_test 的 `_storage_dir(""|None|"  ")` 断言改为等于 tmp 根。
+- 文档同步：stage26 PRD 状态改「已完成」并记录 US-196 实现；主 PRD（文档状态/Stage 26 段落/模块表 M13/M14/路线图/BL-023 完成/下一步）；backlog（BL-023 完成、BL-024 前置条件满足）；future_stages（Stage 26 已完成、阶段数量判断更新）；架构（Web 边界、storage 空值回落根、OpenAPI/DTO/DraftStore 说明）；M13（Stage 26 行 + UI 调整 + 安全边界）、M14（Stage 26 Web storage 根配置）、M11（Stage 26 storage 根）；docs/api/README.md 与 endpoint_inventory.md（storage_dir 空值回落服务端根）；docs/README.md（最近完成阶段）；Stage 27 PRD（前置条件已满足）。
+- 归档：`scripts/ralph/archive/2026-08-30-stage26-web-api-contract-hardening/` 保存活动 prd.json 与 progress.txt 副本（全部 story passes 为 true）。
+- 质量检查：compileall、ruff、非浏览器 pytest（1020 passed）、真实 Chromium 浏览器套件（269 passed）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
+- Files changed: `src/apps/migu_orca_web/services.py`+`views_test.py`+`AGENTS.md`、`tests/api_contract/test_golden_contracts.py`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`docs/MiGuOrca_main_PRD.md`、`docs/MiGuOrca_future_stages.md`、`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`、`docs/backlog.md`、`docs/README.md`、`docs/design/architecture.md`、`docs/modules/M11-storage-state-PRD.md`+`M13-web-ui-PRD.md`+`M14-system-config-PRD.md`、`docs/api/README.md`+`endpoint_inventory.md`、`README.md`、`scripts/ralph/prd.json`+`progress.txt`+`archive/2026-08-30-stage26-web-api-contract-hardening/`。
+- **Learnings for future iterations:**
+  - `_storage_dir` 空值必须返回 `_WEB_STORAGE_ROOT` 而非 `None`：`load_storage_config(None)` 会回退 CLI 默认路径，是 Web storage 根目录边界被绕过的经典坑；新增端点时用「不传 storage_dir 的保存请求」做回归。
+  - 完整测试跑完必须检查仓库根 `.migu_orca/storage` 是否被创建——被创建说明有 Web/CLI 路径绕过了服务端 root，会连锁挂掉浏览器空列表测试（US-196 正是靠这个信号发现回归）。
+  - Stage 收尾归档：把活动 `scripts/ralph/prd.json` 与 `progress.txt` 原样复制到 `archive/<date>-<stage-name>/`，确保最终全 true 状态一致；同步 README、docs/README.md、backlog、future_stages、主 PRD、模块 PRD 的「当前状态/最近完成阶段」。
+  - Stage 27 只通过 OpenAPI/DTO 使用后端（不导入旧 app.js 内部状态），启动时以 `docs/api/openapi.json` 为准复核 stories。
+---

@@ -56,6 +56,11 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 环境变量覆盖，测试用 `services.set_web_storage_root`）。
 - 绝对路径（Unix `/...`、Windows `C:\...`）、`..` 穿越、符号链接逃逸 → 400
   `invalid_storage_dir`，details 只含 `field`/`reason`，绝不回显原始路径。
+- **空值必须解析为服务端根**：`_storage_dir(None|""|"  ")` 返回 `_WEB_STORAGE_ROOT`
+  （US-196 回归修复），**绝不**返回 `None`——`load_storage_config(None)` 会回退到 CLI
+  默认 `DEFAULT_STORAGE_DIR`（仓库根 `.migu_orca/storage`），绕过服务端 root 覆盖
+  （含生产 `MIGU_ORCA_WEB_STORAGE_ROOT`）。新增/修改任何取 `_storage_dir(...)` 的端点后，
+  检查该端点在不传 `storage_dir` 时仍写入服务端根而非仓库根。
 - CLI `--storage-dir` 是不同信任边界（显式本地路径），不要用 Web 解析器约束它。
 - 浏览器测试：`set_storage_preferences` 存 profile 名（`storage_dir.name`），server 端
   `_web_storage_root` fixture 指向 tmp 父目录；不要往 localStorage/URL/payload 里放绝对路径。

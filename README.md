@@ -2,6 +2,8 @@
 
 MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台，目标是在 MiKanProject 与 Auto Bangumi 之间提供 MiKan 订阅源发现、筛选预览、批量草案审核与提交辅助能力。
 
+Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI（compileall/ruff/非浏览器 pytest/node/OpenAPI 漂移/git diff）与真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；Stage 27 前端迁移 handoff 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
+
 Stage 25「正式番名与季数解析」已完成：单个与批量搜索共用结构化 season（`number/raw/normalized/source`）、确定性解析和有界查询计划；真实 MiKan 合集仍由用户显式选择，非第一季缺少候选公开证据时必须明确确认。AutoBangumi 3.1.18 可选使用服务端解析并校验的 MiKan 原始海报作为 `poster_link`，绝不使用浏览器 opaque 代理地址。实现与验收见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
 Stage 24「AutoBangumi 真实认证与订阅兼容闭环」已完成：默认以服务地址、用户名和密码登录兼容 AutoBangumi 3.1.18，同时保留新版 API Token/Bearer 兼容模式；Settings 提供只读连接测试，单个与批量已接受 Request 复用经验证的 `/api/v1/rss/subscribe` 映射和提交编排。执行范围见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
@@ -27,7 +29,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - Stage 19 已把批量新番订阅前置工作台接入 `/index`：批量输入按非空行生成独立条目，AI 名称解析 fake provider 和 provider seam 输出候选标题/搜索词，批量 API 对每个条目独立搜索 MiKan 候选，卡片网格支持删除、展开、单卡修改回流和单卡接受。
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
 - Stage 24 AutoBangumi 真实认证与订阅兼容闭环与 Stage 25 BL-018 均已完成。部署/配置向导及其他条件触发事项继续记录在 `docs/backlog.md`，流式封面代理记录在 `docs/optional_features.md`；后续阶段按 backlog 动态规划。
-- Stage 26「Web API 契约固化与服务端边界治理」已规划为前端工程化迁移前的 P0 阶段：先建立响应 DTO、OpenAPI、正确 HTTP 状态、Web storage 根目录限制和服务端权威 draft，不在本阶段更换页面框架。
+- Stage 26「Web API 契约固化与服务端边界治理」已完成：`/api/v1` 端点清单与 golden contract 冻结、响应 DTO（`extra="forbid"`）与确定性 OpenAPI、Web 适配层按职责拆分（schemas/serializers/services/contexts/routes_*）、稳定 HTTP 状态语义、Web storage 根目录限制（空值回落服务端根）与服务端权威 draft 生命周期、CI 与 local-only 部署基线；本阶段未更换页面框架，页面主要视觉与用户流程保持不变。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
@@ -157,9 +159,9 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 }
 ```
 
-当前 API（US-193 起 `storage_dir` 是服务端允许根目录下的**相对 profile**，未传时使用默认根目录；CLI 的显式 `--storage-dir` 路径行为不变）：
+当前 API（US-193 起 `storage_dir` 是服务端允许根目录下的**相对 profile**，未传时回落服务端根目录本身；CLI 的显式 `--storage-dir` 路径行为不变）：
 
-- `GET /api/v1/requests`：列出已保存 Request 摘要。未传 `storage_dir` 时使用默认 storage 根目录。
+- `GET /api/v1/requests`：列出已保存 Request 摘要。未传 `storage_dir` 时使用服务端 storage 根目录（默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖）。
 - `GET /api/v1/requests/<request_id>`：读取完整 Request snapshot，并附带可用的 `history` 与 `ab_result` 只读数据。
 - `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source`、可选 `mikan_config` 和 request-scoped `mikan_bangumi`。`source` 默认为 `static-fixture`；显式传入 `source: "mikan"` 时会构造真实 MiKan client，未传 `mikan_config` 时使用系统默认 MiKan 配置。存在 `mikan_bangumi` 时会直接解析指定 MiKan `Home/Bangumi/<id>` URL 或 ID 并跳过搜索；该字段不写入浏览器 storage、URL 或持久配置。API 层仍以显式 `save_request: true` 写入本地 storage；Web UI 候选选择与直连 fallback 默认发送 `save_request: false` 生成可编辑预览草案——服务端在 `DraftStore` 持有权威 `PENDING_CONFIRM` 草案并签发 opaque `draft_id`（US-194），`POST /api/v1/requests/preview-modify` 只接受 `draft_id` + 允许 patch 做 dry-run 修改并重算种子，`POST /api/v1/requests/preview-save` 一次性消费 `draft_id` 将草案写入本地 storage 进入待确认流程；draft 失效/重放返回 409 `draft_expired`/`draft_replayed`，客户端只持有 id，完整 Request 与草案内容绝不进入 URL 或浏览器 storage。
 
@@ -347,7 +349,8 @@ Stage 21 偏好/修正 API 的安全边界：endpoint、token、Authorization he
   读取/修改本地订阅方案并触发对 Auto Bangumi / qBittorrent 的写操作。
 - **服务端 storage 根目录**：Web API 只能使用服务端允许的 storage 根目录
   （默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖），浏览器只能选择
-  根目录下的相对 profile（US-193）。CLI `--storage-dir` 是独立信任边界。
+  根目录下的相对 profile（US-193）；`storage_dir` 未传/空值时回落服务端根本身
+  （US-196 回归修复：绝不回退 CLI 默认路径）。CLI `--storage-dir` 是独立信任边界。
 - **健康/就绪探针**：`/healthz` 只报告进程存活；`/readiness` 额外确认服务端 storage 根
   目录可创建/可写（503 表示 storage 不可用）。两者都不访问真实外部系统。
 - **CI 门禁**：`.github/workflows/ci.yml` 在每次 push/PR 执行
@@ -446,8 +449,9 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 >
 > 魔改用法详见下方「使用 DSH 运行 Ralph」小节；`amp` / `claude` / `codex` 三个原始工具分支保持兼容可用。
 
-- 当前 Ralph PRD：Stage 26，Web API 契约固化与服务端边界治理（已规划，待开发）
-- 最近完成阶段：Stage 25，正式番名与季数解析
+- 当前 Ralph PRD：Stage 27，前端工程化迁移与页面重构（已规划，等待 Stage 26 完成后启动）
+- 最近完成阶段：Stage 26，Web API 契约固化与服务端边界治理
+- 前一完成阶段：Stage 25，正式番名与季数解析
 - 前一完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
 - 前一完成阶段：Stage 23，媒体缓存、MiKan 读取优化与批量审核体验
 - 前一完成阶段：Stage 22，Web UI 搜索工作台重构与真实候选闭环
@@ -464,7 +468,8 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- Stage 26 规划：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196
+- Stage 26 规划：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196（已全部完成）
+- Stage 27 规划：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`；预定分支 `agent/stage27-frontend-engineering-migration`，Ralph stories 为 US-197～US-204
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（DSH，推荐）：`./scripts/ralph/ralph.sh --tool dsh --provider commandcode --model deepseek/deepseek-v4-flash 7`

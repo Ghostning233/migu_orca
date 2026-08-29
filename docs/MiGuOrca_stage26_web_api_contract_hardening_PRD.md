@@ -7,7 +7,7 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 26 PRD：Web API 契约固化与服务端边界治理 |
 | 文档类型 | Stage PRD |
-| 当前状态 | 已规划，待开发 |
+| 当前状态 | 已完成 |
 | 创建日期 | 2026-08-29 |
 | Backlog | BL-023 |
 | 优先级 | P0 |
@@ -233,11 +233,19 @@ src/apps/migu_orca_web/
   探针；两者都不访问真实外部系统。README 新增「本地部署基线」：默认 local-only、
   未认证禁止直接暴露公网、storage 根目录、健康/就绪语义与 CI 门禁。
 
-### US-196：Stage 26 兼容回归与文档收尾
+### US-196：Stage 26 兼容回归与文档收尾（已完成）
 
-- 完整单元、API、CLI 和真实 Chromium 用户旅程通过。
+- 完整单元、API、CLI 和真实 Chromium 用户旅程通过（1019 非浏览器 + 269 真实 Chromium）。
 - README、架构、主 PRD、M13/M14、backlog、future stages 与 API 文档同步。
 - 输出 Stage 27 前端迁移 handoff，不提前实施新前端。
+- 已实现（2026-08-30）：修复 US-193 回归——`_storage_dir(None|""|"  ")` 原来返回
+  `None`，导致 `load_storage_config(None)` 回退 CLI 默认 `DEFAULT_STORAGE_DIR`
+  （仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖（含生产
+  `MIGU_ORCA_WEB_STORAGE_ROOT`）；现改为返回 `_WEB_STORAGE_ROOT` 本身，并新增 golden
+  contract 回归（不传 `storage_dir` 的 `save_request=true` 写入服务端根而非仓库根）。
+  Stage 26 prd/progress 已归档到 `scripts/ralph/archive/`，全部 story passes 为 true。
+- Stage 27 明确只通过 OpenAPI/DTO 使用后端，不导入旧 `app.js` 内部状态；详细 handoff
+  见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 ## 10. 验收命令
 

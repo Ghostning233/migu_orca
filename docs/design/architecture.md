@@ -67,9 +67,14 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
   - `contexts.py`：短期候选选择上下文。
   - `routes_*.py`：按端点族（requests/mikan/batches/settings/connections）注册路由。
   - `views.py`：仅保留页面路由与 Blueprint 组装。
-- `docs/api/` 提供 OpenAPI 契约（`docs/api/openapi.json`，确定性生成）。
+- `docs/api/` 提供 OpenAPI 契约（`docs/api/openapi.json`，确定性生成），覆盖全部 `/api/v1`
+  端点；响应 DTO 在 `api_contract.py`（全部 `extra="forbid"`）。新增/删除端点必须同步
+  `docs/api/endpoint_inventory.md` §2、`openapi_gen.py` `_ENDPOINTS` 注册表、`docs/api/openapi.json`
+  与 `tests/api_contract/`，否则契约测试失败。
+- 未保存草案由 `drafts.py:DraftStore`（进程内单例）权威持有：TTL 30 分钟、容量 128、
+  一次性保存与重放保护；客户端只持 opaque `draft_id`，不提交完整 Request 作为权威快照。
 
-因此后续前端工程化应先固化 API 契约和服务端安全边界，再渐进替换页面；不得在没有兼容层的情况下同时重写 API 与全部用户旅程。
+因此后续前端工程化应先固化 API 契约和服务端安全边界，再渐进替换页面；不得在没有兼容层的情况下同时重写 API 与全部用户旅程。Stage 26 已完成该固化（清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 前端迁移 handoff 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 ## 6. 状态与持久化
 
@@ -80,7 +85,9 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
 - Web 与 CLI 使用不同 storage 信任边界（US-193）：CLI 继续接受显式 `--storage-dir`；
   Web API 的 `storage_dir` 只能选择服务端根目录下的相对 profile（默认 `.migu_orca/storage`，
   可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 服务端覆盖），绝对路径/穿越/符号链接逃逸返回 400
-  `invalid_storage_dir`，错误 details 不回显原始路径。
+  `invalid_storage_dir`，错误 details 不回显原始路径。**空值回落服务端根本身**
+  （`services._storage_dir(None|""|"  ")` 返回 `_WEB_STORAGE_ROOT`，绝不返回 `None`，
+  否则 `load_storage_config(None)` 会回退 CLI 默认并绕过服务端 root 覆盖——US-196 回归修复）。
 
 ## 7. 测试与质量门禁
 

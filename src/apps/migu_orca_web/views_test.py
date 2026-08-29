@@ -1383,9 +1383,12 @@ def test_storage_dir_resolver_maps_relative_profile_under_root(
 
     resolved = _storage_dir("storage")
     assert resolved == (tmp_path / "storage").resolve()
-    assert _storage_dir("") is None
-    assert _storage_dir(None) is None
-    assert _storage_dir("  ") is None
+    # US-193/196: an empty storage_dir means the *server* storage root itself,
+    # never ``None`` (which would fall back to the CLI default and bypass the
+    # server-controlled Web root).
+    assert _storage_dir("") == (tmp_path).resolve()
+    assert _storage_dir(None) == (tmp_path).resolve()
+    assert _storage_dir("  ") == (tmp_path).resolve()
 
 
 def test_storage_dir_resolver_rejects_absolute_path(

@@ -36,7 +36,9 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
   US-194：未保存草案由服务端权威持有，客户端只持有 opaque `draft_id`，
   `preview-modify`/`preview-save` 不再接受客户端完整 Request。
 - `storage_dir`（US-193 起）是服务端允许根目录下的**相对 profile**：拒绝绝对路径/
-  穿越/符号链接逃逸（400 `invalid_storage_dir`），details 不回显原始路径。
+  穿越/符号链接逃逸（400 `invalid_storage_dir`），details 不回显原始路径；**未传时回落
+  服务端根**（`services._storage_dir` 返回 `_WEB_STORAGE_ROOT`，默认 `.migu_orca/storage`，
+  可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖；绝不回退 CLI 默认路径——US-196 回归修复）。
 - 海报二进制端点 `GET /api/v1/mikan/posters/{key}` 单独声明
   `image/jpeg|png|gif|webp` content type 与失败响应（函数视图，不经 JSON envelope；
   US-192 起失败返回 JSON envelope + 分类状态码）。

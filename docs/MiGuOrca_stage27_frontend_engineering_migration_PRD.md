@@ -7,11 +7,11 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 27 PRD：前端工程化迁移与页面重构 |
 | 文档类型 | 后继 Stage PRD / Stage 26 handoff |
-| 当前状态 | 已规划，等待 Stage 26 完成后启动 |
+| 当前状态 | 已规划，等待 Stage 26 完成后启动（Stage 26 已于 2026-08-30 完成，可启动） |
 | 创建日期 | 2026-08-29 |
 | Backlog | BL-024 |
 | 优先级 | P1 |
-| 前置条件 | Stage 26 API DTO、OpenAPI、HTTP 状态、storage 与 draft 边界全部完成 |
+| 前置条件 | Stage 26 API DTO、OpenAPI、HTTP 状态、storage 与 draft 边界全部完成（已满足） |
 | 预定分支 | `agent/stage27-frontend-engineering-migration` |
 | 预定 stories | US-197～US-204，启动时按 Stage 26 最终契约复核 |
 
@@ -19,7 +19,11 @@
 
 当前 Web UI 已承载完整业务，但工程形态仍是两份 Jinja 页面、一份约 5,000 行原生 JavaScript 和一份约 1,500 行 CSS。全局 DOM 引用、页面状态、API 调用、渲染函数和敏感表单逻辑集中在同一个 IIFE 中；继续增量开发会放大状态耦合和浏览器回归成本。
 
-Stage 26 将先把 `/api/v1` 固化为类型化、可生成客户端的后端边界，并解决浏览器任意 storage path 与客户端权威 preview Request 等 P0 问题。Stage 27 在该基线上完成前端工程化和页面信息架构重构，不同时重写业务 API。
+Stage 26 已先把 `/api/v1` 固化为类型化、可生成客户端的后端边界（端点清单 + golden
+contract、响应 DTO、确定性 OpenAPI、稳定 HTTP 状态），并解决浏览器任意 storage path
+（Web storage 限制为服务端根目录下相对 profile）与客户端权威 preview Request（服务端
+权威 DraftStore）等 P0 问题。Stage 27 在该基线上完成前端工程化和页面信息架构重构，
+不同时重写业务 API。
 
 ## 3. 技术选型
 

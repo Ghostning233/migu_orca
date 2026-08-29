@@ -139,6 +139,32 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
     assert not (tmp_path / "storage").exists()
 
 
+def test_golden_request_create_without_storage_dir_uses_server_root(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-193/196 regression: omitting ``storage_dir`` must use the server-side
+    Web storage root (the autouse ``_web_storage_root`` fixture points it at
+    ``tmp_path``), never fall back to the CLI default
+    ``DEFAULT_STORAGE_DIR`` (repo ``.migu_orca/storage``)."""
+    from storage_engine.controllers.storage_config import DEFAULT_STORAGE_DIR
+
+    response = client.post(
+        "/api/v1/requests",
+        json={"title": "芙莉莲", "save_request": True},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    saved = payload["result"]["saved_request"]
+    # The save landed under the server root (tmp_path), not the repo root.
+    saved_path = tmp_path / "requests" / saved["filename"]
+    assert saved_path.exists()
+    assert not (tmp_path / "storage").exists()
+    # The repo-default storage directory is never touched by the Web API.
+    assert not DEFAULT_STORAGE_DIR.exists()
+
+
 def test_golden_request_create_validation_failure(client: FlaskClient) -> None:
     response = client.post("/api/v1/requests", json={})
 

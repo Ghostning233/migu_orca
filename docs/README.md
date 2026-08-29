@@ -11,7 +11,7 @@
 - 未实现事项和触发条件：[Backlog](backlog.md)
 - 尚未承诺排期的可选能力：[可选功能](optional_features.md)
 
-截至 2026-08-29，最近完成阶段为 Stage 25「正式番名与季数解析」。Stage 26「Web API 契约固化与服务端边界治理」已规划为当前活动 Stage，Ralph stories 为 US-189～US-196。
+截至 2026-08-30，最近完成阶段为 Stage 26「Web API 契约固化与服务端边界治理」。Stage 27「前端工程化迁移与页面重构」已规划为后继 Stage，Ralph stories 为 US-197～US-204，以 Stage 26 最终 OpenAPI/DTO 为基线。
 
 ## Stage PRD
 
@@ -21,7 +21,7 @@
 - Stage 22～23：搜索工作台、媒体缓存与批量审核体验
 - Stage 24：AutoBangumi 3.1.18 认证与订阅兼容
 - Stage 25：正式番名、季数证据与共享查询计划
-- Stage 26：Web API 契约、服务端安全边界与前端迁移基线
+- Stage 26：Web API 契约、服务端安全边界与前端迁移基线（已完成）
 - Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（Stage 26 后继规划）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。

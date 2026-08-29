@@ -89,12 +89,15 @@ def _storage_dir(value: str | None) -> Path | None:
 
     US-193: the browser may only select a *relative profile* under the
     server-controlled storage root (``_WEB_STORAGE_ROOT``). Empty means the root
-    itself. Absolute paths, Windows drive paths, traversal (``..``) and symlink
-    escapes are rejected with a stable ``invalid_storage_dir`` error (400); the
-    error details never echo the raw value (which could be an absolute path).
+    itself (the resolved ``_WEB_STORAGE_ROOT``, never ``None`` — ``None`` would
+    make ``load_storage_config`` fall back to the CLI default
+    ``DEFAULT_STORAGE_DIR`` and bypass the server root). Absolute paths, Windows
+    drive paths, traversal (``..``) and symlink escapes are rejected with a
+    stable ``invalid_storage_dir`` error (400); the error details never echo the
+    raw value (which could be an absolute path).
     """
     if value is None or not value.strip():
-        return None
+        return _WEB_STORAGE_ROOT
     profile = value.strip()
 
     # Reject absolute paths up front (Unix absolute or Windows drive root) so

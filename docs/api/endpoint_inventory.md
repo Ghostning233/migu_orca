@@ -85,6 +85,7 @@
 
 公共查询参数（所有 Requests 端点）：`storage_dir`（可选字符串；US-193 起为服务端允许
 根目录下的相对目录 profile，拒绝绝对路径/穿越/符号链接逃逸并返回 400 `invalid_storage_dir`；
+**未传时回落服务端根本身**（US-196 回归：绝不回退 CLI 默认 `DEFAULT_STORAGE_DIR`）；
 CLI 显式 `--storage-dir` 行为不受影响）。
 
 | 端点 | 请求字段 | 成功 `result` | 业务失败示例 |
@@ -179,6 +180,10 @@ CLI 显式 `--storage-dir` 行为不受影响）。
   绝对路径（Unix/Windows 盘符）、`..` 穿越与符号链接逃逸统一返回 400 `invalid_storage_dir`，
   details 只含 `field`/`reason`，绝不回显原始路径。旧前端在 localStorage 中的绝对路径旧值
   会被自动忽略并回退默认根目录。
+- US-196 回归修复：`storage_dir` 未传/空值时回落**服务端 Web storage 根**（
+  `services._storage_dir` 返回 `_WEB_STORAGE_ROOT`），绝不返回 `None`——返回 `None` 会让
+  `load_storage_config(None)` 回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根），绕过服务端
+  root 覆盖；golden contract 已覆盖「不传 `storage_dir` 的保存写入服务端根而非仓库根」。
 - US-194：`preview-modify`/`preview-save` 不再接收客户端完整 Request，只接受服务端签发的
   `draft_id`；未保存草案由 `DraftStore`（`apps/migu_orca_web/drafts.py`）持有，TTL 30 分钟、
   容量 128、一次性保存与重放保护，失效/重放统一 409 `draft_expired`/`draft_evicted`/

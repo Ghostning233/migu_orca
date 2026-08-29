@@ -168,16 +168,16 @@ Stage 24 完成后已按 backlog 选择 BL-018，并完成独立执行 PRD：`do
 
 真实 LLM provider、当前播出集数和新版 AutoBangumi Bearer 写契约不进入 Stage 25。
 
-## 9. Stage 26：Web API 契约固化与服务端边界治理（已规划）
+## 9. Stage 26：Web API 契约固化与服务端边界治理（已完成）
 
-Stage 25 已完成并合入 `main`。下一阶段选择 BL-023，先为近期前端大幅重构建立 P0 后端边界，执行 PRD 为 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。
+Stage 26 已完成并合入 `main`。执行 PRD 为 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。
 
-主要目标：
+已完成目标：
 
 1. 冻结 `/api/v1` 请求、响应、错误和敏感值契约，增加 Pydantic 响应 DTO 与 OpenAPI。
 2. 拆分当前集中的 Web schema、serializer、service、context 和 route 职责。
 3. 建立正确 HTTP 状态，同时兼容现有 JSON envelope 和旧页面。
-4. 限制 Web storage 根目录，用服务端权威 draft 替代客户端完整 Request 持久化。
+4. 限制 Web storage 根目录（空值回落服务端根），用服务端权威 draft 替代客户端完整 Request 持久化。
 5. 明确 local-only 默认部署，建立 CI、契约漂移与真实 Chromium 门禁。
 
 Stage 26 不引入新前端框架、不改变主要页面设计；前端工程化迁移作为 Stage 26 完成后的独立 Stage。
@@ -188,7 +188,7 @@ Stage 27 已作为 BL-024 落盘到 `docs/MiGuOrca_stage27_frontend_engineering_
 
 ## 10. 未开发事项优先级池
 
-除已经规划的 Stage 26 和其明确 handoff Stage 27 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
+除已经完成的 Stage 26 和其明确 handoff Stage 27 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
 
 ### 未排期与条件触发事项
 
@@ -233,7 +233,7 @@ Stage 27 已作为 BL-024 落盘到 `docs/MiGuOrca_stage27_frontend_engineering_
 5. Stage 23：媒体缓存、MiKan 读取优化与批量审核体验（已完成）。
 6. Stage 24：AutoBangumi 真实认证与订阅兼容闭环（已完成）。
 7. Stage 25：正式番名与季数解析（已完成）。
-8. Stage 26：Web API 契约固化与服务端边界治理（已规划）。
+8. Stage 26：Web API 契约固化与服务端边界治理（已完成）。
 9. Stage 27：前端工程化迁移与页面重构（等待 Stage 26 完成后启动）。
 
-因此，Stage 19 到 Stage 25 的产品闭环已经完成，Stage 26 作为 P0 后端基础阶段进入规划，Stage 27 作为唯一明确的 P1 handoff 落盘。除这两个连续重构阶段外，不继续预留更多阶段编号；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
+因此，Stage 19 到 Stage 26 的产品闭环与后端边界已经完成，Stage 26 作为 P0 后端基础阶段已交付，Stage 27 作为唯一明确的 P1 handoff 落盘。除这两个连续重构阶段外，不继续预留更多阶段编号；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。

@@ -128,8 +128,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "收尾不实施 Stage 27 页面迁移，只交付可执行 handoff。"
+      "passes": true,
+      "notes": "收尾不实施 Stage 27 页面迁移，只交付可执行 handoff。2026-08-30 完成：修复 US-193 回归——`_storage_dir(None|空)` 原来返回 None 导致 `load_storage_config(None)` 回退 CLI 默认（仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖；现改为返回 `_WEB_STORAGE_ROOT` 并新增 golden contract 回归（不传 storage_dir 的 save_request=true 写入服务端根而非仓库根）。README/主 PRD/架构/M13/M14/M11/backlog/future stages/docs/api 已同步，Stage 26 prd/progress 已归档。"
     }
   ]
 }

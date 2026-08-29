@@ -26,7 +26,7 @@
 | 15 | BL-017 | 媒体缓存、MiKan 读取优化与批量审核体验 | 完成 (Stage 23, 2026-08-24) |
 | 16 | BL-019 | AutoBangumi 真实认证与订阅兼容闭环 | 完成 (Stage 24, 2026-08-25) |
 | 17 | BL-018 | 正式番名与季数解析 | 已完成 (Stage 25, 2026-08-27) |
-| 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已规划 (Stage 26) |
+| 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
 | 19 | BL-024 | 前端工程化迁移与页面重构 | 已规划为 Stage 26 后继 Stage |
 | 20 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
@@ -423,19 +423,19 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-023: Web API 契约固化与服务端边界治理
 
-- 状态：已规划 (Stage 26)
+- 状态：已完成 (Stage 26, 2026-08-30)
 - 来源：Stage 25 后架构与前后端边界审查，2026-08-29
 - 优先级：18，P0
 - 执行 PRD：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`
 
-目标：
+完成情况（Stage 26）：
 
-- 在前端工程化迁移前，冻结 `/api/v1` 端点、请求/响应 DTO、错误 envelope 和兼容行为。
-- 生成可校验的 OpenAPI 文档，拆分 Web schema、serializer、application service 与 route 职责。
-- 为失败响应建立正确 HTTP 状态，同时保持 JSON envelope 和旧 Web UI 兼容。
-- 将 Web storage 限制在服务端允许根目录内，CLI 显式 storage 路径保持不变。
+- 冻结 `/api/v1` 端点清单、请求/响应 DTO、错误 envelope、HTTP 状态与旧前端依赖（golden contract + 清单自动核对）。
+- 生成可校验的 OpenAPI 契约（`docs/api/openapi.json`），拆分 Web schema、serializer、application service、context 与 route 职责。
+- 为失败响应建立正确 HTTP 状态（400/404/409/401/502/503/504/500），保持 JSON envelope 和旧 Web UI 兼容。
+- 将 Web storage 限制在服务端允许根目录内（空值回落服务端根），CLI 显式 storage 路径保持不变。
 - 用有界、过期、服务端权威的 draft context 代替客户端完整 Request 直接持久化。
-- 建立 local-only 默认部署、CI、契约漂移和真实 Chromium 门禁。
+- 建立 local-only 默认部署、CI（compileall/ruff/pytest/node/OpenAPI 漂移/git diff）、契约漂移和真实 Chromium 门禁。
 
 不包含：
 
@@ -445,11 +445,11 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-024: 前端工程化迁移与页面重构
 
-- 状态：已规划为 Stage 26 后继 Stage
+- 状态：已规划为 Stage 27，等待 Stage 26 完成后启动
 - 来源：Stage 25 后前后端边界审查，2026-08-29
 - 优先级：19，P1
 - 规划 PRD：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`
-- 前置条件：Stage 26 的 OpenAPI、DTO、HTTP 状态、Web storage 与服务端 draft 全部完成
+- 前置条件：Stage 26 已完成（OpenAPI、DTO、HTTP 状态、Web storage 与服务端 draft 全部落地）
 
 目标：
 

@@ -88,6 +88,12 @@ Stage 18 补充：
 4. 清理采用有节流的机会式扫描，不引入后台 worker；只删除明确 cache root 内过期的普通缓存文件，拒绝符号链接和路径逃逸。
 5. Request、history、队列、偏好和修正 JSON 不保存图片二进制、原始封面 URL或缓存绝对路径。
 
+## 9. Stage 26 Web storage 根目录（已完成）
+
+1. Web API 的 `storage_dir` 只能选择服务端根目录下的相对 profile（默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖）；绝对路径/穿越/符号链接逃逸返回 400 `invalid_storage_dir`。
+2. `storage_dir` 未传/空值时回落服务端根本身（`services._storage_dir` 返回 `_WEB_STORAGE_ROOT`，绝不返回 `None`——返回 `None` 会让 `load_storage_config(None)` 回退 CLI 默认路径，绕过服务端 root 覆盖；US-196 回归修复）。
+3. CLI `--storage-dir` 是独立信任边界，接受显式本地路径；Web 与 CLI 使用不同 storage 信任边界。
+
 ## 8. 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |
