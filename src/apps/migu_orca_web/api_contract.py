@@ -9,9 +9,9 @@ passing through the API boundary.
 
 Scope notes
 -----------
-- The *request* schemas already live in ``views.py`` (``RequestCreatePayload``
-  etc.) and are wired to the existing view validation; this module is the
-  response half of the contract.
+- The *request* schemas live in ``schemas.py`` (``RequestCreatePayload``
+  etc.) and are wired to the view validation; this module is the response
+  half of the contract.
 - Deep engine dicts that are intentionally opaque to the frontend
   (``request`` snapshots, preference/correction objects, batch items,
   ``parse_result``, queue items, AB/qBittorrent results) are typed as

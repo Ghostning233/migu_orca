@@ -19,7 +19,7 @@
 
 Stage 25 完成后，MiGuOrca 已具备单个/批量候选搜索、草案编辑、Request 管理、提交前队列、Settings 和外部连接测试等完整用户旅程。主要业务操作已经使用 `/api/v1/*` JSON API，但 Web 工程边界仍由长期增量开发形成：
 
-1. `apps/migu_orca_web/views.py` 同时包含请求模型、路由、序列化、错误转换、短期状态和业务编排，文件超过 2,000 行。
+1. `apps/migu_orca_web/views.py` 曾同时包含请求模型、路由、序列化、错误转换、短期状态和业务编排，文件超过 2,000 行。Stage 26 US-191 已按职责拆分为 `schemas.py`、`serializers.py`、`services.py`、`contexts.py`、`blueprints.py` 与 `routes_*.py`（requests/mikan/batches/settings/connections），`views.py` 仅保留页面路由与 Blueprint 组装；URL、方法与 endpoint 名称保持 golden contract 兼容。
 2. 成功和失败使用统一 JSON envelope，但失败通常仍返回 HTTP 200；客户端只能解析 body 判断结果。
 3. 响应结构主要由动态 `dict` 拼装，`docs/api/` 没有可校验的 OpenAPI 文档，后续 TypeScript 前端无法安全生成类型。
 4. `/requests/preview-save` 接收客户端回传的完整预览 Request；服务端只检查状态后持久化，客户端承担了过多权威状态。
@@ -182,11 +182,11 @@ src/apps/migu_orca_web/
 - 生成 `docs/api/openapi.json` 和简洁使用说明。
 - 提供 CI 可执行的契约漂移检查。
 
-### US-191：拆分 Web schema、serializer 与 application service
+### US-191：拆分 Web schema、serializer 与 application service（已完成）
 
-- 从 `views.py` 迁移请求模型、序列化和业务编排。
-- 按 requests、mikan、batches、settings、connections 拆分路由。
-- 保持 Blueprint、URL、endpoint 名称和旧页面行为兼容。
+- 从 `views.py` 迁移请求模型（`schemas.py`）、序列化（`serializers.py`）、业务编排（`services.py`）、短期 context（`contexts.py`）和 Blueprint 定义（`blueprints.py`）。
+- 按 requests、mikan、batches、settings、connections 拆分路由（`routes_*.py`）。
+- 保持 Blueprint、URL、endpoint 名称和旧页面行为兼容（golden contract + 浏览器套件全绿）。
 
 ### US-192：建立正确 HTTP 状态与兼容错误处理
 

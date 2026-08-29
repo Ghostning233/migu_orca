@@ -61,7 +61,7 @@ def _fake_mikan_search(monkeypatch: pytest.MonkeyPatch) -> _FakeMikanTransport:
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create,
     )
     return transport
@@ -334,7 +334,7 @@ def test_golden_mikan_candidates_business_failure_sanitized(
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_candidates_from_parse_result",
+        "apps.migu_orca_web.routes_mikan._search_candidates_from_parse_result",
         fail_search,
     )
 
@@ -359,7 +359,7 @@ def test_golden_batch_parse_success(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda queries, config: [],
     )
 
@@ -402,7 +402,7 @@ def test_golden_batch_parse_failed_item_error_sanitized(
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         fail_search,
     )
 
@@ -647,7 +647,7 @@ def test_golden_qbittorrent_connection_success_whitelist(
         }
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.test_qbittorrent_connection", fake_test
+        "apps.migu_orca_web.routes_connections.test_qbittorrent_connection", fake_test
     )
     response = client.post(
         "/api/v1/qbittorrent/test-connection",
@@ -708,7 +708,7 @@ def test_golden_ab_connection_success_whitelist(
             "error": None,
         }
 
-    monkeypatch.setattr("apps.migu_orca_web.views.test_ab_connection", fake_test)
+    monkeypatch.setattr("apps.migu_orca_web.routes_connections.test_ab_connection", fake_test)
     response = client.post(
         "/api/v1/autobangumi/test-connection",
         json={

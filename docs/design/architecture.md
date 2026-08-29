@@ -59,8 +59,15 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
 
 - `/index` 与 `/settings` 由 Jinja 模板渲染。
 - 两个页面共用 `static/app.js` 和 `static/style.css`。
-- API 请求模型、序列化辅助和路由主要集中在 `apps/migu_orca_web/views.py`。
-- `docs/api/` 尚无正式 OpenAPI 契约。
+- Web API 适配层自 Stage 26 起按职责拆分（`apps/migu_orca_web/`）：
+  - `schemas.py`：请求/查询 Pydantic 模型。
+  - `api_contract.py`：公开响应 DTO（`extra="forbid"`）。
+  - `serializers.py`：响应序列化与脱敏白名单。
+  - `services.py`：用例编排与存储 seam，复用 engine/repository，不复制业务规则。
+  - `contexts.py`：短期候选选择上下文。
+  - `routes_*.py`：按端点族（requests/mikan/batches/settings/connections）注册路由。
+  - `views.py`：仅保留页面路由与 Blueprint 组装。
+- `docs/api/` 提供 OpenAPI 契约（`docs/api/openapi.json`，确定性生成）。
 
 因此后续前端工程化应先固化 API 契约和服务端安全边界，再渐进替换页面；不得在没有兼容层的情况下同时重写 API 与全部用户旅程。
 

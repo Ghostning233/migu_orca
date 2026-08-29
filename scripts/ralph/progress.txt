@@ -4,6 +4,8 @@
 
 - Python 依赖、检查与测试统一通过 `uv`；不要直接使用系统 Python。
 - Web API 成功/失败继续使用 `{ok, result}` / `{ok, error_type, error_message, error_data}` envelope；Stage 26 可修正 HTTP 状态，但必须保持 envelope 兼容。
+- Web 适配层按职责拆分：`schemas.py`（请求模型）、`api_contract.py`（响应 DTO）、`serializers.py`（脱敏白名单）、`services.py`（编排与存储 seam）、`contexts.py`（短期上下文）、`routes_*.py`（按端点族）、`views.py`（仅页面路由 + Blueprint 组装）；route 模块「导入即注册」，`views.py` 必须 import 全部 `routes_*`。
+- monkeypatch 目标必须指向**符号实际被调用处的模块命名空间**（`routes_requests`/`routes_batches`/`routes_mikan`/`routes_settings`/`routes_connections`/`services`/`contexts`），不是定义处或旧的 `views`。
 - 先为端点增加 golden contract，再拆分 `views.py`；每次只迁移一个端点族并运行对应 API/浏览器回归。
 - Pydantic DTO 与确定性 OpenAPI 是 Stage 27 的公开契约；响应 serializer 使用白名单，不让任意 engine dict 或敏感未知字段穿透。
 - Web storage 和 CLI storage 使用不同信任边界：CLI 保留显式路径，Web 只能使用服务端允许根目录/profile。
@@ -62,4 +64,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - `extra="forbid"` DTO 中 `dict[str, Any]` 字段（request 快照/parse_result/queue item 等）内部仍接受任意 key；DTO 只保证 envelope 与顶层 result key 白名单，深层脱敏由现有 serializer 负责。
   - `migu-orca-openapi` console script 需 `uv pip install -e .` 重装后生效；模块方式 `uv run python -m apps.migu_orca_web.openapi_gen` 始终可用。
   - 浏览器测试环境：`.agents/.chromium-libs`（从 .deb 提取的 Chromium 系统库）被 gitignore；运行时需 `ln -s` 到 `/tmp/chromium-libs`（conftest 硬编码路径），否则浏览器测试整体 skip。
+---
+
+## 2026-08-29 21:40:00 CST - US-191
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 拆分 Web schema、serializer、service、context 与按端点族路由，`views.py` 从 2,146 行收敛为 53 行页面路由 + Blueprint 组装；全部 24 个 /api/v1 端点、方法、endpoint 名称保持 golden contract 兼容。
+- 新增模块（均在 `src/apps/migu_orca_web/`）：
+  - `blueprints.py`：`api_blueprint`/`web_blueprint` 唯一归属地（避免循环导入）。
+  - `schemas.py`：请求/查询 Pydantic 模型（从 views.py 原样迁移）。
+  - `serializers.py`：响应序列化与脱敏白名单（`_serialize_*`、`_sanitize_*`、`_strip_sensitive_result_fields`、`poster_service`）。
+  - `services.py`：用例编排与存储 seam（`_storage_dir`、`_resolve_mikan_config`、`_search_*`、`_build_batch_*`、`_load_*_section`），复用 engine/repository。
+  - `contexts.py`：`CandidateSelectionContextStore` 与 `candidate_selection_contexts` 单例。
+  - `routes_requests.py`/`routes_mikan.py`/`routes_batches.py`/`routes_settings.py`/`routes_connections.py`：按端点族注册路由。
+- `views.py` 通过「导入 route 模块即注册端点」的方式组装 Blueprint，并向后兼容再导出 context 符号。
+- 测试 seam 迁移：`views_test.py`、`tests/api_contract/test_golden_contracts.py`、`tests/api_contract/conftest.py` 的 monkeypatch 目标从 `apps.migu_orca_web.views.*` 改为实际调用点模块（`routes_requests`/`routes_batches`/`routes_mikan`/`routes_settings`/`routes_connections`/`services`/`contexts`）。
+- 文档：`docs/design/architecture.md`（Web 边界现状列出新模块职责）、`docs/api/endpoint_inventory.md`（实现位置说明）、stage PRD（US-191 标记完成、背景问题改为历史描述）、`api_contract.py` docstring；新增 `src/apps/migu_orca_web/AGENTS.md` 记录拆分布局与 monkeypatch seam 约定。
+- 质量检查：compileall、完整 pytest（987 非浏览器 + 263 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿。
+- Files changed: 新增 10 个模块文件 + AGENTS.md；修改 `views.py`（重写）、`views_test.py`、`api_contract.py`、`tests/api_contract/conftest.py`、`tests/api_contract/test_golden_contracts.py`、`docs/design/architecture.md`、`docs/api/endpoint_inventory.md`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
+- **Learnings for future iterations:**
+  - route 模块「导入即注册」：`views.py` 必须 import 全部 `routes_*`，漏一个端点就不注册，`test_inventory_consistency.py` 立刻失败。
+  - monkeypatch 目标必须指向**符号实际被调用处的模块命名空间**，不是定义处：`routes_batches` 里的 `_search_batch_item_candidates` 要 patch `routes_batches.<sym>` 而非 `services.<sym>`；路由类里的 `generate_request` 要 patch `routes_requests.<sym>`；`mikan_client_module`/`candidate_search_cache` 在 `services` 命名空间使用。
+  - `views.py` 拆分后仍向后兼容再导出 `CandidateSelectionContextStore`/`candidate_selection_contexts`，旧导入路径不报错；新代码应直接从 `contexts.py` 导入。
+  - 浏览器测试运行前需 `ln -s .agents/.chromium-libs /tmp/chromium-libs`，且必须在**同一 bash 命令内**先建链接再跑 pytest（/tmp 链接跨命令不持久）。
+  - 拆分纯移动代码时先跑 `git show HEAD:views.py` 对比 route 注册集合，确保 24 个端点路径逐一相同；再跑 api_contract + views_test + browser 三套回归。
 ---

@@ -1,12 +1,17 @@
 # MiGuOrca Web API 端点清单（US-189 冻结基线）
 
-> 本文档是 Stage 26 US-189 的产物：在拆分 `views.py` 或改动 HTTP 状态语义**之前**，
+> 本文档是 Stage 26 US-189 的产物：在改动 HTTP 状态语义**之前**（US-192 待办），
 > 先把现有 `/api/v1` 行为、敏感值边界和旧前端依赖冻结成可审查、可自动核对的事实基线。
 > 它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
 > 见 `docs/api/README.md`），也不替代 README 的示例用法。
 >
 > 自动核对：`tests/api_contract/test_inventory_consistency.py` 会把本清单与 Flask
 > 实际 `url_map` 逐一比对，任何新端点漏记都会导致测试失败。
+>
+> 实现位置（US-191 拆分后）：请求模型在 `src/apps/migu_orca_web/schemas.py`，
+> 响应 DTO 在 `api_contract.py`，序列化在 `serializers.py`，用例编排在 `services.py`，
+> 路由按端点族在 `routes_requests.py` / `routes_mikan.py` / `routes_batches.py` /
+> `routes_settings.py` / `routes_connections.py`，页面路由与 Blueprint 组装在 `views.py`。
 
 ## 1. 总览
 

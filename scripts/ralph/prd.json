@@ -48,7 +48,7 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "按端点族渐进迁移，不做一次性无测试重写。"
     },
     {

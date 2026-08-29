@@ -128,7 +128,7 @@ def _clear_candidate_cache() -> None:
     from mikan_engine.controllers.mikan_candidate_cache import candidate_search_cache
 
     candidate_search_cache.clear()
-    from apps.migu_orca_web.views import candidate_selection_contexts
+    from apps.migu_orca_web.contexts import candidate_selection_contexts
 
     candidate_selection_contexts.clear()
 
@@ -1656,7 +1656,7 @@ def test_delete_request_returns_unified_error_for_delete_failure(
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.delete_request_snapshot",
+        "apps.migu_orca_web.routes_requests.delete_request_snapshot",
         fail_delete,
     )
 
@@ -1793,7 +1793,7 @@ def test_create_request_defaults_to_static_fixture_without_mikan_config(
         captured["mikan_config"] = kwargs.get("mikan_config")
         return generate_request(*args, **kwargs)
 
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", spy_generate_request)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1838,7 +1838,7 @@ def test_create_request_uses_inline_mikan_config_when_explicitly_requested(
         "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", spy_generate_request)
 
     response = _client().post(
         "/api/v1/requests",
@@ -1955,7 +1955,7 @@ def test_create_request_does_not_trust_client_candidate_aliases_for_season(
             "error": None,
         }
 
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fake_generate_request)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fake_generate_request)
     response = _client().post(
         "/api/v1/requests",
         json={
@@ -1979,7 +1979,7 @@ def test_create_request_does_not_trust_client_candidate_aliases_for_season(
 def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_candidate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from apps.migu_orca_web.views import candidate_selection_contexts
+    from apps.migu_orca_web.contexts import candidate_selection_contexts
 
     mikan_url = "https://mikan.example/Home/Bangumi/45"
     rejected_context = candidate_selection_contexts.issue(mikan_url, 4)
@@ -1998,7 +1998,7 @@ def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_
             "error": None,
         }
 
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fake_generate_request)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fake_generate_request)
     payload = {"title": "公开标题", "source": "mikan", "mikan_bangumi": mikan_url, "save_request": False}
 
     rejected = _client().post(
@@ -2019,7 +2019,7 @@ def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_
 
 
 def test_candidate_context_is_bound_to_url_expired_and_capacity_limited() -> None:
-    from apps.migu_orca_web.views import CandidateSelectionContextStore
+    from apps.migu_orca_web.contexts import CandidateSelectionContextStore
 
     now = [0.0]
     contexts = CandidateSelectionContextStore(ttl_seconds=10, max_entries=2, now=lambda: now[0])
@@ -2045,7 +2045,7 @@ def test_create_request_rejects_invalid_mikan_direct_entry(
         called = True
         raise AssertionError("generate_request should not be called for invalid payload")
 
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fail_if_called)
 
     response = _client().post(
         "/api/v1/requests",
@@ -2099,7 +2099,7 @@ def test_create_request_uses_default_mikan_config_when_source_is_mikan(
         "apps.migu_orca_entry.controllers.entry_controller.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", spy_generate_request)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", spy_generate_request)
 
     response = _client().post(
         "/api/v1/requests",
@@ -2134,7 +2134,7 @@ def test_create_request_rejects_unsupported_source(
         called = True
         raise AssertionError("generate_request should not be called for invalid payload")
 
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fail_if_called)
 
     response = _client().post(
         "/api/v1/requests",
@@ -2163,7 +2163,7 @@ def test_create_request_rejects_invalid_mikan_timeout(
         called = True
         raise AssertionError("generate_request should not be called for invalid payload")
 
-    monkeypatch.setattr("apps.migu_orca_web.views.generate_request", fail_if_called)
+    monkeypatch.setattr("apps.migu_orca_web.routes_requests.generate_request", fail_if_called)
 
     response = _client().post(
         "/api/v1/requests",
@@ -2216,7 +2216,7 @@ def test_candidate_search_api_returns_sanitized_candidates_with_order(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2300,7 +2300,7 @@ def test_candidate_search_api_returns_empty_list_when_no_candidates(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2328,7 +2328,7 @@ def test_candidate_search_api_rejects_empty_query_before_network(
         raise AssertionError("create_mikan_client should not be called for empty query")
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fail_if_called,
     )
 
@@ -2373,7 +2373,7 @@ def test_candidate_search_api_uses_default_mikan_config(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2454,7 +2454,7 @@ def test_candidate_search_api_returns_sanitized_mikan_errors(
         return client
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2500,7 +2500,7 @@ def test_candidate_search_api_does_not_echo_raw_html_or_sensitive_values(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2560,7 +2560,7 @@ def test_candidate_search_api_includes_display_only_recommendation_labels(
         return client
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2625,7 +2625,7 @@ def test_candidate_search_api_serves_second_call_from_cache_without_transport(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2673,7 +2673,7 @@ def test_candidate_search_api_cache_isolates_different_queries(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2721,7 +2721,7 @@ def test_candidate_search_api_cache_isolates_different_hosts(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -2770,7 +2770,7 @@ def test_batch_parse_api_returns_per_item_parsed_metadata(
         return []
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         _search_candidates,
     )
     raw_input = "\n萌王S4\n  \n路哥S4\n邻家天使S2\n"
@@ -2888,11 +2888,11 @@ def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
         return FakeAnimeTitleParsingProvider(fail_titles={"杖剑谭S2"})
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
         provider,
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
 
@@ -2932,7 +2932,7 @@ def test_batch_parse_api_failed_item_error_does_not_leak_sensitive_values(
             )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
         lambda: SensitiveProvider(),
     )
 
@@ -2964,7 +2964,7 @@ def test_batch_parse_api_applies_saved_preferences_from_storage_dir(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -3018,7 +3018,7 @@ def test_batch_parse_api_empty_result_has_no_preview_request(
 ) -> None:
     """An empty MiKan result cannot create an editable draft skeleton."""
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -3058,7 +3058,7 @@ def test_batch_parse_api_empty_result_has_no_preview_without_preferences(
 ) -> None:
     """Missing preferences do not turn an empty result into a draft."""
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -3079,11 +3079,11 @@ def test_batch_parse_api_failed_item_has_no_preview_request(
 ) -> None:
     """A FAILED item (parse/search failure) has no editable preview_request."""
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
         lambda: FakeAnimeTitleParsingProvider(fail_titles={"萌王S4"}),
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -3103,7 +3103,7 @@ def test_batch_parse_api_falls_back_when_preference_file_is_damaged(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -3138,11 +3138,11 @@ def test_batch_parse_api_failed_item_keeps_applied_preferences_config(
         return FakeAnimeTitleParsingProvider(fail_titles={"杖剑谭S2"})
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._batch_title_parsing_provider",
+        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
         provider,
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -3179,7 +3179,7 @@ def test_batch_parse_api_preference_response_never_leaks_sensitive_values(
     tmp_path: Path,
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
     storage_dir = tmp_path / "migu-state"
@@ -3280,7 +3280,7 @@ def test_batch_parse_api_searches_candidates_for_each_item_query(
     )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         lambda config: client,
     )
 
@@ -3366,7 +3366,7 @@ def test_batch_parse_api_tolerates_one_candidate_search_failure_without_blocking
     )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         lambda config: client,
     )
 
@@ -3427,7 +3427,7 @@ def test_batch_parse_api_candidate_results_only_serialize_public_fields(
     )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         lambda config: client,
     )
 
@@ -3487,7 +3487,7 @@ def test_batch_parse_api_marks_low_confidence_item_for_review(
     )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         lambda config: client,
     )
 
@@ -3549,7 +3549,7 @@ def test_batch_parse_api_marks_preference_conflict_item_for_review(
     )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         lambda config: client,
     )
 
@@ -3763,7 +3763,7 @@ def test_batch_parse_api_searches_enhanced_queries_from_saved_correction(
         }
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         lambda config: client,
     )
 
@@ -3812,7 +3812,7 @@ def test_batch_parse_api_falls_back_through_the_unified_correction_plan(
         }
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         lambda config: client,
     )
 
@@ -3848,7 +3848,7 @@ def test_batch_parse_api_falls_back_to_original_queries_when_corrections_file_da
         "{not valid json", encoding="utf-8"
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
 
@@ -3888,7 +3888,7 @@ def test_batch_parse_api_does_not_leak_poisoned_corrections(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         lambda search_queries, mikan_config: [],
     )
 
@@ -3924,11 +3924,11 @@ def test_batch_parse_api_failed_search_keeps_enhanced_queries_for_review(
         raise Stage1Error("mikan_timeout", "MiKan HTTP 请求超时", "mikan_search")
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         lambda config: client,
     )
     monkeypatch.setattr(
-        "apps.migu_orca_web.views._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
         _raise,
     )
 
@@ -3962,7 +3962,7 @@ def test_candidate_search_api_cache_expires_after_ttl(
         return now_holder["value"]
 
     cache = CandidateSearchCache(ttl_seconds=300, now=_now)
-    monkeypatch.setattr("apps.migu_orca_web.views.candidate_search_cache", cache)
+    monkeypatch.setattr("apps.migu_orca_web.services.candidate_search_cache", cache)
 
     transport = _FakeMikanTransport(
         {
@@ -3980,7 +3980,7 @@ def test_candidate_search_api_cache_expires_after_ttl(
         return create_mikan_client(config, transport=transport)
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fake_create_mikan_client,
     )
 
@@ -4018,7 +4018,7 @@ def test_default_request_create_does_not_call_candidate_search_api_or_real_mikan
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.mikan_client_module.create_mikan_client",
+        "apps.migu_orca_web.services.mikan_client_module.create_mikan_client",
         fail_if_called,
     )
 
@@ -4244,7 +4244,7 @@ def test_create_request_returns_unified_error_for_save_failure(
         }
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.apply_request_save_action",
+        "apps.migu_orca_web.routes_requests.apply_request_save_action",
         fail_save,
     )
 
@@ -4523,7 +4523,7 @@ def test_autobangumi_test_connection_returns_safe_summary(
             "error": None,
         }
 
-    monkeypatch.setattr("apps.migu_orca_web.views.test_ab_connection", fake_test_ab_connection)
+    monkeypatch.setattr("apps.migu_orca_web.routes_connections.test_ab_connection", fake_test_ab_connection)
     response = _client().post(
         "/api/v1/autobangumi/test-connection",
         json={"ab_config": {"auth_mode": "password", "base_url": "http://private-auto-bangumi.local", "username": "private-user", "password": "private-password", "fallback_enabled": False}},
@@ -4541,7 +4541,7 @@ def test_autobangumi_test_connection_sanitizes_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.test_ab_connection",
+        "apps.migu_orca_web.routes_connections.test_ab_connection",
         lambda *, ab_config: {"success": False, "summary": None, "error": {"error_type": "ab_auth_failed", "error_message": "http://private-auto-bangumi.local token=secret-token", "failed_step": "probe_ab_connection", "details": {"username": "private-user", "password": "private-password", "cookie": "token=secret-token", "category": "auth"}}},
     )
     response = _client().post(
@@ -4582,7 +4582,7 @@ def test_qbittorrent_test_connection_returns_safe_summary(
         }
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.test_qbittorrent_connection",
+        "apps.migu_orca_web.routes_connections.test_qbittorrent_connection",
         fake_test_qbittorrent_connection,
     )
 
@@ -4633,7 +4633,7 @@ def test_qbittorrent_test_connection_requires_password_without_calling_controlle
         raise AssertionError("qBittorrent controller should not be called")
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.test_qbittorrent_connection",
+        "apps.migu_orca_web.routes_connections.test_qbittorrent_connection",
         fail_if_called,
     )
 
@@ -4708,7 +4708,7 @@ def test_qbittorrent_test_connection_returns_sanitized_failures(
     expected_error_type: str,
 ) -> None:
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.test_qbittorrent_connection",
+        "apps.migu_orca_web.routes_connections.test_qbittorrent_connection",
         lambda *, qbittorrent_config: controller_result,
     )
 
@@ -6472,7 +6472,7 @@ def test_preference_api_save_storage_failure_returns_chinese_envelope(
         )
 
     monkeypatch.setattr(
-        "apps.migu_orca_web.views.save_user_preferences",
+        "apps.migu_orca_web.routes_settings.save_user_preferences",
         fail_save,
     )
 
