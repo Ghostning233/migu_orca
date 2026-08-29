@@ -539,12 +539,36 @@
   }
 
   async function fetchJson(path, options) {
-    const response = await fetch(path, options);
-    const payload = await response.json();
-    if (!payload.ok) {
-      const error = new Error(payload.error_message || "请求失败");
-      error.errorType = payload.error_type || "request_error";
-      error.errorData = payload.error_data || null;
+    let response;
+    try {
+      response = await fetch(path, options);
+    } catch (networkError) {
+      // Network failure (offline, DNS, connection refused) is a stable,
+      // retryable failure — never a JSON parse error.
+      const error = new Error("网络请求失败，请检查网络后重试");
+      error.errorType = "network_error";
+      error.errorData = null;
+      error.status = 0;
+      throw error;
+    }
+    const contentType = response.headers.get("content-type") || "";
+    let payload = null;
+    if (contentType.includes("application/json")) {
+      try {
+        payload = await response.json();
+      } catch (jsonError) {
+        payload = null;
+      }
+    }
+    // Non-2xx responses still carry the shared envelope; a non-JSON error body
+    // (e.g. a proxy HTML error page) is normalized to a safe generic message.
+    if (!response.ok || !payload || !payload.ok) {
+      const error = new Error(
+        (payload && payload.error_message) || "请求失败，请稍后重试"
+      );
+      error.errorType = (payload && payload.error_type) || "request_error";
+      error.errorData = (payload && payload.error_data) || null;
+      error.status = response.status;
       throw error;
     }
     return payload.result;

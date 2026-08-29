@@ -3,14 +3,16 @@ from __future__ import annotations
 """MiKan-family API routes (US-191 split).
 
 Migrated from ``views.py`` without behavior change. ``/api/v1/mikan/posters/<key>``
-is the one function view that bypasses the ``APIBaseView`` envelope (see
-``docs/api/endpoint_inventory.md`` §4.3 — US-192 will fold it into the unified
-error handling).
+is the one binary function view that bypasses the ``APIBaseView`` envelope
+(US-192): failures are folded into the unified error handling through
+``failed_response`` + ``_error_http_status``, so clients always get a JSON
+envelope with a classified status (see ``docs/api/endpoint_inventory.md`` §4.3).
 """
 
 from flask import Response
 
 from extensions.flask_api import class_route
+from extensions.flask_api.api import failed_response, _error_http_status
 from extensions.flask_api.views import PostView
 from batch_engine.controllers.anime_title_parser import parse_anime_title
 from batch_engine.models import BATCH_ITEM_STATUS_FAILED
@@ -61,6 +63,28 @@ class MikanCandidateSearchView(PostView):
 
 @api_blueprint.get("/api/v1/mikan/posters/<key>")
 def mikan_poster(key: str) -> Response:
-    """Serve only a prior parser-registered poster under an opaque key."""
-    path, content_type = poster_service.get(key)
-    return Response(path.read_bytes(), content_type=content_type, headers={"Cache-Control": "private, max-age=86400"})
+    """Serve only a prior parser-registered poster under an opaque key.
+
+    This is the one binary function view that bypasses the JSON envelope
+    (US-192). Failures are folded into the unified error handling: a JSON
+    envelope with the mapped HTTP status (404 for unknown/unregistered keys,
+    502 when the upstream poster fetch fails, 400 for malformed keys), so
+    clients can always read ``error_type`` from the body. Successful responses
+    stay raw image bytes with the documented content types.
+    """
+    try:
+        path, content_type = poster_service.get(key)
+    except Stage1Error as exc:
+        # Keep the envelope shape identical to every other /api/v1 failure;
+        # poster keys are opaque so the error details never echo the key.
+        return failed_response(
+            exc.error_type,
+            exc.message,
+            {"failed_step": exc.failed_step},
+            status=_error_http_status(exc.error_type),
+        )
+    return Response(
+        path.read_bytes(),
+        content_type=content_type,
+        headers={"Cache-Control": "private, max-age=86400"},
+    )

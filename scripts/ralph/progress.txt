@@ -15,9 +15,11 @@
 - 浏览器测试使用 fixture/Playwright route 隔离外部服务；不得自动向真实 AutoBangumi、qBittorrent 或 MiKan 执行写操作。
 - 完整 browser/full pytest 前确认仓库根 `.migu_orca/storage` 不存在，避免陈旧 Request 干扰测试。
 - Stage 26 不做页面视觉重构或引入新前端框架；只允许维持 API 兼容所需的最小旧前端修改。
+- HTTP 状态语义（US-192）：envelope 形状不变，状态码由 `extensions/flask_api/api.py:_error_http_status` 集中分类（400 输入/`invalid_*`/`config_error`、404 `*_not_found`、409 状态冲突/context 失效/重放、401 外部认证、502 上游不可达、503 不可用/版本不支持、504 超时、500 storage/未知）；新增 error_type 时同步该映射与 `openapi_gen.py` `_ENDPOINTS` 的 errors 声明。
+- 旧前端 `static/app.js` 的 fetchJson 已兼容非 2xx JSON、非 JSON body 与网络失败（中文安全回退）；新增失败 mock 时用 `route.fulfill(status=..., json=...)` 或 `content_type="text/html"` 模拟。
 - API 端点清单与 golden contract 测试位于 `docs/api/endpoint_inventory.md` + `tests/api_contract/`；新增/删除 `/api/v1` 端点必须同步这两处，否则 `test_inventory_consistency.py` 失败。
 - 旧前端 `static/app.js` 的 localStorage key 只有 `miguOrca.web.storageDir`/`miguOrca.web.saveRequest`，URL 状态参数只有 `request_id`/`batch_id`；`tests/api_contract/test_frontend_dependencies.py` 冻结了这些契约。
-- `GET /api/v1/mikan/posters/<key>` 是函数视图，不经过 `APIBaseView` envelope 包装；其 `Stage1Error`（`invalid_poster_key`/`poster_not_found` 等）在 TESTING 模式直接上抛、非 TESTING 变成 Flask 500 HTML。US-192 修正 HTTP 状态时需把它纳入统一错误处理。
+- `GET /api/v1/mikan/posters/<key>` 是二进制函数视图，不经过 `APIBaseView` envelope 包装；US-192 起在 `routes_mikan.py` 内 try/except `Stage1Error` 转 JSON envelope + `_error_http_status` 状态（畸形 key 400、未注册 404、上游取图失败 502）。
 - 批量 retry/recover 对「队列不存在」返回 `queue_not_found`（`load_submission_queue` 直接抛），对「队列存在但 request_id 未知」才返回 `queue_item_not_found`。
 - OpenAPI 契约在 `docs/api/openapi.json`，由 `uv run migu-orca-openapi` 确定性生成（`--check` 做漂移检查）；端点注册表在 `src/apps/migu_orca_web/openapi_gen.py` 的 `_ENDPOINTS`，新增/删除 `/api/v1` 端点必须同步注册表，否则 `tests/api_contract/test_openapi_generation.py` 失败。
 - 公开响应 DTO 在 `src/apps/migu_orca_web/api_contract.py`，全部 `extra="forbid"`；`_ENDPOINTS` 的 `success` 字段引用 DTO（或少量内联 dict，如 request list）。
@@ -87,4 +89,24 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - `views.py` 拆分后仍向后兼容再导出 `CandidateSelectionContextStore`/`candidate_selection_contexts`，旧导入路径不报错；新代码应直接从 `contexts.py` 导入。
   - 浏览器测试运行前需 `ln -s .agents/.chromium-libs /tmp/chromium-libs`，且必须在**同一 bash 命令内**先建链接再跑 pytest（/tmp 链接跨命令不持久）。
   - 拆分纯移动代码时先跑 `git show HEAD:views.py` 对比 route 注册集合，确保 24 个端点路径逐一相同；再跑 api_contract + views_test + browser 三套回归。
+---
+
+## 2026-08-30 02:20:00 CST - US-192
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 为全部 /api/v1 端点建立正确 HTTP 状态语义，envelope 形状保持 golden contract 兼容：状态码按 error_type 分类，客户端可按状态码稳定处理失败。
+- `extensions/flask_api/api.py` 新增 `_error_http_status` 集中分类（唯一来源，路由不硬编码）：400 输入/客户端错误（`data_validation_errors`、`validation_error`、`invalid_*`、`config_error`、`queue_not_found`）、404 资源不存在（`request_not_found`、`queue_item_not_found`、`poster_not_found`）、409 冲突/一次性 context 失效/重放（`invalid_request_status`、`request_cancelled`、`season_evidence_conflict`、`season_confirmation_required`、`candidate_context_invalid` + US-194 draft_* 预告）、401 外部认证失败（`ab_auth_failed`、`qbittorrent_auth_failed`）、502 上游不可达（`mikan_connection_failed`、`ab_connection_failed`、`poster_unavailable` 等）、503 上游不可用/版本不支持（`ab_unsupported_version` 等）、504 上游超时（`mikan_timeout`、`ab_timeout`、`qbittorrent_timeout`）、500 服务端内部（`storage_error`、`storage_json_error`）；未知 error_type 默认 400。`failed_response`/`handle_exception` 按映射设置 status。
+- 海报二进制函数视图 `GET /api/v1/mikan/posters/<key>` 纳入统一错误处理（`routes_mikan.py` try/except + `failed_response(status=_error_http_status(...))`）：畸形 key → 400 `invalid_poster_key`，未注册 key → 404 `poster_not_found`，上游取图失败 → 502 `poster_unavailable`；成功仍返回图片字节。
+- 旧前端 `static/app.js` `fetchJson` 兼容非 2xx：解析 JSON envelope（非 2xx 的 error_type/error_message 仍生效）、非 JSON body 回退「请求失败，请稍后重试」、网络异常回退「网络请求失败，请检查网络后重试」并设 `error.status`；所有错误仍走 `notifyApiError` 中文安全反馈。
+- OpenAPI：`_ENDPOINTS` 注册表 errors 声明与 `_error_http_status` 分类一致（qb/ab test-connection 的 timeout 拆到 504、unsupported 拆到 503），重生成 `docs/api/openapi.json`；`docs/api/endpoint_inventory.md` §1/§4.3/§6 与 `docs/api/README.md` 记录新状态语义。
+- 测试：`tests/api_contract/test_golden_contracts.py` 全部失败路径断言真实状态码 + 新增 `test_golden_upstream_failures_map_to_stable_status`（502/503/504/500 分类 + 真实端点 504 脱敏）与 `test_golden_poster_endpoint_unified_error_handling`（400/404）；`src/extensions/flask_api/api_test.py` 新增映射单测；`views_test.py` 33 处失败断言更新；`tests/browser/test_actions.py` 新增 `TestHttpStatusErrorHandling`（409 JSON、502 非 JSON、网络中断三条中文安全反馈路径）；`test_frontend_dependencies.py` 冻结 fetchJson 非 2xx/非 JSON/网络处理。
+- 质量检查：compileall、完整 pytest（991 非浏览器 + 266 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿。
+- Files changed: `src/extensions/flask_api/api.py`、`api_test.py`、`src/apps/migu_orca_web/routes_mikan.py`、`static/app.js`、`openapi_gen.py`、`views_test.py`、`AGENTS.md`、`docs/api/openapi.json`、`docs/api/endpoint_inventory.md`、`docs/api/README.md`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`tests/api_contract/test_golden_contracts.py`、`test_frontend_dependencies.py`、`tests/browser/test_actions.py`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
+- **Learnings for future iterations:**
+  - HTTP 状态分类只改 `extensions/flask_api/api.py:_error_http_status`，不要在每个 route 里硬编码；OpenAPI `_ENDPOINTS` 的 `errors` 声明必须与分类同步，否则 drift 测试失败。
+  - `failed_response` 返回 `Response` 对象（`response.status_code = ...`），不是 `(body, status)` tuple，否则 `handle_exception`/poster 视图的类型与测试断言会不一致。
+  - 旧测试大量断言「失败仍 200」，US-192 后每处失败路径都要同时断言状态码 + envelope；批量改可用 pytest 失败输出的 `assert X == 200` 反查真实状态码。
+  - `storage_error`/`storage_json_error` 是服务端内部错误 → 500，不是 400；`queue_not_found`（队列不存在）→ 400，`queue_item_not_found`（队列存在但 request_id 未知）→ 404。
+  - 海报 key 是 64 位 hex；畸形 key 走 `invalid_poster_key`（400），格式合法但未注册走 `poster_not_found`（404）——测试两种都要覆盖。
+  - 浏览器测试 mock 非 2xx 时用 `route.fulfill(status=..., json=...)` 或 `content_type="application/json"`；非 JSON body 用 `content_type="text/html"`，前端会回退中文安全文案。
+  - 前端 fetchJson 必须在 `await response.json()` 之前检查 content-type，否则非 JSON 错误体（代理 HTML）会抛 JSON parse 异常打断错误展示。
 ---

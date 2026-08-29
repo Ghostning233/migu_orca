@@ -64,7 +64,7 @@
         "Tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "允许最小旧前端兼容修改，不改变页面设计。"
     },
     {

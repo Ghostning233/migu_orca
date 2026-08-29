@@ -29,6 +29,19 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   4. `tests/api_contract/` 相关 golden/DTO 测试。
 - 响应 DTO 全部 `extra="forbid"`；深层的 engine dict（request 快照、parse_result、queue item 等）在 DTO 内仍为 `dict[str, Any]`，脱敏由 serializer 白名单负责。
 
+## HTTP 状态语义（US-192）
+
+- **envelope 形状不变，状态码表达失败分类**：`extensions/flask_api/api.py:_error_http_status`
+  是唯一分类来源（400/404/409/401/502/503/504/500），路由**不得**硬编码状态码。
+- `openapi_gen.py` 的 `_ENDPOINTS` 注册表 `errors` 声明必须与 `_error_http_status` 分类一致；
+  改分类或改注册表都要跑 `uv run python -m apps.migu_orca_web.openapi_gen` 重生成
+  `docs/api/openapi.json`。
+- 新增 `Stage1Error` error_type 时：若它属于已分类语义（not_found/conflict/timeout/
+  auth/upstream），直接加入 `_error_http_status` 对应集合；未知 error_type 默认 400。
+- 海报二进制端点 `GET /api/v1/mikan/posters/<key>`（函数视图）在 `routes_mikan.py` 里
+  用 `try/except Stage1Error` + `failed_response(..., status=_error_http_status(...))`
+  统一错误处理，成功仍返回图片字节。
+
 ## 安全边界
 
 - 外部 endpoint、token、cookie、password、raw HTML/RSS、完整失败 URL、magnet、本地绝对路径不得进入 API 展示、storage、URL、browser storage、日志或 trace。

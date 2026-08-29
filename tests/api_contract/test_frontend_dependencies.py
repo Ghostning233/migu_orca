@@ -103,18 +103,28 @@ def test_all_api_fetch_urls_are_covered(client: FlaskClient) -> None:
 
 
 def test_fetch_json_handles_the_shared_envelope(client: FlaskClient) -> None:
-    """fetchJson consumes the frozen {ok, result}/{ok, error_*} envelope."""
+    """fetchJson consumes the frozen {ok, result}/{ok, error_*} envelope.
+
+    US-192 adds non-2xx handling: the envelope is still parsed from the body
+    (so error_type/error_message survive), but network failures and non-JSON
+    bodies are normalized to safe generic errors instead of crashing.
+    """
     script = _script(client)
     fetch_start = script.index("async function fetchJson")
     fetch_end = script.index("function setQbittorrentFormError")
     fetch_json = script[fetch_start:fetch_end]
 
     assert "await response.json()" in fetch_json
-    assert "if (!payload.ok)" in fetch_json
-    assert "error.errorType = payload.error_type || \"request_error\"" in fetch_json
-    assert "error.errorData = payload.error_data || null" in fetch_json
+    assert "if (!response.ok || !payload || !payload.ok)" in fetch_json
     assert "return payload.result" in fetch_json
-    assert "response.status" not in fetch_json.split("await response.json()")[0]
+    # Non-2xx statuses are checked AFTER the envelope parse, so the body is
+    # always the source of truth for error_type/error_message.
+    assert "contentType.includes(\"application/json\")" in fetch_json
+    assert "error.errorType = (payload && payload.error_type) || \"request_error\"" in fetch_json
+    assert "error.errorData = (payload && payload.error_data) || null" in fetch_json
+    assert "catch (networkError)" in fetch_json
+    assert "网络请求失败" in fetch_json
+    assert "error.status = response.status" in fetch_json
 
 
 def test_old_frontend_does_not_expose_secret_values(client: FlaskClient) -> None:

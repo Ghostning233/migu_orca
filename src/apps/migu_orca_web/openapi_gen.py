@@ -714,10 +714,8 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "success": QbittorrentConnectionResultDTO,
         "errors": {
             "401": {"qbittorrent_auth_failed": "认证失败"},
-            "502": {
-                "qbittorrent_timeout": "请求超时",
-                "qbittorrent_connection_failed": "连接失败",
-            },
+            "502": {"qbittorrent_connection_failed": "连接失败"},
+            "504": {"qbittorrent_timeout": "请求超时"},
         },
     },
     "POST /api/v1/autobangumi/test-connection": {
@@ -745,8 +743,9 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "success": AutoBangumiConnectionResultDTO,
         "errors": {
             "401": {"ab_auth_failed": "认证失败"},
-            "502": {"ab_connection_failed": "连接失败", "ab_timeout": "请求超时"},
+            "502": {"ab_connection_failed": "连接失败", "ab_submit_failed": "提交失败"},
             "503": {"ab_unsupported_version": "版本不受支持"},
+            "504": {"ab_timeout": "请求超时"},
         },
     },
 }

@@ -886,7 +886,7 @@ def test_static_app_script_wires_page_notifications() -> None:
     assert "订阅方案列表加载失败" in script
     assert "订阅方案详情加载失败" in script
     assert "校验失败" in script
-    assert "error.errorData = payload.error_data || null" in script
+    assert "error.errorData = (payload && payload.error_data) || null" in script
     assert "summarizeValidationErrors" in script
     assert "field + \": \" + message" in script
     assert "safeText" in script
@@ -1492,7 +1492,7 @@ def test_get_request_detail_returns_unified_error_for_missing_request(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 404
     assert payload == {
         "ok": False,
         "error_type": "request_not_found",
@@ -1514,7 +1514,7 @@ def test_get_request_detail_rejects_path_fragments_without_leaking_storage_path(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "invalid_request_id",
@@ -1540,7 +1540,7 @@ def test_list_requests_returns_unified_error_for_damaged_snapshot(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 500
     assert payload["ok"] is False
     assert payload["error_type"] == "storage_json_error"
     assert payload["error_data"]["failed_step"] == "load_request_snapshot"
@@ -1604,7 +1604,7 @@ def test_delete_request_returns_unified_error_for_missing_request(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 404
     assert payload == {
         "ok": False,
         "error_type": "request_not_found",
@@ -1626,7 +1626,7 @@ def test_delete_request_rejects_path_fragments_without_leaking_storage_path(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "invalid_request_id",
@@ -1667,7 +1667,7 @@ def test_delete_request_returns_unified_error_for_delete_failure(
 
     payload = response.get_json()
     serialized = str(payload)
-    assert response.status_code == 200
+    assert response.status_code == 500
     assert payload["ok"] is False
     assert payload["error_type"] == "storage_error"
     assert payload["error_data"]["failed_step"] == "delete_request_snapshot"
@@ -2009,7 +2009,7 @@ def test_create_request_requires_one_time_server_candidate_context_for_nonfirst_
         json={**payload, "season_confirmation": 4, "candidate_context": context},
     )
 
-    assert rejected.status_code == 200
+    assert rejected.status_code == 409
     assert rejected.get_json()["ok"] is False
     assert "season_confirmation_required" in str(rejected.get_json())
     matched = confirmed.get_json()["result"]["request"]["source_info"]["matched_bangumi"]
@@ -2062,7 +2062,7 @@ def test_create_request_rejects_invalid_mikan_direct_entry(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert any(
@@ -2146,7 +2146,7 @@ def test_create_request_rejects_unsupported_source(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert payload["error_data"]["errors"][0]["field"] == "source"
@@ -2179,7 +2179,7 @@ def test_create_request_rejects_invalid_mikan_timeout(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert any(
@@ -2344,7 +2344,7 @@ def test_candidate_search_api_rejects_empty_query_before_network(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert any(
@@ -2872,7 +2872,7 @@ def test_batch_parse_api_rejects_empty_input_with_chinese_validation_error() -> 
 
     payload = response.get_json()
     body = response.get_data(as_text=True)
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "请至少输入一个番剧名称"
@@ -4139,7 +4139,7 @@ def test_preview_modify_rejects_invalid_patch_field() -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "invalid_modify_patch_field"
 
@@ -4180,7 +4180,7 @@ def test_preview_save_rejects_non_pending_status() -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 409
     assert payload["ok"] is False
     assert payload["error_type"] == "invalid_request_status"
 
@@ -4192,7 +4192,7 @@ def test_create_request_returns_validation_error_for_missing_title() -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert payload["error_data"]["errors"][0]["field"] == "title"
@@ -4205,7 +4205,7 @@ def test_create_request_returns_validation_error_for_blank_title() -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert payload["error_data"]["errors"][0]["field"] == "title"
@@ -4218,7 +4218,7 @@ def test_create_request_returns_validation_error_for_invalid_storage_dir_type() 
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert payload["error_data"]["errors"][0]["field"] == "storage_dir"
@@ -4258,7 +4258,7 @@ def test_create_request_returns_unified_error_for_save_failure(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 500
     assert payload["ok"] is False
     assert payload["error_type"] == "storage_error"
     assert payload["error_message"] == "保存订阅方案 JSON 失败"
@@ -4414,7 +4414,7 @@ def test_submit_ab_rejects_missing_token_without_calling_ab(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "config_error"
     assert payload["error_data"] == {
@@ -4442,7 +4442,7 @@ def test_submit_ab_rejects_non_accepted_request(tmp_path: Path) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 409
     assert payload["ok"] is False
     assert payload["error_type"] == "invalid_request_status"
     assert payload["error_message"] == "只有已确认订阅方案可以提交到 Auto Bangumi"
@@ -4549,7 +4549,7 @@ def test_autobangumi_test_connection_sanitizes_failures(
         json={"ab_config": {"auth_mode": "api_token", "base_url": "http://private-auto-bangumi.local", "token": "secret-token", "fallback_enabled": False}},
     )
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 401
     assert payload["ok"] is False
     assert payload["error_type"] == "ab_auth_failed"
     assert payload["error_data"] == {"failed_step": "probe_ab_connection", "details": {"category": "auth"}}
@@ -4650,7 +4650,7 @@ def test_qbittorrent_test_connection_requires_password_without_calling_controlle
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert any(
@@ -4663,7 +4663,7 @@ def test_qbittorrent_test_connection_requires_password_without_calling_controlle
 
 
 @pytest.mark.parametrize(
-    ("controller_result", "expected_error_type"),
+    ("controller_result", "expected_error_type", "expected_status"),
     [
         (
             {
@@ -4686,6 +4686,7 @@ def test_qbittorrent_test_connection_requires_password_without_calling_controlle
                 },
             },
             "qbittorrent_auth_failed",
+            401,
         ),
         (
             {
@@ -4699,6 +4700,7 @@ def test_qbittorrent_test_connection_requires_password_without_calling_controlle
                 },
             },
             "qbittorrent_timeout",
+            504,
         ),
     ],
 )
@@ -4706,6 +4708,7 @@ def test_qbittorrent_test_connection_returns_sanitized_failures(
     monkeypatch: pytest.MonkeyPatch,
     controller_result: dict[str, Any],
     expected_error_type: str,
+    expected_status: int,
 ) -> None:
     monkeypatch.setattr(
         "apps.migu_orca_web.routes_connections.test_qbittorrent_connection",
@@ -4726,7 +4729,7 @@ def test_qbittorrent_test_connection_returns_sanitized_failures(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == expected_status
     assert payload["ok"] is False
     assert payload["error_type"] == expected_error_type
     assert payload["error_data"]["failed_step"] == controller_result["error"][
@@ -4753,7 +4756,7 @@ def test_qbittorrent_test_connection_rejects_invalid_endpoint() -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "config_error"
     assert payload["error_message"] == "qBittorrent endpoint 必须是 http(s) URL"
@@ -4770,7 +4773,7 @@ def test_qbittorrent_test_connection_rejects_missing_config_object() -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert payload["error_data"]["errors"][0]["field"] == "qbittorrent_config"
@@ -5157,7 +5160,7 @@ def test_batch_submit_api_requires_confirmation(tmp_path: Path) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "validation_error",
@@ -5179,7 +5182,7 @@ def test_batch_submit_api_requires_ab_config(tmp_path: Path) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "validation_error",
@@ -5368,7 +5371,7 @@ def test_batch_submit_api_returns_queue_not_found_for_missing_queue(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "queue_not_found",
@@ -5549,7 +5552,7 @@ def test_batch_retry_api_requires_ab_config(tmp_path: Path) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "validation_error",
@@ -5579,7 +5582,7 @@ def test_batch_retry_api_requires_confirmation(tmp_path: Path) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "validation_error",
@@ -5802,7 +5805,7 @@ def test_batch_retry_api_returns_queue_item_not_found_for_unknown_request_id(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 404
     assert payload == {
         "ok": False,
         "error_type": "queue_item_not_found",

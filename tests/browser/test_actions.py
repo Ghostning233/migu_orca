@@ -1034,3 +1034,86 @@ class TestAcceptedRequestManagement:
         detail_text = page.locator("#request-detail-container").inner_text()
         assert "已确认" in detail_text
         assert page.locator("[data-request-id='req-accepted-modify-fail']").count() >= 1
+
+
+class TestHttpStatusErrorHandling:
+    """US-192: 非 2xx JSON 与网络失败显示中文安全反馈，且不泄露敏感值."""
+
+    def test_non_2xx_json_error_shows_chinese_safe_message(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-status-409")
+
+        def handle_accept(route: object) -> None:
+            getattr(route, "fulfill")(
+                status=409,
+                content_type="application/json",
+                body=(
+                    '{"ok": false, "error_type": "invalid_request_status", '
+                    '"error_message": "订阅方案状态已变更，请刷新后重试", '
+                    '"error_data": {"failed_step": "confirm"}}'
+                ),
+            )
+
+        page.route(
+            "**/api/v1/requests/req-status-409/accept**", handle_accept
+        )
+        _open_request_detail(page, live_server_url, storage_dir, "req-status-409")
+
+        page.on("dialog", lambda dialog: dialog.accept())
+        _click_confirm(page)
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        # The envelope's Chinese error_message is shown, not a raw status page.
+        notification = page.locator("#page-notification").inner_text()
+        assert "订阅方案状态已变更，请刷新后重试" in notification
+        assert "request_id=req-status-409" in page.url
+
+    def test_non_json_error_body_falls_back_to_generic_message(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-status-html")
+
+        def handle_cancel(route: object) -> None:
+            getattr(route, "fulfill")(
+                status=502,
+                content_type="text/html",
+                body="<html><body>Bad Gateway</body></html>",
+            )
+
+        page.route(
+            "**/api/v1/requests/req-status-html/cancel**", handle_cancel
+        )
+        _open_request_detail(page, live_server_url, storage_dir, "req-status-html")
+
+        _click_cancel(page)
+        assert page.locator("#detail-cancel-form").is_visible()
+        page.on("dialog", lambda dialog: dialog.accept())
+        page.locator("#detail-cancel-form button:has-text('提交取消')").click()
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        # A non-JSON error body must not crash fetchJson or render raw HTML;
+        # the user sees the safe generic fallback message.
+        notification = page.locator("#page-notification").inner_text()
+        assert "请求失败，请稍后重试" in notification
+        assert "Bad Gateway" not in notification
+
+    def test_network_failure_shows_retryable_message(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-status-net")
+
+        def handle_network(route: object) -> None:
+            route.abort("connectionfailed")
+
+        page.route(
+            "**/api/v1/requests/req-status-net/accept**", handle_network
+        )
+        _open_request_detail(page, live_server_url, storage_dir, "req-status-net")
+
+        page.on("dialog", lambda dialog: dialog.accept())
+        _click_confirm(page)
+        page.wait_for_selector("#page-notification:not([hidden])", timeout=5000)
+
+        notification = page.locator("#page-notification").inner_text()
+        assert "网络请求失败" in notification

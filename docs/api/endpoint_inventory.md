@@ -1,7 +1,9 @@
 # MiGuOrca Web API 端点清单（US-189 冻结基线）
 
-> 本文档是 Stage 26 US-189 的产物：在改动 HTTP 状态语义**之前**（US-192 待办），
-> 先把现有 `/api/v1` 行为、敏感值边界和旧前端依赖冻结成可审查、可自动核对的事实基线。
+> 本文档是 Stage 26 US-189 的产物：先把现有 `/api/v1` 行为、敏感值边界和旧前端依赖
+> 冻结成可审查、可自动核对的事实基线。US-192 已在此基础上修正 HTTP 状态语义
+> （envelope 保持不变，状态码表达失败分类），因此 §1 总览描述的是**当前生效**
+> 的状态语义。
 > 它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
 > 见 `docs/api/README.md`），也不替代 README 的示例用法。
 >
@@ -18,9 +20,25 @@
 - 统一成功 envelope：`{"ok": true, "result": {...}}`（`extensions/flask_api/api.py:ok_response`）。
 - 统一失败 envelope：`{"ok": false, "error_type", "error_message", "error_data"}`（`failed_response`）。
   - `error_data` 恒包含 `failed_step`，Pydantic 校验失败时包含 `errors: [{error_type, field, message}]`。
-- 当前所有 `/api/v1` JSON 端点失败时 HTTP 状态仍为 **200**（envelope 表达失败），
-  HTTP 状态语义修正属于 US-192。唯一例外：`/api/v1/mikan/posters/<key>` 是非 envelope
-  二进制端点，失败时直接抛 `Stage1Error`（详见 §4.3 记录的问题）。
+- **HTTP 状态语义（US-192 修正）**：envelope 形状不变，状态码按 `error_type` 分类
+  （`extensions/flask_api/api.py:_error_http_status`，与 OpenAPI 注册表一致）：
+  - `400`：客户端输入/状态不可用（`data_validation_errors`、`validation_error`、
+    `invalid_*`、`config_error`、`queue_not_found`）。
+  - `404`：资源不存在（`request_not_found`、`queue_item_not_found`、`poster_not_found`）。
+  - `409`：状态冲突/一次性上下文失效/重放（`invalid_request_status`、`request_cancelled`、
+    `season_evidence_conflict`、`season_confirmation_required`、`candidate_context_invalid`；
+    US-194 的 `draft_expired`/`draft_evicted`/`draft_replayed`/`draft_mismatch` 也归此类）。
+  - `401`：外部服务认证失败（`ab_auth_failed`、`qbittorrent_auth_failed`）。
+  - `502`：上游不可达/不健康（`mikan_connection_failed`、`mikan_http_failed`、
+    `mikan_parse_failed`、`poster_unavailable`、`ab_connection_failed`、`ab_submit_failed`、
+    `qbittorrent_connection_failed` 等）。
+  - `503`：上游不可用/版本不受支持（`ab_unsupported_version`、`ab_submit_unsupported`、
+    `ab_probe_unsupported`）。
+  - `504`：上游超时（`mikan_timeout`、`ab_timeout`、`qbittorrent_timeout`）。
+  - `500`：服务端内部错误（`storage_error`、`storage_json_error`、未知异常）。
+- 唯一二进制端点 `/api/v1/mikan/posters/<key>` 不经 JSON envelope，成功返回图片字节；
+  失败返回 JSON envelope + 分类状态码（`invalid_poster_key`/`poster_not_found` → 404，
+  `poster_unavailable` → 502，`invalid_poster` → 400）。
 - 未注册路由返回 Flask 默认 404 HTML，不属于 API envelope。
 - 所有响应在 `failed_response` / `sanitize_error_data` / 各 serializer 白名单中脱敏：
   endpoint、token、cookie、Authorization、SID、password、raw HTML、raw RSS XML、
@@ -145,13 +163,12 @@ US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为�
 
 - `mikan_config`、`mikan_bangumi`、`ab_config`、`qbittorrent_config`、`candidate_context`。
 
-### 4.3 已记录的问题（供 US-190/US-192 治理）
+### 4.3 已治理的问题（US-192 统一错误处理）
 
-- `GET /api/v1/mikan/posters/<key>` 是**函数视图**（非 class-based view），不经过
-  `APIBaseView.dispatch_request` 的 envelope 包装。`poster_service.get` 抛出的
-  `Stage1Error`（如 `invalid_poster_key`、`poster_not_found`、`poster_unavailable`）在
-  TESTING 模式直接上抛，非 TESTING 模式变成 Flask 500 HTML 响应，没有 JSON envelope。
-  US-192 修正 HTTP 状态时应把该端点纳入统一错误处理。
+- `GET /api/v1/mikan/posters/<key>` 是**函数视图**（非 class-based view），US-192 已把
+  它纳入统一错误处理：`poster_service.get` 抛出的 `Stage1Error`（`invalid_poster_key`、
+  `poster_not_found`、`poster_unavailable`、`invalid_poster`）现在转换为 JSON envelope +
+  分类状态码（`_error_http_status`），不再在 TESTING 上抛或变成 500 HTML。
 
 ## 5. 旧前端依赖（已冻结）
 
@@ -212,9 +229,11 @@ US-193 将收紧为服务端允许根目录；CLI 显式 `--storage-dir` 行为�
 - `tests/api_contract/test_inventory_consistency.py`：清单 ↔ 实际 `url_map` 自动核对，
   漏记端点即失败；不访问真实 MiKan/AutoBangumi/qBittorrent。
 - `tests/api_contract/test_golden_contracts.py`：每类端点族的成功、输入失败、
-  业务失败与脱敏错误 golden contract（全部基于 fake/隔离，无真实外部写操作）。
+  业务失败与脱敏错误 golden contract（全部基于 fake/隔离，无真实外部写操作）；
+  US-192 起断言 HTTP 状态（400/404/409/401/502/503/504/500）与 envelope 双语义。
 - `tests/api_contract/test_frontend_dependencies.py`：冻结 localStorage key、URL 参数与
-  前端 fetch 依赖；改动这些契约会立即失败。
+  前端 fetch 依赖；US-192 起同时断言 `fetchJson` 处理非 2xx JSON、非 JSON 与网络失败。
 - `tests/api_contract/test_dto_contracts.py`（US-190）：公开响应 DTO 拒绝未知/敏感字段。
 - `tests/api_contract/test_openapi_generation.py`（US-190）：OpenAPI 覆盖全部端点、
-  确定性生成、脱敏示例、海报二进制 content type 与漂移检查。
+  确定性生成、脱敏示例、海报二进制 content type 与漂移检查；`_ENDPOINTS` 注册表的
+  `errors` 声明与 `_error_http_status` 分类保持一致。

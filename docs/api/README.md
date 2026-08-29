@@ -24,12 +24,18 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
 
 - 成功信封：`{"ok": true, "result": {...}}`；失败信封：
   `{"ok": false, "error_type", "error_message", "error_data"}`。
+- **HTTP 状态语义（US-192）**：envelope 形状不变，状态码按 `error_type` 分类：
+  400 输入校验/客户端错误、404 资源不存在、409 状态冲突/重放/context 失效、
+  401 外部认证失败、502 上游不可达、503 上游不可用/版本不支持、504 上游超时、
+  500 服务端内部错误。`_ENDPOINTS` 注册表的 `errors` 声明与
+  `extensions/flask_api/api.py:_error_http_status` 分类保持一致。
 - 示例全部使用虚构脱敏值；`example.invalid` 是文档保留域。
 - 凭据/外部配置字段（`mikan_config`、`ab_config`、`qbittorrent_config`、
   `candidate_context`、`storage_dir`）标记为 `x-request-scoped: true`：
   request-scoped，绝不进入 storage JSON、URL、浏览器 storage、日志或 trace。
 - 海报二进制端点 `GET /api/v1/mikan/posters/{key}` 单独声明
-  `image/jpeg|png|gif|webp` content type 与失败响应（函数视图，不经 JSON envelope）。
+  `image/jpeg|png|gif|webp` content type 与失败响应（函数视图，不经 JSON envelope；
+  US-192 起失败返回 JSON envelope + 分类状态码）。
 - `request_id`/`batch_id`/`draft_id`/`candidate_context` 生命周期见
   `endpoint_inventory.md` §5.4。
 

@@ -139,7 +139,7 @@ def test_golden_request_create_validation_failure(client: FlaskClient) -> None:
     response = client.post("/api/v1/requests", json={})
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload == {
         "ok": False,
         "error_type": "data_validation_errors",
@@ -160,7 +160,7 @@ def test_golden_request_detail_business_failure(client: FlaskClient) -> None:
     response = client.get("/api/v1/requests/missing-request")
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 404
     assert payload["ok"] is False
     assert payload["error_type"] == "request_not_found"
     assert payload["error_message"] == "未找到已保存的订阅方案"
@@ -178,7 +178,7 @@ def test_golden_preview_modify_rejects_illegal_patch(client: FlaskClient) -> Non
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "invalid_modify_patch_field"
     assert payload["error_data"]["details"]["illegal_fields"] == ["bogus_field"]
@@ -196,7 +196,7 @@ def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 409
     assert payload["ok"] is False
     assert payload["error_type"] == "invalid_request_status"
     assert payload["error_message"] == "只有待确认的订阅草案可以保存"
@@ -213,7 +213,7 @@ def test_golden_request_actions_error_sanitized(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 404
     assert payload["ok"] is False
     assert payload["error_type"] == "request_not_found"
     serialized = str(payload)
@@ -262,7 +262,7 @@ def test_golden_request_create_does_not_trust_client_aliases(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 409
     assert payload["ok"] is False
     assert payload["error_type"] == "candidate_context_invalid"
     assert payload["error_message"] == "候选上下文已失效，请重新搜索并选择合集"
@@ -316,7 +316,7 @@ def test_golden_mikan_candidates_validation_failure(client: FlaskClient) -> None
     response = client.post("/api/v1/mikan/candidates", json={"query": "   "})
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert any(e["field"] == "query" for e in payload["error_data"]["errors"])
@@ -383,7 +383,7 @@ def test_golden_batch_parse_validation_failure(client: FlaskClient) -> None:
     response = client.post("/api/v1/batches/parse", json={"raw_input": "\n \t\n"})
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "请至少输入一个番剧名称"
@@ -470,7 +470,7 @@ def test_golden_batch_submit_requires_ab_config(client: FlaskClient) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "请提供 Auto Bangumi 配置"
@@ -492,7 +492,7 @@ def test_golden_batch_submit_requires_confirmation(client: FlaskClient) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "请确认提交到 Auto Bangumi"
@@ -506,7 +506,7 @@ def test_golden_batch_recover_rejects_bad_action(client: FlaskClient) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "恢复动作必须是 auto、succeeded 或 failed"
@@ -529,7 +529,7 @@ def test_golden_batch_retry_unknown_item(client: FlaskClient) -> None:
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "queue_not_found"
     assert payload["error_message"] == "未找到该批次的提交队列"
@@ -573,7 +573,7 @@ def test_golden_preferences_save_missing(client: FlaskClient) -> None:
     response = client.post("/api/v1/preferences", json={})
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "请提供偏好配置"
@@ -594,7 +594,7 @@ def test_golden_preferences_save_rejects_sensitive_value(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert "https://" not in str(payload)
@@ -616,7 +616,7 @@ def test_golden_corrections_save_missing(client: FlaskClient) -> None:
     response = client.post("/api/v1/corrections", json={})
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "validation_error"
     assert payload["error_message"] == "请提供修正内容"
@@ -680,7 +680,7 @@ def test_golden_qbittorrent_connection_validation_failure(
     response = client.post("/api/v1/qbittorrent/test-connection", json={})
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert any(
@@ -744,7 +744,7 @@ def test_golden_ab_connection_validation_failure(client: FlaskClient) -> None:
     response = client.post("/api/v1/autobangumi/test-connection", json={})
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert any(e["field"] == "ab_config" for e in payload["error_data"]["errors"])
@@ -774,7 +774,7 @@ def test_golden_submit_ab_rejects_non_accepted(
     )
 
     payload = response.get_json()
-    assert response.status_code == 200
+    assert response.status_code == 409
     assert payload["ok"] is False
     assert payload["error_type"] == "invalid_request_status"
     assert payload["error_message"] == "只有已确认订阅方案可以提交到 Auto Bangumi"
@@ -839,3 +839,81 @@ def test_golden_submit_ab_success_sanitizes_ab_result(
     assert "SID=leaked" not in serialized
     assert "secret-token" not in serialized
     assert "private-ab.example" not in serialized
+
+
+# ---------------------------------------------------------------------------
+# US-192: upstream failure status classification
+# ---------------------------------------------------------------------------
+
+
+def test_golden_upstream_failures_map_to_stable_status(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """502 (upstream unreachable), 503 (unavailable) and 504 (timeout) are
+    distinct statuses with the same sanitized envelope shape."""
+    from extensions.flask_api.api import _error_http_status
+
+    # 502 — connection refused / HTTP 5xx from the upstream.
+    assert _error_http_status("mikan_connection_failed") == 502
+    assert _error_http_status("mikan_http_failed") == 502
+    assert _error_http_status("ab_connection_failed") == 502
+    assert _error_http_status("ab_submit_failed") == 502
+    assert _error_http_status("qbittorrent_connection_failed") == 502
+    assert _error_http_status("poster_unavailable") == 502
+    # 503 — upstream unavailable or client version unsupported.
+    assert _error_http_status("ab_unsupported_version") == 503
+    assert _error_http_status("ab_submit_unsupported") == 503
+    # 504 — upstream timeout (retryable).
+    assert _error_http_status("mikan_timeout") == 504
+    assert _error_http_status("ab_timeout") == 504
+    assert _error_http_status("qbittorrent_timeout") == 504
+    # 500 — server-side storage errors never masquerade as client errors.
+    assert _error_http_status("storage_error") == 500
+    assert _error_http_status("storage_json_error") == 500
+
+    # A timeout surfacing through a real endpoint returns 504 with the
+    # sanitized envelope (no raw URL/token in the body).
+    def fail_search(query: str, mikan_config: MikanConfig) -> list[dict[str, Any]]:
+        raise Stage1Error(
+            "mikan_timeout",
+            "MiKan HTTP 请求超时",
+            "mikan_search",
+            {"url": "https://private.example/search?token=secret"},
+        )
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_mikan._search_candidates_from_parse_result",
+        fail_search,
+    )
+    response = client.post("/api/v1/mikan/candidates", json={"query": "芙莉莲"})
+    payload = response.get_json()
+    assert response.status_code == 504
+    assert payload["ok"] is False
+    assert payload["error_type"] == "mikan_timeout"
+    serialized = str(payload)
+    assert "private.example" not in serialized
+    assert "secret" not in serialized
+    assert "https://" not in serialized
+
+
+def test_golden_poster_endpoint_unified_error_handling(
+    client: FlaskClient,
+) -> None:
+    """US-192: the binary poster endpoint returns a JSON envelope + status."""
+    # Malformed opaque key → 400 (client error).
+    response = client.get("/api/v1/mikan/posters/" + "z" * 64)
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_poster_key"
+    assert "error_data" in payload
+    # The opaque key is never echoed back in the error body.
+    assert "z" * 64 not in str(payload)
+
+    # Well-formed but unregistered key → 404 (resource missing).
+    response = client.get("/api/v1/mikan/posters/" + "a" * 64)
+    payload = response.get_json()
+    assert response.status_code == 404
+    assert payload["ok"] is False
+    assert payload["error_type"] == "poster_not_found"
+    assert "a" * 64 not in str(payload)
