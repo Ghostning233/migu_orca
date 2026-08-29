@@ -13,6 +13,24 @@
 - 浏览器测试使用 fixture/Playwright route 隔离外部服务；不得自动向真实 AutoBangumi、qBittorrent 或 MiKan 执行写操作。
 - 完整 browser/full pytest 前确认仓库根 `.migu_orca/storage` 不存在，避免陈旧 Request 干扰测试。
 - Stage 26 不做页面视觉重构或引入新前端框架；只允许维持 API 兼容所需的最小旧前端修改。
+- API 端点清单与 golden contract 测试位于 `docs/api/endpoint_inventory.md` + `tests/api_contract/`；新增/删除 `/api/v1` 端点必须同步这两处，否则 `test_inventory_consistency.py` 失败。
+- 旧前端 `static/app.js` 的 localStorage key 只有 `miguOrca.web.storageDir`/`miguOrca.web.saveRequest`，URL 状态参数只有 `request_id`/`batch_id`；`tests/api_contract/test_frontend_dependencies.py` 冻结了这些契约。
+- `GET /api/v1/mikan/posters/<key>` 是函数视图，不经过 `APIBaseView` envelope 包装；其 `Stage1Error`（`invalid_poster_key`/`poster_not_found` 等）在 TESTING 模式直接上抛、非 TESTING 变成 Flask 500 HTML。US-192 修正 HTTP 状态时需把它纳入统一错误处理。
+- 批量 retry/recover 对「队列不存在」返回 `queue_not_found`（`load_submission_queue` 直接抛），对「队列存在但 request_id 未知」才返回 `queue_item_not_found`。
+
+## 2026-08-29 10:30:00 CST - US-189
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 冻结全部 `/api/v1` 端点清单、方法、请求/响应字段、成功/校验失败/业务失败/脱敏错误 envelope、敏感值边界与旧前端依赖，为 US-190（DTO/OpenAPI）与 US-191（拆分 views.py）提供可自动核对的事实基线。
+- 新增 `docs/api/endpoint_inventory.md`：§2 端点总表（与 url_map 自动核对）、§3 端点族明细（requests/mikan/preferences/corrections/batches/connections）、§4 敏感值边界与已记录问题（poster 函数视图无 envelope）、§5 旧前端依赖（fetch URL、localStorage key、URL 参数、request_id/batch_id/candidate_context 生命周期）。
+- 新增 `tests/api_contract/`：`test_inventory_consistency.py`（清单↔url_map 双向核对，漏记即失败）、`test_golden_contracts.py`（每类端点族成功/输入失败/业务失败/脱敏 golden contract，全部基于 fake 与 tmp_path，不访问真实 MiKan/AB/qB）、`test_frontend_dependencies.py`（冻结 localStorage key、URL 参数、fetch URL、fetchJson envelope 处理）。
+- 质量检查：compileall、非浏览器 pytest（963 passed）、node --check、git diff --check 全绿；浏览器套件因环境缺 Chromium 系统库跳过（US-189 无 UI 改动，无需浏览器验证）。
+- Files changed: `docs/api/endpoint_inventory.md`、`tests/api_contract/`（conftest + 3 个测试文件 + `__init__.py`）。
+- **Learnings for future iterations:**
+  - url_map 中 `request_id` 参数写作 `<path:request_id>`；与清单文档比较前需归一化为 `<request_id>`。
+  - 探测 API 行为时若漏传 `storage_dir` 会写仓库根 `.migu_orca/storage`（如 batch accept 会建 `queue/b1.json`）；探测后必须清理，否则挂掉后续浏览器/完整测试。
+  - `preview-modify` 对非法 patch 返回 `invalid_modify_patch_field`（details 含 `illegal_fields`/`allowed_fields`）；`preview-save` 只允许 PENDING_CONFIRM。
+  - 连接测试成功响应只回白名单字段；`/api/v1/requests/<id>/submit-ab` 的成功结果会把脱敏后的 `ab_submit_result` 写回 snapshot 与 `ab_results/`。
+---
 
 ## 2026-08-29 08:00:00 CST - Stage 26 规划
 Thread: https://codex.openai.com/threads/unknown
