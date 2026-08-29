@@ -16,7 +16,7 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
+      "passes": true,
       "notes": "先冻结事实，再拆分文件；不得把 README 示例当作完整 API 契约。"
     },
     {
