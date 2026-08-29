@@ -239,4 +239,4 @@ Stage 实现后还必须运行 OpenAPI 生成/漂移命令和新增静态检查�
 4. Web 客户端不能选择服务器允许根目录之外的 storage。
 5. 未保存草案由服务端权威 draft 管理，不能通过客户端完整对象伪造后直接持久化。
 6. HTTP 状态、JSON envelope、错误脱敏和敏感值不落盘均有自动化证明。
-7. Stage 27 可以只依赖 OpenAPI/DTO 开始新前端开发，无需导入旧 `app.js` 内部实现。
+7. Stage 27 可以只依赖 OpenAPI/DTO 开始新前端开发，无需导入旧 `app.js` 内部实现；详细 handoff 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。

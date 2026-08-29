@@ -22,6 +22,7 @@
 - Stage 24：AutoBangumi 3.1.18 认证与订阅兼容
 - Stage 25：正式番名、季数证据与共享查询计划
 - Stage 26：Web API 契约、服务端安全边界与前端迁移基线
+- Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（Stage 26 后继规划）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

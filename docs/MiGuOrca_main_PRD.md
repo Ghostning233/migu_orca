@@ -233,8 +233,9 @@ M00 CLI 与流程编排
 | 第二十四阶段 | AutoBangumi 真实认证与订阅兼容闭环（已完成） | M10、M12、M13、M14、测试基础设施 |
 | 第二十五阶段 | 正式番名与季数解析（已完成） | M00、M02、M03、M07、M10、M12、M13、测试基础设施 |
 | 第二十六阶段 | Web API 契约固化与服务端边界治理（已规划） | M00、M01、M11、M12、M13、M14、测试与 CI 基础设施 |
+| 第二十七阶段 | 前端工程化迁移与页面重构（Stage 26 后继规划） | M13、API 契约、前端与测试基础设施 |
 
-Stage 25 已完成 BL-018；Stage 26 已选择 BL-023，为后续前端工程化迁移先固化 API 与服务端安全边界。
+Stage 25 已完成 BL-018；Stage 26 已选择 BL-023，为后续前端工程化迁移先固化 API 与服务端安全边界。Stage 27 已作为 BL-024 handoff 落盘，只有 Stage 26 完成后才启动。
 
 ## 10. 主 PRD 已确认事项
 
@@ -282,8 +283,9 @@ Stage 25 已完成 BL-018；Stage 26 已选择 BL-023，为后续前端工程化
 ## 13. 下一步工作
 
 1. BL-023 已规划为 Stage 26 Web API 契约固化与服务端边界治理；执行范围见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。Stage 26 不重构页面视觉，不引入新前端框架。
-2. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
-3. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
-4. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
-5. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析、可编辑预览、偏好/修正存储和批量提交前队列不得把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
-6. 每次阶段推进继续使用 `uv run pytest`、`uv run python -m compileall -q src tests` 和 Web UI 的 `node --check` 验证；UI story 必须执行 `uv run pytest tests/browser/ -q`。
+2. BL-024 已规划为 Stage 27 前端工程化迁移与页面重构；规划范围见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`，启动前必须以 Stage 26 最终 OpenAPI/DTO 复核 stories。
+3. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
+4. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
+5. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
+6. 后续 Web UI 工作应保持 `/index` 聚焦订阅方案工作台，`/settings` 承载配置、偏好和连接测试。MiKan 候选搜索、直连 fallback、AI 解析、可编辑预览、偏好/修正存储和批量提交前队列不得把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
+7. 每次阶段推进继续使用 `uv run pytest`、`uv run python -m compileall -q src tests` 和 Web UI 的 `node --check` 验证；UI story 必须执行 `uv run pytest tests/browser/ -q`。
