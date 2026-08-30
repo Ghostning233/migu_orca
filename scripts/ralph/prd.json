@@ -34,8 +34,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-198 完成：选定 openapi-typescript@7.13.0（frontend/package-lock.json 锁定），npm run api:generate 生成 frontend/src/api/generated/api.ts（入库）且 api:check 漂移检查（CI frontend job + test_openapi_runtime_consistency.py 双守护）；修复 OpenAPI schema 合法性（内联数组属性→type:array+items，openapi-typescript smoke test 通过）、Request 详情 404/invalid_request_id、海报 400/404/502/500 结构化错误声明、各端点可达的 mikan/AB/qB 错误状态；24 个 operation 固化显式可读 operationId；新增 test_openapi_runtime_consistency.py 7 例（声明 vs _error_http_status 运行时分类一致、被分类 error_type 全部有声明或显式豁免、operationId 唯一/可读/稳定、前端生成客户端不漂移）。全部 Python（1038 non-browser + 275 browser）与前端 typecheck/lint/unit/build 门禁通过。"
     },
     {
       "id": "US-199",

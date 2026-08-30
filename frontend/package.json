@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "test:unit": "vitest"
+    "test:unit": "vitest",
+    "api:generate": "openapi-typescript ../docs/api/openapi.json -o src/api/generated/api.ts",
+    "api:check": "openapi-typescript ../docs/api/openapi.json -o src/api/generated/api.ts --check"
   },
   "dependencies": {
     "pinia": "3.0.4",
@@ -26,6 +28,7 @@
     "eslint": "9.39.5",
     "eslint-plugin-vue": "10.10.0",
     "jsdom": "26.1.0",
+    "openapi-typescript": "^7.13.0",
     "prettier": "3.6.2",
     "typescript": "5.9.3",
     "vite": "7.3.6",

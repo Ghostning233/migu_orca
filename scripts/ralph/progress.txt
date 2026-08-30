@@ -4,7 +4,17 @@
 
 - Python 依赖、检查和测试统一通过 `uv`；前端依赖统一在 `frontend/` 使用 `npm ci`，不得混用 lockfile。
 - Stage 27 只通过 `docs/api/openapi.json` 生成 TypeScript 类型/client；不得导入 Python 模型、手写第二套响应 interface 或从旧 `app.js` 复制业务状态机。
-- OpenAPI 当前覆盖 24 个 operation 且 operationId 唯一，但 US-198 必须先修复运行时状态声明差异（Request 详情 404、海报 400/404/502）、生成器可读命名和自动一致性测试。
+- US-198 起类型化客户端由 `openapi-typescript@7.13.0` 生成：`cd frontend && npm run api:generate`
+  输出 `src/api/generated/api.ts`（入库），`npm run api:check` 做漂移检查（CI frontend job +
+  `tests/api_contract/test_openapi_runtime_consistency.py::test_frontend_generated_client_matches_openapi`
+  双守护）。改 `docs/api/openapi.json` 后必须重生成并提交生成文件。
+- `_ENDPOINTS` 每个条目必须显式声明可读 `operationId`（如 `listRequests`）；`errors` 声明
+  必须与 `extensions/flask_api/api.py:_error_http_status` 运行时分类一致。
+  `test_openapi_runtime_consistency.py` 自动核对：声明 vs 分类一致、被分类 error_type 全部有
+  声明（CLI-only/批内 item 结果的进 `_UNDOCUMENTED_ERROR_TYPES` 豁免集）、operationId 唯一/
+  可读/稳定、OpenAPI 无裸数组属性（列表写 `[Model]` 由 `_normalize_property` 展开）。
+- openapi-typescript 生成模块是类型-only（无运行时值）：前端测试用 vitest `expectTypeOf`
+  做编译期断言，不能 `import { operations }` 当值用；生成文件无敏感值（字段名除外）。
 - 对应 feature 迁移前先补齐它实际读取的深层公开 DTO；长期 `dict[str, Any]` / `Record<string, unknown>` 不能作为完成状态。
 - 新前端先挂载 `/app/`；SPA fallback 不能截获 `/api/v1`、海报、`/healthz`、`/readiness`、静态文件或旧 Flask 页面。
 - production build 由 Flask 同源提供，不依赖 Node 运行时；Vite dev server 只用于本地开发代理。
@@ -89,4 +99,68 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - 浏览器测试 fixture `live_server_url` 是进程内 Flask server；SPA 测试需真实构建
       `frontend/dist`（CI browser job 已构建；本地先 `cd frontend && npm run build`）。
     - 旧 `/index`、`/settings` 与 `/app/` 并存是刻意设计（迁移窗口），US-208 才切换默认入口。
+---
+
+## 2026-08-30 - US-198
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - OpenAPI 校准：修复 schema 合法性（GET /requests 的 result.requests 从内联 `[{}]` 改为
+    `type: array` + `items: RequestSummaryDTO`，openapi-typescript smoke test 之前直接报
+    "Expected Schema Object or boolean, got Array"）；Request 详情补 404 request_not_found +
+    400 invalid_request_id + 500 storage_error/storage_json_error；海报端点补结构化
+    400/404/502/500 错误声明（invalid_poster_key/invalid_poster→400、poster_not_found→404、
+    poster_unavailable→502、storage_error→500）；按可达性补齐 POST /requests 的
+    invalid_input/config_error/rss_parse_failed/season_* 409/mikan 502/504，submit-ab 与
+    batch submit/retry 的 config_error/ab_* 502/503/504，连接测试的
+    config_error/qbittorrent_http_failed/qbittorrent_unexpected_response/ab_probe_unsupported，
+    批量端点的 invalid_batch_id。
+  - operationId：24 个 operation 全部在 _ENDPOINTS 固化显式可读 camelCase id
+    （listRequests/getRequestDetail/createRequest/previewModifyRequest/.../testAutoBangumiConnection），
+    不再依赖路径推导的机器名（如旧的 getRequestsByRequestid）。
+  - 类型化客户端：选定 openapi-typescript@7.13.0（devDependency + lockfile 锁定），
+    `npm run api:generate` → `frontend/src/api/generated/api.ts`（入库），
+    `npm run api:check` 漂移检查；CI frontend job 新增 api:check 步骤；
+    Python 侧 `test_openapi_runtime_consistency.py::test_frontend_generated_client_matches_openapi`
+    也跑同一 drift check（双守护）。
+  - 自动一致性测试：新增 tests/api_contract/test_openapi_runtime_consistency.py 7 例——
+    声明 status/error_type 与 _error_http_status 运行时分类一致、被分类 error_type 全部有声明
+    （或列入 _UNDOCUMENTED_ERROR_TYPES 显式豁免）、operationId 唯一/可读/稳定、
+    OpenAPI 无裸数组属性、前端生成客户端不漂移。
+  - 前端 Vitest：新增 src/api/generated/api.test.ts 5 例（expectTypeOf 编译期断言
+    operations 键=operationId、paths 全集、envelope components、submit-ab 凭据字段）。
+  - 文档：docs/api/README.md 增加"Stage 27 类型化客户端（US-198）"小节；
+    endpoint_inventory.md 修正海报错误状态分类（invalid_poster_key 是 400 不是 404）；
+    frontend/AGENTS.md 与 src/apps/migu_orca_web/AGENTS.md 增加生成器/一致性测试约定；
+    Stage 27 PRD US-198 标记完成。
+- Files changed
+  - 修改：src/apps/migu_orca_web/openapi_gen.py、docs/api/openapi.json、
+    frontend/package.json、frontend/package-lock.json、.github/workflows/ci.yml、
+    docs/api/README.md、docs/api/endpoint_inventory.md、frontend/AGENTS.md、
+    src/apps/migu_orca_web/AGENTS.md、docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md
+  - 新增：tests/api_contract/test_openapi_runtime_consistency.py、
+    frontend/src/api/generated/api.ts、frontend/src/api/generated/api.test.ts
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - openapi-typescript 是类型-only 生成器（interface/type，无运行时值）；Vitest 对它只能
+      用 `expectTypeOf`（编译期断言），不能 `import { operations }` 当值。
+    - `_ENDPOINTS` 的 raw result-shape dict 值必须是合法 JSON Schema 属性；列表写成
+      `[ItemModel]` 由 `_normalize_property` 展开成 `type:array+items`，裸 `[{}]` 会被
+      生成器拒绝。
+    - 一致性测试的豁免集 `_UNDOCUMENTED_ERROR_TYPES` 是必需维护点：CLI-only/批内 item 结果/
+      仅注释提及的 error_type 不属 envelope 契约，新 error_type 要么声明要么加豁免。
+  - Gotchas encountered
+    - 海报端点原文档把 invalid_poster_key 写成 404，实际 _error_http_status 分类是 400
+      （invalid_poster_key 在 _HTTP_BAD_REQUEST_ERROR_TYPES）；golden 测试
+      test_golden_poster_endpoint_unified_error_handling 断言 400，文档与 OpenAPI 之前都错了。
+    - batch accept/submit 的 request_cancelled/ab_http_failed/draft_mismatch 只出现在
+      queue item 结果（dict[str,Any]）或注释里，不是 envelope 错误，必须进豁免集，
+      否则"每个被分类 error_type 都要声明"测试误报。
+    - 改 _ENDPOINTS 的 errors 或 operationId 后要同时重生成 docs/api/openapi.json 和
+      frontend/src/api/generated/api.ts，两个 drift check（uv + npm）都要过。
+  - Useful context
+    - 本机跑浏览器套件：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      uv run pytest tests/browser/ -q`（/tmp 每命令清空，conftest 的 /tmp/chromium-libs 路径
+      本机不可用；CI 用 playwright install --with-deps 无此问题）。
+    - openapi-typescript `--check` 模式返回码 0=最新，非零=过期；CI frontend job 与
+      Python 一致性测试都用它守护生成文件。
 ---

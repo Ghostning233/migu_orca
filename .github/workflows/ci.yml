@@ -78,6 +78,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: OpenAPI client drift check
+        run: npm run api:check
+
       - name: Unit tests
         run: npm run test:unit -- --run
 

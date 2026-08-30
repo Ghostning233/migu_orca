@@ -10,7 +10,7 @@
       "post": {
         "summary": "测试 Auto Bangumi 连接",
         "description": "ab_config 为 request-scoped 凭据；成功响应只回白名单字段。",
-        "operationId": "postAutobangumitestconnection",
+        "operationId": "testAutoBangumiConnection",
         "responses": {
           "200": {
             "description": "成功",
@@ -78,6 +78,60 @@
                     "auth_mode": "示例",
                     "adapter": "示例",
                     "submit_supported": true
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "config_error: Auto Bangumi 配置无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "config_error",
+                  "error_message": "Auto Bangumi 配置无效",
+                  "error_data": {
+                    "failed_step": "示例步骤"
                   }
                 }
               }
@@ -192,7 +246,7 @@
             }
           },
           "503": {
-            "description": "ab_unsupported_version: 版本不受支持",
+            "description": "ab_unsupported_version: 版本不受支持 / ab_probe_unsupported: 当前认证模式不支持此探测方式",
             "content": {
               "application/json": {
                 "schema": {
@@ -359,7 +413,7 @@
       "post": {
         "summary": "批量解析番剧名称",
         "description": "",
-        "operationId": "postBatchesparse",
+        "operationId": "parseBatchTitles",
         "responses": {
           "200": {
             "description": "成功",
@@ -521,7 +575,7 @@
       "get": {
         "summary": "读取标题修正列表",
         "description": "",
-        "operationId": "getCorrections",
+        "operationId": "listCorrections",
         "responses": {
           "200": {
             "description": "成功",
@@ -639,7 +693,7 @@
       "post": {
         "summary": "保存一条标题修正",
         "description": "",
-        "operationId": "postCorrections",
+        "operationId": "saveCorrection",
         "responses": {
           "200": {
             "description": "成功",
@@ -775,7 +829,7 @@
       "post": {
         "summary": "搜索 MiKan 候选",
         "description": "按标题搜索 MiKan 候选，返回公开候选元数据。mikan_config 为 request-scoped。",
-        "operationId": "postMikancandidates",
+        "operationId": "searchMikanCandidates",
         "responses": {
           "200": {
             "description": "成功",
@@ -915,6 +969,114 @@
                   "ok": false,
                   "error_type": "data_validation_errors",
                   "error_message": "query 为空或非法",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "mikan_connection_failed: MiKan HTTP 连接失败 / mikan_http_failed: MiKan HTTP 请求失败 / mikan_parse_failed: MiKan 页面解析失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "mikan_connection_failed",
+                  "error_message": "MiKan HTTP 连接失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "mikan_timeout: MiKan HTTP 请求超时",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "mikan_timeout",
+                  "error_message": "MiKan HTTP 请求超时",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -1160,7 +1322,7 @@
       "post": {
         "summary": "保存用户偏好",
         "description": "",
-        "operationId": "postPreferences",
+        "operationId": "savePreferences",
         "responses": {
           "200": {
             "description": "成功",
@@ -1318,7 +1480,7 @@
       "post": {
         "summary": "测试 qBittorrent 连接",
         "description": "qbittorrent_config 为 request-scoped 凭据；成功响应只回白名单字段。",
-        "operationId": "postQbittorrenttestconnection",
+        "operationId": "testQbittorrentConnection",
         "responses": {
           "200": {
             "description": "成功",
@@ -1368,6 +1530,60 @@
                     "status": "示例",
                     "reachable": true,
                     "version": "示例"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "config_error: qBittorrent 配置无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "config_error",
+                  "error_message": "qBittorrent 配置无效",
+                  "error_data": {
+                    "failed_step": "示例步骤"
                   }
                 }
               }
@@ -1428,7 +1644,7 @@
             }
           },
           "502": {
-            "description": "qbittorrent_connection_failed: 连接失败",
+            "description": "qbittorrent_connection_failed: 连接失败 / qbittorrent_http_failed: HTTP 请求失败 / qbittorrent_unexpected_response: 响应无法识别",
             "content": {
               "application/json": {
                 "schema": {
@@ -1588,7 +1804,7 @@
       "get": {
         "summary": "列出所有已保存订阅方案摘要",
         "description": "返回每个已保存 Request 的公开摘要（request_id、状态、标题、字幕组与种子统计）。storage_dir 为服务端允许根目录下的相对目录 profile。",
-        "operationId": "getRequests",
+        "operationId": "listRequests",
         "responses": {
           "200": {
             "description": "成功",
@@ -1608,9 +1824,101 @@
                     "result": {
                       "type": "object",
                       "properties": {
-                        "requests": [
-                          {}
-                        ]
+                        "requests": {
+                          "type": "array",
+                          "items": {
+                            "additionalProperties": false,
+                            "description": "Public ``summary`` shape produced by ``summarize_request``.",
+                            "properties": {
+                              "request_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Request Id"
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Status"
+                              },
+                              "bangumi_title": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Bangumi Title"
+                              },
+                              "candidate_subtitle_groups": {
+                                "items": {
+                                  "additionalProperties": true,
+                                  "type": "object"
+                                },
+                                "title": "Candidate Subtitle Groups",
+                                "type": "array"
+                              },
+                              "selected_subtitle_group": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Selected Subtitle Group"
+                              },
+                              "effective_seed_count": {
+                                "title": "Effective Seed Count",
+                                "type": "integer"
+                              },
+                              "expected_folder_name": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Expected Folder Name"
+                              },
+                              "warnings": {
+                                "items": {
+                                  "type": "string"
+                                },
+                                "title": "Warnings",
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "request_id",
+                              "status",
+                              "bangumi_title",
+                              "candidate_subtitle_groups",
+                              "selected_subtitle_group",
+                              "effective_seed_count",
+                              "expected_folder_name",
+                              "warnings"
+                            ],
+                            "title": "RequestSummaryDTO",
+                            "type": "object"
+                          }
+                        }
                       }
                     }
                   }
@@ -1619,7 +1927,18 @@
                   "ok": true,
                   "result": {
                     "requests": [
-                      {}
+                      {
+                        "request_id": "示例",
+                        "status": "示例",
+                        "bangumi_title": "示例",
+                        "candidate_subtitle_groups": [
+                          {}
+                        ],
+                        "selected_subtitle_group": "示例",
+                        "effective_seed_count": 1,
+                        "expected_folder_name": "示例",
+                        "warnings": []
+                      }
                     ]
                   }
                 }
@@ -1627,7 +1946,7 @@
             }
           },
           "400": {
-            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_request_id: 已保存订阅方案缺少有效 request_id",
             "content": {
               "application/json": {
                 "schema": {
@@ -1679,6 +1998,60 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "storage_error: 读取订阅方案失败 / storage_json_error: 订阅方案 JSON 损坏",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "storage_error",
+                  "error_message": "读取订阅方案失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -1696,7 +2069,7 @@
       "post": {
         "summary": "生成订阅方案（可保存）",
         "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id（US-194：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
-        "operationId": "postRequests",
+        "operationId": "createRequest",
         "responses": {
           "200": {
             "description": "成功",
@@ -1872,7 +2245,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_input: 请求输入非法 / config_error: MiKan 配置无效 / rss_parse_failed: 所有候选 RSS 均解析失败",
             "content": {
               "application/json": {
                 "schema": {
@@ -1926,7 +2299,7 @@
             }
           },
           "409": {
-            "description": "candidate_context_invalid: 候选上下文已失效或已被消费 / invalid_request_status: 状态冲突",
+            "description": "candidate_context_invalid: 候选上下文已失效或已被消费 / invalid_request_status: 状态冲突 / season_evidence_conflict: 候选季数与确认季数冲突 / season_confirmation_required: 候选缺少可证明季数，需明确确认",
             "content": {
               "application/json": {
                 "schema": {
@@ -1972,6 +2345,114 @@
                   "ok": false,
                   "error_type": "candidate_context_invalid",
                   "error_message": "候选上下文已失效或已被消费",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "mikan_connection_failed: MiKan HTTP 连接失败 / mikan_http_failed: MiKan HTTP 请求失败 / mikan_parse_failed: MiKan 页面解析失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "mikan_connection_failed",
+                  "error_message": "MiKan HTTP 连接失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "mikan_timeout: MiKan HTTP 请求超时",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "mikan_timeout",
+                  "error_message": "MiKan HTTP 请求超时",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -2054,7 +2535,7 @@
       "post": {
         "summary": "内存中修改未保存草案",
         "description": "US-194：只接受服务端签发的 draft_id 与允许 patch，返回更新后的内存草案与摘要（不落盘）。客户端不得提交完整 Request 作为权威快照。",
-        "operationId": "postRequestspreviewmodify",
+        "operationId": "previewModifyRequest",
         "responses": {
           "200": {
             "description": "成功",
@@ -2363,7 +2844,7 @@
       "post": {
         "summary": "保存未修改的预览草案",
         "description": "US-194：消费服务端权威 draft_id（一次性，重放保护），仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
-        "operationId": "postRequestspreviewsave",
+        "operationId": "previewSaveRequest",
         "responses": {
           "200": {
             "description": "成功",
@@ -2667,7 +3148,7 @@
       "post": {
         "summary": "接受批量卡片进入提交前队列",
         "description": "",
-        "operationId": "postBatchesByBatchidaccept",
+        "operationId": "acceptBatchItems",
         "responses": {
           "200": {
             "description": "成功",
@@ -2738,7 +3219,7 @@
             }
           },
           "400": {
-            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_batch_id: batch_id 不能包含路径片段",
             "content": {
               "application/json": {
                 "schema": {
@@ -2856,7 +3337,7 @@
       "get": {
         "summary": "读取提交前队列",
         "description": "",
-        "operationId": "getBatchesByBatchidqueue",
+        "operationId": "getBatchQueue",
         "responses": {
           "200": {
             "description": "成功",
@@ -2913,7 +3394,7 @@
             }
           },
           "400": {
-            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_batch_id: batch_id 不能包含路径片段",
             "content": {
               "application/json": {
                 "schema": {
@@ -2992,7 +3473,7 @@
       "post": {
         "summary": "恢复卡住的队列项目",
         "description": "",
-        "operationId": "postBatchesByBatchidrecover",
+        "operationId": "recoverBatchQueueItem",
         "responses": {
           "200": {
             "description": "成功",
@@ -3064,7 +3545,7 @@
             }
           },
           "400": {
-            "description": "validation_error: action 非法或缺少确认 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "validation_error: action 非法或缺少确认 / invalid_batch_id: batch_id 不能包含路径片段 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -3219,7 +3700,7 @@
       "post": {
         "summary": "重试队列中单个失败项目",
         "description": "",
-        "operationId": "postBatchesByBatchidretry",
+        "operationId": "retryBatchQueueItem",
         "responses": {
           "200": {
             "description": "成功",
@@ -3291,7 +3772,7 @@
             }
           },
           "400": {
-            "description": "validation_error: 缺少 ab_config/confirm/request_id / queue_not_found: 队列不存在 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "validation_error: 缺少 ab_config/confirm/request_id / queue_not_found: 队列不存在 / invalid_batch_id: batch_id 不能包含路径片段 / config_error: Auto Bangumi 配置无效 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -3397,6 +3878,168 @@
                 }
               }
             }
+          },
+          "502": {
+            "description": "ab_connection_failed: Auto Bangumi HTTP 连接失败 / ab_submit_failed: Auto Bangumi HTTP 提交失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_connection_failed",
+                  "error_message": "Auto Bangumi HTTP 连接失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ab_submit_unsupported: 当前 Auto Bangumi 版本或认证模式暂不支持提交",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_submit_unsupported",
+                  "error_message": "当前 Auto Bangumi 版本或认证模式暂不支持提交",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "ab_timeout: Auto Bangumi HTTP 请求超时",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_timeout",
+                  "error_message": "Auto Bangumi HTTP 请求超时",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "requestBody": {
@@ -3473,7 +4116,7 @@
       "post": {
         "summary": "提交队列到 Auto Bangumi",
         "description": "",
-        "operationId": "postBatchesByBatchidsubmit",
+        "operationId": "submitBatchQueue",
         "responses": {
           "200": {
             "description": "成功",
@@ -3545,7 +4188,7 @@
             }
           },
           "400": {
-            "description": "validation_error: 缺少 ab_config 或 confirm / queue_not_found: 队列不存在 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "validation_error: 缺少 ab_config 或 confirm / queue_not_found: 队列不存在 / invalid_batch_id: batch_id 不能包含路径片段 / config_error: Auto Bangumi 配置无效 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -3591,6 +4234,168 @@
                   "ok": false,
                   "error_type": "validation_error",
                   "error_message": "缺少 ab_config 或 confirm",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "ab_connection_failed: Auto Bangumi HTTP 连接失败 / ab_submit_failed: Auto Bangumi HTTP 提交失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_connection_failed",
+                  "error_message": "Auto Bangumi HTTP 连接失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ab_submit_unsupported: 当前 Auto Bangumi 版本或认证模式暂不支持提交",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_submit_unsupported",
+                  "error_message": "当前 Auto Bangumi 版本或认证模式暂不支持提交",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "ab_timeout: Auto Bangumi HTTP 请求超时",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_timeout",
+                  "error_message": "Auto Bangumi HTTP 请求超时",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -3669,8 +4474,8 @@
     "/api/v1/mikan/posters/{key}": {
       "get": {
         "summary": "读取候选海报（二进制）",
-        "description": "按 opaque key 读取候选海报图片字节。该端点为函数视图，不经 JSON envelope；失败返回错误 JSON 或非 2xx。",
-        "operationId": "getMikanpostersByKey",
+        "description": "按 opaque key 读取候选海报图片字节。该端点为函数视图，不经 JSON envelope；失败返回 JSON envelope + 分类状态码（US-192）：400 为非法 key/非法图片（invalid_poster_key/invalid_poster），404 为未注册或过期的 key（poster_not_found），502 为上游获取失败（poster_unavailable），500 为缓存读写错误（storage_error）。",
+        "operationId": "getMikanPoster",
         "responses": {
           "200": {
             "description": "海报图片字节。",
@@ -3709,8 +4514,221 @@
               }
             }
           },
+          "400": {
+            "description": "invalid_poster_key: 封面缓存标识无效 / invalid_poster: 封面响应不是支持的图片或地址无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_poster_key",
+                  "error_message": "封面缓存标识无效",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
           "404": {
-            "description": "poster key 无效或不存在"
+            "description": "poster_not_found: poster key 未注册或已过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "poster_not_found",
+                  "error_message": "poster key 未注册或已过期",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "poster_unavailable: 上游封面获取失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "poster_unavailable",
+                  "error_message": "上游封面获取失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "storage_error: 封面缓存读写失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "storage_error",
+                  "error_message": "封面缓存读写失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3730,7 +4748,7 @@
       "get": {
         "summary": "查看单个订阅方案详情",
         "description": "返回 Request 快照、状态历史与 Auto Bangumi 提交结果（ab_result）。",
-        "operationId": "getRequestsByRequestid",
+        "operationId": "getRequestDetail",
         "responses": {
           "200": {
             "description": "成功",
@@ -3788,7 +4806,7 @@
             }
           },
           "400": {
-            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_request_id: request_id 不能包含路径片段",
             "content": {
               "application/json": {
                 "schema": {
@@ -3840,6 +4858,114 @@
                 }
               }
             }
+          },
+          "404": {
+            "description": "request_not_found: 订阅方案不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "request_not_found",
+                  "error_message": "订阅方案不存在",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "storage_error: 读取订阅方案失败 / storage_json_error: 订阅方案 JSON 损坏",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "storage_error",
+                  "error_message": "读取订阅方案失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -3868,7 +4994,7 @@
       "post": {
         "summary": "确认订阅方案",
         "description": "",
-        "operationId": "postRequestsByRequestidaccept",
+        "operationId": "acceptRequest",
         "responses": {
           "200": {
             "description": "成功",
@@ -4231,7 +5357,7 @@
       "post": {
         "summary": "取消订阅方案",
         "description": "",
-        "operationId": "postRequestsByRequestidcancel",
+        "operationId": "cancelRequest",
         "responses": {
           "200": {
             "description": "成功",
@@ -4599,7 +5725,7 @@
       "post": {
         "summary": "删除订阅方案",
         "description": "",
-        "operationId": "postRequestsByRequestiddelete",
+        "operationId": "deleteRequest",
         "responses": {
           "200": {
             "description": "成功",
@@ -4798,7 +5924,7 @@
       "post": {
         "summary": "修改已保存订阅方案",
         "description": "",
-        "operationId": "postRequestsByRequestidmodify",
+        "operationId": "modifyRequest",
         "responses": {
           "200": {
             "description": "成功",
@@ -5116,7 +6242,7 @@
       "post": {
         "summary": "提交订阅方案到 Auto Bangumi",
         "description": "ab_config 为 request-scoped 凭据，绝不进入 storage、URL、浏览器 storage、日志或 trace。",
-        "operationId": "postRequestsByRequestidsubmitab",
+        "operationId": "submitRequestToAutoBangumi",
         "responses": {
           "200": {
             "description": "成功",
@@ -5313,7 +6439,7 @@
             }
           },
           "400": {
-            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / config_error: Auto Bangumi 配置无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -5467,6 +6593,168 @@
                   "ok": false,
                   "error_type": "invalid_request_status",
                   "error_message": "只有已确认订阅方案可以提交",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "ab_connection_failed: Auto Bangumi HTTP 连接失败 / ab_submit_failed: Auto Bangumi HTTP 提交失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_connection_failed",
+                  "error_message": "Auto Bangumi HTTP 连接失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ab_submit_unsupported: 当前 Auto Bangumi 版本或认证模式暂不支持提交",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_submit_unsupported",
+                  "error_message": "当前 Auto Bangumi 版本或认证模式暂不支持提交",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "ab_timeout: Auto Bangumi HTTP 请求超时",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "ab_timeout",
+                  "error_message": "Auto Bangumi HTTP 请求超时",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }

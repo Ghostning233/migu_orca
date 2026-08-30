@@ -19,6 +19,28 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
   `src/apps/migu_orca_web/openapi_gen.py` 的 `_ENDPOINTS` 注册表，否则
   `tests/api_contract/test_inventory_consistency.py` 与
   `tests/api_contract/test_openapi_generation.py` 失败。
+- 每个 operation 在 `_ENDPOINTS` 里声明**显式可读的 `operationId`**（如
+  `listRequests`、`submitBatchQueue`）；`tests/api_contract/test_openapi_runtime_consistency.py`
+  核对 operationId 唯一、可读、跨重生成稳定，且 `_ENDPOINTS` 声明的每个
+  error_type/status 与 `extensions/flask_api/api.py:_error_http_status` 的运行时分类一致。
+
+## Stage 27 类型化客户端（US-198）
+
+Stage 27 前端只通过 OpenAPI 生成 TypeScript 类型，不手写第二套响应 interface：
+
+```bash
+cd frontend
+npm run api:generate    # openapi-typescript → src/api/generated/api.ts
+npm run api:check       # 漂移检查：生成结果与入库文件不一致时非零退出
+```
+
+- 生成器是 `openapi-typescript@7.13.0`（锁定在 `frontend/package-lock.json`），
+  输入是 `docs/api/openapi.json`，输出 `frontend/src/api/generated/api.ts`（入库）。
+- `frontend/src/api/generated/` **只由契约生成**，不手工维护；迁移 feature 不得
+  手写重复的 API response interface。
+- CI：frontend job 先跑 `npm run api:check`；Python 套件的
+  `test_openapi_runtime_consistency.py::test_frontend_generated_client_matches_openapi`
+  也执行同一 drift check。
 
 ## 契约要点
 

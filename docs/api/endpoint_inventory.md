@@ -37,8 +37,9 @@
   - `504`：上游超时（`mikan_timeout`、`ab_timeout`、`qbittorrent_timeout`）。
   - `500`：服务端内部错误（`storage_error`、`storage_json_error`、未知异常）。
 - 唯一二进制端点 `/api/v1/mikan/posters/<key>` 不经 JSON envelope，成功返回图片字节；
-  失败返回 JSON envelope + 分类状态码（`invalid_poster_key`/`poster_not_found` → 404，
-  `poster_unavailable` → 502，`invalid_poster` → 400）。
+  失败返回 JSON envelope + 分类状态码（US-198 校准后与 OpenAPI 声明一致）：
+  `invalid_poster_key`/`invalid_poster` → 400，`poster_not_found` → 404，
+  `poster_unavailable` → 502，`storage_error` → 500。
 - 未注册路由返回 Flask 默认 404 HTML，不属于 API envelope。
 - 所有响应在 `failed_response` / `sanitize_error_data` / 各 serializer 白名单中脱敏：
   endpoint、token、cookie、Authorization、SID、password、raw HTML、raw RSS XML、

@@ -51,9 +51,16 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   是唯一分类来源（400/404/409/401/502/503/504/500），路由**不得**硬编码状态码。
 - `openapi_gen.py` 的 `_ENDPOINTS` 注册表 `errors` 声明必须与 `_error_http_status` 分类一致；
   改分类或改注册表都要跑 `uv run python -m apps.migu_orca_web.openapi_gen` 重生成
-  `docs/api/openapi.json`。
+  `docs/api/openapi.json`。`tests/api_contract/test_openapi_runtime_consistency.py`（US-198）
+  自动核对：每个声明 status/error_type 与运行时分类一致、每个被分类的 error_type 都有声明
+  （或列入该文件的显式豁免集）、operationId 唯一/可读/稳定、前端生成客户端不漂移。
 - 新增 `Stage1Error` error_type 时：若它属于已分类语义（not_found/conflict/timeout/
   auth/upstream），直接加入 `_error_http_status` 对应集合；未知 error_type 默认 400。
+  若该 error_type 会作为 API envelope 失败返回，必须在对应 `_ENDPOINTS` 条目声明；
+  若只在 CLI/批内 item 结果等非 envelope 路径出现，加入
+  `test_openapi_runtime_consistency.py` 的 `_UNDOCUMENTED_ERROR_TYPES` 豁免集。
+- `_ENDPOINTS` 每个条目**必须显式声明可读 `operationId`**（如 `listRequests`、
+  `submitBatchQueue`）；不要把新端点交给自动推导，否则可读性测试失败。
 - 海报二进制端点 `GET /api/v1/mikan/posters/<key>`（函数视图）在 `routes_mikan.py` 里
   用 `try/except Stage1Error` + `failed_response(..., status=_error_http_status(...))`
   统一错误处理，成功仍返回图片字节。

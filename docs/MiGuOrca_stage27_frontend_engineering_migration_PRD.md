@@ -177,6 +177,14 @@ Flask 生产静态目录、Vite `base` 和 build 输出位置由 US-197 固定�
 - 固化可读且稳定的 operationId；生成结果不依赖路径顺序或临时机器信息。
 - 建立生成目录和 drift check；迁移 feature 不手写重复 API interface。
 
+**US-198 完成**：选定 `openapi-typescript@7.13.0`（`frontend/package-lock.json` 锁定），
+`npm run api:generate` 生成 `frontend/src/api/generated/api.ts`（入库），`npm run api:check`
+漂移检查；修复 OpenAPI 的 schema 合法性（内联数组属性 → `type: array`+items）、Request
+详情 404/`invalid_request_id`、海报 400/404/502/500、各端点可达的 mikan/AB/qB 错误状态；
+24 个 operation 均固化显式可读 operationId；新增
+`tests/api_contract/test_openapi_runtime_consistency.py`（7 例：声明 vs 运行时分类一致、
+分类 error_type 全部有声明或显式豁免、operationId 唯一/可读/稳定、前端生成客户端 drift）。
+
 ### US-199：建立统一 API transport、路由和应用外壳
 
 - 统一处理成功/失败 envelope、非 2xx JSON、非 JSON、网络失败、取消和超时。

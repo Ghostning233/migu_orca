@@ -17,8 +17,23 @@ MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全
   transport 会接管；海报、健康检查与旧 Flask 页面都不能被 SPA 路由吞掉。
 - 敏感值（endpoint、token、cookie、password、原始响应等）只存在于组件局部内存与单次
   POST body；不写 store 持久化、URL、browser storage、日志或 trace。Pinia 默认不持久化。
-- 新前端类型只来自 `docs/api/openapi.json` 生成（US-198 落地后），不导入 Python 模型、
+- 新前端类型只来自 `docs/api/openapi.json` 生成（US-198），不导入 Python 模型、
   不手写第二套响应 interface。
+
+## 类型化客户端（US-198）
+
+- 生成器：`openapi-typescript@7.13.0`（devDependency，lockfile 锁定版本）；输入
+  `docs/api/openapi.json`，输出 `src/api/generated/api.ts`（**入库**，由 drift check 守护）。
+- 命令：`npm run api:generate`（生成）、`npm run api:check`（漂移检查，非零退出表示过期）。
+- `src/api/generated/api.ts` 是**类型-only** 模块（interface/type，无运行时值）：
+  单元测试用 `expectTypeOf`（vitest）做编译期断言，不能 `import { operations }` 当值用。
+- 生成的 `operations` 键名 = OpenAPI `operationId`（如 `listRequests`、
+  `submitBatchQueue`）；新增/重命名端点必须同步 `_ENDPOINTS` 的 operationId 并重生成。
+- 改 `docs/api/openapi.json` 后必须 `npm run api:generate` 并提交生成文件，否则
+  `npm run api:check`、CI frontend job 与
+  `tests/api_contract/test_openapi_runtime_consistency.py` 全部失败。
+- OpenAPI 里的 `x-request-scoped` 字段（凭据）与 `storage_dir` 仍是约定级约束：
+  transport 层不能把它们写进 store/URL/日志/trace。
 
 ## 命令与质量门禁（CI frontend job 同款）
 
@@ -26,6 +41,7 @@ MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全
 npm ci                        # 安装（lockfile 已入库）
 npm run typecheck             # vue-tsc --noEmit（strict + noUncheckedIndexedAccess）
 npm run lint                  # eslint flat config，--max-warnings 0
+npm run api:check             # 生成客户端漂移检查
 npm run test:unit -- --run    # Vitest + Vue Test Utils（jsdom）
 npm run build                 # 先 typecheck 再 vite build → dist/
 ```
