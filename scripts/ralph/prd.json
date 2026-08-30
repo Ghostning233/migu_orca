@@ -137,8 +137,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-204 完成：/app/workbench 迁移单个搜索与服务端草案——WorkbenchView.vue（搜索表单 + 直连 fallback + 候选结果区）、CandidateCard.vue（公开白名单卡片，NEEDS_CONFIRMATION 勾选后可选 / CONFLICT 禁用，绝不自动选候选）、DraftPreviewPanel.vue（编辑订阅草案表单 + preview-modify 种子重算 + preview-save 一次性保存 + draft_expired/evicted/replayed 固定中文「请重新生成」恢复）、candidateSearch.ts（纯函数校验/季数证据/payload 构造，feature 与 Vitest 共用）。补齐 MikanCandidateDTO/SeasonEvidenceDTO 公开白名单（strict extra=forbid，engine 字段 raw_html/raw_rss_xml/token/cookie 在边界拒绝）并重生成 docs/api/openapi.json 与 frontend/src/api/generated/api.ts（drift check 双守护）。candidate_context/draft_id 只在组件内存（seasonConfirmations ref/DraftPreviewPanel 局部 ref），绝不进 URL/browser storage/history/日志；保存成功后 router.push('/requests?request_id=...') 跳转到已保存 Request 列表/详情。Vitest 新增 31 例（candidateSearch 17 + WorkbenchView 14，共 197 例全过）；浏览器新增 tests/browser/test_app_workbench.py 18 例真实 Chromium（搜索/空态/失败重试/解析摘要中文 label/季数确认/冲突禁用/候选选择草案/编辑重算/保存跳转/fallback 门控校验/敏感边界/360px 无横向溢出）。全套 357 浏览器 + 1044 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-205 将复用候选、草案与 Request 组件迁移批量工作台。"
     },
     {
       "id": "US-205",

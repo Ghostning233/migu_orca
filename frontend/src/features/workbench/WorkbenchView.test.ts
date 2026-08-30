@@ -1,0 +1,471 @@
+import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createMemoryHistory, createRouter } from 'vue-router'
+import { nextTick } from 'vue'
+
+import { api } from '@/api/client'
+import type { operations } from '@/api/generated/api'
+import WorkbenchView from '@/features/workbench/WorkbenchView.vue'
+
+// US-204: workbench single-search migration. The view searches MiKan
+// candidates through the shared transport, renders explicit candidate cards
+// (no auto-selection), supports the direct fallback, and opens the
+// server-authoritative draft preview (draft_id in memory only).
+
+vi.mock('@/api/client', () => ({
+  api: {
+    get: vi.fn(),
+    post: vi.fn(),
+    put: vi.fn(),
+    patch: vi.fn(),
+    delete: vi.fn(),
+    poster: vi.fn(),
+  },
+  toApiError: (error: unknown) =>
+    error && typeof error === 'object' && 'type' in error
+      ? (error as { type: string; message: string })
+      : { type: 'request_error', message: '请求失败，请重试' },
+  isApiError: () => false,
+  apiRequest: vi.fn(),
+}))
+
+const apiPost = vi.mocked(api.post)
+
+type CandidateResult = NonNullable<
+  operations['searchMikanCandidates']['responses']['200']['content']['application/json']['result']
+>
+type CreateResult = NonNullable<
+  operations['createRequest']['responses']['200']['content']['application/json']['result']
+>
+
+function candidate(overrides: Record<string, unknown> = {}) {
+  return {
+    bangumi_id: '2353',
+    title: '葬送的芙莉莲',
+    mikan_url: 'https://mikan.example/Home/Bangumi/2353',
+    poster_url: null,
+    source_query: '芙莉莲',
+    aliases: [],
+    recommendation: null,
+    total_episodes: null,
+    season_evidence: null,
+    candidate_context: null,
+    ...overrides,
+  }
+}
+
+function candidateResult(overrides: Partial<Record<string, unknown>> = {}): CandidateResult {
+  return {
+    query: '芙莉莲',
+    status: 'FOUND',
+    parse_result: {
+      normalized_title: '葬送的芙莉莲',
+      base_title: '葬送的芙莉莲',
+      season: { number: null, raw: null, normalized: null, source: 'none' },
+      source: 'rule',
+      needs_user_review: false,
+      review_hints: [],
+      query_plan: [{ query: '芙莉莲', source: 'rule', priority: 1 }],
+    },
+    attempted_queries: [{ query: '芙莉莲', source: 'rule', priority: 1 }],
+    candidates: [candidate() as never],
+    error: null,
+    ...overrides,
+  } as never
+}
+
+function previewSnapshot(overrides: Record<string, unknown> = {}) {
+  return {
+    request_id: 'req-draft-1',
+    status: 'PENDING_CONFIRM',
+    input: { raw_title: '葬送的芙莉莲' },
+    source_info: {
+      matched_bangumi: { title: '葬送的芙莉莲', aliases: [], mikan_url: null, match_score: 1, poster_url: null },
+      rss_sources: [
+        {
+          subtitle_group: '喵萌奶茶屋',
+          rss_url: 'https://example.invalid/rss/moe.xml',
+          source_type: 'mikan',
+          total_seed_count: 2,
+          seed_names: ['[喵萌] 芙莉莲 01.mkv'],
+          valid_seed_count: 1,
+          invalid_seed_count: 1,
+          valid_seed_names: ['[喵萌] 芙莉莲 01.mkv'],
+          excluded_seed_names: [{ name: '[喵萌] 芙莉莲 SP.mkv', reason: '命中排除规则：SP', rule: 'must_not_contain' }],
+          warnings: [],
+        },
+      ],
+    },
+    confirmable_config: {
+      selected_subtitle_group: '喵萌奶茶屋',
+      selected_rss_url: 'https://example.invalid/rss/moe.xml',
+      filter_rule: { must_contain: '', must_not_contain: '', use_regex: false, case_sensitive: false },
+      effective_seed_names: ['[喵萌] 芙莉莲 01.mkv'],
+      expected_folder_name: '葬送的芙莉莲',
+      warnings: [],
+    },
+    ab_submit_result: null,
+    created_at: '2026-08-31T00:00:00+00:00',
+    updated_at: '2026-08-31T00:00:00+00:00',
+    user_action: null,
+    ...overrides,
+  }
+}
+
+function createDraftResult(overrides: Partial<Record<string, unknown>> = {}): CreateResult {
+  return {
+    request: previewSnapshot() as never,
+    summary: { request_id: 'req-draft-1', status: 'PENDING_CONFIRM', bangumi_title: '葬送的芙莉莲', candidate_subtitle_groups: [], selected_subtitle_group: '喵萌奶茶屋', effective_seed_count: 1, expected_folder_name: '葬送的芙莉莲', warnings: [] } as never,
+    saved_request: null,
+    draft_id: 'opaque-draft-token',
+    ...overrides,
+  } as never
+}
+
+async function mountWorkbench() {
+  const router = createRouter({
+    history: createMemoryHistory('/app/'),
+    routes: [
+      { path: '/workbench', name: 'workbench', component: WorkbenchView },
+      { path: '/requests', name: 'requests', component: { template: '<p>requests</p>' } },
+      { path: '/settings', name: 'settings', component: { template: '<p>settings</p>' } },
+    ],
+  })
+  await router.push({ path: '/workbench' })
+  await router.isReady()
+
+  const wrapper = mount(WorkbenchView, {
+    attachTo: document.body,
+    global: {
+      plugins: [createPinia(), router],
+      stubs: { teleport: true },
+    },
+  })
+  await nextTick()
+  return { wrapper, router }
+}
+
+describe('WorkbenchView single search (US-204)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  it('shows the empty search state and validates the query before calling the API', async () => {
+    const { wrapper } = await mountWorkbench()
+
+    expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('输入番剧标题后搜索候选合集')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await nextTick()
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.find('#mikan-candidate-search-error').text()).toContain('搜索 MiKan 候选前必须填写番剧标题')
+  })
+
+  it('searches candidates through the shared transport and renders cards', async () => {
+    apiPost.mockResolvedValue(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/mikan/candidates', {
+      body: { query: '芙莉莲' },
+    })
+    const cards = wrapper.findAll('.candidate-card')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]!.text()).toContain('葬送的芙莉莲')
+    expect(cards[0]!.text()).toContain('MiKan ID: 2353')
+    expect(cards[0]!.text()).toContain('选择此合集')
+  })
+
+  it('never auto-selects a candidate even when only one matches', async () => {
+    apiPost.mockResolvedValue(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+    // The explicit selection button is offered but nothing was generated.
+    expect(wrapper.findAll('.candidate-select')).toHaveLength(1)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders the auditable title-parse summary with Chinese labels', async () => {
+    apiPost.mockResolvedValue(
+      candidateResult({
+        query: '无职转生s4',
+        parse_result: {
+          normalized_title: '无职转生 第四季',
+          base_title: '无职转生',
+          season: { number: 4, raw: 's4', normalized: '第四季', source: 'title_marker' },
+          source: 'alias',
+          needs_user_review: true,
+          review_hints: ['别名匹配结果，请人工核对。'],
+          query_plan: [
+            { query: '无职转生 第四季', source: 'alias', priority: 1 },
+            { query: '无职转生 S4', source: 'rule', priority: 2 },
+          ],
+        },
+        attempted_queries: [{ query: '无职转生 第四季', source: 'alias', priority: 1 }],
+      }),
+    )
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('无职转生s4')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    const summary = wrapper.find('.title-parse-summary')
+    expect(summary.text()).toContain('标题解析摘要')
+    expect(summary.text()).toContain('识别标题')
+    expect(summary.text()).toContain('无职转生 第四季')
+    expect(summary.text()).toContain('识别季度')
+    expect(summary.text()).toContain('第4季')
+    expect(summary.text()).toContain('解析来源')
+    expect(summary.text()).toContain('别名匹配')
+    expect(summary.text()).toContain('实际搜索词')
+    expect(summary.text()).toContain('需人工核对')
+    // The raw source code never reaches the DOM.
+    expect(summary.text()).not.toContain('alias')
+  })
+
+  it('shows the empty-result hint and never renders raw candidate URLs', async () => {
+    apiPost.mockResolvedValue(candidateResult({ candidates: [] }))
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('ghost')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('未找到候选合集')
+    expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('直连合集')
+  })
+
+  it('shows a safe Chinese error state on search failure and keeps the query', async () => {
+    apiPost.mockRejectedValue({ type: 'mikan_http_failed', message: 'MiKan HTTP 请求失败' })
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.error-state').text()).toContain('候选搜索失败')
+    // The raw error_type/message never leaks into the DOM.
+    expect(wrapper.text()).not.toContain('mikan_http_failed')
+    expect(wrapper.find('#mikan-candidate-query').element as HTMLInputElement).toHaveProperty('value', '芙莉莲')
+  })
+
+  it('locks the season-confirmation candidate until the checkbox is checked', async () => {
+    apiPost.mockResolvedValue(
+      candidateResult({
+        candidates: [
+          candidate({
+            season_evidence: { status: 'NEEDS_CONFIRMATION', season: 4, requires_review: true },
+            candidate_context: 'opaque-context',
+          }) as never,
+        ],
+      }),
+    )
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    const card = wrapper.find('.candidate-card')
+    const select = card.find('.candidate-select')
+    const checkbox = card.find('.candidate-season-confirmation input')
+    expect(checkbox.exists()).toBe(true)
+    expect(select.attributes('disabled')).toBeDefined()
+    expect(select.attributes('aria-disabled')).toBe('true')
+
+    await checkbox.setValue(true)
+    await nextTick()
+    expect(select.attributes('disabled')).toBeUndefined()
+    expect(select.attributes('aria-disabled')).toBe('false')
+
+    await checkbox.setValue(false)
+    await nextTick()
+    expect(select.attributes('disabled')).toBeDefined()
+  })
+})
+
+describe('WorkbenchView candidate selection & draft (US-204)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  it('generates a server-authoritative draft on explicit selection', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult())
+    apiPost.mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenLastCalledWith('/api/v1/requests', {
+      body: {
+        title: '葬送的芙莉莲',
+        source: 'mikan',
+        mikan_bangumi: 'https://mikan.example/Home/Bangumi/2353',
+        storage_dir: null,
+        save_request: false,
+      },
+    })
+    // The draft preview panel mounts with the display snapshot.
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+    expect(wrapper.find('.preview-mode-note').text()).toContain('订阅草案（未保存）')
+    expect(wrapper.find('#draft-save-button').exists()).toBe(true)
+    // The draft_id never enters the DOM.
+    expect(wrapper.text()).not.toContain('opaque-draft-token')
+  })
+
+  it('applies preview-modify edits and recomputes the display', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockResolvedValueOnce({
+        request: previewSnapshot({
+          confirmable_config: {
+            ...previewSnapshot().confirmable_config,
+            filter_rule: { must_contain: '', must_not_contain: 'V2', use_regex: false, case_sensitive: false },
+          },
+        }),
+        summary: {},
+        draft_id: 'opaque-draft-token',
+      })
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#preview-must-not-contain').setValue('V2')
+    await wrapper.find('#preview-apply-button').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/preview-modify', {
+      body: {
+        draft_id: 'opaque-draft-token',
+        patch: { filter_rule: { must_not_contain: 'V2', use_regex: false, case_sensitive: false } },
+        storage_dir: null,
+      },
+    })
+    expect(wrapper.find('#detail-preview-edit-form').text()).toContain('编辑订阅草案')
+  })
+
+  it('saves the draft through preview-save and routes to the saved request', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockResolvedValueOnce({
+        request: previewSnapshot(),
+        summary: {},
+      })
+    const { wrapper, router } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#draft-save-button').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/preview-save', {
+      body: { draft_id: 'opaque-draft-token', storage_dir: null },
+    })
+    expect(router.currentRoute.value.path).toBe('/requests')
+    expect(router.currentRoute.value.query.request_id).toBe('req-draft-1')
+  })
+
+  it('shows a safe error and keeps the search state when generation fails', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult())
+    apiPost.mockRejectedValueOnce({ type: 'mikan_parse_failed', message: 'MiKan 番剧页解析失败' })
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    const { useNotificationStore } = await import('@/app/stores/notification')
+    const notification = useNotificationStore()
+    expect(notification.current?.title).toBe('生成失败')
+    expect(notification.current?.message).toBe('从 MiKan 合集生成订阅草案失败。请重试。')
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(false)
+  })
+})
+
+describe('WorkbenchView direct fallback (US-204)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    apiPost.mockReset()
+  })
+
+  it('reveals the fallback form only when the checkbox is checked', async () => {
+    const { wrapper } = await mountWorkbench()
+
+    expect(wrapper.find('#mikan-fallback-form').exists()).toBe(false)
+    await wrapper.find('#mikan-fallback-enabled').setValue(true)
+    await nextTick()
+    expect(wrapper.find('#mikan-fallback-form').exists()).toBe(true)
+  })
+
+  it('validates the fallback value before calling the API', async () => {
+    const { wrapper } = await mountWorkbench()
+    await wrapper.find('#mikan-fallback-enabled').setValue(true)
+    await nextTick()
+
+    await wrapper.find('#mikan-fallback-generate').trigger('click')
+    await nextTick()
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.find('#mikan-fallback-error').text()).toContain('生成前必须填写 MiKan 合集 URL 或 ID')
+
+    await wrapper.find('#mikan-fallback-bangumi').setValue('not a url or id')
+    await wrapper.find('#mikan-fallback-generate').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#mikan-fallback-error').text()).toContain('必须是数字 ID 或 HTTP(S) URL')
+  })
+
+  it('generates a draft from a bare ID and clears the input on success', async () => {
+    apiPost.mockResolvedValue(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-fallback-enabled').setValue(true)
+    await nextTick()
+    await wrapper.find('#mikan-fallback-bangumi').setValue('2353')
+    await wrapper.find('#mikan-fallback-generate').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/requests', {
+      body: {
+        title: '芙莉莲',
+        source: 'mikan',
+        mikan_bangumi: '2353',
+        storage_dir: null,
+        save_request: false,
+      },
+    })
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+    expect((wrapper.find('#mikan-fallback-bangumi').element as HTMLInputElement).value).toBe('')
+  })
+})

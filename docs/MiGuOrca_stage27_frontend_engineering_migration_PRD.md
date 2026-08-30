@@ -308,6 +308,21 @@ node --check/git diff --check 全过，仓库根 `.migu_orca/storage` 不存在�
 - 使用服务端 `draft_id` 完成修改、保存、过期/逐出/重放恢复。
 - 不自动选候选，不把 parser 提示当作真实季数证据，不持久化 draft/context。
 
+US-204 完成（2026-08-31）：`/app/workbench` 迁移单个搜索与服务端草案——
+`WorkbenchView.vue`（搜索表单 + 直连 fallback + 候选结果区）+ `CandidateCard.vue`
+（公开白名单卡片，NEEDS_CONFIRMATION 勾选后可选 / CONFLICT 禁用）+ `DraftPreviewPanel.vue`
+（编辑订阅草案表单 + preview-modify 种子重算 + 保存草案 + draft 失效恢复）+
+`candidateSearch.ts`（纯函数校验/季数证据/payload 构造）。补齐 `MikanCandidateDTO`/
+`SeasonEvidenceDTO` 公开白名单（strict `extra="forbid"`，engine 字段在边界拒绝）并重生成
+OpenAPI 与 TS 客户端（drift check 双守护）。`candidate_context`/`draft_id` 只在组件内存，
+绝不进 URL/storage/日志；保存成功后跳转 `/requests?request_id=...`。Vitest 新增 31 例
+（candidateSearch 17、WorkbenchView 14，共 197 例全过）；浏览器新增
+`tests/browser/test_app_workbench.py` 18 例真实 Chromium（搜索/空态/失败重试/解析摘要/
+季数确认/冲突禁用/候选选择草案/编辑重算/保存跳转/fallback 门控与校验/敏感边界/360px）。
+全套 357 浏览器 + 1044 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/
+node --check/git diff --check 全过，仓库根 `.migu_orca/storage` 不存在。US-205 将复用
+候选、草案与 Request 组件迁移批量工作台。
+
 ### US-205：迁移批量工作台
 
 - 迁移批量输入、独立 FOUND/EMPTY/FAILED、候选浮层、草案详情和删除。

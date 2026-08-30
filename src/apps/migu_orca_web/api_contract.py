@@ -283,12 +283,50 @@ class RequestAbSubmitResultDTO(RequestCreateResultDTO):
 # ---------------------------------------------------------------------------
 
 
+class SeasonEvidenceDTO(_SnapshotBase):
+    """Public candidate season evidence summary (never parser raw text).
+
+    ``status`` is one of PROVEN / NEEDS_CONFIRMATION / CONFLICT / NONE and
+    ``season`` the proven-or-awaiting number; the frontend only ever renders
+    the confirmation checkbox for NEEDS_CONFIRMATION and blocks CONFLICT.
+    """
+
+    status: str | None = None
+    season: int | None = None
+    requires_review: bool | None = None
+
+
+class MikanCandidateDTO(_StrictBase):
+    """Public whitelist for one MiKan candidate card.
+
+    Only non-sensitive public metadata is exposed: the opaque poster key
+    (served by the poster endpoint), the public bangumi id/title, the source
+    query and aliases. ``mikan_url`` is declared for contract accuracy (the
+    backend uses it to fetch the detail page) but the frontend must never
+    render it. ``candidate_context`` is the one-time opaque season-confirmation
+    capability (request-scoped); ``season_evidence`` is the public review
+    summary. Unknown engine fields (raw HTML/RSS/cookies/tokens) are rejected
+    at the boundary.
+    """
+
+    bangumi_id: str
+    title: str
+    mikan_url: str
+    poster_url: str | None = None
+    source_query: str
+    aliases: list[str] = []
+    recommendation: str | None = None
+    total_episodes: int | None = None
+    season_evidence: SeasonEvidenceDTO | None = None
+    candidate_context: str | None = None
+
+
 class MikanCandidateResultDTO(_StrictBase):
     query: str
     status: str
     parse_result: dict[str, Any]
     attempted_queries: list[dict[str, Any]]
-    candidates: list[dict[str, Any]]
+    candidates: list[MikanCandidateDTO]
     error: dict[str, Any] | None = None
 
 

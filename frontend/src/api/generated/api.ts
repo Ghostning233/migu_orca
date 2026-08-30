@@ -1005,7 +1005,18 @@ export interface operations {
                      *           {}
                      *         ],
                      *         "candidates": [
-                     *           {}
+                     *           {
+                     *             "bangumi_id": "示例",
+                     *             "title": "示例",
+                     *             "mikan_url": "示例",
+                     *             "poster_url": null,
+                     *             "source_query": "示例",
+                     *             "aliases": [],
+                     *             "recommendation": null,
+                     *             "total_episodes": null,
+                     *             "season_evidence": null,
+                     *             "candidate_context": null
+                     *           }
                      *         ],
                      *         "error": null
                      *       }
@@ -1030,7 +1041,59 @@ export interface operations {
                             }[];
                             /** Candidates */
                             candidates: {
-                                [key: string]: unknown;
+                                /** Bangumi Id */
+                                bangumi_id: string;
+                                /** Title */
+                                title: string;
+                                /** Mikan Url */
+                                mikan_url: string;
+                                /**
+                                 * Poster Url
+                                 * @default null
+                                 */
+                                poster_url: string | null;
+                                /** Source Query */
+                                source_query: string;
+                                /**
+                                 * Aliases
+                                 * @default []
+                                 */
+                                aliases: string[];
+                                /**
+                                 * Recommendation
+                                 * @default null
+                                 */
+                                recommendation: string | null;
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** @default null */
+                                season_evidence: ({
+                                    /**
+                                     * Status
+                                     * @default null
+                                     */
+                                    status: string | null;
+                                    /**
+                                     * Season
+                                     * @default null
+                                     */
+                                    season: number | null;
+                                    /**
+                                     * Requires Review
+                                     * @default null
+                                     */
+                                    requires_review: boolean | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Candidate Context
+                                 * @default null
+                                 */
+                                candidate_context: string | null;
                             }[];
                             /**
                              * Error

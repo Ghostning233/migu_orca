@@ -170,3 +170,34 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   URL 状态恢复/缺失 request_id 安全错误/确认/取消/删除/修改 patch/脱敏/360px/中文状态码/
   AB 入口跳转。断言详情区用 `#request-detail-container`，动作按钮用
   `#detail-accept-button` 等 id（不要裸用 `[data-request-id]`，列表项与动作共用）。
+
+## 单个搜索与服务端草案（US-204）
+
+- 工作台在 `features/workbench/WorkbenchView.vue`（`/app/workbench`）：单个搜索
+  （`POST /api/v1/mikan/candidates`）、直连 fallback（`POST /api/v1/requests` 带
+  `mikan_bangumi`）与 DraftPreviewPanel（`features/workbench/DraftPreviewPanel.vue`）。
+  纯函数逻辑收敛到 `features/workbench/candidateSearch.ts`（`validateCandidateQuery`/
+  `validateFallbackValue`/`candidateSelectionIsBlocked`/`needsSeasonConfirmation`/
+  `parseSeasonNumber`/`parseSourceLabel`/`collectPreviewEditPatch`/`buildCandidateCreatePayload`/
+  `buildFallbackCreatePayload`），feature 与 Vitest 共用，不复制第二套。
+- 候选卡片（`features/workbench/CandidateCard.vue`）只渲染公开白名单字段；**绝不自动选候选**
+  （即使只有一个）；NEEDS_CONFIRMATION 候选显示「我确认此合集为第N季」checkbox 勾选后才可
+  选择，CONFLICT 候选显示警告并禁用（`candidateSelectionIsBlocked`）。
+- `candidate_context` 与 `draft_id` 只存在于组件内存（`seasonConfirmations` ref /
+  DraftPreviewPanel 的局部 ref），**永不进 URL、browser storage、history 或日志**；候选
+  搜索/选择/fallback 成功后都不设置 URL query（与旧 `/index` parity）。
+- 生成草案走 `POST /api/v1/requests`（`save_request: false`）→ 服务端签发 `draft_id`；
+  编辑走 `preview-modify`（只发 `draft_id` + 允许 patch，绝不回传完整 Request 快照），
+  保存走 `preview-save`（一次性消费，draft_expired/evicted/replayed → 固定中文
+  「请重新生成订阅草案后再试」并清空面板）。
+- 直连 fallback 用 CheckboxRow（`#mikan-fallback-enabled`，id 直接落在原生 input）门控；
+  本地只做「数字 ID 或 HTTP(S) URL」预校验，服务端仍执行权威规则；成功后清空输入。
+- 标题解析摘要（`renderTitleParseSummary` 迁移）只显示识别标题/识别季度/解析来源
+  （中文 label）/实际搜索词/需人工核对；原始 `source` 代码（alias/rule 等）绝不进 DOM。
+- 浏览器测试：`tests/browser/test_app_workbench.py`（18 例真实 Chromium）。mock 候选搜索
+  用 `page.route("**/api/v1/mikan/candidates", ...)`；生成捕获用 conftest
+  `_register_generation_capture`（注意 `**/api/v1/requests` 只匹配精确路径，preview-modify/
+  preview-save 仍走真实后端）；SPA 通知断言用 `.global-notification:not(:empty)`（不是旧页的
+  `#page-notification`）。
+- 保存草案成功后面板 `@saved` 由工作台 `router.push('/requests?request_id=...')` 跳转到
+  已保存 Request 列表/详情（US-203 面板）。

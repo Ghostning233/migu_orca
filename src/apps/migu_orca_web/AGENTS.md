@@ -108,6 +108,23 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `issue_draft_id(preview_request)` 给每个 `preview_request` 补 draft_id。
 - 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.4 与 OpenAPI 注册表。
 
+## MiKan 候选公开 DTO（US-204）
+
+- `POST /api/v1/mikan/candidates` 的 `result.candidates` 在
+  `api_contract.py` 里是 `list[MikanCandidateDTO]`（strict `extra="forbid"`），每个候选只
+  暴露公开白名单：`bangumi_id/title/mikan_url/poster_url/source_query/aliases/
+  recommendation/total_episodes/season_evidence/candidate_context`。engine 字段
+  （raw_html/raw_rss_xml/token/cookie/raw_response_body）在边界被拒绝，测试见
+  `test_dto_contracts.py::test_mikan_candidate_dto_rejects_unknown_or_sensitive_fields`。
+- `season_evidence` 用 lenient `SeasonEvidenceDTO`（`_SnapshotBase`，`extra="allow"`）：
+  `status`（PROVEN/NEEDS_CONFIRMATION/CONFLICT/NONE）+ `season` + `requires_review`，
+  只作公开审核摘要；前端绝不把 parser 提示当作真实季数证据（只有显式确认 checkbox 或
+  服务端一次性 `candidate_context` 能成为证据）。
+- 改 `MikanCandidateResultDTO`/候选白名单后必须重生成 `docs/api/openapi.json` 与
+  `frontend/src/api/generated/api.ts`（drift check 双守护），并同步
+  `test_golden_contracts.py::test_golden_mikan_candidates_success` 的白名单集合断言。
+
+
 ## 静态检查与就绪探针（US-195）
 
 - 静态检查是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：

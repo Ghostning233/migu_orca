@@ -35,6 +35,17 @@
 - `git diff --check` 会报 AGENTS.md 末尾多余空行：编辑后 `rstrip('\n') + '\n'` 归一。
 - 迁移占位视图后必须同步 `tests/browser/test_app_shell.py` 的对应路由断言（旧断言引用
   占位视图的 id/class）。
+- 工作台（US-204 起）候选/草案 feature 逻辑收敛到 `features/workbench/candidateSearch.ts`
+  （校验/季数证据/payload 构造），候选卡片只渲染公开白名单字段；`candidate_context` 与
+  `draft_id` 只存在组件内存，保存成功后 `router.push('/requests?request_id=...')` 跳转。
+- 候选/草案公开 DTO：`MikanCandidateDTO` 用 strict `extra="forbid"`（engine 字段在边界拒绝，
+  白名单见 test_dto_contracts 与 golden 测试）；`season_evidence` 用 lenient
+  `SeasonEvidenceDTO`（`_SnapshotBase`）只作公开审核摘要。改白名单后必须重生成 OpenAPI +
+  TS 客户端并同步 golden 白名单断言。
+- 浏览器测试 SPA 通知断言用 `.global-notification:not(:empty)`（旧页是 `#page-notification`）；
+  `page.route("**/api/v1/requests")` 只匹配精确路径，preview-modify/preview-save 仍走真实后端。
+- CheckboxRow 的 id 直接落在原生 input：测试/浏览器用 `#mikan-fallback-enabled`（不要加
+  ` input` 后缀），`v-model:checked` 绑定后 `setValue(true)` 即可触发显示/隐藏。
 
 - US-200 起共享组件原语在 `frontend/src/components/`：layout（PanelSection/FormField）、
   forms（BaseButton/BaseInput/BaseTextarea/BaseSelect/CheckboxRow，v-model + attrs 透传 +
@@ -598,4 +609,87 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       已保存 Request 的管理动作；预览草案的 preview-modify/preview-save 走 US-204。
     - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
       UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（339 例全过，含新 23 例）。
+---
+## 2026-08-31 04:10:00 CST - US-204
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 迁移单个搜索与服务端草案到 `/app/workbench`（frontend/src/features/workbench/）：
+    - `WorkbenchView.vue`：单个搜索表单（POST /api/v1/mikan/candidates）、直连 fallback
+      门控（CheckboxRow `#mikan-fallback-enabled` + `#mikan-fallback-form`）、候选结果区
+      （loading/error/empty + 标题解析摘要 + 候选卡片列表）、DraftPreviewPanel 挂载。
+    - `CandidateCard.vue`：公开白名单候选卡片（标题/MiKan ID/播出进度/推荐标签/搜索词/
+      同源海报）；NEEDS_CONFIRMATION 显示「我确认此合集为第N季」checkbox 勾选后才可选，
+      CONFLICT 显示警告并禁用；绝不自动选候选（即使只有一个）。
+    - `DraftPreviewPanel.vue`：服务端权威草案编辑面板——订阅草案（未保存）note + 保存草案
+      按钮 + 编辑订阅草案表单（字幕组/包含/排除/正则/大小写/folder_name）+ Overview/
+      Source/Filter/Seeds 分区；`preview-modify`（只发 draft_id + 允许 patch，绝不回传
+      完整 Request 快照）重算种子，`preview-save` 一次性消费 draft_id；draft_expired/
+      evicted/replayed → 固定中文「请重新生成订阅草案后再试」并 emit('expired') 清空面板。
+    - `candidateSearch.ts`：纯函数逻辑（validateCandidateQuery/validateFallbackValue/
+      candidateSelectionIsBlocked/needsSeasonConfirmation/parseSeasonNumber/parseSourceLabel/
+      collectPreviewEditPatch/buildCandidateCreatePayload/buildFallbackCreatePayload），
+      feature 与 Vitest 共用，不复制第二套。
+  - 补齐公开 DTO（api_contract.py）：`MikanCandidateDTO`（strict extra="forbid"，白名单
+    bangumi_id/title/mikan_url/poster_url/source_query/aliases/recommendation/
+    total_episodes/season_evidence/candidate_context，engine 字段在边界拒绝）与
+    `SeasonEvidenceDTO`（lenient _SnapshotBase，status/season/requires_review）；
+    `MikanCandidateResultDTO.candidates` 改为 `list[MikanCandidateDTO]`；重生成
+    docs/api/openapi.json 与 frontend/src/api/generated/api.ts（drift check 双守护）。
+  - 测试：Vitest 新增 candidateSearch.test.ts（17）与 WorkbenchView.test.ts（14，共 197 例
+    全过）；浏览器新增 `tests/browser/test_app_workbench.py` 18 例真实 Chromium（搜索/空态/
+    失败重试/解析摘要中文 label/季数确认/冲突禁用/候选选择草案/编辑重算/保存跳转/fallback
+    门控与校验/敏感边界（fallback URL 不进 URL/localStorage/sessionStorage/bodyText）/360px
+    无横向溢出）。
+  - 文档：frontend/AGENTS.md（US-204 章节）、src/apps/migu_orca_web/AGENTS.md（MiKan 候选
+    公开 DTO 章节）、README（Stage 27 段落 + US-204）、stage PRD 文档（US-204 完成记录）、
+    scripts/ralph/prd.json（US-204 passes: true）。
+- Files changed
+  - 新增：frontend/src/features/workbench/{WorkbenchView.vue, CandidateCard.vue,
+    DraftPreviewPanel.vue, candidateSearch.ts, candidateSearch.test.ts, WorkbenchView.test.ts}、
+    tests/browser/test_app_workbench.py
+  - 修改：src/apps/migu_orca_web/api_contract.py（MikanCandidateDTO/SeasonEvidenceDTO +
+    MikanCandidateResultDTO 白名单）、docs/api/openapi.json、frontend/src/api/generated/api.ts、
+    tests/api_contract/test_dto_contracts.py（+1 例敏感字段拒绝）、frontend/AGENTS.md、
+    src/apps/migu_orca_web/AGENTS.md、README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 候选/草案 feature 复用已迁移的 Request 展示逻辑：`effectiveSeeds`/`excludedSeeds`/
+      `completeSeedGroups`/`totalCompleteSeedCount`/`displayValue` 直接来自
+      `features/requests/requestDetail.ts`，DraftPreviewPanel 不复制第二套 Seeds 渲染。
+    - 生成草案 → preview-modify → preview-save 的三段式：draft_id 只存组件局部 ref，
+      保存成功后清空并 `router.push('/requests?request_id=...')` 交给 US-203 面板；与
+      US-194 服务端权威草案边界完全一致。
+    - 候选卡片是「父组件持有确认状态、卡片只发事件」模式：WorkbenchView 用
+      `seasonConfirmations` ref 记录每个 bangumi_id 的确认季数，CandidateCard 只渲染
+      checkbox 并 `update:confirmedSeason`；父组件构造 create payload 时才读取。
+    - MikanCandidateResultDTO 的 candidates 从 `list[dict[str, Any]]` 收紧为
+      `list[MikanCandidateDTO]` 后，生成的 TS 类型自动带上每个候选的字段
+      （season_evidence/candidate_context 等），前端不再需要 `Record<string, unknown>`
+      收窄；OpenAPI 的 additionalProperties:false 也更强。
+  - Gotchas encountered
+    - SPA 通知断言不能用旧页的 `#page-notification`：新前端是
+      `.global-notification:not(:empty)`（aria-live 容器在 App.vue）。
+    - `page.route("**/api/v1/requests")` 只匹配精确路径，不会截获
+      `/api/v1/requests/preview-modify`/`preview-save`——所以 `_register_generation_capture`
+      可以同时让 preview 端点走真实后端（draft 在进程内 draft_store 里）。
+    - CheckboxRow 的 id 直接落在原生 input（inheritAttrs:false 转发），浏览器/单测用
+      `#mikan-fallback-enabled` 即可，不要写成 `#mikan-fallback-enabled input`（后者是
+      wrapper div + input 两层时才会需要）。
+    - 搜索失败时除了 notification.error 还要设置 searchError ref 才能渲染 ErrorState
+      （retry 按钮依赖它）；空 query 校验失败时先清空 searchResult 避免旧结果残留。
+    - WorkbenchView 顶部用独立 `<h2 id="workbench-heading">`（test_app_shell.py 断言
+      `#workbench-heading`），子面板用 PanelSection 的 h2（title prop），避免重复 id。
+  - Useful context
+    - 旧 app.js 对照基准：`searchMikanCandidates`（~3570 行）、`renderCandidateCard`
+      （~3431 行）、`candidateSelectionIsBlocked`（~3643 行）、`createPreviewDraftFromCandidate`
+      （~3690 行）、`buildPreviewEditForm`/`collectPreviewEditPatch`（~4433/4662 行）、
+      `previewModify`/`savePreviewRequest`（~4719/4618 行）、`renderTitleParseSummary`
+      （~1428 行）。
+    - US-205 迁移批量工作台时可复用：CandidateCard（候选浮层）、DraftPreviewPanel 的
+      preview-modify/save 模式（批量卡片 draft_id + preview_request）、candidateSearch 的
+      payload 构造；批量 parse 的 candidates/preview_request 结构在 services.py
+      `_build_batch_preview_request` 已有服务端权威草案。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（357 例全过，含新 18 例）。
 ---

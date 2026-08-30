@@ -333,6 +333,41 @@ def test_mikan_candidate_dto_accepts_optional_error() -> None:
         MikanCandidateResultDTO.model_validate({**payload, "raw_html": "<html>"})
 
 
+def test_mikan_candidate_dto_rejects_unknown_or_sensitive_fields() -> None:
+    """US-204: the candidate card whitelist rejects engine-only fields."""
+    candidate = {
+        "bangumi_id": "2353",
+        "title": "葬送的芙莉莲",
+        "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+        "poster_url": None,
+        "source_query": "芙莉莲",
+        "aliases": ["Frieren EN"],
+        "recommendation": None,
+        "total_episodes": 28,
+        "season_evidence": {"status": "NEEDS_CONFIRMATION", "season": 4, "requires_review": True},
+        "candidate_context": "opaque-context",
+    }
+    payload = {
+        "query": "芙莉莲",
+        "status": "FOUND",
+        "parse_result": {},
+        "attempted_queries": [],
+        "candidates": [candidate],
+        "error": None,
+    }
+    assert MikanCandidateResultDTO.model_validate(payload) is not None
+    # A raw engine field (raw HTML / RSS / token / cookie) must never pass the
+    # public candidate boundary.
+    for leaked in ("raw_html", "raw_rss_xml", "token", "cookie", "raw_response_body"):
+        with pytest.raises(ValidationError):
+            MikanCandidateResultDTO.model_validate(
+                {**payload, "candidates": [{**candidate, leaked: "secret"}]}
+            )
+    # Unknown envelope fields are rejected too.
+    with pytest.raises(ValidationError):
+        MikanCandidateResultDTO.model_validate({**payload, "leaked": 1})
+
+
 # ---------------------------------------------------------------------------
 # Preferences / Corrections
 # ---------------------------------------------------------------------------
