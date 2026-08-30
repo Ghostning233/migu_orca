@@ -68,8 +68,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-200 完成：建立共享组件原语——布局（PanelSection/FormField）、表单控件（BaseButton/BaseInput/BaseTextarea/BaseSelect/CheckboxRow，支持 v-model/$attrs 透传/aria-invalid）、确认对话框（ConfirmDialog.confirm() 返回 Promise<boolean>，role=alertdialog + focus trap + inert 背景 + Escape/backdrop 取消 + 焦点恢复）、焦点陷阱（useFocusTrap）、敏感凭据（useSensitiveFields：字段只存组件局部内存，模式切换/成功/取消/卸载主动清空，snapshot() 只返回非空值）、状态反馈（StatusAlert：error 用 role=alert，状态不只靠颜色）。新增 /app/components-demo 原语演示路由（迁移脚手架，US-209 删除）。Vitest 新增 26 例（useSensitiveFields 10、useFocusTrap 8、ConfirmDialog 8、BaseInput/BaseTextarea 6，共 61 例全过）；浏览器新增 test_components_primitives.py 8 例真实 Chromium（渲染/360px 无横向溢出/确认/取消/Escape+inert/敏感字段清空/必填错误）。全部门禁通过（typecheck/lint/unit/build/api:check、compileall/ruff、Python 1038 非浏览器 + 283 浏览器、node --check、git diff --check），仓库根 .migu_orca/storage 不存在。US-201 将在此基础上迁移 Settings（storage 偏好/非敏感偏好/qB/AB 连接测试/AB 提交上下文）。"
     },
     {
       "id": "US-201",

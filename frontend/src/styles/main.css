@@ -191,6 +191,14 @@ body {
   filter: brightness(0.92);
 }
 
+/* US-200: shared form primitives (BaseInput/BaseTextarea/BaseSelect live in
+   their component scoped styles; the `[hidden]` rule below preserves the
+   legacy HTML `hidden` attribute semantics that the new components rely on
+   for auth-mode toggling). */
+[hidden] {
+  display: none !important;
+}
+
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,

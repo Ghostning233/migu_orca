@@ -73,6 +73,35 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 全局错误边界：`components/feedback/ErrorBoundary.vue` 包住 `RouterView`，捕获渲染错误，
   不展示原始 error（可能含敏感值）。
 
+## 共享组件原语（US-200）
+
+- 布局：`components/layout/PanelSection.vue`（标题面板 + actions slot）、
+  `components/layout/FormField.vue`（label + 可选 help + required 指示；用 `inputId`
+  指定 label 的 `for`，注意不能用 `for` 作为 prop 名——Vue 模板里是保留字，eslint
+  vue/no-parsing-error 会报错）。
+- 表单控件：`components/forms/BaseButton.vue`（variant: primary/secondary/danger，
+  `loading` 显示「处理中…」并禁用）、`BaseInput.vue` / `BaseTextarea.vue`（v-model +
+  `aria-label`/`aria-invalid` + `$attrs` 透传）、`BaseSelect.vue`（options 支持
+  `string | {value,label}`，显示中文 label、value 只作内部码）、`CheckboxRow.vue`
+  （label + 原生 checkbox，id 用 `useId()` 生成唯一值）。
+- 确认对话框：`components/feedback/ConfirmDialog.vue` 是 `window.confirm` 的可访问替代
+  （`role="alertdialog"` + `aria-modal` + focus trap + inert 背景 + Escape/backdrop 取消 +
+  关闭后焦点恢复到触发元素）。**用 ref + `confirm({title,message,confirmLabel,cancelLabel,
+  danger})` 返回 Promise<boolean>**；`danger: true` 渲染 `.danger-button`。
+- 焦点陷阱：`app/composables/useFocusTrap.ts`（Tab/Shift+Tab 循环、Escape 回调、
+  兄弟元素 `inert`、deactivate 时焦点恢复）。**trap 锚点要放在 Teleport 根（backdrop）上**，
+  否则 `inert` 会标到对话框内部而不是 `#app`。
+- 敏感凭据：`app/composables/useSensitiveFields.ts`（`field/set/reset/clearAll/snapshot/
+  firstMissing/get`）。字段只存在组件局部 reactive 内存，**切换认证模式/成功/取消/卸载时
+  必须 `reset()`/`clearAll()`**；`snapshot()` 只返回非空值用于单次 POST body；
+  `onUnmounted` 用 `getCurrentInstance()` 守卫（无组件实例时不注册，便于纯单测）。
+- 状态反馈：`components/feedback/StatusAlert.vue`（success/info/empty → `role=status`
+  polite，error → `role=alert` assertive；状态不只靠颜色表达）。
+- 浏览器验证原语：`/app/components-demo` 路由（`features/components/
+  ComponentsDemoView.vue`）渲染全部原语，供
+  `tests/browser/test_components_primitives.py` 真实 Chromium 验证（含 360px 无横向溢出、
+  确认流程、Escape/inert、敏感字段清空）。该路由是迁移脚手架，US-209 删除。
+
 ## 测试模式
 
 - `src/App.test.ts` 用 `createMemoryHistory('/app/')` + 与真实路由同表的 stub 组件测外壳；

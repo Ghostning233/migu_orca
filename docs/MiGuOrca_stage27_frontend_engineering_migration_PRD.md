@@ -213,6 +213,20 @@ App 外壳测试扩至 4 路由+通知；浏览器 `test_app_shell.py` 更新为
 - 敏感表单不进入持久化 store，模式切换、成功、取消、卸载时清空。
 - 组件默认支持 label、键盘、ARIA 状态、reduced motion 和 360px 布局。
 
+**US-200 完成**：建立共享组件原语——布局（`components/layout/PanelSection.vue`、
+`FormField.vue`）、表单控件（`components/forms/BaseButton/BaseInput/BaseTextarea/
+BaseSelect/CheckboxRow.vue`，全部支持 v-model/attrs 透传/aria-invalid）、确认对话框
+（`components/feedback/ConfirmDialog.vue`，`confirm()` 返回 Promise<boolean>，
+`role="alertdialog"` + focus trap + inert 背景 + Escape/backdrop 取消 + 焦点恢复）、
+焦点陷阱（`app/composables/useFocusTrap.ts`）、敏感凭据（`app/composables/
+useSensitiveFields.ts`，字段只存组件局部内存，模式切换/成功/取消/卸载主动清空，
+`snapshot()` 只返回非空值）、状态反馈（`components/feedback/StatusAlert.vue`，
+error 用 role=alert，状态不只靠颜色）。新增 `/app/components-demo` 原语演示路由
+（迁移脚手架，US-209 删除）。Vitest 新增 26 例（useSensitiveFields 10、
+useFocusTrap 8、ConfirmDialog 8、BaseInput/BaseTextarea 6 例共 61 例全过）；
+浏览器新增 `tests/browser/test_components_primitives.py` 8 例真实 Chromium
+（渲染/360px 无横向溢出/确认/取消/Escape+inert/敏感字段清空/必填错误），全部门禁通过。
+
 ### US-201：迁移 Settings
 
 - 迁移 storage profile、非敏感偏好、qB/AB 连接测试和 AB Request 提交上下文。

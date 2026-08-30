@@ -2,6 +2,21 @@
 
 ## Codebase Patterns
 
+- US-200 起共享组件原语在 `frontend/src/components/`：layout（PanelSection/FormField）、
+  forms（BaseButton/BaseInput/BaseTextarea/BaseSelect/CheckboxRow，v-model + attrs 透传 +
+  aria-invalid）、feedback（ConfirmDialog/StatusAlert）；focus 用
+  `app/composables/useFocusTrap.ts`，敏感凭据用 `app/composables/useSensitiveFields.ts`
+  （字段只存组件局部内存，模式切换/成功/取消/卸载主动清空）。新 feature 必须复用这些
+  原语，不得复制安全/确认/状态逻辑。
+- ConfirmDialog 用 ref + `confirm({title,message,confirmLabel,cancelLabel,danger})` 返回
+  Promise<boolean>；`danger: true` 渲染 danger-button。useFocusTrap 锚点放在 Teleport 根
+  （backdrop）上，否则 inert 标错对象；浏览器测试查 `#app` 的 inert。
+- BaseInput/BaseTextarea 必须自己 emit `update:modelValue` 才支持 v-model；Vue SFC prop
+  不能用保留字 `for`（用 `inputId`）。jsdom 测 Teleport 组件用
+  `attachTo: document.body` + `stubs: {teleport: true}`。
+- 浏览器验证原语/迁移脚手架路由：`/app/components-demo`
+  （features/components/ComponentsDemoView.vue，不加入导航），配套
+  tests/browser/test_components_primitives.py；该路由在 US-209 删除。
 - Python 依赖、检查和测试统一通过 `uv`；前端依赖统一在 `frontend/` 使用 `npm ci`，不得混用 lockfile。
 - Stage 27 只通过 `docs/api/openapi.json` 生成 TypeScript 类型/client；不得导入 Python 模型、手写第二套响应 interface 或从旧 `app.js` 复制业务状态机。
 - US-198 起类型化客户端由 `openapi-typescript@7.13.0` 生成：`cd frontend && npm run api:generate`
@@ -238,4 +253,70 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       LoadingState/ErrorState。
     - 浏览器测试前置：仓库根 `.migu_orca/storage` 不存在；本机跑浏览器套件需
       `UV_CACHE_DIR=$PWD/.uv-cache` 与 `LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/...`。
+---
+
+## 2026-08-30 20:55:00 CST - US-200
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 建立共享组件原语（frontend/src/components/）：
+    - layout/：PanelSection.vue（标题面板 + actions slot）、FormField.vue（label +
+      可选 help + required 指示；用 `inputId` 指定 label 的 `for`）。
+    - forms/：BaseButton.vue（primary/secondary/danger + loading「处理中…」）、
+      BaseInput.vue / BaseTextarea.vue（v-model + aria-label/aria-invalid + attrs
+      透传）、BaseSelect.vue（options 支持 string | {value,label}）、CheckboxRow.vue
+      （label + 原生 checkbox，id 用 useId()）。
+    - feedback/：ConfirmDialog.vue（ref + confirm() 返回 Promise<boolean>；
+      role=alertdialog + aria-modal + focus trap + inert 背景 + Escape/backdrop 取消 +
+      关闭后焦点恢复）、StatusAlert.vue（success/info/empty→role=status，error→role=alert
+      assertive）。
+  - focus primitive：app/composables/useFocusTrap.ts（Tab/Shift+Tab 循环、Escape 回调、
+    兄弟元素 inert、deactivate 焦点恢复）。
+  - credential-form primitive：app/composables/useSensitiveFields.ts（field/set/reset/
+    clearAll/snapshot/firstMissing/get；字段只存组件局部 reactive 内存；切换认证模式/
+    成功/取消/卸载主动清空；snapshot() 只返回非空值；onUnmounted 用 getCurrentInstance
+    守卫）。
+  - 浏览器验证路由 /app/components-demo（features/components/ComponentsDemoView.vue，
+    懒加载，不加入导航；US-209 随迁移脚手架删除）。
+  - 测试：Vitest 新增 useSensitiveFields.test.ts（10）、useFocusTrap.test.ts（8）、
+    ConfirmDialog.test.ts（8）、BaseFormControls.test.ts（6），共 61 例全过；
+    浏览器新增 tests/browser/test_components_primitives.py 8 例真实 Chromium
+    （渲染/360px 无横向溢出/确认/取消/Escape+inert 背景/敏感字段成功清空/取消清空/
+    必填错误 alert）。
+  - 文档：frontend/AGENTS.md 新增「共享组件原语（US-200）」章节；stage PRD US-200 完成。
+- Files changed
+  - 新增：frontend/src/components/{layout,forms}/*、ConfirmDialog.vue、StatusAlert.vue、
+    useFocusTrap.ts(+test)、useSensitiveFields.ts(+test)、ConfirmDialog.test.ts、
+    BaseFormControls.test.ts、features/components/ComponentsDemoView.vue、
+    tests/browser/test_components_primitives.py
+  - 修改：frontend/src/app/router/index.ts（+components-demo 路由）、App.test.ts（路由表
+    同步）、styles/main.css（[hidden] 规则）、frontend/AGENTS.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、scripts/ralph/prd.json
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - ConfirmDialog 用 ref + `confirm({...})` 返回 Promise<boolean>，feature 里
+      `await confirmDialog.value?.confirm({...})` 即可；危险操作传 `danger: true`
+      渲染 danger-button。
+    - useFocusTrap 的锚点必须放在 Teleport 根（backdrop）上：这样 inert 会标到
+      兄弟的 `#app`，而不是对话框内部元素；若锚在内层 dialog，inert 断言会失败。
+    - useSensitiveFields 是"每组件一个实例"的 composable，字段值用 computed v-model
+      绑定到 BaseInput；clearAll/reset 后 DOM 输入框自动清空（因为 v-model 是单向
+      value + update 事件）。
+    - BaseInput/BaseTextarea 必须自己 emit update:modelValue 才支持 v-model；只透传
+      $attrs 时填值不会进 model、清 model 也不会清 DOM（浏览器测试暴露）。
+    - Vue SFC prop 名不能用保留字 `for`（eslint vue/no-parsing-error）；用 `inputId`。
+    - jsdom 单测 ConfirmDialog 用 `attachTo: document.body` + `stubs: {teleport: true}`
+      才能测到 Teleport 内容；焦点断言在 requestAnimationFrame 后。
+  - Gotchas encountered
+    - 浏览器测试 .danger-button 只存在于打开的 dialog 内，渲染断言要先打开 dialog。
+    - 360px 断言用 `body.scrollWidth <= window.innerWidth`；dialog 宽度断言用
+      bounding_box()["width"]。
+    - 浏览器测试对 Teleport 到 body 的 dialog：inert 断言查 `#app`（body 的兄弟），
+      不是页面内的 panel。
+  - Useful context
+    - US-201 迁移 Settings 时复用：PanelSection/FormField 做分区布局，BaseInput/
+      BaseSelect/CheckboxRow 做 storage 偏好与非敏感偏好表单，useSensitiveFields +
+      BaseInput 做 qB/AB 凭据表单（auth 模式切换调 reset()，成功调 clearAll()），
+      ConfirmDialog 做恢复默认/提交确认，StatusAlert 做 status 反馈。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（283 例全过，含新 8 例）。
 ---

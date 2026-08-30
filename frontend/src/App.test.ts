@@ -38,6 +38,11 @@ function makeRouter() {
         name: 'settings',
         component: { template: '<p class="shell-route">Settings 路由内容</p>' },
       },
+      {
+        path: '/components-demo',
+        name: 'components-demo',
+        component: { template: '<p class="shell-route">组件原语路由内容</p>' },
+      },
     ],
   })
 }

@@ -46,6 +46,17 @@ export const router = createRouter({
       component: () => import('@/features/settings/SettingsView.vue'),
       meta: { title: 'Settings' },
     },
+    // US-200 primitive gallery. This route is a staging artifact used by the
+    // real-Chromium verification test (tests/browser/test_components_primitives.py);
+    // it is not part of the user-facing navigation. US-201+ builds the real
+    // features on the same primitives, and US-209 removes this route together
+    // with the other migration scaffolding.
+    {
+      path: '/components-demo',
+      name: 'components-demo',
+      component: () => import('@/features/components/ComponentsDemoView.vue'),
+      meta: { title: '组件原语' },
+    },
   ],
 })
 
