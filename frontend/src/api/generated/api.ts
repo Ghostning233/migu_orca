@@ -1176,10 +1176,24 @@ export interface operations {
                      *       "ok": true,
                      *       "result": {
                      *         "version": 1,
-                     *         "subtitle_groups": {},
-                     *         "filter_defaults": {},
-                     *         "naming": {},
-                     *         "search": {}
+                     *         "subtitle_groups": {
+                     *           "preferred": [],
+                     *           "excluded": [],
+                     *           "fallback": "示例"
+                     *         },
+                     *         "filter_defaults": {
+                     *           "must_contain": "示例",
+                     *           "must_not_contain": "示例",
+                     *           "use_regex": true,
+                     *           "case_sensitive": true
+                     *         },
+                     *         "naming": {
+                     *           "strategy": "示例",
+                     *           "template": "示例"
+                     *         },
+                     *         "search": {
+                     *           "reuse_explicit_corrections": true
+                     *         }
                      *       }
                      *     }
                      */
@@ -1190,21 +1204,53 @@ export interface operations {
                         result: {
                             /** Version */
                             version: number;
-                            /** Subtitle Groups */
+                            /**
+                             * SubtitleGroupPreferenceDTO
+                             * @description Non-sensitive subtitle-group preference section.
+                             *
+                             *     ``preferred``/``excluded`` are display lists (Chinese business names);
+                             *     ``fallback`` is the stable internal code (``next_preferred``/``none``)
+                             *     rendered via the shared select primitive — never shown as raw text.
+                             */
                             subtitle_groups: {
-                                [key: string]: unknown;
+                                /** Preferred */
+                                preferred: string[];
+                                /** Excluded */
+                                excluded: string[];
+                                /** Fallback */
+                                fallback: string;
                             };
-                            /** Filter Defaults */
+                            /**
+                             * FilterDefaultsDTO
+                             * @description Non-sensitive default filter rule section.
+                             */
                             filter_defaults: {
-                                [key: string]: unknown;
+                                /** Must Contain */
+                                must_contain: string;
+                                /** Must Not Contain */
+                                must_not_contain: string;
+                                /** Use Regex */
+                                use_regex: boolean;
+                                /** Case Sensitive */
+                                case_sensitive: boolean;
                             };
-                            /** Naming */
+                            /**
+                             * NamingPreferenceDTO
+                             * @description Non-sensitive default naming section (folder-name defaults only).
+                             */
                             naming: {
-                                [key: string]: unknown;
+                                /** Strategy */
+                                strategy: string;
+                                /** Template */
+                                template: string;
                             };
-                            /** Search */
+                            /**
+                             * SearchPreferenceDTO
+                             * @description Non-sensitive default search section.
+                             */
                             search: {
-                                [key: string]: unknown;
+                                /** Reuse Explicit Corrections */
+                                reuse_explicit_corrections: boolean;
                             };
                         };
                     };
@@ -1319,10 +1365,24 @@ export interface operations {
                      *       "ok": true,
                      *       "result": {
                      *         "version": 1,
-                     *         "subtitle_groups": {},
-                     *         "filter_defaults": {},
-                     *         "naming": {},
-                     *         "search": {}
+                     *         "subtitle_groups": {
+                     *           "preferred": [],
+                     *           "excluded": [],
+                     *           "fallback": "示例"
+                     *         },
+                     *         "filter_defaults": {
+                     *           "must_contain": "示例",
+                     *           "must_not_contain": "示例",
+                     *           "use_regex": true,
+                     *           "case_sensitive": true
+                     *         },
+                     *         "naming": {
+                     *           "strategy": "示例",
+                     *           "template": "示例"
+                     *         },
+                     *         "search": {
+                     *           "reuse_explicit_corrections": true
+                     *         }
                      *       }
                      *     }
                      */
@@ -1333,21 +1393,53 @@ export interface operations {
                         result: {
                             /** Version */
                             version: number;
-                            /** Subtitle Groups */
+                            /**
+                             * SubtitleGroupPreferenceDTO
+                             * @description Non-sensitive subtitle-group preference section.
+                             *
+                             *     ``preferred``/``excluded`` are display lists (Chinese business names);
+                             *     ``fallback`` is the stable internal code (``next_preferred``/``none``)
+                             *     rendered via the shared select primitive — never shown as raw text.
+                             */
                             subtitle_groups: {
-                                [key: string]: unknown;
+                                /** Preferred */
+                                preferred: string[];
+                                /** Excluded */
+                                excluded: string[];
+                                /** Fallback */
+                                fallback: string;
                             };
-                            /** Filter Defaults */
+                            /**
+                             * FilterDefaultsDTO
+                             * @description Non-sensitive default filter rule section.
+                             */
                             filter_defaults: {
-                                [key: string]: unknown;
+                                /** Must Contain */
+                                must_contain: string;
+                                /** Must Not Contain */
+                                must_not_contain: string;
+                                /** Use Regex */
+                                use_regex: boolean;
+                                /** Case Sensitive */
+                                case_sensitive: boolean;
                             };
-                            /** Naming */
+                            /**
+                             * NamingPreferenceDTO
+                             * @description Non-sensitive default naming section (folder-name defaults only).
+                             */
                             naming: {
-                                [key: string]: unknown;
+                                /** Strategy */
+                                strategy: string;
+                                /** Template */
+                                template: string;
                             };
-                            /** Search */
+                            /**
+                             * SearchPreferenceDTO
+                             * @description Non-sensitive default search section.
+                             */
                             search: {
-                                [key: string]: unknown;
+                                /** Reuse Explicit Corrections */
+                                reuse_explicit_corrections: boolean;
                             };
                         };
                     };
@@ -4289,7 +4381,13 @@ export interface operations {
                      *         },
                      *         "saved_request": null,
                      *         "draft_id": null,
-                     *         "ab_submit_result": {},
+                     *         "ab_submit_result": {
+                     *           "success": true,
+                     *           "ab_subscription_id": "示例",
+                     *           "ab_response": {},
+                     *           "fallback_config": null,
+                     *           "error": null
+                     *         },
                      *         "saved_ab_result": null
                      *       }
                      *     }
@@ -4339,9 +4437,37 @@ export interface operations {
                              * @default null
                              */
                             draft_id: string | null;
-                            /** Ab Submit Result */
+                            /**
+                             * AbSubmitResultDTO
+                             * @description Public Auto Bangumi submit-result whitelist.
+                             *
+                             *     ``ab_response`` is sanitized by ``_sanitize_ab_submit_result`` (never
+                             *     carries tokens/cookies/URLs); ``fallback_config`` is an opaque
+                             *     non-sensitive fallback payload when enabled.
+                             */
                             ab_submit_result: {
-                                [key: string]: unknown;
+                                /** Success */
+                                success: boolean;
+                                /** Ab Subscription Id */
+                                ab_subscription_id: string | null;
+                                /** Ab Response */
+                                ab_response: {
+                                    [key: string]: unknown;
+                                };
+                                /**
+                                 * Fallback Config
+                                 * @default null
+                                 */
+                                fallback_config: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Error
+                                 * @default null
+                                 */
+                                error: {
+                                    [key: string]: unknown;
+                                } | null;
                             };
                             /**
                              * Saved Ab Result

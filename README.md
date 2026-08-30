@@ -647,6 +647,10 @@ npm run dev               # Vite dev server（代理 /api/v1 到 http://127.0.0.
   （US-198），不导入 Python 模型、不手写第二套响应 interface。
 - 安全边界与旧前端一致：endpoint、token、cookie、password、原始响应等敏感值只存在于
   组件局部内存与单次 POST body，不进入 store 持久化、URL、browser storage、日志或 trace。
+- US-201 已迁移 Settings 到 `/app/settings`：Storage 偏好（localStorage 只存服务端相对
+  profile）、偏好默认值（`/api/v1/preferences`，保存失败回退到上次成功值并清空被拒绝的
+  敏感输入）、qBittorrent 与 Auto Bangumi 连接测试和 AB 提交上下文（`request_id` 来自
+  URL query）；连接测试/提交失败只显示固定中文反馈，绝不渲染服务端原始错误（可能含凭据）。
 
 ## 参考文档
 

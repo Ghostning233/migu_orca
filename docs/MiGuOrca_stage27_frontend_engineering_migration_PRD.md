@@ -233,6 +233,22 @@ useFocusTrap 8、ConfirmDialog 8、BaseInput/BaseTextarea 6 例共 61 例全过�
 - 补齐 preferences/connections/submit-ab 的公开 DTO 和生成类型。
 - 保持确认、HTTP 分类、错误脱敏、URL Request 上下文与敏感字段清理。
 
+**完成记录（2026-08-30）**：`/app/settings` 四个分区全部迁移到共享原语——
+Storage 偏好（`frontend/src/features/settings/storagePreferences.ts`，localStorage 只存
+服务端相对 profile，绝对路径/穿越值回退服务端根）、偏好默认值
+（`preferences.ts` + `/api/v1/preferences`，保存失败回退到上次成功值并清空被拒绝的敏感
+输入，恢复默认需确认）、qBittorrent（`useSensitiveFields` + 确认 + 成功后清空）、
+Auto Bangumi（连接测试 + `request_id` 提交上下文 + 认证模式切换清空）。补齐公开 DTO：
+`AbSubmitResultDTO`（`ab_submit_result` 白名单）、`SubtitleGroupPreferenceDTO`/
+`FilterDefaultsDTO`/`NamingPreferenceDTO`/`SearchPreferenceDTO`（深层偏好结构）并重新生成
+`docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`。连接测试/提交失败只显示
+固定中文反馈，绝不渲染服务端原始错误（可能含凭据）。修复 `CheckboxRow`：支持
+`v-model:checked`（checked prop + update:checked emit）、`inheritAttrs: false` 让 `id`
+只落在原生 input（不再重复到包装 div）。Vitest 新增 34 例（storagePreferences 12、
+preferences 5、SettingsView 17），浏览器新增 `tests/browser/test_app_settings.py` 18 例
+真实 Chromium（四分区旅程、敏感值不落盘、360px、错误 role=alert），全套 301 例浏览器 +
+1038 非浏览器全过。
+
 ### US-202：迁移 Request 列表
 
 - 迁移列表加载、搜索、状态筛选、排序、计数、空状态和路由选择。

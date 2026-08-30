@@ -22,13 +22,18 @@ const helpId = computed(() => `${fieldId.value}-help`)
 
 <template>
   <div class="form-field" :class="{ 'form-field-required': required }">
-    <label v-if="inputId" :for="inputId" class="form-field-label">
-      {{ label }}<span v-if="required" class="visually-hidden">（必填）</span>
-    </label>
-    <label v-else class="form-field-label">
-      {{ label }}<span v-if="required" class="visually-hidden">（必填）</span>
+    <template v-if="inputId">
+      <label :for="inputId" class="form-field-label">
+        {{ label }}<span v-if="required" class="visually-hidden">（必填）</span>
+      </label>
       <slot />
-    </label>
+    </template>
+    <template v-else>
+      <label class="form-field-label">
+        {{ label }}<span v-if="required" class="visually-hidden">（必填）</span>
+        <slot />
+      </label>
+    </template>
     <p v-if="help" :id="helpId" class="field-help">{{ help }}</p>
   </div>
 </template>

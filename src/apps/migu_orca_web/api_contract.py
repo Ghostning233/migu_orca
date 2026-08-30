@@ -118,8 +118,23 @@ class RequestDeleteResultDTO(_StrictBase):
     deleted: bool
 
 
+class AbSubmitResultDTO(_StrictBase):
+    """Public Auto Bangumi submit-result whitelist.
+
+    ``ab_response`` is sanitized by ``_sanitize_ab_submit_result`` (never
+    carries tokens/cookies/URLs); ``fallback_config`` is an opaque
+    non-sensitive fallback payload when enabled.
+    """
+
+    success: bool
+    ab_subscription_id: str | None
+    ab_response: dict[str, Any]
+    fallback_config: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+
+
 class RequestAbSubmitResultDTO(RequestCreateResultDTO):
-    ab_submit_result: dict[str, Any]
+    ab_submit_result: AbSubmitResultDTO
     saved_ab_result: dict[str, Any] | None = None
 
 
@@ -142,12 +157,47 @@ class MikanCandidateResultDTO(_StrictBase):
 # ---------------------------------------------------------------------------
 
 
+class SubtitleGroupPreferenceDTO(_StrictBase):
+    """Non-sensitive subtitle-group preference section.
+
+    ``preferred``/``excluded`` are display lists (Chinese business names);
+    ``fallback`` is the stable internal code (``next_preferred``/``none``)
+    rendered via the shared select primitive — never shown as raw text.
+    """
+
+    preferred: list[str]
+    excluded: list[str]
+    fallback: str
+
+
+class FilterDefaultsDTO(_StrictBase):
+    """Non-sensitive default filter rule section."""
+
+    must_contain: str
+    must_not_contain: str
+    use_regex: bool
+    case_sensitive: bool
+
+
+class NamingPreferenceDTO(_StrictBase):
+    """Non-sensitive default naming section (folder-name defaults only)."""
+
+    strategy: str
+    template: str
+
+
+class SearchPreferenceDTO(_StrictBase):
+    """Non-sensitive default search section."""
+
+    reuse_explicit_corrections: bool
+
+
 class PreferenceResultDTO(_StrictBase):
     version: int
-    subtitle_groups: dict[str, Any]
-    filter_defaults: dict[str, Any]
-    naming: dict[str, Any]
-    search: dict[str, Any]
+    subtitle_groups: SubtitleGroupPreferenceDTO
+    filter_defaults: FilterDefaultsDTO
+    naming: NamingPreferenceDTO
+    search: SearchPreferenceDTO
 
 
 class CorrectionsResultDTO(_StrictBase):

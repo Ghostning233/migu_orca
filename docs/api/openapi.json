@@ -1153,23 +1153,99 @@
                           "type": "integer"
                         },
                         "subtitle_groups": {
-                          "additionalProperties": true,
-                          "title": "Subtitle Groups",
+                          "additionalProperties": false,
+                          "description": "Non-sensitive subtitle-group preference section.\n\n``preferred``/``excluded`` are display lists (Chinese business names);\n``fallback`` is the stable internal code (``next_preferred``/``none``)\nrendered via the shared select primitive — never shown as raw text.",
+                          "properties": {
+                            "preferred": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "title": "Preferred",
+                              "type": "array"
+                            },
+                            "excluded": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "title": "Excluded",
+                              "type": "array"
+                            },
+                            "fallback": {
+                              "title": "Fallback",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "preferred",
+                            "excluded",
+                            "fallback"
+                          ],
+                          "title": "SubtitleGroupPreferenceDTO",
                           "type": "object"
                         },
                         "filter_defaults": {
-                          "additionalProperties": true,
-                          "title": "Filter Defaults",
+                          "additionalProperties": false,
+                          "description": "Non-sensitive default filter rule section.",
+                          "properties": {
+                            "must_contain": {
+                              "title": "Must Contain",
+                              "type": "string"
+                            },
+                            "must_not_contain": {
+                              "title": "Must Not Contain",
+                              "type": "string"
+                            },
+                            "use_regex": {
+                              "title": "Use Regex",
+                              "type": "boolean"
+                            },
+                            "case_sensitive": {
+                              "title": "Case Sensitive",
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "must_contain",
+                            "must_not_contain",
+                            "use_regex",
+                            "case_sensitive"
+                          ],
+                          "title": "FilterDefaultsDTO",
                           "type": "object"
                         },
                         "naming": {
-                          "additionalProperties": true,
-                          "title": "Naming",
+                          "additionalProperties": false,
+                          "description": "Non-sensitive default naming section (folder-name defaults only).",
+                          "properties": {
+                            "strategy": {
+                              "title": "Strategy",
+                              "type": "string"
+                            },
+                            "template": {
+                              "title": "Template",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "strategy",
+                            "template"
+                          ],
+                          "title": "NamingPreferenceDTO",
                           "type": "object"
                         },
                         "search": {
-                          "additionalProperties": true,
-                          "title": "Search",
+                          "additionalProperties": false,
+                          "description": "Non-sensitive default search section.",
+                          "properties": {
+                            "reuse_explicit_corrections": {
+                              "title": "Reuse Explicit Corrections",
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "reuse_explicit_corrections"
+                          ],
+                          "title": "SearchPreferenceDTO",
                           "type": "object"
                         }
                       },
@@ -1189,10 +1265,24 @@
                   "ok": true,
                   "result": {
                     "version": 1,
-                    "subtitle_groups": {},
-                    "filter_defaults": {},
-                    "naming": {},
-                    "search": {}
+                    "subtitle_groups": {
+                      "preferred": [],
+                      "excluded": [],
+                      "fallback": "示例"
+                    },
+                    "filter_defaults": {
+                      "must_contain": "示例",
+                      "must_not_contain": "示例",
+                      "use_regex": true,
+                      "case_sensitive": true
+                    },
+                    "naming": {
+                      "strategy": "示例",
+                      "template": "示例"
+                    },
+                    "search": {
+                      "reuse_explicit_corrections": true
+                    }
                   }
                 }
               }
@@ -1347,23 +1437,99 @@
                           "type": "integer"
                         },
                         "subtitle_groups": {
-                          "additionalProperties": true,
-                          "title": "Subtitle Groups",
+                          "additionalProperties": false,
+                          "description": "Non-sensitive subtitle-group preference section.\n\n``preferred``/``excluded`` are display lists (Chinese business names);\n``fallback`` is the stable internal code (``next_preferred``/``none``)\nrendered via the shared select primitive — never shown as raw text.",
+                          "properties": {
+                            "preferred": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "title": "Preferred",
+                              "type": "array"
+                            },
+                            "excluded": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "title": "Excluded",
+                              "type": "array"
+                            },
+                            "fallback": {
+                              "title": "Fallback",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "preferred",
+                            "excluded",
+                            "fallback"
+                          ],
+                          "title": "SubtitleGroupPreferenceDTO",
                           "type": "object"
                         },
                         "filter_defaults": {
-                          "additionalProperties": true,
-                          "title": "Filter Defaults",
+                          "additionalProperties": false,
+                          "description": "Non-sensitive default filter rule section.",
+                          "properties": {
+                            "must_contain": {
+                              "title": "Must Contain",
+                              "type": "string"
+                            },
+                            "must_not_contain": {
+                              "title": "Must Not Contain",
+                              "type": "string"
+                            },
+                            "use_regex": {
+                              "title": "Use Regex",
+                              "type": "boolean"
+                            },
+                            "case_sensitive": {
+                              "title": "Case Sensitive",
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "must_contain",
+                            "must_not_contain",
+                            "use_regex",
+                            "case_sensitive"
+                          ],
+                          "title": "FilterDefaultsDTO",
                           "type": "object"
                         },
                         "naming": {
-                          "additionalProperties": true,
-                          "title": "Naming",
+                          "additionalProperties": false,
+                          "description": "Non-sensitive default naming section (folder-name defaults only).",
+                          "properties": {
+                            "strategy": {
+                              "title": "Strategy",
+                              "type": "string"
+                            },
+                            "template": {
+                              "title": "Template",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "strategy",
+                            "template"
+                          ],
+                          "title": "NamingPreferenceDTO",
                           "type": "object"
                         },
                         "search": {
-                          "additionalProperties": true,
-                          "title": "Search",
+                          "additionalProperties": false,
+                          "description": "Non-sensitive default search section.",
+                          "properties": {
+                            "reuse_explicit_corrections": {
+                              "title": "Reuse Explicit Corrections",
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "reuse_explicit_corrections"
+                          ],
+                          "title": "SearchPreferenceDTO",
                           "type": "object"
                         }
                       },
@@ -1383,10 +1549,24 @@
                   "ok": true,
                   "result": {
                     "version": 1,
-                    "subtitle_groups": {},
-                    "filter_defaults": {},
-                    "naming": {},
-                    "search": {}
+                    "subtitle_groups": {
+                      "preferred": [],
+                      "excluded": [],
+                      "fallback": "示例"
+                    },
+                    "filter_defaults": {
+                      "must_contain": "示例",
+                      "must_not_contain": "示例",
+                      "use_regex": true,
+                      "case_sensitive": true
+                    },
+                    "naming": {
+                      "strategy": "示例",
+                      "template": "示例"
+                    },
+                    "search": {
+                      "reuse_explicit_corrections": true
+                    }
                   }
                 }
               }
@@ -6385,8 +6565,62 @@
                           "title": "Draft Id"
                         },
                         "ab_submit_result": {
-                          "additionalProperties": true,
-                          "title": "Ab Submit Result",
+                          "additionalProperties": false,
+                          "description": "Public Auto Bangumi submit-result whitelist.\n\n``ab_response`` is sanitized by ``_sanitize_ab_submit_result`` (never\ncarries tokens/cookies/URLs); ``fallback_config`` is an opaque\nnon-sensitive fallback payload when enabled.",
+                          "properties": {
+                            "success": {
+                              "title": "Success",
+                              "type": "boolean"
+                            },
+                            "ab_subscription_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Ab Subscription Id"
+                            },
+                            "ab_response": {
+                              "additionalProperties": true,
+                              "title": "Ab Response",
+                              "type": "object"
+                            },
+                            "fallback_config": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": true,
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Fallback Config"
+                            },
+                            "error": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": true,
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Error"
+                            }
+                          },
+                          "required": [
+                            "success",
+                            "ab_subscription_id",
+                            "ab_response"
+                          ],
+                          "title": "AbSubmitResultDTO",
                           "type": "object"
                         },
                         "saved_ab_result": {
@@ -6431,7 +6665,13 @@
                     },
                     "saved_request": null,
                     "draft_id": null,
-                    "ab_submit_result": {},
+                    "ab_submit_result": {
+                      "success": true,
+                      "ab_subscription_id": "示例",
+                      "ab_response": {},
+                      "fallback_config": null,
+                      "error": null
+                    },
                     "saved_ab_result": null
                   }
                 }

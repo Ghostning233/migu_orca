@@ -3,22 +3,46 @@
 //
 // Labeled checkbox with the legacy "checkbox-row" layout: label text next to
 // the native checkbox (not a wrapping label, so the id/for pair stays
-// explicit). `label` is the accessible name; the checkbox itself receives
-// `v-bind="$attrs"` (id, name, checked via v-model, ...). The label/for id is
-// unique per instance via Vue's useId.
-import { useId } from 'vue'
+// explicit). Supports `v-model:checked` (checked prop + update:checked emit)
+// like the other form primitives; `label` is the accessible name.
+//
+// Attribute handling: the root is a wrapper div, so `inheritAttrs` is disabled
+// and only the checkbox-relevant attributes (id, name, disabled, ...) are
+// forwarded to the native input — `id` must reach the input (FormField uses it
+// for the label `for`), never a duplicate on the wrapper.
+import { computed, useAttrs, useId } from 'vue'
 
 defineProps<{
   label: string
   help?: string
+  checked?: boolean
 }>()
 
-const checkboxId = useId()
+const emit = defineEmits<{
+  (e: 'update:checked', value: boolean): void
+}>()
+
+defineOptions({ inheritAttrs: false })
+
+const attrs = useAttrs()
+const generatedId = useId()
+const checkboxId = computed(() => (typeof attrs.id === 'string' ? attrs.id : generatedId))
+
+function onChange(event: Event): void {
+  emit('update:checked', (event.target as HTMLInputElement).checked)
+}
 </script>
 
 <template>
   <div class="checkbox-row">
-    <input :id="checkboxId" type="checkbox" class="base-checkbox" v-bind="$attrs" />
+    <input
+      :id="checkboxId"
+      type="checkbox"
+      class="base-checkbox"
+      :checked="checked"
+      v-bind="attrs"
+      @change="onChange"
+    />
     <div class="checkbox-row-copy">
       <label :for="checkboxId" class="checkbox-row-label">{{ label }}</label>
       <p v-if="help" class="field-help checkbox-row-help">{{ help }}</p>

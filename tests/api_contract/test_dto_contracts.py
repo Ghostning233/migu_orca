@@ -157,7 +157,23 @@ def test_request_ab_submit_dto_requires_top_level_ab_result() -> None:
         RequestCreateResultDTO.model_validate(
             {**base, "ab_submit_result": {"success": True}}
         )
-    payload = {**base, "ab_submit_result": {"success": True}}
+    # A partial ``ab_submit_result`` (missing the required whitelist fields)
+    # fails the strict AbSubmitResultDTO...
+    with pytest.raises(ValidationError):
+        RequestAbSubmitResultDTO.model_validate(
+            {**base, "ab_submit_result": {"success": True}}
+        )
+    # ...and the full sanitized submit-result shape validates.
+    payload = {
+        **base,
+        "ab_submit_result": {
+            "success": True,
+            "ab_subscription_id": "ab-sub-1",
+            "ab_response": {"id": "ab-sub-1"},
+            "fallback_config": None,
+            "error": None,
+        },
+    }
     assert RequestAbSubmitResultDTO.model_validate(payload) is not None
 
 

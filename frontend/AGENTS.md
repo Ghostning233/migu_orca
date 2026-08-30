@@ -83,7 +83,15 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `loading` 显示「处理中…」并禁用）、`BaseInput.vue` / `BaseTextarea.vue`（v-model +
   `aria-label`/`aria-invalid` + `$attrs` 透传）、`BaseSelect.vue`（options 支持
   `string | {value,label}`，显示中文 label、value 只作内部码）、`CheckboxRow.vue`
-  （label + 原生 checkbox，id 用 `useId()` 生成唯一值）。
+  （label + 原生 checkbox，id 用 `useId()` 生成唯一值；支持 `v-model:checked`）。
+- CheckboxRow 是带包装 div 的组件：必须 `defineOptions({ inheritAttrs: false })` 并手动把
+  `id`/`name` 等 attrs 转发到原生 input，否则 `id` 同时落在包装 div 和 input 上
+  （Playwright strict mode 报 2 元素，且 `label for` 指向重复 id 无效）。`v-model:checked`
+  需要显式 `checked` prop + `update:checked` emit（原生 checkbox 的 change 不会自动触发）。
+- 连接测试/提交类表单（qB/AB）失败时只显示**固定中文反馈**，绝不把服务端
+  `error_message` 拼进 UI——服务端原始错误可能含 endpoint/凭据（与旧 app.js 行为一致）。
+- 偏好保存失败要回退到「上次成功加载/保存的值」并清空被拒绝的敏感输入，而不是保留表单
+  当前值（legacy `renderPreferenceSettings(currentPreferenceValues)` 行为）。
 - 确认对话框：`components/feedback/ConfirmDialog.vue` 是 `window.confirm` 的可访问替代
   （`role="alertdialog"` + `aria-modal` + focus trap + inert 背景 + Escape/backdrop 取消 +
   关闭后焦点恢复到触发元素）。**用 ref + `confirm({title,message,confirmLabel,cancelLabel,

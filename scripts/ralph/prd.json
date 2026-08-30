@@ -86,8 +86,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-201 完成：/app/settings 四个分区全部迁移到共享原语——Storage 偏好（storagePreferences.ts，localStorage 只存服务端相对 profile，绝对路径/穿越值回退服务端根）、偏好默认值（preferences.ts + /api/v1/preferences，保存失败回退到上次成功值并清空被拒绝的敏感输入，恢复默认需确认）、qBittorrent（useSensitiveFields + 确认 + 成功后清空）、Auto Bangumi（连接测试 + request_id 提交上下文 + 认证模式切换清空）。补齐公开 DTO：AbSubmitResultDTO、SubtitleGroupPreferenceDTO/FilterDefaultsDTO/NamingPreferenceDTO/SearchPreferenceDTO 并重新生成 docs/api/openapi.json 与 frontend/src/api/generated/api.ts（drift check 双守护）。连接测试/提交失败只显示固定中文反馈，绝不渲染服务端原始错误（可能含凭据）。修复 CheckboxRow：支持 v-model:checked（checked prop + update:checked emit）、inheritAttrs:false 让 id 只落在原生 input。Vitest 新增 34 例（storagePreferences 12、preferences 5、SettingsView 17，共 95 例）；浏览器新增 tests/browser/test_app_settings.py 18 例真实 Chromium；全套 301 浏览器 + 1038 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-202 将在同一基线上迁移 Request 列表。"
     },
     {
       "id": "US-202",
