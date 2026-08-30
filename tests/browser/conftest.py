@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import socket
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 import pytest
 
 from apps.base import create_app
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
+from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
-from shared.models import EntryRequest
-
 
 CHROMIUM_LIB_DIRS = (
     Path("/tmp/chromium-libs/usr/lib/x86_64-linux-gnu"),
@@ -111,9 +111,23 @@ def is_browser_available() -> bool:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Auto-skip browser tests when no browser binary is available."""
+    """Auto-skip browser tests when no browser binary is available.
+
+    US-195: in CI the browser suite must *not* be silently skipped — a UI
+    change cannot count as verified without a real Chromium run. When
+    ``MIGU_ORCA_CI=1`` is set and the browser is unavailable, collection fails
+    loudly instead of skipping.
+    """
     if is_browser_available():
         return
+    if os.environ.get("MIGU_ORCA_CI") == "1" and any(
+        "browser" in item.keywords for item in items
+    ):
+        raise RuntimeError(
+            "Browser binary or system libraries unavailable in CI. "
+            "Run './script/setup-browser-deps.sh' (or install Chromium deps) "
+            "before the browser job — a skipped browser suite is not a pass."
+        )
     skip_browser = pytest.mark.skip(
         reason="Browser binary or system libraries unavailable. "
         "Run './script/setup-browser-deps.sh' or install Chromium system deps."
@@ -192,7 +206,7 @@ def _register_test_routes(app: Any) -> None:
 
 
 @pytest.fixture(scope="session")
-def live_server_url(app: Any) -> Generator[str, None, None]:
+def live_server_url(app: Any) -> Generator[str]:
     """Start the Flask app on a random port and return its base URL.
 
     The server runs for the entire test session and is killed when the session ends.
@@ -232,6 +246,25 @@ def storage_dir(tmp_path: Path) -> Path:
     return tmp_path / "storage"
 
 
+@pytest.fixture(autouse=True)
+def _web_storage_root(tmp_path: Path) -> None:
+    """US-193: point the Web storage root at the per-test tmp dir.
+
+    The browser server runs in-process, so the server-side storage root must be
+    the same tmp parent the ``storage_dir`` fixture lives under. The browser
+    then selects the *relative profile* ``storage`` instead of an absolute
+    tmp path, keeping absolute paths out of API payloads/URLs/localStorage.
+    """
+    from apps.migu_orca_web.drafts import draft_store
+    from apps.migu_orca_web.services import set_web_storage_root
+
+    set_web_storage_root(tmp_path)
+    draft_store.clear()
+    yield
+    draft_store.clear()
+    set_web_storage_root(None)
+
+
 def create_saved_request(storage_root: Path, title: str, request_id: str) -> dict[str, Any]:
     """Generate and save a Request to temporary storage for browser tests.
 
@@ -246,11 +279,110 @@ def create_saved_request(storage_root: Path, title: str, request_id: str) -> dic
     return request
 
 
+def preview_result_json(
+    request: dict[str, Any],
+    *,
+    draft_id: str | None = None,
+    summary: dict[str, Any] | None = None,
+) -> str:
+    """Build a ``POST /api/v1/requests`` response body for an unsaved preview draft.
+
+    US-194: an unsaved generation returns an opaque ``draft_id`` and the server
+    holds the authoritative draft. To let browser tests exercise the real
+    preview-modify/preview-save backend, the draft is issued into the in-process
+    ``draft_store`` singleton (cleared per test by the ``_web_storage_root``
+    fixture), and the response carries the same id the real backend would.
+    """
+    from apps.migu_orca_web.drafts import draft_store
+    from request_engine.controllers.request_controller import summarize_request
+
+    if draft_id is None:
+        draft_id = draft_store.issue(request)
+    body = {
+        "ok": True,
+        "result": {
+            "request": request,
+            "summary": summary if summary is not None else summarize_request(request),
+            "draft_id": draft_id,
+        }
+    }
+    return json.dumps(body, ensure_ascii=False)
+
+
+def issue_draft_id(request: dict[str, Any]) -> str:
+    """Issue a server-authoritative draft for a preview Request (test seam).
+
+    Used by batch-parse mock helpers so a card's ``preview_request`` has a real
+    draft_id the frontend can send to the real preview-modify/save backend.
+    """
+    from apps.migu_orca_web.drafts import draft_store
+
+    return draft_store.issue(request)
+
+
+def save_preview_handler(calls: list[dict[str, Any]] | None = None):
+    """Build a ``POST /api/v1/requests/preview-save`` route handler.
+
+    Mirrors the real US-194 backend contract for browser tests: consumes the
+    ``draft_id`` from the in-process draft store (the card's draft was issued
+    when the mocked batch parse response was built) and returns the saved
+    request. Never persists to disk (the original mocks did not either) and
+    never returns sensitive draft content. ``calls`` (optional) records every
+    preview-save payload for assertions.
+    """
+    from apps.migu_orca_web.drafts import draft_store
+    from request_engine.controllers.request_controller import summarize_request
+
+    def _handler(route: Any, request: Any) -> None:
+        payload = json.loads(request.post_data or "{}")
+        if calls is not None:
+            calls.append(payload)
+        draft_id = payload.get("draft_id")
+        draft, _ = draft_store.consume_for_save(draft_id)
+        if draft is None:
+            route.fulfill(
+                status=409,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": False,
+                        "error_type": "draft_expired",
+                        "error_message": "订阅草案已过期或不存在，请重新生成",
+                        "error_data": {"failed_step": "consume_preview_draft", "details": {"field": "draft_id"}},
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            return
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "request": draft,
+                        "summary": summarize_request(draft),
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    return _handler
+
+
 def set_storage_preferences(
     page: Any, storage_root: Path | str, *, save_request: bool = False
 ) -> None:
-    """Seed non-sensitive Settings preferences before loading Web UI pages."""
-    storage_dir_json = json.dumps(str(storage_root))
+    """Seed non-sensitive Settings preferences before loading Web UI pages.
+
+    US-193: localStorage holds a *relative profile* under the server storage
+    root (e.g. ``storage``), never an absolute path. A Path argument is treated
+    as a tmp-based storage dir whose profile is its basename.
+    """
+    profile = storage_root.name if isinstance(storage_root, Path) else str(storage_root)
+    storage_dir_json = json.dumps(profile)
     save_request_json = json.dumps(save_request)
     page.add_init_script(
         f"""

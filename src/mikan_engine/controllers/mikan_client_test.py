@@ -7,22 +7,22 @@ import pytest
 
 import mikan_engine.controllers.mikan_client as mikan_client_module
 from mikan_engine.controllers.mikan_client import (
-    MIKAN_READ_CHUNK_BYTES,
-    MAX_MIKAN_STREAM_SECONDS,
     MAX_MIKAN_RESPONSE_BYTES,
+    MAX_MIKAN_STREAM_SECONDS,
+    MIKAN_READ_CHUNK_BYTES,
     MikanPartialResponseError,
+    UrlopenMikanTransport,
     _MikanBangumiPageParser,
     _MikanCandidatePageParser,
     _parse_candidate_cards,
-    UrlopenMikanTransport,
     create_mikan_client,
 )
-from mikan_engine.models import MikanCandidate
 from mikan_engine.controllers.mikan_config import (
     DEFAULT_MIKAN_TIMEOUT_SECONDS,
     MikanConfig,
     default_mikan_config,
 )
+from mikan_engine.models import MikanCandidate
 from shared.errors import Stage1Error
 from shared.models import MatchedBangumi
 
@@ -53,7 +53,7 @@ class _FakeUrlopenResponse:
         self.offset = 0
         self.read_sizes: list[int] = []
 
-    def __enter__(self) -> "_FakeUrlopenResponse":
+    def __enter__(self) -> _FakeUrlopenResponse:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -75,7 +75,7 @@ class _ChunkedFakeUrlopenResponse:
         self.chunks = chunks
         self.read_sizes: list[int] = []
 
-    def __enter__(self) -> "_ChunkedFakeUrlopenResponse":
+    def __enter__(self) -> _ChunkedFakeUrlopenResponse:
         return self
 
     def __exit__(self, *args: object) -> None:
@@ -448,7 +448,7 @@ def test_mikan_search_transport_handles_utf8_and_marker_across_chunks(
     body = (
         '<section class="related-recommendations"><a href="/Home/Bangumi/7">'
         "芙莉莲</a></section><div>ignored</div>"
-    ).encode("utf-8")
+    ).encode()
     response = _ChunkedFakeUrlopenResponse(
         [body[index : index + 2] for index in range(0, len(body), 2)]
     )

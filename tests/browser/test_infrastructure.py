@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 from playwright.sync_api import Page
-from tests.browser.conftest import open_dev_fixture_panel
 
+from tests.browser.conftest import open_dev_fixture_panel
 
 pytestmark = pytest.mark.browser
 
@@ -36,6 +36,13 @@ def test_server_reachable(page: Page, live_server_url: str) -> None:
     page.goto(f"{live_server_url}/healthz")
     body = page.locator("body").inner_text()
     assert "ok" in body
+
+
+def test_readiness_reports_ready(page: Page, live_server_url: str) -> None:
+    """Readiness is 200 when the server storage root is usable (US-195)."""
+    response = page.request.get(f"{live_server_url}/readiness")
+    assert response.status == 200
+    assert response.json() == {"ok": True, "result": "ok"}
 
 
 def test_root_redirects_to_index(page: Page, live_server_url: str) -> None:

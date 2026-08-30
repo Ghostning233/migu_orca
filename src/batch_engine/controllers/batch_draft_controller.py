@@ -1,11 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
-from typing import Callable
 from uuid import uuid4
 
 from batch_engine.models import BatchDraft, BatchDraftItem
-
 
 IdFactory = Callable[[], str]
 

@@ -57,3 +57,9 @@ config/user/default_rules.json
 2. 两种模式字段互斥；base_url 仅允许 http/https 根地址，拒绝 userinfo、query、fragment，允许用户明确提供的局域网地址。
 3. 凭据只存在于当前 Web/CLI 请求和 client session，不进入配置目录、Request、队列、AB result、浏览器 storage、URL、日志或 trace。
 4. `fallback_enabled` 仍是 MiGuOrca 提交失败后的降级行为开关，不属于 AutoBangumi 认证字段。
+
+## 8. Stage 26 Web storage 根目录配置（已完成）
+
+1. Web API 的 `storage_dir` 只能选择服务端根目录下的**相对 profile**；未传时回落服务端根本身（默认 `.migu_orca/storage`）。
+2. 服务端根可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 环境变量覆盖（仅服务端可信配置，浏览器不可控）；绝对路径、`..` 穿越与符号链接逃逸统一返回 400 `invalid_storage_dir`，错误不回显原始路径。
+3. CLI `--storage-dir` 是独立信任边界，接受显式本地路径，不受 Web 解析器约束。

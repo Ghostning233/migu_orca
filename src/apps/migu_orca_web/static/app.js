@@ -107,6 +107,10 @@
   let currentBatchDetailItemId = null;
   let batchDraftCards = [];
   let currentBatchId = null;
+  // US-194: the server owns unsaved drafts. The client keeps only the opaque
+  // draft_id in memory (never in browser storage, URL, history or logs) so
+  // preview-modify/preview-save can reference the authoritative draft.
+  let currentDraftId = null;
   // Candidate choices are a single anchored dialog, rather than card content.
   // Keeping the active item separately prevents cards from growing with every
   // candidate and makes switching between rows deterministic.
@@ -231,10 +235,39 @@
     }
   }
 
+  function isAbsoluteStorageProfile(value) {
+    // US-193: storage_dir is now a server-constrained relative profile. Any
+    // legacy localStorage value that is an absolute path (Unix or Windows
+    // drive) must not be sent to the API, stored, or shown.
+    const text = String(value || "").trim();
+    if (!text) {
+      return false;
+    }
+    if (text.charAt(0) === "/") {
+      return true;
+    }
+    return /^[a-zA-Z]:[\\/]/.test(text);
+  }
+
+  function sanitizeStorageProfile(value) {
+    // Legacy absolute paths fall back to the server default profile (empty).
+    // Only a safe relative profile name is kept for localStorage/URL/payload.
+    const text = String(value || "").trim();
+    if (isAbsoluteStorageProfile(text)) {
+      return "";
+    }
+    // Reject traversal escapes client-side too, so a ``..`` profile never
+    // reaches the server (the server also rejects it defensively).
+    if (text.split("/").indexOf("..") !== -1 || text.split("\\").indexOf("..") !== -1) {
+      return "";
+    }
+    return text;
+  }
+
   function restoreWebPreferences() {
     const savedStorageDir = readPreference(preferenceKeys.storageDir);
     const savedSaveRequest = readPreference(preferenceKeys.saveRequest);
-    storageDirPreference = savedStorageDir || "";
+    storageDirPreference = sanitizeStorageProfile(savedStorageDir);
     saveRequestPreference =
       savedSaveRequest === null ? true : savedSaveRequest === "true";
     if (settingsStorageInput) {
@@ -242,6 +275,15 @@
     }
     if (settingsSaveInput) {
       settingsSaveInput.checked = saveRequestPreference;
+    }
+    // US-193 smooth migration: drop an unsafe legacy absolute-path value from
+    // localStorage so it can never leak into later API payloads/URLs.
+    if (savedStorageDir && savedStorageDir !== storageDirPreference) {
+      if (storageDirPreference) {
+        writePreference(preferenceKeys.storageDir, storageDirPreference);
+      } else {
+        removePreference(preferenceKeys.storageDir);
+      }
     }
     updateStoragePreferenceSummary();
     updateStoragePreferencesStatus("已读取浏览器偏好。", "empty-state compact-state");
@@ -252,8 +294,8 @@
       return;
     }
     const storageText = storageDirPreference
-      ? "自定义 storage_dir：" + storageDirPreference
-      : "默认 `.migu_orca/storage`";
+      ? "storage profile：" + storageDirPreference
+      : "默认服务器 storage 根目录";
     const saveText = saveRequestPreference
       ? "默认保存订阅方案 JSON"
       : "默认只生成预览";
@@ -270,7 +312,7 @@
   }
 
   function currentStorageDir() {
-    return storageDirPreference.trim();
+    return sanitizeStorageProfile(storageDirPreference);
   }
 
   function currentSaveRequest() {
@@ -301,14 +343,18 @@
       event.preventDefault();
     }
     const preferences = readSettingsFormPreferences();
-    applyPreferenceValues(preferences.storageDir, preferences.saveRequest);
+    const safeStorageDir = sanitizeStorageProfile(preferences.storageDir);
+    applyPreferenceValues(safeStorageDir, preferences.saveRequest);
     if (storageDirPreference) {
       writePreference(preferenceKeys.storageDir, storageDirPreference);
     } else {
       removePreference(preferenceKeys.storageDir);
     }
     writePreference(preferenceKeys.saveRequest, String(saveRequestPreference));
-    updateStoragePreferencesStatus("偏好已保存。", "success-state compact-state");
+    const migrationNote = safeStorageDir !== preferences.storageDir
+      ? "（已忽略不安全的 storage profile，改用服务器默认根目录）"
+      : "";
+    updateStoragePreferencesStatus("偏好已保存。" + migrationNote, "success-state compact-state");
   }
 
   function clearWebPreferences() {
@@ -316,7 +362,7 @@
     removePreference(preferenceKeys.saveRequest);
     applyPreferenceValues("", true);
     updateStoragePreferencesStatus(
-      "偏好已清除；订阅方案工作台将使用默认 `.migu_orca/storage` 并保存订阅方案 JSON。",
+      "偏好已清除；订阅方案工作台将使用服务器默认 storage 根目录并保存订阅方案 JSON。",
       "empty-state compact-state",
     );
   }
@@ -443,8 +489,22 @@
 
   function notifyApiError(title, error) {
     const validationSummary = summarizeValidationErrors(error.errorData);
+    let detail = validationSummary;
+    // US-194: a stale/expired/replayed draft is a state conflict (409). Guide
+    // the user to regenerate instead of showing a confusing raw error.
+    const errorType = (error && error.errorType) || "";
+    if (
+      errorType === "draft_expired" ||
+      errorType === "draft_evicted" ||
+      errorType === "draft_replayed" ||
+      errorType === "draft_mismatch"
+    ) {
+      detail = detail
+        ? detail + "；请重新生成订阅草案后再试。"
+        : "请重新生成订阅草案后再试。";
+    }
     showNotification("error", title, error.message || "请求失败", {
-      detail: validationSummary,
+      detail: detail,
     });
   }
 
@@ -539,12 +599,36 @@
   }
 
   async function fetchJson(path, options) {
-    const response = await fetch(path, options);
-    const payload = await response.json();
-    if (!payload.ok) {
-      const error = new Error(payload.error_message || "请求失败");
-      error.errorType = payload.error_type || "request_error";
-      error.errorData = payload.error_data || null;
+    let response;
+    try {
+      response = await fetch(path, options);
+    } catch (networkError) {
+      // Network failure (offline, DNS, connection refused) is a stable,
+      // retryable failure — never a JSON parse error.
+      const error = new Error("网络请求失败，请检查网络后重试");
+      error.errorType = "network_error";
+      error.errorData = null;
+      error.status = 0;
+      throw error;
+    }
+    const contentType = response.headers.get("content-type") || "";
+    let payload = null;
+    if (contentType.includes("application/json")) {
+      try {
+        payload = await response.json();
+      } catch (jsonError) {
+        payload = null;
+      }
+    }
+    // Non-2xx responses still carry the shared envelope; a non-JSON error body
+    // (e.g. a proxy HTML error page) is normalized to a safe generic message.
+    if (!response.ok || !payload || !payload.ok) {
+      const error = new Error(
+        (payload && payload.error_message) || "请求失败，请稍后重试"
+      );
+      error.errorType = (payload && payload.error_type) || "request_error";
+      error.errorData = (payload && payload.error_data) || null;
+      error.status = response.status;
       throw error;
     }
     return payload.result;
@@ -1732,7 +1816,7 @@
     return canExpandBatchCard(row) && Boolean(batchCardRequest(row));
   }
 
-  function updateBatchCardRequest(itemId, modified) {
+  function updateBatchCardRequest(itemId, modified, draftId) {
     if (!itemId || !modified) {
       return;
     }
@@ -1747,6 +1831,9 @@
         next.draft_request = modified;
       } else {
         next.preview_request = modified;
+      }
+      if (typeof draftId === "string" && draftId) {
+        next.draft_id = draftId;
       }
       next.confirmable_config = modified.confirmable_config || row.confirmable_config;
       next.source_info = modified.source_info || row.source_info;
@@ -1769,6 +1856,7 @@
       next.request = acceptedRequest;
       delete next.preview_request;
       delete next.draft_request;
+      delete next.draft_id;
       next.confirmable_config =
         acceptedRequest.confirmable_config || row.confirmable_config;
       next.source_info = acceptedRequest.source_info || row.source_info;
@@ -1782,12 +1870,14 @@
     }
   }
 
-  async function savePreviewDraftRequest(request) {
+  async function savePreviewDraftRequest(request, draftId) {
+    // US-194: preview-save consumes the server-authoritative draft by its
+    // opaque id; the full Request snapshot is never sent from the client.
     const result = await fetchJson("/api/v1/requests/preview-save", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
-        request: request,
+        draft_id: draftId,
         storage_dir: currentStorageDir() || null,
       }),
     });
@@ -1800,6 +1890,10 @@
 
   function batchCardPreviewRequest(row) {
     return (row && (row.preview_request || row.draft_request)) || null;
+  }
+
+  function batchCardDraftId(row) {
+    return (row && row.draft_id) || null;
   }
 
   function batchCardIsSelectable(row) {
@@ -1999,7 +2093,9 @@
       const preview = batchCardPreviewRequest(row);
       if (preview && preview.request_id) {
         try {
-          const savedRequest = await savePreviewDraftRequest(preview);
+          // US-194: save the server-authoritative draft by its opaque id.
+          const draftId = batchCardDraftId(row);
+          const savedRequest = await savePreviewDraftRequest(preview, draftId);
           if (!savedRequest || !savedRequest.request_id) {
             throw new Error("preview-save returned no request_id");
           }
@@ -2177,7 +2273,13 @@
     }
     currentBatchDetailItemId = row.item_id || null;
     currentBatchEditItemId = row.item_id || null;
-    renderDetailPayload({request: request}, {preview: true, batchItemId: row.item_id});
+    // US-194: the batch card's server-authoritative draft id rides along so
+    // preview-modify/save reference the right draft (never persisted).
+    const draftId = batchCardDraftId(row);
+    renderDetailPayload(
+      {request: request, draft_id: draftId},
+      {preview: true, batchItemId: row.item_id},
+    );
     const detailHeading = document.getElementById("request-detail-heading");
     if (detailHeading && detailHeading.scrollIntoView) {
       detailHeading.scrollIntoView({behavior: "smooth", block: "start"});
@@ -2193,6 +2295,7 @@
     currentBatchDetailItemId = null;
     currentBatchEditItemId = null;
     currentDetailPayload = null;
+    currentDraftId = null;
     setState(detailContainer, "选择一个订阅方案后查看详情。", "empty-state");
   }
 
@@ -3620,6 +3723,10 @@
       if (!request) {
         throw new Error("candidate preview returned no request");
       }
+      // US-194: the server owns the unsaved draft; the client keeps only the
+      // opaque draft_id (in memory, never in browser storage/URL) plus the
+      // display snapshot for rendering.
+      const draftId = (result && result.draft_id) || null;
       batchDraftCards = batchDraftCards.map(function (current) {
         if (current.item_id !== row.item_id) {
           return current;
@@ -3627,6 +3734,7 @@
         return Object.assign({}, current, {
           status: "DRAFT",
           preview_request: request,
+          draft_id: draftId,
           selected_candidate: candidate,
         });
       });
@@ -4517,13 +4625,16 @@
     setActionInFlight(true);
     setState(detailContainer, "正在保存订阅草案...", "loading-state");
     try {
-      // Persist the (possibly modified) preview draft as-is. The server only
-      // accepts PENDING_CONFIRM drafts, so the saved object enters the existing
-      // confirmation flow and can then be confirmed, cancelled, modified, or
-      // deleted like any other saved Request.
-      const savedRequest = await savePreviewDraftRequest(request);
+      // US-194: persist the server-authoritative draft by its opaque id. The
+      // server only accepts PENDING_CONFIRM drafts, so the saved object enters
+      // the existing confirmation flow (accept/cancel/modify/delete).
+      const draftId = currentDraftId || null;
+      const savedRequest = await savePreviewDraftRequest(request, draftId);
       const generatedRequestId = savedRequest && savedRequest.request_id;
       const batchItemId = currentBatchDetailItemId;
+      // The draft was consumed by the save; clear the in-memory id so a
+      // replay cannot reference a stale draft.
+      currentDraftId = null;
       if (batchItemId) {
         updateBatchCardRequest(batchItemId, savedRequest);
       }
@@ -4606,16 +4717,21 @@
   }
 
   async function previewModify(request, patch) {
-    // Dry-run modify: recompute the in-memory preview request without saving.
+    // US-194: dry-run modify references the server-authoritative draft by its
+    // opaque id; the full Request snapshot is never sent from the client.
+    const draftId = currentDraftId || null;
     const result = await fetchJson("/api/v1/requests/preview-modify", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       body: JSON.stringify({
-        request: request,
+        draft_id: draftId,
         patch: patch || {},
         storage_dir: currentStorageDir() || null,
       }),
     });
+    if (result && result.draft_id) {
+      currentDraftId = result.draft_id;
+    }
     return result && result.request;
   }
 
@@ -4643,7 +4759,7 @@
       }
       updateCurrentPreviewRequest(modified);
       if (batchItemId) {
-        updateBatchCardRequest(batchItemId, modified);
+        updateBatchCardRequest(batchItemId, modified, currentDraftId);
       }
       renderDetailPayload(currentDetailPayload, {
         preview: true,
@@ -4683,6 +4799,14 @@
       (options && options.preview) ||
       (Object.prototype.hasOwnProperty.call(payload, "saved_request") && !payload.saved_request)
     );
+    // US-194: remember the server-authoritative draft id for the current
+    // preview so preview-modify/save can reference it. Never persisted, and
+    // cleared when rendering a saved request (its draft was consumed).
+    if (payload && typeof payload.draft_id === "string" && payload.draft_id) {
+      currentDraftId = payload.draft_id;
+    } else if (!isPreview) {
+      currentDraftId = null;
+    }
     var input = request.input || {};
     var sourceInfo = request.source_info || {};
     var matched = sourceInfo.matched_bangumi || {};
@@ -5012,6 +5136,11 @@
   async function finalizeGeneratedRequest(result) {
     var generatedRequestId = result.request && result.request.request_id;
     selectedRequestId = result.saved_request ? generatedRequestId : null;
+    // US-194: an unsaved generation returns an opaque draft_id; keep it
+    // in-memory so preview-modify/save can reference the server draft.
+    if (result && typeof result.draft_id === "string" && result.draft_id) {
+      currentDraftId = result.draft_id;
+    }
     renderDetailPayload(result, {preview: !result.saved_request});
     await loadList({loadSelectedDetail: false});
     if (result.saved_request) {

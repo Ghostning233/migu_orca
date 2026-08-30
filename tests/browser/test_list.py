@@ -7,7 +7,6 @@ from playwright.sync_api import Page
 
 from tests.browser.conftest import create_saved_request, set_storage_preferences
 
-
 pytestmark = pytest.mark.browser
 
 

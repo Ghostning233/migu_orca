@@ -1,189 +1,200 @@
-# Ralph Progress Log
-Started: 2026-08-26 17:20:00 CST
+# MiGuOrca Ralph Progress - Stage 26
 
 ## Codebase Patterns
 
-- 普通解析路径使用 `RuleAnimeTitleParsingProvider`；`FakeAnimeTitleParsingProvider` 仅用于显式测试注入。规则查询按 correction → alias → rule → fallback 排序，使用 NFKC/空白/casefold 去重，并限制为 8 条。
-- Python 依赖、检查与测试统一通过 `uv`；Web 前端修改后运行 `node --check src/apps/migu_orca_web/static/app.js`，UI story 必须读取 `.agents/skills/dev-browser/SKILL.md` 并在真实 Chromium 验证。
-- 标题解析结果只是搜索计划，不是真实 MiKan 候选；只有 M03 返回公开 `bangumi_id` 与规范化 `mikan_url` 的候选才可由用户显式选择并进入 preview。
-- 单个 `/api/v1/mikan/candidates` 与批量 `/api/v1/batches/parse` 必须复用同一 parse → bounded query plan → candidate search 编排，不得复制第二套 MiKan parser、fallback 或候选序列化。
-- 解析 API 的新结构应使用 `AnimeTitleParseResult.to_dict()` 作为白名单 `parse_result`，并暂保留旧扁平字段；搜索错误 details 仅输出 category/field/length/recoverable。
-- 季数解析使用共享结构化原语，范围 1～99；无标记保持 null，冲突、越界、Part/分割放送等无法证明的表达必须人工审核，不得默认第一季。
-- 跨模块季数判断统一使用 `shared.title_season.parse_title_season()`；它只返回可证明的 1～99 季数，保留原始 marker 供已接受元数据兼容，并提供稳定的中文规范化标题。
-- 查询计划必须有界、稳定去重并保留来源/priority；高优先级查询有真实候选后停止弱 fallback，单条查询失败不阻断当前 item 的后续 fallback。
-- 用户明确保存的公开 `TitleCorrection` 可优先生成搜索词，但不能自动选择 MiKan 合集；无修正、读取失败或规则低置信度时保留原始输入与 MiKan URL/ID fallback。
-- parser 的 canonical title/season 是可审核提示。只有选中候选公开标题/元数据或用户显式确认能证明的 season 才能进入 Request、M07 命名和 M10 payload；冲突时保持审核并 fail closed。
-- 候选选择后的季数必须通过 `shared.season_evidence`：候选公开标题/别名可证明时自动写入；没有公开季数标记时必须提交明确 `season_confirmation`；冲突则拒绝生成草案。
-- Web UI 的解析来源通过固定中文白名单展示；不要拼接内部 source code，也不要产生“源名称：搜索词：...”之类嵌套标签。
-- endpoint、token、Cookie、Authorization、账号密码、raw HTML、raw RSS XML、magnet、原始响应体、完整失败 URL和本地绝对路径不得进入解析结果、查询计划、API、页面、storage、日志、截图或 trace。
-- 浏览器测试使用 Playwright route/fixture 隔离外部依赖；运行完整 browser/full pytest 前确认仓库根 `.migu_orca/storage` 不存在。
-- 每个 Ralph story 独立提交，只将当前完成 story 的 `passes` 改为 true，并在本文件末尾追加实现、文件和精确测试记录。
----
+- `_storage_dir` 空值（`None|""|"  "`）必须返回 `_WEB_STORAGE_ROOT` 本身，**绝不**返回 `None`：`load_storage_config(None)` 会回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖（含生产 `MIGU_ORCA_WEB_STORAGE_ROOT`）。新增/修改取 `_storage_dir(...)` 的端点后，用「不传 storage_dir 的保存请求」回归验证写入服务端根而非仓库根。
+- 完整测试跑完必须检查仓库根 `.migu_orca/storage` 是否被创建——被创建说明有路径绕过了服务端 root，会连锁挂掉浏览器空列表测试（US-196 靠此信号发现 US-193 回归）。
+- Python 依赖、检查与测试统一通过 `uv`；不要直接使用系统 Python。
+- Web API 成功/失败继续使用 `{ok, result}` / `{ok, error_type, error_message, error_data}` envelope；Stage 26 可修正 HTTP 状态，但必须保持 envelope 兼容。
+- Web 适配层按职责拆分：`schemas.py`（请求模型）、`api_contract.py`（响应 DTO）、`serializers.py`（脱敏白名单）、`services.py`（编排与存储 seam）、`contexts.py`（短期上下文）、`routes_*.py`（按端点族）、`views.py`（仅页面路由 + Blueprint 组装）；route 模块「导入即注册」，`views.py` 必须 import 全部 `routes_*`。
+- monkeypatch 目标必须指向**符号实际被调用处的模块命名空间**（`routes_requests`/`routes_batches`/`routes_mikan`/`routes_settings`/`routes_connections`/`services`/`contexts`），不是定义处或旧的 `views`。
+- 先为端点增加 golden contract，再拆分 `views.py`；每次只迁移一个端点族并运行对应 API/浏览器回归。
+- Pydantic DTO 与确定性 OpenAPI 是 Stage 27 的公开契约；响应 serializer 使用白名单，不让任意 engine dict 或敏感未知字段穿透。
+- Web storage 和 CLI storage 使用不同信任边界：CLI 保留显式路径，Web 只能使用服务端允许根目录/profile。
+- 未保存草案由服务端权威 draft 管理；客户端只持有 opaque ID 和允许 patch，不能把完整 Request 作为可信持久化输入。
+- 服务端权威草案实现（US-194）：`apps/migu_orca_web/drafts.py` 的 `DraftStore`（TTL 30 分钟、容量 128、一次性保存 + 重放保护）；查找返回 `(value, reason)` 区分 expired/evicted/replayed/unknown → 409 `draft_expired`/`draft_evicted`/`draft_replayed`；错误 details 不回显 draft_id。前端只在内存持有 `currentDraftId`/`row.draft_id`，绝不写 URL/browser storage。
+- 浏览器测试 mock 未保存草案：生成响应必须用 conftest `preview_result_json(request)`（内部 `draft_store.issue` 签发真实 draft），批量卡片 mock 用 `issue_draft_id(preview_request)` 补 draft_id，preview-save mock 用 `save_preview_handler(calls?)`（消费 draft 返回保存结果）；否则真实 preview-save 后端 409。
+- DraftStore 是进程级单例，views/api_contract/browser 的 autouse fixture 都要 `draft_store.clear()`。
+- 外部 endpoint、username、password、token、cookie、Authorization、SID、raw HTML、raw RSS XML、原始响应体、完整失败 URL、magnet 和本地绝对路径不得进入 API 展示、storage、URL、browser storage、日志、截图或 trace。
+- UI story 必须读取 `.agents/skills/dev-browser/SKILL.md` 并用真实 Chromium 验证；浏览器整体 skip 不能作为 UI 完成证据。
+- 浏览器测试使用 fixture/Playwright route 隔离外部服务；不得自动向真实 AutoBangumi、qBittorrent 或 MiKan 执行写操作。
+- 完整 browser/full pytest 前确认仓库根 `.migu_orca/storage` 不存在，避免陈旧 Request 干扰测试。
+- Stage 26 不做页面视觉重构或引入新前端框架；只允许维持 API 兼容所需的最小旧前端修改。
+- HTTP 状态语义（US-192）：envelope 形状不变，状态码由 `extensions/flask_api/api.py:_error_http_status` 集中分类（400 输入/`invalid_*`/`config_error`、404 `*_not_found`、409 状态冲突/context 失效/重放、401 外部认证、502 上游不可达、503 不可用/版本不支持、504 超时、500 storage/未知）；新增 error_type 时同步该映射与 `openapi_gen.py` `_ENDPOINTS` 的 errors 声明。
+- 旧前端 `static/app.js` 的 fetchJson 已兼容非 2xx JSON、非 JSON body 与网络失败（中文安全回退）；新增失败 mock 时用 `route.fulfill(status=..., json=...)` 或 `content_type="text/html"` 模拟。
+- API 端点清单与 golden contract 测试位于 `docs/api/endpoint_inventory.md` + `tests/api_contract/`；新增/删除 `/api/v1` 端点必须同步这两处，否则 `test_inventory_consistency.py` 失败。
+- 旧前端 `static/app.js` 的 localStorage key 只有 `miguOrca.web.storageDir`/`miguOrca.web.saveRequest`，URL 状态参数只有 `request_id`/`batch_id`；`tests/api_contract/test_frontend_dependencies.py` 冻结了这些契约。
+- Web `storage_dir` 是服务端根目录下的相对 profile（`services._storage_dir`，默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖，测试用 `set_web_storage_root`）；绝对路径/穿越/符号链接逃逸 → 400 `invalid_storage_dir`，details 不回显原始路径；CLI `--storage-dir` 是独立信任边界不受此约束。
+- 改 Web API 测试的 storage 时：views/api_contract/browser 三处都有 autouse `_web_storage_root` fixture 指向 tmp，API-facing `storage_dir` 传相对 profile 名；浏览器 `set_storage_preferences` 用 `storage_dir.name`，localStorage 断言也用 `storage_dir.name`。
+- `GET /api/v1/mikan/posters/<key>` 是二进制函数视图，不经过 `APIBaseView` envelope 包装；US-192 起在 `routes_mikan.py` 内 try/except `Stage1Error` 转 JSON envelope + `_error_http_status` 状态（畸形 key 400、未注册 404、上游取图失败 502）。
+- 批量 retry/recover 对「队列不存在」返回 `queue_not_found`（`load_submission_queue` 直接抛），对「队列存在但 request_id 未知」才返回 `queue_item_not_found`。
+- OpenAPI 契约在 `docs/api/openapi.json`，由 `uv run migu-orca-openapi` 确定性生成（`--check` 做漂移检查）；端点注册表在 `src/apps/migu_orca_web/openapi_gen.py` 的 `_ENDPOINTS`，新增/删除 `/api/v1` 端点必须同步注册表，否则 `tests/api_contract/test_openapi_generation.py` 失败。
+- 公开响应 DTO 在 `src/apps/migu_orca_web/api_contract.py`，全部 `extra="forbid"`；`_ENDPOINTS` 的 `success` 字段引用 DTO（或少量内联 dict，如 request list）。
+- pydantic v2 `model_json_schema()` 会输出 `$defs` + `$ref`；OpenAPI 生成时用 `_dereference` 内联，避免输出带本地 ref 的文档（客户端生成器更易消费）。
+- Python 静态检查（US-195）是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：F/E4/E7/E9/W/I/UP/B/SIM，`line-length=120`，排除 E402/E501/B009/UP046/UP047/UP031 并记录理由）；`compileall` 只是语法检查，不冒充静态检查。
+- 质量门禁（US-195）：`.github/workflows/ci.yml` 每次 push/PR 执行 compileall → ruff → 非浏览器 pytest → `node --check` → `migu-orca-openapi --check` → `git diff --check`；真实 Chromium 套件在单独 job，`MIGU_ORCA_CI=1` 下浏览器不可用直接失败（conftest `pytest_collection_modifyitems` 抛 RuntimeError）而非静默 skip。
+- 健康/就绪探针：`/healthz` 纯存活；`/readiness` 用 `services._web_storage_root()` + `ensure_storage_layout(load_storage_config(...))` 校验服务端 storage 根，失败 503 `{"ok": false, "result": "storage_unavailable"}`；两者都不访问真实外部系统。readiness 测试必须 `set_web_storage_root(tmp_path)` 避免污染仓库 `.migu_orca/storage`。
+- 修改「仅作再导出」的 import（如 views.py 的 `api_blueprint`）时，ruff --fix 会误删；保留并加 `# noqa: F401` 注明用途。UP037（去引号注解）只在有 `from __future__ import annotations` 的文件安全。
 
-## 2026-08-27 13:45:00 CST - US-188
-Thread: https://codex.openai.com/threads/unknown
-- 完成 Stage 25 文档状态同步、安全回归与 Ralph 归档；BL-018 已标记为完成，未触发真实 MiKan、AutoBangumi 或 qBittorrent 操作。
-- 归档当前 PRD 和进度日志至 `scripts/ralph/archive/2026-08-27-stage25-title-season-parsing/`；当前 Ralph 文件保留在原处。
-- Files changed: `README.md`, `docs/backlog.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/archive/2026-08-27-stage25-title-season-parsing/`.
+
+## 2026-08-29 10:30:00 CST - US-189
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 冻结全部 `/api/v1` 端点清单、方法、请求/响应字段、成功/校验失败/业务失败/脱敏错误 envelope、敏感值边界与旧前端依赖，为 US-190（DTO/OpenAPI）与 US-191（拆分 views.py）提供可自动核对的事实基线。
+- 新增 `docs/api/endpoint_inventory.md`：§2 端点总表（与 url_map 自动核对）、§3 端点族明细（requests/mikan/preferences/corrections/batches/connections）、§4 敏感值边界与已记录问题（poster 函数视图无 envelope）、§5 旧前端依赖（fetch URL、localStorage key、URL 参数、request_id/batch_id/candidate_context 生命周期）。
+- 新增 `tests/api_contract/`：`test_inventory_consistency.py`（清单↔url_map 双向核对，漏记即失败）、`test_golden_contracts.py`（每类端点族成功/输入失败/业务失败/脱敏 golden contract，全部基于 fake 与 tmp_path，不访问真实 MiKan/AB/qB）、`test_frontend_dependencies.py`（冻结 localStorage key、URL 参数、fetch URL、fetchJson envelope 处理）。
+- 质量检查：compileall、非浏览器 pytest（963 passed）、node --check、git diff --check 全绿；浏览器套件因环境缺 Chromium 系统库跳过（US-189 无 UI 改动，无需浏览器验证）。
+- Files changed: `docs/api/endpoint_inventory.md`、`tests/api_contract/`（conftest + 3 个测试文件 + `__init__.py`）。
 - **Learnings for future iterations:**
-  - BL-018 已提供确定性规则、显式候选证据与人工确认边界；真实 LLM 解析仍属于后续独立能力。
+  - url_map 中 `request_id` 参数写作 `<path:request_id>`；与清单文档比较前需归一化为 `<request_id>`。
+  - 探测 API 行为时若漏传 `storage_dir` 会写仓库根 `.migu_orca/storage`（如 batch accept 会建 `queue/b1.json`）；探测后必须清理，否则挂掉后续浏览器/完整测试。
+  - `preview-modify` 对非法 patch 返回 `invalid_modify_patch_field`（details 含 `illegal_fields`/`allowed_fields`）；`preview-save` 只允许 PENDING_CONFIRM。
+  - 连接测试成功响应只回白名单字段；`/api/v1/requests/<id>/submit-ab` 的成功结果会把脱敏后的 `ab_submit_result` 写回 snapshot 与 `ab_results/`。
 ---
 
-## 2026-08-27 13:40:00 CST - US-187
+## 2026-08-29 08:00:00 CST - Stage 26 规划
 Thread: https://codex.openai.com/threads/unknown
-- 单个候选结果与批量卡片复用同一可审核解析摘要，展示识别标题、季数、中文来源、实际搜索词和人工核对提示；候选来源标签不再叠加搜索词或内部枚举。
-- 保持 EMPTY/FAILED 原有手动操作边界，未增加自动选择、保存、接受或提交；全部外部候选由 Playwright route fixture 隔离。
-- Files changed: `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_mikan_candidates.py`, `tests/browser/test_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- Stage 25 已通过中文 PR #43 合入 `main`，合并提交为 `8eac997`。
+- 新建 Stage 26 P0 规划：冻结 API、建立响应 DTO/OpenAPI、拆分 Web 适配层、修正 HTTP 状态、限制 Web storage、建立服务端权威 draft、增加 CI 与 local-only 部署基线。
+- 活动分支：`agent/stage26-web-api-contract-hardening`；stories 为 US-189～US-196，初始均为 `passes: false`。
+- Stage 27 前端工程化迁移只作为 handoff，不进入 Stage 26 实现。
 - **Learnings for future iterations:**
-  - UI 直接消费 US-185 的白名单 `parse_result`/`attempted_queries`，只展示固定中文来源标签，不渲染内部 source code。
-  - Browser verification: `node --check src/apps/migu_orca_web/static/app.js` and `uv run pytest tests/browser/test_mikan_candidates.py tests/browser/test_batch_workbench.py -q` passed (74 passed).
+  - 现有 API 行为和浏览器旅程覆盖充分，适合用 golden contract 保护后渐进拆分，不适合同时重写后端和前端。
+  - `views.py`、客户端完整 preview Request 和浏览器任意 storage_dir 是前端迁移前必须优先治理的服务端边界。
 ---
 
-## 2026-08-26 22:22:50 CST - US-181
-Thread: https://codex.openai.com/threads/unknown
-- 建立不可变、JSON 安全的标题解析契约：规范化标题、基础标题、季数、查询计划、审核提示和固定来源枚举。
-- 未知 provider 来源安全降级为 `fallback`，兼容的 `search_queries` 与 query plan 一致，并覆盖长度、季数、数量与 priority 边界。
-- Files changed: `src/batch_engine/models/__init__.py`, `src/batch_engine/controllers/anime_title_parser_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`。
+## 2026-08-29 12:00:00 CST - US-190
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 建立公开响应 DTO 与确定性 OpenAPI 契约，作为 Stage 27 TypeScript 前端的唯一生成类型来源。
+- 新增 `src/apps/migu_orca_web/api_contract.py`：成功/失败 envelope DTO（`ApiOkEnvelope`/`ApiErrorEnvelope`）与每端点族 result DTO，全部 `extra="forbid"` 拒绝未知字段；`ok_result()` 帮助函数可选按 DTO 校验后返回 envelope。
+- 新增 `src/apps/migu_orca_web/openapi_gen.py`：从 Flask url_map + `_ENDPOINTS` 注册表确定性生成 OpenAPI 3.1（24 个操作全覆盖）；`--check` 漂移检查；`migu-orca-openapi` console script（pyproject.toml）。
+- 生成 `docs/api/openapi.json`（~170KB）与 `docs/api/README.md`；示例全部虚构脱敏（`example.invalid`），凭据字段标 `x-request-scoped`，海报端点声明 image/jpeg|png|gif|webp content type。
+- 生命周期文档：`endpoint_inventory.md` §5.4 补充 draft_id（US-194 预告），OpenAPI info description 引用；README/docs README 更新命令。
+- 新增测试：`tests/api_contract/test_dto_contracts.py`（16 个 DTO 拒绝未知/敏感字段）、`test_openapi_generation.py`（8 个：url_map 全覆盖、注册表一致性、确定性、脱敏示例、poster content type、漂移 CLI）。
+- 质量检查：compileall、完整 pytest（1250 passed，含真实 Chromium 263 个浏览器测试）、node --check、OpenAPI --check、git diff --check 全绿。
+- Files changed: `src/apps/migu_orca_web/api_contract.py`、`openapi_gen.py`、`docs/api/openapi.json`、`docs/api/README.md`、`docs/api/endpoint_inventory.md`、`docs/README.md`、`README.md`、`pyproject.toml`、`.gitignore`、`tests/api_contract/test_dto_contracts.py`、`test_openapi_generation.py`。
 - **Learnings for future iterations:**
-  - 解析结果的公开序列字段使用 tuple；API 边界统一调用 `to_dict()` 取得 JSON-safe list/dict。
-  - 来源必须通过 `AnimeTitleParseSource` 白名单归一化，不能回显 provider 自定义字符串。
-  - 完整 pytest 会继续执行 Playwright 浏览器套件，耗时显著长于核心单元测试。
+  - pydantic v2 `model_json_schema()` 输出 `$defs` + `$ref`；OpenAPI 生成需 `_dereference` 内联，否则文档带本地 ref。
+  - `_ENDPOINTS` 注册表 key 用 url_map 的 `<param>` 形式（`<path:request_id>`/`<batch_id>`/`<key>`），OpenAPI 路径再规范化为 `{param}`；url_map 的 `request_id` 是 `<path:request_id>` 不是 `<request_id>`。
+  - `extra="forbid"` DTO 中 `dict[str, Any]` 字段（request 快照/parse_result/queue item 等）内部仍接受任意 key；DTO 只保证 envelope 与顶层 result key 白名单，深层脱敏由现有 serializer 负责。
+  - `migu-orca-openapi` console script 需 `uv pip install -e .` 重装后生效；模块方式 `uv run python -m apps.migu_orca_web.openapi_gen` 始终可用。
+  - 浏览器测试环境：`.agents/.chromium-libs`（从 .deb 提取的 Chromium 系统库）被 gitignore；运行时需 `ln -s` 到 `/tmp/chromium-libs`（conftest 硬编码路径），否则浏览器测试整体 skip。
 ---
 
-## 2026-08-26 22:31:47 CST - US-182
-Thread: https://codex.openai.com/threads/unknown
-- 新增保守、纯函数的共享季数解析：支持 S/s、Season、第 N 季/期、中文数字与全角数字，并将 `无职转生s4` 规范化为 `无职转生 第四季`。
-- 对无标记保持空季数；冲突、0/100+、不完整标记、Part/分割放送返回人工审核提示，绝不默认第一季。
-- 搜索增强、命名默认值和 AutoBangumi 3.1 payload 改为复用此原语；payload 仍保留候选标题中的原始季数 marker。
-- Files changed: `src/shared/title_season.py`, `src/shared/title_season_test.py`, `src/batch_engine/controllers/anime_title_parser.py`, `src/batch_engine/controllers/search_enhancer.py`, `src/batch_engine/controllers/preference_applicator.py`, `src/ab_engine/controllers/subscription_payload.py`, associated parser tests, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+## 2026-08-29 21:40:00 CST - US-191
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 拆分 Web schema、serializer、service、context 与按端点族路由，`views.py` 从 2,146 行收敛为 53 行页面路由 + Blueprint 组装；全部 24 个 /api/v1 端点、方法、endpoint 名称保持 golden contract 兼容。
+- 新增模块（均在 `src/apps/migu_orca_web/`）：
+  - `blueprints.py`：`api_blueprint`/`web_blueprint` 唯一归属地（避免循环导入）。
+  - `schemas.py`：请求/查询 Pydantic 模型（从 views.py 原样迁移）。
+  - `serializers.py`：响应序列化与脱敏白名单（`_serialize_*`、`_sanitize_*`、`_strip_sensitive_result_fields`、`poster_service`）。
+  - `services.py`：用例编排与存储 seam（`_storage_dir`、`_resolve_mikan_config`、`_search_*`、`_build_batch_*`、`_load_*_section`），复用 engine/repository。
+  - `contexts.py`：`CandidateSelectionContextStore` 与 `candidate_selection_contexts` 单例。
+  - `routes_requests.py`/`routes_mikan.py`/`routes_batches.py`/`routes_settings.py`/`routes_connections.py`：按端点族注册路由。
+- `views.py` 通过「导入 route 模块即注册端点」的方式组装 Blueprint，并向后兼容再导出 context 符号。
+- 测试 seam 迁移：`views_test.py`、`tests/api_contract/test_golden_contracts.py`、`tests/api_contract/conftest.py` 的 monkeypatch 目标从 `apps.migu_orca_web.views.*` 改为实际调用点模块（`routes_requests`/`routes_batches`/`routes_mikan`/`routes_settings`/`routes_connections`/`services`/`contexts`）。
+- 文档：`docs/design/architecture.md`（Web 边界现状列出新模块职责）、`docs/api/endpoint_inventory.md`（实现位置说明）、stage PRD（US-191 标记完成、背景问题改为历史描述）、`api_contract.py` docstring；新增 `src/apps/migu_orca_web/AGENTS.md` 记录拆分布局与 monkeypatch seam 约定。
+- 质量检查：compileall、完整 pytest（987 非浏览器 + 263 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿。
+- Files changed: 新增 10 个模块文件 + AGENTS.md；修改 `views.py`（重写）、`views_test.py`、`api_contract.py`、`tests/api_contract/conftest.py`、`tests/api_contract/test_golden_contracts.py`、`docs/design/architecture.md`、`docs/api/endpoint_inventory.md`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
 - **Learnings for future iterations:**
-  - Season number parsing and its display spelling are different concerns: use the shared parser for the number, and retain `season_marker` only where a legacy accepted-payload field needs the public original spelling.
-  - `AnimeTitleParseResult.season` remains a search hint; later candidate-selection work must require public MiKan evidence or explicit user confirmation before persisting it.
-  - Full pytest and the browser subset were run with a clean `.migu_orca/storage`; no UI implementation changed in this story.
+  - route 模块「导入即注册」：`views.py` 必须 import 全部 `routes_*`，漏一个端点就不注册，`test_inventory_consistency.py` 立刻失败。
+  - monkeypatch 目标必须指向**符号实际被调用处的模块命名空间**，不是定义处：`routes_batches` 里的 `_search_batch_item_candidates` 要 patch `routes_batches.<sym>` 而非 `services.<sym>`；路由类里的 `generate_request` 要 patch `routes_requests.<sym>`；`mikan_client_module`/`candidate_search_cache` 在 `services` 命名空间使用。
+  - `views.py` 拆分后仍向后兼容再导出 `CandidateSelectionContextStore`/`candidate_selection_contexts`，旧导入路径不报错；新代码应直接从 `contexts.py` 导入。
+  - 浏览器测试运行前需 `ln -s .agents/.chromium-libs /tmp/chromium-libs`，且必须在**同一 bash 命令内**先建链接再跑 pytest（/tmp 链接跨命令不持久）。
+  - 拆分纯移动代码时先跑 `git show HEAD:views.py` 对比 route 注册集合，确保 24 个端点路径逐一相同；再跑 api_contract + views_test + browser 三套回归。
 ---
 
-## 2026-08-26 23:20:00 CST - US-183
-Thread: https://codex.openai.com/threads/unknown
-- 新增默认确定性规则标题 provider，支持正式标题、别名、用户修正、季数四种公开拼写，以及有来源和优先级的最多八条查询计划。
-- Web 批量解析默认改用规则 provider；fake provider 保留为测试显式注入。未知标题和查询截断继续要求人工核对，所有查询经 Unicode/空白规范化稳定去重。
-- Files changed: `src/batch_engine/controllers/anime_title_parser.py`, `src/batch_engine/controllers/anime_title_parser_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+## 2026-08-30 02:20:00 CST - US-192
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 为全部 /api/v1 端点建立正确 HTTP 状态语义，envelope 形状保持 golden contract 兼容：状态码按 error_type 分类，客户端可按状态码稳定处理失败。
+- `extensions/flask_api/api.py` 新增 `_error_http_status` 集中分类（唯一来源，路由不硬编码）：400 输入/客户端错误（`data_validation_errors`、`validation_error`、`invalid_*`、`config_error`、`queue_not_found`）、404 资源不存在（`request_not_found`、`queue_item_not_found`、`poster_not_found`）、409 冲突/一次性 context 失效/重放（`invalid_request_status`、`request_cancelled`、`season_evidence_conflict`、`season_confirmation_required`、`candidate_context_invalid` + US-194 draft_* 预告）、401 外部认证失败（`ab_auth_failed`、`qbittorrent_auth_failed`）、502 上游不可达（`mikan_connection_failed`、`ab_connection_failed`、`poster_unavailable` 等）、503 上游不可用/版本不支持（`ab_unsupported_version` 等）、504 上游超时（`mikan_timeout`、`ab_timeout`、`qbittorrent_timeout`）、500 服务端内部（`storage_error`、`storage_json_error`）；未知 error_type 默认 400。`failed_response`/`handle_exception` 按映射设置 status。
+- 海报二进制函数视图 `GET /api/v1/mikan/posters/<key>` 纳入统一错误处理（`routes_mikan.py` try/except + `failed_response(status=_error_http_status(...))`）：畸形 key → 400 `invalid_poster_key`，未注册 key → 404 `poster_not_found`，上游取图失败 → 502 `poster_unavailable`；成功仍返回图片字节。
+- 旧前端 `static/app.js` `fetchJson` 兼容非 2xx：解析 JSON envelope（非 2xx 的 error_type/error_message 仍生效）、非 JSON body 回退「请求失败，请稍后重试」、网络异常回退「网络请求失败，请检查网络后重试」并设 `error.status`；所有错误仍走 `notifyApiError` 中文安全反馈。
+- OpenAPI：`_ENDPOINTS` 注册表 errors 声明与 `_error_http_status` 分类一致（qb/ab test-connection 的 timeout 拆到 504、unsupported 拆到 503），重生成 `docs/api/openapi.json`；`docs/api/endpoint_inventory.md` §1/§4.3/§6 与 `docs/api/README.md` 记录新状态语义。
+- 测试：`tests/api_contract/test_golden_contracts.py` 全部失败路径断言真实状态码 + 新增 `test_golden_upstream_failures_map_to_stable_status`（502/503/504/500 分类 + 真实端点 504 脱敏）与 `test_golden_poster_endpoint_unified_error_handling`（400/404）；`src/extensions/flask_api/api_test.py` 新增映射单测；`views_test.py` 33 处失败断言更新；`tests/browser/test_actions.py` 新增 `TestHttpStatusErrorHandling`（409 JSON、502 非 JSON、网络中断三条中文安全反馈路径）；`test_frontend_dependencies.py` 冻结 fetchJson 非 2xx/非 JSON/网络处理。
+- 质量检查：compileall、完整 pytest（991 非浏览器 + 266 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿。
+- Files changed: `src/extensions/flask_api/api.py`、`api_test.py`、`src/apps/migu_orca_web/routes_mikan.py`、`static/app.js`、`openapi_gen.py`、`views_test.py`、`AGENTS.md`、`docs/api/openapi.json`、`docs/api/endpoint_inventory.md`、`docs/api/README.md`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`tests/api_contract/test_golden_contracts.py`、`test_frontend_dependencies.py`、`tests/browser/test_actions.py`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
 - **Learnings for future iterations:**
-  - 解析 query plan 的单条来源由 `AnimeTitleQuery` 保留；规范化结果时必须重建该 plan，不能仅从 `search_queries` 重建，否则会丢失 correction/alias 来源。
-  - 规则正式标题不携带 parser season 事实；季数只作为搜索词生成，后续候选选择仍须以公开 MiKan 证据或用户确认落库。
-  - Non-browser regression: `uv run pytest -q -m 'not browser'` passed (893 passed, 260 deselected); Chromium suite was launched with `uv run pytest tests/browser/ -q`.
+  - HTTP 状态分类只改 `extensions/flask_api/api.py:_error_http_status`，不要在每个 route 里硬编码；OpenAPI `_ENDPOINTS` 的 `errors` 声明必须与分类同步，否则 drift 测试失败。
+  - `failed_response` 返回 `Response` 对象（`response.status_code = ...`），不是 `(body, status)` tuple，否则 `handle_exception`/poster 视图的类型与测试断言会不一致。
+  - 旧测试大量断言「失败仍 200」，US-192 后每处失败路径都要同时断言状态码 + envelope；批量改可用 pytest 失败输出的 `assert X == 200` 反查真实状态码。
+  - `storage_error`/`storage_json_error` 是服务端内部错误 → 500，不是 400；`queue_not_found`（队列不存在）→ 400，`queue_item_not_found`（队列存在但 request_id 未知）→ 404。
+  - 海报 key 是 64 位 hex；畸形 key 走 `invalid_poster_key`（400），格式合法但未注册走 `poster_not_found`（404）——测试两种都要覆盖。
+  - 浏览器测试 mock 非 2xx 时用 `route.fulfill(status=..., json=...)` 或 `content_type="application/json"`；非 JSON body 用 `content_type="text/html"`，前端会回退中文安全文案。
+  - 前端 fetchJson 必须在 `await response.json()` 之前检查 content-type，否则非 JSON 错误体（代理 HTML）会抛 JSON parse 异常打断错误展示。
 ---
 
-## 2026-08-26 22:58:45 CST - US-184
-Thread: https://codex.openai.com/threads/unknown
-- 抽取共享的 parse → bounded query plan → MiKan 候选搜索编排，并同时接入单个候选 API 与批量解析；高优先级命中后停止弱回退，单条失败继续后续查询。
-- 以公开 `bangumi_id`/`mikan_url` 做稳定候选去重；全部失败为 FAILED，至少一次成功但无结果为 EMPTY，且批量条目互不阻断。
-- Files changed: `src/batch_engine/controllers/candidate_search_orchestrator.py`, `src/batch_engine/controllers/candidate_search_orchestrator_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+## 2026-08-30 03:45:00 CST - US-193
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 收紧 Web storage 根目录：浏览器只能选择服务端允许根目录下的相对 profile，绝对路径/穿越/符号链接逃逸返回 400 `invalid_storage_dir`，错误 details 不回显原始路径；CLI `--storage-dir` 显式路径行为不变。
+- 服务端（`src/apps/migu_orca_web/services.py`）：`_storage_dir(value)` 改为相对 profile 解析器——空值 → 默认根；Unix `/...` 与 Windows 盘符（`^[a-zA-Z]:[\\/]`）→ 400；`(root/profile).resolve()` 后 `is_relative_to(root)` 校验拒绝 `..` 穿越与符号链接逃逸。`_WEB_STORAGE_ROOT` 默认 `DEFAULT_STORAGE_DIR`（`.migu_orca/storage`），可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 环境变量服务端覆盖；`set_web_storage_root(root|None)` 是测试 seam。
+- `extensions/flask_api/api.py`：`invalid_storage_dir` 加入 `_HTTP_BAD_REQUEST_ERROR_TYPES`（400）；`api_test.py` 加映射单测。
+- 前端（`static/app.js` + `settings.html` + `index.html`）：`isAbsoluteStorageProfile`/`sanitizeStorageProfile` 在读取/保存/发送前丢弃绝对路径与 `..`；`restoreWebPreferences` 发现旧 localStorage 绝对路径值自动清除（平滑迁移）；Settings 输入从「默认 storage_dir」改为「storage profile（相对服务器根目录）」，summary 文案改为「默认服务器 storage 根目录」。
+- OpenAPI：`openapi_gen.py` 新增 `_STORAGE_DIR_ERRORS` 常量，全部接受 `storage_dir` 的端点 errors 声明 `invalid_storage_dir`（400），preferences/corrections GET 补充 storage_dir 参数声明；重生成 `docs/api/openapi.json`（含 27 处 invalid_storage_dir）。
+- 测试迁移：`views_test.py`/`tests/api_contract/conftest.py`/`tests/browser/conftest.py` 新增 autouse `_web_storage_root` fixture（`set_web_storage_root(tmp_path)`），所有 API-facing `storage_dir` 值从绝对 tmp 路径改为相对 profile（`"storage"`/`"migu-state"`/`storage_dir.name`）；`set_storage_preferences` 只存 profile 名。新增 golden contract（绝对路径/Windows 盘符/穿越/符号链接 4 类 `invalid_storage_dir` 拒绝 + 不回显）、`_storage_dir` 解析器 6 个单测、浏览器 2 个旧值迁移测试。
+- 文档：`endpoint_inventory.md` §1/§3.1/§4.3/§5.2/§5.3、`docs/api/README.md`、`architecture.md` §6、stage PRD US-193 段、README Web API 示例（去掉 `?storage_dir=.migu_orca/storage` 路径式 query）、`AGENTS.md` 新增 Web storage 根目录约定。
+- 质量检查：compileall、完整 pytest（1001 非浏览器 + 268 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
+- Files changed: `services.py`、`extensions/flask_api/api.py`+`api_test.py`、`openapi_gen.py`、`static/app.js`、`templates/index.html`+`settings.html`、`views_test.py`、`tests/api_contract/`（conftest+golden+frontend_dependencies）、`tests/browser/`（conftest+generation+shell+actions+detail+ui_quality+mikan_candidates）、`docs/api/openapi.json`+`endpoint_inventory.md`+`README.md`、`docs/design/architecture.md`、stage PRD、`README.md`、`AGENTS.md`、`scripts/ralph/prd.json`、`progress.txt`。
 - **Learnings for future iterations:**
-  - 共享编排只接收 search callback 与公开 identity 函数；MiKan 客户端、缓存和 API 序列化仍留在 Web view 边界。
-  - 某个 fallback 抛错但后续查询成功为空时，最终状态是 EMPTY；只有所有查询都失败才是 FAILED。
-  - 保存的标题修正应注入 `RuleAnimeTitleParsingProvider`，使其成为同一个正式 query plan，而不是额外的搜索循环。
+  - `_storage_dir` 是 Web 路由的统一存储 seam：改语义只需动这一处，routes_* 全部自动生效；CLI 的 `--storage-dir`（entry_controller）是不同信任边界，不要用 Web 解析器约束。
+  - `sanitize_error_data` 的正则会命中子串（如 `outside` 里的 `sid` → `[redacted]`），错误 reason 标记要避开敏感关键词子串（用 `escape_attempt` 而非 `outside_allowed_root`）。
+  - 浏览器测试的 server 是 in-process 线程，`set_web_storage_root` fixture 必须在**每个测试函数**内设置（tmp_path 按函数隔离），不能只放 session fixture。
+  - `set_storage_preferences(page, storage_root)` 对 Path 参数用 `storage_root.name` 作为 profile；绝对路径断言（`"miguOrca.web.storageDir": str(storage_dir)`）全部改为 `storage_dir.name`。
+  - localStorage 里的旧绝对路径值不会自动消失：`restoreWebPreferences` 需主动 `removePreference`/覆写，否则「迁移」只是不发送、不清理，浏览器测试断言 localStorage 时仍会看到旧值。
+  - OpenAPI `_ENDPOINTS` 中接受 `storage_dir` 的端点（含 preview-modify/save、preferences/corrections GET）要同步声明参数与 `invalid_storage_dir` 错误，否则文档与实现不一致。
 ---
-
-## 2026-08-26 23:06:17 CST - US-185
-Thread: https://codex.openai.com/threads/unknown
-- 为单个 MiKan 候选搜索和批量解析增加相同的白名单 `parse_result` 摘要、实际 `attempted_queries` 和明确的 FOUND/EMPTY/FAILED 状态；保留原有顶层兼容字段。
-- 将标题解析和 MiKan 搜索失败详情收敛为稳定的类别、字段、长度和可恢复标记，避免回显 provider 或外部响应详情；单个搜索失败现以可审核 FAILED 结果返回。
-- Files changed: `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+## 2026-08-30 05:05:00 CST - US-194
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 建立服务端权威 draft 生命周期：未保存草案由服务端持有，客户端只持 opaque `draft_id`，不再把完整 Request 作为权威快照提交。
+- 新增 `src/apps/migu_orca_web/drafts.py`：`DraftStore`（进程内单例 `draft_store`，TTL 30 分钟、容量 128、自动清理、一次性保存 + 重放保护），查找返回 `(value, reason)`（ok/expired/evicted/replayed/unknown）以便路由映射稳定 409。
+- `schemas.py`：`RequestPreviewModifyPayload`/`RequestPreviewSavePayload` 从 `request` 改为 `draft_id`（+ patch）。
+- `routes_requests.py`：`POST /api/v1/requests`（`save_request=false`）签发 `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch（`draft_store.get` 不消费，成功后 `update` 回写最新草案并回传同一 draft_id）；`preview-save` 用 `consume_for_save` 一次性消费；`_draft_store_error` 把 expired/unknown → `draft_expired`、evicted → `draft_evicted`、replayed → `draft_replayed`（均 409，details 不回显 draft_id）。
+- `api_contract.py`：`RequestCreateResultDTO`/`RequestPreviewModifyResultDTO` 增加可选 `draft_id`；`RequestPreviewSaveResultDTO` 独立（保存后无 draft_id）。
+- 前端 `static/app.js`：新增 `currentDraftId`（内存，不落 localStorage/URL）；生成响应带 `draft_id` 时记录；`previewModify`/`savePreviewDraftRequest` 只发 `draft_id`；批量卡片 `row.draft_id` 随生成/修改维护，接受/保存后清除；`notifyApiError` 对 `draft_*` 错误追加「请重新生成订阅草案后再试」指引。
+- OpenAPI：`_ENDPOINTS` 更新 preview-modify/save 的 requestBody（draft_id + x-request-scoped）与 409 draft_* errors；重生成 `docs/api/openapi.json`。
+- 测试：新增 `tests/api_contract/test_draft_store.py`（9 个 DraftStore 单测：issue/get/consume 一次性/update/TTL/容量逐出/重放/clear）；`test_golden_contracts.py` 更新 create 成功断言 draft_id、preview-modify/save 用 draft_id、新增 save 一次性消费 + 未知 draft 409；`views_test.py` 更新 5 个 preview 测试用 `_issue_draft` 辅助并新增重放/未知 draft 测试；`api_test.py` 加 draft_* → 409 映射断言；`test_dto_contracts.py` 加 draft_id DTO 测试；`test_frontend_dependencies.py` 新增「preview 只发 draft_id 不发完整 request、draft_id 不落 localStorage」断言。
+- 浏览器测试：conftest 新增 `preview_result_json(request)`（签发真实 draft 并返回 draft_id）、`issue_draft_id(preview_request)`（批量卡片 mock 补 draft_id）、`save_preview_handler(calls?)`（消费 draft 返回保存结果）；`_batch_item` 对带 preview_request 的卡片自动补 draft_id；`test_batch_workbench`/`test_ui_quality` 的 `_save_preview` 全部替换为 `save_preview_handler`，断言改为校验 payload 只含 draft_id。
+- 文档：`endpoint_inventory.md` §3.1/§4.2/§4.3/§5.4、`docs/api/README.md`、`README.md`、stage PRD US-194 段、`AGENTS.md`（新增 DraftStore 模块与浏览器测试 seam 约定）。
+- 质量检查：compileall、完整 pytest（1017 非浏览器 + 268 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
+- Files changed: `src/apps/migu_orca_web/drafts.py`（新）、`routes_requests.py`、`schemas.py`、`api_contract.py`、`openapi_gen.py`、`static/app.js`、`views_test.py`、`extensions/flask_api/api_test.py`、`tests/api_contract/`（conftest+golden+dto+frontend_dependencies+draft_store）、`tests/browser/`（conftest+batch_workbench+mikan_candidates+fixture_mode+ui_quality）、`docs/api/endpoint_inventory.md`+`README.md`+`openapi.json`、`README.md`、stage PRD、`AGENTS.md`、`scripts/ralph/prd.json`+`progress.txt`。
 - **Learnings for future iterations:**
-  - API 兼容迁移可新增嵌套 `parse_result`，同时保留既有扁平解析字段，且两者均应来自同一 `AnimeTitleParseResult.to_dict()` 白名单。
-  - 搜索失败也应作为有状态、可审核的结果；错误 details 只能包含稳定 category/field/length/recoverable，不能复用外部错误 details。
-  - Full quality checks: `uv run python -m compileall -q src tests`, `uv run pytest src/apps/migu_orca_web/views_test.py -q` (170 passed), `uv run pytest -q` (1156 passed), and `git diff --check`.
----
+  - DraftStore 的 `get` 与 `consume_for_save` 返回 `(value, reason)` 而非裸值，路由才能区分 expired/evicted/replayed/unknown 并映射稳定 409；仅用「None」无法区分「被保存过（重放）」与「从未签发」。
+  - 一次性保存用 tombstone（`_tombstones: draft_id -> (reason, at)`）记录已消费 id，且 tombstone 也按 TTL 清理，否则「重放」语义会永久残留或误报。
+  - 浏览器测试 mock 生成响应必须用 `preview_result_json(request)`（内部 `draft_store.issue`），否则前端 `currentDraftId` 为 null，真实 preview-save 后端 409；批量卡片 mock 必须给每个 `preview_request` 补 `issue_draft_id(...)`。
+  - 手工探针（非测试）直接调 preview-save 且不传 storage_dir 会写仓库根 `.migu_orca/storage`（`load_storage_config(None)` 默认根），跑浏览器套件前必须 `rm -rf .migu_orca/storage`。
+  - 前端 `currentDraftId` 必须在「渲染已保存请求」与「清空批量详情上下文」时置 null，否则切到已保存详情后误用旧 draft_id。
+  - `RequestPreviewSaveResultDTO` 不能再继承 `RequestCreateResultDTO`（后者新增了 draft_id，而保存响应没有 draft_id）；改为独立定义相同字段。
+  - 旧测试大量断言 `saved_calls[0]["request"]["request_id"]`，US-194 后 preview-save/modify 的 payload 只含 draft_id，断言改为 `saved_calls[0]["draft_id"]` + `"request" not in payload`。
 
-## 2026-08-26 23:16:19 CST - US-186
-Thread: https://codex.openai.com/threads/unknown
-- 新增共享候选季数证据规则：解析季数仅作搜索提示；真实 MiKan 候选的公开标题/别名一致时才自动写入季数，无标记候选需要用户显式确认，冲突直接 fail closed。
-- 单个与批量候选响应均返回可审核的季数证据；候选卡片为无证据的非第一季提供默认未勾选确认框，确认值随既有候选 → preview 链路提交。Request 始终以候选公开标题/别名为准，M07/M10 因而只消费已证明或明确确认的字段。
-- Files changed: `src/shared/season_evidence.py`, `src/shared/season_evidence_test.py`, `src/apps/migu_orca_web/views.py`, `src/apps/migu_orca_web/views_test.py`, `src/apps/migu_orca_web/static/app.js`, `src/apps/migu_orca_web/static/style.css`, `tests/browser/test_mikan_candidates.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+## 2026-08-30 07:30:00 CST - US-195
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- 建立 P0 CI 门禁、Python 静态检查与 local-only 部署基线：每次 push/PR 自动执行 compileall → ruff → 非浏览器 pytest → node --check → OpenAPI 漂移 → git diff --check；真实 Chromium 套件在单独 job 运行，CI 下浏览器不可用直接失败而非静默 skip。
+- 新增 `.github/workflows/ci.yml`：`checks` job（astral-sh/setup-uv + setup-python + setup-node，跑全部静态与契约门禁）+ `browser` job（`uv run playwright install --with-deps chromium` + `MIGU_ORCA_CI=1` 跑 tests/browser/）。CI 不保存凭据/真实 endpoint/trace/敏感失败产物。
+- 引入 `ruff` 作为 Python 静态检查（`pyproject.toml` `[tool.ruff.lint]`：F/E4/E7/E9/W/I/UP/B/SIM，`line-length=120`，排除 E402/E501/B009/UP046/UP047/UP031 并在注释记录理由）；加入 dev 依赖（uv.lock 更新），修复全部存量违规（约 116 处：I001 排序、F401 未用导入、UP035/037/012/043 现代化、SIM105/108/210/103 简化、F821 补 pytest 导入）。compileall 降级为纯语法检查，不再冒充静态检查。
+- `src/apps/healthz/views.py`：`/healthz` 保持纯存活探针；`/readiness` 拆分为就绪探针——用 `services._web_storage_root()` + `ensure_storage_layout(load_storage_config(...))` 校验服务端 storage 根目录可创建/可写，失败返回 503 `{"ok": false, "result": "storage_unavailable"}`（不回显路径/敏感值）；两者都不访问真实 MiKan/AB/qB。
+- 测试：`src/apps/healthz/views_test.py` 新增 3 个测试（成功路径用 tmp storage root 避免污染仓库 `.migu_orca/storage`、外部 client 工厂全部 monkeypatch 抛错证明不触碰外部系统、503 失败 envelope 不回显路径）；`tests/browser/test_infrastructure.py` 新增 `test_readiness_reports_ready`；`tests/browser/conftest.py` 在 `MIGU_ORCA_CI=1` 且浏览器不可用时 collection 抛错（不静默 skip）。
+- 文档：README「开发约定」区分 compileall/ruff、「Web UI 与 API」healthz/readiness 语义、新增「本地部署基线」（默认 local-only、未认证禁止直接暴露公网、storage 根目录、健康/就绪探针、CI 门禁）；stage PRD US-195 段、`docs/design/architecture.md` §7、`docs/api/README.md`、`endpoint_inventory.md` §2、`src/apps/migu_orca_web/AGENTS.md` 同步。
+- 质量检查：compileall、ruff、完整 pytest（1019 非浏览器 + 269 真实 Chromium 全绿，含新增 readiness 测试）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
+- Files changed: `.github/workflows/ci.yml`（新）、`pyproject.toml`、`uv.lock`、`src/apps/healthz/views.py`+`views_test.py`、`tests/browser/conftest.py`+`test_infrastructure.py`、`README.md`、`docs/design/architecture.md`、`docs/api/README.md`+`endpoint_inventory.md`、stage PRD、`AGENTS.md`、`scripts/ralph/prd.json`+`progress.txt`，以及 ruff 自动修复的 ~60 个源/测试文件（导入排序、未用导入、UP 现代化、SIM 简化）。
 - **Learnings for future iterations:**
-  - 选择候选时将其公开 aliases 随请求传递，才能让服务端用同一证据原语判断别名中已明确的季数，而不会采用 parser canonical title。
-  - `season_evidence` 仅在 parser 提供季数提示时加入候选 API，以保持无季数客户端的既有候选字段稳定。
-  - Browser validation used Playwright with mocked candidate search; full-suite processes must not be started concurrently because both include browser coverage.
----
+  - `ruff check --fix` 会移除「仅作再导出」的 import（views.py 的 `api_blueprint` 被 F401 当未用），破坏 `apps.migu_orca_web.__init__` 的再导出；这类 import 必须保留并加 `# noqa: F401` 注释说明用途。
+  - ruff 的 UP037（去引号注解）只在该文件有 `from __future__ import annotations` 时才安全；本仓库全部相关文件都有，且无 `get_type_hints`/`__annotations__` 运行时求值，全套测试通过证明安全。
+  - ruff E501/E402 在本仓库是项目风格（docstring 在 `from __future__` 之后、长中文 UI 字符串），不是正确性问题；在 `[tool.ruff.lint].ignore` 记录理由比强改 ~750 行更符合「适合当前代码」。
+  - 浏览器测试 conftest 的 skip 逻辑在 CI 下要抛 `RuntimeError` 而非静默 skip；`MIGU_ORCA_CI=1` 环境变量是 CI job 与本地运行的开关。
+  - `/readiness` 探针测试必须把 `_web_storage_root` 指到 tmp，否则成功路径会在仓库根创建 `.migu_orca/storage` 挂掉后续浏览器测试（复用 US-193 的 `set_web_storage_root` seam）。
+  - CI 里 `uv sync --all-groups` 会把 ruff/pytest/playwright 都装上；`astral-sh/setup-uv` + `actions/setup-python`（python-version-file 指向 `.python-version`）是 uv 项目标准组合。
+  - `playwright install --with-deps chromium` 在 ubuntu-latest 上能装全系统库；本地沙箱用 `.agents/.chromium-libs` + 同一 bash 命令内 `ln -sfn` 到 `/tmp/chromium-libs`。
 
-## 2026-08-27 14:20:00 CST - Stage 25 静态复审重新打开
-Thread: https://codex.openai.com/threads/unknown
-- 复审推翻此前的完成状态：US-181、US-182、US-183、US-186、US-187 与 US-188 已恢复为未完成，后续按一 story 一提交重新验收。
-- 历史中 US-187/US-188 记录曾被错误置于较早位置；保留全部原始记录，本条仅追加顺序更正与复审结论。
-- 复审范围包括结构化 season 公共契约、混合不支持标记、correction season_hint 的唯一查询计划、候选证据信任边界、未确认非第一季、可信海报传播、UI 确认状态和最终归档。
-- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 操作；外部系统后续继续只使用 fixture、fake transport 与 Playwright route。
----
-
-## 2026-08-27 14:35:00 CST - US-181
-Thread: https://codex.openai.com/threads/unknown
-- 复审修复：`AnimeTitleParseResult.to_dict()` 的 `season` 现为不可变 JSON-safe 的 `number/raw/normalized/source` 对象；兼容 `season_number` 和 `season_hint` 均只从该对象导出。
-- API 与 Web UI 共同消费结构化 season；无法证明时保持 number/raw/normalized 为空且 source 为固定 `none`，不保留相互矛盾的整数事实。
-- 验证：`uv run pytest src/shared/title_season_test.py src/batch_engine/controllers/anime_title_parser_test.py -q`（37 passed）。
----
-
-## 2026-08-27 14:38:00 CST - US-182
-Thread: https://codex.openai.com/threads/unknown
-- 复审修复：共享季数 parser 现在逐段识别未被合法 marker 覆盖的不完整标记，且 Part/分割放送即使与合法数字共存也会保留人工审核；一致的重复 marker 仍可去重。
-- `S2 第百季`、`S2 第100季`、`S2 S`、`S2 Part 2` 与“第二季 分割放送”均不生成可信季数，冲突 marker 同样 fail closed。
-- 验证：`uv run pytest src/shared/title_season_test.py src/batch_engine/controllers/anime_title_parser_test.py -q`（37 passed）。
----
-
-## 2026-08-27 14:50:00 CST - US-183
-Thread: https://codex.openai.com/threads/unknown
-- 复审修复：已保存 correction 的 canonical title、query_correction 和可证明 season_hint 现在均加入 `RuleAnimeTitleParsingProvider` 的唯一有界 query plan；不再由旧 search enhancer 单独展示或搜索。
-- correction 保留优先级，同时限制每个修正字段的季数展开以留出 rule 与 raw fallback；`attempted_queries` 直接记录同一 plan 的 transport 调用顺序。
-- 验证：`uv run pytest src/batch_engine/controllers/anime_title_parser_test.py src/batch_engine/controllers/candidate_search_orchestrator_test.py -q`（22 passed）。
----
-
-## 2026-08-27 15:20:00 CST - US-186
-Thread: https://codex.openai.com/threads/unknown
-- 复审修复：POST Request 不再接受或写入客户端 `candidate_aliases`；Request 始终通过服务端 MiKan 详情重建 title、URL 与可选海报。候选搜索产生的非第一季确认提示只在服务端短期公共候选记录中延续，未确认时拒绝生成草案。
-- AutoBangumi 3.1.18 legacy mapper 新增可选 `data.poster_link`：只接受服务端解析、规范 HTTP(S)、无 userinfo/控制字符的公开原始海报 URL；本地 opaque poster 路由、非法 URL 与客户端伪造字段均被忽略。
-- 验证：`uv run pytest -q -m "not browser"`（916 passed，262 deselected）；`uv run pytest src/shared/season_evidence_test.py src/ab_engine/controllers/subscription_payload_test.py src/apps/migu_orca_web/views_test.py -q`（207 passed）。
----
-
-## 2026-08-27 15:28:00 CST - US-187
-Thread: https://codex.openai.com/threads/unknown
-- 复审修复：候选为 `NEEDS_CONFIRMATION` 时，“选择此合集”默认 disabled，并带同步 `aria-disabled`；勾选明确确认后才启用，取消勾选立即恢复禁用。候选冲突仍保持不可选择。
-- Chromium fixture 测试迁移到结构化 season 契约，并断言确认控件默认、切换与 API body 不再带客户端 aliases；解析摘要继续只展示实际查询。
-- 验证：`node --check src/apps/migu_orca_web/static/app.js`；针对确认、批量候选与结构化摘要的 Chromium tests（4 passed）。
----
-
-## 2026-08-27 15:45:00 CST - US-188
-Thread: https://codex.openai.com/threads/unknown
-- 最终静态复审完成：同步 README、主/Stage PRD、future stages、backlog 与 M03/M07/M10/M12/M13 的实际边界；明确 3.1.18 `poster_link` 仅使用服务端校验的 MiKan 原始公开 URL，缺失不阻断订阅。
-- 已清理错误命名且内容属于 Stage 25 初始状态的 `2026-08-26-agent/stage24-autobangumi-compatibility` 归档；保留全部历史 progress 内容，并以最终活动 PRD/progress 重建正确 Stage 25 归档。
-- 最终验证：`uv run python -m compileall -q src tests` 通过；`node --check src/apps/migu_orca_web/static/app.js` 通过；`uv run pytest -q -m "not browser"`（916 passed，262 deselected）；`uv run pytest tests/browser/ -q`（262 passed，真实 Chromium）；`uv run pytest -q`（1178 passed）；`git diff --check` 通过。
-- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 写操作；真实 AutoBangumi 海报效果仍须由用户在真实实例显式创建时人工复验。
----
-
-## 2026-08-27 16:10:00 CST - Stage 25 二次静态复审重新打开
-Thread: https://codex.openai.com/threads/unknown
-- 此前全通过结论再次被复审推翻：US-186、US-187 与 US-188 恢复为未完成。历史记录保持不变，本条仅追加复审结论。
-- US-186：URL 键的全局候选季数提示无 TTL、容量、搜索上下文隔离和一次性消费，可能跨请求污染；改用有界、过期、与候选 URL 绑定的一次性 opaque 上下文。
-- US-187：异步候选生成结束后曾无条件启用全部按钮，须依据候选业务禁用原因与 in-flight 状态统一重算，并以多候选 Chromium 成功/失败回归保护。
-- US-188：Stage 25 PRD 与主 PRD仍写“待开发”，须同步完成状态并重建最终归档。
-- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 操作；外部系统仅限 fixture、fake transport 与 Playwright route。
----
-
-## 2026-08-27 16:20:00 CST - US-186
-Thread: https://codex.openai.com/threads/unknown
-- 二次复审修复：移除 URL 键全局季数提示，改为仅在 `NEEDS_CONFIRMATION` 候选响应中签发的 opaque context。服务端 store 使用 5 分钟 TTL、128 条 FIFO 上限、详情解析后的 MiKan URL 绑定和首次消费；过期、逐出、URL 不匹配或重放均不再产生季数提示。
-- Request 继续由服务端 MiKan 详情重建；仅有效 context 携带 parser season 进入共享 `attach_selected_candidate_season`，客户端 aliases、海报和展示字段不构成事实。无季数的普通直连兼容路径不携带 context，保持合法的第一季默认行为。
-- 验证：`uv run pytest src/apps/migu_orca_web/views_test.py src/shared/season_evidence_test.py src/ab_engine/controllers/subscription_payload_test.py -q`（208 passed）；`git diff --check` 通过。
----
-
-## 2026-08-27 16:25:00 CST - US-187
-Thread: https://codex.openai.com/threads/unknown
-- 二次复审修复：候选选择按钮现保存关联候选，并经单一状态函数同时计算 in-flight、`NEEDS_CONFIRMATION` 未勾选及 `CONFLICT` 三种禁用原因；异步成功或失败收尾不再无条件解锁所有按钮，`disabled` 与 `aria-disabled` 始终同步。
-- 真实 Chromium fixture 回归覆盖多候选：选择一个正常候选完成成功请求和失败请求后，未确认与冲突候选仍不可选；未使用真实外部系统。
-- 验证：`node --check src/apps/migu_orca_web/static/app.js`；`uv run pytest tests/browser/test_mikan_candidates.py -q`（36 passed，真实 Chromium）。
----
-
-## 2026-08-27 16:40:00 CST - US-188
-Thread: https://codex.openai.com/threads/unknown
-- 二次复审收尾：Stage 25 PRD、主 PRD阶段叙述/路线图与 M00/M02/M03/M13 均改为“已完成”，消除与 README、future stages、backlog 和已完成 Ralph 状态相矛盾的“已规划、待开发”表述。
-- 归档将由活动 `scripts/ralph/prd.json` 与 `progress.txt` 原样重建至 `scripts/ralph/archive/2026-08-27-stage25-title-season-parsing/`，确保最终全 true 状态字节一致；不创建下一 Stage PRD。
-- 完整验证：`uv run python -m compileall -q src tests` 通过；`node --check src/apps/migu_orca_web/static/app.js` 通过；`uv run pytest -q -m "not browser"`（917 passed，263 deselected）；`uv run pytest tests/browser/ -q`（263 passed，真实 Chromium）；`uv run pytest -q`（1180 passed）。
-- 未执行真实 MiKan、AutoBangumi 或 qBittorrent 写操作；AutoBangumi 海报最终视觉效果仍须由用户在真实实例显式创建时人工复验。
+## 2026-08-30 06:30:00 CST - US-196
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- Stage 26 收尾：完整单元/API/CLI 与真实 Chromium 用户旅程回归通过，README、主 PRD、架构、M11/M13/M14、backlog、future stages、docs/api 与 Stage 27 handoff 全部同步为「Stage 26 已完成」，并归档 Stage 26 prd/progress。
+- **安全回归发现并修复 US-193 回归**：`services._storage_dir(None|""|"  ")` 原来返回 `None`，所有 Web 路由随后调用 `load_storage_config(None)` 回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖（含生产 `MIGU_ORCA_WEB_STORAGE_ROOT`）——完整非浏览器 pytest 会把请求写到仓库根并污染后续浏览器空列表测试。修复：空值返回 `_WEB_STORAGE_ROOT` 本身；新增 golden contract `test_golden_request_create_without_storage_dir_uses_server_root`（不传 storage_dir 的 `save_request=true` 写入服务端根 tmp，且 `DEFAULT_STORAGE_DIR` 不被创建）；views_test 的 `_storage_dir(""|None|"  ")` 断言改为等于 tmp 根。
+- 文档同步：stage26 PRD 状态改「已完成」并记录 US-196 实现；主 PRD（文档状态/Stage 26 段落/模块表 M13/M14/路线图/BL-023 完成/下一步）；backlog（BL-023 完成、BL-024 前置条件满足）；future_stages（Stage 26 已完成、阶段数量判断更新）；架构（Web 边界、storage 空值回落根、OpenAPI/DTO/DraftStore 说明）；M13（Stage 26 行 + UI 调整 + 安全边界）、M14（Stage 26 Web storage 根配置）、M11（Stage 26 storage 根）；docs/api/README.md 与 endpoint_inventory.md（storage_dir 空值回落服务端根）；docs/README.md（最近完成阶段）；Stage 27 PRD（前置条件已满足）。
+- 归档：`scripts/ralph/archive/2026-08-30-stage26-web-api-contract-hardening/` 保存活动 prd.json 与 progress.txt 副本（全部 story passes 为 true）。
+- 质量检查：compileall、ruff、非浏览器 pytest（1020 passed）、真实 Chromium 浏览器套件（269 passed）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
+- Files changed: `src/apps/migu_orca_web/services.py`+`views_test.py`+`AGENTS.md`、`tests/api_contract/test_golden_contracts.py`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`docs/MiGuOrca_main_PRD.md`、`docs/MiGuOrca_future_stages.md`、`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`、`docs/backlog.md`、`docs/README.md`、`docs/design/architecture.md`、`docs/modules/M11-storage-state-PRD.md`+`M13-web-ui-PRD.md`+`M14-system-config-PRD.md`、`docs/api/README.md`+`endpoint_inventory.md`、`README.md`、`scripts/ralph/prd.json`+`progress.txt`+`archive/2026-08-30-stage26-web-api-contract-hardening/`。
+- **Learnings for future iterations:**
+  - `_storage_dir` 空值必须返回 `_WEB_STORAGE_ROOT` 而非 `None`：`load_storage_config(None)` 会回退 CLI 默认路径，是 Web storage 根目录边界被绕过的经典坑；新增端点时用「不传 storage_dir 的保存请求」做回归。
+  - 完整测试跑完必须检查仓库根 `.migu_orca/storage` 是否被创建——被创建说明有 Web/CLI 路径绕过了服务端 root，会连锁挂掉浏览器空列表测试（US-196 正是靠这个信号发现回归）。
+  - Stage 收尾归档：把活动 `scripts/ralph/prd.json` 与 `progress.txt` 原样复制到 `archive/<date>-<stage-name>/`，确保最终全 true 状态一致；同步 README、docs/README.md、backlog、future_stages、主 PRD、模块 PRD 的「当前状态/最近完成阶段」。
+  - Stage 27 只通过 OpenAPI/DTO 使用后端（不导入旧 app.js 内部状态），启动时以 `docs/api/openapi.json` 为准复核 stories。
 ---

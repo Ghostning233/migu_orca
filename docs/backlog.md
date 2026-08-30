@@ -26,7 +26,9 @@
 | 15 | BL-017 | 媒体缓存、MiKan 读取优化与批量审核体验 | 完成 (Stage 23, 2026-08-24) |
 | 16 | BL-019 | AutoBangumi 真实认证与订阅兼容闭环 | 完成 (Stage 24, 2026-08-25) |
 | 17 | BL-018 | 正式番名与季数解析 | 已完成 (Stage 25, 2026-08-27) |
-| 18 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
+| 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
+| 19 | BL-024 | 前端工程化迁移与页面重构 | 已规划为 Stage 26 后继 Stage |
+| 20 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
 以下事项已经落盘，但尚未进入开发优先级排序；触发条件满足或完成独立可行性评估后，再决定是否进入新的 Stage：
 
@@ -419,11 +421,53 @@ Stage 23 closeout：同源安全封面缓存、搜索结构感知提前停止、
 
 Stage 25 实际结论：普通流程使用确定性规则解析器，单个与批量入口共享结构化 `number/raw/normalized/source` season 和最多 8 项的有界 query plan；用户修正、版本化别名、规则标题和原始输入依次 fallback。parser 提示不等于真实候选或已确认季数；候选缺少非第一季公开证据时必须明确确认。M10 的 3.1.18 可选 `poster_link` 仅使用服务端校验的 MiKan 原始公开 URL，缺失不阻断订阅。
 
+### BL-023: Web API 契约固化与服务端边界治理
+
+- 状态：已完成 (Stage 26, 2026-08-30)
+- 来源：Stage 25 后架构与前后端边界审查，2026-08-29
+- 优先级：18，P0
+- 执行 PRD：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`
+
+完成情况（Stage 26）：
+
+- 冻结 `/api/v1` 端点清单、请求/响应 DTO、错误 envelope、HTTP 状态与旧前端依赖（golden contract + 清单自动核对）。
+- 生成可校验的 OpenAPI 契约（`docs/api/openapi.json`），拆分 Web schema、serializer、application service、context 与 route 职责。
+- 为失败响应建立正确 HTTP 状态（400/404/409/401/502/503/504/500），保持 JSON envelope 和旧 Web UI 兼容。
+- 将 Web storage 限制在服务端允许根目录内（空值回落服务端根），CLI 显式 storage 路径保持不变。
+- 用有界、过期、服务端权威的 draft context 代替客户端完整 Request 直接持久化。
+- 建立 local-only 默认部署、CI（compileall/ruff/pytest/node/OpenAPI 漂移/git diff）、契约漂移和真实 Chromium 门禁。
+
+不包含：
+
+- 不重构页面视觉，不引入新前端框架。
+- 不实现多用户账号、数据库、后台 worker 或远程 SaaS。
+- 不实施 BL-020、BL-021、BL-022 或 OF-001。
+
+### BL-024: 前端工程化迁移与页面重构
+
+- 状态：已规划为 Stage 27，等待 Stage 26 完成后启动
+- 来源：Stage 25 后前后端边界审查，2026-08-29
+- 优先级：19，P1
+- 规划 PRD：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`
+- 前置条件：Stage 26 已完成（OpenAPI、DTO、HTTP 状态、Web storage 与服务端 draft 全部落地）
+
+目标：
+
+- 建立 Vue 3 + TypeScript + Vite 独立前端工程，生产继续与 Flask API 同源。
+- 按 Settings、Request、单个搜索、批量工作台、提交队列顺序渐进迁移。
+- 重构页面信息架构、响应式与无障碍体验，同时保持现有业务状态机和安全边界。
+- 新旧页面完成 parity 后再切换默认入口并清理旧 Jinja 主页面、单文件 `app.js` 与无用 CSS。
+
+不包含：
+
+- 不改变 MiKan、Request、季数证据、筛选和 AutoBangumi 业务规则。
+- 不实施 BL-020、BL-021、BL-022、OF-001、多用户账号、数据库或后台 worker。
+
 ### BL-014: 部署/配置向导可行性验证
 
 - 状态：待办，远期，仅辅助配置
 - 来源：2026-08-19 方向调整讨论
-- 优先级：18
+- 优先级：20
 - 不阻塞：批量新番订阅工作台
 
 目标：

@@ -2,6 +2,8 @@
 
 MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台，目标是在 MiKanProject 与 Auto Bangumi 之间提供 MiKan 订阅源发现、筛选预览、批量草案审核与提交辅助能力。
 
+Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI（compileall/ruff/非浏览器 pytest/node/OpenAPI 漂移/git diff）与真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；Stage 27 前端迁移 handoff 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
+
 Stage 25「正式番名与季数解析」已完成：单个与批量搜索共用结构化 season（`number/raw/normalized/source`）、确定性解析和有界查询计划；真实 MiKan 合集仍由用户显式选择，非第一季缺少候选公开证据时必须明确确认。AutoBangumi 3.1.18 可选使用服务端解析并校验的 MiKan 原始海报作为 `poster_link`，绝不使用浏览器 opaque 代理地址。实现与验收见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
 Stage 24「AutoBangumi 真实认证与订阅兼容闭环」已完成：默认以服务地址、用户名和密码登录兼容 AutoBangumi 3.1.18，同时保留新版 API Token/Bearer 兼容模式；Settings 提供只读连接测试，单个与批量已接受 Request 复用经验证的 `/api/v1/rss/subscribe` 映射和提交编排。执行范围见 `docs/MiGuOrca_stage24_autobangumi_compatibility_PRD.md`。
@@ -27,6 +29,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - Stage 19 已把批量新番订阅前置工作台接入 `/index`：批量输入按非空行生成独立条目，AI 名称解析 fake provider 和 provider seam 输出候选标题/搜索词，批量 API 对每个条目独立搜索 MiKan 候选，卡片网格支持删除、展开、单卡修改回流和单卡接受。
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
 - Stage 24 AutoBangumi 真实认证与订阅兼容闭环与 Stage 25 BL-018 均已完成。部署/配置向导及其他条件触发事项继续记录在 `docs/backlog.md`，流式封面代理记录在 `docs/optional_features.md`；后续阶段按 backlog 动态规划。
+- Stage 26「Web API 契约固化与服务端边界治理」已完成：`/api/v1` 端点清单与 golden contract 冻结、响应 DTO（`extra="forbid"`）与确定性 OpenAPI、Web 适配层按职责拆分（schemas/serializers/services/contexts/routes_*）、稳定 HTTP 状态语义、Web storage 根目录限制（空值回落服务端根）与服务端权威 draft 生命周期、CI 与 local-only 部署基线；本阶段未更换页面框架，页面主要视觉与用户流程保持不变。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
@@ -54,8 +57,11 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 
 - 安装依赖：`uv sync`
 - 运行测试：`uv run pytest`
-- 类型/语法检查：`uv run python -m compileall -q src`
+- 语法检查：`uv run python -m compileall -q src tests`（只证明可编译，不是静态检查）
+- 静态检查：`uv run ruff check src tests`（US-195 引入；pyflakes/bugbear/pyupgrade 规则，
+  配置见 `pyproject.toml` 的 `[tool.ruff.lint]`。编译通过≠静态通过，CI 两者都跑）
 - 运行入口命令：`uv run migu-orca "咒术回战第三季"`
+- 生成/检查 OpenAPI 契约：`uv run migu-orca-openapi` / `uv run migu-orca-openapi --check`（漂移检查，CI 使用）
 - 启动 Flask Web UI：`uv run flask --app wsgi:app run`
 - 接受 Request：`uv run migu-orca "咒术回战第三季" --action accept`
 - 生成并保存 Request：`uv run migu-orca "咒术回战第三季" --save-request --storage-dir .migu_orca/storage`
@@ -116,7 +122,11 @@ uv run flask --app wsgi:app run
 - `GET /index?request_id=<id>`：打开 Request 工作台并恢复指定 Request 详情。
 - `GET /settings`：服务端渲染 Settings 页面。
 - `GET /Settings`：重定向到 `/settings`。
-- `GET /healthz`、`GET /readiness`：健康检查。
+- `GET /healthz`：存活探针。只证明 Flask 进程在服务，不做任何存储或外部系统工作。
+- `GET /readiness`：就绪探针（US-195）。进程在服务**且**服务端 Web storage 根目录可用
+  （可创建/可写）时返回 200 `{"ok": true, "result": "ok"}`；storage 不可用时返回 503
+  `{"ok": false, "result": "storage_unavailable"}`。只触碰本地存储布局，绝不探测或写入
+  真实 MiKan / AutoBangumi / qBittorrent。
 
 `/index` 页面包含真实 MiKan 候选搜索主表单、可编辑预览订阅草案、本地 Request 列表、URL 可恢复的详情区域、状态历史和 AB 提交结果摘要。页面提供共享顶部导航、运行模式摘要、非空标题浏览器校验、提交中按钮状态、Settings Storage 偏好只读摘要、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、可见取消/修改表单、窄屏单列布局和基础无障碍标记。候选选择与直连 fallback 默认生成 `订阅草案（未保存）` 预览，不展示确认、取消、删除或 Auto Bangumi 提交动作；预览提供可编辑表单（字幕组、包含/排除规则、使用正则、大小写敏感、folder_name），`应用修改` 通过 dry-run 预览修改端点重算当前选中字幕组的有效/排除种子展示，`保存草案` 持久化修改后的订阅方案并同步 `request_id` 到 URL 进入待确认流程。已保存 `ACCEPTED` Request 详情展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作，`删除` 前必须经浏览器确认框确认。Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区按 有效种子（默认可见并标注当前选中字幕组）-> 完整种子（按字幕组分组，默认折叠）-> 排除种子（默认折叠）的顺序展示。`/settings` 页面包含 Storage 偏好、数据源、qBittorrent 和 Auto Bangumi 分区；Storage 偏好只写入浏览器 `localStorage`，qBittorrent 连接测试表单直接显示，Auto Bangumi 按 `request_id` 上下文渐进展示，提交前必须显式确认。页面和 API 都不应展示 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径。
 
@@ -149,18 +159,18 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 }
 ```
 
-当前 API：
+当前 API（US-193 起 `storage_dir` 是服务端允许根目录下的**相对 profile**，未传时回落服务端根目录本身；CLI 的显式 `--storage-dir` 路径行为不变）：
 
-- `GET /api/v1/requests?storage_dir=.migu_orca/storage`：列出已保存 Request 摘要。未传 `storage_dir` 时使用默认 `.migu_orca/storage`。
-- `GET /api/v1/requests/<request_id>?storage_dir=.migu_orca/storage`：读取完整 Request snapshot，并附带可用的 `history` 与 `ab_result` 只读数据。
-- `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source`、可选 `mikan_config` 和 request-scoped `mikan_bangumi`。`source` 默认为 `static-fixture`；显式传入 `source: "mikan"` 时会构造真实 MiKan client，未传 `mikan_config` 时使用系统默认 MiKan 配置。存在 `mikan_bangumi` 时会直接解析指定 MiKan `Home/Bangumi/<id>` URL 或 ID 并跳过搜索；该字段不写入浏览器 storage、URL 或持久配置。API 层仍以显式 `save_request: true` 写入本地 storage；Web UI 候选选择与直连 fallback 默认发送 `save_request: false` 生成可编辑预览草案，`POST /api/v1/requests/preview-modify` 对未保存草案执行 dry-run 修改并重算种子，`POST /api/v1/requests/preview-save` 将修改后的 `PENDING_CONFIRM` 草案写入本地 storage 进入待确认流程。
+- `GET /api/v1/requests`：列出已保存 Request 摘要。未传 `storage_dir` 时使用服务端 storage 根目录（默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖）。
+- `GET /api/v1/requests/<request_id>`：读取完整 Request snapshot，并附带可用的 `history` 与 `ab_result` 只读数据。
+- `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source`、可选 `mikan_config` 和 request-scoped `mikan_bangumi`。`source` 默认为 `static-fixture`；显式传入 `source: "mikan"` 时会构造真实 MiKan client，未传 `mikan_config` 时使用系统默认 MiKan 配置。存在 `mikan_bangumi` 时会直接解析指定 MiKan `Home/Bangumi/<id>` URL 或 ID 并跳过搜索；该字段不写入浏览器 storage、URL 或持久配置。API 层仍以显式 `save_request: true` 写入本地 storage；Web UI 候选选择与直连 fallback 默认发送 `save_request: false` 生成可编辑预览草案——服务端在 `DraftStore` 持有权威 `PENDING_CONFIRM` 草案并签发 opaque `draft_id`（US-194），`POST /api/v1/requests/preview-modify` 只接受 `draft_id` + 允许 patch 做 dry-run 修改并重算种子，`POST /api/v1/requests/preview-save` 一次性消费 `draft_id` 将草案写入本地 storage 进入待确认流程；draft 失效/重放返回 409 `draft_expired`/`draft_replayed`，客户端只持有 id，完整 Request 与草案内容绝不进入 URL 或浏览器 storage。
 
 `POST /api/v1/requests` 示例：
 
 ```json
 {
   "title": "咒术回战第三季",
-  "storage_dir": ".migu_orca/storage",
+  "storage_dir": "backups",
   "save_request": true
 }
 ```
@@ -175,7 +185,7 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
     "search_endpoint": "https://mikan.example/Home/Search",
     "timeout_seconds": 10
   },
-  "storage_dir": ".migu_orca/storage",
+  "storage_dir": "backups",
   "save_request": true
 }
 ```
@@ -190,24 +200,24 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
     "search_endpoint": "https://mikan.example/Home/Search",
     "timeout_seconds": 10
   },
-  "storage_dir": ".migu_orca/storage",
+  "storage_dir": "backups",
   "save_request": true
 }
 ```
 
 Stage 10 新增 Request 操作端点（确认/取消仅 PENDING_CONFIRM 状态可操作；修改同时接受 PENDING_CONFIRM 与 ACCEPTED）：
 
-- `POST /api/v1/requests/<request_id>/accept?storage_dir=.migu_orca/storage`：确认 Request，状态变更为 ACCEPTED。
-- `POST /api/v1/requests/<request_id>/cancel?storage_dir=.migu_orca/storage`：取消 Request，请求体可含 `cancel_reason` 字段。
-- `POST /api/v1/requests/<request_id>/modify?storage_dir=.migu_orca/storage`：修改 Request，请求体含 `patch` 对象（允许字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`）。修改 `ACCEPTED` Request 后状态保持 `ACCEPTED` 不回落为 `PENDING_CONFIRM`，并记录 `MODIFY` history 事件；修改后重新计算有效/排除 Seeds。
+- `POST /api/v1/requests/<request_id>/accept`：确认 Request，状态变更为 ACCEPTED。
+- `POST /api/v1/requests/<request_id>/cancel`：取消 Request，请求体可含 `cancel_reason` 字段。
+- `POST /api/v1/requests/<request_id>/modify`：修改 Request，请求体含 `patch` 对象（允许字段：`selected_subtitle_group`、`filter_rule`、`expected_folder_name`）。修改 `ACCEPTED` Request 后状态保持 `ACCEPTED` 不回落为 `PENDING_CONFIRM`，并记录 `MODIFY` history 事件；修改后重新计算有效/排除 Seeds。
 
 Stage 15 新增已保存 Request 删除端点：
 
-- `POST /api/v1/requests/<path:request_id>/delete?storage_dir=.migu_orca/storage`：删除 `requests/<request_id>.json`。request_id 必须来自 URL 路径，payload 只允许携带 `storage_dir` 等现有非敏感上下文；删除函数拒绝空值、路径片段和路径穿越，返回统一脱敏错误，且响应只返回被删除 request_id 和安全摘要，不返回已删除 snapshot 的原始 JSON。删除成功后列表不再包含该 request_id，详情加载该 request_id 返回 `request_not_found`。
+- `POST /api/v1/requests/<path:request_id>/delete`：删除 `requests/<request_id>.json`。request_id 必须来自 URL 路径，payload 只允许携带 `storage_dir` 等现有非敏感上下文；删除函数拒绝空值、路径片段和路径穿越，返回统一脱敏错误，且响应只返回被删除 request_id 和安全摘要，不返回已删除 snapshot 的原始 JSON。删除成功后列表不再包含该 request_id，详情加载该 request_id 返回 `request_not_found`。
 
 Stage 11 新增真实配置入口端点：
 
-- `POST /api/v1/requests/<request_id>/submit-ab?storage_dir=.migu_orca/storage`：对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交。请求体必须包含 request-scoped `ab_config`：默认账号密码模式为 `auth_mode`、`base_url`、`username`、`password`、`fallback_enabled`，API Token 模式为 `auth_mode`、`base_url`、`token`、`fallback_enabled`。提交结果会以脱敏形式写回 Request snapshot 和 `ab_results/`；服务地址、用户名、密码、token、Authorization header、cookie 和完整 URL 不应出现在 API 响应、日志或本地存储中。
+- `POST /api/v1/requests/<request_id>/submit-ab`：对 `ACCEPTED` Request 执行显式 Auto Bangumi 提交。请求体必须包含 request-scoped `ab_config`：默认账号密码模式为 `auth_mode`、`base_url`、`username`、`password`、`fallback_enabled`，API Token 模式为 `auth_mode`、`base_url`、`token`、`fallback_enabled`。提交结果会以脱敏形式写回 Request snapshot 和 `ab_results/`；服务地址、用户名、密码、token、Authorization header、cookie 和完整 URL 不应出现在 API 响应、日志或本地存储中。
 
 Stage 12 引入、Stage 13 迁移到 Settings 使用的 qBittorrent 显式连接测试端点：
 
@@ -216,7 +226,7 @@ Stage 12 引入、Stage 13 迁移到 Settings 使用的 qBittorrent 显式连接
 取消示例：
 
 ```bash
-curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/cancel?storage_dir=.migu_orca/storage' \
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/cancel' \
   -H 'Content-Type: application/json' \
   -d '{"cancel_reason": "不想追了"}'
 ```
@@ -224,7 +234,7 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/cancel?storage_dir=.mig
 修改示例：
 
 ```bash
-curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify?storage_dir=.migu_orca/storage' \
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify' \
   -H 'Content-Type: application/json' \
   -d '{"patch": {"expected_folder_name": "自定义目录"}}'
 ```
@@ -232,7 +242,7 @@ curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/modify?storage_dir=.mig
 显式 Auto Bangumi 提交示例：
 
 ```bash
-curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/submit-ab?storage_dir=.migu_orca/storage' \
+curl -X POST 'http://127.0.0.1:5000/api/v1/requests/<id>/submit-ab' \
   -H 'Content-Type: application/json' \
   -d '{"ab_config": {"auth_mode": "password", "base_url": "http://auto-bangumi.local", "username": "replace-with-username", "password": "replace-with-password", "fallback_enabled": true}}'
 ```
@@ -329,6 +339,25 @@ Stage 21 偏好/修正 API 的安全边界：endpoint、token、Authorization he
 
 **外部 Auto Bangumi 幂等性限制（剩余风险）**：MiGuOrca 的批量提交通过「提交前持久化 `SUBMITTING` + 成功后标记 `SUCCEEDED`」避免已到达 Auto Bangumi 的项目被自动重试，并通过 `recover` 端点提供人工核验恢复；但 Auto Bangumi 自身不提供幂等创建订阅语义，以下场景仍可能产生重复订阅，需人工核对：1) 进程在 Auto Bangumi 已成功创建订阅、但 MiGuOrca 尚未把结果写入 Request/ab_results 前中断——磁盘队列停留在 `SUBMITTING`，不会被自动重试；若没有明确结果，用户需在 `recover` 核验弹窗中选择「已创建订阅」或「未创建订阅」；若 Request 中已保存 `success=true`，则可自动恢复为成功，若已保存 `success=false`，则按错误类型恢复为失败或可重试；2) 单项结果持久化失败进入 `RESULT_PERSIST_FAILED`，用户在 `recover` 中核验 Auto Bangumi 侧状态后选择「已创建/未创建」恢复，**不可**直接点重试。除此之外，`SUCCEEDED` 项目在任何路径下都不会再次调用 Auto Bangumi，`RESULT_PERSIST_FAILED` 与无明确结果的 `SUBMITTING` 项目永远不会被自动重试。
 
+### 本地部署基线（US-195）
+
+- **默认 local-only**：`uv run flask --app wsgi:app run` 只监听 `127.0.0.1:5000`。Web UI
+  没有内置认证/授权，且页面与 API 只面向本机单用户工作流。
+- **未认证时禁止直接暴露公网**：不要在不加任何反向代理认证的情况下把本应用直接暴露到
+  公网或不可信网络。如需远程访问，必须在前面放置强制认证的代理（如带 Basic Auth /
+  OIDC 的反向代理），并保持 storage 与敏感配置只在服务端。否则任何能访问页面的人都能
+  读取/修改本地订阅方案并触发对 Auto Bangumi / qBittorrent 的写操作。
+- **服务端 storage 根目录**：Web API 只能使用服务端允许的 storage 根目录
+  （默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖），浏览器只能选择
+  根目录下的相对 profile（US-193）；`storage_dir` 未传/空值时回落服务端根本身
+  （US-196 回归修复：绝不回退 CLI 默认路径）。CLI `--storage-dir` 是独立信任边界。
+- **健康/就绪探针**：`/healthz` 只报告进程存活；`/readiness` 额外确认服务端 storage 根
+  目录可创建/可写（503 表示 storage 不可用）。两者都不访问真实外部系统。
+- **CI 门禁**：`.github/workflows/ci.yml` 在每次 push/PR 执行
+  compileall → ruff 静态检查 → 非浏览器 pytest → `node --check` → OpenAPI 漂移检查 →
+  `git diff --check`；真实 Chromium 套件在单独 job 运行，`MIGU_ORCA_CI=1` 下浏览器不可用
+  会**失败**而不是静默 skip。CI 不保存凭据、真实 endpoint、trace 或含敏感数据的失败产物。
+
 ### 本地验收流程
 
 1. 运行质量检查：
@@ -367,8 +396,8 @@ Stage 21 偏好/修正 API 的安全边界：endpoint、token、Authorization he
 18. 通过 API 验证本地列表和详情：
 
    ```bash
-   curl 'http://127.0.0.1:5000/api/v1/requests?storage_dir=.migu_orca/storage'
-   curl 'http://127.0.0.1:5000/api/v1/requests/<request_id>?storage_dir=.migu_orca/storage'
+   curl 'http://127.0.0.1:5000/api/v1/requests'
+   curl 'http://127.0.0.1:5000/api/v1/requests/<request_id>'
    ```
 
 19. 验证 Stage 22 创建订阅方案工作台：主区标题为「创建订阅方案」，可用键盘或鼠标在「单个搜索 / 批量搜索」之间切换；一次只显示当前输入，结果始终位于独占一行的 `#search-results-panel`。切换后另一模式旧结果不应冒充当前结果。单个及批量 FOUND 候选均展示公开标题、MiKan ID、匹配提示和封面或明确占位；即使仅有一个候选，也必须点击「选择此合集」后才生成订阅草案。批量按原始输入分组，绝不默认选择第一个候选。EMPTY 显示「未找到匹配的 MiKan 合集」，FAILED 显示可重试的脱敏错误，两者及仅 PARSED 条目均不可展开、修改、保存或接受；选择真实候选并完成详情解析后才进入可编辑的 DRAFT/READY 草案。搜索开始、完成、无结果和失败反馈使用 aria-live 状态区；搜索中相关输入、模式切换和提交操作禁用，结束后恢复。页面底部「开发 / 离线测试」中的 `Fixture 生成` 默认收起，普通路径不会触发 fixture 生成。
@@ -420,8 +449,9 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 >
 > 魔改用法详见下方「使用 DSH 运行 Ralph」小节；`amp` / `claude` / `codex` 三个原始工具分支保持兼容可用。
 
-- 当前 Ralph PRD：Stage 25，正式番名与季数解析（已完成，已归档）
-- 最近完成阶段：Stage 25，正式番名与季数解析
+- 当前 Ralph PRD：Stage 27，前端工程化迁移与页面重构（已规划，可启动）
+- 最近完成阶段：Stage 26，Web API 契约固化与服务端边界治理
+- 前一完成阶段：Stage 25，正式番名与季数解析
 - 前一完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
 - 前一完成阶段：Stage 23，媒体缓存、MiKan 读取优化与批量审核体验
 - 前一完成阶段：Stage 22，Web UI 搜索工作台重构与真实候选闭环
@@ -438,12 +468,13 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- Stage 25 执行：`docs/MiGuOrca_stage25_title_season_parsing_PRD.md`；执行分支 `agent/stage25-title-season-parsing`，Ralph stories 为 US-181～US-188
+- Stage 26 执行：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196（已全部完成）
+- Stage 27 规划：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`；预定分支 `agent/stage27-frontend-engineering-migration`，Ralph stories 为 US-197～US-204
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
+- Ralph 循环命令（DSH，推荐）：`./scripts/ralph/ralph.sh --tool dsh --provider commandcode --model deepseek/deepseek-v4-flash 7`
 - Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
 - Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`
-- Ralph 循环命令（DSH / DeepSeek Harness）：`./scripts/ralph/ralph.sh --tool dsh --provider commandcode --model deepseek/deepseek-v4-flash 7`
 
 ### Ralph 阶段开发规范
 
@@ -464,7 +495,7 @@ Ralph 运行过程中由下属 Agent 产生的本地中间提交不强制使用�
 
 ### 使用 Claude 运行 Ralph
 
-当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex|dsh` 选择执行工具。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
+当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex|dsh` 选择执行工具（`dsh` 为本项目魔改新增，见下一小节）。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
 
 Claude 模型可以通过命令行参数显式指定。当前仓库里可直接运行的示例是：
 
@@ -486,11 +517,11 @@ RALPH_MODEL=deepseek-v4-flash ./scripts/ralph/ralph.sh --tool claude 7
 
 如果你的 Claude 环境已经为别名做了额外映射，也可以换成对应别名；但在本仓库当前环境中，`deepseek-v4-flash` 是可直接运行的模型名。
 
-`--model` 目前只会传递给 Claude 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
+`--model` 会传递给 Claude 或 DSH 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
 
-### 使用 DSH 运行 Ralph
+### 使用 DSH 运行 Ralph（魔改新增，推荐）
 
-`--tool dsh` 通过 DeepSeek Harness 的 headless profile（`dsh --profile headless`）运行 Ralph 循环：每轮把 `scripts/ralph/prompt.md` 作为一次性任务提交，headless 完成整轮开发后把最终 assistant 消息（含 `<promise>COMPLETE</promise>` 完成标记）写到 stdout，脚本据此判断是否全部 story 完成。
+`--tool dsh` 是本项目对 Ralph 循环的魔改扩展，通过 DeepSeek Harness 的 headless profile（`dsh --profile headless`）运行：每轮把 `scripts/ralph/prompt.md` 作为一次性任务提交，headless 完成整轮开发后把最终 assistant 消息（含 `<promise>COMPLETE</promise>` 完成标记）写到 stdout，脚本据此判断是否全部 story 完成。
 
 默认模型来自 `$DSH_HOME/settings.yaml` 的 `agent-default-model` 段。当前项目常用配置是 Command Code 的 `deepseek/deepseek-v4-flash`：
 
@@ -498,7 +529,7 @@ RALPH_MODEL=deepseek-v4-flash ./scripts/ralph/ralph.sh --tool claude 7
 ./scripts/ralph/ralph.sh --tool dsh --provider commandcode --model deepseek/deepseek-v4-flash 7
 ```
 
-- `--provider` 指定 DSH LLM provider。`commandcode`（Command Code API，需 headless profile 安装 `@mars-sea/dsh-commandcode-provider`，脚本首次运行会自动安装）与 `deepseek-official`（DeepSeek 官方 API）均已配置凭据。
+- `--provider` 指定 DSH LLM provider。`commandcode`（Command Code API，脚本首次运行会自动向 headless profile 幂等安装 `@mars-sea/dsh-commandcode-provider`）与 `deepseek-official`（DeepSeek 官方 API）均已配置凭据，可按需选用。
 - `--model` 是模型标识符，原样写入临时 settings 覆盖（不做拆分）。注意保留 provider 自己的前缀约定：`commandcode` 需要 `deepseek/deepseek-v4-flash` 这种带 `deepseek/` 前缀的完整标识；`deepseek-official` 用裸名 `deepseek-v4-flash` 即可。
 - 只传 `--model` 时，provider 自动沿用全局 settings.yaml 的默认值；显式传 `--provider` 时两者都必须给出。
 - 未传 `--provider`/`--model` 时完全沿用全局 settings.yaml，不生成任何临时覆盖。

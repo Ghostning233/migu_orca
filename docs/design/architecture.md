@@ -59,10 +59,22 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
 
 - `/index` 与 `/settings` 由 Jinja 模板渲染。
 - 两个页面共用 `static/app.js` 和 `static/style.css`。
-- API 请求模型、序列化辅助和路由主要集中在 `apps/migu_orca_web/views.py`。
-- `docs/api/` 尚无正式 OpenAPI 契约。
+- Web API 适配层自 Stage 26 起按职责拆分（`apps/migu_orca_web/`）：
+  - `schemas.py`：请求/查询 Pydantic 模型。
+  - `api_contract.py`：公开响应 DTO（`extra="forbid"`）。
+  - `serializers.py`：响应序列化与脱敏白名单。
+  - `services.py`：用例编排与存储 seam，复用 engine/repository，不复制业务规则。
+  - `contexts.py`：短期候选选择上下文。
+  - `routes_*.py`：按端点族（requests/mikan/batches/settings/connections）注册路由。
+  - `views.py`：仅保留页面路由与 Blueprint 组装。
+- `docs/api/` 提供 OpenAPI 契约（`docs/api/openapi.json`，确定性生成），覆盖全部 `/api/v1`
+  端点；响应 DTO 在 `api_contract.py`（全部 `extra="forbid"`）。新增/删除端点必须同步
+  `docs/api/endpoint_inventory.md` §2、`openapi_gen.py` `_ENDPOINTS` 注册表、`docs/api/openapi.json`
+  与 `tests/api_contract/`，否则契约测试失败。
+- 未保存草案由 `drafts.py:DraftStore`（进程内单例）权威持有：TTL 30 分钟、容量 128、
+  一次性保存与重放保护；客户端只持 opaque `draft_id`，不提交完整 Request 作为权威快照。
 
-因此后续前端工程化应先固化 API 契约和服务端安全边界，再渐进替换页面；不得在没有兼容层的情况下同时重写 API 与全部用户旅程。
+因此后续前端工程化应先固化 API 契约和服务端安全边界，再渐进替换页面；不得在没有兼容层的情况下同时重写 API 与全部用户旅程。Stage 26 已完成该固化（清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 前端迁移 handoff 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 ## 6. 状态与持久化
 
@@ -70,19 +82,36 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
 - Request、history、AB result、queue、preference 和 correction 分目录保存为 JSON。
 - 候选缓存、候选选择 context 等短期状态当前位于单进程内存，不能假定天然支持多 worker。
 - AutoBangumi 与 qBittorrent 凭据保持 request-scoped，不进入持久化、URL、浏览器 storage、日志或测试产物。
+- Web 与 CLI 使用不同 storage 信任边界（US-193）：CLI 继续接受显式 `--storage-dir`；
+  Web API 的 `storage_dir` 只能选择服务端根目录下的相对 profile（默认 `.migu_orca/storage`，
+  可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 服务端覆盖），绝对路径/穿越/符号链接逃逸返回 400
+  `invalid_storage_dir`，错误 details 不回显原始路径。**空值回落服务端根本身**
+  （`services._storage_dir(None|""|"  ")` 返回 `_WEB_STORAGE_ROOT`，绝不返回 `None`，
+  否则 `load_storage_config(None)` 会回退 CLI 默认并绕过服务端 root 覆盖——US-196 回归修复）。
 
 ## 7. 测试与质量门禁
 
 测试包括纯规则单元测试、fixture 解析、API/入口测试和 Playwright 浏览器测试。统一命令为：
 
 ```bash
-uv run python -m compileall -q src tests
-uv run pytest -q
-uv run pytest tests/browser/ -q
+uv run python -m compileall -q src tests   # 语法检查（只证明可编译）
+uv run ruff check src tests                # Python 静态检查（US-195，pyproject.toml [tool.ruff.lint]）
+uv run pytest -q -m "not browser"          # 非浏览器测试
+uv run pytest tests/browser/ -q            # 真实 Chromium 浏览器套件
 node --check src/apps/migu_orca_web/static/app.js
+uv run migu-orca-openapi --check           # OpenAPI 漂移检查
+git diff --check
 ```
 
-浏览器不可用时允许明确记录 skip 原因，但不得把整体 skip 当作 UI Stage 的完成证据。
+- `compileall` 只是语法检查，**不是**静态检查；静态检查由 `ruff` 承担（pyflakes/
+  bugbear/pyupgrade 等规则，见 `pyproject.toml`）。CI（`.github/workflows/ci.yml`）
+  依次执行全部上述命令；真实 Chromium 套件在单独 job 运行，`MIGU_ORCA_CI=1` 下浏览器
+  不可用会**失败**而不是静默 skip。
+- 浏览器不可用时允许明确记录 skip 原因，但不得把整体 skip 当作 UI Stage 的完成证据。
+- 健康/就绪探针：`/healthz` 只证明进程存活；`/readiness` 额外校验服务端 Web storage
+  根目录可创建/可写（不可用返回 503 `{ok: false, result: "storage_unavailable"}`）。
+  两者都不访问真实 MiKan / AutoBangumi / qBittorrent。
+- 部署基线：默认 local-only（`flask run` 只监听 127.0.0.1）；未认证时禁止直接暴露公网。
 
 ## 8. 拆分原则
 

@@ -6,17 +6,17 @@ use after it has validated a MiKan poster URL.
 """
 from __future__ import annotations
 
+import contextlib
+import os
+import tempfile
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
-import os
 from pathlib import Path
-import tempfile
-from typing import Callable, Iterable
 
 from shared.config import PROJECT_ROOT
 from shared.errors import Stage1Error
-
 
 POSTER_CACHE_VERSION = "v1"
 DEFAULT_POSTER_CACHE_DIR = PROJECT_ROOT / ".migu_orca" / "mikan_posters_v1"
@@ -115,10 +115,8 @@ class MikanPosterCacheRepository:
             raise _storage_error("保存封面缓存失败", "save_mikan_poster", exc) from exc
         finally:
             if temporary is not None:
-                try:
+                with contextlib.suppress(OSError):
                     temporary.unlink(missing_ok=True)
-                except OSError:
-                    pass
 
     def cleanup_expired(self) -> None:
         """Occasionally delete only expired regular files inside the cache directory."""

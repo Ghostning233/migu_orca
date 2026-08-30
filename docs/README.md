@@ -11,7 +11,7 @@
 - 未实现事项和触发条件：[Backlog](backlog.md)
 - 尚未承诺排期的可选能力：[可选功能](optional_features.md)
 
-截至 2026-08-29，最近完成阶段为 Stage 25「正式番名与季数解析」。当前活动 Ralph 文件仍保存 Stage 25 的最终完成快照；开始下一阶段时应按 Ralph 流程归档并替换，不能把已完成快照误认为仍有待实现 story。
+截至 2026-08-30，最近完成阶段为 Stage 26「Web API 契约固化与服务端边界治理」。Stage 27「前端工程化迁移与页面重构」已规划为后继 Stage，Ralph stories 为 US-197～US-204，以 Stage 26 最终 OpenAPI/DTO 为基线。
 
 ## Stage PRD
 
@@ -21,6 +21,8 @@
 - Stage 22～23：搜索工作台、媒体缓存与批量审核体验
 - Stage 24：AutoBangumi 3.1.18 认证与订阅兼容
 - Stage 25：正式番名、季数证据与共享查询计划
+- Stage 26：Web API 契约、服务端安全边界与前端迁移基线（已完成）
+- Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（Stage 26 后继规划）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 
@@ -35,4 +37,4 @@ Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已�
 3. 主 PRD、future stages 与模块 PRD。
 4. 历史 Stage PRD、归档 progress 和早期设计规格。
 
-`docs/api/` 当前只保留目录占位，尚无正式 OpenAPI 契约；不能把 README 中的接口示例当作完整、可生成客户端的 API 规范。
+`docs/api/` 提供正式 OpenAPI 契约（`openapi.json`，由确定性脚本生成，覆盖全部 `/api/v1` 端点）、端点清单与敏感值边界（`endpoint_inventory.md`）；README 中的接口示例仅作用法示意，不作为完整、可生成客户端的 API 规范。

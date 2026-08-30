@@ -7,11 +7,6 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, Request, expect
 
-from tests.browser.conftest import (
-    create_saved_request,
-    open_dev_fixture_panel,
-    set_storage_preferences,
-)
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from batch_engine.controllers.batch_queue_controller import (
     complete_queue_item_submit,
@@ -20,12 +15,19 @@ from batch_engine.controllers.batch_queue_controller import (
     start_queue_item_submit,
 )
 from batch_engine.models import BATCH_QUEUE_STATUS_FAILED
-from request_engine.controllers.request_controller import accept_request, summarize_request
+from request_engine.controllers.request_controller import accept_request
 from shared.models import EntryRequest
 from storage_engine.controllers.queue_repository import save_submission_queue
 from storage_engine.controllers.request_repository import save_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
-
+from tests.browser.conftest import (
+    create_saved_request,
+    issue_draft_id,
+    open_dev_fixture_panel,
+    preview_result_json,
+    save_preview_handler,
+    set_storage_preferences,
+)
 
 pytestmark = pytest.mark.browser
 
@@ -279,7 +281,7 @@ def test_stage14_sensitive_settings_values_do_not_persist_or_leak(
         )"""
     )
     assert local_storage == {
-        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.storageDir": storage_dir.name,
         "miguOrca.web.saveRequest": "true",
     }
     assert json.loads(storage_json)["source_info"]
@@ -423,7 +425,7 @@ def test_stage15_accepted_modify_delete_do_not_leak_sensitive_values(
         )"""
     )
     assert local_storage == {
-        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.storageDir": storage_dir.name,
         "miguOrca.web.saveRequest": "false",
     }
 
@@ -488,20 +490,14 @@ def test_stage18_mikan_primary_flow_does_not_leak_sensitive_values(
 
     # Return an unsaved static-fixture preview draft for the generation POST so
     # the flow renders the editable preview without any live MiKan network read.
+    # US-194: the mock issues the draft into the in-process draft store and
+    # returns the opaque draft_id the real backend would, so the real
+    # preview-modify/preview-save backend works.
     preview = {
         **generate_request(EntryRequest(raw_title="葬送的芙莉莲"))["request"],
         "request_id": "req-stage18-sec",
     }
-    preview_body = json.dumps(
-        {
-            "ok": True,
-            "result": {
-                "request": preview,
-                "summary": summarize_request(preview),
-            },
-        },
-        ensure_ascii=False,
-    )
+    preview_body = preview_result_json(preview)
 
     def _fulfill_generation(route: object, request: Request) -> None:
         if getattr(request, "method") != "POST":
@@ -578,7 +574,7 @@ def test_stage18_mikan_primary_flow_does_not_leak_sensitive_values(
         )"""
     )
     assert local_storage == {
-        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.storageDir": storage_dir.name,
         "miguOrca.web.saveRequest": "false",
     }
 
@@ -683,6 +679,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
                             ],
                         },
                         "preview_request": first_preview,
+                        "draft_id": issue_draft_id(first_preview),
                         "provider_response": {
                             "endpoint": sensitive_values[0],
                             "token": sensitive_values[1],
@@ -703,6 +700,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
                         "confirmable_config": None,
                         "source_info": None,
                         "preview_request": second_preview,
+                        "draft_id": issue_draft_id(second_preview),
                     },
                 ],
             },
@@ -717,23 +715,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
         route.fulfill(status=200, content_type="application/json", body=batch_body)
 
     def _save_preview(route: Any, request: Request) -> None:
-        payload = json.loads(request.post_data or "{}")
-        saved_calls.append(payload)
-        saved = dict(payload["request"])
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "ok": True,
-                    "result": {
-                        "request": saved,
-                        "summary": {"request_id": saved["request_id"]},
-                    },
-                },
-                ensure_ascii=False,
-            ),
-        )
+        save_preview_handler(saved_calls)(route, request)
 
     def _accept(route: Any, request: Request) -> None:
         # US-146：单卡接受与批量接受统一走批次接受 API（POST
@@ -818,15 +800,16 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
     expect(first_card.locator(".batch-card-status")).to_contain_text("已接受")
     expect(first_card.locator(".batch-card-delete")).to_be_hidden()
     expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
-    assert saved_calls and saved_calls[0]["request"]["request_id"] == "req-stage19-sec"
+    assert saved_calls and isinstance(saved_calls[0]["draft_id"], str)
+    assert "request" not in saved_calls[0]
     # US-146：accept 请求体按 BatchAcceptPayload 契约携带 items（含
     # item_id/request_id/title，均为公开字段）与 storage_dir；设置了 storage
-    # 偏好时 storage_dir 为路径值（URL query 经 apiPath 同样携带），属于功能
-    # 参数，不属于 sensitive_values。
+    # 偏好时 storage_dir 为相对 profile（URL query 经 apiPath 同样携带），属于
+    # 功能参数，不属于 sensitive_values。
     assert accept_calls
     assert accept_calls[0]["items"][0]["item_id"] == "item-sec"
     assert accept_calls[0]["items"][0]["request_id"] == "req-stage19-sec"
-    assert accept_calls[0]["storage_dir"] == str(storage_dir)
+    assert accept_calls[0]["storage_dir"] == storage_dir.name
 
     browser_state = page.evaluate(
         """() => ({
@@ -858,7 +841,7 @@ def test_stage19_batch_workbench_does_not_leak_sensitive_values(
         )"""
     )
     assert local_storage == {
-        "miguOrca.web.storageDir": str(storage_dir),
+        "miguOrca.web.storageDir": storage_dir.name,
         "miguOrca.web.saveRequest": "false",
     }
 
@@ -976,6 +959,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
                             ],
                         },
                         "preview_request": first_preview,
+                        "draft_id": issue_draft_id(first_preview),
                         # provider_response 是 LLM 提供商的响应，包含全部敏感值；
                         # 它们只允许存在于预览/请求快照，绝不能进入任何响应边界。
                         "provider_response": {
@@ -1000,6 +984,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
                         "confirmable_config": None,
                         "source_info": None,
                         "preview_request": second_preview,
+                        "draft_id": issue_draft_id(second_preview),
                     },
                 ],
             },
@@ -1053,23 +1038,7 @@ def test_stage20_batch_retry_does_not_leak_sensitive_values(
         route.fulfill(status=200, content_type="application/json", body=batch_body)
 
     def _save_preview(route: Any, request: Request) -> None:
-        payload = json.loads(request.post_data or "{}")
-        saved_calls.append(payload)
-        saved = dict(payload["request"])
-        route.fulfill(
-            status=200,
-            content_type="application/json",
-            body=json.dumps(
-                {
-                    "ok": True,
-                    "result": {
-                        "request": saved,
-                        "summary": {"request_id": saved["request_id"]},
-                    },
-                },
-                ensure_ascii=False,
-            ),
-        )
+        save_preview_handler(saved_calls)(route, request)
 
     def _queue_item_payload(
         *,
@@ -1409,7 +1378,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
         return page.request.post(
             f"{live_server_url}/api/v1/corrections",
             data=json.dumps(
-                {"storage_dir": str(storage_dir), "correction": correction},
+                {"storage_dir": storage_dir.name, "correction": correction},
                 ensure_ascii=False,
             ),
             headers={"Content-Type": "application/json"},
@@ -1447,7 +1416,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
 
     get_body = page.request.get(
         f"{live_server_url}/api/v1/corrections",
-        params={"storage_dir": str(storage_dir)},
+        params={"storage_dir": storage_dir.name},
     ).text()
     get_corrections = json.loads(get_body)["result"]["corrections"]
     assert get_corrections[0]["raw_title"] == "萌王S4"
@@ -1618,6 +1587,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
                             ],
                         },
                         "preview_request": first_preview,
+                        "draft_id": issue_draft_id(first_preview),
                         # provider_response 是 LLM 提供商的响应，包含全部敏感值；
                         # 它们只允许存在于预览/请求快照，绝不能进入任何响应边界。
                         "provider_response": {
@@ -1649,6 +1619,7 @@ def test_stage21_preferences_corrections_do_not_leak_sensitive_values(
                         "confirmable_config": None,
                         "source_info": None,
                         "preview_request": second_preview,
+                        "draft_id": issue_draft_id(second_preview),
                     },
                 ],
             },

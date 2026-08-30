@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Iterable
 
 from batch_engine.models.queue import (
     BATCH_QUEUE_STATUS_FAILED,

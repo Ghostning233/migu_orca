@@ -28,7 +28,7 @@ def _candidate(
     )
 
 
-def _fake_clock(start: float = 1000.0) -> tuple[dict[str, float], "object"]:
+def _fake_clock(start: float = 1000.0) -> tuple[dict[str, float], object]:
     holder = {"value": start}
 
     def _now() -> float:

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import UTC, datetime
-import re
 from typing import Any
 from uuid import uuid4
 

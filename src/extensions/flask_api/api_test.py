@@ -63,6 +63,49 @@ def test_failed_response_sanitizes_error_data(app: Flask) -> None:
     }
 
 
+def test_error_http_status_maps_semantic_categories() -> None:
+    """US-192: error types map to stable HTTP statuses."""
+    from extensions.flask_api.api import _error_http_status
+
+    # Client/input errors → 400
+    assert _error_http_status("validation_error") == 400
+    assert _error_http_status("data_validation_errors") == 400
+    assert _error_http_status("invalid_modify_patch_field") == 400
+    assert _error_http_status("invalid_input") == 400
+    assert _error_http_status("config_error") == 400
+    assert _error_http_status("queue_not_found") == 400
+    assert _error_http_status("invalid_storage_dir") == 400
+    # Missing resources → 404
+    assert _error_http_status("request_not_found") == 404
+    assert _error_http_status("queue_item_not_found") == 404
+    assert _error_http_status("poster_not_found") == 404
+    # State conflicts / replay → 409
+    assert _error_http_status("invalid_request_status") == 409
+    assert _error_http_status("request_cancelled") == 409
+    assert _error_http_status("season_evidence_conflict") == 409
+    assert _error_http_status("candidate_context_invalid") == 409
+    # US-194 draft store failures → 409 (expired/evicted/replayed/mismatch).
+    assert _error_http_status("draft_expired") == 409
+    assert _error_http_status("draft_evicted") == 409
+    assert _error_http_status("draft_replayed") == 409
+    assert _error_http_status("draft_mismatch") == 409
+    # External auth → 401
+    assert _error_http_status("ab_auth_failed") == 401
+    assert _error_http_status("qbittorrent_auth_failed") == 401
+    # Upstream bad gateway → 502
+    assert _error_http_status("mikan_connection_failed") == 502
+    assert _error_http_status("ab_submit_failed") == 502
+    # Upstream unavailable/unsupported → 503
+    assert _error_http_status("ab_unsupported_version") == 503
+    # Upstream timeout → 504
+    assert _error_http_status("mikan_timeout") == 504
+    assert _error_http_status("ab_timeout") == 504
+    assert _error_http_status("qbittorrent_timeout") == 504
+    # Unknown error types default to 400 (client-visible, never 500).
+    assert _error_http_status("some_future_error") == 400
+    assert _error_http_status("") == 400
+
+
 def test_route_wraps_success_response() -> None:
     app = Flask(__name__)
     blueprint = Blueprint("api_test", __name__)
@@ -99,7 +142,9 @@ def test_route_converts_stage1_error_to_sanitized_api_error() -> None:
 
     response = app.test_client().get("/boom")
 
-    assert response.status_code == 200
+    # mikan_failed is not in a known category; the envelope defaults to 400
+    # (client-visible) rather than 500.
+    assert response.status_code == 400
     assert response.get_json() == {
         "ok": False,
         "error_type": "mikan_failed",
@@ -157,7 +202,7 @@ def test_class_route_returns_validation_errors() -> None:
     response = app.test_client().get("/requests?limit=bad")
     payload = response.get_json()
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
     assert payload["error_data"]["errors"][0]["field"] == "limit"
@@ -194,8 +239,43 @@ def test_unhandled_exception_is_generic_outside_debug() -> None:
             RuntimeError("secret-token at /home/user/private"),
         )
 
+    assert response.status_code == 500
     assert response.get_json() == {
         "ok": False,
         "error_type": "internal_server_error",
         "error_message": "A server error occurred.",
     }
+
+
+def test_stage1_error_maps_to_semantic_http_status(app: Flask) -> None:
+    """US-192: a Stage1Error's HTTP status follows its error_type category."""
+    with app.app_context():
+        not_found = handle_exception(
+            "test_view",
+            Stage1Error(
+                "request_not_found", "未找到订阅方案", "load", {"request_id": "r1"}
+            ),
+        )
+        conflict = handle_exception(
+            "test_view",
+            Stage1Error(
+                "invalid_request_status", "状态冲突", "confirm", {"status": "x"}
+            ),
+        )
+        timeout = handle_exception(
+            "test_view",
+            Stage1Error("mikan_timeout", "MiKan 请求超时", "search"),
+        )
+        gateway = handle_exception(
+            "test_view",
+            Stage1Error("ab_submit_failed", "AB 提交失败", "submit"),
+        )
+
+    assert not_found.status_code == 404
+    assert not_found.get_json()["error_type"] == "request_not_found"
+    assert conflict.status_code == 409
+    assert conflict.get_json()["error_type"] == "invalid_request_status"
+    assert timeout.status_code == 504
+    assert timeout.get_json()["error_type"] == "mikan_timeout"
+    assert gateway.status_code == 502
+    assert gateway.get_json()["error_type"] == "ab_submit_failed"

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
 from mikan_engine.controllers.mikan_poster_cache import (
+    POSTER_CACHE_VERSION,
     MikanPosterCacheConfig,
     MikanPosterCacheRepository,
-    POSTER_CACHE_VERSION,
     poster_cache_key,
 )
 from shared.errors import Stage1Error

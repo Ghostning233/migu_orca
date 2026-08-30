@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import ssl
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.cookies import SimpleCookie
-from collections.abc import Callable
 from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlparse

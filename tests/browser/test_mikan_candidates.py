@@ -7,15 +7,14 @@ from typing import Any
 import pytest
 from playwright.sync_api import Page, expect
 
-from tests.browser.conftest import (
-    create_saved_request,
-    open_dev_fixture_panel,
-    set_storage_preferences,
-)
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from request_engine.controllers.request_controller import summarize_request
 from shared.models import EntryRequest
-
+from tests.browser.conftest import (
+    open_dev_fixture_panel,
+    preview_result_json,
+    set_storage_preferences,
+)
 
 pytestmark = pytest.mark.browser
 
@@ -571,7 +570,7 @@ class TestCandidateSearchSensitiveBoundary:
             )"""
         )
         assert local_storage == {
-            "miguOrca.web.storageDir": str(storage_dir),
+            "miguOrca.web.storageDir": storage_dir.name,
             "miguOrca.web.saveRequest": "true",
         }
 
@@ -623,17 +622,13 @@ def _preview_request(title: str, request_id: str) -> dict[str, Any]:
 
 
 def _preview_result_json(request: dict[str, Any]) -> str:
-    """Build a `POST /api/v1/requests` response body for an unsaved preview draft."""
-    return json.dumps(
-        {
-            "ok": True,
-            "result": {
-                "request": request,
-                "summary": summarize_request(request),
-            }
-        },
-        ensure_ascii=False,
-    )
+    """Build a `POST /api/v1/requests` response body for an unsaved preview draft.
+
+    US-194: the server owns the unsaved draft. The mock issues the draft into
+    the in-process draft store and returns the same opaque ``draft_id`` the real
+    backend would, so the real preview-modify/preview-save backend works.
+    """
+    return preview_result_json(request)
 
 
 def _register_generation_capture(

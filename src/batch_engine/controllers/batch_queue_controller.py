@@ -11,10 +11,11 @@ sanitized on write and re-sanitized on serialization.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime
-import re
-from typing import Any, Callable
+from typing import Any
 from uuid import uuid4
 
 from batch_engine.models.queue import (

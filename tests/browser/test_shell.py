@@ -5,7 +5,6 @@ from playwright.sync_api import Page
 
 from tests.browser.conftest import open_dev_fixture_panel
 
-
 pytestmark = pytest.mark.browser
 
 
@@ -220,7 +219,7 @@ class TestNoSensitiveContent:
         body = page.locator("body").inner_text()
         # Form help text should be present and instructional
         assert "至少输入 1 个非空白字符" in body
-        assert "当前使用默认 `.migu_orca/storage`" in body
+        assert "默认服务器 storage 根目录" in body
         assert "默认保存订阅方案 JSON" in body
         assert "前往 Settings" in body
         assert "search_endpoint" not in body

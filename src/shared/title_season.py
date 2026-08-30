@@ -7,9 +7,9 @@ selected MiKan candidate has that season.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import re
 import unicodedata
+from dataclasses import dataclass
 
 _SEASON_MARKER_RE = re.compile(
     r"(?<![A-Za-z0-9])(?P<s>[Ss]\s*(?P<s_number>\d{1,3}))(?!\d)"

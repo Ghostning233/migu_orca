@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
 import re
-from urllib.parse import urlparse
+from copy import deepcopy
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from request_engine.controllers.request_controller import ACCEPTED
 from shared.errors import Stage1Error
