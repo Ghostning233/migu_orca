@@ -109,7 +109,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 
 当前 Web UI 延续 Stage 7 引入的本地 Flask 管理界面，并已累积接入 Settings、真实 MiKan 候选、可编辑预览、批量草案、提交前队列、偏好、媒体缓存、AutoBangumi 3.1.18 兼容和 Stage 25 标题季数解析。页面仍由 Flask/Jinja 提供，并由原生 JavaScript 驱动；尚未引入独立前端构建链。业务操作统一通过 `/api/v1/*` JSON API 编排，CLI 默认行为保持不变。
 
-Stage 27 已开始把 Web UI 迁移到独立前端工程：`frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程（npm 管理，`package-lock.json` 已入库）。生产构建输出到 `frontend/dist/`（不入库），由 Flask 在 `/app/` 同源托管（`routes_app.py` 的 `app_blueprint`）；Vite `base` 固定为 `/app/`，SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness` 或旧 Flask 页面。开发时可 `cd frontend && npm run dev`（Vite dev server 代理 `/api/v1` 到本地 Flask）。US-197 建立了工程基线（typecheck/lint/unit/build 全绿 + CI 门禁）；后续 story 将逐项迁移 Settings、Request 列表/详情、搜索/草案、批量工作台和提交队列，旧页面在迁移完成前保持可用。
+Stage 27 已开始把 Web UI 迁移到独立前端工程：`frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程（npm 管理，`package-lock.json` 已入库）。生产构建输出到 `frontend/dist/`（不入库），由 Flask 在 `/app/` 同源托管（`routes_app.py` 的 `app_blueprint`）；Vite `base` 固定为 `/app/`，SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness` 或旧 Flask 页面。开发时可 `cd frontend && npm run dev`（Vite dev server 代理 `/api/v1` 到本地 Flask）。US-197 建立了工程基线（typecheck/lint/unit/build 全绿 + CI 门禁）；US-199 建立了统一 API transport（`frontend/src/api/client.ts`，处理 envelope/非 2xx/非 JSON/网络失败/取消/超时，feature 不得自行拼接 `/api/v1` URL）、4 条 SPA 路由（工作台/订阅方案/提交队列/Settings）与全局 loading/空状态/错误边界/aria-live 通知。后续 story 将逐项迁移 Settings、Request 列表/详情、搜索/草案、批量工作台和提交队列，旧页面在迁移完成前保持可用。
 
 启动方式：
 
@@ -124,8 +124,9 @@ uv run flask --app wsgi:app run
 - `GET /index?request_id=<id>`：打开 Request 工作台并恢复指定 Request 详情。
 - `GET /settings`：服务端渲染 Settings 页面（迁移期保留）。
 - `GET /Settings`：重定向到 `/settings`。
-- `GET /app/`：新 Vue SPA 外壳（US-197 起）；`/app/workbench`、`/app/settings` 是 SPA 路由，
-  由 Vue Router 处理，刷新时由 Flask fallback 返回外壳。
+- `GET /app/`：新 Vue SPA 外壳（US-197 起）；`/app/workbench`、`/app/requests`、
+  `/app/queue`、`/app/settings` 是 SPA 路由（US-199 起 4 条导航），由 Vue Router 处理，
+  刷新时由 Flask fallback 返回外壳。
 - `GET /healthz`：存活探针。只证明 Flask 进程在服务，不做任何存储或外部系统工作。
 - `GET /readiness`：就绪探针（US-195）。进程在服务**且**服务端 Web storage 根目录可用
   （可创建/可写）时返回 200 `{"ok": true, "result": "ok"}`；storage 不可用时返回 503

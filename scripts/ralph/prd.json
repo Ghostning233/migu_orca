@@ -51,8 +51,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-199 完成：统一 transport（frontend/src/api/client.ts，apiRequest/api.*/api.poster）处理 envelope、非 2xx JSON、非 JSON 错误体（代理 HTML 归一为安全中文回退）、网络失败（network_error）、AbortSignal 取消（request_cancelled）与超时（默认 15s，request_timeout），失败统一抛 ApiError；路径参数用 {param} 模板，查询参数只放非敏感值，海报端点返回 Blob 不经 envelope。trackedApi（app/composables/useTrackedRequest.ts）驱动全局 loading store；notification store + GlobalNotification.vue 提供 aria-live 通知（error 用 role=alert）；ErrorBoundary.vue 包住 RouterView。SPA 路由扩为 4 条（/app/workbench、/app/requests、/app/queue、/app/settings），导航含工作台/订阅方案/提交队列/Settings；Requests/Queue 为带空状态的占位视图（US-202/US-206 迁移）。Flask 侧无需新增服务端路由，fallback 边界与探针/旧页面不被截获由既有测试守护。Vitest 新增 client.test.ts（16 例）、useTrackedRequest.test.ts（2 例）、loading.test.ts（2 例），App 外壳测试扩至 4 路由+通知（共 29 例）；浏览器 test_app_shell.py 更新为 4 导航与各 route 挂载（6 例真实 Chromium 全过）。全部门禁通过（typecheck/lint/unit/build、compileall/ruff、Python 1038 非浏览器 + 275 浏览器、OpenAPI drift、node --check、git diff --check）。"
     },
     {
       "id": "US-200",

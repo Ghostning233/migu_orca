@@ -53,10 +53,33 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 浏览器测试需要 `frontend/dist` 已构建；CI 的 browser job 先 `npm ci && npm run build`。
   本地验证 SPA：`cd frontend && npm run build` 后再跑浏览器套件。
 
+## 统一 API transport（US-199）
+
+- **feature 不得直接调用 `fetch` 或拼接 `/api/v1` URL**：统一走
+  `src/api/client.ts` 的 `apiRequest`（或 `api.get/post/...`、海报用 `api.poster`）。
+  transport 负责 envelope（`{ok:true,result}` / `{ok:false,error_type,error_message,error_data}`）、
+  非 2xx JSON、非 JSON 错误体（代理 HTML）、网络失败、AbortSignal 取消与超时
+  （默认 `DEFAULT_TIMEOUT_MS=15000`），失败统一抛 `ApiError`（`type/message/status/details/
+  cancelled/network/nonJson/httpError`）。
+- 路径参数用 `{param}` 模板（如 `/api/v1/requests/{request_id}`）传 `options.path`；
+  查询参数传 `options.query`（只放相对 `storage_dir` 等非敏感值）。海报端点
+  `api.poster(key)` 返回 `Blob`，不经 JSON envelope 解析。
+- `ApiError.message` 永远只含服务端 `error_message` 或安全中文回退；**不得**渲染/记录
+  原始错误文本、URL、响应体或凭据（`toApiError` 对任意 Error 一律降级为安全文案）。
+- 全局加载指示：feature 请求用 `src/app/composables/useTrackedRequest.ts` 的 `trackedApi`
+  （begin/end 驱动 `app/stores/loading.ts` 计数）；仅组件级 loading 时才直接用 `api`。
+- 通知：全局 `aria-live` 容器在 `App.vue`（`components/feedback/GlobalNotification.vue`），
+  通过 `app/stores/notification.ts` 触发（success/error/info，error 用 role=alert）。
+- 全局错误边界：`components/feedback/ErrorBoundary.vue` 包住 `RouterView`，捕获渲染错误，
+  不展示原始 error（可能含敏感值）。
+
 ## 测试模式
 
 - `src/App.test.ts` 用 `createMemoryHistory('/app/')` + 与真实路由同表的 stub 组件测外壳；
   RouterLink 在测试里会按 `/app/` base 解析，路由表必须与真实一致，否则出现
-  "No match found" 警告。
+  "No match found" 警告。US-199 起导航为 4 项（工作台/订阅方案/提交队列/Settings）。
+- transport 单测（`src/api/client.test.ts`）用 `vi.stubGlobal('fetch', ...)` 直接 stub
+  `fetch`；jsdom 的 `Response.blob()` 可能不是真 `Blob`，海报测试断言 URL/值而不依赖
+  `instanceof Blob`。
 - `npm run dev`（Vite dev server :5173）代理 `/api/v1` 到本地 Flask :5000，仅限本地开发；
   生产不依赖 Node。

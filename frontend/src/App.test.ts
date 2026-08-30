@@ -1,9 +1,10 @@
 import { mount } from '@vue/test-utils'
-import { createPinia } from 'pinia'
-import { describe, expect, it } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { createMemoryHistory, createRouter } from 'vue-router'
 
 import App from '@/App.vue'
+import { useNotificationStore } from '@/app/stores/notification'
 
 // The test router mirrors the application route table (paths are relative to
 // the `/app/` history base used in src/app/router/index.ts). Using real
@@ -23,6 +24,16 @@ function makeRouter() {
         component: { template: '<p class="shell-route">工作台路由内容</p>' },
       },
       {
+        path: '/requests',
+        name: 'requests',
+        component: { template: '<p class="shell-route">订阅方案路由内容</p>' },
+      },
+      {
+        path: '/queue',
+        name: 'queue',
+        component: { template: '<p class="shell-route">提交队列路由内容</p>' },
+      },
+      {
         path: '/settings',
         name: 'settings',
         component: { template: '<p class="shell-route">Settings 路由内容</p>' },
@@ -31,8 +42,12 @@ function makeRouter() {
   })
 }
 
-describe('App shell (US-197)', () => {
-  it('renders the header, navigation and a routed view', async () => {
+describe('App shell (US-199)', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+  })
+
+  it('renders the header, 4-route navigation and a routed view', async () => {
     const router = makeRouter()
     const wrapper = mount(App, {
       global: {
@@ -47,17 +62,18 @@ describe('App shell (US-197)', () => {
     expect(wrapper.find('.mode-summary').exists()).toBe(true)
 
     const navLinks = wrapper.findAll('.top-nav .nav-link')
-    expect(navLinks).toHaveLength(2)
+    expect(navLinks).toHaveLength(4)
     expect(navLinks[0]?.text()).toContain('订阅方案工作台')
-    expect(navLinks[1]?.text()).toContain('Settings')
+    expect(navLinks[1]?.text()).toContain('订阅方案')
+    expect(navLinks[2]?.text()).toContain('提交队列')
+    expect(navLinks[3]?.text()).toContain('Settings')
 
-    // The routed view is mounted inside <main class="app-main">.
     const main = wrapper.find('.app-main')
     expect(main.exists()).toBe(true)
     expect(main.find('.shell-route').text()).toBe('工作台路由内容')
   })
 
-  it('renders the Settings route view', async () => {
+  it('renders the Requests, Queue and Settings route views', async () => {
     const router = makeRouter()
     const wrapper = mount(App, {
       global: {
@@ -65,8 +81,60 @@ describe('App shell (US-197)', () => {
       },
     })
     await router.isReady()
-    await router.push('/settings')
 
+    await router.push('/requests')
+    expect(wrapper.find('.app-main .shell-route').text()).toBe('订阅方案路由内容')
+
+    await router.push('/queue')
+    expect(wrapper.find('.app-main .shell-route').text()).toBe('提交队列路由内容')
+
+    await router.push('/settings')
     expect(wrapper.find('.app-main .shell-route').text()).toBe('Settings 路由内容')
+  })
+
+  it('shows the global notification region with an aria-live role', async () => {
+    const router = makeRouter()
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+    await router.isReady()
+
+    const notification = useNotificationStore()
+    notification.success('保存成功', '订阅方案已保存。')
+    await wrapper.vm.$nextTick()
+
+    const region = wrapper.find('.global-notification')
+    expect(region.exists()).toBe(true)
+    expect(region.attributes('aria-live')).toBe('polite')
+    expect(region.attributes('role')).toBe('status')
+    expect(region.text()).toContain('保存成功')
+    expect(region.text()).toContain('订阅方案已保存。')
+
+    notification.clear()
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.global-notification').exists()).toBe(false)
+  })
+
+  it('renders error notifications with role=alert and a close button', async () => {
+    const router = makeRouter()
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+    await router.isReady()
+
+    const notification = useNotificationStore()
+    notification.error('请求失败', '网络请求失败，请检查网络后重试。')
+    await wrapper.vm.$nextTick()
+
+    const region = wrapper.find('.global-notification')
+    expect(region.attributes('role')).toBe('alert')
+    expect(region.classes()).toContain('global-notification-error')
+
+    await wrapper.find('.global-notification-close').trigger('click')
+    expect(wrapper.find('.global-notification').exists()).toBe(false)
   })
 })

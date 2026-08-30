@@ -58,9 +58,11 @@ def test_app_shell_loads_and_mounts_spa(page: Page, live_server_url: str) -> Non
     page.wait_for_url("**/app/workbench", timeout=5000)
     assert page.locator(".app-title").inner_text() == "MiGuOrca"
     nav = page.locator(".top-nav .nav-link")
-    assert nav.count() == 2
+    assert nav.count() == 4
     assert nav.nth(0).inner_text().strip() == "订阅方案工作台"
-    assert nav.nth(1).inner_text().strip() == "Settings"
+    assert nav.nth(1).inner_text().strip() == "订阅方案"
+    assert nav.nth(2).inner_text().strip() == "提交队列"
+    assert nav.nth(3).inner_text().strip() == "Settings"
     # The lazy-loaded workbench view mounted.
     assert page.locator("#workbench-heading").count() >= 1
     # The placeholder must not leak into a built SPA.
@@ -68,11 +70,21 @@ def test_app_shell_loads_and_mounts_spa(page: Page, live_server_url: str) -> Non
 
 
 def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> None:
-    """Client-side navigation between workbench and Settings works."""
+    """Client-side navigation between all four shell routes works."""
     _require_dist()
 
     page.goto(f"{live_server_url}/app/workbench")
     page.wait_for_selector(".app-title")
+
+    page.get_by_role("link", name="订阅方案", exact=True).click()
+    page.wait_for_url("**/app/requests", timeout=5000)
+    assert page.locator("#requests-heading").count() >= 1
+    assert page.locator(".requests-panel .empty-state").count() >= 1
+
+    page.get_by_role("link", name="提交队列", exact=True).click()
+    page.wait_for_url("**/app/queue", timeout=5000)
+    assert page.locator("#queue-heading").count() >= 1
+    assert page.locator(".queue-panel .empty-state").count() >= 1
 
     page.locator(".top-nav .nav-link", has_text="Settings").click()
     page.wait_for_url("**/app/settings", timeout=5000)

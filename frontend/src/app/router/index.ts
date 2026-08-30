@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
 /**
- * MiGuOrca application router (US-197).
+ * MiGuOrca application router (US-199).
  *
  * The SPA mounts at `/app/` (Flask serves the shell at `/app/` and falls back
  * to it for `/app/*` SPA routes — see apps/migu_orca_web/routes_app.py). The
@@ -27,6 +27,18 @@ export const router = createRouter({
       name: 'workbench',
       component: () => import('@/features/workbench/WorkbenchView.vue'),
       meta: { title: '订阅方案工作台' },
+    },
+    {
+      path: '/requests',
+      name: 'requests',
+      component: () => import('@/features/requests/RequestsView.vue'),
+      meta: { title: '订阅方案' },
+    },
+    {
+      path: '/queue',
+      name: 'queue',
+      component: () => import('@/features/queue/QueueView.vue'),
+      meta: { title: '提交队列' },
     },
     {
       path: '/settings',

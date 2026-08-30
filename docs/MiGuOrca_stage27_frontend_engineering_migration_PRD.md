@@ -191,6 +191,22 @@ Flask 生产静态目录、Vite `base` 和 build 输出位置由 US-197 固定�
 - 建立 `/app/` 路由、导航、加载/空/错误状态、通知和全局错误边界。
 - API、海报、health/readiness 和旧 Flask 页面不被 SPA fallback 截获。
 
+**US-199 完成**：统一 transport 落在 `frontend/src/api/client.ts`（`apiRequest`/`api.*`/
+`api.poster`），统一处理 envelope（`{ok:true,result}`/`{ok:false,error_type,error_message,
+error_data}`）、非 2xx JSON、非 JSON 错误体（代理 HTML 归一为安全中文回退）、网络失败
+（`network_error`）、AbortSignal 取消（`request_cancelled`）与超时（默认 15s，
+`request_timeout`），失败统一抛 `ApiError`；路径参数用 `{param}` 模板、查询参数只放非敏感值，
+海报端点返回 `Blob` 不经 envelope。`useTrackedRequest.ts` 的 `trackedApi` 驱动全局 loading
+store；`app/stores/notification.ts` + `GlobalNotification.vue` 提供 aria-live 通知
+（error 用 role=alert），`ErrorBoundary.vue` 包住 RouterView。SPA 路由扩为 4 条：
+`/app/workbench`、`/app/requests`、`/app/queue`、`/app/settings`（导航含工作台/订阅方案/
+提交队列/Settings），Requests/Queue 为带空状态的占位视图（US-202/US-206 迁移）。Flask 侧
+无需新增服务端路由，fallback 边界与探针/旧页面不被截获由既有测试守护。Vitest 新增
+`client.test.ts`（16 例）、`useTrackedRequest.test.ts`（2 例）、`loading.test.ts`（2 例）、
+App 外壳测试扩至 4 路由+通知；浏览器 `test_app_shell.py` 更新为 4 导航与各 route 挂载
+（6 例全过）。全部门禁通过（typecheck/lint/unit 29 例/build/compileall/ruff/Python
+1038 非浏览器 + 275 浏览器/OpenAPI drift/node --check）。
+
 ### US-200：建立设计基础与安全表单组件
 
 - 建立 layout、按钮、输入、确认、credential form、status/alert、loading 和 focus primitives。

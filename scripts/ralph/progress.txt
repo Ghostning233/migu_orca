@@ -37,6 +37,14 @@
   typecheck/lint/unit/build，browser job 先构建 frontend 再跑真实 Chromium。
 - 前端单元测试（Vitest）用 `createMemoryHistory('/app/')` + 与真实路由同表的 stub 组件；
   RouterLink 按 `/app/` base 解析，路由表必须与真实一致，否则出现 "No match found" 警告。
+- US-199 起新前端统一走 `frontend/src/api/client.ts` 的 `apiRequest`/`api.*`/`api.poster`：
+  feature 不得裸 `fetch` 或拼接 `/api/v1` URL；`{param}` 路径模板 + `options.path`/`query`，
+  失败统一抛 `ApiError`（安全中文 message），海报端点返回 Blob 不经 envelope。
+- 全局 loading（`app/stores/loading.ts` + `useTrackedRequest.ts` 的 `trackedApi`）、通知
+  （`app/stores/notification.ts` + `GlobalNotification.vue` aria-live，error 用 role=alert）、
+  错误边界（`ErrorBoundary.vue` 包 RouterView）都是非敏感全局状态；敏感值仍只在组件内存。
+- SPA 路由 4 条：`/app/workbench`、`/app/requests`、`/app/queue`、`/app/settings`（导航
+  工作台/订阅方案/提交队列/Settings）；Flask 侧除 `/app/` fallback 外不需新增服务端路由。
 - 本机 home 只读时，`uv` 缓存用 `UV_CACHE_DIR=<repo>/.uv-cache`、npm 用
   `--cache <repo>/.npm-cache`；Chromium 系统库可解包到 `<repo>/.chromium-deps/extracted` 并
   前置 `LD_LIBRARY_PATH`（这些目录已加入根 .gitignore）。
@@ -163,4 +171,71 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       本机不可用；CI 用 playwright install --with-deps 无此问题）。
     - openapi-typescript `--check` 模式返回码 0=最新，非零=过期；CI frontend job 与
       Python 一致性测试都用它守护生成文件。
+---
+
+## 2026-08-30 19:57:22 CST - US-199
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 统一 API transport：`frontend/src/api/client.ts`（US-199 核心）——`apiRequest` +
+    `api.get/post/put/patch/delete` + `api.poster(key)`（海报 Blob，不经 envelope）。
+    统一处理成功/失败 envelope（`{ok:true,result}` / `{ok:false,error_type,error_message,error_data}`）、
+    非 2xx JSON、非 JSON 错误体（代理 HTML 归一为「请求失败，请稍后重试」）、网络失败
+    （TypeError→`network_error`）、AbortSignal 取消（`request_cancelled`）与超时
+    （默认 `DEFAULT_TIMEOUT_MS=15000`，AbortError→`request_timeout`），失败统一抛 `ApiError`
+    （type/message/status/details/cancelled/network/nonJson/httpError）；`toApiError` 对任意
+    Error 一律降级为安全中文文案（绝不渲染原始错误文本/URL/响应体/凭据）。
+  - 路径参数用 `{param}` 模板（如 `/api/v1/requests/{request_id}` 传 `options.path`），
+    查询参数 `options.query` 只放非敏感值（相对 `storage_dir` 等）。
+  - 全局状态：`app/stores/loading.ts`（in-flight 计数）、`app/stores/notification.ts`
+    （success/error/info）；`app/composables/useTrackedRequest.ts`（`trackedApi` begin/end
+    驱动全局 loading）。
+  - 共享反馈组件：`components/feedback/` EmptyState / LoadingState（reduced-motion 兼容）/
+    ErrorState / GlobalNotification（aria-live，error 用 role=alert）/ ErrorBoundary（包住
+    RouterView，不展示原始 error）。
+  - SPA 路由扩为 4 条：`/app/workbench`、`/app/requests`、`/app/queue`、`/app/settings`；
+    App.vue 导航含「订阅方案工作台/订阅方案/提交队列/Settings」4 项；RequestsView/
+    QueueView 为带 EmptyState 的占位视图（US-202/US-206 迁移）。
+  - `main.css` 增加 primary/secondary/danger 按钮原语与 focus-visible 样式。
+  - 测试：`client.test.ts` 16 例（envelope/非 JSON/网络/取消/超时/路径插值/海报/安全降级）、
+    `useTrackedRequest.test.ts` 2 例、`loading.test.ts` 2 例；`App.test.ts` 扩至 4 路由+
+    通知（aria-live/role=alert/关闭）；`tests/browser/test_app_shell.py` 更新为 4 导航与
+    各 route 挂载（6 例真实 Chromium）。
+  - 文档：README（Stage 27 段落 + /app/ 路由清单）、frontend/AGENTS.md（统一 transport
+    章节）、src/apps/migu_orca_web/AGENTS.md（4 条 SPA 路由说明）、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md（US-199 完成记录）、
+    scripts/ralph/prd.json（US-199 passes: true）。
+- Files changed
+  - 新增：frontend/src/api/client.ts、client.test.ts、
+    frontend/src/app/stores/{loading,notification}.ts、loading.test.ts、
+    frontend/src/app/composables/useTrackedRequest.ts、useTrackedRequest.test.ts、
+    frontend/src/components/feedback/{EmptyState,LoadingState,ErrorState,GlobalNotification,
+    ErrorBoundary,GlobalLoadingBar}.vue、
+    frontend/src/features/requests/RequestsView.vue、frontend/src/features/queue/QueueView.vue
+  - 修改：frontend/src/{App.vue, App.test.ts, app/router/index.ts, styles/main.css}、
+    frontend/AGENTS.md、README.md、docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    src/apps/migu_orca_web/AGENTS.md、tests/browser/test_app_shell.py、
+    scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - `apiRequest` 的 `{param}` 路径模板是类型安全的：`ApiPath` 来自生成的 `paths` 键，
+      缺失路径参数直接 throw（测试守护）。feature 迁移一律走 `api.*`，禁止裸 `fetch`。
+    - jsdom 下 `Response.blob()` 返回的对象不是真 `Blob`（无 `.text()`），海报单测断言
+      URL/返回值而非 `instanceof Blob`。
+    - 通知/loading/error-boundary 都是全局非敏感状态：Pinia store 只放计数器/消息，
+      不持久化、不含凭据；敏感值仍只在组件内存与单次 POST body。
+    - 浏览器测试选导航链接要用 `get_by_role("link", name="订阅方案", exact=True)`：
+      `has_text="订阅方案"` 会同时命中「订阅方案工作台」（前缀匹配歧义）。
+  - Gotchas encountered
+    - App.vue 用了共享组件后必须显式 import（Vue SFC 不会自动注册）；忘了 import 时
+      typecheck 会报 unknown component，但 build 也可能悄悄通过——注意看模板编译。
+    - 非 JSON 错误体（如代理 502 HTML）之前没置 `nonJson` 标志，测试暴露后补上：
+      `envelopeError(status, payload, isNonJson)`。
+    - AbortError 同时来自超时与外部取消：用 `signal?.aborted` 区分
+      `request_timeout` / `request_cancelled`，两者 status 都是 0。
+  - Useful context
+    - US-200 将在这套 feedback 原语之上建 layout/button/input/confirm/credential form 等
+      primitives；US-202 起迁移 Request 列表时复用 `trackedApi` + 通知 + EmptyState/
+      LoadingState/ErrorState。
+    - 浏览器测试前置：仓库根 `.migu_orca/storage` 不存在；本机跑浏览器套件需
+      `UV_CACHE_DIR=$PWD/.uv-cache` 与 `LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/...`。
 ---
