@@ -449,7 +449,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 >
 > 魔改用法详见下方「使用 DSH 运行 Ralph」小节；`amp` / `claude` / `codex` 三个原始工具分支保持兼容可用。
 
-- 当前 Ralph PRD：Stage 27，前端工程化迁移与页面重构（已规划，等待 Stage 26 完成后启动）
+- 当前 Ralph PRD：Stage 27，前端工程化迁移与页面重构（已规划，可启动）
 - 最近完成阶段：Stage 26，Web API 契约固化与服务端边界治理
 - 前一完成阶段：Stage 25，正式番名与季数解析
 - 前一完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
@@ -468,7 +468,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 前一完成阶段：Stage 10，Web UI Request 确认、取消和修改操作入口 PRD
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
-- Stage 26 规划：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196（已全部完成）
+- Stage 26 执行：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196（已全部完成）
 - Stage 27 规划：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`；预定分支 `agent/stage27-frontend-engineering-migration`，Ralph stories 为 US-197～US-204
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
@@ -517,7 +517,7 @@ RALPH_MODEL=deepseek-v4-flash ./scripts/ralph/ralph.sh --tool claude 7
 
 如果你的 Claude 环境已经为别名做了额外映射，也可以换成对应别名；但在本仓库当前环境中，`deepseek-v4-flash` 是可直接运行的模型名。
 
-`--model` 目前只会传递给 Claude 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
+`--model` 会传递给 Claude 或 DSH 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
 
 ### 使用 DSH 运行 Ralph（魔改新增，推荐）
 
