@@ -51,9 +51,9 @@ from apps.migu_orca_web.api_contract import (
     RequestCreateResultDTO,
     RequestDeleteResultDTO,
     RequestDetailResultDTO,
+    RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
-    RequestSummaryDTO,
 )
 
 OPENAPI_VERSION = "3.1.0"
@@ -250,7 +250,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "schema": {"type": "string"},
             }
         ],
-        "success": {"requests": [RequestSummaryDTO]},
+        "success": RequestListResultDTO,
         "errors": {
             "400": {
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",

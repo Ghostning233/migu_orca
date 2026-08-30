@@ -78,8 +78,8 @@ def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> 
 
     page.get_by_role("link", name="订阅方案", exact=True).click()
     page.wait_for_url("**/app/requests", timeout=5000)
-    assert page.locator("#requests-heading").count() >= 1
-    assert page.locator(".requests-panel .empty-state").count() >= 1
+    assert page.locator("#request-list-container").count() >= 1
+    assert page.locator("#request-list-count").count() >= 1
 
     page.get_by_role("link", name="提交队列", exact=True).click()
     page.wait_for_url("**/app/queue", timeout=5000)

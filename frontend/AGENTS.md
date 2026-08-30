@@ -120,3 +120,23 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `instanceof Blob`。
 - `npm run dev`（Vite dev server :5173）代理 `/api/v1` 到本地 Flask :5000，仅限本地开发；
   生产不依赖 Node。
+
+## Request 列表（US-202）
+
+- 列表逻辑在 `features/requests/requestsList.ts`（纯函数：`requestLabel`/`searchableText`/
+  `filterRequests`/`sortRequests`/`availableStatuses`/`statusLabel`），与旧 `app.js`
+  `filteredAndSortedRequests` 语义一致；feature 与测试复用同一份，不复制第二套。
+- 状态码内部值（`PENDING_CONFIRM`/`ACCEPTED`/`CANCELLED`）只作 option value 与内部比较，
+  用户可见文案走 `statusLabel`（待确认/已确认/已取消）；未知状态按原样渲染（不回退为
+  「未设置」，避免掩盖服务端新状态）。
+- 列表加载用 `api.get<ListResult>('/api/v1/requests', { query })`，`query.storage_dir` 只放
+  localStorage 里的**相对 profile**（`sanitizeStorageProfile` 已挡绝对路径/穿越）；
+  `result.requests ?? []` 兜底空数组，避免 200 无字段时崩溃。
+- 选择状态由 URL query `request_id` 驱动（`router.push({ path, query })`），刷新恢复；
+  清空/点空项用 `router.push({ path: '/requests' })` 去掉 query。`request_id` 是公开已保存
+  标识符，可进 URL；凭据/endpoint 永远不进 URL。
+- 浏览器测试：`tests/browser/test_app_requests.py`（SPA `/app/requests`），fixture 用
+  conftest `create_saved_request` 预置 + `set_storage_preferences` 设相对 profile；错误态
+  用 `page.route("**/api/v1/requests**")` mock 500 后断言脱敏文案（error_type/error_data
+  不得进 DOM）。断言列表项用 `.request-list-item`（含 `data-request-id`）、状态用
+  `.request-list-item.is-selected`，不要用裸 `[data-request-id]`（详情页动作也用同属性）。

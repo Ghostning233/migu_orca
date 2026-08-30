@@ -2002,10 +2002,10 @@
                       "const": true
                     },
                     "result": {
-                      "type": "object",
+                      "additionalProperties": false,
+                      "description": "Public list-result whitelist: every entry is a full summary DTO.\n\nUS-202: the new frontend consumes ``GET /api/v1/requests`` exclusively\nthrough the generated TypeScript client, so the result shape is typed at\nthe boundary instead of a bare ``list[dict[str, Any]]``.",
                       "properties": {
                         "requests": {
-                          "type": "array",
                           "items": {
                             "additionalProperties": false,
                             "description": "Public ``summary`` shape produced by ``summarize_request``.",
@@ -2097,9 +2097,16 @@
                             ],
                             "title": "RequestSummaryDTO",
                             "type": "object"
-                          }
+                          },
+                          "title": "Requests",
+                          "type": "array"
                         }
-                      }
+                      },
+                      "required": [
+                        "requests"
+                      ],
+                      "title": "RequestListResultDTO",
+                      "type": "object"
                     }
                   }
                 },

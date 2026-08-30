@@ -30,6 +30,7 @@ from apps.migu_orca_web.api_contract import (
     RequestCreateResultDTO,
     RequestDeleteResultDTO,
     RequestDetailResultDTO,
+    RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
     RequestSummaryDTO,
@@ -85,6 +86,26 @@ def test_request_summary_dto_rejects_unknown_fields() -> None:
     assert RequestSummaryDTO.model_validate(summary) is not None
     with pytest.raises(ValidationError):
         RequestSummaryDTO.model_validate({**summary, "leaked_secret": "x"})
+
+
+def test_request_list_dto_accepts_real_summaries() -> None:
+    """US-202: the list result is typed as full summary DTOs, not bare dicts."""
+    request = _generated_request()
+    payload = {"requests": [_summary(request), _summary(request)]}
+    validated = RequestListResultDTO.model_validate(payload)
+    assert all(isinstance(item, RequestSummaryDTO) for item in validated.requests)
+
+
+def test_request_list_dto_rejects_unknown_fields() -> None:
+    summary = _summary(_generated_request())
+    with pytest.raises(ValidationError):
+        RequestListResultDTO.model_validate(
+            {"requests": [summary], "leaked_secret": "x"}
+        )
+    with pytest.raises(ValidationError):
+        RequestListResultDTO.model_validate(
+            {"requests": [{**summary, "leaked_secret": "x"}]}
+        )
 
 
 def test_request_create_dto_accepts_real_payload() -> None:

@@ -1728,8 +1728,17 @@ export interface operations {
                     "application/json": {
                         /** @constant */
                         ok: true;
+                        /**
+                         * RequestListResultDTO
+                         * @description Public list-result whitelist: every entry is a full summary DTO.
+                         *
+                         *     US-202: the new frontend consumes ``GET /api/v1/requests`` exclusively
+                         *     through the generated TypeScript client, so the result shape is typed at
+                         *     the boundary instead of a bare ``list[dict[str, Any]]``.
+                         */
                         result: {
-                            requests?: {
+                            /** Requests */
+                            requests: {
                                 /** Request Id */
                                 request_id: string | null;
                                 /** Status */

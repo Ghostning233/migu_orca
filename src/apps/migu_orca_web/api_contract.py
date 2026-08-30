@@ -79,6 +79,17 @@ class RequestSummaryDTO(_StrictBase):
     warnings: list[str]
 
 
+class RequestListResultDTO(_StrictBase):
+    """Public list-result whitelist: every entry is a full summary DTO.
+
+    US-202: the new frontend consumes ``GET /api/v1/requests`` exclusively
+    through the generated TypeScript client, so the result shape is typed at
+    the boundary instead of a bare ``list[dict[str, Any]]``.
+    """
+
+    requests: list[RequestSummaryDTO]
+
+
 class RequestDetailResultDTO(_StrictBase):
     request: dict[str, Any]
     history: dict[str, Any]

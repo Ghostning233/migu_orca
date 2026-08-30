@@ -255,6 +255,23 @@ preferences 5、SettingsView 17），浏览器新增 `tests/browser/test_app_set
 - 补齐 Request summary DTO；`request_id` 可刷新恢复，storage 只使用相对 profile。
 - 旧列表与新列表使用同一 API，结果和失败反馈 parity。
 
+**完成记录（2026-08-31）**：`/app/requests` 迁移完成——`GET /api/v1/requests` 走统一
+transport（`api.get<ListResult>`），列表加载/搜索（标题、request_id、字幕组、
+folder_name）/状态筛选（待确认/已确认/已取消）/排序（默认/标题升序/request_id 升序）/
+计数（`显示 X / Y`）/空状态（无订阅方案/无匹配）/错误重试全部与旧 `/index` 列表 parity；
+纯函数列表逻辑收敛到 `frontend/src/features/requests/requestsList.ts`（feature 与测试共用，
+不复制第二套）。补齐公开 DTO `RequestListResultDTO`（`requests: list[RequestSummaryDTO]`，
+替换裸 inline 数组）并重新生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`
+（drift check 双守护）；DTO 测试新增 2 例。选择状态由 URL query `request_id` 驱动
+（点击 push、刷新恢复、清空移除），每项提供「复制 request_id」按钮（剪贴板 + 通知）；
+storage 只从 localStorage 读相对 profile（`sanitizeStorageProfile` 已挡绝对路径/穿越）。
+Vitest 新增 33 例（requestsList 18、RequestsView 15，共 128 例全过）；浏览器新增
+`tests/browser/test_app_requests.py` 15 例真实 Chromium（加载/计数/搜索/筛选/排序/空状态/
+选择恢复/复制/脱敏错误/360px/role=alert），更新 `test_app_shell.py` 的 requests 路由断言，
+全套 316 例浏览器 + 1040 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/
+node --check/git diff --check 全过，仓库根 `.migu_orca/storage` 不存在。US-203 将迁移
+详情面板与管理动作（列表项点击后详情区仍为 US-203 内容）。
+
 ### US-203：迁移 Request 详情与管理动作
 
 - 迁移详情、history、AB result、Filter/Seeds/Source/Audit 展示。
