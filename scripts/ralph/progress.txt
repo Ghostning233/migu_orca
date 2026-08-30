@@ -46,6 +46,24 @@
   `page.route("**/api/v1/requests")` 只匹配精确路径，preview-modify/preview-save 仍走真实后端。
 - CheckboxRow 的 id 直接落在原生 input：测试/浏览器用 `#mikan-fallback-enabled`（不要加
   ` input` 后缀），`v-model:checked` 绑定后 `setValue(true)` 即可触发显示/隐藏。
+- 批量工作台（US-205）feature 逻辑收敛到 `features/workbench/batchWorkbench.ts`
+  （label/校验/payload/通知纯函数），FOUND 候选浮层复用 `CandidateCard`（
+  `BatchCandidatePopover.vue`）、DRAFT 详情复用 `DraftPreviewPanel`（
+  `BatchDraftPreviewPanel.vue` 加批量专属接受/删除动作行），不复制第二套实现。
+- 批量接受统一走 `POST /api/v1/batches/{batch_id}/accept`（US-146 单卡/批量同端点）：
+  「批量接受」带 `item_ids` 只发选中项，「全接受」按 legacy parity 发送**所有卡片**
+  不带 `item_ids`（让服务端对不可接受卡片返回中文 reason）；accept payload 只含
+  item_id/request_id/title + 相对 storage_dir。批量卡片 preview-save 用
+  `DraftPreviewPanel.saveDraftAndReturn()`（返回已保存 Request，避免二次保存）。
+- 批量公开 DTO：`BatchParseItemDTO`/`BatchQueueItemDTO`/`BatchQueueDTO`/
+  `BatchResultItemDTO` 用 lenient `_SnapshotBase`（`extra="allow"`），**内嵌
+  `candidates` 仍是 strict `MikanCandidateDTO`**（engine 字段在嵌套层拒绝）；
+  envelope 仍 strict。改批量 DTO 后必须重生成 OpenAPI + TS 客户端（drift check 双守护）。
+- 批量卡片 CheckboxRow 用 `class="batch-card-checkbox-row"`（inheritAttrs 把 class 落
+  到原生 input），浏览器测试直接 `.batch-card-checkbox-row`；ConfirmDialog Teleport 到
+  body，断言用全局 `.confirm-dialog .primary-button`（不要限定到 toolbar/panel 作用域）。
+- 批量 `batch_id` 是公开标识符可进 URL query（刷新恢复提交队列），但批量卡片服务端不
+  持久化，刷新后不恢复卡片；`candidate_context`/`draft_id` 仍只在组件内存。
 
 - US-200 起共享组件原语在 `frontend/src/components/`：layout（PanelSection/FormField）、
   forms（BaseButton/BaseInput/BaseTextarea/BaseSelect/CheckboxRow，v-model + attrs 透传 +
@@ -692,4 +710,93 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       `_build_batch_preview_request` 已有服务端权威草案。
     - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
       UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（357 例全过，含新 18 例）。
+---
+## 2026-08-31 06:55:00 CST - US-205
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 迁移批量工作台到 `/app/workbench`（frontend/src/features/workbench/）：
+    - `BatchWorkbenchView.vue`：挂在 `WorkbenchView.vue` 底部的「批量工作台」
+      PanelSection——批量输入（BaseTextarea，每行一个番剧名）→
+      `POST /api/v1/batches/parse` 返回独立 FOUND/EMPTY/FAILED 卡片与 `batch_id`
+      （`router.replace` 进 URL query 供提交队列刷新恢复；批量卡片服务端不持久化，
+      刷新不恢复卡片，与旧 `/index` parity）。
+    - `BatchCandidatePopover.vue`：FOUND 卡片候选浮层（`role="dialog"`，复用
+      `CandidateCard` 的白名单渲染/季数确认 checkbox/冲突禁用；Escape/关闭后焦点回
+      触发器）；选候选 → `POST /api/v1/requests`（`save_request=false`）生成服务端
+      权威草案，卡片置 `status: DRAFT` + `preview_request` + `draft_id`（内存）。
+    - `BatchDraftPreviewPanel.vue`：DRAFT 卡片复用 `DraftPreviewPanel`（编辑订阅草案
+      + preview-modify/preview-save）+ 批量专属「接受当前批量草案 / 删除当前批量
+      卡片」动作行；接受前经新增的 `DraftPreviewPanel.saveDraftAndReturn()` 走
+      preview-save（一次性消费 draft_id）并返回已保存 Request。
+    - 接受工具栏：全选 CheckboxRow、`已选择 N 项` 计数、批量接受（只发选中 reviewable
+      卡片 + `item_ids`）、全接受（legacy parity 发送**所有卡片**不带 `item_ids`，
+      不可接受卡片显示服务端中文 reason）；统一走
+      `POST /api/v1/batches/{batch_id}/accept`；成功后卡片置 ACCEPTED +
+      `queue_status`（从 accept 响应 queue 同步）+ `draft_id: null`。
+  - 纯函数逻辑收敛 `frontend/src/features/workbench/batchWorkbench.ts`
+    （`batchStatusLabel`/`batchCardTitle`/`batchCardPreferenceSummary`/
+    `batchCardSeedSummary`/`canExpandBatchCard`/`canAcceptBatchCard`/
+    `collectBatchAcceptDescriptors`/`buildBatchAcceptPayload`/`postBatchAccept`/
+    `batchAcceptNotification`/`queueStatusLabel`/`queueItemSummary` 等），feature 与
+    Vitest 共用，不复制第二套。
+  - 补齐批量公开 DTO（src/apps/migu_orca_web/api_contract.py）：`BatchParseItemDTO`
+    （lenient `_SnapshotBase`，含 item_id/raw_title/status/queue_status/candidates/
+    preference 元数据/preview_request/draft_id/error，**内嵌 strict MikanCandidateDTO**）、
+    `BatchQueueDTO`/`BatchQueueItemDTO`/`BatchResultItemDTO`（lenient，accept 带
+    `queued`、submit/retry/recover 带 `attempts`）；重新生成 `docs/api/openapi.json`
+    与 `frontend/src/api/generated/api.ts`（drift check 双守护）。
+  - 测试：Vitest 新增 batchWorkbench.test.ts（18）与 BatchWorkbenchView.test.ts（10，
+    共 225 例全过）；浏览器新增 `tests/browser/test_app_batch_workbench.py` 13 例真实
+    Chromium（解析状态/loading/空输入校验/候选浮层/季数确认/草案详情与删除/脱敏/
+    选择接受/全接受/全选计数/失败保留/360px/敏感边界）；DTO 测试新增 5 例。
+  - 文档：frontend/AGENTS.md（批量工作台章节）、src/apps/migu_orca_web/AGENTS.md
+    （批量公开 DTO 章节）、README（US-205 完成）、stage PRD 文档（US-205 完成记录）、
+    scripts/ralph/prd.json（US-205 passes: true）。
+- Files changed
+  - 新增：frontend/src/features/workbench/{BatchWorkbenchView.vue, BatchCandidatePopover.vue,
+    BatchDraftPreviewPanel.vue, batchWorkbench.ts, batchWorkbench.test.ts,
+    BatchWorkbenchView.test.ts}、tests/browser/test_app_batch_workbench.py
+  - 修改：frontend/src/features/workbench/{DraftPreviewPanel.vue, WorkbenchView.vue}、
+    src/apps/migu_orca_web/api_contract.py、tests/api_contract/test_dto_contracts.py、
+    docs/api/openapi.json、frontend/src/api/generated/api.ts、frontend/AGENTS.md、
+    src/apps/migu_orca_web/AGENTS.md、README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 批量工作台复用单个搜索的组件：FOUND 候选浮层 = `BatchCandidatePopover`（内部
+      CandidateCard）+ `seasonConfirmations`（父组件持有，popover 只发事件）；DRAFT
+      详情 = `BatchDraftPreviewPanel`（内部 DraftPreviewPanel + 批量动作行）。US-206
+      迁移提交队列时可继续复用 accept 响应的 queue 同步逻辑。
+    - 批量接受端点语义（legacy parity 关键）：`acceptBatchItems` 的 `item_ids` 可选——
+      缺省（全接受）时服务端对**所有**传入卡片返回逐卡结果，不可接受卡片带中文
+      reason（unacceptable/failed）；前端全接受必须发全部卡片而不是只发 reviewable。
+    - 批量 DTO 模式：parse item 用 lenient `_SnapshotBase`（允许引擎追加 review
+      元数据）但内嵌 `candidates` 仍 strict `MikanCandidateDTO`（engine 字段在嵌套
+      层拒绝）；queue/result item 用 lenient DTO 覆盖 accept（queued）与
+      submit/retry/recover（attempts）两个 family 的共享字段。
+    - `DraftPreviewPanel` 新增 `saveDraftAndReturn()`（保存并返回已保存 Request）供
+      批量接受流程复用，避免「先保存再查」二次请求。
+  - Gotchas encountered
+    - CheckboxRow 是 `inheritAttrs: false`：在批量卡片上写的
+      `class="batch-card-checkbox-row"` 会落到**原生 input** 而不是包装 div——浏览器
+      测试定位 `.batch-card-checkbox-row` 即可（不要写成 `... input`）。
+    - ConfirmDialog Teleport 到 `body`：浏览器测试断言用全局
+      `.confirm-dialog .primary-button`，不能限定到 `#batch-accept-toolbar .confirm-dialog`。
+    - 生成的 `BatchItem` 类型里 `draft_id`/`queue_status` 是 `string | null`：删除
+      draft 时不能用 `delete obj.draft_id`（TS 报 operand must be optional），要
+      显式赋 `null`；`queue_status` 同步时用 `?? null` 而不是 `?? undefined`。
+    - `vue-tsc` strict 下 `v-for :key` 不接受 `string | null`：用
+      `item.item_id ?? item.raw_title ?? ''`。
+    - 浏览器 route mock `**/api/v1/batches/batch-spa/accept*` 需要 `*` 通配（URL 可能
+      带 storage_dir query）。
+  - Useful context
+    - 旧 app.js 对照基准：`submitBatchAccept`（~2144 行）、`resolveBatchAcceptDescriptors`
+      （~2078）、`applyBatchAcceptResult`（~1982）、`renderBatchCard`（~2403）、
+      `generateBatchRequestFromCandidate`（~3711）、`savePreviewDraftRequest`（~1873）、
+      `batchQueueStatusLabel`/`batchQueueItemSummary`（~2825/2854）。
+    - US-206 迁移提交队列时可复用：BatchWorkbenchView 已同步 accept 响应的
+      `queueItems`/`queue_status`；提交队列面板（读 queue、顺序提交、失败重试、
+      recover）在 `/app/queue` 路由的 QueueView.vue（当前占位）。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（370 例全过，含新 13 例）。
 ---

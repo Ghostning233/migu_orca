@@ -201,3 +201,38 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `#page-notification`）。
 - 保存草案成功后面板 `@saved` 由工作台 `router.push('/requests?request_id=...')` 跳转到
   已保存 Request 列表/详情（US-203 面板）。
+
+## 批量工作台（US-205）
+
+- 批量工作台在 `features/workbench/BatchWorkbenchView.vue`（挂在 `/app/workbench` 的
+  `WorkbenchView.vue` 底部，`<BatchWorkbenchView class="batch-workbench-section">`）。
+  纯函数逻辑收敛到 `features/workbench/batchWorkbench.ts`（`batchStatusLabel`/
+  `batchCardTitle`/`batchCardPreferenceSummary`/`batchCardSeedSummary`/
+  `canExpandBatchCard`/`canAcceptBatchCard`/`collectBatchAcceptDescriptors`/
+  `buildBatchAcceptPayload`/`postBatchAccept`/`batchAcceptNotification`/
+  `queueStatusLabel`/`queueItemSummary` 等），feature 与 Vitest 共用，不复制第二套。
+- 批量卡片复用共享组件：FOUND 卡片的候选浮层是
+  `BatchCandidatePopover.vue`（内部复用 `CandidateCard`，`role="dialog"`，Escape/
+  关闭后焦点回触发器）；DRAFT 卡片的详情面板是 `BatchDraftPreviewPanel.vue`（复用
+  `DraftPreviewPanel` + 批量专属「接受当前批量草案 / 删除当前批量卡片」动作行）。
+  **不要为批量再造第二套候选卡片或草案详情实现。**
+- 批量接受统一走 `POST /api/v1/batches/{batch_id}/accept`（US-146：单卡接受与批量接受
+  同端点）。「批量接受」只发选中的 reviewable 卡片并带 `item_ids`；「全接受」按 legacy
+  parity 发送**所有卡片**（含 FOUND/EMPTY/FAILED，不带 `item_ids`），让服务端对不可
+  接受的卡片返回中文 reason（`unacceptable`）。accept payload 只含公开字段
+  （item_id/request_id/title）+ `storage_dir`（相对 profile）。
+- 批量接受前若卡片仍持有未保存草案，先经 `DraftPreviewPanel.saveDraftAndReturn()` 走
+  preview-save（一次性消费 draft_id）再 accept；成功后的卡片置 `status: ACCEPTED`、
+  `draft_id: null`（已消费的 draft 绝不重复引用）、`queue_status` 从 accept 响应的
+  queue 同步。
+- `batch_id` 是公开标识符，可进 URL query（`router.replace({ path: '/workbench',
+  query: { batch_id } })`）供提交队列刷新恢复；批量卡片本身服务端不持久化，刷新后
+  不恢复卡片（与旧 `/index` parity）。`candidate_context`/`draft_id` 仍只在组件内存。
+- 浏览器测试：`tests/browser/test_app_batch_workbench.py`（13 例真实 Chromium）。mock
+  批量解析用 `page.route("**/api/v1/batches/parse", ...)`；卡片 draft 用 conftest
+  `issue_draft_id(preview)` 签发真实 draft_id 让 preview-modify/save 走真实后端；
+  accept 用 `_accept_route_handler(accepted_ids)`。ConfirmDialog Teleport 到 body，
+  断言用全局 `.confirm-dialog .primary-button`（不要限定到 toolbar）。
+- CheckboxRow 在批量卡片里用 `class="batch-card-checkbox-row"`（inheritAttrs 会把
+  class 落到原生 input 上），浏览器测试直接 `.batch-card-checkbox-row` 即可，
+  不要写成 `.batch-card-checkbox-row input`；全选用 `#batch-select-all-checkbox`。

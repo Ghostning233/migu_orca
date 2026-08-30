@@ -1,0 +1,108 @@
+<script setup lang="ts">
+// BatchCandidatePopover (US-205).
+//
+// The anchored candidate-choices popover for a FOUND batch card. It reuses
+// the shared CandidateCard primitive (public whitelist, season-confirmation
+// checkbox, conflict disable) so the batch flow never duplicates the
+// single-search candidate logic. The popover is fixed-position with a
+// role=dialog, an Escape/backdrop close and focus return to the trigger.
+//
+// Security boundary: only the strict public candidate whitelist is rendered
+// (never raw URLs / candidate_context). The parent owns the in-memory
+// season-confirmation state; nothing here is persisted or logged.
+import { ref } from 'vue'
+
+import CandidateCard from '@/features/workbench/CandidateCard.vue'
+import type { BatchCandidate } from '@/features/workbench/batchWorkbench'
+
+defineProps<{
+  title: string
+  candidates: BatchCandidate[]
+  query: string
+  disabled?: boolean
+  confirmedSeasons: Record<string, number | null>
+}>()
+
+const emit = defineEmits<{
+  (e: 'select', candidate: BatchCandidate): void
+  (e: 'update:confirmedSeason', bangumiId: string, season: number | null): void
+  (e: 'close'): void
+}>()
+
+const closeButton = ref<HTMLButtonElement | null>(null)
+
+defineExpose({ focusClose: () => closeButton.value?.focus() })
+</script>
+
+<template>
+  <div id="batch-candidate-choices" class="batch-candidate-choices" role="dialog" aria-modal="false" aria-labelledby="batch-candidate-choices-title">
+    <h3 id="batch-candidate-choices-title">候选合集：{{ title }}</h3>
+    <button
+      ref="closeButton"
+      type="button"
+      class="icon-button batch-candidate-close"
+      aria-label="关闭候选合集"
+      @click="emit('close')"
+    >
+      ×
+    </button>
+    <p class="field-help">请选择一个真实 MiKan 合集后生成订阅草案。</p>
+    <ul class="candidate-list batch-candidate-list" aria-label="MiKan 候选合集">
+      <CandidateCard
+        v-for="candidate in candidates"
+        :key="candidate.bangumi_id"
+        :candidate="candidate"
+        :query="query"
+        :disabled="disabled"
+        :confirmed-season="confirmedSeasons[candidate.bangumi_id] ?? null"
+        @select="emit('select', candidate)"
+        @update:confirmed-season="(season: number | null) => emit('update:confirmedSeason', candidate.bangumi_id, season)"
+      />
+    </ul>
+  </div>
+</template>
+
+<style scoped>
+.batch-candidate-choices {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  display: grid;
+  gap: 0.625rem;
+  left: 12px;
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  padding: 14px;
+  position: fixed;
+  top: 12px;
+  width: min(760px, calc(100vw - 24px));
+  z-index: 20;
+}
+
+.batch-candidate-choices h3 {
+  font-size: 0.98rem;
+  margin: 0;
+  padding-right: 32px;
+}
+
+.batch-candidate-close {
+  min-height: 30px;
+  min-width: 30px;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+}
+
+.batch-candidate-choices .field-help {
+  margin: 0;
+}
+
+.batch-candidate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.75rem;
+}
+</style>

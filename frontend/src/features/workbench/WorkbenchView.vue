@@ -34,6 +34,7 @@ import PanelSection from '@/components/layout/PanelSection.vue'
 
 import CandidateCard from '@/features/workbench/CandidateCard.vue'
 import DraftPreviewPanel from '@/features/workbench/DraftPreviewPanel.vue'
+import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
 import {
   buildCandidateCreatePayload,
   buildFallbackCreatePayload,
@@ -377,6 +378,9 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     @failed="onDraftExpired"
   />
   <LoadingState v-if="draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />
+
+  <!-- ── batch workbench (US-205) ────────────────────────────────── -->
+  <BatchWorkbenchView class="batch-workbench-section" />
 </template>
 
 <style scoped>
@@ -449,6 +453,10 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   padding: 0;
   display: grid;
   gap: 0.75rem;
+}
+
+.batch-workbench-section {
+  margin-top: 1.25rem;
 }
 
 .notification-actions {

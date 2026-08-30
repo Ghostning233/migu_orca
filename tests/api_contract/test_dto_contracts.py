@@ -410,10 +410,133 @@ def test_batch_parse_dto_shape() -> None:
         BatchParseResultDTO.model_validate({**payload, "raw_rss": "<rss>"})
 
 
+def test_batch_parse_dto_accepts_real_serialized_items() -> None:
+    """US-205: the batch parse item is typed (parse summary + strict candidates)."""
+    request = _generated_request()
+    item = {
+        "item_id": "item-1",
+        "raw_title": "萌王S4",
+        "status": "FOUND",
+        "canonical_title_candidates": ["关于我转生变成史莱姆这档事 第四季"],
+        "season_hint": "S4",
+        "search_queries": ["转生史莱姆 第四季"],
+        "confidence": 0.9,
+        "needs_user_review": False,
+        "source": "rule",
+        "parse_result": {
+            "normalized_title": "关于我转生变成史莱姆这档事 第四季",
+            "season": {"number": 4, "raw": "s4", "normalized": "第四季", "source": "title_marker"},
+        },
+        "attempted_queries": [{"query": "转生史莱姆 第四季", "source": "rule", "priority": 1}],
+        "candidates": [
+            {
+                "bangumi_id": "42",
+                "title": "关于我转生变成史莱姆这档事 第四季",
+                "mikan_url": "https://mikan.example/Home/Bangumi/42",
+                "poster_url": None,
+                "source_query": "转生史莱姆 第四季",
+                "aliases": [],
+                "recommendation": None,
+                "total_episodes": None,
+                "season_evidence": None,
+                "candidate_context": None,
+            }
+        ],
+        "applied_preferences": None,
+        "preference_hits": [],
+        "preference_warnings": [],
+        "review_hints": [],
+        "enhanced_search_queries": [],
+        "preview_request": request,
+        "draft_id": "opaque-draft-token",
+        "error": None,
+    }
+    payload = {"batch_id": "batch-1", "raw_input": "萌王S4", "items": [item]}
+    validated = BatchParseResultDTO.model_validate(payload)
+    assert validated.items[0].item_id == "item-1"
+    assert validated.items[0].preview_request is not None
+    assert validated.items[0].draft_id == "opaque-draft-token"
+    # A raw engine candidate field must never pass the nested strict whitelist.
+    with pytest.raises(ValidationError):
+        BatchParseResultDTO.model_validate(
+            {
+                **payload,
+                "items": [{**item, "candidates": [{**item["candidates"][0], "raw_html": "<html>"}]}],
+            }
+        )
+
+
+def test_batch_parse_dto_rejects_sensitive_item_fields() -> None:
+    """US-205: engine-only/sensitive item keys are rejected at the boundary."""
+    payload = {
+        "batch_id": "batch-1",
+        "raw_input": "萌王S4",
+        "items": [
+            {
+                "item_id": "item-1",
+                "raw_title": "萌王S4",
+                "status": "FAILED",
+                "canonical_title_candidates": [],
+                "season_hint": None,
+                "search_queries": [],
+                "confidence": 0.0,
+                "needs_user_review": True,
+                "source": "unknown",
+                "parse_result": None,
+                "attempted_queries": [],
+                "candidates": [],
+                "applied_preferences": None,
+                "preference_hits": [],
+                "preference_warnings": [],
+                "review_hints": [],
+                "enhanced_search_queries": [],
+                "preview_request": None,
+                "draft_id": None,
+                "error": None,
+            }
+        ],
+    }
+    # The parse item is lenient (engine may add review metadata), so unknown
+    # non-sensitive fields pass — but the envelope stays strict.
+    assert BatchParseResultDTO.model_validate(payload) is not None
+    with pytest.raises(ValidationError):
+        BatchParseResultDTO.model_validate({**payload, "token": "x"})
+
+
 def test_batch_queue_dto_accepts_null_queue() -> None:
     assert BatchQueueResultDTO.model_validate({"batch_id": "b1", "queue": None}) is not None
     with pytest.raises(ValidationError):
         BatchQueueResultDTO.model_validate({"batch_id": "b1", "queue": None, "x": 1})
+
+
+def test_batch_queue_dto_types_queue_items() -> None:
+    """US-205: queue items carry only non-sensitive public fields."""
+    queue = {
+        "queue_id": "queue-1",
+        "batch_id": "batch-1",
+        "created_at": "2026-08-19T00:00:00+00:00",
+        "updated_at": "2026-08-19T00:00:00+00:00",
+        "items": [
+            {
+                "queue_id": "queue-1",
+                "batch_id": "batch-1",
+                "item_id": "item-1",
+                "request_id": "req-1",
+                "title": "关于我转生变成史莱姆这档事 第四季",
+                "status": "READY_TO_SUBMIT",
+                "status_label": "待提交",
+                "attempts": 0,
+                "last_error": None,
+                "ab_result_summary": None,
+                "created_at": "2026-08-19T00:00:00+00:00",
+                "updated_at": "2026-08-19T00:00:00+00:00",
+            }
+        ],
+    }
+    payload = {"batch_id": "batch-1", "queue": queue}
+    validated = BatchQueueResultDTO.model_validate(payload)
+    assert validated.queue.items[0].status == "READY_TO_SUBMIT"
+    assert validated.queue.items[0].title
 
 
 def test_batch_accept_dto_validates_serialized_result() -> None:
@@ -421,6 +544,45 @@ def test_batch_accept_dto_validates_serialized_result() -> None:
     assert BatchAcceptResultDTO.model_validate(result) is not None
     with pytest.raises(ValidationError):
         BatchAcceptResultDTO.model_validate({**result, "leak": 1})
+
+
+def test_batch_accept_dto_types_result_items() -> None:
+    """US-205: accept result items carry public Chinese reasons only."""
+    queue = {
+        "queue_id": "queue-1",
+        "batch_id": "batch-1",
+        "created_at": "2026-08-19T00:00:00+00:00",
+        "updated_at": "2026-08-19T00:00:00+00:00",
+        "items": [],
+    }
+    payload = {
+        "batch_id": "batch-1",
+        "queue": queue,
+        "items": [
+            {
+                "item_id": "item-1",
+                "request_id": "req-1",
+                "title": "标题",
+                "status": "accepted",
+                "reason": None,
+                "error_type": None,
+                "queued": True,
+            },
+            {
+                "item_id": "item-2",
+                "request_id": None,
+                "title": "标题",
+                "status": "unacceptable",
+                "reason": "卡片缺少订阅草案，无法接受",
+                "error_type": None,
+                "queued": False,
+            },
+        ],
+        "summary": {"accepted": 1, "already_accepted": 0, "unacceptable": 1, "failed": 0},
+    }
+    validated = BatchAcceptResultDTO.model_validate(payload)
+    assert validated.items[0].queued is True
+    assert validated.items[1].reason == "卡片缺少订阅草案，无法接受"
 
 
 def test_batch_submit_dto_shares_accept_shape() -> None:

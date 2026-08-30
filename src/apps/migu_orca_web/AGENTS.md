@@ -124,6 +124,21 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `frontend/src/api/generated/api.ts`（drift check 双守护），并同步
   `test_golden_contracts.py::test_golden_mikan_candidates_success` 的白名单集合断言。
 
+## 批量公开 DTO（US-205）
+
+- `BatchParseResultDTO.items` 是 `list[BatchParseItemDTO]`（lenient `_SnapshotBase`，
+  `extra="allow"`）：类型化 parse 摘要/candidates/preview_request/draft_id/error 等公开
+  字段，同时允许引擎继续追加 review 元数据。**内嵌 `candidates` 仍是 strict
+  `MikanCandidateDTO`**——原始 engine 字段在嵌套层被拒绝（测试见
+  `test_dto_contracts.py::test_batch_parse_dto_accepts_real_serialized_items`）。
+- `BatchQueueResultDTO.queue` / `BatchAcceptResultDTO.queue` 用 lenient
+  `BatchQueueDTO` + `BatchQueueItemDTO`（只含公开非敏感字段：item_id/request_id/title/
+  status/status_label/attempts/last_error/ab_result_summary）；accept/submit 结果项用
+  lenient `BatchResultItemDTO`（accept 带 `queued`、submit/retry/recover 带 `attempts`，
+  一个 lenient shape 覆盖两个 family 的共享字段）。envelope 仍 strict
+  `extra="forbid"`。
+- 改批量 DTO 后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`
+  （drift check 双守护）；`test_dto_contracts.py` 用真实 serializer 输出断言嵌套白名单。
 
 ## 静态检查与就绪探针（US-195）
 

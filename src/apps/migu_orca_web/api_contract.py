@@ -387,21 +387,100 @@ class CorrectionsResultDTO(_StrictBase):
 # ---------------------------------------------------------------------------
 
 
+class BatchParseItemDTO(_SnapshotBase):
+    """One batch card's public parse/search metadata (US-205).
+
+    The parse item carries the auditable title-parse summary, the whitelisted
+    candidate list, and the client-side draft state (``preview_request`` +
+    ``draft_id``) after a candidate is chosen. Lenient (``extra="allow"``) so
+    the engine can keep adding review metadata without breaking the boundary;
+    the nested candidates stay strict (``MikanCandidateDTO``) so raw engine
+    fields never pass.
+    """
+
+    item_id: str | None = None
+    raw_title: str | None = None
+    status: str | None = None
+    queue_status: str | None = None
+    canonical_title_candidates: list[str] = []
+    season_hint: str | None = None
+    search_queries: list[str] = []
+    confidence: float | None = None
+    needs_user_review: bool | None = None
+    source: str | None = None
+    parse_result: dict[str, Any] | None = None
+    attempted_queries: list[dict[str, Any]] = []
+    candidates: list[MikanCandidateDTO] = []
+    applied_preferences: dict[str, Any] | None = None
+    preference_hits: list[dict[str, Any]] = []
+    preference_warnings: list[str] = []
+    review_hints: list[str] = []
+    enhanced_search_queries: list[dict[str, Any]] = []
+    preview_request: RequestSnapshotDTO | None = None
+    draft_id: str | None = None
+    error: dict[str, Any] | None = None
+
+
 class BatchParseResultDTO(_StrictBase):
     batch_id: str
     raw_input: str
-    items: list[dict[str, Any]]
+    items: list[BatchParseItemDTO]
+
+
+class BatchQueueItemDTO(_SnapshotBase):
+    """One public pre-submission queue item (non-sensitive fields only)."""
+
+    queue_id: str | None = None
+    batch_id: str | None = None
+    item_id: str | None = None
+    request_id: str | None = None
+    title: str | None = None
+    status: str | None = None
+    status_label: str | None = None
+    attempts: int | None = None
+    last_error: str | None = None
+    ab_result_summary: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class BatchQueueDTO(_SnapshotBase):
+    """The public pre-submission queue (idempotent, sanitized summaries)."""
+
+    queue_id: str | None = None
+    batch_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    items: list[BatchQueueItemDTO] = []
+
+
+class BatchResultItemDTO(_SnapshotBase):
+    """One accept/submit result item (public Chinese reason only).
+
+    Accept items carry ``queued``; submit/retry/recover items carry
+    ``attempts``. The lenient shape types the shared fields and lets each
+    family's extra field pass without a second DTO.
+    """
+
+    item_id: str | None = None
+    request_id: str | None = None
+    title: str | None = None
+    status: str | None = None
+    reason: str | None = None
+    error_type: str | None = None
+    queued: bool | None = None
+    attempts: int | None = None
 
 
 class BatchQueueResultDTO(_StrictBase):
     batch_id: str
-    queue: dict[str, Any] | None = None
+    queue: BatchQueueDTO | None = None
 
 
 class BatchAcceptResultDTO(_StrictBase):
     batch_id: str
-    queue: dict[str, Any]
-    items: list[dict[str, Any]]
+    queue: BatchQueueDTO
+    items: list[BatchResultItemDTO]
     summary: dict[str, int]
 
 

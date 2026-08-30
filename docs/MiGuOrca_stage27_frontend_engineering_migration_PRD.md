@@ -329,6 +329,25 @@ node --check/git diff --check 全过，仓库根 `.migu_orca/storage` 不存在�
 - 迁移选择、单个接受、批量接受和全接受，并显示明确不可接受原因。
 - 补齐 batch parse/accept DTO；复用候选、草案和 Request 组件。
 
+US-205 完成（2026-08-31）：`/app/workbench` 底部挂载 `BatchWorkbenchView.vue`（批量
+工作台区）——批量输入（textarea，每行一个番剧名）→ `POST /api/v1/batches/parse` 返回
+独立 FOUND/EMPTY/FAILED 卡片与 `batch_id`（进 URL query 供提交队列刷新恢复）。FOUND
+卡片经 `BatchCandidatePopover.vue`（复用 `CandidateCard`，`role="dialog"`，季数确认/
+冲突禁用）选候选 → `POST /api/v1/requests`（`save_request=false`）生成服务端权威草案；
+DRAFT 卡片经 `BatchDraftPreviewPanel.vue`（复用 `DraftPreviewPanel` + 批量专属
+「接受当前批量草案/删除当前批量卡片」）查看/编辑/保存草案。选择/单个接受/批量接受/
+全接受统一走 `POST /api/v1/batches/{batch_id}/accept`（「批量接受」带 `item_ids` 只发
+选中项；「全接受」按 legacy parity 发送全部卡片不带 `item_ids`，不可接受卡片显示中文
+reason）。补齐批量公开 DTO（`BatchParseItemDTO`/`BatchQueueItemDTO`/`BatchQueueDTO`/
+`BatchResultItemDTO`，lenient `_SnapshotBase` 内嵌 strict `MikanCandidateDTO`）并重生成
+OpenAPI 与 TS 客户端（drift check 双守护）。Vitest 新增 28 例（batchWorkbench 18 +
+BatchWorkbenchView 10，共 225 例全过）；浏览器新增 `tests/browser/test_app_batch_workbench.py`
+13 例真实 Chromium（解析状态/loading/空输入校验/候选浮层/季数确认/草案详情与删除/
+脱敏/选择接受/全接受/全选计数/失败保留/360px/敏感边界）。全套 370 浏览器 + 1044 非
+浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check
+全过，仓库根 `.migu_orca/storage` 不存在。US-206 将迁移提交队列（queue/submit/retry/
+recover）。
+
 ### US-206：迁移提交队列
 
 - 迁移队列读取、刷新恢复、顺序提交、失败重试、recover 和防重复提交。

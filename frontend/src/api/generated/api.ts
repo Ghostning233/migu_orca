@@ -730,7 +730,29 @@ export interface operations {
                      *         "batch_id": "示例",
                      *         "raw_input": "示例",
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "raw_title": null,
+                     *             "status": null,
+                     *             "queue_status": null,
+                     *             "canonical_title_candidates": [],
+                     *             "season_hint": null,
+                     *             "search_queries": [],
+                     *             "confidence": null,
+                     *             "needs_user_review": null,
+                     *             "source": null,
+                     *             "parse_result": null,
+                     *             "attempted_queries": [],
+                     *             "candidates": [],
+                     *             "applied_preferences": null,
+                     *             "preference_hits": [],
+                     *             "preference_warnings": [],
+                     *             "review_hints": [],
+                     *             "enhanced_search_queries": [],
+                     *             "preview_request": null,
+                     *             "draft_id": null,
+                     *             "error": null
+                     *           }
                      *         ]
                      *       }
                      *     }
@@ -745,9 +767,388 @@ export interface operations {
                             /** Raw Input */
                             raw_input: string;
                             /** Items */
-                            items: {
+                            items: ({
+                                /**
+                                 * Item Id
+                                 * @default null
+                                 */
+                                item_id: string | null;
+                                /**
+                                 * Raw Title
+                                 * @default null
+                                 */
+                                raw_title: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /**
+                                 * Queue Status
+                                 * @default null
+                                 */
+                                queue_status: string | null;
+                                /**
+                                 * Canonical Title Candidates
+                                 * @default []
+                                 */
+                                canonical_title_candidates: string[];
+                                /**
+                                 * Season Hint
+                                 * @default null
+                                 */
+                                season_hint: string | null;
+                                /**
+                                 * Search Queries
+                                 * @default []
+                                 */
+                                search_queries: string[];
+                                /**
+                                 * Confidence
+                                 * @default null
+                                 */
+                                confidence: number | null;
+                                /**
+                                 * Needs User Review
+                                 * @default null
+                                 */
+                                needs_user_review: boolean | null;
+                                /**
+                                 * Source
+                                 * @default null
+                                 */
+                                source: string | null;
+                                /**
+                                 * Parse Result
+                                 * @default null
+                                 */
+                                parse_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Attempted Queries
+                                 * @default []
+                                 */
+                                attempted_queries: {
+                                    [key: string]: unknown;
+                                }[];
+                                /**
+                                 * Candidates
+                                 * @default []
+                                 */
+                                candidates: {
+                                    /** Bangumi Id */
+                                    bangumi_id: string;
+                                    /** Title */
+                                    title: string;
+                                    /** Mikan Url */
+                                    mikan_url: string;
+                                    /**
+                                     * Poster Url
+                                     * @default null
+                                     */
+                                    poster_url: string | null;
+                                    /** Source Query */
+                                    source_query: string;
+                                    /**
+                                     * Aliases
+                                     * @default []
+                                     */
+                                    aliases: string[];
+                                    /**
+                                     * Recommendation
+                                     * @default null
+                                     */
+                                    recommendation: string | null;
+                                    /**
+                                     * Total Episodes
+                                     * @default null
+                                     */
+                                    total_episodes: number | null;
+                                    /** @default null */
+                                    season_evidence: ({
+                                        /**
+                                         * Status
+                                         * @default null
+                                         */
+                                        status: string | null;
+                                        /**
+                                         * Season
+                                         * @default null
+                                         */
+                                        season: number | null;
+                                        /**
+                                         * Requires Review
+                                         * @default null
+                                         */
+                                        requires_review: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Candidate Context
+                                     * @default null
+                                     */
+                                    candidate_context: string | null;
+                                }[];
+                                /**
+                                 * Applied Preferences
+                                 * @default null
+                                 */
+                                applied_preferences: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Preference Hits
+                                 * @default []
+                                 */
+                                preference_hits: {
+                                    [key: string]: unknown;
+                                }[];
+                                /**
+                                 * Preference Warnings
+                                 * @default []
+                                 */
+                                preference_warnings: string[];
+                                /**
+                                 * Review Hints
+                                 * @default []
+                                 */
+                                review_hints: string[];
+                                /**
+                                 * Enhanced Search Queries
+                                 * @default []
+                                 */
+                                enhanced_search_queries: {
+                                    [key: string]: unknown;
+                                }[];
+                                /** @default null */
+                                preview_request: ({
+                                    /**
+                                     * Request Id
+                                     * @default null
+                                     */
+                                    request_id: string | null;
+                                    /**
+                                     * Status
+                                     * @default null
+                                     */
+                                    status: string | null;
+                                    /** @default null */
+                                    input: ({
+                                        /**
+                                         * Raw Title
+                                         * @default null
+                                         */
+                                        raw_title: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /** @default null */
+                                    source_info: ({
+                                        /** @default null */
+                                        matched_bangumi: ({
+                                            /**
+                                             * Title
+                                             * @default null
+                                             */
+                                            title: string | null;
+                                            /**
+                                             * Aliases
+                                             * @default []
+                                             */
+                                            aliases: string[];
+                                            /**
+                                             * Mikan Url
+                                             * @default null
+                                             */
+                                            mikan_url: string | null;
+                                            /**
+                                             * Match Score
+                                             * @default null
+                                             */
+                                            match_score: number | null;
+                                            /**
+                                             * Poster Url
+                                             * @default null
+                                             */
+                                            poster_url: string | null;
+                                        } & {
+                                            [key: string]: unknown;
+                                        }) | null;
+                                        /**
+                                         * Rss Sources
+                                         * @default []
+                                         */
+                                        rss_sources: ({
+                                            /**
+                                             * Subtitle Group
+                                             * @default null
+                                             */
+                                            subtitle_group: string | null;
+                                            /**
+                                             * Rss Url
+                                             * @default null
+                                             */
+                                            rss_url: string | null;
+                                            /**
+                                             * Source Type
+                                             * @default null
+                                             */
+                                            source_type: string | null;
+                                            /**
+                                             * Total Seed Count
+                                             * @default null
+                                             */
+                                            total_seed_count: number | null;
+                                            /**
+                                             * Seed Names
+                                             * @default []
+                                             */
+                                            seed_names: string[];
+                                            /**
+                                             * Valid Seed Count
+                                             * @default null
+                                             */
+                                            valid_seed_count: number | null;
+                                            /**
+                                             * Invalid Seed Count
+                                             * @default null
+                                             */
+                                            invalid_seed_count: number | null;
+                                            /**
+                                             * Valid Seed Names
+                                             * @default []
+                                             */
+                                            valid_seed_names: string[];
+                                            /**
+                                             * Excluded Seed Names
+                                             * @default []
+                                             */
+                                            excluded_seed_names: {
+                                                [key: string]: unknown;
+                                            }[];
+                                            /**
+                                             * Warnings
+                                             * @default []
+                                             */
+                                            warnings: string[];
+                                        } & {
+                                            [key: string]: unknown;
+                                        })[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /** @default null */
+                                    confirmable_config: ({
+                                        /**
+                                         * Selected Subtitle Group
+                                         * @default null
+                                         */
+                                        selected_subtitle_group: string | null;
+                                        /**
+                                         * Selected Rss Url
+                                         * @default null
+                                         */
+                                        selected_rss_url: string | null;
+                                        /** @default null */
+                                        filter_rule: ({
+                                            /**
+                                             * Must Contain
+                                             * @default null
+                                             */
+                                            must_contain: string | null;
+                                            /**
+                                             * Must Not Contain
+                                             * @default null
+                                             */
+                                            must_not_contain: string | null;
+                                            /**
+                                             * Use Regex
+                                             * @default null
+                                             */
+                                            use_regex: boolean | null;
+                                            /**
+                                             * Case Sensitive
+                                             * @default null
+                                             */
+                                            case_sensitive: boolean | null;
+                                        } & {
+                                            [key: string]: unknown;
+                                        }) | null;
+                                        /**
+                                         * Effective Seed Names
+                                         * @default []
+                                         */
+                                        effective_seed_names: string[];
+                                        /**
+                                         * Expected Folder Name
+                                         * @default null
+                                         */
+                                        expected_folder_name: string | null;
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Ab Submit Result
+                                     * @default null
+                                     */
+                                    ab_submit_result: {
+                                        [key: string]: unknown;
+                                    } | null;
+                                    /**
+                                     * Created At
+                                     * @default null
+                                     */
+                                    created_at: string | null;
+                                    /**
+                                     * Updated At
+                                     * @default null
+                                     */
+                                    updated_at: string | null;
+                                    /** @default null */
+                                    user_action: ({
+                                        /**
+                                         * Action
+                                         * @default null
+                                         */
+                                        action: string | null;
+                                        /**
+                                         * Reason
+                                         * @default null
+                                         */
+                                        reason: string | null;
+                                        /**
+                                         * Decided At
+                                         * @default null
+                                         */
+                                        decided_at: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Draft Id
+                                 * @default null
+                                 */
+                                draft_id: string | null;
+                                /**
+                                 * Error
+                                 * @default null
+                                 */
+                                error: {
+                                    [key: string]: unknown;
+                                } | null;
+                            } & {
                                 [key: string]: unknown;
-                            }[];
+                            })[];
                         };
                     };
                 };
@@ -3640,9 +4041,24 @@ export interface operations {
                      *       "ok": true,
                      *       "result": {
                      *         "batch_id": "示例",
-                     *         "queue": {},
+                     *         "queue": {
+                     *           "queue_id": null,
+                     *           "batch_id": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "items": []
+                     *         },
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "status": null,
+                     *             "reason": null,
+                     *             "error_type": null,
+                     *             "queued": null,
+                     *             "attempts": null
+                     *           }
                      *         ],
                      *         "summary": {}
                      *       }
@@ -3655,14 +4071,147 @@ export interface operations {
                         result: {
                             /** Batch Id */
                             batch_id: string;
-                            /** Queue */
+                            /**
+                             * BatchQueueDTO
+                             * @description The public pre-submission queue (idempotent, sanitized summaries).
+                             */
                             queue: {
+                                /**
+                                 * Queue Id
+                                 * @default null
+                                 */
+                                queue_id: string | null;
+                                /**
+                                 * Batch Id
+                                 * @default null
+                                 */
+                                batch_id: string | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /**
+                                 * Items
+                                 * @default []
+                                 */
+                                items: ({
+                                    /**
+                                     * Queue Id
+                                     * @default null
+                                     */
+                                    queue_id: string | null;
+                                    /**
+                                     * Batch Id
+                                     * @default null
+                                     */
+                                    batch_id: string | null;
+                                    /**
+                                     * Item Id
+                                     * @default null
+                                     */
+                                    item_id: string | null;
+                                    /**
+                                     * Request Id
+                                     * @default null
+                                     */
+                                    request_id: string | null;
+                                    /**
+                                     * Title
+                                     * @default null
+                                     */
+                                    title: string | null;
+                                    /**
+                                     * Status
+                                     * @default null
+                                     */
+                                    status: string | null;
+                                    /**
+                                     * Status Label
+                                     * @default null
+                                     */
+                                    status_label: string | null;
+                                    /**
+                                     * Attempts
+                                     * @default null
+                                     */
+                                    attempts: number | null;
+                                    /**
+                                     * Last Error
+                                     * @default null
+                                     */
+                                    last_error: string | null;
+                                    /**
+                                     * Ab Result Summary
+                                     * @default null
+                                     */
+                                    ab_result_summary: string | null;
+                                    /**
+                                     * Created At
+                                     * @default null
+                                     */
+                                    created_at: string | null;
+                                    /**
+                                     * Updated At
+                                     * @default null
+                                     */
+                                    updated_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                })[];
+                            } & {
                                 [key: string]: unknown;
                             };
                             /** Items */
-                            items: {
+                            items: ({
+                                /**
+                                 * Item Id
+                                 * @default null
+                                 */
+                                item_id: string | null;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /**
+                                 * Reason
+                                 * @default null
+                                 */
+                                reason: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /**
+                                 * Queued
+                                 * @default null
+                                 */
+                                queued: boolean | null;
+                                /**
+                                 * Attempts
+                                 * @default null
+                                 */
+                                attempts: number | null;
+                            } & {
                                 [key: string]: unknown;
-                            }[];
+                            })[];
                             /** Summary */
                             summary: {
                                 [key: string]: number;
@@ -3745,13 +4294,99 @@ export interface operations {
                         result: {
                             /** Batch Id */
                             batch_id: string;
-                            /**
-                             * Queue
-                             * @default null
-                             */
-                            queue: {
+                            /** @default null */
+                            queue: ({
+                                /**
+                                 * Queue Id
+                                 * @default null
+                                 */
+                                queue_id: string | null;
+                                /**
+                                 * Batch Id
+                                 * @default null
+                                 */
+                                batch_id: string | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /**
+                                 * Items
+                                 * @default []
+                                 */
+                                items: ({
+                                    /**
+                                     * Queue Id
+                                     * @default null
+                                     */
+                                    queue_id: string | null;
+                                    /**
+                                     * Batch Id
+                                     * @default null
+                                     */
+                                    batch_id: string | null;
+                                    /**
+                                     * Item Id
+                                     * @default null
+                                     */
+                                    item_id: string | null;
+                                    /**
+                                     * Request Id
+                                     * @default null
+                                     */
+                                    request_id: string | null;
+                                    /**
+                                     * Title
+                                     * @default null
+                                     */
+                                    title: string | null;
+                                    /**
+                                     * Status
+                                     * @default null
+                                     */
+                                    status: string | null;
+                                    /**
+                                     * Status Label
+                                     * @default null
+                                     */
+                                    status_label: string | null;
+                                    /**
+                                     * Attempts
+                                     * @default null
+                                     */
+                                    attempts: number | null;
+                                    /**
+                                     * Last Error
+                                     * @default null
+                                     */
+                                    last_error: string | null;
+                                    /**
+                                     * Ab Result Summary
+                                     * @default null
+                                     */
+                                    ab_result_summary: string | null;
+                                    /**
+                                     * Created At
+                                     * @default null
+                                     */
+                                    created_at: string | null;
+                                    /**
+                                     * Updated At
+                                     * @default null
+                                     */
+                                    updated_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                })[];
+                            } & {
                                 [key: string]: unknown;
-                            } | null;
+                            }) | null;
                         };
                     };
                 };
@@ -3833,9 +4468,24 @@ export interface operations {
                      *       "ok": true,
                      *       "result": {
                      *         "batch_id": "示例",
-                     *         "queue": {},
+                     *         "queue": {
+                     *           "queue_id": null,
+                     *           "batch_id": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "items": []
+                     *         },
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "status": null,
+                     *             "reason": null,
+                     *             "error_type": null,
+                     *             "queued": null,
+                     *             "attempts": null
+                     *           }
                      *         ],
                      *         "summary": {}
                      *       }
@@ -3851,14 +4501,147 @@ export interface operations {
                         result: {
                             /** Batch Id */
                             batch_id: string;
-                            /** Queue */
+                            /**
+                             * BatchQueueDTO
+                             * @description The public pre-submission queue (idempotent, sanitized summaries).
+                             */
                             queue: {
+                                /**
+                                 * Queue Id
+                                 * @default null
+                                 */
+                                queue_id: string | null;
+                                /**
+                                 * Batch Id
+                                 * @default null
+                                 */
+                                batch_id: string | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /**
+                                 * Items
+                                 * @default []
+                                 */
+                                items: ({
+                                    /**
+                                     * Queue Id
+                                     * @default null
+                                     */
+                                    queue_id: string | null;
+                                    /**
+                                     * Batch Id
+                                     * @default null
+                                     */
+                                    batch_id: string | null;
+                                    /**
+                                     * Item Id
+                                     * @default null
+                                     */
+                                    item_id: string | null;
+                                    /**
+                                     * Request Id
+                                     * @default null
+                                     */
+                                    request_id: string | null;
+                                    /**
+                                     * Title
+                                     * @default null
+                                     */
+                                    title: string | null;
+                                    /**
+                                     * Status
+                                     * @default null
+                                     */
+                                    status: string | null;
+                                    /**
+                                     * Status Label
+                                     * @default null
+                                     */
+                                    status_label: string | null;
+                                    /**
+                                     * Attempts
+                                     * @default null
+                                     */
+                                    attempts: number | null;
+                                    /**
+                                     * Last Error
+                                     * @default null
+                                     */
+                                    last_error: string | null;
+                                    /**
+                                     * Ab Result Summary
+                                     * @default null
+                                     */
+                                    ab_result_summary: string | null;
+                                    /**
+                                     * Created At
+                                     * @default null
+                                     */
+                                    created_at: string | null;
+                                    /**
+                                     * Updated At
+                                     * @default null
+                                     */
+                                    updated_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                })[];
+                            } & {
                                 [key: string]: unknown;
                             };
                             /** Items */
-                            items: {
+                            items: ({
+                                /**
+                                 * Item Id
+                                 * @default null
+                                 */
+                                item_id: string | null;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /**
+                                 * Reason
+                                 * @default null
+                                 */
+                                reason: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /**
+                                 * Queued
+                                 * @default null
+                                 */
+                                queued: boolean | null;
+                                /**
+                                 * Attempts
+                                 * @default null
+                                 */
+                                attempts: number | null;
+                            } & {
                                 [key: string]: unknown;
-                            }[];
+                            })[];
                             /** Summary */
                             summary: {
                                 [key: string]: number;
@@ -3986,9 +4769,24 @@ export interface operations {
                      *       "ok": true,
                      *       "result": {
                      *         "batch_id": "示例",
-                     *         "queue": {},
+                     *         "queue": {
+                     *           "queue_id": null,
+                     *           "batch_id": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "items": []
+                     *         },
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "status": null,
+                     *             "reason": null,
+                     *             "error_type": null,
+                     *             "queued": null,
+                     *             "attempts": null
+                     *           }
                      *         ],
                      *         "summary": {}
                      *       }
@@ -4004,14 +4802,147 @@ export interface operations {
                         result: {
                             /** Batch Id */
                             batch_id: string;
-                            /** Queue */
+                            /**
+                             * BatchQueueDTO
+                             * @description The public pre-submission queue (idempotent, sanitized summaries).
+                             */
                             queue: {
+                                /**
+                                 * Queue Id
+                                 * @default null
+                                 */
+                                queue_id: string | null;
+                                /**
+                                 * Batch Id
+                                 * @default null
+                                 */
+                                batch_id: string | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /**
+                                 * Items
+                                 * @default []
+                                 */
+                                items: ({
+                                    /**
+                                     * Queue Id
+                                     * @default null
+                                     */
+                                    queue_id: string | null;
+                                    /**
+                                     * Batch Id
+                                     * @default null
+                                     */
+                                    batch_id: string | null;
+                                    /**
+                                     * Item Id
+                                     * @default null
+                                     */
+                                    item_id: string | null;
+                                    /**
+                                     * Request Id
+                                     * @default null
+                                     */
+                                    request_id: string | null;
+                                    /**
+                                     * Title
+                                     * @default null
+                                     */
+                                    title: string | null;
+                                    /**
+                                     * Status
+                                     * @default null
+                                     */
+                                    status: string | null;
+                                    /**
+                                     * Status Label
+                                     * @default null
+                                     */
+                                    status_label: string | null;
+                                    /**
+                                     * Attempts
+                                     * @default null
+                                     */
+                                    attempts: number | null;
+                                    /**
+                                     * Last Error
+                                     * @default null
+                                     */
+                                    last_error: string | null;
+                                    /**
+                                     * Ab Result Summary
+                                     * @default null
+                                     */
+                                    ab_result_summary: string | null;
+                                    /**
+                                     * Created At
+                                     * @default null
+                                     */
+                                    created_at: string | null;
+                                    /**
+                                     * Updated At
+                                     * @default null
+                                     */
+                                    updated_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                })[];
+                            } & {
                                 [key: string]: unknown;
                             };
                             /** Items */
-                            items: {
+                            items: ({
+                                /**
+                                 * Item Id
+                                 * @default null
+                                 */
+                                item_id: string | null;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /**
+                                 * Reason
+                                 * @default null
+                                 */
+                                reason: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /**
+                                 * Queued
+                                 * @default null
+                                 */
+                                queued: boolean | null;
+                                /**
+                                 * Attempts
+                                 * @default null
+                                 */
+                                attempts: number | null;
+                            } & {
                                 [key: string]: unknown;
-                            }[];
+                            })[];
                             /** Summary */
                             summary: {
                                 [key: string]: number;
@@ -4247,9 +5178,24 @@ export interface operations {
                      *       "ok": true,
                      *       "result": {
                      *         "batch_id": "示例",
-                     *         "queue": {},
+                     *         "queue": {
+                     *           "queue_id": null,
+                     *           "batch_id": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "items": []
+                     *         },
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "status": null,
+                     *             "reason": null,
+                     *             "error_type": null,
+                     *             "queued": null,
+                     *             "attempts": null
+                     *           }
                      *         ],
                      *         "summary": {}
                      *       }
@@ -4265,14 +5211,147 @@ export interface operations {
                         result: {
                             /** Batch Id */
                             batch_id: string;
-                            /** Queue */
+                            /**
+                             * BatchQueueDTO
+                             * @description The public pre-submission queue (idempotent, sanitized summaries).
+                             */
                             queue: {
+                                /**
+                                 * Queue Id
+                                 * @default null
+                                 */
+                                queue_id: string | null;
+                                /**
+                                 * Batch Id
+                                 * @default null
+                                 */
+                                batch_id: string | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /**
+                                 * Items
+                                 * @default []
+                                 */
+                                items: ({
+                                    /**
+                                     * Queue Id
+                                     * @default null
+                                     */
+                                    queue_id: string | null;
+                                    /**
+                                     * Batch Id
+                                     * @default null
+                                     */
+                                    batch_id: string | null;
+                                    /**
+                                     * Item Id
+                                     * @default null
+                                     */
+                                    item_id: string | null;
+                                    /**
+                                     * Request Id
+                                     * @default null
+                                     */
+                                    request_id: string | null;
+                                    /**
+                                     * Title
+                                     * @default null
+                                     */
+                                    title: string | null;
+                                    /**
+                                     * Status
+                                     * @default null
+                                     */
+                                    status: string | null;
+                                    /**
+                                     * Status Label
+                                     * @default null
+                                     */
+                                    status_label: string | null;
+                                    /**
+                                     * Attempts
+                                     * @default null
+                                     */
+                                    attempts: number | null;
+                                    /**
+                                     * Last Error
+                                     * @default null
+                                     */
+                                    last_error: string | null;
+                                    /**
+                                     * Ab Result Summary
+                                     * @default null
+                                     */
+                                    ab_result_summary: string | null;
+                                    /**
+                                     * Created At
+                                     * @default null
+                                     */
+                                    created_at: string | null;
+                                    /**
+                                     * Updated At
+                                     * @default null
+                                     */
+                                    updated_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                })[];
+                            } & {
                                 [key: string]: unknown;
                             };
                             /** Items */
-                            items: {
+                            items: ({
+                                /**
+                                 * Item Id
+                                 * @default null
+                                 */
+                                item_id: string | null;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /**
+                                 * Reason
+                                 * @default null
+                                 */
+                                reason: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /**
+                                 * Queued
+                                 * @default null
+                                 */
+                                queued: boolean | null;
+                                /**
+                                 * Attempts
+                                 * @default null
+                                 */
+                                attempts: number | null;
+                            } & {
                                 [key: string]: unknown;
-                            }[];
+                            })[];
                             /** Summary */
                             summary: {
                                 [key: string]: number;

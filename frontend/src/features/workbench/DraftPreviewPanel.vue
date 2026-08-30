@@ -228,7 +228,56 @@ async function saveDraft(): Promise<void> {
   }
 }
 
-defineExpose({ request, draftId })
+/** Batch helper (US-205): save the draft and return the persisted snapshot.
+ *
+ * Mirrors ``saveDraft`` but returns the saved Request so the batch accept flow
+ * can hand it to the accept endpoint without a second preview-save round trip.
+ * Returns ``null`` when the save failed (the shared error handling already
+ * fired the notification/expired events).
+ */
+async function saveDraftAndReturn(): Promise<RequestSnapshot | null> {
+  saving.value = true
+  formError.value = ''
+  try {
+    const patch = collectPreviewEditPatch(originalEditState(), currentEditState())
+    let saveDraftId = draftId.value
+    if (Object.keys(patch).length) {
+      const modified = await api.post<PreviewModifyResult>('/api/v1/requests/preview-modify', {
+        body: { draft_id: saveDraftId, patch, storage_dir: storageQuery().storage_dir ?? null },
+      })
+      if (modified?.draft_id) {
+        saveDraftId = modified.draft_id
+      }
+      if (modified?.request) {
+        request.value = modified.request
+      }
+    }
+    const saved = await api.post<PreviewSaveResult>('/api/v1/requests/preview-save', {
+      body: { draft_id: saveDraftId, storage_dir: storageQuery().storage_dir ?? null },
+    })
+    draftId.value = ''
+    const savedRequest = saved?.request as RequestSnapshot | undefined
+    if (savedRequest?.request_id) {
+      emit('saved', savedRequest.request_id)
+      return savedRequest
+    }
+    emit('failed')
+    return null
+  } catch (error) {
+    void error
+    if (isDraftError(error)) {
+      notifyDraftExpired()
+      return null
+    }
+    notification.error('保存失败', '订阅草案保存失败，请稍后重试。')
+    emit('failed')
+    return null
+  } finally {
+    saving.value = false
+  }
+}
+
+defineExpose({ request, draftId, saveDraftAndReturn })
 </script>
 
 <template>
