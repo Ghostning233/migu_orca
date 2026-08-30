@@ -18,6 +18,18 @@
 - 每个 feature 自己承担 DTO、Vitest、API contract、基本响应式/无障碍、Playwright parity 和敏感值回归；US-207 只做跨功能收敛。
 - US-208 完成 parity 矩阵、默认入口切换和不回滚业务数据的回退演练；未通过前不得执行 US-209 旧资产删除。
 - 完整门禁后确认仓库根 `.migu_orca/storage` 不存在，并检查未提交 build 临时目录和敏感产物。
+- US-197 起 SPA 托管在 `/app/`：Vite `base` 固定 `/app/`（`routes_app.py` 的 `app_blueprint`
+  同源服务 `frontend/dist`，无构建时返回占位模板）；SPA fallback 只接管 `/app/*`，其他路由
+  各自注册、绝不截获。
+- Vue Router history base 是 `/app/`：路由 `to` 用相对路径（`/workbench`），完整 URL 是
+  `/app/workbench`；RouterLink 不要重复写 `/app/` 前缀。
+- `frontend/dist`、`node_modules`、`*.tsbuildinfo` 不入库；CI frontend job 用 `npm ci` +
+  typecheck/lint/unit/build，browser job 先构建 frontend 再跑真实 Chromium。
+- 前端单元测试（Vitest）用 `createMemoryHistory('/app/')` + 与真实路由同表的 stub 组件；
+  RouterLink 按 `/app/` base 解析，路由表必须与真实一致，否则出现 "No match found" 警告。
+- 本机 home 只读时，`uv` 缓存用 `UV_CACHE_DIR=<repo>/.uv-cache`、npm 用
+  `--cache <repo>/.npm-cache`；Chromium 系统库可解包到 `<repo>/.chromium-deps/extracted` 并
+  前置 `LD_LIBRARY_PATH`（这些目录已加入根 .gitignore）。
 
 ## 2026-08-30 - Stage 27 启动优化
 
@@ -27,4 +39,54 @@
 - 每个故事按依赖排序且目标在单次 Ralph 迭代内完成；UI story 都要求使用 dev-browser 真实 Chromium 验证，全部 story 初始 `passes: false`。
 - Stage 26 活动 `prd.json`/`progress.txt` 与 `scripts/ralph/archive/2026-08-30-stage26-web-api-contract-hardening/` 完全一致后才切换活动文件，没有覆盖未归档进度。
 - 本轮只优化规划和活动 Ralph 输入，不实施 Vue 页面或修改业务 API。
+---
+
+## 2026-08-30 - US-197
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 建立 `frontend/` Vue 3 + TypeScript(strict) + Vite 工程：`package.json`/`package-lock.json`
+    （npm ci 可复现）、`tsconfig.json`（strict + noUncheckedIndexedAccess）、`vite.config.ts`
+    （base=/app/、dev proxy /api/v1 → Flask :5000、build sourcemap=false）、`vitest.config.ts`
+    （jsdom）、`eslint.config.js`（flat + vue/typescript/prettier，--max-warnings 0）。
+  - 最小 SPA：`src/main.ts` + `App.vue`（外壳 header/导航/RouterView）+ `src/app/router/index.ts`
+    （base=/app/，/workbench、/settings 懒加载）+ `features/workbench|settings` 占位视图 +
+    `src/styles/main.css` 设计基线；`src/App.test.ts` 两个 Vitest 外壳测试。
+  - Flask 托管：新增 `routes_app.py`（`app_blueprint`）——`/app/` 外壳、`/app/<path:subpath>`
+    按真实文件服务或回退 SPA 外壳（路径穿越防护），无 `frontend/dist` 时返回依赖无关占位模板；
+    蓝图注册进 `apps/migu_orca_web/__init__.py`，`views.py` 导入并再导出。
+  - 测试：`src/apps/migu_orca_web/app_routes_test.py`（11 例：构建/占位/静态/fallback/穿越/
+    API 与旧页面与探针不被截获/蓝图注册/base 资产前缀/占位无敏感值）；
+    `tests/browser/test_app_shell.py`（6 例真实 Chromium：SPA 挂载、路由切换、无 console 错误、
+    fallback 不截获 API/探针、旧页面并存、CI 缺构建即失败）。
+  - CI：新增 `frontend` job（setup-node cache + npm ci + typecheck/lint/unit/build）；
+    `browser` job 在跑套件前 `npm ci && npm run build`。
+  - 文档：README「Web UI 与 API」「前端工程（Stage 27）」、`src/apps/migu_orca_web/AGENTS.md`
+    （SPA 托管与 fallback 边界）、新建 `frontend/AGENTS.md`；根 .gitignore 追加
+    `.npm-cache/` `.uv-cache/` `.chromium-deps/`。
+- Files changed
+  - 新增：frontend/（18 个文件）、`src/apps/migu_orca_web/routes_app.py`、`app_routes_test.py`、
+    `templates/migu_orca_web/app_placeholder.html`、`tests/browser/test_app_shell.py`
+  - 修改：`.github/workflows/ci.yml`、`.gitignore`、`README.md`、
+    `src/apps/migu_orca_web/{__init__.py, views.py, AGENTS.md}`、`scripts/ralph/{prd.json, progress.txt}`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - Vite `base: '/app/'` 后，`dist/index.html` 自动引用 `/app/assets/*`；Flask 用
+      `app_blueprint` 在 `/app/<path:subpath>` 直接 `send_from_directory(dist, subpath)` 服务真实
+      文件、其余回退外壳即可，无需单独的 `/app/static/` 路由。
+    - `vue-tsc -b`（build mode）会生成 `tsconfig.tsbuildinfo` 且要求 composite；改用
+      `vue-tsc --noEmit`（typecheck）与 `build: npm run typecheck && vite build` 更干净。
+    - RouterLink 在 `createWebHistory('/app/')` 下 `to` 写相对路径；测试用
+      `createMemoryHistory('/app/')` + 同表 stub 路由避免 "No match found"。
+  - Gotchas encountered
+    - npm/uv 默认缓存写在 `~/.cache`，本机 home 只读 → 必须用 `--cache` / `UV_CACHE_DIR`
+      指到仓库内目录（已 gitignore），否则 `uv sync`/`npm install` 直接 EROFS 失败。
+    - Chromium 缺 `libnspr4/libnss3/libnssutil3` 系统库；apt download + dpkg -x 解包到仓库内
+      `.chromium-deps/extracted` 并前置 `LD_LIBRARY_PATH` 即可跑真实浏览器套件（/tmp 每次命令
+      被清空，不能放 /tmp）。
+    - `create_app("testing")` 的 url_map 现在含 `/app/` 路由；OpenAPI/端点清单测试只核对
+      `/api/v1`，不受影响；新 `/app` 路由不属 API 契约，无需改 endpoint_inventory/openapi.json。
+  - Useful context
+    - 浏览器测试 fixture `live_server_url` 是进程内 Flask server；SPA 测试需真实构建
+      `frontend/dist`（CI browser job 已构建；本地先 `cd frontend && npm run build`）。
+    - 旧 `/index`、`/settings` 与 `/app/` 并存是刻意设计（迁移窗口），US-208 才切换默认入口。
 ---

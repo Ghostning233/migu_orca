@@ -1,0 +1,46 @@
+# AGENTS.md — frontend (Stage 27, US-197)
+
+MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全部走 npm（`npm ci`），
+与后端 `uv` 分离；**不得**混用多个 lockfile（`package-lock.json` 是唯一来源）。
+
+## 工程结构与约定
+
+- `src/app/router/index.ts`：Vue Router，history base 固定 `/app/`。路由 `to` 用相对路径
+  （`/workbench`、`/settings`），完整 URL 是 `/app/workbench`。RouterLink **不要**再写
+  `/app/` 前缀（`createWebHistory('/app/')` 已处理 base）。
+- `src/styles/main.css`：共享设计基线（layout shell + panel/field-help 等原语）。
+  feature 样式随迁移 story 加入，避免全局选择器膨胀。
+- 生产构建由 Flask 同源托管：Vite `base: '/app/'`，`dist/index.html` 引用 `/app/assets/*`，
+  由 `src/apps/migu_orca_web/routes_app.py` 的 `app_blueprint` 服务。**不要改 base**，
+  否则 Flask 静态路径与 SPA fallback 全部错位。
+- SPA fallback 只接管 `/app/*`；feature 里**不要**自行拼接 `/api/v1` URL——US-199 统一
+  transport 会接管；海报、健康检查与旧 Flask 页面都不能被 SPA 路由吞掉。
+- 敏感值（endpoint、token、cookie、password、原始响应等）只存在于组件局部内存与单次
+  POST body；不写 store 持久化、URL、browser storage、日志或 trace。Pinia 默认不持久化。
+- 新前端类型只来自 `docs/api/openapi.json` 生成（US-198 落地后），不导入 Python 模型、
+  不手写第二套响应 interface。
+
+## 命令与质量门禁（CI frontend job 同款）
+
+```bash
+npm ci                        # 安装（lockfile 已入库）
+npm run typecheck             # vue-tsc --noEmit（strict + noUncheckedIndexedAccess）
+npm run lint                  # eslint flat config，--max-warnings 0
+npm run test:unit -- --run    # Vitest + Vue Test Utils（jsdom）
+npm run build                 # 先 typecheck 再 vite build → dist/
+```
+
+- `dist/`、`node_modules/`、`*.tsbuildinfo` 不入库（见 `frontend/.gitignore`）。
+- 新增依赖用 `npm install <pkg>` 并在同一提交带上更新后的 `package-lock.json`。
+- 改了 Web UI 后要跑 `node --check src/apps/migu_orca_web/static/app.js`（旧前端仍存在）与
+  `uv run pytest tests/browser/ -q`（真实 Chromium；SPA 测试见 `tests/browser/test_app_shell.py`）。
+- 浏览器测试需要 `frontend/dist` 已构建；CI 的 browser job 先 `npm ci && npm run build`。
+  本地验证 SPA：`cd frontend && npm run build` 后再跑浏览器套件。
+
+## 测试模式
+
+- `src/App.test.ts` 用 `createMemoryHistory('/app/')` + 与真实路由同表的 stub 组件测外壳；
+  RouterLink 在测试里会按 `/app/` base 解析，路由表必须与真实一致，否则出现
+  "No match found" 警告。
+- `npm run dev`（Vite dev server :5173）代理 `/api/v1` 到本地 Flask :5000，仅限本地开发；
+  生产不依赖 Node。

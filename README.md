@@ -109,6 +109,8 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 
 当前 Web UI 延续 Stage 7 引入的本地 Flask 管理界面，并已累积接入 Settings、真实 MiKan 候选、可编辑预览、批量草案、提交前队列、偏好、媒体缓存、AutoBangumi 3.1.18 兼容和 Stage 25 标题季数解析。页面仍由 Flask/Jinja 提供，并由原生 JavaScript 驱动；尚未引入独立前端构建链。业务操作统一通过 `/api/v1/*` JSON API 编排，CLI 默认行为保持不变。
 
+Stage 27 已开始把 Web UI 迁移到独立前端工程：`frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程（npm 管理，`package-lock.json` 已入库）。生产构建输出到 `frontend/dist/`（不入库），由 Flask 在 `/app/` 同源托管（`routes_app.py` 的 `app_blueprint`）；Vite `base` 固定为 `/app/`，SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness` 或旧 Flask 页面。开发时可 `cd frontend && npm run dev`（Vite dev server 代理 `/api/v1` 到本地 Flask）。US-197 建立了工程基线（typecheck/lint/unit/build 全绿 + CI 门禁）；后续 story 将逐项迁移 Settings、Request 列表/详情、搜索/草案、批量工作台和提交队列，旧页面在迁移完成前保持可用。
+
 启动方式：
 
 ```bash
@@ -118,10 +120,12 @@ uv run flask --app wsgi:app run
 启动后访问：
 
 - `GET /`：重定向到 `/index`。
-- `GET /index`：服务端渲染 Request 工作台。
+- `GET /index`：服务端渲染 Request 工作台（迁移期保留；US-208 切换默认入口）。
 - `GET /index?request_id=<id>`：打开 Request 工作台并恢复指定 Request 详情。
-- `GET /settings`：服务端渲染 Settings 页面。
+- `GET /settings`：服务端渲染 Settings 页面（迁移期保留）。
 - `GET /Settings`：重定向到 `/settings`。
+- `GET /app/`：新 Vue SPA 外壳（US-197 起）；`/app/workbench`、`/app/settings` 是 SPA 路由，
+  由 Vue Router 处理，刷新时由 Flask fallback 返回外壳。
 - `GET /healthz`：存活探针。只证明 Flask 进程在服务，不做任何存储或外部系统工作。
 - `GET /readiness`：就绪探针（US-195）。进程在服务**且**服务端 Web storage 根目录可用
   （可创建/可写）时返回 200 `{"ok": true, "result": "ok"}`；storage 不可用时返回 503
@@ -615,6 +619,33 @@ uv run pytest -m "not browser"
 
 浏览器测试的输出、截图、trace 和失败日志不会包含 token、完整 endpoint URL、
 原始 HTML、原始 RSS XML 或本地绝对路径。
+
+## 前端工程（Stage 27）
+
+`frontend/` 是独立的前端工程（Vue 3 + TypeScript strict + Vite），US-197 建立了工程与 CI 基线。
+
+```bash
+cd frontend
+npm ci                    # 安装依赖（lockfile 已入库，CI 使用 npm ci）
+npm run typecheck         # vue-tsc --noEmit（strict）
+npm run lint              # ESLint flat config（--max-warnings 0）
+npm run test:unit -- --run  # Vitest + Vue Test Utils（jsdom）
+npm run build             # 先 typecheck，再 vite build 输出到 dist/
+npm run dev               # Vite dev server（代理 /api/v1 到 http://127.0.0.1:5000）
+```
+
+约定：
+
+- `frontend/dist/`（生产构建）与 `node_modules/` 不入库；CI 通过 `npm ci` 重建。
+- Vite `base` 固定为 `/app/`，生产构建由 Flask 同源托管在 `/app/`，不依赖 Node 运行时。
+- SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness`
+  或旧 Flask 页面（`src/apps/migu_orca_web/routes_app.py` 的 `app_blueprint` 保证）。
+- 路由 base 是 `/app/`：Vue Router 的 `to` 使用相对路径（如 `/workbench`），完整 URL 是
+  `/app/workbench`。
+- 新前端只通过 Stage 26 OpenAPI（`docs/api/openapi.json`）生成 TypeScript 类型/client
+  （US-198），不导入 Python 模型、不手写第二套响应 interface。
+- 安全边界与旧前端一致：endpoint、token、cookie、password、原始响应等敏感值只存在于
+  组件局部内存与单次 POST body，不进入 store 持久化、URL、browser storage、日志或 trace。
 
 ## 参考文档
 

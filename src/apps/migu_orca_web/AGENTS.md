@@ -12,8 +12,22 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - `drafts.py`（US-194）：服务端权威未保存草案存储（`draft_store` / `DraftStore`，TTL 30 分钟、
   容量 128、一次性保存与重放保护）；`preview-modify`/`preview-save` 只接受 opaque `draft_id`。
 - `routes_requests.py` / `routes_mikan.py` / `routes_batches.py` / `routes_settings.py` / `routes_connections.py`：按端点族注册 `/api/v1` 路由。
+- `routes_app.py`（US-197）：`app_blueprint` 托管 Vue SPA——`/app/` 外壳、`/app/<path:subpath>`
+  fallback（真实构建文件直接服务，其余 `/app/*` 返回 SPA 外壳）、`_dist_dir()` 指向
+  `frontend/dist/`（无构建时返回依赖无关的占位模板，测试 monkeypatch `_dist_dir`）。
 - `views.py`：仅保留 Jinja 页面路由 + 导入 route 模块（导入副作用即注册端点）+ 再导出 blueprints；同时为测试兼容再导出 `CandidateSelectionContextStore` / `candidate_selection_contexts`。
-- `__init__.py` 的 `blueprints = [web_blueprint, api_blueprint]` 由 `apps/registry.py` 消费。
+- `__init__.py` 的 `blueprints = [web_blueprint, api_blueprint, app_blueprint]` 由 `apps/registry.py` 消费。
+
+## SPA 托管与 fallback 边界（US-197）
+
+- Vite `base` 固定为 `/app/`，`frontend/dist/` 的 `index.html` 引用 `/app/assets/*`；
+  Flask 的 `app_blueprint` 在 `/app/` 同源托管，生产不依赖 Node 运行时。
+- **fallback 只接管 `/app/*`**：`/api/v1/*`、海报、`/migu-orca-static/*`、`/healthz`、
+  `/readiness`、旧 `/index`、`/settings` 都由各自的 Flask 路由处理，绝不能被 `/app/<path:subpath>`
+  截获（`tests/api_contract/test_inventory_consistency.py` 只核对 `/api/v1`，但
+  `src/apps/migu_orca_web/app_routes_test.py` 断言非 `/app` 路由端点不属于 `migu_orca_app.*`）。
+- `frontend/dist` 不入库；CI 的 frontend/browser job 在跑套件前执行 `npm ci && npm run build`。
+  浏览器测试 `tests/browser/test_app_shell.py` 在 `MIGU_ORCA_CI=1` 下缺构建直接失败（不 skip）。
 
 ## 路由注册与测试 seam 的坑
 

@@ -9,6 +9,11 @@ registry. Request schemas live in ``schemas.py``, response serializers in
 ``serializers.py``, orchestration in ``services.py``, short-lived contexts in
 ``contexts.py``, and Blueprint objects in ``blueprints.py``.
 
+Stage 27 (US-197) adds the Vue SPA shell: ``routes_app.py`` owns the
+``app_blueprint`` (``/app/`` shell + scoped SPA fallback) and is imported
+here alongside the API route modules so its endpoints register on app
+creation. The blueprint list in ``apps.migu_orca_web.__init__`` includes it.
+
 ``CandidateSelectionContextStore`` and ``candidate_selection_contexts`` are
 re-exported here for backward compatibility (pre-split consumers imported them
 from ``apps.migu_orca_web.views``); the canonical home is ``contexts.py``.
@@ -20,6 +25,7 @@ from flask import redirect, render_template, url_for
 # import side effect is intentional. Order matters only for readability, not
 # for URL resolution.
 from apps.migu_orca_web import (  # noqa: F401
+    routes_app,
     routes_batches,
     routes_connections,
     routes_mikan,
@@ -34,6 +40,7 @@ from apps.migu_orca_web.contexts import (  # noqa: F401
     CandidateSelectionContextStore,
     candidate_selection_contexts,
 )
+from apps.migu_orca_web.routes_app import app_blueprint  # noqa: F401
 
 
 @web_blueprint.get("/")

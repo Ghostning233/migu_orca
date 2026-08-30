@@ -52,6 +52,38 @@ jobs:
       - name: Whitespace / conflict markers
         run: git diff --check
 
+  frontend:
+    name: Frontend (typecheck, lint, unit, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm run test:unit -- --run
+
+      - name: Production build
+        run: npm run build
+
   browser:
     name: Real Chromium browser suite
     runs-on: ubuntu-latest
@@ -75,6 +107,12 @@ jobs:
       - name: Install Playwright Chromium + system libraries
         run: |
           uv run playwright install --with-deps chromium
+
+      - name: Build frontend (for SPA browser tests)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
 
       - name: Run browser suite (fail loudly if Chromium cannot start)
         run: uv run pytest tests/browser/ -q
