@@ -27,7 +27,7 @@
 | 16 | BL-019 | AutoBangumi 真实认证与订阅兼容闭环 | 完成 (Stage 24, 2026-08-25) |
 | 17 | BL-018 | 正式番名与季数解析 | 已完成 (Stage 25, 2026-08-27) |
 | 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
-| 19 | BL-024 | 前端工程化迁移与页面重构 | 已规划为 Stage 26 后继 Stage |
+| 19 | BL-024 | 前端工程化迁移与页面重构 | Stage 27 启动校准已完成，进入开发准备 |
 | 20 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
 以下事项已经落盘，但尚未进入开发优先级排序；触发条件满足或完成独立可行性评估后，再决定是否进入新的 Stage：
@@ -445,16 +445,17 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-024: 前端工程化迁移与页面重构
 
-- 状态：已规划为 Stage 27，等待 Stage 26 完成后启动
+- 状态：Stage 27 启动校准已完成，活动 Ralph PRD 已切换，进入开发准备
 - 来源：Stage 25 后前后端边界审查，2026-08-29
 - 优先级：19，P1
 - 规划 PRD：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`
 - 前置条件：Stage 26 已完成（OpenAPI、DTO、HTTP 状态、Web storage 与服务端 draft 全部落地）
+- 执行分支：`agent/stage27-frontend-engineering-migration`；Ralph stories 为 US-197～US-209
 
 目标：
 
 - 建立 Vue 3 + TypeScript + Vite 独立前端工程，生产继续与 Flask API 同源。
-- 按 Settings、Request、单个搜索、批量工作台、提交队列顺序渐进迁移。
+- 先校准 OpenAPI 生成契约，再按应用外壳/安全组件、Settings、Request 列表/详情、单个搜索、批量工作台、提交队列顺序渐进迁移。
 - 重构页面信息架构、响应式与无障碍体验，同时保持现有业务状态机和安全边界。
 - 新旧页面完成 parity 后再切换默认入口并清理旧 Jinja 主页面、单文件 `app.js` 与无用 CSS。
 

@@ -6,50 +6,68 @@
 | --- | --- |
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 27 PRD：前端工程化迁移与页面重构 |
-| 文档类型 | 后继 Stage PRD / Stage 26 handoff |
-| 当前状态 | 已规划，等待 Stage 26 完成后启动（Stage 26 已于 2026-08-30 完成，可启动） |
+| 文档类型 | 执行 PRD / Stage 26 handoff |
+| 当前状态 | 已完成启动校准，进入开发准备 |
 | 创建日期 | 2026-08-29 |
+| 优化日期 | 2026-08-30 |
 | Backlog | BL-024 |
 | 优先级 | P1 |
 | 前置条件 | Stage 26 API DTO、OpenAPI、HTTP 状态、storage 与 draft 边界全部完成（已满足） |
-| 预定分支 | `agent/stage27-frontend-engineering-migration` |
-| 预定 stories | US-197～US-204，启动时按 Stage 26 最终契约复核 |
+| 执行分支 | `agent/stage27-frontend-engineering-migration` |
+| Ralph stories | US-197～US-209 |
 
 ## 2. 背景
 
-当前 Web UI 已承载完整业务，但工程形态仍是两份 Jinja 页面、一份约 5,000 行原生 JavaScript 和一份约 1,500 行 CSS。全局 DOM 引用、页面状态、API 调用、渲染函数和敏感表单逻辑集中在同一个 IIFE 中；继续增量开发会放大状态耦合和浏览器回归成本。
+当前 Web UI 已承载完整业务，但工程形态仍是两份 Jinja 页面、一份约 5,250 行原生
+JavaScript 和一份全局 CSS。全局 DOM 引用、页面状态、API 调用、渲染函数和敏感表单逻辑
+集中在同一个 IIFE 中；继续增量开发会放大状态耦合和浏览器回归成本。
 
-Stage 26 已先把 `/api/v1` 固化为类型化、可生成客户端的后端边界（端点清单 + golden
-contract、响应 DTO、确定性 OpenAPI、稳定 HTTP 状态），并解决浏览器任意 storage path
-（Web storage 限制为服务端根目录下相对 profile）与客户端权威 preview Request（服务端
-权威 DraftStore）等 P0 问题。Stage 27 在该基线上完成前端工程化和页面信息架构重构，
-不同时重写业务 API。
+Stage 26 已把 `/api/v1` 固化为可审查的后端边界：端点清单、golden contract、响应 DTO、
+确定性 OpenAPI、稳定 HTTP 状态、服务端 Web storage 根目录和权威 DraftStore 均已落地。
+Stage 27 在该基线上完成前端工程化和信息架构重构，不重写业务规则。
 
-## 3. 技术选型
+启动复核同时确认：当前 OpenAPI 覆盖 24 个 operation 且 operationId 唯一，但在直接交给
+TypeScript 生成器前仍需校准错误响应、operationId 可读性和迁移功能使用的深层公开 DTO。
+例如 Request 详情实际返回 404、海报端点实际返回 400/404/502，而当前 OpenAPI 声明不完整；
+部分响应深层结构仍是 `dict[str, Any]`。这些问题纳入 US-198，在任何业务页面迁移前解决。
+
+## 3. 技术选型与约束
 
 | 领域 | 选择 | 说明 |
 | --- | --- | --- |
-| 框架 | Vue 3 Composition API | 适合表单、工作台、局部状态与渐进组件化 |
-| 语言 | TypeScript strict | API、状态和表单必须有静态契约 |
-| 构建 | Vite | 提供快速开发、分包和生产静态产物 |
-| 路由 | Vue Router | 工作台、Request 详情、队列和 Settings 使用明确路由 |
-| 状态 | Pinia + feature-local composables | 只保存非敏感业务/UI 状态；服务凭据不进入 store 持久化 |
-| API client | Stage 26 OpenAPI 生成类型 + 薄封装 | 不手写第二套响应 interface |
-| 单元测试 | Vitest + Vue Test Utils | 覆盖纯状态、组件交互和错误边界 |
-| 浏览器测试 | 现有 pytest-playwright | 继续使用真实 Chromium 与 route fake，逐步减少脆弱 CSS selector |
-| Node 包管理 | npm + lockfile | 仓库提交 lockfile，CI 使用可重复安装 |
+| 框架 | Vue 3 Composition API | 适合表单、工作台和渐进组件化 |
+| 语言 | TypeScript strict | API、路由状态、表单和组件 props 必须有静态契约 |
+| 构建 | Vite | 开发代理、生产分包和 Flask 静态产物 |
+| 路由 | Vue Router | 工作台、Request、队列和 Settings 使用明确路由 |
+| 状态 | Pinia + feature-local composables | Pinia 只保存跨页面非敏感状态，不默认持久化 |
+| API client | Stage 26 OpenAPI 生成类型/client + 薄 transport | 不手写第二套响应 interface；生成器与版本由 US-198 的 dry-run 固定 |
+| 单元测试 | Vitest + Vue Test Utils | 覆盖纯状态、组件交互、错误边界和敏感字段清理 |
+| 浏览器测试 | 现有 pytest-playwright | 真实 Chromium + route fake，逐步改用 role/label/data-testid |
+| Node 包管理 | npm + package-lock.json | CI 使用 `npm ci`，不混用多个 lockfile |
 
-若 Stage 26 的 OpenAPI 生成方式对客户端生成器有不同约束，可在 Stage 27 启动前调整具体生成工具，但不得退回手写无校验 API 类型。
+约束：
+
+- `frontend/src/api/generated/` 只能由 `docs/api/openapi.json` 生成，不手工维护。
+- generator 版本、命令和配置必须入库；重复生成无 diff，CI 必须执行漂移检查。
+- feature 不直接拼接 `/api/v1` URL，通过统一 client/transport 调用。
+- 后端 DTO 在对应 feature 迁移前补齐该 feature 实际读取的公开字段；不得用长期
+  `Record<string, unknown>` 绕过类型化目标。
+- 敏感连接表单使用组件局部内存；切换认证模式、成功、取消和离开页面时主动清空。
+- production build 不需要 Node 运行时，由 Flask 同源提供静态产物；SPA fallback 不得吞掉
+  `/api/v1`、海报、`/healthz`、`/readiness` 或其他 Flask 路由。
+- 旧页面只用于迁移期 parity/回退，不得继续增加业务能力。
 
 ## 4. 目标
 
-1. 新建独立 `frontend/` 工程，建立 TypeScript、Vite、Vue、lint、unit test 和 production build。
-2. 生产环境继续与 Flask API 同源，开发环境通过 Vite proxy 访问本地 Flask；不为前端迁移引入跨域凭据存储。
-3. 将工作台和 Settings 从全局 DOM 脚本迁移到路由、feature、component、store/composable 分层。
-4. 重构页面信息架构，使“创建方案—审核候选—编辑草案—管理 Request—提交队列”成为清晰连续流程。
-5. 保持 Stage 25/26 业务语义、URL 恢复、安全边界和外部提交确认行为。
-6. 新旧页面并行一段时间；新页面达到完整行为与浏览器验收后再切换默认入口并删除旧资产。
-7. 建立可持续的前端质量门禁，避免再次形成单文件状态中心。
+1. 新建独立 `frontend/` 工程，建立 strict TypeScript、lint、unit test、build 和可重复 CI。
+2. 让 OpenAPI 经过真实生成器 smoke test，并把运行时状态、稳定 operationId 和前端读取的
+   深层公开结构准确表达为生成类型。
+3. 生产环境继续与 Flask API 同源，开发环境通过 Vite proxy 访问本地 Flask。
+4. 将工作台和 Settings 从全局 DOM 脚本迁移到 route、feature、component、store/composable。
+5. 重构信息架构，使“创建方案—审核候选—编辑草案—管理 Request—提交队列”连续可理解。
+6. 保持 Stage 25/26 业务语义、URL 恢复、安全边界和外部提交确认行为。
+7. 每个 feature 独立完成 DTO、Vitest、Playwright parity 和敏感值回归后再迁移下一项。
+8. 完成全量 parity 与回退演练后切换入口并删除旧前端资产。
 
 ## 5. 非目标
 
@@ -57,8 +75,10 @@ contract、响应 DTO、确定性 OpenAPI、稳定 HTTP 状态），并解决浏
 2. 不实施当前播出集数、真实 LLM provider、新版 Bearer 写契约或流式封面代理。
 3. 不实现账号体系、远程多用户协作、数据库或后台 worker。
 4. 不把 qBittorrent 连接测试扩展为下载任务创建。
-5. 不把 AutoBangumi/qB endpoint、username、password、token、cookie 或完整外部响应保存到 Pinia、localStorage、sessionStorage、URL、日志、截图或 trace。
-6. 不在功能未对等前删除旧 Flask/Jinja 页面和 `app.js`。
+5. 不把 endpoint、username、password、token、cookie、Authorization、原始响应或本地绝对路径
+   保存到 Pinia 持久化、localStorage、sessionStorage、URL、日志、截图、trace 或 sourcemap。
+6. 不在功能未对等、全量回归未通过、回退未演练前删除旧 Jinja 页面和 `app.js`。
+7. 不用前端迁移顺带实现 BL-020、BL-021、BL-022 或 OF-001。
 
 ## 6. 目标目录
 
@@ -91,150 +111,168 @@ frontend/
   vite.config.ts
 ```
 
-约束：
+Flask 生产静态目录、Vite `base` 和 build 输出位置由 US-197 固定；生成文件和 build 产物的
+提交/忽略策略必须明确，不能依赖开发机残留目录。
 
-- `api/generated` 只能由 Stage 26 OpenAPI 生成，不手工维护。
-- feature 组件不直接拼接 `/api/v1` URL，通过统一 client 调用。
-- 敏感连接表单使用组件局部内存；切换认证模式、提交成功、离开页面时主动清空。
-- 只有经过明确审查的非敏感偏好允许使用持久化 adapter。
-
-## 7. 信息架构
+## 7. 信息架构与状态边界
 
 ### 7.1 应用外壳
 
-- 统一顶部或侧边导航：工作台、订阅方案、提交队列、Settings。
-- 全局只保留导航、非敏感运行模式提示和通知容器。
-- 页面标题不再展示历史 Stage 编号。
-- 桌面、平板、窄屏使用同一语义结构，避免仅靠 CSS 隐藏关键操作。
+- 导航包含：工作台、订阅方案、提交队列、Settings。
+- 全局只保留导航、非敏感运行模式提示、错误边界和通知容器。
+- 页面标题不展示历史 Stage 编号。
+- 桌面、平板、360px 窄屏使用同一语义结构，不靠隐藏关键操作适配窄屏。
 
 ### 7.2 工作台
 
-工作台按用户任务组织：
+1. 创建：单个/批量输入与直连 fallback。
+2. 搜索审核：解析摘要、FOUND/EMPTY/FAILED、真实候选和季数确认。
+3. 草案：字幕组、筛选、命名、有效/完整/排除种子。
+4. 接受：保存、单个/批量接受和明确不可接受原因。
 
-1. 创建区域：单个/批量输入与直连 fallback。
-2. 搜索审核区域：解析摘要、FOUND/EMPTY/FAILED、真实候选选择与季数确认。
-3. 草案区域：字幕组、筛选、命名、有效/完整/排除种子。
-4. 接受区域：保存、单个/批量接受与明确不可接受原因。
+单个与批量复用候选、草案和 Request 组件，不复制业务状态机。
 
-批量候选和草案继续复用同一业务组件，不复制单个/批量两套详情逻辑。
+### 7.3 Request、队列与 Settings
 
-### 7.3 Request 与队列
+- Request 列表、详情和提交队列使用路由状态；`request_id`、`batch_id` 可复制并刷新恢复。
+- candidate context、draft ID、服务地址和认证字段只存在于内存，不进入 URL 或持久化 store。
+- 队列保留顺序提交、独立重试、人工 recover 和防重复提交语义。
+- Storage/profile、非敏感偏好、qBittorrent 和 AutoBangumi 分区清晰。
+- 恢复默认、删除、recover 和真实提交继续显式确认。
 
-- Request 列表与详情使用路由状态，而不是依赖一个页面内的全局 selected ID。
-- `request_id`、`batch_id` 保持可复制和刷新恢复，但外部配置绝不进入 URL。
-- 提交队列提供独立视图，保留顺序提交、重试、人工 recover 和防重复提交语义。
-- AutoBangumi 敏感表单只在当前提交操作中存在，成功后清空。
+### 7.4 状态所有权
 
-### 7.4 Settings
+| 范围 | 状态 |
+| --- | --- |
+| 可持久化 | 相对 storage profile、用户明确保存的非敏感偏好、展示偏好 |
+| 仅组件/会话内存 | candidate context、draft ID、搜索结果、敏感连接表单、当前提交状态 |
+| 服务端权威 | Request/history、提交队列、draft 内容、偏好/修正业务数据、季数证据 context |
 
-- Storage/profile、非敏感偏好、数据源说明、qBittorrent 和 AutoBangumi 分区清晰。
-- 连接测试使用统一 credential form 组件，但 qB/AB payload 仍按独立 API 契约生成。
-- 恢复默认、删除、人工 recover 等不可逆或高风险动作继续显式确认。
+## 8. 渐进迁移与切换策略
 
-## 8. 渐进迁移策略
+1. 新前端先挂载在 `/app/`，旧 `/index`、`/settings` 保持可用。
+2. 先完成工程基线、OpenAPI 生成验证、统一 transport、路由和应用外壳。
+3. 再按共享安全表单 → Settings → Request 列表 → Request 详情 → 单个搜索/草案 →
+   批量工作台 → 提交队列的顺序迁移。
+4. 每项迁移都先补齐对应 DTO，随后通过 Vitest、API contract 和真实 Chromium parity；
+   不把安全、响应式和无障碍全部推迟到收尾 story。
+5. US-207 只处理跨 feature 的 360px、键盘、焦点、ARIA、reduced motion、分包与错误边界收敛。
+6. US-208 生成可审查 parity 矩阵，完成入口切换和自动化回退演练；旧资产仍保留一个提交窗口。
+7. US-209 在回退演练和全量门禁通过后删除旧主模板、`app.js` 和无用 CSS，并完成归档。
 
-1. 新前端初期挂载在 `/app/`，旧 `/index`、`/settings` 保持可用。
-2. Flask 在生产提供 Vite build 静态资源和 SPA fallback；API 与海报保持同源。
-3. 每完成一个 feature，增加 API contract test、Vitest 和 Playwright parity 测试。
-4. Settings 先迁移，用于验证表单、API client、通知、敏感字段清理和响应式基础。
-5. 然后迁移 Request 列表/详情、单个搜索、批量工作台、提交队列。
-6. 全部关键旅程通过后，将 `/index` 和 `/settings` 切换或重定向到新前端。
-7. 保留一个明确回退版本窗口；稳定后删除旧 Jinja 主页面、`app.js` 和不再使用的 CSS。
+禁止“大爆炸式”替换，也禁止新旧前端各自实现不同 API 或业务规则。
 
-不采用“大爆炸式”替换，也不允许新旧前端各自实现不同 API 或业务状态机。
+## 9. 用户故事
 
-## 9. 状态管理规则
+### US-197：建立 Vue/TypeScript/Vite 工程与 CI 基线
 
-### 9.1 可持久化
+- 创建 `frontend/`、npm lockfile、strict TypeScript、ESLint、Vitest 和 production build。
+- 固定 Flask 静态托管、Vite dev proxy、`base`、SPA fallback 与 build 产物策略。
+- CI 使用 `npm ci` 并运行 typecheck、lint、unit test、build，保留全部 Python/Chromium 门禁。
 
-- 经过 Stage 26 约束后的非敏感 storage profile ID。
-- 用户明确保存的非敏感 UI 偏好。
-- 不含外部配置的展示偏好，例如列表排序或折叠状态。
+### US-198：校准 OpenAPI 并生成类型化客户端
 
-### 9.2 只存在于内存
+- 用真实生成器对 `docs/api/openapi.json` 做 smoke test，选定并锁定工具、版本和命令。
+- 修正 Request 详情 404、海报 400/404/502 等运行时/文档差异，新增自动一致性测试。
+- 固化可读且稳定的 operationId；生成结果不依赖路径顺序或临时机器信息。
+- 建立生成目录和 drift check；迁移 feature 不手写重复 API interface。
 
-- candidate context、draft ID 及其过期状态。
-- 当前搜索结果、批量卡片工作状态。
-- AutoBangumi/qBittorrent 服务地址和所有认证字段。
-- submit/retry/recover 当前请求状态。
+### US-199：建立统一 API transport、路由和应用外壳
 
-### 9.3 由服务端权威管理
+- 统一处理成功/失败 envelope、非 2xx JSON、非 JSON、网络失败、取消和超时。
+- 建立 `/app/` 路由、导航、加载/空/错误状态、通知和全局错误边界。
+- API、海报、health/readiness 和旧 Flask 页面不被 SPA fallback 截获。
 
-- Request snapshot 与 history。
-- batch submission queue。
-- preview draft 内容和生命周期。
-- preference/correction 业务数据。
-- 候选季数证据和一次性确认 context。
+### US-200：建立设计基础与安全表单组件
 
-## 10. 用户故事
+- 建立 layout、按钮、输入、确认、credential form、status/alert、loading 和 focus primitives。
+- 敏感表单不进入持久化 store，模式切换、成功、取消、卸载时清空。
+- 组件默认支持 label、键盘、ARIA 状态、reduced motion 和 360px 布局。
 
-### US-197：建立 Vue/TypeScript/Vite 前端工程
+### US-201：迁移 Settings
 
-- 创建 `frontend/`、npm lockfile、strict TypeScript、ESLint、Vitest 和生产 build。
-- Flask 同源提供生产静态资源，Vite dev proxy 连接本地 API。
-- CI 检查 install、typecheck、lint、unit test 和 build。
+- 迁移 storage profile、非敏感偏好、qB/AB 连接测试和 AB Request 提交上下文。
+- 补齐 preferences/connections/submit-ab 的公开 DTO 和生成类型。
+- 保持确认、HTTP 分类、错误脱敏、URL Request 上下文与敏感字段清理。
 
-### US-198：建立生成 API client 与应用外壳
+### US-202：迁移 Request 列表
 
-- 从 Stage 26 OpenAPI 生成 TypeScript 类型/client。
-- 建立统一 envelope、HTTP 错误、通知和安全字段处理。
-- 完成导航、路由、布局、空/加载/错误状态和基础设计 token。
+- 迁移列表加载、搜索、状态筛选、排序、计数、空状态和路由选择。
+- 补齐 Request summary DTO；`request_id` 可刷新恢复，storage 只使用相对 profile。
+- 旧列表与新列表使用同一 API，结果和失败反馈 parity。
 
-### US-199：迁移 Settings 与敏感连接表单
+### US-203：迁移 Request 详情与管理动作
 
-- 迁移 storage profile、用户偏好、qB 与 AB 连接测试/提交上下文。
-- 敏感输入不进入 store 持久化，切换模式和成功后清空。
-- 保持确认、错误脱敏和窄屏可用性。
+- 迁移详情、history、AB result、Filter/Seeds/Source/Audit 展示。
+- 迁移修改、取消、删除和 ACCEPTED 状态差异；危险操作显式确认。
+- 补齐详情/action DTO，404/409/500 分支有类型化、安全反馈。
 
-### US-200：迁移 Request 列表与详情
+### US-204：迁移单个搜索与服务端草案
 
-- 迁移搜索、状态筛选、排序、详情、history、AB result、修改、取消和删除。
-- Request 详情使用路由恢复，保留 preview/saved/accepted 状态差异。
-- Seeds、Filter、Source、Audit 使用可复用类型化组件。
+- 迁移真实候选、直连 fallback、季数确认、同源海报和候选显式选择。
+- 使用服务端 `draft_id` 完成修改、保存、过期/逐出/重放恢复。
+- 不自动选候选，不把 parser 提示当作真实季数证据，不持久化 draft/context。
 
-### US-201：迁移单个搜索与服务端草案
+### US-205：迁移批量工作台
 
-- 迁移解析摘要、真实候选、直连 fallback、季数确认和同源封面。
-- 使用 Stage 26 draft ID 完成修改、保存和过期恢复。
-- 不自动选择候选，不把 parser 提示当作真实季数证据。
+- 迁移批量输入、独立 FOUND/EMPTY/FAILED、候选浮层、草案详情和删除。
+- 迁移选择、单个接受、批量接受和全接受，并显示明确不可接受原因。
+- 补齐 batch parse/accept DTO；复用候选、草案和 Request 组件。
 
-### US-202：迁移批量工作台与提交队列
+### US-206：迁移提交队列
 
-- 迁移批量输入、候选浮层、草案详情、删除、批量接受和全接受。
-- 迁移队列读取、顺序提交、重试、recover 和防重复提交。
-- 单个与批量复用候选、草案、Request 和 credential 组件。
+- 迁移队列读取、刷新恢复、顺序提交、失败重试、recover 和防重复提交。
+- 补齐 queue/submit/retry/recover DTO；成功项不重复提交，失败项独立恢复。
+- AB 凭据仅存在于当前组件内存和单次 POST body，成功/离开时清空。
 
-### US-203：完成响应式、无障碍与测试迁移
+### US-207：完成跨功能响应式、无障碍与运行质量收敛
 
-- 桌面、平板和窄屏关键旅程无横向溢出，键盘和焦点行为可用。
-- Vitest 覆盖 feature 状态和安全清理，Playwright 覆盖关键端到端旅程。
-- 浏览器测试优先使用 role、label 和稳定 `data-testid`，减少对视觉 class 的耦合。
+- 覆盖 360px、平板和桌面，无关键操作横向溢出或只靠颜色表达状态。
+- 完成键盘导航、焦点恢复、ARIA live/error、reduced motion 和错误边界审计。
+- 检查路由懒加载、production chunk、静态缓存和公开 sourcemap 策略。
 
-### US-204：切换默认入口并清理旧前端
+### US-208：完成 parity、切换默认入口并演练回退
 
-- parity 清单全部通过后切换 `/index`、`/settings` 到新前端。
-- 完成回退演练后删除旧 `app.js`、旧主模板和无用 CSS。
-- 更新 README、架构、M13、部署说明、测试命令和 Stage 归档。
+- 建立旧 269 个 Chromium 旅程到新路由的 parity 矩阵，关键旅程全部指向新前端。
+- `/index`、`/settings` 及 request_id/batch_id 兼容入口切换到新前端。
+- 演练一次无需修改业务数据的入口回退；失败时可恢复旧入口，API/storage 不回滚。
+
+### US-209：删除旧前端并完成 Stage 27 收尾
+
+- 在 parity、回退演练和全量门禁通过后删除旧 `app.js`、旧主模板和无用 CSS/测试 helper。
+- 更新 README、架构、M13、部署说明、测试命令和文档索引。
+- 归档 Stage 27 prd/progress，确认 build 产物、`.migu_orca/storage` 和敏感数据未污染仓库。
+
+## 10. 每个 story 的共同门禁
+
+- `npm run typecheck`、`npm run lint`、`npm run test:unit -- --run`、`npm run build`。
+- `uv run python -m compileall -q src tests`、`uv run ruff check src tests`。
+- 与当前改动相关的 Python/API contract 测试；OpenAPI 变化运行 `uv run migu-orca-openapi --check`。
+- UI story 使用 `.agents/skills/dev-browser/SKILL.md` 在真实 Chromium 验证，不接受整体 skip。
+- `git diff --check`；不得生成仓库根 `.migu_orca/storage`。
+- 不访问真实 MiKan、AutoBangumi 或 qBittorrent，不在 trace/screenshot/build 输出敏感值。
 
 ## 11. 验收矩阵
 
 至少覆盖：
 
-- 单个 FOUND/EMPTY/FAILED 与候选选择。
-- 非第一季明确确认、冲突候选禁用和 draft 过期恢复。
+- 单个 FOUND/EMPTY/FAILED、候选选择、非第一季确认、冲突候选禁用和 draft 失效恢复。
 - 批量多项独立失败、修改、删除、单个/批量/全接受。
 - 队列刷新恢复、顺序提交、失败重试、SUBMITTING/RESULT_PERSIST_FAILED recover。
 - Request 修改、取消、删除与 AutoBangumi Settings 上下文。
-- qB/AB 连接成功、认证失败、超时、非 JSON 响应和敏感字段清理。
-- localStorage、sessionStorage、URL、页面、日志、截图和 trace 的敏感值检查。
-- 360px 窄屏、键盘导航、焦点恢复、ARIA 状态和 reduced motion。
+- qB/AB 成功、认证失败、超时、非 JSON 和敏感字段清理。
+- localStorage、sessionStorage、URL、页面、日志、构建产物、截图和 trace 的敏感值检查。
+- 360px、键盘、焦点恢复、ARIA 状态、reduced motion 和 SPA fallback 边界。
+- 新旧 parity、入口切换和不回滚业务数据的回退演练。
 
 ## 12. 完成标准
 
-1. 用户所有主要 Web 旅程在新前端达到或超过旧页面行为。
-2. 前端只依赖 Stage 26 OpenAPI/DTO，不导入或复制 Python 内部模型。
-3. 旧原生 JavaScript 全局状态中心被删除，不存在新旧双实现长期并存。
-4. 敏感外部配置仅存在于当前组件内存和单次 POST body。
-5. TypeScript、lint、Vitest、production build、Python API 测试和真实 Chromium 全部通过。
-6. `/index`、`/settings`、`request_id`、`batch_id` 的用户可恢复行为保持兼容。
-7. Stage 27 不夹带新的业务 backlog 功能，前端迁移完成后再重新评估 BL-020/BL-021 等事项。
+1. 所有主要 Web 旅程在新前端达到或超过旧页面行为。
+2. 前端只依赖生成的 OpenAPI 类型/client，不导入 Python 模型或复制响应 interface。
+3. UI 实际读取的公开 API 字段有明确 DTO，不以长期 `Any`/`unknown` 逃避类型。
+4. 旧原生 JavaScript 全局状态中心和不再使用的主模板已删除。
+5. 敏感外部配置仅存在于当前组件内存和单次 POST body。
+6. TypeScript、lint、Vitest、production build、Python/API 测试和真实 Chromium 全部通过。
+7. `/index`、`/settings`、`request_id`、`batch_id` 的兼容入口和刷新恢复保持有效。
+8. SPA fallback 不截获 API、海报和健康检查，生产运行不依赖 Node。
+9. Stage 27 不夹带业务 backlog，Ralph 记录正确归档，工作区无运行数据或敏感产物。

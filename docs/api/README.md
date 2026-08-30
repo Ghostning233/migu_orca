@@ -51,6 +51,10 @@ Stage 27 TypeScript 前端只通过本 OpenAPI/DTO 生成客户端类型，不�
 `app.js` 内部状态。生成后按 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`
 handoff 使用。
 
+Stage 27 US-198 会先用锁定版本的真实生成器执行 smoke test，并校准运行时错误状态声明、
+稳定 operationId 与各迁移 feature 实际读取的深层公开 DTO；在该 story 完成前，不应在
+业务组件中手写接口来绕过生成类型。
+
 ## 健康/就绪探针（非 /api/v1 契约）
 
 - `GET /healthz`：存活探针，只证明 Flask 进程在服务。

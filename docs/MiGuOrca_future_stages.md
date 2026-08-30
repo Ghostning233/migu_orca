@@ -184,7 +184,7 @@ Stage 26 不引入新前端框架、不改变主要页面设计；前端工程�
 
 ### Stage 26 handoff：Stage 27 前端工程化迁移与页面重构
 
-Stage 27 已作为 BL-024 落盘到 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`，但不会在 Stage 26 完成前启动。它使用 Vue 3、TypeScript 和 Vite，以 Stage 26 OpenAPI 生成客户端，按 Settings、Request、单个搜索、批量工作台与提交队列顺序渐进迁移，并在完整 parity 后切换默认入口。
+Stage 27 已作为 BL-024 落盘到 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`，Stage 26 前置条件已满足，启动校准和活动 Ralph PRD 切换已完成。它使用 Vue 3、TypeScript 和 Vite，先通过真实生成器校准 Stage 26 OpenAPI，再按应用外壳/安全组件、Settings、Request 列表/详情、单个搜索、批量工作台与提交队列顺序渐进迁移，并在完整 parity 和回退演练后切换默认入口、清理旧前端。
 
 ## 10. 未开发事项优先级池
 
@@ -234,6 +234,6 @@ Stage 27 已作为 BL-024 落盘到 `docs/MiGuOrca_stage27_frontend_engineering_
 6. Stage 24：AutoBangumi 真实认证与订阅兼容闭环（已完成）。
 7. Stage 25：正式番名与季数解析（已完成）。
 8. Stage 26：Web API 契约固化与服务端边界治理（已完成）。
-9. Stage 27：前端工程化迁移与页面重构（等待 Stage 26 完成后启动）。
+9. Stage 27：前端工程化迁移与页面重构（启动校准已完成，进入开发准备）。
 
-因此，Stage 19 到 Stage 26 的产品闭环与后端边界已经完成，Stage 26 作为 P0 后端基础阶段已交付，Stage 27 作为唯一明确的 P1 handoff 落盘。除这两个连续重构阶段外，不继续预留更多阶段编号；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
+因此，Stage 19 到 Stage 26 的产品闭环与后端边界已经完成，Stage 26 作为 P0 后端基础阶段已交付，Stage 27 作为唯一明确的 P1 handoff 已完成启动校准并进入开发准备。除这两个连续重构阶段外，不继续预留更多阶段编号；流式封面代理等未排期方向统一记录在 `docs/optional_features.md`。
