@@ -67,6 +67,65 @@ const LIST_RESULT: ListResult = {
   ],
 }
 
+// US-203: selecting a list item mounts the detail panel, which issues its own
+// `GET /api/v1/requests/{request_id}` through the same mocked transport.
+function detailResult(requestId: string) {
+  return {
+    request: {
+      request_id: requestId,
+      status: 'PENDING_CONFIRM',
+      input: { raw_title: '葬送的芙莉莲' },
+      source_info: {
+        matched_bangumi: { title: '葬送的芙莉莲', aliases: [], mikan_url: null, match_score: 1, poster_url: null },
+        rss_sources: [
+          {
+            subtitle_group: '喵萌奶茶屋',
+            rss_url: 'https://example.invalid/rss/moe.xml',
+            source_type: 'mikan',
+            total_seed_count: 2,
+            seed_names: ['[喵萌] 芙莉莲 01.mkv'],
+            valid_seed_count: 1,
+            invalid_seed_count: 1,
+            valid_seed_names: ['[喵萌] 芙莉莲 01.mkv'],
+            excluded_seed_names: [
+              { name: '[喵萌] 芙莉莲 SP.mkv', reason: '命中排除规则：SP', rule: 'must_not_contain' },
+            ],
+            warnings: [],
+          },
+        ],
+      },
+      confirmable_config: {
+        selected_subtitle_group: '喵萌奶茶屋',
+        selected_rss_url: 'https://example.invalid/rss/moe.xml',
+        filter_rule: { must_contain: '', must_not_contain: '', use_regex: false, case_sensitive: false },
+        effective_seed_names: ['[喵萌] 芙莉莲 01.mkv'],
+        expected_folder_name: '葬送的芙莉莲',
+        warnings: [],
+      },
+      ab_submit_result: null,
+      created_at: '2026-08-31T00:00:00+00:00',
+      updated_at: '2026-08-31T00:00:00+00:00',
+      user_action: null,
+    },
+    history: { available: true, events: [], error: null },
+    ab_result: { available: false, record: null, error: null },
+  }
+}
+
+/** Mock that answers the list endpoint with LIST_RESULT and detail with a fixture. */
+function mockApiGet() {
+  apiGet.mockImplementation((path: string) => {
+    if (path === '/api/v1/requests') {
+      return Promise.resolve(LIST_RESULT)
+    }
+    if (path === '/api/v1/requests/{request_id}') {
+      // The detail panel always passes an options object with a path param.
+      return Promise.resolve(detailResult('req-b'))
+    }
+    return Promise.resolve({})
+  })
+}
+
 async function mountRequests(query: Record<string, string> = {}) {
   const router = createRouter({
     history: createMemoryHistory('/app/'),
@@ -104,7 +163,7 @@ describe('RequestsView list load (US-202)', () => {
   beforeEach(() => {
     localStorage.clear()
     apiGet.mockReset()
-    apiGet.mockResolvedValue(LIST_RESULT)
+    mockApiGet()
   })
 
   it('loads summaries from GET /api/v1/requests on mount', async () => {
@@ -135,7 +194,11 @@ describe('RequestsView list load (US-202)', () => {
   })
 
   it('shows the empty state for a zero-result list', async () => {
-    apiGet.mockResolvedValue({ requests: [] })
+    apiGet.mockImplementation((path: string) =>
+      path === '/api/v1/requests/{request_id}'
+        ? Promise.resolve(detailResult('req-b'))
+        : Promise.resolve({ requests: [] }),
+    )
     const { wrapper } = await mountRequests()
     await nextTick()
 
@@ -144,10 +207,11 @@ describe('RequestsView list load (US-202)', () => {
   })
 
   it('shows a safe Chinese error state with retry on API failure', async () => {
-    apiGet.mockRejectedValue({
-      type: 'storage_error',
-      message: '读取订阅方案失败',
-    })
+    apiGet.mockImplementation((path: string) =>
+      path === '/api/v1/requests/{request_id}'
+        ? Promise.resolve(detailResult('req-b'))
+        : Promise.reject({ type: 'storage_error', message: '读取订阅方案失败' }),
+    )
     const { wrapper } = await mountRequests()
     await nextTick()
 
@@ -157,7 +221,11 @@ describe('RequestsView list load (US-202)', () => {
     // The raw server error_message never reaches the DOM.
     expect(error.text()).not.toContain('storage_error')
 
-    apiGet.mockResolvedValue(LIST_RESULT)
+    apiGet.mockImplementation((path: string) =>
+      path === '/api/v1/requests/{request_id}'
+        ? Promise.resolve(detailResult('req-b'))
+        : Promise.resolve(LIST_RESULT),
+    )
     await wrapper.find('.error-state .secondary-button').trigger('click')
     await nextTick()
     await nextTick()
@@ -169,7 +237,7 @@ describe('RequestsView search/filter/sort (US-202)', () => {
   beforeEach(() => {
     localStorage.clear()
     apiGet.mockReset()
-    apiGet.mockResolvedValue(LIST_RESULT)
+    mockApiGet()
   })
 
   it('filters by search term and updates the count', async () => {
@@ -235,7 +303,7 @@ describe('RequestsView selection & copy (US-202)', () => {
   beforeEach(() => {
     localStorage.clear()
     apiGet.mockReset()
-    apiGet.mockResolvedValue(LIST_RESULT)
+    mockApiGet()
   })
 
   it('restores the selected item from the URL request_id', async () => {
@@ -264,7 +332,11 @@ describe('RequestsView selection & copy (US-202)', () => {
 
     // Clicking an item with a null request_id clears the query.
     const emptySummary = summary({ request_id: null })
-    apiGet.mockResolvedValue({ requests: [emptySummary as never] })
+    apiGet.mockImplementation((path: string) =>
+      path === '/api/v1/requests/{request_id}'
+        ? Promise.resolve(detailResult('req-b'))
+        : Promise.resolve({ requests: [emptySummary as never] }),
+    )
     await wrapper.find('#request-list-refresh').trigger('click')
     await flushPromises()
 

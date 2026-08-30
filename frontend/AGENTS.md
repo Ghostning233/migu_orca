@@ -140,3 +140,33 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   用 `page.route("**/api/v1/requests**")` mock 500 后断言脱敏文案（error_type/error_data
   不得进 DOM）。断言列表项用 `.request-list-item`（含 `data-request-id`）、状态用
   `.request-list-item.is-selected`，不要用裸 `[data-request-id]`（详情页动作也用同属性）。
+
+## Request 详情与管理动作（US-203）
+
+- 详情面板在 `features/requests/RequestDetailPanel.vue`（挂载于 `/app/requests` 列表下方，
+  选中项即渲染；`RequestDetailPanel` 用 `:key="selectedRequestId"` 保证切换请求时重挂载）。
+- 纯展示逻辑收敛到 `features/requests/requestDetail.ts`（`displayValue`/`actionLabel`/
+  `selectedRssSource`/`effectiveSeeds`/`excludedSeeds`/`completeSeedGroups`/
+  `totalCompleteSeedCount`/`scrubConfig`，与旧 `app.js` `renderDetailPayload` parity）；
+  `displayValue` 会把 URL 样式字符串脱敏成 `[redacted_url]`，原始 `rss_url`/`mikan_url`/
+  `poster_url` 永远不渲染（RSS 来源只显示已选择/未选择）。
+- 详情加载走 `api.get('/api/v1/requests/{request_id}', { path, query })`；相对 storage
+  profile 查询参数统一从 `features/requests/requestStorage.ts` 的 `storageQuery()` 读
+  （列表与详情共用，不复制第二套）。
+- 管理动作按状态分派：PENDING_CONFIRM → 确认/取消/修改；ACCEPTED → 修改/删除/去
+  Settings 提交 AB；CANCELLED → 只读提示。所有破坏性动作走共享 ConfirmDialog
+  （`confirm()` 返回 Promise<boolean>，danger 用 `.danger-button`）。
+- 动作成功后面板用服务端返回的 `request` 立即更新内存快照并重新 `loadDetail()`，列表
+  `@changed` 重新加载；删除成功后 `@deleted` 清空 URL 选择并卸载面板。
+- 修改表单 `modify-clear-*` checkbox 勾选时通过 watch 清空对应输入（legacy
+  `appendClearControl` 行为），patch 里发显式空字符串；空 patch 前端拦截并显示
+  「请至少修改或清空一个字段」。
+- 动作失败只显示固定中文反馈（确认失败/取消失败/修改失败/删除失败），绝不渲染服务端
+  `error_message`（可能含凭据）。详情加载失败显示 `订阅方案详情加载失败`（role=alert），
+  不泄漏 `error_type`/`error_data`。
+- Settings AB 面板的「返回订阅方案详情」链接指向 `/requests?request_id=...`（US-203 起
+  详情在列表页而非工作台）；AB 提交成功后 `@changed` 由详情面板刷新。
+- 浏览器测试：`tests/browser/test_app_request_detail.py`（23 例真实 Chromium）：分区渲染/
+  URL 状态恢复/缺失 request_id 安全错误/确认/取消/删除/修改 patch/脱敏/360px/中文状态码/
+  AB 入口跳转。断言详情区用 `#request-detail-container`，动作按钮用
+  `#detail-accept-button` 等 id（不要裸用 `[data-request-id]`，列表项与动作共用）。

@@ -2,6 +2,19 @@
 
 ## Codebase Patterns
 
+- 快照类 DTO（RequestSnapshotDTO/HistorySectionDTO/AbResultSectionDTO 等）用
+  `_SnapshotBase(BaseModel)`（`extra="allow"`）让引擎 dict 可带额外字段过边界，同时给
+  生成客户端稳定显示类型；envelope DTO 仍 strict `extra="forbid"`。视图运行时直接返回
+  引擎 dict 不重序列化，OpenAPI 快照字段只是声明。
+- 详情/子面板挂载模式：父视图 `v-if="selectedId"` + `:key` 重挂载，子面板自加载自管理
+  loading/error/empty；`@changed` 通知父刷新列表、`@deleted` 由父清 URL 并卸载。
+  动作成功后面板用服务端返回对象更新内存快照再重载，避免旧 app.js 双请求竞态。
+- 破坏性/不可逆动作统一走共享 ConfirmDialog（confirm() 返回 Promise<boolean>，
+  danger 用 .danger-button）；动作失败只显示固定中文反馈，绝不渲染服务端 error_message。
+- 浏览器测试动作流程断言重载后状态用 wait_for_selector + to_contain_text 组合，避免
+  命中重载前的旧面板（不要用会匹配旧面板的通用选择器如 .detail-actions）。
+- `displayValue` 数组 join 用中文逗号 `，`；`scrubConfig` 里 key 命中敏感词
+  （endpoint/url/token/...）优先整体 `[redacted]`，值 URL 检查只对非敏感 key 生效。
 - `_ENDPOINTS` 的 `success` 优先写 pydantic DTO（如 `RequestListResultDTO`）而非 inline
   dict：DTO 让 OpenAPI 出现 title/required/additionalProperties:false，生成客户端类型更严格。
   改 DTO 后必须 `uv run python -m apps.migu_orca_web.openapi_gen` + `cd frontend && npm run
@@ -490,4 +503,99 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       route query 加载 `/api/v1/requests/{request_id}`；`selectRequest` 的 push 已就位。
     - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
       UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（316 例全过，含新 15 例）。
+---
+
+## 2026-08-31 02:35:00 CST - US-203
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 迁移 Request 详情面板到 `/app/requests`（frontend/src/features/requests/RequestDetailPanel.vue，
+    挂载于列表下方，选中 `request_id` 即渲染，`:key="selectedRequestId"` 保证切换重挂载）：
+    `GET /api/v1/requests/{request_id}` 走统一 transport（`api.get<RequestDetailResult>`，
+    path 模板 + 相对 storage query），渲染 Overview / Source / Filter / Seeds（有效种子 →
+    完整种子按字幕组分组 → 排除种子）/ Audit（状态历史 + Auto Bangumi 结果）五个分区，
+    与旧 `/index` 详情 `renderDetailPayload` 行为 parity。
+  - 管理动作按状态分派：PENDING_CONFIRM → 确认/取消/修改；ACCEPTED → 修改/删除/去
+    Settings 提交 Auto Bangumi（入口带 `request_id`+`ab=1`，Settings 返回链接改指
+    `/requests?request_id=...`）；CANCELLED → 只读提示。所有破坏性动作走共享
+    ConfirmDialog（confirm() 返回 Promise<boolean>，danger 用 .danger-button）；
+    成功后面板用服务端返回的 `request` 更新内存快照并重载 `loadDetail()`，列表
+    `@changed` 重新加载；删除成功后 `@deleted` 清空 URL 选择并卸载面板。
+  - 失败语义：确认/取消/修改/删除失败只显示固定中文反馈（绝不渲染服务端
+    `error_message`，可能含凭据）；详情加载失败显示「订阅方案详情加载失败」
+    （role=alert + 重试），原始 `error_type`/`error_data`/RSS URL/`mikan_url` 绝不进
+    DOM（`displayValue` 对 URL 样式字符串脱敏为 `[redacted_url]`，RSS 来源只显示
+    已选择/未选择）。
+  - 补齐详情/历史/AB/action 公开 DTO：`RequestSnapshotDTO`/`RequestInputDTO`/
+    `SourceInfoDTO`/`RssSourceDTO`/`FilterRuleDTO`/`ConfirmableConfigDTO`/
+    `UserActionDTO`/`HistorySectionDTO`/`HistoryEventDTO`/`AbResultSectionDTO`/
+    `AbResultRecordDTO`/`AbSubmitResultRecordDTO`（lenient `extra="allow"` 快照 +
+    strict envelope；create/preview/action DTO 的 request 字段同步改为快照 DTO），
+    并重新生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`。
+  - 纯展示逻辑收敛到 `frontend/src/features/requests/requestDetail.ts`
+    （`displayValue`/`actionLabel`/`selectedRssSource`/`effectiveSeeds`/`excludedSeeds`/
+    `completeSeedGroups`/`totalCompleteSeedCount`/`scrubConfig`/`isPreview`，feature 与
+    Vitest 共用）；相对 storage profile 查询参数收敛到
+    `frontend/src/features/requests/requestStorage.ts`（`storageQuery()`，列表/详情共用，
+    不再复制第二套）。
+  - 修改表单：字幕组 select + 包含/排除规则 + 使用正则/大小写敏感 + folder_name，
+    `modify-clear-*` checkbox 勾选时 watch 清空对应输入（legacy `appendClearControl`
+    行为）并禁用输入，patch 发显式空字符串；空 patch 前端拦截显示
+    「请至少修改或清空一个字段」。
+  - 测试：Vitest 新增 requestDetail.test.ts（16）与 RequestDetailPanel.test.ts（22，
+    共 166 例全过）；浏览器新增 `tests/browser/test_app_request_detail.py` 23 例真实
+    Chromium（分区渲染/URL 状态恢复/缺失 request_id 安全错误/确认/取消/删除/修改
+    patch/脱敏/360px/中文状态码/AB 入口跳转）。
+  - 文档：frontend/AGENTS.md 新增「Request 详情与管理动作（US-203）」章节；stage PRD
+    US-203 完成记录；README Web UI 段落无需改（/app/requests 已列）。
+- Files changed
+  - 新增：frontend/src/features/requests/{requestDetail.ts, requestDetail.test.ts,
+    RequestDetailPanel.vue, RequestDetailPanel.test.ts, requestStorage.ts}、
+    tests/browser/test_app_request_detail.py
+  - 修改：src/apps/migu_orca_web/api_contract.py（详情/历史/AB/action DTO）、
+    tests/api_contract/test_dto_contracts.py（+6 例新 DTO 断言）、docs/api/openapi.json、
+    frontend/src/api/generated/api.ts、frontend/src/features/requests/RequestsView.vue
+    （挂载详情面板 + onDetailChanged/onDetailDeleted）、RequestsView.test.ts、
+    frontend/src/features/settings/SettingsView.vue（返回链接 /workbench → /requests）、
+    SettingsView.test.ts、frontend/AGENTS.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 详情面板挂载模式：RequestsView 里 `v-if="selectedRequestId"` + `:key` 重挂载 +
+      `@changed`（列表刷新）/`@deleted`（清 URL + 卸载），父组件不持有详情数据，面板
+      自加载自管理 loading/error/empty——US-204/205 的候选/草案详情可复用该模式。
+    - 快照类 DTO 用 `_SnapshotBase(BaseModel)`（`extra="allow"`）让引擎 dict 可带额外
+      字段过边界，同时给生成客户端稳定显示类型；envelope DTO 仍 strict
+      `extra="forbid"`。运行时视图直接返回引擎 dict 不经过 DTO 重序列化，OpenAPI
+      里快照字段只是「声明」不改变响应。
+    - 动作成功后「用服务端返回 request 更新内存快照 + 重载详情 + 通知列表刷新」避免
+      旧 app.js 的 `loadDetail(requestId); loadList()` 双请求竞态；`emit('changed')`
+      触发父组件列表刷新，`emit('deleted')` 由父组件清 URL。
+    - 浏览器测试动作流程用 ConfirmDialog 的 `.confirm-dialog .danger-button`/
+      `.primary-button` 点击，断言重载后状态用 `wait_for_selector` + `to_contain_text`
+      组合，避免命中重载前的旧面板（detail-actions 选择器会匹配旧面板导致竞态）。
+    - Settings AB 的返回链接指向 `/requests?request_id=...` 而非 `/workbench`（详情在
+      列表页）；`ab=1` query 用于 AB 面板定位（当前 Settings 未用但保留兼容）。
+  - Gotchas encountered
+    - pydantic `extra="allow"` 子模型 + 可选字段：`config.filter_rule ?? {}` 在 TS 里
+      类型是 `{}` 不满足 DTO 形状——用本地 `ModifyConfig` 结构类型收敛字段再比较，
+      不要对 DTO 类型做 `?? {}` 回落。
+    - `isPreview` 检测 `saved_request` 字段：生成的 detail result 类型没有该字段，
+      用 `Record<string, unknown>` 收窄再 `hasOwnProperty`，避免 TS 报错。
+    - 浏览器 route mock `**/api/v1/requests/**` 会同时命中列表和详情：区分用
+      `/api/v1/requests/`（带路径段）vs 裸 `/api/v1/requests`。
+    - 删除成功后详情面板卸载（v-if），不要断言「已删除」文案——断言
+      `#request-detail-container` 不存在 + URL 无 request_id + 磁盘 JSON 不存在。
+    - `displayValue` 数组 join 用中文逗号 `，`（不是英文 `,`）；`scrubConfig` 里
+      key 命中敏感词（如 endpoint/url）优先整体 `[redacted]`，值 URL 检查只对
+      非敏感 key 生效（与旧 app.js 一致）。
+  - Useful context
+    - 旧 app.js 详情渲染在 `renderDetailPayload`（~4791-5110 行），管理动作在
+      `performAction`/`deleteRequest`/`buildModifyForm`/`buildCancelForm`；parity
+      对照基准。
+    - US-204 迁移单个搜索/草案时，`RequestDetailPanel` 的 preview 分支（isPreview +
+      编辑订阅草案 + 保存草案按钮 + draft_id 内存态）尚未实现——本 story 只迁移
+      已保存 Request 的管理动作；预览草案的 preview-modify/preview-save 走 US-204。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（339 例全过，含新 23 例）。
 ---

@@ -823,7 +823,7 @@ onMounted(() => {
             v-if="hasRequestContext"
             id="settings-ab-return-link"
             class="base-button secondary-button"
-            :to="{ path: '/workbench', query: { request_id: requestId } }"
+            :to="{ path: '/requests', query: { request_id: requestId } }"
           >
             返回订阅方案详情
           </RouterLink>

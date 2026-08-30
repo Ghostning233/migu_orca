@@ -278,6 +278,30 @@ node --check/git diff --check 全过，仓库根 `.migu_orca/storage` 不存在�
 - 迁移修改、取消、删除和 ACCEPTED 状态差异；危险操作显式确认。
 - 补齐详情/action DTO，404/409/500 分支有类型化、安全反馈。
 
+**完成记录（2026-08-31）**：`/app/requests` 详情面板迁移完成——
+`features/requests/RequestDetailPanel.vue` 挂在列表下方（选中 `request_id` 即渲染，
+`:key` 重挂载），加载走统一 transport `GET /api/v1/requests/{request_id}`，渲染
+Overview/Source/Filter/Seeds（有效/完整按字幕组分组/排除）/Audit（状态历史 + AB 结果）。
+管理动作按状态分派：PENDING_CONFIRM → 确认/取消/修改；ACCEPTED → 修改/删除/去
+Settings 提交 AB（入口带 `request_id` + `ab=1`，Settings 返回链接改指
+`/requests?request_id=...`）；CANCELLED → 只读提示。所有破坏性动作走共享
+ConfirmDialog；成功后面板用服务端返回的 `request` 更新内存快照并重载详情、列表
+`@changed` 刷新；删除成功清空 URL 选择并卸载面板。失败只显示固定中文反馈
+（确认失败/取消失败/修改失败/删除失败），详情加载失败显示「订阅方案详情加载失败」
+（role=alert），原始 `error_type`/`error_message`/RSS URL/`mikan_url` 绝不进 DOM
+（`displayValue` 对 URL 样式字符串脱敏为 `[redacted_url]`）。
+补齐详情/历史/AB/action DTO（`RequestSnapshotDTO`/`HistorySectionDTO`/
+`AbResultSectionDTO` 等，lenient `extra="allow"` 快照 + strict envelope）并重新生成
+`docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`；纯展示逻辑收敛到
+`features/requests/requestDetail.ts`，相对 storage profile 查询参数收敛到
+`features/requests/requestStorage.ts`（列表/详情共用）。Vitest 新增 38 例
+（requestDetail 16、RequestDetailPanel 22，共 166 例全过）；浏览器新增
+`tests/browser/test_app_request_detail.py` 23 例真实 Chromium（分区/URL 恢复/缺失
+request_id 安全错误/确认/取消/删除/修改 patch/脱敏/360px/中文状态码/AB 入口跳转），
+全套 339 浏览器 + 1043 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/
+node --check/git diff --check 全过，仓库根 `.migu_orca/storage` 不存在。US-204 将在
+同一基线上迁移单个搜索与服务端草案。
+
 ### US-204：迁移单个搜索与服务端草案
 
 - 迁移真实候选、直连 fallback、季数确认、同源海报和候选显式选择。

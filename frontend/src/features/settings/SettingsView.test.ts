@@ -62,12 +62,13 @@ async function mountSettings(query: Record<string, string> = {}) {
         name: 'settings',
         component: SettingsView,
       },
-      // The AB panel's "返回订阅方案详情" link targets the workbench; keep the
-      // test router table in sync with the real one to avoid "No match found".
+      // The AB panel's "返回订阅方案详情" link targets the requests list where
+      // the detail panel lives (US-203); keep the test router table in sync
+      // with the real one to avoid "No match found".
       {
-        path: '/workbench',
-        name: 'workbench',
-        component: { template: '<p>workbench</p>' },
+        path: '/requests',
+        name: 'requests',
+        component: { template: '<p>requests</p>' },
       },
     ],
   })

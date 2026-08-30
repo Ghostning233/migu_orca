@@ -90,21 +90,150 @@ class RequestListResultDTO(_StrictBase):
     requests: list[RequestSummaryDTO]
 
 
+class _SnapshotBase(BaseModel):
+    """Base for opaque engine snapshot shapes (detail/action responses).
+
+    Unlike the whitelisted envelope DTOs (``extra="forbid"``), engine
+    snapshot dicts may legitimately gain fields over time. ``extra="allow"``
+    lets them pass through the boundary while the typed fields give the
+    generated TypeScript client stable display types for the fields the UI
+    renders. The response half is not re-serialized through these models at
+    runtime (the views return the engine dicts as-is), so the emitted field
+    set is never altered.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class RequestInputDTO(_SnapshotBase):
+    raw_title: str | None = None
+
+
+class MatchedBangumiDTO(_SnapshotBase):
+    title: str | None = None
+    aliases: list[str] = []
+    mikan_url: str | None = None
+    match_score: float | None = None
+    poster_url: str | None = None
+
+
+class RssSourceDTO(_SnapshotBase):
+    subtitle_group: str | None = None
+    rss_url: str | None = None
+    source_type: str | None = None
+    total_seed_count: int | None = None
+    seed_names: list[str] = []
+    valid_seed_count: int | None = None
+    invalid_seed_count: int | None = None
+    valid_seed_names: list[str] = []
+    excluded_seed_names: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+
+class SourceInfoDTO(_SnapshotBase):
+    matched_bangumi: MatchedBangumiDTO | None = None
+    rss_sources: list[RssSourceDTO] = []
+
+
+class FilterRuleDTO(_SnapshotBase):
+    must_contain: str | None = None
+    must_not_contain: str | None = None
+    use_regex: bool | None = None
+    case_sensitive: bool | None = None
+
+
+class ConfirmableConfigDTO(_SnapshotBase):
+    selected_subtitle_group: str | None = None
+    selected_rss_url: str | None = None
+    filter_rule: FilterRuleDTO | None = None
+    effective_seed_names: list[str] = []
+    expected_folder_name: str | None = None
+    warnings: list[str] = []
+
+
+class UserActionDTO(_SnapshotBase):
+    action: str | None = None
+    reason: str | None = None
+    decided_at: str | None = None
+
+
+class RequestSnapshotDTO(_SnapshotBase):
+    """Typed view of the saved Request snapshot the detail panel renders.
+
+    Only the display fields are typed; the engine may add fields without
+    breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+    ``poster_url`` are declared for schema accuracy but the frontend must
+    never render them (URLs are redacted at display time).
+    """
+
+    request_id: str | None = None
+    status: str | None = None
+    input: RequestInputDTO | None = None
+    source_info: SourceInfoDTO | None = None
+    confirmable_config: ConfirmableConfigDTO | None = None
+    ab_submit_result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    user_action: UserActionDTO | None = None
+
+
+class HistoryEventDTO(_SnapshotBase):
+    request_id: str | None = None
+    previous_status: str | None = None
+    next_status: str | None = None
+    action: str | None = None
+    timestamp: str | None = None
+    details: dict[str, Any] | None = None
+
+
+class HistorySectionDTO(_SnapshotBase):
+    available: bool = True
+    events: list[HistoryEventDTO] = []
+    error: dict[str, Any] | None = None
+
+
+class AbSubmitResultRecordDTO(_SnapshotBase):
+    """Lenient copy of the sanitized AB submit result for the Audit section.
+
+    The strict ``AbSubmitResultDTO`` (extra="forbid") whitelists the
+    submit-ab *response*; records read back from storage may carry extra
+    fields, so the detail panel uses this lenient variant.
+    """
+
+    success: bool | None = None
+    ab_subscription_id: str | None = None
+    ab_response: dict[str, Any] | None = None
+    fallback_config: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+
+
+class AbResultRecordDTO(_SnapshotBase):
+    request_id: str | None = None
+    recorded_at: str | None = None
+    ab_submit_result: AbSubmitResultRecordDTO | None = None
+
+
+class AbResultSectionDTO(_SnapshotBase):
+    available: bool = True
+    record: AbResultRecordDTO | None = None
+    error: dict[str, Any] | None = None
+
+
 class RequestDetailResultDTO(_StrictBase):
-    request: dict[str, Any]
-    history: dict[str, Any]
-    ab_result: dict[str, Any]
+    request: RequestSnapshotDTO
+    history: HistorySectionDTO
+    ab_result: AbResultSectionDTO
 
 
 class RequestCreateResultDTO(_StrictBase):
-    request: dict[str, Any]
+    request: RequestSnapshotDTO
     summary: RequestSummaryDTO
-    saved_request: dict[str, Any] | None = None
+    saved_request: RequestSnapshotDTO | None = None
     draft_id: str | None = None
 
 
 class RequestPreviewModifyResultDTO(_StrictBase):
-    request: dict[str, Any]
+    request: RequestSnapshotDTO
     summary: RequestSummaryDTO
     draft_id: str | None = None
 
@@ -112,9 +241,9 @@ class RequestPreviewModifyResultDTO(_StrictBase):
 class RequestPreviewSaveResultDTO(_StrictBase):
     """preview-save result equals the create result shape (draft consumed)."""
 
-    request: dict[str, Any]
+    request: RequestSnapshotDTO
     summary: RequestSummaryDTO
-    saved_request: dict[str, Any] | None = None
+    saved_request: RequestSnapshotDTO | None = None
 
 
 class RequestActionResultDTO(RequestCreateResultDTO):

@@ -112,7 +112,7 @@ def test_request_create_dto_accepts_real_payload() -> None:
     request = _generated_request()
     payload = {"request": request, "summary": _summary(request)}
     validated = RequestCreateResultDTO.model_validate(payload)
-    assert validated.request["status"] == "PENDING_CONFIRM"
+    assert validated.request.status == "PENDING_CONFIRM"
 
 
 def test_request_create_dto_rejects_unknown_result_field() -> None:
@@ -207,6 +207,98 @@ def test_request_detail_dto_shape() -> None:
     assert RequestDetailResultDTO.model_validate(payload) is not None
     with pytest.raises(ValidationError):
         RequestDetailResultDTO.model_validate({**payload, "extra": 1})
+
+
+def test_request_detail_dto_accepts_real_sections() -> None:
+    """US-203: the detail result types the history/AB section shapes the UI renders."""
+    request = _generated_request()
+    payload = {
+        "request": request,
+        "history": {
+            "available": True,
+            "events": [
+                {
+                    "request_id": request["request_id"],
+                    "previous_status": "PENDING_CONFIRM",
+                    "next_status": "ACCEPTED",
+                    "action": "ACCEPT",
+                    "timestamp": "2026-08-31T00:00:00+00:00",
+                    "details": None,
+                }
+            ],
+            "error": None,
+        },
+        "ab_result": {
+            "available": True,
+            "record": {
+                "request_id": request["request_id"],
+                "recorded_at": "2026-08-31T00:00:00+00:00",
+                "ab_submit_result": {
+                    "success": True,
+                    "ab_subscription_id": "ab-sub-1",
+                    "ab_response": {"id": "ab-sub-1"},
+                    "fallback_config": None,
+                    "error": None,
+                },
+            },
+            "error": None,
+        },
+    }
+    validated = RequestDetailResultDTO.model_validate(payload)
+    assert validated.request.status == "PENDING_CONFIRM"
+    assert validated.request.input.raw_title == "芙莉莲"
+    assert validated.request.source_info.rss_sources[0].subtitle_group
+    assert validated.request.confirmable_config.filter_rule.use_regex is False
+    assert validated.history.events[0].action == "ACCEPT"
+    assert validated.ab_result.record.ab_submit_result.ab_subscription_id == "ab-sub-1"
+    # Lenient snapshot shapes still reject unknown envelope fields.
+    with pytest.raises(ValidationError):
+        RequestDetailResultDTO.model_validate({**payload, "leaked": 1})
+
+
+def test_request_detail_dto_accepts_error_sections() -> None:
+    """US-203: history/AB sections may carry a sanitized error dict."""
+    payload = {
+        "request": _generated_request(),
+        "history": {
+            "available": False,
+            "events": [],
+            "error": {
+                "error_type": "storage_error",
+                "error_message": "读取状态历史失败",
+                "failed_step": "load_status_history",
+                "details": {"request_id": "req-1"},
+            },
+        },
+        "ab_result": {
+            "available": False,
+            "record": None,
+            "error": {
+                "error_type": "storage_error",
+                "error_message": "读取提交结果失败",
+                "failed_step": "load_ab_submit_result",
+                "details": {"request_id": "req-1"},
+            },
+        },
+    }
+    validated = RequestDetailResultDTO.model_validate(payload)
+    assert validated.history.error is not None
+    assert validated.ab_result.error is not None
+
+
+def test_request_snapshot_dto_rejects_unknown_envelope_field() -> None:
+    """US-203: the snapshot DTO itself is lenient, but extra request keys are fine.
+
+    The lenient snapshot shape only lives inside the whitelisted detail/action
+    envelopes; the envelope must never gain unexpected top-level keys.
+    """
+    request = _generated_request()
+    request["future_engine_field"] = {"anything": 1}
+    payload = {
+        "request": request,
+        "summary": _summary(request),
+    }
+    assert RequestCreateResultDTO.model_validate(payload) is not None
 
 
 def test_request_delete_dto_shape() -> None:

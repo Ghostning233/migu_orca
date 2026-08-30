@@ -120,8 +120,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-203 完成：/app/requests 详情面板迁移——RequestDetailPanel.vue 挂列表下方（选中 request_id 渲染，:key 重挂载），渲染 Overview/Source/Filter/Seeds（有效/完整按字幕组分组/排除）/Audit（历史+AB 结果）；管理动作按状态分派（PENDING_CONFIRM→确认/取消/修改，ACCEPTED→修改/删除/去 Settings 提交 AB 且返回链接改指 /requests，CANCELLED→只读提示），破坏性动作走共享 ConfirmDialog，成功后面板用服务端 request 更新内存快照并重载、列表 @changed 刷新，删除清空 URL 卸载面板；失败固定中文反馈（确认失败/取消失败/修改失败/删除失败），详情加载失败 role=alert，error_type/error_message/RSS URL/mikan_url 绝不进 DOM。补齐 RequestSnapshotDTO/HistorySectionDTO/AbResultSectionDTO 等 lenient 快照 DTO + strict envelope 并重新生成 OpenAPI 与生成客户端；纯展示逻辑收敛 requestDetail.ts、storage 查询收敛 requestStorage.ts。Vitest 新增 38 例（共 166 例全过）；浏览器新增 test_app_request_detail.py 23 例真实 Chromium；全套 339 浏览器 + 1043 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-204 迁移单个搜索与服务端草案。"
     },
     {
       "id": "US-204",

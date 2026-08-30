@@ -32,7 +32,6 @@ import BaseInput from '@/components/forms/BaseInput.vue'
 import BaseSelect from '@/components/forms/BaseSelect.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 
-import { sanitizeStorageProfile } from '@/features/settings/storagePreferences'
 import {
   availableStatuses,
   fieldValue,
@@ -43,6 +42,8 @@ import {
   type RequestSummary,
   type SortMode,
 } from '@/features/requests/requestsList'
+import { storageQuery as requestStorageQuery } from '@/features/requests/requestStorage'
+import RequestDetailPanel from '@/features/requests/RequestDetailPanel.vue'
 
 type ListResult = operations['listRequests']['responses']['200']['content']['application/json']['result']
 
@@ -76,25 +77,11 @@ const filtered = computed(() =>
 
 const countText = computed(() => `显示 ${filtered.value.length} / ${loadedRequests.value.length}`)
 
-function currentStorageDir(): string {
-  // Same localStorage keys as Settings (US-201); empty = server default root.
-  try {
-    return sanitizeStorageProfile(window.localStorage.getItem('miguOrca.web.storageDir') ?? '')
-  } catch {
-    return ''
-  }
-}
-
-function storageQuery(): { storage_dir?: string } {
-  const dir = currentStorageDir()
-  return dir ? { storage_dir: dir } : {}
-}
-
 async function loadList(): Promise<void> {
   loading.value = true
   loadFailed.value = false
   try {
-    const result = await api.get<ListResult>('/api/v1/requests', { query: storageQuery() })
+    const result = await api.get<ListResult>('/api/v1/requests', { query: requestStorageQuery() })
     loadedRequests.value = result.requests ?? []
     // Keep the status filter valid: if the currently selected status no longer
     // exists in the list (or never did), fall back to 全部.
@@ -131,6 +118,18 @@ async function copyRequestId(requestId: string): Promise<void> {
 }
 
 function retry(): void {
+  void loadList()
+}
+
+function onDetailChanged(): void {
+  void loadList()
+}
+
+function onDetailDeleted(requestId: string): void {
+  // Clear the URL selection and drop the deleted item from the loaded list.
+  loadedRequests.value = loadedRequests.value.filter((summary) => summary.request_id !== requestId)
+  selectedRequestId.value = ''
+  void router.push({ path: '/requests' })
   void loadList()
 }
 
@@ -247,6 +246,16 @@ watch(
       </ul>
     </div>
   </PanelSection>
+
+  <!-- US-203: detail panel. Mounted whenever a request_id is selected; the
+       panel owns its own loading/error/empty states and management actions. -->
+  <RequestDetailPanel
+    v-if="selectedRequestId"
+    :key="selectedRequestId"
+    :request-id="selectedRequestId"
+    @changed="onDetailChanged"
+    @deleted="onDetailDeleted"
+  />
 </template>
 
 <style scoped>

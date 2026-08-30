@@ -1892,7 +1892,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -1915,8 +1925,224 @@ export interface operations {
                         ok: true;
                         /** RequestCreateResultDTO */
                         result: {
-                            /** Request */
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
                             request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
                             };
                             /**
@@ -1943,13 +2169,218 @@ export interface operations {
                                 /** Warnings */
                                 warnings: string[];
                             };
-                            /**
-                             * Saved Request
-                             * @default null
-                             */
-                            saved_request: {
+                            /** @default null */
+                            saved_request: ({
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
-                            } | null;
+                            }) | null;
                             /**
                              * Draft Id
                              * @default null
@@ -2141,7 +2572,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -2163,8 +2604,224 @@ export interface operations {
                         ok: true;
                         /** RequestPreviewModifyResultDTO */
                         result: {
-                            /** Request */
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
                             request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
                             };
                             /**
@@ -2304,7 +2961,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -2329,8 +2996,224 @@ export interface operations {
                          * @description preview-save result equals the create result shape (draft consumed).
                          */
                         result: {
-                            /** Request */
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
                             request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
                             };
                             /**
@@ -2357,13 +3240,218 @@ export interface operations {
                                 /** Warnings */
                                 warnings: string[];
                             };
-                            /**
-                             * Saved Request
-                             * @default null
-                             */
-                            saved_request: {
+                            /** @default null */
+                            saved_request: ({
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
-                            } | null;
+                            }) | null;
                         };
                     };
                 };
@@ -3473,9 +4561,27 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
-                     *         "history": {},
-                     *         "ab_result": {}
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
+                     *         "history": {
+                     *           "available": true,
+                     *           "events": [],
+                     *           "error": null
+                     *         },
+                     *         "ab_result": {
+                     *           "available": true,
+                     *           "record": null,
+                     *           "error": null
+                     *         }
                      *       }
                      *     }
                      */
@@ -3484,16 +4590,349 @@ export interface operations {
                         ok: true;
                         /** RequestDetailResultDTO */
                         result: {
-                            /** Request */
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
                             request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
                             };
-                            /** History */
+                            /** HistorySectionDTO */
                             history: {
+                                /**
+                                 * Available
+                                 * @default true
+                                 */
+                                available: boolean;
+                                /**
+                                 * Events
+                                 * @default []
+                                 */
+                                events: ({
+                                    /**
+                                     * Request Id
+                                     * @default null
+                                     */
+                                    request_id: string | null;
+                                    /**
+                                     * Previous Status
+                                     * @default null
+                                     */
+                                    previous_status: string | null;
+                                    /**
+                                     * Next Status
+                                     * @default null
+                                     */
+                                    next_status: string | null;
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Timestamp
+                                     * @default null
+                                     */
+                                    timestamp: string | null;
+                                    /**
+                                     * Details
+                                     * @default null
+                                     */
+                                    details: {
+                                        [key: string]: unknown;
+                                    } | null;
+                                } & {
+                                    [key: string]: unknown;
+                                })[];
+                                /**
+                                 * Error
+                                 * @default null
+                                 */
+                                error: {
+                                    [key: string]: unknown;
+                                } | null;
+                            } & {
                                 [key: string]: unknown;
                             };
-                            /** Ab Result */
+                            /** AbResultSectionDTO */
                             ab_result: {
+                                /**
+                                 * Available
+                                 * @default true
+                                 */
+                                available: boolean;
+                                /** @default null */
+                                record: ({
+                                    /**
+                                     * Request Id
+                                     * @default null
+                                     */
+                                    request_id: string | null;
+                                    /**
+                                     * Recorded At
+                                     * @default null
+                                     */
+                                    recorded_at: string | null;
+                                    /** @default null */
+                                    ab_submit_result: ({
+                                        /**
+                                         * Success
+                                         * @default null
+                                         */
+                                        success: boolean | null;
+                                        /**
+                                         * Ab Subscription Id
+                                         * @default null
+                                         */
+                                        ab_subscription_id: string | null;
+                                        /**
+                                         * Ab Response
+                                         * @default null
+                                         */
+                                        ab_response: {
+                                            [key: string]: unknown;
+                                        } | null;
+                                        /**
+                                         * Fallback Config
+                                         * @default null
+                                         */
+                                        fallback_config: {
+                                            [key: string]: unknown;
+                                        } | null;
+                                        /**
+                                         * Error
+                                         * @default null
+                                         */
+                                        error: {
+                                            [key: string]: unknown;
+                                        } | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Error
+                                 * @default null
+                                 */
+                                error: {
+                                    [key: string]: unknown;
+                                } | null;
+                            } & {
                                 [key: string]: unknown;
                             };
                         };
@@ -3638,7 +5077,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -3664,8 +5113,224 @@ export interface operations {
                          * @description accept/cancel/modify results equal the create result shape.
                          */
                         result: {
-                            /** Request */
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
                             request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
                             };
                             /**
@@ -3692,13 +5357,218 @@ export interface operations {
                                 /** Warnings */
                                 warnings: string[];
                             };
-                            /**
-                             * Saved Request
-                             * @default null
-                             */
-                            saved_request: {
+                            /** @default null */
+                            saved_request: ({
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
-                            } | null;
+                            }) | null;
                             /**
                              * Draft Id
                              * @default null
@@ -3851,7 +5721,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -3877,8 +5757,224 @@ export interface operations {
                          * @description accept/cancel/modify results equal the create result shape.
                          */
                         result: {
-                            /** Request */
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
                             request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
                             };
                             /**
@@ -3905,13 +6001,218 @@ export interface operations {
                                 /** Warnings */
                                 warnings: string[];
                             };
-                            /**
-                             * Saved Request
-                             * @default null
-                             */
-                            saved_request: {
+                            /** @default null */
+                            saved_request: ({
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
-                            } | null;
+                            }) | null;
                             /**
                              * Draft Id
                              * @default null
@@ -4194,7 +6495,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -4220,8 +6531,224 @@ export interface operations {
                          * @description accept/cancel/modify results equal the create result shape.
                          */
                         result: {
-                            /** Request */
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
                             request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
                             };
                             /**
@@ -4248,13 +6775,218 @@ export interface operations {
                                 /** Warnings */
                                 warnings: string[];
                             };
-                            /**
-                             * Saved Request
-                             * @default null
-                             */
-                            saved_request: {
+                            /** @default null */
+                            saved_request: ({
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
-                            } | null;
+                            }) | null;
                             /**
                              * Draft Id
                              * @default null
@@ -4375,7 +7107,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -4406,8 +7148,224 @@ export interface operations {
                         ok: true;
                         /** RequestAbSubmitResultDTO */
                         result: {
-                            /** Request */
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
                             request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
                             };
                             /**
@@ -4434,13 +7392,218 @@ export interface operations {
                                 /** Warnings */
                                 warnings: string[];
                             };
-                            /**
-                             * Saved Request
-                             * @default null
-                             */
-                            saved_request: {
+                            /** @default null */
+                            saved_request: ({
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
                                 [key: string]: unknown;
-                            } | null;
+                            }) | null;
                             /**
                              * Draft Id
                              * @default null
