@@ -188,8 +188,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-207 完成：跨功能响应式、无障碍与运行质量收敛——App.vue 增加 #skip-link（Tab 首个聚焦目标，聚焦时可见，href=#app-main）+ main#app-main tabindex=-1 焦点落点；BatchCandidatePopover 打开聚焦 close 按钮、Escape 关闭、父组件关闭时同步恢复焦点到触发按钮（不用 rAF，避免 popover 卸载丢焦点）；top-nav 改 flex-wrap（360px 下导航换行不溢出），四路由 × 360/768/1280 无横向溢出由新浏览器收敛套件守护；状态不只靠颜色（status chip 带中文文本 label）；reduced-motion 下 LoadingState/BaseButton spinner 停动画但文本 + aria-busy/disabled 保留（conftest 新增 test-slow-queue 服务端延迟路由供浏览器观察 loading）；vite functional manualChunks 把 node_modules 打进 vendor-*.js（保持路由懒加载）、sourcemap:false 且 build 永不提交 .map；Flask /app/assets/* 返回 immutable 缓存头、SPA shell 与其它 /app/* 返回 no-cache（routes_app.py 的 app_shell/app_fallback 改返回带 Cache-Control 的 Response）。Vitest 新增 4 例（App skip-link 1 + BatchCandidatePopover 3，共 258 例全过）；浏览器新增 tests/browser/test_app_responsive_a11y.py 22 例真实 Chromium；app_routes_test.py 新增 3 例（asset immutable/shell no-cache/build 无 sourcemap）。全套 408 浏览器 + 1051 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-208 将建立 parity 矩阵并切换默认入口。"
     },
     {
       "id": "US-208",

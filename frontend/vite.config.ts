@@ -37,5 +37,19 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
     sourcemap: false,
+    // US-207: split the stable vendor runtime (vue/pinia/vue-router) into its
+    // own hashed chunk so feature rebuilds don't invalidate the framework
+    // cache, while keeping feature routes lazy. A functional manualChunks
+    // keeps the vendor boundary explicit (an object form would group
+    // everything into one chunk and defeat code-splitting).
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            return 'vendor'
+          }
+        },
+      },
+    },
   },
 })

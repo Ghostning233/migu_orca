@@ -10,7 +10,12 @@
 // Security boundary: only the strict public candidate whitelist is rendered
 // (never raw URLs / candidate_context). The parent owns the in-memory
 // season-confirmation state; nothing here is persisted or logged.
-import { ref } from 'vue'
+//
+// US-207 keyboard accessibility: opening moves focus into the dialog (close
+// button), Escape closes it and the parent restores focus to the trigger
+// button. The dialog is `aria-modal="false"` (it does not block the rest of
+// the page) so no focus trap is applied — matching the legacy popover.
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import CandidateCard from '@/features/workbench/CandidateCard.vue'
 import type { BatchCandidate } from '@/features/workbench/batchWorkbench'
@@ -29,13 +34,39 @@ const emit = defineEmits<{
   (e: 'close'): void
 }>()
 
+const rootEl = ref<HTMLElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.stopPropagation()
+    emit('close')
+  }
+}
+
+onMounted(() => {
+  // Initial focus moves into the dialog so keyboard users land inside the
+  // candidate list rather than tabbing through the page behind it.
+  closeButton.value?.focus()
+  rootEl.value?.addEventListener('keydown', onKeydown)
+})
+
+onBeforeUnmount(() => {
+  rootEl.value?.removeEventListener('keydown', onKeydown)
+})
 
 defineExpose({ focusClose: () => closeButton.value?.focus() })
 </script>
 
 <template>
-  <div id="batch-candidate-choices" class="batch-candidate-choices" role="dialog" aria-modal="false" aria-labelledby="batch-candidate-choices-title">
+  <div
+    id="batch-candidate-choices"
+    ref="rootEl"
+    class="batch-candidate-choices"
+    role="dialog"
+    aria-modal="false"
+    aria-labelledby="batch-candidate-choices-title"
+  >
     <h3 id="batch-candidate-choices-title">候选合集：{{ title }}</h3>
     <button
       ref="closeButton"

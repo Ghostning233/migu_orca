@@ -53,6 +53,42 @@ body {
 
 /* Layout shell ------------------------------------------------------------- */
 
+/* US-207: keyboard skip link — visually hidden until focused (standard
+   "skip to content" pattern), then rendered as a floating primary pill so
+   keyboard users can jump past the header/nav. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: auto;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  z-index: 200;
+}
+
+.skip-link:focus {
+  position: fixed;
+  left: 1rem;
+  top: 0.75rem;
+  width: auto;
+  height: auto;
+  padding: 0.5rem 0.85rem;
+  border-radius: 6px;
+  background: var(--color-accent);
+  color: #ffffff;
+  font-weight: 600;
+  text-decoration: none;
+  outline: 2px solid var(--color-bg);
+  outline-offset: 2px;
+}
+
+/* The main landmark is a keyboard-focus target for the skip link; keep it
+   out of the default tab order but remove the default focus ring when it
+   receives programmatic focus. */
+#app-main:focus {
+  outline: none;
+}
+
 .app-shell {
   min-height: 100vh;
   display: flex;
@@ -84,6 +120,7 @@ body {
 
 .top-nav {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 

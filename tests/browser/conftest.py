@@ -204,6 +204,29 @@ def _register_test_routes(app: Any) -> None:
             400,
         )
 
+    @app.route("/api/v1/batches/test-slow-queue/queue", methods=["GET"])
+    def _slow_batch_queue() -> tuple[Any, int]:
+        # 让队列读取保持 ~1.5s，浏览器测试可稳定观察 LoadingState（US-207
+        # reduced-motion 收敛：加载文案 + aria-busy 不只靠 spinner 动画）。
+        # 永不触碰敏感配置。
+        time.sleep(1.5)
+        return (
+            {
+                "ok": True,
+                "result": {
+                    "batch_id": "test-slow-queue",
+                    "queue": {
+                        "queue_id": "queue-test-slow-queue",
+                        "batch_id": "test-slow-queue",
+                        "created_at": "2026-08-19T00:00:00+00:00",
+                        "updated_at": "2026-08-19T00:00:00+00:00",
+                        "items": [],
+                    },
+                },
+            },
+            200,
+        )
+
 
 @pytest.fixture(scope="session")
 def live_server_url(app: Any) -> Generator[str]:

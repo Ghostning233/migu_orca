@@ -99,6 +99,9 @@ const acceptFeedback = ref<Record<string, { status: string; reason: string }>>({
 // Candidate popover state (component memory only).
 const activeCandidateItemId = ref<string | null>(null)
 const seasonConfirmations = ref<Record<string, number | null>>({})
+// US-207: remember the trigger button so closing the popover restores focus
+// to it (keyboard/AT users keep their place in the batch grid).
+const candidateTrigger = ref<HTMLButtonElement | null>(null)
 
 // Draft detail state.
 const detailItemId = ref<string | null>(null)
@@ -228,16 +231,29 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
   }
 }
 
-function openCandidateChoices(item: BatchItem): void {
+function openCandidateChoices(item: BatchItem, trigger?: HTMLElement | null): void {
   if (activeCandidateItemId.value === item.item_id) {
-    activeCandidateItemId.value = null
+    closeCandidateChoices()
     return
   }
+  // Prefer the explicit trigger element (click target); fall back to the
+  // currently focused element (keyboard activation) so focus restore on close
+  // always has a target (US-207).
+  candidateTrigger.value =
+    (trigger as HTMLButtonElement | null) ??
+    (document.activeElement as HTMLButtonElement | null)
   activeCandidateItemId.value = item.item_id
 }
 
 function closeCandidateChoices(): void {
+  const trigger = candidateTrigger.value
   activeCandidateItemId.value = null
+  candidateTrigger.value = null
+  // Restore focus to the trigger button *before* the popover unmounts: the
+  // browser moves focus to <body> when the focused close button is removed,
+  // and the popover unmounts on the next tick, so focus must be restored
+  // synchronously here (US-207 keyboard accessibility).
+  trigger?.focus()
 }
 
 function openDraftDetail(item: BatchItem): void {
@@ -515,7 +531,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                   :aria-controls="'batch-candidate-choices'"
                   :aria-label="`${activeCandidateItemId === item.item_id ? '收起候选' : '查看候选'}：${item.raw_title ?? '批量条目'}`"
                   :disabled="acceptInFlight"
-                  @click="openCandidateChoices(item)"
+                  @click="openCandidateChoices(item, $event.currentTarget as HTMLElement)"
                 >
                   {{ activeCandidateItemId === item.item_id ? '收起候选' : '查看候选' }}
                 </BaseButton>

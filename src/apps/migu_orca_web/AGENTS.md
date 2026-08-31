@@ -151,3 +151,17 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   避免创建仓库根 `.migu_orca/storage`。
 - CI（`.github/workflows/ci.yml`）在 `MIGU_ORCA_CI=1` 下浏览器不可用会失败而不是静默
   skip；浏览器测试 conftest 的 `pytest_collection_modifyitems` 处理该逻辑。
+
+## SPA 静态缓存与构建产物（US-207）
+
+- `routes_app.py` 的缓存策略：`/app/assets/*`（Vite 内容哈希文件名）返回
+  `public, max-age=31536000, immutable`；SPA shell（`/app/` 与 `/app/<path:subpath>`
+  的 fallback）返回 `no-cache`——部署换哈希后不会 pin 旧资源。改缓存策略必须同步
+  `app_routes_test.py` 的 `test_app_assets_served_with_immutable_cache` /
+  `test_app_shell_never_cached`。
+- `frontend/dist` 永不提交 `.map` 文件（`sourcemap: false` + gitignore）：
+  `app_routes_test.py::test_build_has_no_sourcemaps` 断言 build 无 `.map` 且 asset
+  无 `sourceMappingURL`，避免公开 sourcemap 泄漏源码与可能的敏感字面量。
+- 路由返回类型：`app_shell`/`app_fallback` 现在返回 `Response`（带 Cache-Control
+  头），不再是裸 `str`；新增 `/app/*` 处理函数时保持 `Response` 返回并显式设置
+  缓存头，不要依赖默认缓存。

@@ -264,3 +264,33 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `page.route("**/api/v1/batches/{batch_id}/queue*", ...)`（注意 `*` 通配 storage_dir
   query）；in-flight 用 conftest 的 `test-slow-submit`/`test-slow-retry` 延迟路由
   （不 mock，真实返回 400）；SPA 通知断言用 `.global-notification:not(:empty)`。
+
+## 跨功能收敛（US-207）
+
+- 键盘可达性：App.vue 有 `#skip-link`（`.skip-link`）——Tab 首个聚焦目标，
+  href=`#app-main`，聚焦时才可见（main.css）；`main#app-main` 带 `tabindex="-1"`
+  是 skip 的焦点落点。新增 feature 路由不要移除 main landmark。
+- 批量候选浮层 `BatchCandidatePopover.vue`（US-207）：打开时焦点移入 dialog
+  （close 按钮），Escape 关闭，父组件（BatchWorkbenchView）在关闭时**同步**把
+  焦点恢复到触发按钮（`candidateTrigger` 在 open 时捕获 `$event.currentTarget`
+  或 `document.activeElement`；不要在 `requestAnimationFrame` 里恢复——popover
+  卸载会先把焦点丢到 body）。
+- 响应式：`top-nav` 是 `flex-wrap`（360px 下 4 个导航链接换行不溢出）；所有 feature
+  路由 360/768/1280 无横向溢出由 `tests/browser/test_app_responsive_a11y.py` 守护
+  （`body.scrollWidth <= innerWidth`）。
+- 状态不只靠颜色：status chip 必须带中文文本 label（如 `提交成功`）+ 状态 class，
+  不能只改背景色。
+- reduced-motion：LoadingState/BaseButton spinner 在 `prefers-reduced-motion:
+  reduce` 下停动画但文本与 `aria-busy`/disabled 保留。浏览器测试用 conftest 的
+  服务端延迟路由（`test-slow-queue` 等）观察 loading——`time.sleep` 不能写在
+  `page.route` handler 里（会阻塞 Playwright 分发线程，loading 永远不可见）。
+- production build：vite.config.ts 用 functional `manualChunks` 把 `node_modules`
+  打进 `vendor-*.js`（不要用 object 形式，会把全部依赖并成一个 chunk 破坏懒加载）；
+  `sourcemap: false` 且 dist 永不提交 `.map`（`*.map` 已 gitignore）。
+- Flask 静态缓存：`/app/assets/*` 返回 `public, max-age=31536000, immutable`
+  （Vite 内容哈希文件名不可变），SPA shell 与其它 `/app/*` 返回 `no-cache`
+  （部署换哈希后不会 pin 旧资源）。改 `routes_app.py` 后同步
+  `src/apps/migu_orca_web/app_routes_test.py` 的缓存头断言。
+- 浏览器收敛测试文件：`tests/browser/test_app_responsive_a11y.py`（22 例）——
+  四路由 × 三视口无横向溢出、skip link、popover 焦点、状态文本、reduced-motion、
+  vendor chunk、无 sourcemap、缓存头。它**不重复**各 feature 的业务断言。

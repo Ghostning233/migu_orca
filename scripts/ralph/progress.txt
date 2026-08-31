@@ -122,6 +122,22 @@
 - 每个 UI story 必须读取 `.agents/skills/dev-browser/SKILL.md` 并用真实 Chromium 验证；浏览器整体 skip 不能作为完成证据。
 - 浏览器测试通过 fixture/Playwright route fake 隔离外部服务；不得自动访问真实 MiKan 或向真实 AutoBangumi/qBittorrent 写入。
 - 每个 feature 自己承担 DTO、Vitest、API contract、基本响应式/无障碍、Playwright parity 和敏感值回归；US-207 只做跨功能收敛。
+- 键盘可达性（US-207）：App.vue 的 `#skip-link` 是 Tab 首个聚焦目标（聚焦时才可见），
+  `main#app-main` 带 `tabindex="-1"` 作为 skip 落点；批量候选浮层打开聚焦 close 按钮、
+  Escape 关闭，父组件在关闭时**同步**恢复焦点到触发按钮（不要在 rAF 里恢复——popover
+  卸载会先把焦点丢到 body）。
+- `time.sleep` 不能写在 `page.route` handler 里（阻塞 Playwright 分发线程，loading 永远
+  不可见）：观察 in-flight/loading 态用 conftest 服务端延迟路由（`test-slow-submit`/
+  `test-slow-retry`/`test-slow-queue`）。
+- production build（US-207）：vite.config.ts 用 functional `manualChunks` 把 node_modules
+  打进 `vendor-*.js`（object 形式会把全部依赖并成一个 chunk 破坏懒加载）；`sourcemap:
+  false` 且 dist 永不提交 `.map`。Flask `/app/assets/*` 返回 immutable 缓存头（Vite 内容
+  哈希不可变），SPA shell 与其它 `/app/*` 返回 `no-cache`（部署换哈希不 pin 旧资源）；
+  `routes_app.py` 的 `app_shell`/`app_fallback` 返回带 Cache-Control 的 `Response`。
+- 跨功能收敛浏览器套件在 `tests/browser/test_app_responsive_a11y.py`（22 例）：四路由 ×
+  360/768/1280 无横向溢出（`body.scrollWidth <= innerWidth`）、导航 flex-wrap 换行、
+  状态文本不只靠颜色、skip link、popover 焦点、reduced-motion、vendor chunk、无
+  sourcemap、缓存头。新增 feature 路由/UI 后保持这些跨功能断言全绿，不重复业务断言。
 - US-208 完成 parity 矩阵、默认入口切换和不回滚业务数据的回退演练；未通过前不得执行 US-209 旧资产删除。
 - 完整门禁后确认仓库根 `.migu_orca/storage` 不存在，并检查未提交 build 临时目录和敏感产物。
 - US-197 起 SPA 托管在 `/app/`：Vite `base` 固定 `/app/`（`routes_app.py` 的 `app_blueprint`
@@ -896,4 +912,66 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
       UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（386 例全过，
       含新 16 例）。
+---
+
+
+## 2026-08-31 08:37:45 CST - US-207
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 键盘可达性：App.vue 增加 `#skip-link`（Tab 首个聚焦目标，href=`#app-main`，聚焦时
+    才可见）+ `main#app-main` 带 `tabindex="-1"` 作为 skip 落点；main.css 增加
+    `.skip-link`/`#app-main:focus` 样式。
+  - 批量候选浮层（BatchCandidatePopover.vue）：打开时焦点移入 dialog（close 按钮），
+    root 上监听 Escape 关闭，卸载时移除 listener；父组件（BatchWorkbenchView）在
+    `openCandidateChoices` 捕获触发按钮（`$event.currentTarget` 或
+    `document.activeElement`），`closeCandidateChoices` **同步**恢复焦点（不用 rAF——
+    浏览器在 popover 卸载时会先把焦点丢到 body）。
+  - 响应式：`top-nav` 改 `flex-wrap`（360px 下 4 个导航链接换行不溢出）；四路由 ×
+    360/768/1280 三视口无横向溢出由新浏览器收敛套件守护。
+  - reduced-motion：LoadingState/BaseButton spinner 在 `prefers-reduced-motion: reduce`
+    下停动画但文本 + `aria-busy`/disabled 保留（既有 CSS 已覆盖，浏览器测试补断言）；
+    conftest 新增 `test-slow-queue` 服务端延迟路由（1.5s）供浏览器观察队列 LoadingState。
+  - production 运行质量：vite.config.ts 用 functional `manualChunks` 把 `node_modules`
+    打进 `vendor-*.js`（保持路由懒加载）；`sourcemap: false` 且 build 永不提交 `.map`。
+    routes_app.py：`/app/assets/*` 返回 `public, max-age=31536000, immutable`，SPA shell
+    与其它 `/app/*` 返回 `no-cache`；`app_shell`/`app_fallback` 改为返回带 Cache-Control
+    的 `Response`（Blueprint 没有 make_response，直接用 flask Response）。
+  - 测试：Vitest 新增 App.test.ts skip-link 1 例 + BatchCandidatePopover.test.ts 3 例
+    （共 258 例全过）；浏览器新增 tests/browser/test_app_responsive_a11y.py 22 例真实
+    Chromium；app_routes_test.py 新增 3 例（asset immutable 缓存/shell no-cache/build
+    无 sourcemap）。
+- Files changed
+  - 修改：frontend/src/App.vue、frontend/src/styles/main.css、frontend/vite.config.ts、
+    frontend/src/features/workbench/BatchCandidatePopover.vue、
+    frontend/src/features/workbench/BatchWorkbenchView.vue、frontend/src/App.test.ts、
+    src/apps/migu_orca_web/routes_app.py、src/apps/migu_orca_web/app_routes_test.py、
+    tests/browser/conftest.py、frontend/AGENTS.md、src/apps/migu_orca_web/AGENTS.md、
+    README.md、docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    scripts/ralph/{prd.json, progress.txt}
+  - 新增：frontend/src/features/workbench/BatchCandidatePopover.test.ts、
+    tests/browser/test_app_responsive_a11y.py
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - `$event.currentTarget` 只在事件分发期间有效：模板里
+      `@click="fn(item, $event.currentTarget)"` 传的是元素本身，函数签名要收
+      `HTMLElement | null`，不要再当 MouseEvent 取 `.currentTarget`。
+    - focus 恢复要在 popover/dialog 卸载**之前**同步做：浏览器移除聚焦元素时会把焦点
+      丢到 body；`requestAnimationFrame` 恢复会竞态失败（浏览器测试暴露）。
+    - `Blueprint` 没有 `make_response`（那是 Flask app 的）；带响应头返回裸字符串路由
+      用 `flask.Response(body, headers={...})`。
+    - Playwright `route.fulfill` 里的 `time.sleep` 会阻塞 sync API 的分发线程，loading
+      态永远不可见；延迟必须放 Flask 测试服务端（conftest `test-slow-*` 路由模式）。
+  - Gotchas encountered
+    - `/app/<path:subpath>` 的 `subpath` 是相对 `/app/` 的（如 `assets/x.js`），判断
+      asset 前缀要拼回 `f"/app/{subpath}"` 再 `startswith('/app/assets/')`。
+    - functional `manualChunks` 用 `id.includes('node_modules')` 返回 'vendor'：object
+      形式（`{ vendor: ['vue'] }`）会警告并可能把全部依赖并成一个 chunk。
+    - reduced-motion 浏览器测试不要依赖真实外部搜索：用 conftest 服务端延迟路由 +
+      queue 页面的 LoadingState 断言（`aria-busy` + 文案），比 mock 候选搜索更稳。
+  - Useful context
+    - US-208 将基于此收敛基线建立旧 269 个 Chromium 旅程到新路由的 parity 矩阵并切换
+      默认入口（/index、/settings → /app/...）；US-209 删除旧资产时保留
+      test_app_responsive_a11y.py 的跨功能断言。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（408 例全过，含新 22 例）。
 ---

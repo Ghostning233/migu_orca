@@ -12,6 +12,9 @@ import GlobalNotification from '@/components/feedback/GlobalNotification.vue'
 
 <template>
   <div class="app-shell">
+    <!-- US-207: skip link — first focusable element so keyboard users can jump
+         past the header/nav straight to the feature content. -->
+    <a id="skip-link" class="skip-link" href="#app-main">跳到主要内容</a>
     <GlobalLoadingBar />
     <header class="app-header">
       <div class="header-copy">
@@ -28,7 +31,7 @@ import GlobalNotification from '@/components/feedback/GlobalNotification.vue'
       </nav>
     </header>
 
-    <main class="app-main">
+    <main id="app-main" tabindex="-1" class="app-main">
       <GlobalNotification />
       <ErrorBoundary>
         <RouterView />

@@ -142,4 +142,24 @@ describe('App shell (US-199)', () => {
     await wrapper.find('.global-notification-close').trigger('click')
     expect(wrapper.find('.global-notification').exists()).toBe(false)
   })
+
+  it('renders a keyboard skip link to the main landmark (US-207)', async () => {
+    const router = makeRouter()
+    const wrapper = mount(App, {
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+    await router.isReady()
+    await router.push('/requests')
+
+    const skip = wrapper.find('.skip-link')
+    expect(skip.exists()).toBe(true)
+    expect(skip.attributes('href')).toBe('#app-main')
+    expect(skip.text()).toBe('跳到主要内容')
+
+    const main = wrapper.find('main#app-main')
+    expect(main.exists()).toBe(true)
+    expect(main.attributes('tabindex')).toBe('-1')
+  })
 })

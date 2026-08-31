@@ -26,7 +26,7 @@ routing handles the rest).
 
 from pathlib import Path
 
-from flask import Blueprint, abort, render_template, send_from_directory
+from flask import Blueprint, Response, abort, render_template, send_from_directory
 from werkzeug.exceptions import NotFound
 
 # Absolute path of the Vite production build directory. Resolved once at
@@ -34,6 +34,24 @@ from werkzeug.exceptions import NotFound
 # app, so the directory exists. Tests monkeypatch ``_dist_dir`` to point at a
 # fixture build or assert the placeholder path when no build is present.
 _FRONTEND_DIST = Path(__file__).resolve().parents[3] / "frontend" / "dist"
+
+# Hashed Vite build assets under /app/assets/* (US-207). Vite emits content
+# hashes in the filename (e.g. index-<hash>.js), so these are immutable:
+# the browser may cache them indefinitely and a redeploy simply references a
+# new URL. The SPA shell must never be cached (a stale index.html would pin
+# old hashes), so it is served with no-cache. Only assets inside this folder
+# are treated as immutable — every other /app/* path is a client-side route
+# and gets the no-cache shell.
+_APP_ASSETS_PREFIX = "/app/assets/"
+
+# Cache-Control for /app/assets/* files. max-age=31536000 (1 year) matches
+# the Vite recommendation for content-hashed assets; the `immutable` flag
+# tells browsers/proxies the bytes never change for that URL.
+_ASSETS_CACHE_CONTROL = "public, max-age=31536000, immutable"
+
+# Cache-Control for the SPA shell and any other /app/* fallback response.
+# Must revalidate so a deploy that changes the hashed asset URLs is picked up.
+_SHELL_CACHE_CONTROL = "no-cache"
 
 app_blueprint = Blueprint("migu_orca_app", __name__)
 
@@ -55,19 +73,28 @@ def _index_html() -> str:
 
 
 @app_blueprint.get("/app/")
-def app_shell() -> str:
-    """Serve the SPA shell at the exact ``/app/`` mount point."""
-    return _index_html()
+def app_shell() -> Response:
+    """Serve the SPA shell at the exact ``/app/`` mount point.
+
+    The shell is never cached (``no-cache``) so a redeploy that changes the
+    hashed asset URLs is picked up immediately; the hashed assets themselves
+    are served with an immutable cache header (see ``app_fallback``).
+    """
+    return Response(_index_html(), headers={"Cache-Control": _SHELL_CACHE_CONTROL})
 
 
 @app_blueprint.get("/app/<path:subpath>")
-def app_fallback(subpath: str) -> str:
+def app_fallback(subpath: str) -> Response:
     """Serve a real build file or fall back to the SPA shell under ``/app/``.
 
     Files that exist inside the Vite build (hashed JS/CSS chunks, favicons)
     are served verbatim; all other ``/app/*`` paths are client-side routes
     and return the shell ``index.html``. Path traversal is blocked by the
     containment check plus ``send_from_directory``'s own guard.
+
+    Cache headers (US-207): hashed assets under ``/app/assets/`` are
+    immutable (``public, max-age=31536000, immutable``); the shell fallback
+    and any other non-asset path are served with ``no-cache``.
     """
     dist = _dist_dir()
     candidate = (dist / subpath).resolve()
@@ -77,7 +104,16 @@ def app_fallback(subpath: str) -> str:
         abort(404)
     if candidate.is_file():
         try:
-            return send_from_directory(dist, subpath)
+            response = send_from_directory(dist, subpath)
+            # subpath is relative to /app/ (e.g. "assets/index-<hash>.js");
+            # hashed assets under /app/assets/ are immutable, everything else
+            # (any other real file) is treated like the shell (no-cache).
+            request_path = f"/app/{subpath}"
+            if request_path.startswith(_APP_ASSETS_PREFIX):
+                response.headers["Cache-Control"] = _ASSETS_CACHE_CONTROL
+            else:
+                response.headers["Cache-Control"] = _SHELL_CACHE_CONTROL
+            return response
         except NotFound:
             abort(404)
-    return _index_html()
+    return Response(_index_html(), headers={"Cache-Control": _SHELL_CACHE_CONTROL})

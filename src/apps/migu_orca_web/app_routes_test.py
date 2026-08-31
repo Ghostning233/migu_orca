@@ -105,6 +105,55 @@ def test_app_static_assets_served(tmp_path: Path, monkeypatch: Any) -> None:
     assert "text/css" in css.content_type
 
 
+def test_app_assets_served_with_immutable_cache(tmp_path: Path, monkeypatch: Any) -> None:
+    """US-207: hashed build assets are immutable (long-lived cache).
+
+    Vite content-hashes the filenames, so ``/app/assets/*`` bytes never change
+    for a given URL and may be cached for a year; a redeploy references new
+    URLs, so a stale asset cache cannot pin old bytes.
+    """
+    _point_dist(tmp_path, monkeypatch)
+
+    js = _client().get("/app/assets/index-deadbeef.js")
+    assert js.status_code == 200
+    assert js.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+
+    css = _client().get("/app/assets/index-cafebabe.css")
+    assert css.status_code == 200
+    assert css.headers.get("Cache-Control") == "public, max-age=31536000, immutable"
+
+
+def test_app_shell_never_cached(tmp_path: Path, monkeypatch: Any) -> None:
+    """US-207: the SPA shell and client-route fallbacks are no-cache.
+
+    A stale ``index.html`` would pin old hashed asset URLs after a deploy, so
+    the shell must always revalidate.
+    """
+    _point_dist(tmp_path, monkeypatch)
+
+    for path in ("/app/", "/app/workbench", "/app/settings"):
+        response = _client().get(path)
+        assert response.status_code == 200, path
+        assert response.headers.get("Cache-Control") == "no-cache", path
+
+
+def test_build_has_no_sourcemaps(tmp_path: Path, monkeypatch: Any) -> None:
+    """US-207: production build must not ship public sourcemaps.
+
+    ``sourcemap: false`` in vite.config.ts; the fixture build here also
+    contains no ``.map`` files and the served assets reference no
+    ``sourceMappingURL`` — the repo must never commit ``*.map`` artifacts
+    (they would expose raw source and any accidental sensitive literals).
+    """
+    dist = _point_dist(tmp_path, monkeypatch)
+    assert not list(dist.rglob("*.map")), "build must not contain .map files"
+
+    js = _client().get("/app/assets/index-deadbeef.js")
+    assert js.status_code == 200
+    assert "sourceMappingURL" not in js.get_data(as_text=True)
+    assert "//# sourceMappingURL" not in js.get_data(as_text=True)
+
+
 def test_app_fallback_returns_shell_for_spa_routes(tmp_path: Path, monkeypatch: Any) -> None:
     """Client-side routes under /app/* get the shell for Vue Router."""
     _point_dist(tmp_path, monkeypatch)

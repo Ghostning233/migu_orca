@@ -109,7 +109,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 
 当前 Web UI 延续 Stage 7 引入的本地 Flask 管理界面，并已累积接入 Settings、真实 MiKan 候选、可编辑预览、批量草案、提交前队列、偏好、媒体缓存、AutoBangumi 3.1.18 兼容和 Stage 25 标题季数解析。页面仍由 Flask/Jinja 提供，并由原生 JavaScript 驱动；尚未引入独立前端构建链。业务操作统一通过 `/api/v1/*` JSON API 编排，CLI 默认行为保持不变。
 
-Stage 27 已开始把 Web UI 迁移到独立前端工程：`frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程（npm 管理，`package-lock.json` 已入库）。生产构建输出到 `frontend/dist/`（不入库），由 Flask 在 `/app/` 同源托管（`routes_app.py` 的 `app_blueprint`）；Vite `base` 固定为 `/app/`，SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness` 或旧 Flask 页面。开发时可 `cd frontend && npm run dev`（Vite dev server 代理 `/api/v1` 到本地 Flask）。US-197 建立了工程基线（typecheck/lint/unit/build 全绿 + CI 门禁）；US-199 建立了统一 API transport（`frontend/src/api/client.ts`，处理 envelope/非 2xx/非 JSON/网络失败/取消/超时，feature 不得自行拼接 `/api/v1` URL）、4 条 SPA 路由（工作台/订阅方案/提交队列/Settings）与全局 loading/空状态/错误边界/aria-live 通知。US-201 已迁移 Settings（storage 偏好/非敏感偏好/qB/AB 连接测试与提交上下文）；US-202 已迁移 Request 列表（`/app/requests`：加载、搜索、状态筛选、排序、计数、空状态、`request_id` 刷新恢复与复制）；US-203 已迁移 Request 详情与管理动作（`/app/requests` 详情面板：Overview/Source/Filter/Seeds/Audit、确认/取消/修改/删除、AB 提交入口）；US-204 已迁移单个搜索与服务端草案（`/app/workbench`：真实 MiKan 候选搜索、直连 fallback、季数确认/冲突禁用、可编辑订阅草案 preview-modify/preview-save，`candidate_context`/`draft_id` 只在内存）；US-205 已迁移批量工作台（`/app/workbench` 批量工作台区：批量输入、独立 FOUND/EMPTY/FAILED 卡片、候选浮层、共享草案详情与删除、选择/单个接受/批量接受/全接受，统一走 `POST /api/v1/batches/{batch_id}/accept`，`batch_id` 进 URL 供提交队列刷新恢复）；US-206 已迁移提交队列（`/app/queue`：从 URL `batch_id` 恢复队列、逐项提交/失败重试/恢复（自动 + 人工核验）、防重复提交，AB 凭据只在内存与单次 POST body）。旧页面在迁移完成前保持可用。
+Stage 27 已开始把 Web UI 迁移到独立前端工程：`frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程（npm 管理，`package-lock.json` 已入库）。生产构建输出到 `frontend/dist/`（不入库），由 Flask 在 `/app/` 同源托管（`routes_app.py` 的 `app_blueprint`）；Vite `base` 固定为 `/app/`，SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness` 或旧 Flask 页面。开发时可 `cd frontend && npm run dev`（Vite dev server 代理 `/api/v1` 到本地 Flask）。US-197 建立了工程基线（typecheck/lint/unit/build 全绿 + CI 门禁）；US-199 建立了统一 API transport（`frontend/src/api/client.ts`，处理 envelope/非 2xx/非 JSON/网络失败/取消/超时，feature 不得自行拼接 `/api/v1` URL）、4 条 SPA 路由（工作台/订阅方案/提交队列/Settings）与全局 loading/空状态/错误边界/aria-live 通知。US-201 已迁移 Settings（storage 偏好/非敏感偏好/qB/AB 连接测试与提交上下文）；US-202 已迁移 Request 列表（`/app/requests`：加载、搜索、状态筛选、排序、计数、空状态、`request_id` 刷新恢复与复制）；US-203 已迁移 Request 详情与管理动作（`/app/requests` 详情面板：Overview/Source/Filter/Seeds/Audit、确认/取消/修改/删除、AB 提交入口）；US-204 已迁移单个搜索与服务端草案（`/app/workbench`：真实 MiKan 候选搜索、直连 fallback、季数确认/冲突禁用、可编辑订阅草案 preview-modify/preview-save，`candidate_context`/`draft_id` 只在内存）；US-205 已迁移批量工作台（`/app/workbench` 批量工作台区：批量输入、独立 FOUND/EMPTY/FAILED 卡片、候选浮层、共享草案详情与删除、选择/单个接受/批量接受/全接受，统一走 `POST /api/v1/batches/{batch_id}/accept`，`batch_id` 进 URL 供提交队列刷新恢复）；US-206 已迁移提交队列（`/app/queue`：从 URL `batch_id` 恢复队列、逐项提交/失败重试/恢复（自动 + 人工核验）、防重复提交，AB 凭据只在内存与单次 POST body）。US-207 完成跨功能收敛：键盘 skip link、批量候选浮层焦点管理（打开聚焦/Escape 关闭/焦点恢复）、360/768/1280 无横向溢出、状态不只靠颜色、reduced-motion 反馈、vendor chunk 分包、`/app/assets/*` immutable 缓存 + shell no-cache、build 无 sourcemap（详见 `tests/browser/test_app_responsive_a11y.py`）。旧页面在迁移完成前保持可用。
 
 启动方式：
 
@@ -647,6 +647,10 @@ npm run dev               # Vite dev server（代理 /api/v1 到 http://127.0.0.
   （US-198），不导入 Python 模型、不手写第二套响应 interface。
 - 安全边界与旧前端一致：endpoint、token、cookie、password、原始响应等敏感值只存在于
   组件局部内存与单次 POST body，不进入 store 持久化、URL、browser storage、日志或 trace。
+- US-207 运行质量：`npm run build` 会把 `node_modules` 打进 `vendor-*.js`（保持路由
+  懒加载），`sourcemap: false` 且 `dist` 永不提交 `.map`；Flask 对 `/app/assets/*`
+  返回 `public, max-age=31536000, immutable`，对 SPA shell 与其它 `/app/*` 返回
+  `no-cache`（部署换哈希后不会 pin 旧资源）。
 - US-201 已迁移 Settings 到 `/app/settings`：Storage 偏好（localStorage 只存服务端相对
   profile）、偏好默认值（`/api/v1/preferences`，保存失败回退到上次成功值并清空被拒绝的
   敏感输入）、qBittorrent 与 Auto Bangumi 连接测试和 AB 提交上下文（`request_id` 来自

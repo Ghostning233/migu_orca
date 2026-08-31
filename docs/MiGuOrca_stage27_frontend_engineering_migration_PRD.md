@@ -381,6 +381,33 @@ api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 `.mig
 - 完成键盘导航、焦点恢复、ARIA live/error、reduced motion 和错误边界审计。
 - 检查路由懒加载、production chunk、静态缓存和公开 sourcemap 策略。
 
+**US-207 完成（2026-08-31）**：跨功能收敛落地——
+
+- 键盘可达性：App.vue 增加 `#skip-link`（Tab 首个聚焦目标，聚焦时可见，
+  href=`#app-main`），`main#app-main` 加 `tabindex="-1"` 作为焦点落点。
+- 批量候选浮层（`BatchCandidatePopover.vue`）打开时焦点移入 dialog（close 按钮），
+  Escape 关闭且父组件在关闭时**同步**把焦点恢复到触发按钮（不再用
+  `requestAnimationFrame`，避免 popover 卸载先把焦点丢到 body）。
+- 响应式：`top-nav` 改 `flex-wrap`（360px 下 4 个导航链接换行不溢出）；四路由 ×
+  360/768/1280 三视口无横向溢出由新浏览器收敛套件守护。
+- reduced-motion：LoadingState/BaseButton spinner 在 `prefers-reduced-motion` 下停
+  动画但文本 + `aria-busy`/disabled 保留；conftest 新增 `test-slow-queue` 服务端延迟
+  路由供浏览器观察 loading（`time.sleep` 写在 `page.route` handler 会阻塞 Playwright
+  分发线程——加载态永远不可见）。
+- production 运行质量：vite.config.ts 用 functional `manualChunks` 把 `node_modules`
+  打进 `vendor-*.js`（保持路由懒加载）；`sourcemap: false` 且 build 永不提交 `.map`；
+  Flask `/app/assets/*` 返回 `public, max-age=31536000, immutable`，SPA shell 与
+  fallback 返回 `no-cache`（部署换哈希不 pin 旧资源），`routes_app.py` 的
+  `app_shell`/`app_fallback` 改为返回带 Cache-Control 的 `Response`。
+- 测试：Vitest 新增 App skip-link 1 例 + BatchCandidatePopover 3 例（共 258 例全过）；
+  浏览器新增 `tests/browser/test_app_responsive_a11y.py` 22 例真实 Chromium（四路由 ×
+  三视口无横向溢出/导航换行/状态文本不只靠颜色/skip link 跳转/main landmark/
+  popover Escape 焦点恢复/reduced-motion 加载与按钮/ vendor chunk/无 sourcemap/
+  缓存头）；`app_routes_test.py` 新增 3 例（asset immutable 缓存/shell no-cache/
+  build 无 sourcemap）。全套 408 浏览器 + 1051 非浏览器 + typecheck/lint/unit/build/
+  api:check/compileall/ruff/node --check/git diff --check 全过，仓库根
+  `.migu_orca/storage` 不存在。US-208 将基于此收敛基线建立 parity 矩阵并切换默认入口。
+
 ### US-208：完成 parity、切换默认入口并演练回退
 
 - 建立旧 269 个 Chromium 旅程到新路由的 parity 矩阵，关键旅程全部指向新前端。
