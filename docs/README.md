@@ -11,7 +11,7 @@
 - 未实现事项和触发条件：[Backlog](backlog.md)
 - 尚未承诺排期的可选能力：[可选功能](optional_features.md)
 
-截至 2026-08-31，最近完成阶段为 Stage 27「前端工程化迁移与页面重构」（US-197～US-208 已完成，默认 Web 入口已切换到新前端 `/app/*`，旧 `/index`、`/settings` 页面在迁移窗口内保留，US-209 收尾删除）。parity 矩阵见 `Stage27_parity_matrix.md`（`tests/api_contract/test_parity_matrix_guard.py` 自动核对）。
+截至 2026-08-31，最近完成阶段为 Stage 27「前端工程化迁移与页面重构」（US-197～US-209 全部完成，默认 Web 入口为新前端 `/app/*`，旧 `/index`、`/settings` Jinja 页面与 `app.js` 已在 US-209 删除；入口路由固定重定向到 SPA）。
 
 ## Stage PRD
 
@@ -22,7 +22,7 @@
 - Stage 24：AutoBangumi 3.1.18 认证与订阅兼容
 - Stage 25：正式番名、季数证据与共享查询计划
 - Stage 26：Web API 契约、服务端安全边界与前端迁移基线（已完成）
-- Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（US-197～US-208 已完成，默认入口已切换；US-209 收尾）
+- Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（US-197～US-209 全部完成，旧前端已删除）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

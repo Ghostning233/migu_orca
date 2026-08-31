@@ -5,7 +5,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `openapi.json` | OpenAPI 3.1 文档，覆盖全部 `/api/v1` 端点，由确定性脚本生成。 |
-| `endpoint_inventory.md` | US-189 冻结的端点清单、敏感值边界与旧前端依赖（人工可读基线）。 |
+| `endpoint_inventory.md` | US-189 冻结的端点清单、敏感值边界与前端依赖（人工可读基线；US-209 更新）。 |
 
 ## 生成与漂移检查
 
@@ -65,17 +65,18 @@ npm run api:check       # 漂移检查：生成结果与入库文件不一致时
   `image/jpeg|png|gif|webp` content type 与失败响应（函数视图，不经 JSON envelope；
   US-192 起失败返回 JSON envelope + 分类状态码）。
 - `request_id`/`batch_id`/`draft_id`/`candidate_context` 生命周期见
-  `endpoint_inventory.md` §5.4。
+  `endpoint_inventory.md` §5.3。
 
 ## Stage 27 使用方式
 
-Stage 27 TypeScript 前端只通过本 OpenAPI/DTO 生成客户端类型，不导入旧
-`app.js` 内部状态。生成后按 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`
-handoff 使用。
+Stage 27 TypeScript 前端只通过本 OpenAPI/DTO 生成客户端类型，不手写第二套
+响应 interface。旧 `app.js` 已在 US-209 随旧 Jinja 页面删除，生成客户端是
+Web UI 唯一的前端类型来源。生成后按
+`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md` 使用。
 
-Stage 27 US-198 会先用锁定版本的真实生成器执行 smoke test，并校准运行时错误状态声明、
-稳定 operationId 与各迁移 feature 实际读取的深层公开 DTO；在该 story 完成前，不应在
-业务组件中手写接口来绕过生成类型。
+Stage 27 US-198 已用锁定版本的真实生成器（openapi-typescript@7.13.0）完成
+smoke test，校准了运行时错误状态声明、稳定 operationId 与各迁移 feature
+实际读取的深层公开 DTO；业务组件不得手写接口来绕过生成类型。
 
 ## 健康/就绪探针（非 /api/v1 契约）
 

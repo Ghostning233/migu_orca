@@ -15,10 +15,11 @@ MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全
   否则 Flask 静态路径与 SPA fallback 全部错位。
 - SPA fallback 只接管 `/app/*`；feature 里**不要**自行拼接 `/api/v1` URL——US-199 统一
   transport 会接管；海报、健康检查与旧 Flask 页面都不能被 SPA 路由吞掉。
-- US-208 起 `/index`、`/settings` 默认重定向到 `/app/workbench`、`/app/settings`
-  （Flask `views.py` 的 `web_entry_mode()`，保留 `request_id`/`batch_id` query）。
-  SPA 各 feature 已从 URL query 读 `request_id`/`batch_id`（RequestsView/QueueView/
-  BatchWorkbenchView），旧书签直接可用；**不要**再往 URL 拼 `/index` 或 `/settings`。
+- US-208/209 起 `/index`、`/settings` 入口路由重定向到 `/app/workbench`、`/app/settings`
+  （Flask `views.py` 入口路由，保留 `request_id`/`batch_id` query；旧 Jinja 页面与
+  `web_entry_mode()` 已在 US-209 删除）。SPA 各 feature 已从 URL query 读
+  `request_id`/`batch_id`（RequestsView/QueueView/BatchWorkbenchView），旧书签直接可用；
+  **不要**再往 URL 拼 `/index` 或 `/settings`。
 - 敏感值（endpoint、token、cookie、password、原始响应等）只存在于组件局部内存与单次
   POST body；不写 store 持久化、URL、browser storage、日志或 trace。Pinia 默认不持久化。
 - 新前端类型只来自 `docs/api/openapi.json` 生成（US-198），不导入 Python 模型、
@@ -52,8 +53,9 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 
 - `dist/`、`node_modules/`、`*.tsbuildinfo` 不入库（见 `frontend/.gitignore`）。
 - 新增依赖用 `npm install <pkg>` 并在同一提交带上更新后的 `package-lock.json`。
-- 改了 Web UI 后要跑 `node --check src/apps/migu_orca_web/static/app.js`（旧前端仍存在）与
-  `uv run pytest tests/browser/ -q`（真实 Chromium；SPA 测试见 `tests/browser/test_app_shell.py`）。
+- 改了 Web UI 后要跑 `uv run pytest tests/browser/ -q`（真实 Chromium；SPA 测试见
+  `tests/browser/test_app_shell.py`）。旧 `static/app.js` 已在 US-209 删除，
+  不再需要 `node --check`。
 - 浏览器测试需要 `frontend/dist` 已构建；CI 的 browser job 先 `npm ci && npm run build`。
   本地验证 SPA：`cd frontend && npm run build` 后再跑浏览器套件。
 
@@ -109,10 +111,9 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `onUnmounted` 用 `getCurrentInstance()` 守卫（无组件实例时不注册，便于纯单测）。
 - 状态反馈：`components/feedback/StatusAlert.vue`（success/info/empty → `role=status`
   polite，error → `role=alert` assertive；状态不只靠颜色表达）。
-- 浏览器验证原语：`/app/components-demo` 路由（`features/components/
-  ComponentsDemoView.vue`）渲染全部原语，供
-  `tests/browser/test_components_primitives.py` 真实 Chromium 验证（含 360px 无横向溢出、
-  确认流程、Escape/inert、敏感字段清空）。该路由是迁移脚手架，US-209 删除。
+- US-209 已删除 `/app/components-demo` 原语演示路由与
+  `tests/browser/test_components_primitives.py`（迁移脚手架）；共享组件原语本身
+  继续由各 feature 的 Vitest/浏览器套件覆盖。
 
 ## 测试模式
 

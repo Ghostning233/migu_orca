@@ -3,7 +3,7 @@
   "info": {
     "title": "MiGuOrca Web API",
     "version": "0.1.0",
-    "description": "MiGuOrca /api/v1 公开契约。成功信封 `{ok: true, result}`；失败信封 `{ok: false, error_type, error_message, error_data}`。所有示例均为虚构脱敏值；`example.invalid` 为文档保留域。凭据字段标记为 `x-request-scoped`，绝不进入 storage、URL、浏览器 storage、日志或 trace。request_id/batch_id/draft_id/candidate_context 生命周期见 `docs/api/endpoint_inventory.md` §5.4。"
+    "description": "MiGuOrca /api/v1 公开契约。成功信封 `{ok: true, result}`；失败信封 `{ok: false, error_type, error_message, error_data}`。所有示例均为虚构脱敏值；`example.invalid` 为文档保留域。凭据字段标记为 `x-request-scoped`，绝不进入 storage、URL、浏览器 storage、日志或 trace。request_id/batch_id/draft_id/candidate_context 生命周期见 `docs/api/endpoint_inventory.md` §5.3。"
   },
   "paths": {
     "/api/v1/autobangumi/test-connection": {

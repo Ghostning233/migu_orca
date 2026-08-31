@@ -222,8 +222,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-209 完成：删除旧 app.js、style.css、index/settings/_top_nav Jinja 模板与 14 个旧旅程浏览器套件、test_components_primitives 脚手架、test_app_entry_switch 回退演练、parity 矩阵（docs/Stage27_parity_matrix.md + tests/api_contract/parity_matrix.py + test_parity_matrix_guard.py）与 test_frontend_dependencies.py；views.py 去掉 web_entry_mode() legacy 分支（入口路由固定重定向 SPA）、blueprints.py 移除 static/template 文件夹（app_blueprint 自带 placeholder 模板）、routes_app.py 更新 fallback 边界注释；conftest 移除 open_dev_fixture_panel/_legacy_entry_mode，pyproject 移除 legacy_entry marker，CI 移除 node --check 与 Node setup；frontend 删除 /app/components-demo 路由与 ComponentsDemoView.vue；README、docs/README、architecture、M13、backlog、future stages、主 PRD、stage27 PRD、endpoint_inventory、docs/api/README、skills（dev-browser/ralph）与 AGENTS.md 全部同步为 Stage 27 已完成。全套 1150 测试（1019 非浏览器 + 131 真实 Chromium SPA）+ typecheck/lint/unit/build/api:check/compileall/ruff/OpenAPI drift/git diff --check 全绿，仓库根 .migu_orca/storage 不存在；Stage 27 prd/progress 已归档。"
     }
   ]
 }

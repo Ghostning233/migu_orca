@@ -2,12 +2,12 @@
 
 ## Codebase Patterns
 
-- 默认 Web 入口由 `views.py:web_entry_mode()` 控制（服务端环境变量 `MIGU_ORCA_WEB_ENTRY_LEGACY=1`
-  回退旧 Jinja 页面，默认 SPA）；旧 `/index`、`/settings` 路由始终注册，切换只决定
-  渲染/重定向哪个页面。旧旅程浏览器套件（非 test_app_*）必须加
-  `pytest.mark.legacy_entry`（conftest `_legacy_entry_mode` autouse fixture 设环境变量），
-  否则 /index 重定向会让旧套件失败。parity 矩阵（`tests/api_contract/parity_matrix.py` +
-  `test_parity_matrix_guard.py`）守护旧旅程→新路由映射与 269 总数。
+- Web 入口路由（`/`、`/index`、`/Settings`、`/settings`）在 `views.py` 里**固定重定向
+  到 SPA**（US-209 起旧 Jinja 页面、`app.js`、`web_entry_mode()` 与
+  `MIGU_ORCA_WEB_ENTRY_LEGACY` 回退开关已删除）；只转发公开 `request_id`/`batch_id`
+  query。`web_blueprint` 不再挂 static/template 文件夹，placeholder 模板由
+  `app_blueprint`（自带 template_folder）渲染。浏览器回归只有 SPA 套件
+  （`tests/browser/test_app_*.py`），不再有旧旅程/legacy_entry。
 - 快照类 DTO（RequestSnapshotDTO/HistorySectionDTO/AbResultSectionDTO 等）用
   `_SnapshotBase(BaseModel)`（`extra="allow"`）让引擎 dict 可带额外字段过边界，同时给
   生成客户端稳定显示类型；envelope DTO 仍 strict `extra="forbid"`。视图运行时直接返回
@@ -101,9 +101,9 @@
   「上次成功值」清空被拒绝输入（等价 legacy `currentPreferenceValues`）。
 - Settings 等含多个 StatusAlert 的页面，断言必须限定到各自 form 作用域
   （`#xxx-form .status-alert`），裸 `.status-alert` 会命中第一个。
-- 浏览器验证原语/迁移脚手架路由：`/app/components-demo`
-  （features/components/ComponentsDemoView.vue，不加入导航），配套
-  tests/browser/test_components_primitives.py；该路由在 US-209 删除。
+- 浏览器验证原语/迁移脚手架路由 `/app/components-demo`（ComponentsDemoView.vue +
+  test_components_primitives.py）已在 US-209 删除；共享组件原语继续由各 feature 的
+  Vitest/浏览器套件覆盖。
 - Python 依赖、检查和测试统一通过 `uv`；前端依赖统一在 `frontend/` 使用 `npm ci`，不得混用 lockfile。
 - Stage 27 只通过 `docs/api/openapi.json` 生成 TypeScript 类型/client；不得导入 Python 模型、手写第二套响应 interface 或从旧 `app.js` 复制业务状态机。
 - US-198 起类型化客户端由 `openapi-typescript@7.13.0` 生成：`cd frontend && npm run api:generate`
@@ -1056,4 +1056,67 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
       UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（416 例全过，
       含新 8 例 entry-switch）。
+---
+
+## 2026-08-31 16:10:00 CST - US-209
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 删除旧前端资产：`src/apps/migu_orca_web/static/app.js`、`static/style.css`、
+    `templates/migu_orca_web/{index,settings,_top_nav}.html`（旧 Jinja 主模板）。
+  - 删除 14 个旧旅程浏览器套件（test_shell/test_actions/test_list/test_detail/
+    test_preferences/test_qbittorrent_connection/test_generation/test_fixture_mode/
+    test_batch_workbench/test_mikan_candidates/test_a11y/test_infrastructure/
+    test_ui_quality/test_stage11_real_config_entry）、迁移脚手架
+    test_components_primitives 与回退演练 test_app_entry_switch；删除 parity 矩阵
+    （docs/Stage27_parity_matrix.md + tests/api_contract/parity_matrix.py +
+    test_parity_matrix_guard.py）与 test_frontend_dependencies.py。
+  - `views.py`：去掉 `web_entry_mode()`/`MIGU_ORCA_WEB_ENTRY_LEGACY` legacy 分支，
+    入口路由固定重定向 SPA（`/`、`/index` → /app/workbench；`/Settings`、`/settings`
+    → /app/settings，保留 request_id/batch_id query）。
+  - `blueprints.py`：`web_blueprint` 移除 static/template 文件夹（旧资产已删）；
+    `routes_app.py` 的 `app_blueprint` 自带 template_folder 供 placeholder 渲染，
+    fallback 边界注释更新（去掉 /migu-orca-static 与旧页面）。
+  - conftest.py 移除 `open_dev_fixture_panel`/`_legacy_entry_mode`；pyproject 移除
+    legacy_entry marker；CI 移除 `node --check` 与 Node setup 步骤。
+  - frontend 删除 `/app/components-demo` 路由、ComponentsDemoView.vue 与 App.test.ts
+    对应 stub。
+  - 文档同步：README、docs/README、docs/design/architecture.md（Web 边界现状改为
+    前端工程）、docs/modules/M13-web-ui-PRD.md（Stage 27 状态/技术栈/UI 调整）、
+    docs/backlog.md（BL-024 已完成）、docs/MiGuOrca_future_stages.md、
+    docs/MiGuOrca_main_PRD.md（v0.27）、docs/MiGuOrca_stage27_..._PRD.md（US-209
+    完成记录）、docs/api/endpoint_inventory.md（§5 前端依赖章节改 SPA 契约）、
+    docs/api/README.md、skills（dev-browser/ralph）、AGENTS.md（web/frontend）。
+  - 归档：scripts/ralph/archive/2026-08-31-stage27-frontend-engineering-migration/
+    （prd.json + progress.txt，全部 story passes: true）。
+- Files changed
+  - 删除：旧 static/templates、14 个旧旅程套件、test_components_primitives、
+    test_app_entry_switch、parity 矩阵 3 件、test_frontend_dependencies.py、
+    ComponentsDemoView.vue
+  - 修改：views.py、views_test.py、app_routes_test.py、blueprints.py、routes_app.py、
+    conftest.py、test_inventory_consistency.py、test_app_shell.py、pyproject.toml、
+    .github/workflows/ci.yml、frontend/src/app/router/index.ts、App.test.ts、
+    README.md、docs/*（README/architecture/M13/backlog/future_stages/main_PRD/
+    stage27_PRD/api/endpoint_inventory/api/README）、AGENTS.md × 2、skills × 2、
+    scripts/ralph/{prd.json, progress.txt} + 新增 archive/2026-08-31-.../{prd,progress}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 删除 web_blueprint 的 template_folder 后，`render_template`（如 placeholder）
+      必须由自带 template_folder 的 app_blueprint 渲染，否则 TemplateNotFound。
+    - 移除 Blueprint 的 static_folder 后，`/migu-orca-static/*` 路由自动消失；
+      入口路由（/、/index、/Settings、/settings）保留在 views.py 只做重定向。
+    - 旧旅程套件删除后，SPA 套件（test_app_*）是浏览器回归的唯一来源；
+      test_app_shell.py 的入口重定向断言改为描述「旧页面已删、入口固定重定向」。
+  - Gotchas encountered
+    - `git diff --check` 会报 conftest.py 末尾多余空行（删除区块后残留）——
+      编辑后 `rstrip('\n') + '\n'` 归一。
+    - ruff 报 `url_for` 未使用（views.py 不再渲染模板）——删 import 即可。
+    - 删除静态测试块用脚本按 `def test_` 边界切割时要保留前导 `def ` 行本身，
+      否则把函数签名也删掉（先 restore 再精确按行删除）。
+  - Useful context
+    - Stage 27 全部 13 个 story（US-197～US-209）已完成；全套门禁：
+      compileall/ruff/OpenAPI drift/git diff --check + 1150 pytest（1019 非浏览器 +
+      131 真实 Chromium SPA）+ frontend typecheck/lint/unit(258)/build/api:check 全绿；
+      仓库根 .migu_orca/storage 不存在。
+    - 归档位置：scripts/ralph/archive/2026-08-31-stage27-frontend-engineering-migration/；
+      下一个 Stage 从 main 新建分支时 ralph.sh 会自动归档（但本 story 已手动归档）。
 ---

@@ -139,12 +139,10 @@ def test_spa_fallback_never_intercepts_api_or_probes(
 def test_default_entry_switches_index_and_settings_to_spa(
     page: Page, live_server_url: str
 ) -> None:
-    """US-208: /index and /settings now redirect to the SPA (default entry).
+    """US-208/209: /index and /settings redirect to the SPA (default entry).
 
-    The legacy pages remain *registered* for the migration window, but the
-    default entry serves the new frontend; the rollback rehearsal (legacy
-    entry mode) restores the old pages and is covered by
-    ``tests/browser/test_app_entry_switch.py``.
+    The legacy Jinja pages were removed in US-209; the entry routes always
+    redirect to the SPA, so old bookmarks keep working.
     """
     _require_dist()
 
@@ -160,7 +158,7 @@ def test_default_entry_switches_index_and_settings_to_spa(
     assert page.locator("#settings-heading").count() >= 1
 
     # The SPA shell, API and probes are all still reachable after visiting the
-    # legacy entry URLs.
+    # entry URLs.
     page.goto(f"{live_server_url}/app/workbench")
     page.wait_for_selector(".app-title")
     assert page.request.get(f"{live_server_url}/api/v1/requests").status == 200

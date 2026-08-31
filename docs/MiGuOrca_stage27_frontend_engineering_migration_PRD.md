@@ -434,6 +434,19 @@ typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --chec
 - 更新 README、架构、M13、部署说明、测试命令和文档索引。
 - 归档 Stage 27 prd/progress，确认 build 产物、`.migu_orca/storage` 和敏感数据未污染仓库。
 
+完成记录（2026-08-31）：旧 `app.js`、`style.css`、`index.html`/`settings.html`/`_top_nav.html`
+Jinja 主模板与 14 个旧旅程浏览器套件、`test_components_primitives` 脚手架、
+`test_app_entry_switch` 回退演练、parity 矩阵（`docs/Stage27_parity_matrix.md` +
+`tests/api_contract/parity_matrix.py` + `test_parity_matrix_guard.py`）与
+`test_frontend_dependencies.py` 全部删除；`views.py` 去掉 `web_entry_mode()` legacy 分支，
+入口路由固定重定向 SPA，`blueprints.py` 移除 static/template 文件夹；conftest 移除
+`open_dev_fixture_panel`/`_legacy_entry_mode`，pyproject 移除 legacy_entry marker，
+CI 移除 `node --check`。README、架构、M13、backlog、future stages、主 PRD、docs/README、
+endpoint_inventory、docs/api/README、skills 与 AGENTS.md 全部同步为 Stage 27 已完成。
+全套 Python（非浏览器 + 真实 Chromium SPA 套件）+ 前端 typecheck/lint/unit/build/api:check +
+compileall/ruff/OpenAPI drift/git diff 全绿，仓库根 `.migu_orca/storage` 不存在；
+Stage 27 prd/progress 已归档到 `scripts/ralph/archive/`。
+
 ## 10. 每个 story 的共同门禁
 
 - `npm run typecheck`、`npm run lint`、`npm run test:unit -- --run`、`npm run build`。

@@ -10,10 +10,9 @@ import { createRouter, createWebHistory } from 'vue-router'
  * `/app/settings`.
  *
  * Non-SPA routes must never be captured by the fallback: `/api/v1/*` (JSON
- * API), `/migu-orca-static/*` (legacy static assets), `/healthz`,
- * `/readiness` and the legacy Flask pages `/index` and `/settings` stay on the
- * Flask side. The Flask fallback route only matches paths that do not start
- * with those prefixes (see routes_app.py).
+ * API), posters, `/healthz`, `/readiness` and the entry routes `/index` and
+ * `/settings` stay on the Flask side. The Flask fallback route only matches
+ * paths that do not start with those prefixes (see routes_app.py).
  */
 export const router = createRouter({
   history: createWebHistory('/app/'),
@@ -45,17 +44,6 @@ export const router = createRouter({
       name: 'settings',
       component: () => import('@/features/settings/SettingsView.vue'),
       meta: { title: 'Settings' },
-    },
-    // US-200 primitive gallery. This route is a staging artifact used by the
-    // real-Chromium verification test (tests/browser/test_components_primitives.py);
-    // it is not part of the user-facing navigation. US-201+ builds the real
-    // features on the same primitives, and US-209 removes this route together
-    // with the other migration scaffolding.
-    {
-      path: '/components-demo',
-      name: 'components-demo',
-      component: () => import('@/features/components/ComponentsDemoView.vue'),
-      meta: { title: '组件原语' },
     },
   ],
 })

@@ -15,17 +15,21 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - `routes_app.py`（US-197）：`app_blueprint` 托管 Vue SPA——`/app/` 外壳、`/app/<path:subpath>`
   fallback（真实构建文件直接服务，其余 `/app/*` 返回 SPA 外壳）、`_dist_dir()` 指向
   `frontend/dist/`（无构建时返回依赖无关的占位模板，测试 monkeypatch `_dist_dir`）。
-- `views.py`：仅保留 Jinja 页面路由 + 导入 route 模块（导入副作用即注册端点）+ 再导出 blueprints；同时为测试兼容再导出 `CandidateSelectionContextStore` / `candidate_selection_contexts`。
+- `views.py`：仅保留 Web 入口重定向路由（`/`、`/index`、`/Settings`、`/settings` → SPA，
+  US-209 起旧 Jinja 页面已删除）+ 导入 route 模块（导入副作用即注册端点）+ 再导出
+  blueprints；同时为测试兼容再导出 `CandidateSelectionContextStore` /
+  `candidate_selection_contexts`。
 - `__init__.py` 的 `blueprints = [web_blueprint, api_blueprint, app_blueprint]` 由 `apps/registry.py` 消费。
 
 ## SPA 托管与 fallback 边界（US-197）
 
 - Vite `base` 固定为 `/app/`，`frontend/dist/` 的 `index.html` 引用 `/app/assets/*`；
   Flask 的 `app_blueprint` 在 `/app/` 同源托管，生产不依赖 Node 运行时。
-- **fallback 只接管 `/app/*`**：`/api/v1/*`、海报、`/migu-orca-static/*`、`/healthz`、
-  `/readiness`、旧 `/index`、`/settings` 都由各自的 Flask 路由处理，绝不能被 `/app/<path:subpath>`
-  截获（`tests/api_contract/test_inventory_consistency.py` 只核对 `/api/v1`，但
-  `src/apps/migu_orca_web/app_routes_test.py` 断言非 `/app` 路由端点不属于 `migu_orca_app.*`）。
+- **fallback 只接管 `/app/*`**：`/api/v1/*`、海报、`/healthz`、`/readiness`、入口路由
+  （`/`、`/index`、`/Settings`、`/settings`）都由各自的 Flask 路由处理，绝不能被
+  `/app/<path:subpath>` 截获（`tests/api_contract/test_inventory_consistency.py` 只核对
+  `/api/v1`，但 `src/apps/migu_orca_web/app_routes_test.py` 断言非 `/app` 路由端点
+  不属于 `migu_orca_app.*`）。
 - `frontend/dist` 不入库；CI 的 frontend/browser job 在跑套件前执行 `npm ci && npm run build`。
   浏览器测试 `tests/browser/test_app_shell.py` 在 `MIGU_ORCA_CI=1` 下缺构建直接失败（不 skip）。
 - US-199 起 SPA 客户端路由为 4 条：`/app/workbench`、`/app/requests`、`/app/queue`、
@@ -33,25 +37,16 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   客户端路由，Flask 侧除 `/app/` 与 `/app/<path:subpath>` fallback 外**不需要**新增任何
   服务端路由；浏览器测试在 `test_app_shell.py` 断言 4 项导航与各 route 挂载。
 
-## 默认入口与回退（US-208）
+## 默认入口（US-209）
 
-- `views.py` 的 `web_entry_mode()` 决定默认 Web 入口：生产默认 `"spa"`（`GET /`、
-  `GET /index` → `/app/workbench`，`GET /Settings`、`GET /settings` → `/app/settings`，
-  保留 `request_id`/`batch_id` query）；`MIGU_ORCA_WEB_ENTRY_LEGACY=1` 恢复旧
-  `/index`、`/settings` Jinja 页面（回退演练/旧旅程回归）。环境变量在请求时读取，
-  运行中翻转即可切换，浏览器不可控。
-- `/index`、`/settings` 路由**始终注册**（US-209 才删除）；切换只决定入口渲染/重定向
-  哪个页面。SPA 重定向只转发公开已保存标识符（`request_id`/`batch_id`），
-  endpoint/token/storage 路径等敏感值绝不进入重定向 URL（
+- `views.py` 的入口路由**始终重定向到 SPA**（旧 Jinja 页面与 `web_entry_mode()`
+  已在 US-209 删除）：`GET /`、`GET /index` → `/app/workbench`，`GET /Settings`、
+  `GET /settings` → `/app/settings`，保留 `request_id`/`batch_id` query。
+- 重定向只转发公开已保存标识符（`request_id`/`batch_id`），endpoint/token/storage
+  路径等敏感值绝不进入重定向 URL（
   `app_routes_test.py::test_spa_entry_never_forwards_sensitive_query_values` 守护）。
-- 旧旅程浏览器套件（`tests/browser/test_*.py`，非 `test_app_*`）用
-  `pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]` 在
-  `MIGU_ORCA_WEB_ENTRY_LEGACY=1` 下跑旧页面；`tests/browser/conftest.py` 的
-  `_legacy_entry_mode` autouse fixture 实现。SPA 套件（`test_app_*`）不设该 marker，
-  跑默认 SPA 入口。新增旧旅程套件必须加 marker，否则 /index 重定向会让它失败。
-- parity 矩阵：`docs/Stage27_parity_matrix.md` + `tests/api_contract/parity_matrix.py`
-  + `test_parity_matrix_guard.py` 守护 269 个旧旅程到新路由的映射；改旧套件测试数或
-  重命名会破坏 guard。
+- `web_blueprint` 不再挂 `static_folder`/`template_folder`（旧 `app.js`/`style.css`/
+  Jinja 模板已删）；`blueprints.py` 只定义 Blueprint 对象，SPA 由 `app_blueprint` 托管。
 
 ## 路由注册与测试 seam 的坑
 
@@ -118,7 +113,7 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   在响应里签发 opaque `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch 并回写同一
   draft_id；`preview-save` 一次性消费 `draft_id` 后落盘。
 - 客户端**绝不**把完整 Request 作为权威快照提交；前端只在内存持有 `draft_id`
-  （`app.js` 的 `currentDraftId` / 批量卡片的 `row.draft_id`），不写 URL/browser storage。
+  （新前端 DraftPreviewPanel 的局部 ref / 批量卡片的 `draft_id`），不写 URL/browser storage。
 - 失败语义统一 409：`draft_expired`（过期/未知）、`draft_evicted`（容量满）、
   `draft_replayed`（重复保存）；错误 details 不回显 draft_id 或草案内容。
 - 测试：`DraftStore` 是进程级单例，必须在 `views_test`/`api_contract`/`browser` 的
@@ -126,7 +121,7 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `preview_result_json(request)`（签发真实 draft 并返回 draft_id）与
   `save_preview_handler(calls?)`（消费 draft 并返回保存结果），批量卡片 mock 用
   `issue_draft_id(preview_request)` 给每个 `preview_request` 补 draft_id。
-- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.4 与 OpenAPI 注册表。
+- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.3 与 OpenAPI 注册表。
 
 ## MiKan 候选公开 DTO（US-204）
 

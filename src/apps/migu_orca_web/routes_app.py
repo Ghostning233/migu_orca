@@ -11,11 +11,9 @@ Fallback scope (critical): the SPA shell route at ``/app/`` and the SPA
 client-side routes under ``/app/*`` must return the shell, but the fallback
 must **never** capture:
 
-- ``/api/v1/*`` (JSON API), ``/migu-orca-static/*`` (legacy static assets),
-  ``/healthz``, ``/readiness`` (probes),
-- the legacy Flask pages ``/index``, ``/settings`` and any other registered
-  Flask route (they keep serving during the migration window; US-208 flips
-  the default entry and US-209 removes them).
+- ``/api/v1/*`` (JSON API), posters, ``/healthz``, ``/readiness`` (probes),
+- the entry routes ``/``, ``/index``, ``/Settings``, ``/settings`` (US-209:
+  they always redirect to the SPA now that the legacy Jinja pages are gone).
 
 The ``/app/<path:subpath>`` route only matches paths under ``/app/``; every
 other route is registered separately and takes precedence in Flask's URL map,
@@ -53,7 +51,10 @@ _ASSETS_CACHE_CONTROL = "public, max-age=31536000, immutable"
 # Must revalidate so a deploy that changes the hashed asset URLs is picked up.
 _SHELL_CACHE_CONTROL = "no-cache"
 
-app_blueprint = Blueprint("migu_orca_app", __name__)
+# The app blueprint serves the SPA shell and the dependency-free placeholder;
+# template_folder points at the package templates so the placeholder renders
+# even though web_blueprint no longer carries a template folder (US-209).
+app_blueprint = Blueprint("migu_orca_app", __name__, template_folder="templates")
 
 
 def _dist_dir() -> Path:

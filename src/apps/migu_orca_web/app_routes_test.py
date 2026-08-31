@@ -9,9 +9,10 @@ These tests pin the engineering baseline of Stage 27:
 - real build files under ``/app/*`` are served as static assets;
 - non-file ``/app/*`` paths fall back to the SPA shell for client-side
   routing;
-- the fallback **never** captures the API, legacy static assets, health
-  probes or legacy Flask pages — every non-``/app`` route keeps its own
-  handler (US-199 and US-208 extend this to a parity matrix).
+- the fallback **never** captures the API, posters, health probes or the
+  entry routes — every non-``/app`` route keeps its own handler (US-199
+  established the boundary; US-209 removed the legacy Jinja pages/static
+  assets the fallback used to share the origin with).
 """
 
 import json
@@ -187,12 +188,12 @@ def test_api_not_intercepted_by_spa_fallback() -> None:
     assert "text/html" not in response.content_type
 
 
-def test_legacy_pages_and_probes_not_intercepted() -> None:
-    """Legacy Flask pages, probes and legacy static assets stay on Flask."""
+def test_entry_routes_and_probes_not_intercepted() -> None:
+    """Entry routes, probes stay on Flask (never the SPA fallback)."""
     client = _client()
 
-    # US-208: the default entry serves the SPA; the legacy pages remain
-    # reachable through their own Flask routes (never the SPA fallback).
+    # US-209: the entry routes always redirect to the SPA (the legacy Jinja
+    # pages are gone); they stay registered so old bookmarks keep working.
     index = client.get("/index")
     assert index.status_code == 302
     assert index.headers["Location"] == "/app/workbench"
@@ -204,35 +205,6 @@ def test_legacy_pages_and_probes_not_intercepted() -> None:
     healthz = client.get("/healthz")
     assert healthz.status_code == 200
     assert healthz.get_json() == {"ok": True, "result": "ok"}
-
-    legacy_static = client.get("/migu-orca-static/style.css")
-    assert legacy_static.status_code in (200, 404)  # asset may or may not exist
-    assert "text/html" not in legacy_static.content_type
-
-
-def test_legacy_pages_served_in_legacy_entry_mode(monkeypatch: Any) -> None:
-    """US-208 rollback rehearsal: legacy entry mode restores the old pages.
-
-    Flipping ``MIGU_ORCA_WEB_ENTRY_LEGACY=1`` only changes which page the
-    entry routes serve — the API and storage behavior is untouched (the same
-    ``/api/v1/requests`` handler is exercised here and in the SPA-mode tests).
-    """
-    monkeypatch.setenv("MIGU_ORCA_WEB_ENTRY_LEGACY", "1")
-    client = _client()
-
-    index = client.get("/index")
-    assert index.status_code == 200
-    assert "text/html" in index.content_type
-    assert "Stage 13 订阅方案工作台" in index.get_data(as_text=True)
-
-    settings = client.get("/settings")
-    assert settings.status_code == 200
-    assert "MiGuOrca Settings" in settings.get_data(as_text=True)
-
-    # The API contract does not change with the entry mode.
-    api = client.get("/api/v1/requests")
-    assert api.status_code == 200
-    assert api.get_json()["ok"] is True
 
 
 def test_spa_entry_redirects_preserve_public_query_params() -> None:

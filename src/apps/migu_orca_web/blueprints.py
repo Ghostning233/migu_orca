@@ -14,10 +14,8 @@ from flask import Blueprint
 
 api_blueprint = Blueprint("migu_orca_web_api", __name__)
 
-web_blueprint = Blueprint(
-    "migu_orca_web",
-    __name__,
-    static_folder="static",
-    static_url_path="/migu-orca-static",
-    template_folder="templates",
-)
+# US-209: the legacy Jinja frontend (app.js/style.css under ``static/``) was
+# removed with the Stage 27 closeout, so ``web_blueprint`` no longer serves a
+# static folder or templates — the SPA is served by ``app_blueprint`` at
+# ``/app/`` and the web blueprint only owns the entry redirects in views.py.
+web_blueprint = Blueprint("migu_orca_web", __name__)

@@ -1018,7 +1018,7 @@ def _build_openapi() -> dict[str, Any]:
                 "`example.invalid` 为文档保留域。凭据字段标记为 "
                 "`x-request-scoped`，绝不进入 storage、URL、浏览器 storage、"
                 "日志或 trace。request_id/batch_id/draft_id/candidate_context 生命周期见 "
-                "`docs/api/endpoint_inventory.md` §5.4。"
+                "`docs/api/endpoint_inventory.md` §5.3。"
             ),
         },
         "paths": ordered_paths,
