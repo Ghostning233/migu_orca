@@ -15,6 +15,10 @@ MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全
   否则 Flask 静态路径与 SPA fallback 全部错位。
 - SPA fallback 只接管 `/app/*`；feature 里**不要**自行拼接 `/api/v1` URL——US-199 统一
   transport 会接管；海报、健康检查与旧 Flask 页面都不能被 SPA 路由吞掉。
+- US-208 起 `/index`、`/settings` 默认重定向到 `/app/workbench`、`/app/settings`
+  （Flask `views.py` 的 `web_entry_mode()`，保留 `request_id`/`batch_id` query）。
+  SPA 各 feature 已从 URL query 读 `request_id`/`batch_id`（RequestsView/QueueView/
+  BatchWorkbenchView），旧书签直接可用；**不要**再往 URL 拼 `/index` 或 `/settings`。
 - 敏感值（endpoint、token、cookie、password、原始响应等）只存在于组件局部内存与单次
   POST body；不写 store 持久化、URL、browser storage、日志或 trace。Pinia 默认不持久化。
 - 新前端类型只来自 `docs/api/openapi.json` 生成（US-198），不导入 Python 模型、

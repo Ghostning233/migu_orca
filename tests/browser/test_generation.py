@@ -12,7 +12,7 @@ from tests.browser.conftest import (
     set_storage_preferences,
 )
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]
 
 
 class TestFormValidation:

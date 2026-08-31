@@ -44,6 +44,7 @@ minversion = "7.0"
 testpaths = ["src", "tests"]
 markers = [
     "browser: browser automation tests that require a browser binary",
+    "legacy_entry: browser tests that drive the legacy /index and /settings pages (US-208 rollback mode)",
 ]
 
 [build-system]

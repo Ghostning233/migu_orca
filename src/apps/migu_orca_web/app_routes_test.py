@@ -191,6 +191,35 @@ def test_legacy_pages_and_probes_not_intercepted() -> None:
     """Legacy Flask pages, probes and legacy static assets stay on Flask."""
     client = _client()
 
+    # US-208: the default entry serves the SPA; the legacy pages remain
+    # reachable through their own Flask routes (never the SPA fallback).
+    index = client.get("/index")
+    assert index.status_code == 302
+    assert index.headers["Location"] == "/app/workbench"
+
+    settings = client.get("/settings")
+    assert settings.status_code == 302
+    assert settings.headers["Location"] == "/app/settings"
+
+    healthz = client.get("/healthz")
+    assert healthz.status_code == 200
+    assert healthz.get_json() == {"ok": True, "result": "ok"}
+
+    legacy_static = client.get("/migu-orca-static/style.css")
+    assert legacy_static.status_code in (200, 404)  # asset may or may not exist
+    assert "text/html" not in legacy_static.content_type
+
+
+def test_legacy_pages_served_in_legacy_entry_mode(monkeypatch: Any) -> None:
+    """US-208 rollback rehearsal: legacy entry mode restores the old pages.
+
+    Flipping ``MIGU_ORCA_WEB_ENTRY_LEGACY=1`` only changes which page the
+    entry routes serve — the API and storage behavior is untouched (the same
+    ``/api/v1/requests`` handler is exercised here and in the SPA-mode tests).
+    """
+    monkeypatch.setenv("MIGU_ORCA_WEB_ENTRY_LEGACY", "1")
+    client = _client()
+
     index = client.get("/index")
     assert index.status_code == 200
     assert "text/html" in index.content_type
@@ -200,13 +229,41 @@ def test_legacy_pages_and_probes_not_intercepted() -> None:
     assert settings.status_code == 200
     assert "MiGuOrca Settings" in settings.get_data(as_text=True)
 
-    healthz = client.get("/healthz")
-    assert healthz.status_code == 200
-    assert healthz.get_json() == {"ok": True, "result": "ok"}
+    # The API contract does not change with the entry mode.
+    api = client.get("/api/v1/requests")
+    assert api.status_code == 200
+    assert api.get_json()["ok"] is True
 
-    legacy_static = client.get("/migu-orca-static/style.css")
-    assert legacy_static.status_code in (200, 404)  # asset may or may not exist
-    assert "text/html" not in legacy_static.content_type
+
+def test_spa_entry_redirects_preserve_public_query_params() -> None:
+    """US-208: /index and /settings forward request_id/batch_id to the SPA."""
+    client = _client()
+
+    index = client.get("/index?request_id=req-1&batch_id=batch-2")
+    assert index.status_code == 302
+    assert index.headers["Location"] == "/app/workbench?request_id=req-1&batch_id=batch-2"
+
+    settings = client.get("/settings?request_id=req-ab-3")
+    assert settings.status_code == 302
+    assert settings.headers["Location"] == "/app/settings?request_id=req-ab-3"
+
+
+def test_spa_entry_never_forwards_sensitive_query_values() -> None:
+    """US-208: only request_id/batch_id are forwarded; everything else is dropped.
+
+    The redirect is a plain 302 Location (no body) — endpoint/token/absolute
+    paths never survive into the SPA URL.
+    """
+    client = _client()
+
+    response = client.get(
+        "/index?request_id=req-1&token=secret-token&storage_dir=/etc/passwd&endpoint=http://x"
+    )
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/app/workbench?request_id=req-1"
+    assert "secret-token" not in response.headers["Location"]
+    assert "storage_dir" not in response.headers["Location"]
+    assert "endpoint" not in response.headers["Location"]
 
 
 def test_app_blueprint_registered() -> None:

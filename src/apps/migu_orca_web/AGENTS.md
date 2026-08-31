@@ -33,6 +33,26 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   客户端路由，Flask 侧除 `/app/` 与 `/app/<path:subpath>` fallback 外**不需要**新增任何
   服务端路由；浏览器测试在 `test_app_shell.py` 断言 4 项导航与各 route 挂载。
 
+## 默认入口与回退（US-208）
+
+- `views.py` 的 `web_entry_mode()` 决定默认 Web 入口：生产默认 `"spa"`（`GET /`、
+  `GET /index` → `/app/workbench`，`GET /Settings`、`GET /settings` → `/app/settings`，
+  保留 `request_id`/`batch_id` query）；`MIGU_ORCA_WEB_ENTRY_LEGACY=1` 恢复旧
+  `/index`、`/settings` Jinja 页面（回退演练/旧旅程回归）。环境变量在请求时读取，
+  运行中翻转即可切换，浏览器不可控。
+- `/index`、`/settings` 路由**始终注册**（US-209 才删除）；切换只决定入口渲染/重定向
+  哪个页面。SPA 重定向只转发公开已保存标识符（`request_id`/`batch_id`），
+  endpoint/token/storage 路径等敏感值绝不进入重定向 URL（
+  `app_routes_test.py::test_spa_entry_never_forwards_sensitive_query_values` 守护）。
+- 旧旅程浏览器套件（`tests/browser/test_*.py`，非 `test_app_*`）用
+  `pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]` 在
+  `MIGU_ORCA_WEB_ENTRY_LEGACY=1` 下跑旧页面；`tests/browser/conftest.py` 的
+  `_legacy_entry_mode` autouse fixture 实现。SPA 套件（`test_app_*`）不设该 marker，
+  跑默认 SPA 入口。新增旧旅程套件必须加 marker，否则 /index 重定向会让它失败。
+- parity 矩阵：`docs/Stage27_parity_matrix.md` + `tests/api_contract/parity_matrix.py`
+  + `test_parity_matrix_guard.py` 守护 269 个旧旅程到新路由的映射；改旧套件测试数或
+  重命名会破坏 guard。
+
 ## 路由注册与测试 seam 的坑
 
 - route 模块**导入即注册**：`views.py` 必须 import 所有 `routes_*` 模块，否则端点不注册（`tests/api_contract/test_inventory_consistency.py` 会失败）。

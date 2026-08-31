@@ -8,7 +8,7 @@ from playwright.sync_api import Page, Request, expect
 
 from tests.browser.conftest import open_dev_fixture_panel, set_storage_preferences
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]
 
 
 class TestQbittorrentNotOnWorkbench:

@@ -205,8 +205,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-208 完成：建立旧 269 个 Chromium 旅程到新路由的可审查 parity 矩阵（docs/Stage27_parity_matrix.md + tests/api_contract/parity_matrix.py + test_parity_matrix_guard.py 自动重数旧套件测试数并守护映射）；默认入口切换到新前端——views.py 新增 web_entry_mode()（默认 spa：GET /、GET /index → /app/workbench 保留 request_id/batch_id query，GET /Settings、GET /settings → /app/settings 保留 request_id query；只转发公开已保存标识符，敏感值绝不进重定向 URL，MIGU_ORCA_WEB_ENTRY_LEGACY=1 回退旧 Jinja 页面）；演练不修改业务数据的入口回退（tests/browser/test_app_entry_switch.py 8 例真实 Chromium：SPA 入口/兼容入口/敏感值不过 redirect/API 与探针不受影响/回退恢复旧页面且同一 /api/v1/requests 与 storage 前后不变）；14 个旧旅程浏览器套件加 pytest.mark.legacy_entry 在 legacy 入口下回归（conftest _legacy_entry_mode autouse fixture），全套 416 浏览器 + 1076 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-209 将删除旧前端资产并归档 Stage 27。"
     },
     {
       "id": "US-209",

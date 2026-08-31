@@ -232,13 +232,43 @@ class _MappedCandidateSearchClient:
 
 
 def test_root_redirects_to_index() -> None:
+    """US-208: the default entry redirects / to the SPA workbench (legacy mode keeps /index)."""
+    response = _client().get("/")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/app/workbench"
+
+
+def test_root_redirects_to_index_in_legacy_entry_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """US-208 rollback rehearsal: legacy entry mode restores the old / → /index flow."""
+    monkeypatch.setenv("MIGU_ORCA_WEB_ENTRY_LEGACY", "1")
     response = _client().get("/")
 
     assert response.status_code == 302
     assert response.headers["Location"] == "/index"
 
 
-def test_index_serves_web_ui_shell() -> None:
+def test_index_redirects_to_spa_workbench_by_default() -> None:
+    """US-208: /index now redirects to the SPA workbench (the new default entry)."""
+    response = _client().get("/index")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/app/workbench"
+
+
+def test_index_redirect_preserves_public_query_params() -> None:
+    """US-208: request_id/batch_id bookmarks from the legacy UI keep working."""
+    response = _client().get("/index?request_id=req-1&batch_id=batch-2")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/app/workbench?request_id=req-1&batch_id=batch-2"
+
+
+def test_index_serves_legacy_shell_in_legacy_entry_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-208 rollback rehearsal: legacy mode keeps serving the old /index page."""
+    monkeypatch.setenv("MIGU_ORCA_WEB_ENTRY_LEGACY", "1")
     response = _client().get("/index")
 
     html = response.get_data(as_text=True)
@@ -401,13 +431,45 @@ def test_index_serves_web_ui_shell() -> None:
 
 
 def test_settings_case_redirects_to_settings() -> None:
+    """US-208: the default entry redirects /Settings to the SPA Settings page."""
+    response = _client().get("/Settings")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/app/settings"
+
+
+def test_settings_case_redirects_to_settings_in_legacy_entry_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-208 rollback rehearsal: legacy mode restores /Settings → /settings."""
+    monkeypatch.setenv("MIGU_ORCA_WEB_ENTRY_LEGACY", "1")
     response = _client().get("/Settings")
 
     assert response.status_code == 302
     assert response.headers["Location"] == "/settings"
 
 
-def test_settings_serves_placeholder_shell_with_shared_navigation() -> None:
+def test_settings_redirects_to_spa_settings_by_default() -> None:
+    """US-208: /settings now redirects to the SPA Settings page."""
+    response = _client().get("/settings")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/app/settings"
+
+
+def test_settings_redirect_preserves_public_request_id() -> None:
+    """US-208: the legacy /settings?request_id=<id>#auto-bangumi entry keeps working."""
+    response = _client().get("/settings?request_id=req-ab-3")
+
+    assert response.status_code == 302
+    assert response.headers["Location"] == "/app/settings?request_id=req-ab-3"
+
+
+def test_settings_serves_legacy_shell_in_legacy_entry_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-208 rollback rehearsal: legacy mode keeps serving the old /settings page."""
+    monkeypatch.setenv("MIGU_ORCA_WEB_ENTRY_LEGACY", "1")
     response = _client().get("/settings")
 
     html = response.get_data(as_text=True)

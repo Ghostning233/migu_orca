@@ -7,7 +7,7 @@ from playwright.sync_api import Page
 
 from tests.browser.conftest import create_saved_request, set_storage_preferences
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]
 
 
 @pytest.fixture(scope="function")

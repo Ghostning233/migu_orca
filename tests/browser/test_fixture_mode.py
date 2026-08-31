@@ -11,7 +11,7 @@ from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from shared.models import EntryRequest
 from tests.browser.conftest import open_dev_fixture_panel, preview_result_json, set_storage_preferences
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]
 
 
 def _candidate_result_json(query: str, candidates: list[dict[str, Any]]) -> str:

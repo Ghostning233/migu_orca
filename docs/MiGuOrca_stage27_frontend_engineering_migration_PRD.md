@@ -410,9 +410,23 @@ api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 `.mig
 
 ### US-208：完成 parity、切换默认入口并演练回退
 
-- 建立旧 269 个 Chromium 旅程到新路由的 parity 矩阵，关键旅程全部指向新前端。
-- `/index`、`/settings` 及 request_id/batch_id 兼容入口切换到新前端。
-- 演练一次无需修改业务数据的入口回退；失败时可恢复旧入口，API/storage 不回滚。
+- 建立旧 269 个 Chromium 旅程到新路由的 parity 矩阵（`docs/Stage27_parity_matrix.md`，
+  数据在 `tests/api_contract/parity_matrix.py`，`tests/api_contract/test_parity_matrix_guard.py`
+  自动重数旧套件测试数并守护映射，重命名/删减旧套件即失败），关键旅程全部指向新前端。
+- `/index`、`/settings` 及 request_id/batch_id 兼容入口切换到新前端（`views.py`
+  `web_entry_mode()`：默认 `spa`，`GET /`、`GET /index` → `/app/workbench` 保留
+  `request_id`/`batch_id` query，`GET /Settings`、`GET /settings` → `/app/settings`
+  保留 `request_id` query；只转发公开已保存标识符，敏感值绝不进入重定向 URL）。
+- 演练一次无需修改业务数据的入口回退（`tests/browser/test_app_entry_switch.py` 真实
+  Chromium：`MIGU_ORCA_WEB_ENTRY_LEGACY=1` 恢复旧 `/index`、`/settings` Jinja 页面，
+  同一 `/api/v1/requests` 与 storage 前后不变；旧旅程浏览器套件用
+  `pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]` 在 legacy 入口下回归）。
+- 旧资产（旧主模板、`app.js`、无用 CSS）保留一个提交窗口；US-209 在全部门禁通过后删除。
+
+完成记录（2026-08-31）：parity 矩阵 + guard、默认入口切换与回退演练全部门禁通过——
+全套 416 浏览器（269 旧旅程 legacy 入口 + 147 SPA）+ 1076 非浏览器 +
+typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全绿，
+仓库根 `.migu_orca/storage` 不存在。US-209 将删除旧前端资产并归档 Stage 27。
 
 ### US-209：删除旧前端并完成 Stage 27 收尾
 

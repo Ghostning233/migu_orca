@@ -35,7 +35,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - 已建立 Auto Bangumi 提交结果契约、Request 到 AB payload 映射、fake client、真实 HTTP client adapter、失败降级 JSON 和显式配置读取。
 - 已建立真实 MiKanProject 数据源 adapter、可注入 HTTP transport、搜索页解析、合集详情页结构化解析、字幕组级 RSS 优先输出、番剧级 RSS fallback、真实 RSS XML 读取和安全错误归一化。
 - 当前 CLI 只有在显式传入 `--source mikan` 和 `--mikan-config` 时才会构造真实 MiKan client；可额外传入 `--mikan-bangumi <url-or-id>` 直接读取指定合集详情页并跳过搜索；只有在显式传入 `--submit-ab` 和 `--ab-config` 时才会构造真实 Auto Bangumi HTTP client；只有在显式传入 `--save-request` 时才会写入本地 JSON 存储。
-- 已提供 Flask Web UI：`/` 重定向到 `/index`，`/index` 是订阅方案工作台，`/settings` 是配置与连接测试页面，`/Settings` 重定向到 `/settings`。
+- 已提供 Flask Web UI（Stage 13～25 的旧前端；US-208 起默认入口切换为新前端 `/app/*`，旧 `/index`、`/settings` 页面仍在迁移窗口内保留，`MIGU_ORCA_WEB_ENTRY_LEGACY=1` 可回退）：`/` 重定向到 `/index`，`/index` 是订阅方案工作台，`/settings` 是配置与连接测试页面，`/Settings` 重定向到 `/settings`。
 - `/index` 主流程通过真实 MiKan 候选搜索生成订阅方案，可以搜索/筛选/排序本地 Request、读取 URL 可恢复的分组详情，并执行确认、可见取消表单和受限修改；候选选择与直连 fallback 默认生成可编辑的 `订阅草案（未保存）` 预览，可修改字幕组/筛选规则/文件夹名并重算种子展示，点击 `保存草案` 后才进入待确认流程。fixture-backed 生成不参与普通主流程，而是放在页面底部「开发 / 离线测试」面板中，面板默认收起，需开发者手动展开才能使用。
 - 已保存 `ACCEPTED` Request 详情同时展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作；`修改` 复用详情内修改表单并保持 `ACCEPTED` 状态，`删除` 需显式确认并刷新列表、清空详情和移除 URL `request_id`。
 - Request 详情的 Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区按 有效种子 -> 完整种子（按字幕组分组）-> 排除种子 的顺序展示：有效种子默认可见并标注 `当前选中字幕组`，完整种子按 MiKan 字幕组分组（每组显示字幕组名、种子数量并可展开），完整种子与排除种子默认折叠，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言。
@@ -109,7 +109,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 
 当前 Web UI 延续 Stage 7 引入的本地 Flask 管理界面，并已累积接入 Settings、真实 MiKan 候选、可编辑预览、批量草案、提交前队列、偏好、媒体缓存、AutoBangumi 3.1.18 兼容和 Stage 25 标题季数解析。页面仍由 Flask/Jinja 提供，并由原生 JavaScript 驱动；尚未引入独立前端构建链。业务操作统一通过 `/api/v1/*` JSON API 编排，CLI 默认行为保持不变。
 
-Stage 27 已开始把 Web UI 迁移到独立前端工程：`frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程（npm 管理，`package-lock.json` 已入库）。生产构建输出到 `frontend/dist/`（不入库），由 Flask 在 `/app/` 同源托管（`routes_app.py` 的 `app_blueprint`）；Vite `base` 固定为 `/app/`，SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness` 或旧 Flask 页面。开发时可 `cd frontend && npm run dev`（Vite dev server 代理 `/api/v1` 到本地 Flask）。US-197 建立了工程基线（typecheck/lint/unit/build 全绿 + CI 门禁）；US-199 建立了统一 API transport（`frontend/src/api/client.ts`，处理 envelope/非 2xx/非 JSON/网络失败/取消/超时，feature 不得自行拼接 `/api/v1` URL）、4 条 SPA 路由（工作台/订阅方案/提交队列/Settings）与全局 loading/空状态/错误边界/aria-live 通知。US-201 已迁移 Settings（storage 偏好/非敏感偏好/qB/AB 连接测试与提交上下文）；US-202 已迁移 Request 列表（`/app/requests`：加载、搜索、状态筛选、排序、计数、空状态、`request_id` 刷新恢复与复制）；US-203 已迁移 Request 详情与管理动作（`/app/requests` 详情面板：Overview/Source/Filter/Seeds/Audit、确认/取消/修改/删除、AB 提交入口）；US-204 已迁移单个搜索与服务端草案（`/app/workbench`：真实 MiKan 候选搜索、直连 fallback、季数确认/冲突禁用、可编辑订阅草案 preview-modify/preview-save，`candidate_context`/`draft_id` 只在内存）；US-205 已迁移批量工作台（`/app/workbench` 批量工作台区：批量输入、独立 FOUND/EMPTY/FAILED 卡片、候选浮层、共享草案详情与删除、选择/单个接受/批量接受/全接受，统一走 `POST /api/v1/batches/{batch_id}/accept`，`batch_id` 进 URL 供提交队列刷新恢复）；US-206 已迁移提交队列（`/app/queue`：从 URL `batch_id` 恢复队列、逐项提交/失败重试/恢复（自动 + 人工核验）、防重复提交，AB 凭据只在内存与单次 POST body）。US-207 完成跨功能收敛：键盘 skip link、批量候选浮层焦点管理（打开聚焦/Escape 关闭/焦点恢复）、360/768/1280 无横向溢出、状态不只靠颜色、reduced-motion 反馈、vendor chunk 分包、`/app/assets/*` immutable 缓存 + shell no-cache、build 无 sourcemap（详见 `tests/browser/test_app_responsive_a11y.py`）。旧页面在迁移完成前保持可用。
+Stage 27 已把 Web UI 迁移到独立前端工程并完成入口切换：`frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程（npm 管理，`package-lock.json` 已入库）。生产构建输出到 `frontend/dist/`（不入库），由 Flask 在 `/app/` 同源托管（`routes_app.py` 的 `app_blueprint`）；Vite `base` 固定为 `/app/`，SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness` 或旧 Flask 页面。开发时可 `cd frontend && npm run dev`（Vite dev server 代理 `/api/v1` 到本地 Flask）。US-197 建立了工程基线（typecheck/lint/unit/build 全绿 + CI 门禁）；US-199 建立了统一 API transport（`frontend/src/api/client.ts`，处理 envelope/非 2xx/非 JSON/网络失败/取消/超时，feature 不得自行拼接 `/api/v1` URL）、4 条 SPA 路由（工作台/订阅方案/提交队列/Settings）与全局 loading/空状态/错误边界/aria-live 通知。US-201 已迁移 Settings（storage 偏好/非敏感偏好/qB/AB 连接测试与提交上下文）；US-202 已迁移 Request 列表（`/app/requests`：加载、搜索、状态筛选、排序、计数、空状态、`request_id` 刷新恢复与复制）；US-203 已迁移 Request 详情与管理动作（`/app/requests` 详情面板：Overview/Source/Filter/Seeds/Audit、确认/取消/修改/删除、AB 提交入口）；US-204 已迁移单个搜索与服务端草案（`/app/workbench`：真实 MiKan 候选搜索、直连 fallback、季数确认/冲突禁用、可编辑订阅草案 preview-modify/preview-save，`candidate_context`/`draft_id` 只在内存）；US-205 已迁移批量工作台（`/app/workbench` 批量工作台区：批量输入、独立 FOUND/EMPTY/FAILED 卡片、候选浮层、共享草案详情与删除、选择/单个接受/批量接受/全接受，统一走 `POST /api/v1/batches/{batch_id}/accept`，`batch_id` 进 URL 供提交队列刷新恢复）；US-206 已迁移提交队列（`/app/queue`：从 URL `batch_id` 恢复队列、逐项提交/失败重试/恢复（自动 + 人工核验）、防重复提交，AB 凭据只在内存与单次 POST body）。US-207 完成跨功能收敛：键盘 skip link、批量候选浮层焦点管理（打开聚焦/Escape 关闭/焦点恢复）、360/768/1280 无横向溢出、状态不只靠颜色、reduced-motion 反馈、vendor chunk 分包、`/app/assets/*` immutable 缓存 + shell no-cache、build 无 sourcemap（详见 `tests/browser/test_app_responsive_a11y.py`）。US-208 完成 parity 与默认入口切换：旧 269 个 Chromium 旅程到新路由的可审查 parity 矩阵见 `docs/Stage27_parity_matrix.md`（`tests/api_contract/test_parity_matrix_guard.py` 自动核对），`/index`、`/settings` 及 `request_id`/`batch_id` 兼容入口默认重定向到新前端，并演练了不修改业务数据的入口回退（`MIGU_ORCA_WEB_ENTRY_LEGACY=1` 恢复旧页面，API/storage 不回滚）；旧 Jinja 页面与 `app.js` 仍在迁移窗口内保留（US-209 删除）。
 
 启动方式：
 
@@ -119,11 +119,11 @@ uv run flask --app wsgi:app run
 
 启动后访问：
 
-- `GET /`：重定向到 `/index`。
-- `GET /index`：服务端渲染 Request 工作台（迁移期保留；US-208 切换默认入口）。
-- `GET /index?request_id=<id>`：打开 Request 工作台并恢复指定 Request 详情。
-- `GET /settings`：服务端渲染 Settings 页面（迁移期保留）。
-- `GET /Settings`：重定向到 `/settings`。
+- `GET /`：重定向到 `/app/workbench`（US-208 起默认入口为新前端）。
+- `GET /index`：重定向到 `/app/workbench`（保留 `request_id`/`batch_id` query；
+  旧 Jinja 页面在迁移窗口内可用，`MIGU_ORCA_WEB_ENTRY_LEGACY=1` 可回退）。
+- `GET /settings`：重定向到 `/app/settings`（保留 `request_id` query）。
+- `GET /Settings`：重定向到 `/settings` 的 SPA 对应项（`/app/settings`）。
 - `GET /app/`：新 Vue SPA 外壳（US-197 起）；`/app/workbench`、`/app/requests`、
   `/app/queue`、`/app/settings` 是 SPA 路由（US-199 起 4 条导航），由 Vue Router 处理，
   刷新时由 Flask fallback 返回外壳。
@@ -132,6 +132,10 @@ uv run flask --app wsgi:app run
   （可创建/可写）时返回 200 `{"ok": true, "result": "ok"}`；storage 不可用时返回 503
   `{"ok": false, "result": "storage_unavailable"}`。只触碰本地存储布局，绝不探测或写入
   真实 MiKan / AutoBangumi / qBittorrent。
+
+> US-208 入口切换：`views.py` 的 `web_entry_mode()` 决定默认入口（`spa`/`legacy`）。
+> 生产默认 `spa`；`MIGU_ORCA_WEB_ENTRY_LEGACY=1` 恢复旧 `/index`、`/settings`
+> Jinja 页面（回退演练/旧旅程回归用），API 与 storage 行为不变。
 
 `/index` 页面包含真实 MiKan 候选搜索主表单、可编辑预览订阅草案、本地 Request 列表、URL 可恢复的详情区域、状态历史和 AB 提交结果摘要。页面提供共享顶部导航、运行模式摘要、非空标题浏览器校验、提交中按钮状态、Settings Storage 偏好只读摘要、列表文本搜索/状态筛选/排序、详情 Overview/Source/Filter/Seeds/Audit 分组、统一成功/错误通知、可恢复操作按钮、可见取消/修改表单、窄屏单列布局和基础无障碍标记。候选选择与直连 fallback 默认生成 `订阅草案（未保存）` 预览，不展示确认、取消、删除或 Auto Bangumi 提交动作；预览提供可编辑表单（字幕组、包含/排除规则、使用正则、大小写敏感、folder_name），`应用修改` 通过 dry-run 预览修改端点重算当前选中字幕组的有效/排除种子展示，`保存草案` 持久化修改后的订阅方案并同步 `request_id` 到 URL 进入待确认流程。已保存 `ACCEPTED` Request 详情展示 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作，`删除` 前必须经浏览器确认框确认。Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 分区按 有效种子（默认可见并标注当前选中字幕组）-> 完整种子（按字幕组分组，默认折叠）-> 排除种子（默认折叠）的顺序展示。`/settings` 页面包含 Storage 偏好、数据源、qBittorrent 和 Auto Bangumi 分区；Storage 偏好只写入浏览器 `localStorage`，qBittorrent 连接测试表单直接显示，Auto Bangumi 按 `request_id` 上下文渐进展示，提交前必须显式确认。页面和 API 都不应展示 token、完整 endpoint URL、qBittorrent username、password、Authorization header、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径。
 
@@ -384,14 +388,18 @@ Stage 21 偏好/修正 API 的安全边界：endpoint、token、Authorization he
    uv run flask --app wsgi:app run
    ```
 
-4. 打开本地 `/index` 页面；`GET /` 应重定向到 `/index`，`GET /Settings` 应重定向到 `/settings`。确认 `/index` 和 `/settings` 使用一致顶部导航，并包含 `订阅方案工作台` 与 `Settings` 入口。
+4. 打开新前端默认入口：`GET /` 与 `GET /index` 应重定向到 `/app/workbench`，
+   `GET /Settings` 与 `GET /settings` 应重定向到 `/app/settings`；确认新前端
+   4 条导航（工作台/订阅方案/提交队列/Settings）与一致顶部导航。回退演练：
+   设 `MIGU_ORCA_WEB_ENTRY_LEGACY=1` 重启后 `/index`、`/settings` 恢复旧 Jinja
+   页面，API 与 storage 不受影响（自动化见 `tests/browser/test_app_entry_switch.py`）。
 5. 在生成表单中提交空白标题，确认页面在浏览器端提示错误且不会发起生成；再填写标题，确认提交按钮在请求中禁用，完成后通过统一通知展示生成或保存结果。
-6. 验证 Settings Storage 偏好：打开 `/settings`，修改默认 Storage 目录和默认保存 Request 开关后刷新页面，确认浏览器恢复最近偏好；点击 `清除偏好` 后恢复默认 `.migu_orca/storage` 和默认保存状态。该偏好只应存在于浏览器 `localStorage`，不写入 storage JSON 或 API 响应；缺省保存状态表示 `/index` 默认生成并保存 Request。
+6. 验证 Settings Storage 偏好：打开 `/app/settings`（或旧 `/settings` 回退入口），修改默认 Storage 目录和默认保存 Request 开关后刷新页面，确认浏览器恢复最近偏好；点击 `清除偏好` 后恢复默认 `.migu_orca/storage` 和默认保存状态。该偏好只应存在于浏览器 `localStorage`，不写入 storage JSON 或 API 响应；缺省保存状态表示默认生成并保存 Request。
 7. 验证 Request 列表：刷新列表后使用文本搜索、status 筛选和默认/标题升序/request_id 升序排序，确认匹配计数形如 `显示 2 / 5`，无匹配时显示空状态，清空筛选后列表恢复。
-8. 验证 Request 详情：打开列表项后确认浏览器 URL 同步为 `/index?request_id=<id>`；刷新该 URL 后仍展示同一详情。详情应按 Overview、Source、Filter、Seeds、Audit 分组；request_id 可复制；RSS 只显示是否已选择，不显示完整 RSS URL；Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 按 有效种子 -> 完整种子（按字幕组分组）-> 排除种子 顺序展示：有效种子默认可见并标注当前选中字幕组，完整种子每组显示字幕组名、种子数量并可展开列表，完整种子与排除种子默认折叠，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言；缺失 history 或 AB result 时保持非致命提示。
+8. 验证 Request 详情：打开列表项后确认浏览器 URL 同步为 `/app/requests?request_id=<id>`；刷新该 URL 后仍展示同一详情。详情应按 Overview、Source、Filter、Seeds、Audit 分组；request_id 可复制；RSS 只显示是否已选择，不显示完整 RSS URL；Filter 分区展示包含规则、排除规则、匹配模式（普通字符或正则）和大小写状态；Seeds 按 有效种子 -> 完整种子（按字幕组分组）-> 排除种子 顺序展示：有效种子默认可见并标注当前选中字幕组，完整种子每组显示字幕组名、种子数量并可展开列表，完整种子与排除种子默认折叠，排除原因使用 `命中排除规则` / `未命中包含规则` 可读语言；缺失 history 或 AB result 时保持非致命提示。
 9. 验证通知和恢复：列表加载失败时刷新按钮仍可用；详情加载失败时不清空已加载列表；通知可手动关闭，并会在下一次操作时替换旧消息。
-10. 验证 Stage 15 UI 质量门槛：`/index` 标题、运行模式摘要、主操作区、Request 列表和详情区应有清晰阅读顺序；`/settings` Storage、数据源、qBittorrent 和 Auto Bangumi 分区边界清晰；生成、确认、提交使用主按钮，刷新、修改、返回 Settings 使用次按钮，取消、清空、删除和撤销类操作使用危险/警示样式。
-11. 验证响应式和键盘操作：在中屏和移动宽度下 `/index` 与 `/settings` 为单列或低密度布局，不出现横向拥挤导航、过密并排表单或不可读详情表格；Tab 能聚焦主要控件和 Request 列表按钮；焦点样式可见，动态通知/列表/详情区域具备合适的语义标记。
+10. 验证 Stage 15 UI 质量门槛：新前端各页标题、运行模式摘要、主操作区、Request 列表和详情区应有清晰阅读顺序；Settings Storage、偏好默认值、qBittorrent 和 Auto Bangumi 分区边界清晰；生成、确认、提交使用主按钮，刷新、修改、返回 Settings 使用次按钮，取消、清空、删除和撤销类操作使用危险/警示样式。
+11. 验证响应式和键盘操作：在中屏和移动宽度下新前端各页为单列或低密度布局，不出现横向拥挤导航、过密并排表单或不可读详情表格；Tab 能聚焦主要控件和 Request 列表按钮；焦点样式可见，动态通知/列表/详情区域具备合适的语义标记。
 12. 验证 Request 操作：打开 PENDING_CONFIRM 状态的 Request 详情，确认出现确认、取消、修改按钮；点击确认后确认浏览器弹出确认框，确认后状态变为 ACCEPTED；点击取消后展示详情区内可见取消表单，提交前必须确认；点击修改后展示内联表单，空 patch 必须在浏览器端阻止，显式清空 filter_rule 或 expected_folder_name 后状态保持 PENDING_CONFIRM 且 Audit 更新。
 13. 验证 ACCEPTED Request 管理与筛选控件：打开 `ACCEPTED` Request 详情，确认同时出现 `修改`、`删除` 和 `去 Settings 提交 Auto Bangumi` 动作；`修改` 提交受限 patch 后详情保持 `ACCEPTED` 且 Filter、Seeds、Audit 刷新；`删除` 必须先确认，取消确认不调用删除 API，确认删除后列表刷新、详情清空且 URL 移除 `request_id`。在修改表单中确认 `包含规则` / `排除规则` 标签与默认未勾选的 `使用正则` / `大小写敏感` 复选框；默认提交发送 `use_regex=false` / `case_sensitive=false`，勾选后发送 `true`；普通字符模式下输入 `[` 或 `[v2]` 不得触发正则错误，勾选 `使用正则` 后非法正则才返回统一校验错误。
 14. 验证 Auto Bangumi Settings 入口：打开 `/settings#auto-bangumi`，确认无 request_id 也可选择默认账号密码或 API Token 并执行只读“测试连接”；成功摘要只显示连通性、公开版本、认证方式、adapter 和提交能力。打开 `ACCEPTED` Request 详情，确认出现跳转 `/settings?request_id=<id>#auto-bangumi` 的入口；提交前必须确认。成功后清理服务地址和全部认证字段，失败时只显示脱敏通知且不复制凭据。真实实例验收仅允许登录/状态等只读操作；Ralph 和自动化不调用真实订阅写接口。

@@ -7,7 +7,7 @@ from playwright.sync_api import Page
 
 from tests.browser.conftest import open_dev_fixture_panel
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]
 
 
 def _check_no_sensitive_content(page: Page) -> None:

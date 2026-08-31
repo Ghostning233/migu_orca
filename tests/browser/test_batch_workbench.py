@@ -18,7 +18,7 @@ from tests.browser.conftest import (
     set_storage_preferences,
 )
 
-pytestmark = pytest.mark.browser
+pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]
 
 
 def test_batch_result_renders_the_same_auditable_parse_summary(

@@ -136,21 +136,35 @@ def test_spa_fallback_never_intercepts_api_or_probes(
     assert readiness.status == 200
 
 
-def test_legacy_pages_still_served_alongside_app(
+def test_default_entry_switches_index_and_settings_to_spa(
     page: Page, live_server_url: str
 ) -> None:
-    """Legacy /index and /settings remain available during the migration window."""
+    """US-208: /index and /settings now redirect to the SPA (default entry).
+
+    The legacy pages remain *registered* for the migration window, but the
+    default entry serves the new frontend; the rollback rehearsal (legacy
+    entry mode) restores the old pages and is covered by
+    ``tests/browser/test_app_entry_switch.py``.
+    """
     _require_dist()
 
     page.goto(f"{live_server_url}/app/workbench")
     page.wait_for_selector(".app-title")
 
     page.goto(f"{live_server_url}/index")
-    assert page.title().startswith("MiGuOrca")
-    assert page.locator("text=Stage 13 订阅方案工作台").count() >= 1
+    page.wait_for_url("**/app/workbench", timeout=5000)
+    assert page.locator("#workbench-heading").count() >= 1
 
     page.goto(f"{live_server_url}/settings")
-    assert page.title() == "MiGuOrca Settings"
+    page.wait_for_url("**/app/settings", timeout=5000)
+    assert page.locator("#settings-heading").count() >= 1
+
+    # The SPA shell, API and probes are all still reachable after visiting the
+    # legacy entry URLs.
+    page.goto(f"{live_server_url}/app/workbench")
+    page.wait_for_selector(".app-title")
+    assert page.request.get(f"{live_server_url}/api/v1/requests").status == 200
+    assert page.request.get(f"{live_server_url}/healthz").status == 200
 
 
 def test_browser_availability_sanity() -> None:
