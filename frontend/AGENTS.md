@@ -236,3 +236,31 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - CheckboxRow 在批量卡片里用 `class="batch-card-checkbox-row"`（inheritAttrs 会把
   class 落到原生 input 上），浏览器测试直接 `.batch-card-checkbox-row` 即可，
   不要写成 `.batch-card-checkbox-row input`；全选用 `#batch-select-all-checkbox`。
+
+## 提交队列（US-206）
+
+- 提交队列在 `features/queue/QueueView.vue`（`/app/queue`）。纯函数逻辑收敛到
+  `features/queue/queueWorkbench.ts`（`queueStatusLabel`/`queueStatusClass`/
+  `queueItemSummary`/`queueItemCanRetry`/`queueItemCanRecover`/`buildAbConfig`/
+  `validateAbConfig`/`batchSubmitSummaryMessage`/`batchSubmitNotification`/
+  `recoverOutcomeNeedsManual` + transport wrappers），feature 与 Vitest 共用，
+  不复制第二套（legacy `batchQueueStatusLabel`/`buildAbConfig` parity）。
+- `batch_id` 是公开标识符，从 URL query 读取（`/app/queue?batch_id=...`）驱动队列
+  加载与刷新恢复；批量工作台（US-205）解析后把 `batch_id` 推入 URL，因此从批量
+  接受 → 提交队列是同一条链路。无 `batch_id` 时显示空状态并禁用刷新。
+- 队列项按状态分派动作：`FAILED`/`RETRYABLE` → 单项「重试」
+  （`POST /api/v1/batches/{batch_id}/retry`，带 `request_id`）；`SUBMITTING`/
+  `RESULT_PERSIST_FAILED` → 「恢复」（`POST .../recover`：先 `action=auto`，服务端
+  返回 `needs_manual` 时用共享 ConfirmDialog 让用户人工核验，确认=已创建订阅→
+  `succeeded`，取消=未创建→`failed`，均带 `confirm: true`）。已成功项绝不重复提交。
+- 提交/重试/恢复共用**同一个** Auto Bangumi 凭据表单（auth mode + endpoint +
+  password/token + fallback + 显式 confirm 勾选）：凭据走 `useSensitiveFields`
+  （组件内存），`queuePayload()` 在单次 POST body 里构造 `ab_config`；成功后
+  `ab.clearAll()` + `abConfirm=false`，切换认证模式 `ab.reset()`，卸载自动清空。
+- 失败语义（legacy parity）：HTTP 级失败**保留敏感输入与确认勾选**便于重试，只显示
+  固定中文反馈（绝不渲染服务端 `error_message`/`error_type`）；队列读取失败显示
+  脱敏错误态 + 重试。
+- 浏览器测试：`tests/browser/test_app_queue.py`（真实 Chromium）。mock 队列读取用
+  `page.route("**/api/v1/batches/{batch_id}/queue*", ...)`（注意 `*` 通配 storage_dir
+  query）；in-flight 用 conftest 的 `test-slow-submit`/`test-slow-retry` 延迟路由
+  （不 mock，真实返回 400）；SPA 通知断言用 `.global-notification:not(:empty)`。

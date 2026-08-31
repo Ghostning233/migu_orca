@@ -171,8 +171,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "US-206 完成：/app/queue 迁移提交队列——QueueView.vue 从 URL batch_id 读取 GET /api/v1/batches/{batch_id}/queue 恢复队列（批量工作台解析后已把 batch_id 推入 URL），无 batch_id 显示空状态并禁用刷新；队列项按状态分派动作（FAILED/RETRYABLE→重试、SUBMITTING/RESULT_PERSIST_FAILED→恢复：先 action=auto，服务端返回 needs_manual 时经共享 ConfirmDialog 人工核验，确认=已创建订阅→succeeded、取消=未创建→failed，均带 confirm:true），已成功项绝不重复提交。提交/重试/恢复共用同一个 Auto Bangumi 凭据表单（useSensitiveFields 组件内存 + 单次 POST body ab_config，成功/切换认证模式/卸载清空；HTTP 级失败保留输入与确认便于重试，只显示固定中文反馈）。纯函数逻辑收敛 queueWorkbench.ts。Vitest 新增 29 例（共 254 例全过）；浏览器新增 tests/browser/test_app_queue.py 16 例真实 Chromium（共 386 例全过），并同步 test_app_shell.py queue 路由断言。全套 386 浏览器 + 1048 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-207 将做跨功能响应式、无障碍与运行质量收敛。"
     },
     {
       "id": "US-207",

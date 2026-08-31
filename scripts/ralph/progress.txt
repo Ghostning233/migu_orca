@@ -64,6 +64,16 @@
   body，断言用全局 `.confirm-dialog .primary-button`（不要限定到 toolbar/panel 作用域）。
 - 批量 `batch_id` 是公开标识符可进 URL query（刷新恢复提交队列），但批量卡片服务端不
   持久化，刷新后不恢复卡片；`candidate_context`/`draft_id` 仍只在组件内存。
+- 队列（US-206）`batch_id` 从 URL query 读取驱动队列加载与刷新恢复（批量工作台解析后
+  已把 `batch_id` 推入 URL，接受 → 提交队列是同一条链路）；队列项按状态分派动作
+  （FAILED/RETRYABLE→重试、SUBMITTING/RESULT_PERSIST_FAILED→恢复、terminal 无按钮 =
+  防重复提交）。提交/重试/恢复共用一个 AB 凭据表单 + `queuePayload()` 工厂（成功
+  `clearAll()`、HTTP 级失败保留输入、切换认证模式 `reset()`）。
+- SPA 的 BaseButton `loading` 只显示 spinner + disabled（slot 文本保留）：浏览器
+  in-flight 断言用 `to_be_disabled()` + `aria-busy`，不要断言「处理中…」文本。
+- api_token 模式下模板没有 username/password 输入框（v-if 分支）：fill 密码字段前
+  必须先选 password 模式；切换认证模式会清空共享的 endpoint 字段（legacy
+  `clearAbSensitiveFields` 语义）。
 
 - US-200 起共享组件原语在 `frontend/src/components/`：layout（PanelSection/FormField）、
   forms（BaseButton/BaseInput/BaseTextarea/BaseSelect/CheckboxRow，v-model + attrs 透传 +
@@ -799,4 +809,91 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       recover）在 `/app/queue` 路由的 QueueView.vue（当前占位）。
     - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
       UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（370 例全过，含新 13 例）。
+---
+
+## 2026-08-31 08:05:00 CST - US-206
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 迁移提交队列到 `/app/queue`（frontend/src/features/queue/QueueView.vue）：
+    - 队列读取：`GET /api/v1/batches/{batch_id}/queue` 走统一 transport
+      （`loadQueue`，`{batch_id}` 路径模板 + 相对 storage query）；`batch_id` 是公开
+      标识符，从 URL query 读取（`/app/queue?batch_id=...`），批量工作台（US-205）
+      解析后已把 `batch_id` 推入 URL，因此接受 → 提交队列是同一条链路；无
+      `batch_id` 显示空状态并禁用刷新；URL batch_id 变化 watch 重新读取。
+    - 队列项按状态分派动作：`FAILED`/`RETRYABLE` → 单项「重试」
+      （`POST /api/v1/batches/{batch_id}/retry`，带 `request_id`）；`SUBMITTING`/
+      `RESULT_PERSIST_FAILED` → 「恢复」（`POST .../recover`：先 `action=auto`，
+      服务端返回 `needs_manual` 时经共享 ConfirmDialog 人工核验——确认=已创建
+      订阅→`succeeded`、取消=未创建→`failed`，均带 `confirm: true`）；已成功项
+      绝不重复提交（terminal 状态无动作按钮）。
+    - 提交/重试/恢复共用同一个 Auto Bangumi 凭据表单（auth mode + endpoint +
+      password/token + fallback + 显式 confirm 勾选）：凭据走 `useSensitiveFields`
+      （组件内存），`queuePayload()` 在单次 POST body 构造 `ab_config`；成功后
+      `ab.clearAll()` + `abConfirm=false`，切换认证模式 `ab.reset()`，卸载自动清空。
+    - 失败语义（legacy parity）：HTTP 级失败保留敏感输入与确认勾选便于重试，只显示
+      固定中文反馈（绝不渲染服务端 error_message/error_type）；队列读取失败显示
+      脱敏错误态 + 重试；in-flight 时提交按钮与敏感输入全部禁用。
+  - 纯函数逻辑收敛到 `frontend/src/features/queue/queueWorkbench.ts`
+    （`queueStatusLabel`/`queueStatusClass`/`queueItemSummary`/`queueItemCanRetry`/
+    `queueItemCanRecover`/`queueItemIsStuck`/`queueItemIsTerminal`/`buildAbConfig`/
+    `validateAbConfig`/`batchSubmitSummaryMessage`/`batchSubmitNotification`/
+    `recoverOutcomeNeedsManual`/`recoverNeedsManualMessage` + `loadQueue`/
+    `submitQueue`/`retryQueueItem`/`recoverQueueItem` transport wrappers），feature
+    与 Vitest 共用，不复制第二套（legacy `batchQueueStatusLabel`/`buildAbConfig`
+    parity）。
+  - 测试：Vitest 新增 queueWorkbench.test.ts（13）与 QueueView.test.ts（16，共 254
+    例全过）；浏览器新增 `tests/browser/test_app_queue.py` 16 例真实 Chromium（空
+    状态/读取与状态渲染/读取失败脱敏/360px/提交校验与确认/提交成功清空与防重复/
+    提交失败保留输入/in-flight 禁用/重试按钮分派/重试成功/重试失败/恢复按钮分派/
+    自动恢复/人工核验确认/人工核验取消/敏感边界）；同步 `test_app_shell.py` queue
+    路由断言（`#queue-heading` → `#batch-queue-count`/`#batch-queue-list`）。
+  - 文档：frontend/AGENTS.md（US-206 章节）、README（Stage 27 段落 + US-206）、
+    stage PRD 文档（US-206 完成记录）、scripts/ralph/prd.json（US-206 passes: true）。
+- Files changed
+  - 新增：frontend/src/features/queue/{queueWorkbench.ts, queueWorkbench.test.ts,
+    QueueView.test.ts}、tests/browser/test_app_queue.py
+  - 修改：frontend/src/features/queue/QueueView.vue（占位→完整队列）、
+    tests/browser/test_app_shell.py、frontend/AGENTS.md、README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 队列项按状态分派动作是「纯函数能力位」模式：`queueItemCanRetry`/
+      `queueItemCanRecover` 只判断 status 码，渲染层 v-if 出对应按钮；terminal
+      状态（SUCCEEDED/FAILED）无按钮 → 天然防重复提交，与旧 app.js
+      `renderBatchQueueItem` 一致。
+    - 提交/重试/恢复共用一个凭据表单 + 一个 `queuePayload()` 工厂：ab_config 在
+      单次 POST body 构造（`buildAbConfig` + `validateAbConfig` 纯函数），成功后
+      `clearAll()`、失败保留输入——复用 Settings AB 表单模式，不复制第二套。
+    - recover 三段式：先 `action=auto`（不需要凭据/确认）→ 服务端返回
+      `needs_manual` 才弹 ConfirmDialog → 确认/取消分别走 `succeeded`/`failed`
+      （均带 `confirm: true`）。用 `recoverOutcomeNeedsManual(result.items[0])`
+      判断，注意首次 recover 调用后要重新取 mock calls 数组再断言第二次。
+    - SPA 的 BaseButton `loading` 只显示 spinner + disabled（slot 文本保留），
+      浏览器 in-flight 断言用 `to_be_disabled()` + `aria-busy`，不要断言
+      「处理中…」文本（旧 app.js 是替换按钮文案，新前端不同）。
+  - Gotchas encountered
+    - api_token 模式下模板里**没有** username/password 输入框（v-if 分支）：
+      Vitest/浏览器测试 fill 密码字段前必须先选 password 模式，否则
+      Playwright `#batch-queue-ab-password` 超时。
+    - 切换认证模式 `ab.reset()` 会清空 endpoint（共享字段也清空），与旧 app.js
+      `clearAbSensitiveFields` 语义一致；测试断言共享字段清空 + 密码字段卸载 +
+      token 字段出现为空。
+    - `recoverOutcomeNeedsManual` 参数要接受 `undefined`（`result.items?.[0]`
+      可能缺失），TS strict 下签名要写 `{ status?: string | null } | undefined | null`。
+    - QueueView 的 StatusAlert 作用域是 `#batch-queue-submit-form .status-alert`
+      （页面只有这一个 form 时裸 `.status-alert` 也行，但保持 form 作用域更稳）。
+  - Useful context
+    - 旧 app.js 对照基准：`renderBatchQueueItem`/`loadBatchQueue`/`submitBatchQueue`/
+      `retryBatchQueueItem`/`recoverBatchQueueItem`（~2825-3287 行）、
+      `buildAbConfig`/`clearAbSensitiveFields`（~819/838 行）、
+      `batchQueueSummaryMessage`（~3069 行）。
+    - 队列端点 DTO（BatchQueueDTO/BatchQueueItemDTO/BatchSubmitResultDTO）在
+      US-205 已补齐并入库，本 story 无需改 OpenAPI/生成客户端（drift check 双守护
+      全过）；`serialize_queue` 只回公开脱敏字段，前端直接渲染无需再 displayValue。
+    - US-207 将做跨功能响应式/无障碍收敛；US-208 parity 矩阵可把旧 queue 旅程
+      （提交/重试/恢复/刷新恢复）指向 `/app/queue?batch_id=...`。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（386 例全过，
+      含新 16 例）。
 ---

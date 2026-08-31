@@ -354,6 +354,27 @@ recover）。
 - 补齐 queue/submit/retry/recover DTO；成功项不重复提交，失败项独立恢复。
 - AB 凭据仅存在于当前组件内存和单次 POST body，成功/离开时清空。
 
+US-206 完成（2026-08-31）：`/app/queue` 迁移提交队列——`QueueView.vue` 从 URL
+`batch_id`（公开标识符）读取 `GET /api/v1/batches/{batch_id}/queue` 恢复队列（批量工作台
+解析后已把 `batch_id` 推入 URL），无 `batch_id` 显示空状态并禁用刷新；队列项按状态分派
+动作：FAILED/RETRYABLE → 单项「重试」（`retry` 带 `request_id`），SUBMITTING/
+RESULT_PERSIST_FAILED → 「恢复」（`recover`：先 `action=auto`，服务端返回 `needs_manual`
+时经共享 ConfirmDialog 人工核验——确认=已创建订阅→`succeeded`、取消=未创建→`failed`，
+均带 `confirm: true`），已成功项绝不重复提交。提交/重试/恢复共用同一个 Auto Bangumi
+凭据表单（`useSensitiveFields` 组件内存 + 单次 POST body `ab_config`，成功清空/切换认证
+模式清空/卸载清空；HTTP 级失败保留输入与确认便于重试，只显示固定中文反馈）。纯函数逻辑
+收敛到 `features/queue/queueWorkbench.ts`（`queueStatusLabel`/`queueStatusClass`/
+`queueItemSummary`/`queueItemCanRetry`/`queueItemCanRecover`/`buildAbConfig`/
+`validateAbConfig`/`batchSubmitSummaryMessage`/`batchSubmitNotification` +
+transport wrappers）。Vitest 新增 29 例（queueWorkbench 13 + QueueView 16，共 254 例全过）；
+浏览器新增 `tests/browser/test_app_queue.py` 16 例真实 Chromium（空状态/读取与状态渲染/
+读取失败脱敏/360px/提交校验与确认/提交成功清空与防重复/提交失败保留输入/in-flight 禁用/
+重试按钮分派/重试成功/重试失败/恢复按钮分派/自动恢复/人工核验确认/人工核验取消/敏感边界），
+并同步 `test_app_shell.py` queue 路由断言（`#queue-heading` → `#batch-queue-count`/
+`#batch-queue-list`）。全套 386 浏览器 + 1044 非浏览器 + typecheck/lint/unit/build/
+api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 `.migu_orca/storage`
+不存在。US-207 将做跨功能响应式、无障碍与运行质量收敛。
+
 ### US-207：完成跨功能响应式、无障碍与运行质量收敛
 
 - 覆盖 360px、平板和桌面，无关键操作横向溢出或只靠颜色表达状态。
