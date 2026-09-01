@@ -81,7 +81,9 @@ def _preserved_entry_query() -> str:
 
 @web_blueprint.get("/")
 def index_redirect() -> object:
-    return redirect(_INDEX_SPA_PATH)
+    # The root entry is as bookmarkable as /index and must preserve the same
+    # public identifiers while dropping every sensitive query value.
+    return redirect(f"{_INDEX_SPA_PATH}{_preserved_entry_query()}")
 
 
 @web_blueprint.get("/index")
@@ -94,7 +96,7 @@ def index() -> object:
 
 @web_blueprint.get("/Settings")
 def settings_case_redirect() -> object:
-    return redirect(_SETTINGS_SPA_PATH)
+    return redirect(f"{_SETTINGS_SPA_PATH}{_preserved_entry_query()}")
 
 
 @web_blueprint.get("/settings")

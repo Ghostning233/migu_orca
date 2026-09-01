@@ -208,8 +208,14 @@ def test_entry_routes_and_probes_not_intercepted() -> None:
 
 
 def test_spa_entry_redirects_preserve_public_query_params() -> None:
-    """US-208: /index and /settings forward request_id/batch_id to the SPA."""
+    """US-208: Web entries forward public request_id/batch_id to the SPA."""
     client = _client()
+
+    root = client.get("/?request_id=req-root&batch_id=batch-root")
+    assert root.status_code == 302
+    assert root.headers["Location"] == (
+        "/app/workbench?request_id=req-root&batch_id=batch-root"
+    )
 
     index = client.get("/index?request_id=req-1&batch_id=batch-2")
     assert index.status_code == 302
@@ -218,6 +224,10 @@ def test_spa_entry_redirects_preserve_public_query_params() -> None:
     settings = client.get("/settings?request_id=req-ab-3")
     assert settings.status_code == 302
     assert settings.headers["Location"] == "/app/settings?request_id=req-ab-3"
+
+    settings_case = client.get("/Settings?request_id=req-ab-4")
+    assert settings_case.status_code == 302
+    assert settings_case.headers["Location"] == "/app/settings?request_id=req-ab-4"
 
 
 def test_spa_entry_never_forwards_sensitive_query_values() -> None:
