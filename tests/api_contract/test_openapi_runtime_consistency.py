@@ -195,18 +195,20 @@ def test_frontend_generated_client_matches_openapi() -> None:
 
     US-198 pins ``frontend/src/api/generated/api.ts`` to
     ``docs/api/openapi.json`` via ``openapi-typescript`` (locked in
-    ``frontend/package.json``). This test runs the same drift check CI runs
-    (``npm run api:check``), so a stale generated client fails the Python
-    suite too — no separate CI step is needed for local runs.
+    ``frontend/package.json``). When frontend dependencies are installed this
+    test runs the same drift check as the dedicated frontend CI job. A clean
+    backend-only checkout skips it instead of mistaking a missing local CLI
+    for generated-client drift.
     """
     import shutil
 
     repo_root = Path(__file__).resolve().parents[2]
     npm = shutil.which("npm")
-    if npm is None:
+    generator = repo_root / "frontend" / "node_modules" / ".bin" / "openapi-typescript"
+    if npm is None or not generator.is_file():
         import pytest
 
-        pytest.skip("npm not available; frontend drift is covered by CI")
+        pytest.skip("frontend dependencies not installed; drift is covered by frontend CI")
     result = subprocess.run(
         [npm, "run", "api:check"],
         cwd=repo_root / "frontend",
