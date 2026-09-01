@@ -1,200 +1,1122 @@
-# MiGuOrca Ralph Progress - Stage 26
+# MiGuOrca Ralph Progress - Stage 27
 
 ## Codebase Patterns
 
-- `_storage_dir` 空值（`None|""|"  "`）必须返回 `_WEB_STORAGE_ROOT` 本身，**绝不**返回 `None`：`load_storage_config(None)` 会回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖（含生产 `MIGU_ORCA_WEB_STORAGE_ROOT`）。新增/修改取 `_storage_dir(...)` 的端点后，用「不传 storage_dir 的保存请求」回归验证写入服务端根而非仓库根。
-- 完整测试跑完必须检查仓库根 `.migu_orca/storage` 是否被创建——被创建说明有路径绕过了服务端 root，会连锁挂掉浏览器空列表测试（US-196 靠此信号发现 US-193 回归）。
-- Python 依赖、检查与测试统一通过 `uv`；不要直接使用系统 Python。
-- Web API 成功/失败继续使用 `{ok, result}` / `{ok, error_type, error_message, error_data}` envelope；Stage 26 可修正 HTTP 状态，但必须保持 envelope 兼容。
-- Web 适配层按职责拆分：`schemas.py`（请求模型）、`api_contract.py`（响应 DTO）、`serializers.py`（脱敏白名单）、`services.py`（编排与存储 seam）、`contexts.py`（短期上下文）、`routes_*.py`（按端点族）、`views.py`（仅页面路由 + Blueprint 组装）；route 模块「导入即注册」，`views.py` 必须 import 全部 `routes_*`。
-- monkeypatch 目标必须指向**符号实际被调用处的模块命名空间**（`routes_requests`/`routes_batches`/`routes_mikan`/`routes_settings`/`routes_connections`/`services`/`contexts`），不是定义处或旧的 `views`。
-- 先为端点增加 golden contract，再拆分 `views.py`；每次只迁移一个端点族并运行对应 API/浏览器回归。
-- Pydantic DTO 与确定性 OpenAPI 是 Stage 27 的公开契约；响应 serializer 使用白名单，不让任意 engine dict 或敏感未知字段穿透。
-- Web storage 和 CLI storage 使用不同信任边界：CLI 保留显式路径，Web 只能使用服务端允许根目录/profile。
-- 未保存草案由服务端权威 draft 管理；客户端只持有 opaque ID 和允许 patch，不能把完整 Request 作为可信持久化输入。
-- 服务端权威草案实现（US-194）：`apps/migu_orca_web/drafts.py` 的 `DraftStore`（TTL 30 分钟、容量 128、一次性保存 + 重放保护）；查找返回 `(value, reason)` 区分 expired/evicted/replayed/unknown → 409 `draft_expired`/`draft_evicted`/`draft_replayed`；错误 details 不回显 draft_id。前端只在内存持有 `currentDraftId`/`row.draft_id`，绝不写 URL/browser storage。
-- 浏览器测试 mock 未保存草案：生成响应必须用 conftest `preview_result_json(request)`（内部 `draft_store.issue` 签发真实 draft），批量卡片 mock 用 `issue_draft_id(preview_request)` 补 draft_id，preview-save mock 用 `save_preview_handler(calls?)`（消费 draft 返回保存结果）；否则真实 preview-save 后端 409。
-- DraftStore 是进程级单例，views/api_contract/browser 的 autouse fixture 都要 `draft_store.clear()`。
-- 外部 endpoint、username、password、token、cookie、Authorization、SID、raw HTML、raw RSS XML、原始响应体、完整失败 URL、magnet 和本地绝对路径不得进入 API 展示、storage、URL、browser storage、日志、截图或 trace。
-- UI story 必须读取 `.agents/skills/dev-browser/SKILL.md` 并用真实 Chromium 验证；浏览器整体 skip 不能作为 UI 完成证据。
-- 浏览器测试使用 fixture/Playwright route 隔离外部服务；不得自动向真实 AutoBangumi、qBittorrent 或 MiKan 执行写操作。
-- 完整 browser/full pytest 前确认仓库根 `.migu_orca/storage` 不存在，避免陈旧 Request 干扰测试。
-- Stage 26 不做页面视觉重构或引入新前端框架；只允许维持 API 兼容所需的最小旧前端修改。
-- HTTP 状态语义（US-192）：envelope 形状不变，状态码由 `extensions/flask_api/api.py:_error_http_status` 集中分类（400 输入/`invalid_*`/`config_error`、404 `*_not_found`、409 状态冲突/context 失效/重放、401 外部认证、502 上游不可达、503 不可用/版本不支持、504 超时、500 storage/未知）；新增 error_type 时同步该映射与 `openapi_gen.py` `_ENDPOINTS` 的 errors 声明。
-- 旧前端 `static/app.js` 的 fetchJson 已兼容非 2xx JSON、非 JSON body 与网络失败（中文安全回退）；新增失败 mock 时用 `route.fulfill(status=..., json=...)` 或 `content_type="text/html"` 模拟。
-- API 端点清单与 golden contract 测试位于 `docs/api/endpoint_inventory.md` + `tests/api_contract/`；新增/删除 `/api/v1` 端点必须同步这两处，否则 `test_inventory_consistency.py` 失败。
-- 旧前端 `static/app.js` 的 localStorage key 只有 `miguOrca.web.storageDir`/`miguOrca.web.saveRequest`，URL 状态参数只有 `request_id`/`batch_id`；`tests/api_contract/test_frontend_dependencies.py` 冻结了这些契约。
-- Web `storage_dir` 是服务端根目录下的相对 profile（`services._storage_dir`，默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖，测试用 `set_web_storage_root`）；绝对路径/穿越/符号链接逃逸 → 400 `invalid_storage_dir`，details 不回显原始路径；CLI `--storage-dir` 是独立信任边界不受此约束。
-- 改 Web API 测试的 storage 时：views/api_contract/browser 三处都有 autouse `_web_storage_root` fixture 指向 tmp，API-facing `storage_dir` 传相对 profile 名；浏览器 `set_storage_preferences` 用 `storage_dir.name`，localStorage 断言也用 `storage_dir.name`。
-- `GET /api/v1/mikan/posters/<key>` 是二进制函数视图，不经过 `APIBaseView` envelope 包装；US-192 起在 `routes_mikan.py` 内 try/except `Stage1Error` 转 JSON envelope + `_error_http_status` 状态（畸形 key 400、未注册 404、上游取图失败 502）。
-- 批量 retry/recover 对「队列不存在」返回 `queue_not_found`（`load_submission_queue` 直接抛），对「队列存在但 request_id 未知」才返回 `queue_item_not_found`。
-- OpenAPI 契约在 `docs/api/openapi.json`，由 `uv run migu-orca-openapi` 确定性生成（`--check` 做漂移检查）；端点注册表在 `src/apps/migu_orca_web/openapi_gen.py` 的 `_ENDPOINTS`，新增/删除 `/api/v1` 端点必须同步注册表，否则 `tests/api_contract/test_openapi_generation.py` 失败。
-- 公开响应 DTO 在 `src/apps/migu_orca_web/api_contract.py`，全部 `extra="forbid"`；`_ENDPOINTS` 的 `success` 字段引用 DTO（或少量内联 dict，如 request list）。
-- pydantic v2 `model_json_schema()` 会输出 `$defs` + `$ref`；OpenAPI 生成时用 `_dereference` 内联，避免输出带本地 ref 的文档（客户端生成器更易消费）。
-- Python 静态检查（US-195）是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：F/E4/E7/E9/W/I/UP/B/SIM，`line-length=120`，排除 E402/E501/B009/UP046/UP047/UP031 并记录理由）；`compileall` 只是语法检查，不冒充静态检查。
-- 质量门禁（US-195）：`.github/workflows/ci.yml` 每次 push/PR 执行 compileall → ruff → 非浏览器 pytest → `node --check` → `migu-orca-openapi --check` → `git diff --check`；真实 Chromium 套件在单独 job，`MIGU_ORCA_CI=1` 下浏览器不可用直接失败（conftest `pytest_collection_modifyitems` 抛 RuntimeError）而非静默 skip。
-- 健康/就绪探针：`/healthz` 纯存活；`/readiness` 用 `services._web_storage_root()` + `ensure_storage_layout(load_storage_config(...))` 校验服务端 storage 根，失败 503 `{"ok": false, "result": "storage_unavailable"}`；两者都不访问真实外部系统。readiness 测试必须 `set_web_storage_root(tmp_path)` 避免污染仓库 `.migu_orca/storage`。
-- 修改「仅作再导出」的 import（如 views.py 的 `api_blueprint`）时，ruff --fix 会误删；保留并加 `# noqa: F401` 注明用途。UP037（去引号注解）只在有 `from __future__ import annotations` 的文件安全。
+- Web 入口路由（`/`、`/index`、`/Settings`、`/settings`）在 `views.py` 里**固定重定向
+  到 SPA**（US-209 起旧 Jinja 页面、`app.js`、`web_entry_mode()` 与
+  `MIGU_ORCA_WEB_ENTRY_LEGACY` 回退开关已删除）；只转发公开 `request_id`/`batch_id`
+  query。`web_blueprint` 不再挂 static/template 文件夹，placeholder 模板由
+  `app_blueprint`（自带 template_folder）渲染。浏览器回归只有 SPA 套件
+  （`tests/browser/test_app_*.py`），不再有旧旅程/legacy_entry。
+- 快照类 DTO（RequestSnapshotDTO/HistorySectionDTO/AbResultSectionDTO 等）用
+  `_SnapshotBase(BaseModel)`（`extra="allow"`）让引擎 dict 可带额外字段过边界，同时给
+  生成客户端稳定显示类型；envelope DTO 仍 strict `extra="forbid"`。视图运行时直接返回
+  引擎 dict 不重序列化，OpenAPI 快照字段只是声明。
+- 详情/子面板挂载模式：父视图 `v-if="selectedId"` + `:key` 重挂载，子面板自加载自管理
+  loading/error/empty；`@changed` 通知父刷新列表、`@deleted` 由父清 URL 并卸载。
+  动作成功后面板用服务端返回对象更新内存快照再重载，避免旧 app.js 双请求竞态。
+- 破坏性/不可逆动作统一走共享 ConfirmDialog（confirm() 返回 Promise<boolean>，
+  danger 用 .danger-button）；动作失败只显示固定中文反馈，绝不渲染服务端 error_message。
+- 浏览器测试动作流程断言重载后状态用 wait_for_selector + to_contain_text 组合，避免
+  命中重载前的旧面板（不要用会匹配旧面板的通用选择器如 .detail-actions）。
+- `displayValue` 数组 join 用中文逗号 `，`；`scrubConfig` 里 key 命中敏感词
+  （endpoint/url/token/...）优先整体 `[redacted]`，值 URL 检查只对非敏感 key 生效。
+- `_ENDPOINTS` 的 `success` 优先写 pydantic DTO（如 `RequestListResultDTO`）而非 inline
+  dict：DTO 让 OpenAPI 出现 title/required/additionalProperties:false，生成客户端类型更严格。
+  改 DTO 后必须 `uv run python -m apps.migu_orca_web.openapi_gen` + `cd frontend && npm run
+  api:generate` 并提交两个生成文件（drift check 双守护）。
+- 生成的 `frontend/src/api/generated/api.ts` 里业务类型从 operations 内联提取，例如列表项：
+  `NonNullable<operations['listRequests']['responses']['200']['content']['application/json']['result']['requests']>[number]`；
+  `components.schemas` 只有 envelope DTO（ApiOkEnvelope/ApiErrorEnvelope），没有业务 DTO。
+- 列表/表格类 feature 把纯函数逻辑收敛到独立模块（如 `features/requests/requestsList.ts`：
+  label/search/filter/sort/status），feature 与 Vitest 共用，不复制第二套；状态码内部值只作
+  option value 与内部比较，用户可见文案走 statusLabel 映射。
+- 选择/恢复类状态由 URL query 驱动（`router.push({path, query})`），刷新恢复、清空时 push
+  不带 query；`request_id` 等公开已保存标识符可进 URL，凭据/endpoint 永远不进 URL。
+- 浏览器断言列表项用 `.request-list-item`（含 `data-request-id`）、选中用
+  `.request-list-item.is-selected`，不要裸用 `[data-request-id]`（多处动作按钮共用该属性）。
+- Vitest 里 `setValue` 后 computed 不重算，先怀疑 fixture 数据：多条 fixture 共享某字段
+  （如 expected_folder_name）会让搜索命中多条；fixture 必须区分每条。
+- `router.push` 是异步的：测试断言 URL query 用 `await flushPromises()`，不要单次 nextTick。
+- `git diff --check` 会报 AGENTS.md 末尾多余空行：编辑后 `rstrip('\n') + '\n'` 归一。
+- 迁移占位视图后必须同步 `tests/browser/test_app_shell.py` 的对应路由断言（旧断言引用
+  占位视图的 id/class）。
+- 工作台（US-204 起）候选/草案 feature 逻辑收敛到 `features/workbench/candidateSearch.ts`
+  （校验/季数证据/payload 构造），候选卡片只渲染公开白名单字段；`candidate_context` 与
+  `draft_id` 只存在组件内存，保存成功后 `router.push('/requests?request_id=...')` 跳转。
+- 候选/草案公开 DTO：`MikanCandidateDTO` 用 strict `extra="forbid"`（engine 字段在边界拒绝，
+  白名单见 test_dto_contracts 与 golden 测试）；`season_evidence` 用 lenient
+  `SeasonEvidenceDTO`（`_SnapshotBase`）只作公开审核摘要。改白名单后必须重生成 OpenAPI +
+  TS 客户端并同步 golden 白名单断言。
+- 浏览器测试 SPA 通知断言用 `.global-notification:not(:empty)`（旧页是 `#page-notification`）；
+  `page.route("**/api/v1/requests")` 只匹配精确路径，preview-modify/preview-save 仍走真实后端。
+- CheckboxRow 的 id 直接落在原生 input：测试/浏览器用 `#mikan-fallback-enabled`（不要加
+  ` input` 后缀），`v-model:checked` 绑定后 `setValue(true)` 即可触发显示/隐藏。
+- 批量工作台（US-205）feature 逻辑收敛到 `features/workbench/batchWorkbench.ts`
+  （label/校验/payload/通知纯函数），FOUND 候选浮层复用 `CandidateCard`（
+  `BatchCandidatePopover.vue`）、DRAFT 详情复用 `DraftPreviewPanel`（
+  `BatchDraftPreviewPanel.vue` 加批量专属接受/删除动作行），不复制第二套实现。
+- 批量接受统一走 `POST /api/v1/batches/{batch_id}/accept`（US-146 单卡/批量同端点）：
+  「批量接受」带 `item_ids` 只发选中项，「全接受」按 legacy parity 发送**所有卡片**
+  不带 `item_ids`（让服务端对不可接受卡片返回中文 reason）；accept payload 只含
+  item_id/request_id/title + 相对 storage_dir。批量卡片 preview-save 用
+  `DraftPreviewPanel.saveDraftAndReturn()`（返回已保存 Request，避免二次保存）。
+- 批量公开 DTO：`BatchParseItemDTO`/`BatchQueueItemDTO`/`BatchQueueDTO`/
+  `BatchResultItemDTO` 用 lenient `_SnapshotBase`（`extra="allow"`），**内嵌
+  `candidates` 仍是 strict `MikanCandidateDTO`**（engine 字段在嵌套层拒绝）；
+  envelope 仍 strict。改批量 DTO 后必须重生成 OpenAPI + TS 客户端（drift check 双守护）。
+- 批量卡片 CheckboxRow 用 `class="batch-card-checkbox-row"`（inheritAttrs 把 class 落
+  到原生 input），浏览器测试直接 `.batch-card-checkbox-row`；ConfirmDialog Teleport 到
+  body，断言用全局 `.confirm-dialog .primary-button`（不要限定到 toolbar/panel 作用域）。
+- 批量 `batch_id` 是公开标识符可进 URL query（刷新恢复提交队列），但批量卡片服务端不
+  持久化，刷新后不恢复卡片；`candidate_context`/`draft_id` 仍只在组件内存。
+- 队列（US-206）`batch_id` 从 URL query 读取驱动队列加载与刷新恢复（批量工作台解析后
+  已把 `batch_id` 推入 URL，接受 → 提交队列是同一条链路）；队列项按状态分派动作
+  （FAILED/RETRYABLE→重试、SUBMITTING/RESULT_PERSIST_FAILED→恢复、terminal 无按钮 =
+  防重复提交）。提交/重试/恢复共用一个 AB 凭据表单 + `queuePayload()` 工厂（成功
+  `clearAll()`、HTTP 级失败保留输入、切换认证模式 `reset()`）。
+- SPA 的 BaseButton `loading` 只显示 spinner + disabled（slot 文本保留）：浏览器
+  in-flight 断言用 `to_be_disabled()` + `aria-busy`，不要断言「处理中…」文本。
+- api_token 模式下模板没有 username/password 输入框（v-if 分支）：fill 密码字段前
+  必须先选 password 模式；切换认证模式会清空共享的 endpoint 字段（legacy
+  `clearAbSensitiveFields` 语义）。
 
+- US-200 起共享组件原语在 `frontend/src/components/`：layout（PanelSection/FormField）、
+  forms（BaseButton/BaseInput/BaseTextarea/BaseSelect/CheckboxRow，v-model + attrs 透传 +
+  aria-invalid）、feedback（ConfirmDialog/StatusAlert）；focus 用
+  `app/composables/useFocusTrap.ts`，敏感凭据用 `app/composables/useSensitiveFields.ts`
+  （字段只存组件局部内存，模式切换/成功/取消/卸载主动清空）。新 feature 必须复用这些
+  原语，不得复制安全/确认/状态逻辑。
+- ConfirmDialog 用 ref + `confirm({title,message,confirmLabel,cancelLabel,danger})` 返回
+  Promise<boolean>；`danger: true` 渲染 danger-button。useFocusTrap 锚点放在 Teleport 根
+  （backdrop）上，否则 inert 标错对象；浏览器测试查 `#app` 的 inert。
+- BaseInput/BaseTextarea 必须自己 emit `update:modelValue` 才支持 v-model；Vue SFC prop
+  不能用保留字 `for`（用 `inputId`）。jsdom 测 Teleport 组件用
+  `attachTo: document.body` + `stubs: {teleport: true}`。
+- CheckboxRow 等带包装 div 的组件必须 `defineOptions({ inheritAttrs: false })` 并手动转发
+  `id`/`name` 到原生控件：否则 `id` 同时落在包装 div 和 input（Playwright strict mode 报
+  2 元素）；`v-model:checked` 需显式 `checked` prop + `update:checked` emit。
+- 连接测试/提交类表单（qB/AB）失败只显示**固定中文反馈**，绝不渲染服务端
+  `error_message`（可能含 endpoint/凭据）；偏好等会拒绝敏感输入的表单失败时回退到
+  「上次成功值」清空被拒绝输入（等价 legacy `currentPreferenceValues`）。
+- Settings 等含多个 StatusAlert 的页面，断言必须限定到各自 form 作用域
+  （`#xxx-form .status-alert`），裸 `.status-alert` 会命中第一个。
+- 浏览器验证原语/迁移脚手架路由 `/app/components-demo`（ComponentsDemoView.vue +
+  test_components_primitives.py）已在 US-209 删除；共享组件原语继续由各 feature 的
+  Vitest/浏览器套件覆盖。
+- Python 依赖、检查和测试统一通过 `uv`；前端依赖统一在 `frontend/` 使用 `npm ci`，不得混用 lockfile。
+- Stage 27 只通过 `docs/api/openapi.json` 生成 TypeScript 类型/client；不得导入 Python 模型、手写第二套响应 interface 或从旧 `app.js` 复制业务状态机。
+- US-198 起类型化客户端由 `openapi-typescript@7.13.0` 生成：`cd frontend && npm run api:generate`
+  输出 `src/api/generated/api.ts`（入库），`npm run api:check` 做漂移检查（CI frontend job +
+  `tests/api_contract/test_openapi_runtime_consistency.py::test_frontend_generated_client_matches_openapi`
+  双守护）。改 `docs/api/openapi.json` 后必须重生成并提交生成文件。
+- `_ENDPOINTS` 每个条目必须显式声明可读 `operationId`（如 `listRequests`）；`errors` 声明
+  必须与 `extensions/flask_api/api.py:_error_http_status` 运行时分类一致。
+  `test_openapi_runtime_consistency.py` 自动核对：声明 vs 分类一致、被分类 error_type 全部有
+  声明（CLI-only/批内 item 结果的进 `_UNDOCUMENTED_ERROR_TYPES` 豁免集）、operationId 唯一/
+  可读/稳定、OpenAPI 无裸数组属性（列表写 `[Model]` 由 `_normalize_property` 展开）。
+- openapi-typescript 生成模块是类型-only（无运行时值）：前端测试用 vitest `expectTypeOf`
+  做编译期断言，不能 `import { operations }` 当值用；生成文件无敏感值（字段名除外）。
+- 对应 feature 迁移前先补齐它实际读取的深层公开 DTO；长期 `dict[str, Any]` / `Record<string, unknown>` 不能作为完成状态。
+- 新前端先挂载 `/app/`；SPA fallback 不能截获 `/api/v1`、海报、`/healthz`、`/readiness`、静态文件或旧 Flask 页面。
+- production build 由 Flask 同源提供，不依赖 Node 运行时；Vite dev server 只用于本地开发代理。
+- Pinia 只放跨页面非敏感状态且默认不持久化；candidate context、draft ID、搜索结果和敏感表单仅存在于内存。
+- endpoint、username、password、token、cookie、Authorization、SID、raw HTML、raw RSS XML、原始响应体、完整失败 URL、magnet、本地绝对路径不得进入 store 持久化、URL、browser storage、日志、build、sourcemap、截图或 trace。
+- 未保存草案由服务端 `DraftStore` 权威管理；前端只持有 opaque `draft_id` 和允许 patch，不得提交完整 Request 作为 preview modify/save 权威输入。
+- Web storage 只能提交服务端根目录下相对 profile；空值回落服务端根。CLI 显式路径是不同信任边界。
+- 单个与批量复用候选、草案、Request 和安全表单组件；不要复制后端标题、季数、筛选、状态或队列规则。
+- 每个 UI story 必须读取 `.agents/skills/dev-browser/SKILL.md` 并用真实 Chromium 验证；浏览器整体 skip 不能作为完成证据。
+- 浏览器测试通过 fixture/Playwright route fake 隔离外部服务；不得自动访问真实 MiKan 或向真实 AutoBangumi/qBittorrent 写入。
+- 每个 feature 自己承担 DTO、Vitest、API contract、基本响应式/无障碍、Playwright parity 和敏感值回归；US-207 只做跨功能收敛。
+- 键盘可达性（US-207）：App.vue 的 `#skip-link` 是 Tab 首个聚焦目标（聚焦时才可见），
+  `main#app-main` 带 `tabindex="-1"` 作为 skip 落点；批量候选浮层打开聚焦 close 按钮、
+  Escape 关闭，父组件在关闭时**同步**恢复焦点到触发按钮（不要在 rAF 里恢复——popover
+  卸载会先把焦点丢到 body）。
+- `time.sleep` 不能写在 `page.route` handler 里（阻塞 Playwright 分发线程，loading 永远
+  不可见）：观察 in-flight/loading 态用 conftest 服务端延迟路由（`test-slow-submit`/
+  `test-slow-retry`/`test-slow-queue`）。
+- production build（US-207）：vite.config.ts 用 functional `manualChunks` 把 node_modules
+  打进 `vendor-*.js`（object 形式会把全部依赖并成一个 chunk 破坏懒加载）；`sourcemap:
+  false` 且 dist 永不提交 `.map`。Flask `/app/assets/*` 返回 immutable 缓存头（Vite 内容
+  哈希不可变），SPA shell 与其它 `/app/*` 返回 `no-cache`（部署换哈希不 pin 旧资源）；
+  `routes_app.py` 的 `app_shell`/`app_fallback` 返回带 Cache-Control 的 `Response`。
+- 跨功能收敛浏览器套件在 `tests/browser/test_app_responsive_a11y.py`（22 例）：四路由 ×
+  360/768/1280 无横向溢出（`body.scrollWidth <= innerWidth`）、导航 flex-wrap 换行、
+  状态文本不只靠颜色、skip link、popover 焦点、reduced-motion、vendor chunk、无
+  sourcemap、缓存头。新增 feature 路由/UI 后保持这些跨功能断言全绿，不重复业务断言。
+- US-208 完成 parity 矩阵、默认入口切换和不回滚业务数据的回退演练；未通过前不得执行 US-209 旧资产删除。
+- 完整门禁后确认仓库根 `.migu_orca/storage` 不存在，并检查未提交 build 临时目录和敏感产物。
+- US-197 起 SPA 托管在 `/app/`：Vite `base` 固定 `/app/`（`routes_app.py` 的 `app_blueprint`
+  同源服务 `frontend/dist`，无构建时返回占位模板）；SPA fallback 只接管 `/app/*`，其他路由
+  各自注册、绝不截获。
+- Vue Router history base 是 `/app/`：路由 `to` 用相对路径（`/workbench`），完整 URL 是
+  `/app/workbench`；RouterLink 不要重复写 `/app/` 前缀。
+- `frontend/dist`、`node_modules`、`*.tsbuildinfo` 不入库；CI frontend job 用 `npm ci` +
+  typecheck/lint/unit/build，browser job 先构建 frontend 再跑真实 Chromium。
+- 前端单元测试（Vitest）用 `createMemoryHistory('/app/')` + 与真实路由同表的 stub 组件；
+  RouterLink 按 `/app/` base 解析，路由表必须与真实一致，否则出现 "No match found" 警告。
+- US-199 起新前端统一走 `frontend/src/api/client.ts` 的 `apiRequest`/`api.*`/`api.poster`：
+  feature 不得裸 `fetch` 或拼接 `/api/v1` URL；`{param}` 路径模板 + `options.path`/`query`，
+  失败统一抛 `ApiError`（安全中文 message），海报端点返回 Blob 不经 envelope。
+- 全局 loading（`app/stores/loading.ts` + `useTrackedRequest.ts` 的 `trackedApi`）、通知
+  （`app/stores/notification.ts` + `GlobalNotification.vue` aria-live，error 用 role=alert）、
+  错误边界（`ErrorBoundary.vue` 包 RouterView）都是非敏感全局状态；敏感值仍只在组件内存。
+- SPA 路由 4 条：`/app/workbench`、`/app/requests`、`/app/queue`、`/app/settings`（导航
+  工作台/订阅方案/提交队列/Settings）；Flask 侧除 `/app/` fallback 外不需新增服务端路由。
+- 本机 home 只读时，`uv` 缓存用 `UV_CACHE_DIR=<repo>/.uv-cache`、npm 用
+  `--cache <repo>/.npm-cache`；Chromium 系统库可解包到 `<repo>/.chromium-deps/extracted` 并
+  前置 `LD_LIBRARY_PATH`（这些目录已加入根 .gitignore）。
 
-## 2026-08-29 10:30:00 CST - US-189
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- 冻结全部 `/api/v1` 端点清单、方法、请求/响应字段、成功/校验失败/业务失败/脱敏错误 envelope、敏感值边界与旧前端依赖，为 US-190（DTO/OpenAPI）与 US-191（拆分 views.py）提供可自动核对的事实基线。
-- 新增 `docs/api/endpoint_inventory.md`：§2 端点总表（与 url_map 自动核对）、§3 端点族明细（requests/mikan/preferences/corrections/batches/connections）、§4 敏感值边界与已记录问题（poster 函数视图无 envelope）、§5 旧前端依赖（fetch URL、localStorage key、URL 参数、request_id/batch_id/candidate_context 生命周期）。
-- 新增 `tests/api_contract/`：`test_inventory_consistency.py`（清单↔url_map 双向核对，漏记即失败）、`test_golden_contracts.py`（每类端点族成功/输入失败/业务失败/脱敏 golden contract，全部基于 fake 与 tmp_path，不访问真实 MiKan/AB/qB）、`test_frontend_dependencies.py`（冻结 localStorage key、URL 参数、fetch URL、fetchJson envelope 处理）。
-- 质量检查：compileall、非浏览器 pytest（963 passed）、node --check、git diff --check 全绿；浏览器套件因环境缺 Chromium 系统库跳过（US-189 无 UI 改动，无需浏览器验证）。
-- Files changed: `docs/api/endpoint_inventory.md`、`tests/api_contract/`（conftest + 3 个测试文件 + `__init__.py`）。
-- **Learnings for future iterations:**
-  - url_map 中 `request_id` 参数写作 `<path:request_id>`；与清单文档比较前需归一化为 `<request_id>`。
-  - 探测 API 行为时若漏传 `storage_dir` 会写仓库根 `.migu_orca/storage`（如 batch accept 会建 `queue/b1.json`）；探测后必须清理，否则挂掉后续浏览器/完整测试。
-  - `preview-modify` 对非法 patch 返回 `invalid_modify_patch_field`（details 含 `illegal_fields`/`allowed_fields`）；`preview-save` 只允许 PENDING_CONFIRM。
-  - 连接测试成功响应只回白名单字段；`/api/v1/requests/<id>/submit-ab` 的成功结果会把脱敏后的 `ab_submit_result` 写回 snapshot 与 `ab_results/`。
+## 2026-08-30 - Stage 27 启动优化
+
+- Stage 26 已通过 PR #45 合入 `main`，合并提交 `255194c`；本地与远端均只保留 `main` 后创建 Stage 27 执行分支。
+- 复核 Stage 26 最终 OpenAPI：24 个 operation 全覆盖且 operationId 唯一；发现 Request 详情实际 404 未声明、海报实际 400/404/502 仅声明 404、operationId 可读性和深层 DTO 仍需面向生成器校准，纳入 US-198。
+- 将原 US-197～US-204 的大故事拆为 US-197～US-209：工程基线、契约生成、外壳、共享安全组件、Settings、Request 列表、Request 详情、单个搜索/草案、批量工作台、提交队列、横向质量、切换/回退、旧资产清理。
+- 每个故事按依赖排序且目标在单次 Ralph 迭代内完成；UI story 都要求使用 dev-browser 真实 Chromium 验证，全部 story 初始 `passes: false`。
+- Stage 26 活动 `prd.json`/`progress.txt` 与 `scripts/ralph/archive/2026-08-30-stage26-web-api-contract-hardening/` 完全一致后才切换活动文件，没有覆盖未归档进度。
+- 本轮只优化规划和活动 Ralph 输入，不实施 Vue 页面或修改业务 API。
 ---
 
-## 2026-08-29 08:00:00 CST - Stage 26 规划
-Thread: https://codex.openai.com/threads/unknown
-- Stage 25 已通过中文 PR #43 合入 `main`，合并提交为 `8eac997`。
-- 新建 Stage 26 P0 规划：冻结 API、建立响应 DTO/OpenAPI、拆分 Web 适配层、修正 HTTP 状态、限制 Web storage、建立服务端权威 draft、增加 CI 与 local-only 部署基线。
-- 活动分支：`agent/stage26-web-api-contract-hardening`；stories 为 US-189～US-196，初始均为 `passes: false`。
-- Stage 27 前端工程化迁移只作为 handoff，不进入 Stage 26 实现。
+## 2026-08-30 - US-197
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 建立 `frontend/` Vue 3 + TypeScript(strict) + Vite 工程：`package.json`/`package-lock.json`
+    （npm ci 可复现）、`tsconfig.json`（strict + noUncheckedIndexedAccess）、`vite.config.ts`
+    （base=/app/、dev proxy /api/v1 → Flask :5000、build sourcemap=false）、`vitest.config.ts`
+    （jsdom）、`eslint.config.js`（flat + vue/typescript/prettier，--max-warnings 0）。
+  - 最小 SPA：`src/main.ts` + `App.vue`（外壳 header/导航/RouterView）+ `src/app/router/index.ts`
+    （base=/app/，/workbench、/settings 懒加载）+ `features/workbench|settings` 占位视图 +
+    `src/styles/main.css` 设计基线；`src/App.test.ts` 两个 Vitest 外壳测试。
+  - Flask 托管：新增 `routes_app.py`（`app_blueprint`）——`/app/` 外壳、`/app/<path:subpath>`
+    按真实文件服务或回退 SPA 外壳（路径穿越防护），无 `frontend/dist` 时返回依赖无关占位模板；
+    蓝图注册进 `apps/migu_orca_web/__init__.py`，`views.py` 导入并再导出。
+  - 测试：`src/apps/migu_orca_web/app_routes_test.py`（11 例：构建/占位/静态/fallback/穿越/
+    API 与旧页面与探针不被截获/蓝图注册/base 资产前缀/占位无敏感值）；
+    `tests/browser/test_app_shell.py`（6 例真实 Chromium：SPA 挂载、路由切换、无 console 错误、
+    fallback 不截获 API/探针、旧页面并存、CI 缺构建即失败）。
+  - CI：新增 `frontend` job（setup-node cache + npm ci + typecheck/lint/unit/build）；
+    `browser` job 在跑套件前 `npm ci && npm run build`。
+  - 文档：README「Web UI 与 API」「前端工程（Stage 27）」、`src/apps/migu_orca_web/AGENTS.md`
+    （SPA 托管与 fallback 边界）、新建 `frontend/AGENTS.md`；根 .gitignore 追加
+    `.npm-cache/` `.uv-cache/` `.chromium-deps/`。
+- Files changed
+  - 新增：frontend/（18 个文件）、`src/apps/migu_orca_web/routes_app.py`、`app_routes_test.py`、
+    `templates/migu_orca_web/app_placeholder.html`、`tests/browser/test_app_shell.py`
+  - 修改：`.github/workflows/ci.yml`、`.gitignore`、`README.md`、
+    `src/apps/migu_orca_web/{__init__.py, views.py, AGENTS.md}`、`scripts/ralph/{prd.json, progress.txt}`
 - **Learnings for future iterations:**
-  - 现有 API 行为和浏览器旅程覆盖充分，适合用 golden contract 保护后渐进拆分，不适合同时重写后端和前端。
-  - `views.py`、客户端完整 preview Request 和浏览器任意 storage_dir 是前端迁移前必须优先治理的服务端边界。
+  - Patterns discovered
+    - Vite `base: '/app/'` 后，`dist/index.html` 自动引用 `/app/assets/*`；Flask 用
+      `app_blueprint` 在 `/app/<path:subpath>` 直接 `send_from_directory(dist, subpath)` 服务真实
+      文件、其余回退外壳即可，无需单独的 `/app/static/` 路由。
+    - `vue-tsc -b`（build mode）会生成 `tsconfig.tsbuildinfo` 且要求 composite；改用
+      `vue-tsc --noEmit`（typecheck）与 `build: npm run typecheck && vite build` 更干净。
+    - RouterLink 在 `createWebHistory('/app/')` 下 `to` 写相对路径；测试用
+      `createMemoryHistory('/app/')` + 同表 stub 路由避免 "No match found"。
+  - Gotchas encountered
+    - npm/uv 默认缓存写在 `~/.cache`，本机 home 只读 → 必须用 `--cache` / `UV_CACHE_DIR`
+      指到仓库内目录（已 gitignore），否则 `uv sync`/`npm install` 直接 EROFS 失败。
+    - Chromium 缺 `libnspr4/libnss3/libnssutil3` 系统库；apt download + dpkg -x 解包到仓库内
+      `.chromium-deps/extracted` 并前置 `LD_LIBRARY_PATH` 即可跑真实浏览器套件（/tmp 每次命令
+      被清空，不能放 /tmp）。
+    - `create_app("testing")` 的 url_map 现在含 `/app/` 路由；OpenAPI/端点清单测试只核对
+      `/api/v1`，不受影响；新 `/app` 路由不属 API 契约，无需改 endpoint_inventory/openapi.json。
+  - Useful context
+    - 浏览器测试 fixture `live_server_url` 是进程内 Flask server；SPA 测试需真实构建
+      `frontend/dist`（CI browser job 已构建；本地先 `cd frontend && npm run build`）。
+    - 旧 `/index`、`/settings` 与 `/app/` 并存是刻意设计（迁移窗口），US-208 才切换默认入口。
 ---
 
-## 2026-08-29 12:00:00 CST - US-190
+## 2026-08-30 - US-198
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- 建立公开响应 DTO 与确定性 OpenAPI 契约，作为 Stage 27 TypeScript 前端的唯一生成类型来源。
-- 新增 `src/apps/migu_orca_web/api_contract.py`：成功/失败 envelope DTO（`ApiOkEnvelope`/`ApiErrorEnvelope`）与每端点族 result DTO，全部 `extra="forbid"` 拒绝未知字段；`ok_result()` 帮助函数可选按 DTO 校验后返回 envelope。
-- 新增 `src/apps/migu_orca_web/openapi_gen.py`：从 Flask url_map + `_ENDPOINTS` 注册表确定性生成 OpenAPI 3.1（24 个操作全覆盖）；`--check` 漂移检查；`migu-orca-openapi` console script（pyproject.toml）。
-- 生成 `docs/api/openapi.json`（~170KB）与 `docs/api/README.md`；示例全部虚构脱敏（`example.invalid`），凭据字段标 `x-request-scoped`，海报端点声明 image/jpeg|png|gif|webp content type。
-- 生命周期文档：`endpoint_inventory.md` §5.4 补充 draft_id（US-194 预告），OpenAPI info description 引用；README/docs README 更新命令。
-- 新增测试：`tests/api_contract/test_dto_contracts.py`（16 个 DTO 拒绝未知/敏感字段）、`test_openapi_generation.py`（8 个：url_map 全覆盖、注册表一致性、确定性、脱敏示例、poster content type、漂移 CLI）。
-- 质量检查：compileall、完整 pytest（1250 passed，含真实 Chromium 263 个浏览器测试）、node --check、OpenAPI --check、git diff --check 全绿。
-- Files changed: `src/apps/migu_orca_web/api_contract.py`、`openapi_gen.py`、`docs/api/openapi.json`、`docs/api/README.md`、`docs/api/endpoint_inventory.md`、`docs/README.md`、`README.md`、`pyproject.toml`、`.gitignore`、`tests/api_contract/test_dto_contracts.py`、`test_openapi_generation.py`。
+- What was implemented
+  - OpenAPI 校准：修复 schema 合法性（GET /requests 的 result.requests 从内联 `[{}]` 改为
+    `type: array` + `items: RequestSummaryDTO`，openapi-typescript smoke test 之前直接报
+    "Expected Schema Object or boolean, got Array"）；Request 详情补 404 request_not_found +
+    400 invalid_request_id + 500 storage_error/storage_json_error；海报端点补结构化
+    400/404/502/500 错误声明（invalid_poster_key/invalid_poster→400、poster_not_found→404、
+    poster_unavailable→502、storage_error→500）；按可达性补齐 POST /requests 的
+    invalid_input/config_error/rss_parse_failed/season_* 409/mikan 502/504，submit-ab 与
+    batch submit/retry 的 config_error/ab_* 502/503/504，连接测试的
+    config_error/qbittorrent_http_failed/qbittorrent_unexpected_response/ab_probe_unsupported，
+    批量端点的 invalid_batch_id。
+  - operationId：24 个 operation 全部在 _ENDPOINTS 固化显式可读 camelCase id
+    （listRequests/getRequestDetail/createRequest/previewModifyRequest/.../testAutoBangumiConnection），
+    不再依赖路径推导的机器名（如旧的 getRequestsByRequestid）。
+  - 类型化客户端：选定 openapi-typescript@7.13.0（devDependency + lockfile 锁定），
+    `npm run api:generate` → `frontend/src/api/generated/api.ts`（入库），
+    `npm run api:check` 漂移检查；CI frontend job 新增 api:check 步骤；
+    Python 侧 `test_openapi_runtime_consistency.py::test_frontend_generated_client_matches_openapi`
+    也跑同一 drift check（双守护）。
+  - 自动一致性测试：新增 tests/api_contract/test_openapi_runtime_consistency.py 7 例——
+    声明 status/error_type 与 _error_http_status 运行时分类一致、被分类 error_type 全部有声明
+    （或列入 _UNDOCUMENTED_ERROR_TYPES 显式豁免）、operationId 唯一/可读/稳定、
+    OpenAPI 无裸数组属性、前端生成客户端不漂移。
+  - 前端 Vitest：新增 src/api/generated/api.test.ts 5 例（expectTypeOf 编译期断言
+    operations 键=operationId、paths 全集、envelope components、submit-ab 凭据字段）。
+  - 文档：docs/api/README.md 增加"Stage 27 类型化客户端（US-198）"小节；
+    endpoint_inventory.md 修正海报错误状态分类（invalid_poster_key 是 400 不是 404）；
+    frontend/AGENTS.md 与 src/apps/migu_orca_web/AGENTS.md 增加生成器/一致性测试约定；
+    Stage 27 PRD US-198 标记完成。
+- Files changed
+  - 修改：src/apps/migu_orca_web/openapi_gen.py、docs/api/openapi.json、
+    frontend/package.json、frontend/package-lock.json、.github/workflows/ci.yml、
+    docs/api/README.md、docs/api/endpoint_inventory.md、frontend/AGENTS.md、
+    src/apps/migu_orca_web/AGENTS.md、docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md
+  - 新增：tests/api_contract/test_openapi_runtime_consistency.py、
+    frontend/src/api/generated/api.ts、frontend/src/api/generated/api.test.ts
 - **Learnings for future iterations:**
-  - pydantic v2 `model_json_schema()` 输出 `$defs` + `$ref`；OpenAPI 生成需 `_dereference` 内联，否则文档带本地 ref。
-  - `_ENDPOINTS` 注册表 key 用 url_map 的 `<param>` 形式（`<path:request_id>`/`<batch_id>`/`<key>`），OpenAPI 路径再规范化为 `{param}`；url_map 的 `request_id` 是 `<path:request_id>` 不是 `<request_id>`。
-  - `extra="forbid"` DTO 中 `dict[str, Any]` 字段（request 快照/parse_result/queue item 等）内部仍接受任意 key；DTO 只保证 envelope 与顶层 result key 白名单，深层脱敏由现有 serializer 负责。
-  - `migu-orca-openapi` console script 需 `uv pip install -e .` 重装后生效；模块方式 `uv run python -m apps.migu_orca_web.openapi_gen` 始终可用。
-  - 浏览器测试环境：`.agents/.chromium-libs`（从 .deb 提取的 Chromium 系统库）被 gitignore；运行时需 `ln -s` 到 `/tmp/chromium-libs`（conftest 硬编码路径），否则浏览器测试整体 skip。
+  - Patterns discovered
+    - openapi-typescript 是类型-only 生成器（interface/type，无运行时值）；Vitest 对它只能
+      用 `expectTypeOf`（编译期断言），不能 `import { operations }` 当值。
+    - `_ENDPOINTS` 的 raw result-shape dict 值必须是合法 JSON Schema 属性；列表写成
+      `[ItemModel]` 由 `_normalize_property` 展开成 `type:array+items`，裸 `[{}]` 会被
+      生成器拒绝。
+    - 一致性测试的豁免集 `_UNDOCUMENTED_ERROR_TYPES` 是必需维护点：CLI-only/批内 item 结果/
+      仅注释提及的 error_type 不属 envelope 契约，新 error_type 要么声明要么加豁免。
+  - Gotchas encountered
+    - 海报端点原文档把 invalid_poster_key 写成 404，实际 _error_http_status 分类是 400
+      （invalid_poster_key 在 _HTTP_BAD_REQUEST_ERROR_TYPES）；golden 测试
+      test_golden_poster_endpoint_unified_error_handling 断言 400，文档与 OpenAPI 之前都错了。
+    - batch accept/submit 的 request_cancelled/ab_http_failed/draft_mismatch 只出现在
+      queue item 结果（dict[str,Any]）或注释里，不是 envelope 错误，必须进豁免集，
+      否则"每个被分类 error_type 都要声明"测试误报。
+    - 改 _ENDPOINTS 的 errors 或 operationId 后要同时重生成 docs/api/openapi.json 和
+      frontend/src/api/generated/api.ts，两个 drift check（uv + npm）都要过。
+  - Useful context
+    - 本机跑浏览器套件：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      uv run pytest tests/browser/ -q`（/tmp 每命令清空，conftest 的 /tmp/chromium-libs 路径
+      本机不可用；CI 用 playwright install --with-deps 无此问题）。
+    - openapi-typescript `--check` 模式返回码 0=最新，非零=过期；CI frontend job 与
+      Python 一致性测试都用它守护生成文件。
 ---
 
-## 2026-08-29 21:40:00 CST - US-191
+## 2026-08-30 19:57:22 CST - US-199
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- 拆分 Web schema、serializer、service、context 与按端点族路由，`views.py` 从 2,146 行收敛为 53 行页面路由 + Blueprint 组装；全部 24 个 /api/v1 端点、方法、endpoint 名称保持 golden contract 兼容。
-- 新增模块（均在 `src/apps/migu_orca_web/`）：
-  - `blueprints.py`：`api_blueprint`/`web_blueprint` 唯一归属地（避免循环导入）。
-  - `schemas.py`：请求/查询 Pydantic 模型（从 views.py 原样迁移）。
-  - `serializers.py`：响应序列化与脱敏白名单（`_serialize_*`、`_sanitize_*`、`_strip_sensitive_result_fields`、`poster_service`）。
-  - `services.py`：用例编排与存储 seam（`_storage_dir`、`_resolve_mikan_config`、`_search_*`、`_build_batch_*`、`_load_*_section`），复用 engine/repository。
-  - `contexts.py`：`CandidateSelectionContextStore` 与 `candidate_selection_contexts` 单例。
-  - `routes_requests.py`/`routes_mikan.py`/`routes_batches.py`/`routes_settings.py`/`routes_connections.py`：按端点族注册路由。
-- `views.py` 通过「导入 route 模块即注册端点」的方式组装 Blueprint，并向后兼容再导出 context 符号。
-- 测试 seam 迁移：`views_test.py`、`tests/api_contract/test_golden_contracts.py`、`tests/api_contract/conftest.py` 的 monkeypatch 目标从 `apps.migu_orca_web.views.*` 改为实际调用点模块（`routes_requests`/`routes_batches`/`routes_mikan`/`routes_settings`/`routes_connections`/`services`/`contexts`）。
-- 文档：`docs/design/architecture.md`（Web 边界现状列出新模块职责）、`docs/api/endpoint_inventory.md`（实现位置说明）、stage PRD（US-191 标记完成、背景问题改为历史描述）、`api_contract.py` docstring；新增 `src/apps/migu_orca_web/AGENTS.md` 记录拆分布局与 monkeypatch seam 约定。
-- 质量检查：compileall、完整 pytest（987 非浏览器 + 263 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿。
-- Files changed: 新增 10 个模块文件 + AGENTS.md；修改 `views.py`（重写）、`views_test.py`、`api_contract.py`、`tests/api_contract/conftest.py`、`tests/api_contract/test_golden_contracts.py`、`docs/design/architecture.md`、`docs/api/endpoint_inventory.md`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
+- What was implemented
+  - 统一 API transport：`frontend/src/api/client.ts`（US-199 核心）——`apiRequest` +
+    `api.get/post/put/patch/delete` + `api.poster(key)`（海报 Blob，不经 envelope）。
+    统一处理成功/失败 envelope（`{ok:true,result}` / `{ok:false,error_type,error_message,error_data}`）、
+    非 2xx JSON、非 JSON 错误体（代理 HTML 归一为「请求失败，请稍后重试」）、网络失败
+    （TypeError→`network_error`）、AbortSignal 取消（`request_cancelled`）与超时
+    （默认 `DEFAULT_TIMEOUT_MS=15000`，AbortError→`request_timeout`），失败统一抛 `ApiError`
+    （type/message/status/details/cancelled/network/nonJson/httpError）；`toApiError` 对任意
+    Error 一律降级为安全中文文案（绝不渲染原始错误文本/URL/响应体/凭据）。
+  - 路径参数用 `{param}` 模板（如 `/api/v1/requests/{request_id}` 传 `options.path`），
+    查询参数 `options.query` 只放非敏感值（相对 `storage_dir` 等）。
+  - 全局状态：`app/stores/loading.ts`（in-flight 计数）、`app/stores/notification.ts`
+    （success/error/info）；`app/composables/useTrackedRequest.ts`（`trackedApi` begin/end
+    驱动全局 loading）。
+  - 共享反馈组件：`components/feedback/` EmptyState / LoadingState（reduced-motion 兼容）/
+    ErrorState / GlobalNotification（aria-live，error 用 role=alert）/ ErrorBoundary（包住
+    RouterView，不展示原始 error）。
+  - SPA 路由扩为 4 条：`/app/workbench`、`/app/requests`、`/app/queue`、`/app/settings`；
+    App.vue 导航含「订阅方案工作台/订阅方案/提交队列/Settings」4 项；RequestsView/
+    QueueView 为带 EmptyState 的占位视图（US-202/US-206 迁移）。
+  - `main.css` 增加 primary/secondary/danger 按钮原语与 focus-visible 样式。
+  - 测试：`client.test.ts` 16 例（envelope/非 JSON/网络/取消/超时/路径插值/海报/安全降级）、
+    `useTrackedRequest.test.ts` 2 例、`loading.test.ts` 2 例；`App.test.ts` 扩至 4 路由+
+    通知（aria-live/role=alert/关闭）；`tests/browser/test_app_shell.py` 更新为 4 导航与
+    各 route 挂载（6 例真实 Chromium）。
+  - 文档：README（Stage 27 段落 + /app/ 路由清单）、frontend/AGENTS.md（统一 transport
+    章节）、src/apps/migu_orca_web/AGENTS.md（4 条 SPA 路由说明）、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md（US-199 完成记录）、
+    scripts/ralph/prd.json（US-199 passes: true）。
+- Files changed
+  - 新增：frontend/src/api/client.ts、client.test.ts、
+    frontend/src/app/stores/{loading,notification}.ts、loading.test.ts、
+    frontend/src/app/composables/useTrackedRequest.ts、useTrackedRequest.test.ts、
+    frontend/src/components/feedback/{EmptyState,LoadingState,ErrorState,GlobalNotification,
+    ErrorBoundary,GlobalLoadingBar}.vue、
+    frontend/src/features/requests/RequestsView.vue、frontend/src/features/queue/QueueView.vue
+  - 修改：frontend/src/{App.vue, App.test.ts, app/router/index.ts, styles/main.css}、
+    frontend/AGENTS.md、README.md、docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    src/apps/migu_orca_web/AGENTS.md、tests/browser/test_app_shell.py、
+    scripts/ralph/{prd.json, progress.txt}
 - **Learnings for future iterations:**
-  - route 模块「导入即注册」：`views.py` 必须 import 全部 `routes_*`，漏一个端点就不注册，`test_inventory_consistency.py` 立刻失败。
-  - monkeypatch 目标必须指向**符号实际被调用处的模块命名空间**，不是定义处：`routes_batches` 里的 `_search_batch_item_candidates` 要 patch `routes_batches.<sym>` 而非 `services.<sym>`；路由类里的 `generate_request` 要 patch `routes_requests.<sym>`；`mikan_client_module`/`candidate_search_cache` 在 `services` 命名空间使用。
-  - `views.py` 拆分后仍向后兼容再导出 `CandidateSelectionContextStore`/`candidate_selection_contexts`，旧导入路径不报错；新代码应直接从 `contexts.py` 导入。
-  - 浏览器测试运行前需 `ln -s .agents/.chromium-libs /tmp/chromium-libs`，且必须在**同一 bash 命令内**先建链接再跑 pytest（/tmp 链接跨命令不持久）。
-  - 拆分纯移动代码时先跑 `git show HEAD:views.py` 对比 route 注册集合，确保 24 个端点路径逐一相同；再跑 api_contract + views_test + browser 三套回归。
+  - Patterns discovered
+    - `apiRequest` 的 `{param}` 路径模板是类型安全的：`ApiPath` 来自生成的 `paths` 键，
+      缺失路径参数直接 throw（测试守护）。feature 迁移一律走 `api.*`，禁止裸 `fetch`。
+    - jsdom 下 `Response.blob()` 返回的对象不是真 `Blob`（无 `.text()`），海报单测断言
+      URL/返回值而非 `instanceof Blob`。
+    - 通知/loading/error-boundary 都是全局非敏感状态：Pinia store 只放计数器/消息，
+      不持久化、不含凭据；敏感值仍只在组件内存与单次 POST body。
+    - 浏览器测试选导航链接要用 `get_by_role("link", name="订阅方案", exact=True)`：
+      `has_text="订阅方案"` 会同时命中「订阅方案工作台」（前缀匹配歧义）。
+  - Gotchas encountered
+    - App.vue 用了共享组件后必须显式 import（Vue SFC 不会自动注册）；忘了 import 时
+      typecheck 会报 unknown component，但 build 也可能悄悄通过——注意看模板编译。
+    - 非 JSON 错误体（如代理 502 HTML）之前没置 `nonJson` 标志，测试暴露后补上：
+      `envelopeError(status, payload, isNonJson)`。
+    - AbortError 同时来自超时与外部取消：用 `signal?.aborted` 区分
+      `request_timeout` / `request_cancelled`，两者 status 都是 0。
+  - Useful context
+    - US-200 将在这套 feedback 原语之上建 layout/button/input/confirm/credential form 等
+      primitives；US-202 起迁移 Request 列表时复用 `trackedApi` + 通知 + EmptyState/
+      LoadingState/ErrorState。
+    - 浏览器测试前置：仓库根 `.migu_orca/storage` 不存在；本机跑浏览器套件需
+      `UV_CACHE_DIR=$PWD/.uv-cache` 与 `LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/...`。
 ---
 
-## 2026-08-30 02:20:00 CST - US-192
+## 2026-08-30 20:55:00 CST - US-200
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- 为全部 /api/v1 端点建立正确 HTTP 状态语义，envelope 形状保持 golden contract 兼容：状态码按 error_type 分类，客户端可按状态码稳定处理失败。
-- `extensions/flask_api/api.py` 新增 `_error_http_status` 集中分类（唯一来源，路由不硬编码）：400 输入/客户端错误（`data_validation_errors`、`validation_error`、`invalid_*`、`config_error`、`queue_not_found`）、404 资源不存在（`request_not_found`、`queue_item_not_found`、`poster_not_found`）、409 冲突/一次性 context 失效/重放（`invalid_request_status`、`request_cancelled`、`season_evidence_conflict`、`season_confirmation_required`、`candidate_context_invalid` + US-194 draft_* 预告）、401 外部认证失败（`ab_auth_failed`、`qbittorrent_auth_failed`）、502 上游不可达（`mikan_connection_failed`、`ab_connection_failed`、`poster_unavailable` 等）、503 上游不可用/版本不支持（`ab_unsupported_version` 等）、504 上游超时（`mikan_timeout`、`ab_timeout`、`qbittorrent_timeout`）、500 服务端内部（`storage_error`、`storage_json_error`）；未知 error_type 默认 400。`failed_response`/`handle_exception` 按映射设置 status。
-- 海报二进制函数视图 `GET /api/v1/mikan/posters/<key>` 纳入统一错误处理（`routes_mikan.py` try/except + `failed_response(status=_error_http_status(...))`）：畸形 key → 400 `invalid_poster_key`，未注册 key → 404 `poster_not_found`，上游取图失败 → 502 `poster_unavailable`；成功仍返回图片字节。
-- 旧前端 `static/app.js` `fetchJson` 兼容非 2xx：解析 JSON envelope（非 2xx 的 error_type/error_message 仍生效）、非 JSON body 回退「请求失败，请稍后重试」、网络异常回退「网络请求失败，请检查网络后重试」并设 `error.status`；所有错误仍走 `notifyApiError` 中文安全反馈。
-- OpenAPI：`_ENDPOINTS` 注册表 errors 声明与 `_error_http_status` 分类一致（qb/ab test-connection 的 timeout 拆到 504、unsupported 拆到 503），重生成 `docs/api/openapi.json`；`docs/api/endpoint_inventory.md` §1/§4.3/§6 与 `docs/api/README.md` 记录新状态语义。
-- 测试：`tests/api_contract/test_golden_contracts.py` 全部失败路径断言真实状态码 + 新增 `test_golden_upstream_failures_map_to_stable_status`（502/503/504/500 分类 + 真实端点 504 脱敏）与 `test_golden_poster_endpoint_unified_error_handling`（400/404）；`src/extensions/flask_api/api_test.py` 新增映射单测；`views_test.py` 33 处失败断言更新；`tests/browser/test_actions.py` 新增 `TestHttpStatusErrorHandling`（409 JSON、502 非 JSON、网络中断三条中文安全反馈路径）；`test_frontend_dependencies.py` 冻结 fetchJson 非 2xx/非 JSON/网络处理。
-- 质量检查：compileall、完整 pytest（991 非浏览器 + 266 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿。
-- Files changed: `src/extensions/flask_api/api.py`、`api_test.py`、`src/apps/migu_orca_web/routes_mikan.py`、`static/app.js`、`openapi_gen.py`、`views_test.py`、`AGENTS.md`、`docs/api/openapi.json`、`docs/api/endpoint_inventory.md`、`docs/api/README.md`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`tests/api_contract/test_golden_contracts.py`、`test_frontend_dependencies.py`、`tests/browser/test_actions.py`、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`。
+- What was implemented
+  - 建立共享组件原语（frontend/src/components/）：
+    - layout/：PanelSection.vue（标题面板 + actions slot）、FormField.vue（label +
+      可选 help + required 指示；用 `inputId` 指定 label 的 `for`）。
+    - forms/：BaseButton.vue（primary/secondary/danger + loading「处理中…」）、
+      BaseInput.vue / BaseTextarea.vue（v-model + aria-label/aria-invalid + attrs
+      透传）、BaseSelect.vue（options 支持 string | {value,label}）、CheckboxRow.vue
+      （label + 原生 checkbox，id 用 useId()）。
+    - feedback/：ConfirmDialog.vue（ref + confirm() 返回 Promise<boolean>；
+      role=alertdialog + aria-modal + focus trap + inert 背景 + Escape/backdrop 取消 +
+      关闭后焦点恢复）、StatusAlert.vue（success/info/empty→role=status，error→role=alert
+      assertive）。
+  - focus primitive：app/composables/useFocusTrap.ts（Tab/Shift+Tab 循环、Escape 回调、
+    兄弟元素 inert、deactivate 焦点恢复）。
+  - credential-form primitive：app/composables/useSensitiveFields.ts（field/set/reset/
+    clearAll/snapshot/firstMissing/get；字段只存组件局部 reactive 内存；切换认证模式/
+    成功/取消/卸载主动清空；snapshot() 只返回非空值；onUnmounted 用 getCurrentInstance
+    守卫）。
+  - 浏览器验证路由 /app/components-demo（features/components/ComponentsDemoView.vue，
+    懒加载，不加入导航；US-209 随迁移脚手架删除）。
+  - 测试：Vitest 新增 useSensitiveFields.test.ts（10）、useFocusTrap.test.ts（8）、
+    ConfirmDialog.test.ts（8）、BaseFormControls.test.ts（6），共 61 例全过；
+    浏览器新增 tests/browser/test_components_primitives.py 8 例真实 Chromium
+    （渲染/360px 无横向溢出/确认/取消/Escape+inert 背景/敏感字段成功清空/取消清空/
+    必填错误 alert）。
+  - 文档：frontend/AGENTS.md 新增「共享组件原语（US-200）」章节；stage PRD US-200 完成。
+- Files changed
+  - 新增：frontend/src/components/{layout,forms}/*、ConfirmDialog.vue、StatusAlert.vue、
+    useFocusTrap.ts(+test)、useSensitiveFields.ts(+test)、ConfirmDialog.test.ts、
+    BaseFormControls.test.ts、features/components/ComponentsDemoView.vue、
+    tests/browser/test_components_primitives.py
+  - 修改：frontend/src/app/router/index.ts（+components-demo 路由）、App.test.ts（路由表
+    同步）、styles/main.css（[hidden] 规则）、frontend/AGENTS.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、scripts/ralph/prd.json
 - **Learnings for future iterations:**
-  - HTTP 状态分类只改 `extensions/flask_api/api.py:_error_http_status`，不要在每个 route 里硬编码；OpenAPI `_ENDPOINTS` 的 `errors` 声明必须与分类同步，否则 drift 测试失败。
-  - `failed_response` 返回 `Response` 对象（`response.status_code = ...`），不是 `(body, status)` tuple，否则 `handle_exception`/poster 视图的类型与测试断言会不一致。
-  - 旧测试大量断言「失败仍 200」，US-192 后每处失败路径都要同时断言状态码 + envelope；批量改可用 pytest 失败输出的 `assert X == 200` 反查真实状态码。
-  - `storage_error`/`storage_json_error` 是服务端内部错误 → 500，不是 400；`queue_not_found`（队列不存在）→ 400，`queue_item_not_found`（队列存在但 request_id 未知）→ 404。
-  - 海报 key 是 64 位 hex；畸形 key 走 `invalid_poster_key`（400），格式合法但未注册走 `poster_not_found`（404）——测试两种都要覆盖。
-  - 浏览器测试 mock 非 2xx 时用 `route.fulfill(status=..., json=...)` 或 `content_type="application/json"`；非 JSON body 用 `content_type="text/html"`，前端会回退中文安全文案。
-  - 前端 fetchJson 必须在 `await response.json()` 之前检查 content-type，否则非 JSON 错误体（代理 HTML）会抛 JSON parse 异常打断错误展示。
+  - Patterns discovered
+    - ConfirmDialog 用 ref + `confirm({...})` 返回 Promise<boolean>，feature 里
+      `await confirmDialog.value?.confirm({...})` 即可；危险操作传 `danger: true`
+      渲染 danger-button。
+    - useFocusTrap 的锚点必须放在 Teleport 根（backdrop）上：这样 inert 会标到
+      兄弟的 `#app`，而不是对话框内部元素；若锚在内层 dialog，inert 断言会失败。
+    - useSensitiveFields 是"每组件一个实例"的 composable，字段值用 computed v-model
+      绑定到 BaseInput；clearAll/reset 后 DOM 输入框自动清空（因为 v-model 是单向
+      value + update 事件）。
+    - BaseInput/BaseTextarea 必须自己 emit update:modelValue 才支持 v-model；只透传
+      $attrs 时填值不会进 model、清 model 也不会清 DOM（浏览器测试暴露）。
+    - Vue SFC prop 名不能用保留字 `for`（eslint vue/no-parsing-error）；用 `inputId`。
+    - jsdom 单测 ConfirmDialog 用 `attachTo: document.body` + `stubs: {teleport: true}`
+      才能测到 Teleport 内容；焦点断言在 requestAnimationFrame 后。
+  - Gotchas encountered
+    - 浏览器测试 .danger-button 只存在于打开的 dialog 内，渲染断言要先打开 dialog。
+    - 360px 断言用 `body.scrollWidth <= window.innerWidth`；dialog 宽度断言用
+      bounding_box()["width"]。
+    - 浏览器测试对 Teleport 到 body 的 dialog：inert 断言查 `#app`（body 的兄弟），
+      不是页面内的 panel。
+  - Useful context
+    - US-201 迁移 Settings 时复用：PanelSection/FormField 做分区布局，BaseInput/
+      BaseSelect/CheckboxRow 做 storage 偏好与非敏感偏好表单，useSensitiveFields +
+      BaseInput 做 qB/AB 凭据表单（auth 模式切换调 reset()，成功调 clearAll()），
+      ConfirmDialog 做恢复默认/提交确认，StatusAlert 做 status 反馈。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（283 例全过，含新 8 例）。
 ---
 
-## 2026-08-30 03:45:00 CST - US-193
+## 2026-08-30 23:35:00 CST - US-201
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- 收紧 Web storage 根目录：浏览器只能选择服务端允许根目录下的相对 profile，绝对路径/穿越/符号链接逃逸返回 400 `invalid_storage_dir`，错误 details 不回显原始路径；CLI `--storage-dir` 显式路径行为不变。
-- 服务端（`src/apps/migu_orca_web/services.py`）：`_storage_dir(value)` 改为相对 profile 解析器——空值 → 默认根；Unix `/...` 与 Windows 盘符（`^[a-zA-Z]:[\\/]`）→ 400；`(root/profile).resolve()` 后 `is_relative_to(root)` 校验拒绝 `..` 穿越与符号链接逃逸。`_WEB_STORAGE_ROOT` 默认 `DEFAULT_STORAGE_DIR`（`.migu_orca/storage`），可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 环境变量服务端覆盖；`set_web_storage_root(root|None)` 是测试 seam。
-- `extensions/flask_api/api.py`：`invalid_storage_dir` 加入 `_HTTP_BAD_REQUEST_ERROR_TYPES`（400）；`api_test.py` 加映射单测。
-- 前端（`static/app.js` + `settings.html` + `index.html`）：`isAbsoluteStorageProfile`/`sanitizeStorageProfile` 在读取/保存/发送前丢弃绝对路径与 `..`；`restoreWebPreferences` 发现旧 localStorage 绝对路径值自动清除（平滑迁移）；Settings 输入从「默认 storage_dir」改为「storage profile（相对服务器根目录）」，summary 文案改为「默认服务器 storage 根目录」。
-- OpenAPI：`openapi_gen.py` 新增 `_STORAGE_DIR_ERRORS` 常量，全部接受 `storage_dir` 的端点 errors 声明 `invalid_storage_dir`（400），preferences/corrections GET 补充 storage_dir 参数声明；重生成 `docs/api/openapi.json`（含 27 处 invalid_storage_dir）。
-- 测试迁移：`views_test.py`/`tests/api_contract/conftest.py`/`tests/browser/conftest.py` 新增 autouse `_web_storage_root` fixture（`set_web_storage_root(tmp_path)`），所有 API-facing `storage_dir` 值从绝对 tmp 路径改为相对 profile（`"storage"`/`"migu-state"`/`storage_dir.name`）；`set_storage_preferences` 只存 profile 名。新增 golden contract（绝对路径/Windows 盘符/穿越/符号链接 4 类 `invalid_storage_dir` 拒绝 + 不回显）、`_storage_dir` 解析器 6 个单测、浏览器 2 个旧值迁移测试。
-- 文档：`endpoint_inventory.md` §1/§3.1/§4.3/§5.2/§5.3、`docs/api/README.md`、`architecture.md` §6、stage PRD US-193 段、README Web API 示例（去掉 `?storage_dir=.migu_orca/storage` 路径式 query）、`AGENTS.md` 新增 Web storage 根目录约定。
-- 质量检查：compileall、完整 pytest（1001 非浏览器 + 268 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
-- Files changed: `services.py`、`extensions/flask_api/api.py`+`api_test.py`、`openapi_gen.py`、`static/app.js`、`templates/index.html`+`settings.html`、`views_test.py`、`tests/api_contract/`（conftest+golden+frontend_dependencies）、`tests/browser/`（conftest+generation+shell+actions+detail+ui_quality+mikan_candidates）、`docs/api/openapi.json`+`endpoint_inventory.md`+`README.md`、`docs/design/architecture.md`、stage PRD、`README.md`、`AGENTS.md`、`scripts/ralph/prd.json`、`progress.txt`。
+- What was implemented
+  - 迁移 Settings 到 `/app/settings`（frontend/src/features/settings/SettingsView.vue），
+    四个分区全部复用 US-200 共享原语：
+    1. Storage 偏好——`storagePreferences.ts`（localStorage 只存服务端根目录下相对
+       profile，绝对路径/`..` 穿越/Windows 盘符回退服务端根，与旧 app.js 同键名平滑迁移）；
+    2. 偏好默认值——`preferences.ts` + `/api/v1/preferences`（GET/POST，保存失败回退到
+       「上次成功加载/保存的值」并清空被拒绝的敏感输入，恢复默认经 ConfirmDialog 确认）；
+    3. qBittorrent——`useSensitiveFields` + 确认 + 成功后 `clearAll()`；
+    4. Auto Bangumi——连接测试 + `request_id`（URL query）提交上下文 + 认证模式切换
+       `reset()` 清空 + 成功后 `clearAll()` + 返回详情 RouterLink。
+  - 补齐公开 DTO（src/apps/migu_orca_web/api_contract.py）：`AbSubmitResultDTO`
+    （ab_submit_result 白名单：success/ab_subscription_id/ab_response/fallback_config/error）、
+    `SubtitleGroupPreferenceDTO`/`FilterDefaultsDTO`/`NamingPreferenceDTO`/
+    `SearchPreferenceDTO`（深层偏好结构替换 dict[str,Any]）；重新生成
+    `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`（drift check 双守护）。
+  - 修复 `CheckboxRow.vue`（US-200 原语缺陷，Settings 使用暴露）：
+    - 支持 `v-model:checked`（显式 `checked` prop + `update:checked` emit）——之前原生
+      checkbox 的 change 不会自动更新绑定；
+    - `defineOptions({ inheritAttrs: false })` + 手动把 `id`/`name` 转发到原生 input——
+      之前 `id` 同时落在包装 div 和 input 上（Playwright strict mode 报 2 元素）。
+  - 安全 parity 修复（浏览器测试暴露，与旧 app.js 行为一致）：
+    - qB/AB 连接测试与 AB 提交失败只显示**固定中文反馈**，绝不把服务端原始
+      `error_message` 拼进 UI（原始错误可能含 endpoint/凭据）；
+    - 偏好保存/加载/恢复默认失败回退到上次成功值（`lastGoodPreferences`），被拒绝的
+      敏感输入不残留在表单。
+- Files changed
+  - 新增：frontend/src/features/settings/{SettingsView.test.ts, storagePreferences.ts,
+    storagePreferences.test.ts, preferences.ts, preferences.test.ts}、
+    tests/browser/test_app_settings.py
+  - 修改：frontend/src/components/forms/CheckboxRow.vue、frontend/src/components/layout/
+    FormField.vue（label 包裹 slot 结构调整）、frontend/src/features/settings/
+    SettingsView.vue、src/apps/migu_orca_web/api_contract.py、docs/api/openapi.json、
+    frontend/src/api/generated/api.ts、tests/api_contract/test_dto_contracts.py、
+    frontend/AGENTS.md、README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    scripts/ralph/{prd.json, progress.txt}
+  - 删除：frontend/src/features/settings/debug.test.ts（临时调试文件）
 - **Learnings for future iterations:**
-  - `_storage_dir` 是 Web 路由的统一存储 seam：改语义只需动这一处，routes_* 全部自动生效；CLI 的 `--storage-dir`（entry_controller）是不同信任边界，不要用 Web 解析器约束。
-  - `sanitize_error_data` 的正则会命中子串（如 `outside` 里的 `sid` → `[redacted]`），错误 reason 标记要避开敏感关键词子串（用 `escape_attempt` 而非 `outside_allowed_root`）。
-  - 浏览器测试的 server 是 in-process 线程，`set_web_storage_root` fixture 必须在**每个测试函数**内设置（tmp_path 按函数隔离），不能只放 session fixture。
-  - `set_storage_preferences(page, storage_root)` 对 Path 参数用 `storage_root.name` 作为 profile；绝对路径断言（`"miguOrca.web.storageDir": str(storage_dir)`）全部改为 `storage_dir.name`。
-  - localStorage 里的旧绝对路径值不会自动消失：`restoreWebPreferences` 需主动 `removePreference`/覆写，否则「迁移」只是不发送、不清理，浏览器测试断言 localStorage 时仍会看到旧值。
-  - OpenAPI `_ENDPOINTS` 中接受 `storage_dir` 的端点（含 preview-modify/save、preferences/corrections GET）要同步声明参数与 `invalid_storage_dir` 错误，否则文档与实现不一致。
+  - Patterns discovered
+    - Settings 页面有 4 个 StatusAlert（storage/preferences/qB/AB），单元/浏览器断言必须
+      限定到各自 form/panel 作用域（`#storage-preferences-form .status-alert` 等），
+      裸 `.status-alert` 会命中第一个（storage）。
+    - CheckboxRow 的 `id` 由 `useId()` 生成但会被 `$attrs` 覆盖；`inheritAttrs: false`
+      是带包装 div 组件转发 id 到原生控件的标准做法。
+    - 连接测试类表单（request-scoped 凭据）失败反馈与旧前端 parity：只显示固定中文，
+      不渲染 `ApiError.message`（可能含服务端未脱敏的 endpoint/凭据）。
+    - 偏好等「非敏感但会拒绝敏感输入」的表单：维护 `lastGoodPreferences` 快照，失败时
+      `restoreLastGoodPreferences()` 回退，等价 legacy `currentPreferenceValues`。
+    - 浏览器测试选 checkbox 用 `input#id`（避免命中包装 div）；`page.route` mock 的
+      POST handler 里对非 POST 请求要 `route.continue_()` 放行真实后端。
+  - Gotchas encountered
+    - `wrapper.find('#settings-save-request')` 返回外层 div（attrs 落在包装 div + input），
+      `.checked` 是 undefined；必须 `wrapper.find('input#settings-save-request')`。
+    - Vue Router 测试里 AB 面板的「返回订阅方案详情」RouterLink 指向 /workbench，测试
+      路由表必须包含该路由否则 "No match found" 警告。
+    - 保存偏好失败时如果只清空输入框而不回退整个表单，其他字段（如 fallback select）
+      会残留非法组合；回退整份 `lastGoodPreferences` 最稳。
+    - qB 失败测试断言 `"http://" not in result_text` 会因 mock 的 error_message 包含
+      endpoint URL 而失败——这正是「固定中文反馈」修复要解决的安全泄漏。
+  - Useful context
+    - 旧 app.js 的偏好保存失败处理在 `savePreferenceSettings` catch 块
+      （`renderPreferenceSettings(currentPreferenceValues || {})`），qB/AB 失败在
+      `testQbittorrentConnection`/`testSettingsAbConnection` catch 块（固定文案）。
+    - 浏览器测试本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（301 例全过，含新 18 例）。
 ---
-## 2026-08-30 05:05:00 CST - US-194
-Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- 建立服务端权威 draft 生命周期：未保存草案由服务端持有，客户端只持 opaque `draft_id`，不再把完整 Request 作为权威快照提交。
-- 新增 `src/apps/migu_orca_web/drafts.py`：`DraftStore`（进程内单例 `draft_store`，TTL 30 分钟、容量 128、自动清理、一次性保存 + 重放保护），查找返回 `(value, reason)`（ok/expired/evicted/replayed/unknown）以便路由映射稳定 409。
-- `schemas.py`：`RequestPreviewModifyPayload`/`RequestPreviewSavePayload` 从 `request` 改为 `draft_id`（+ patch）。
-- `routes_requests.py`：`POST /api/v1/requests`（`save_request=false`）签发 `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch（`draft_store.get` 不消费，成功后 `update` 回写最新草案并回传同一 draft_id）；`preview-save` 用 `consume_for_save` 一次性消费；`_draft_store_error` 把 expired/unknown → `draft_expired`、evicted → `draft_evicted`、replayed → `draft_replayed`（均 409，details 不回显 draft_id）。
-- `api_contract.py`：`RequestCreateResultDTO`/`RequestPreviewModifyResultDTO` 增加可选 `draft_id`；`RequestPreviewSaveResultDTO` 独立（保存后无 draft_id）。
-- 前端 `static/app.js`：新增 `currentDraftId`（内存，不落 localStorage/URL）；生成响应带 `draft_id` 时记录；`previewModify`/`savePreviewDraftRequest` 只发 `draft_id`；批量卡片 `row.draft_id` 随生成/修改维护，接受/保存后清除；`notifyApiError` 对 `draft_*` 错误追加「请重新生成订阅草案后再试」指引。
-- OpenAPI：`_ENDPOINTS` 更新 preview-modify/save 的 requestBody（draft_id + x-request-scoped）与 409 draft_* errors；重生成 `docs/api/openapi.json`。
-- 测试：新增 `tests/api_contract/test_draft_store.py`（9 个 DraftStore 单测：issue/get/consume 一次性/update/TTL/容量逐出/重放/clear）；`test_golden_contracts.py` 更新 create 成功断言 draft_id、preview-modify/save 用 draft_id、新增 save 一次性消费 + 未知 draft 409；`views_test.py` 更新 5 个 preview 测试用 `_issue_draft` 辅助并新增重放/未知 draft 测试；`api_test.py` 加 draft_* → 409 映射断言；`test_dto_contracts.py` 加 draft_id DTO 测试；`test_frontend_dependencies.py` 新增「preview 只发 draft_id 不发完整 request、draft_id 不落 localStorage」断言。
-- 浏览器测试：conftest 新增 `preview_result_json(request)`（签发真实 draft 并返回 draft_id）、`issue_draft_id(preview_request)`（批量卡片 mock 补 draft_id）、`save_preview_handler(calls?)`（消费 draft 返回保存结果）；`_batch_item` 对带 preview_request 的卡片自动补 draft_id；`test_batch_workbench`/`test_ui_quality` 的 `_save_preview` 全部替换为 `save_preview_handler`，断言改为校验 payload 只含 draft_id。
-- 文档：`endpoint_inventory.md` §3.1/§4.2/§4.3/§5.4、`docs/api/README.md`、`README.md`、stage PRD US-194 段、`AGENTS.md`（新增 DraftStore 模块与浏览器测试 seam 约定）。
-- 质量检查：compileall、完整 pytest（1017 非浏览器 + 268 真实 Chromium 浏览器全绿）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
-- Files changed: `src/apps/migu_orca_web/drafts.py`（新）、`routes_requests.py`、`schemas.py`、`api_contract.py`、`openapi_gen.py`、`static/app.js`、`views_test.py`、`extensions/flask_api/api_test.py`、`tests/api_contract/`（conftest+golden+dto+frontend_dependencies+draft_store）、`tests/browser/`（conftest+batch_workbench+mikan_candidates+fixture_mode+ui_quality）、`docs/api/endpoint_inventory.md`+`README.md`+`openapi.json`、`README.md`、stage PRD、`AGENTS.md`、`scripts/ralph/prd.json`+`progress.txt`。
-- **Learnings for future iterations:**
-  - DraftStore 的 `get` 与 `consume_for_save` 返回 `(value, reason)` 而非裸值，路由才能区分 expired/evicted/replayed/unknown 并映射稳定 409；仅用「None」无法区分「被保存过（重放）」与「从未签发」。
-  - 一次性保存用 tombstone（`_tombstones: draft_id -> (reason, at)`）记录已消费 id，且 tombstone 也按 TTL 清理，否则「重放」语义会永久残留或误报。
-  - 浏览器测试 mock 生成响应必须用 `preview_result_json(request)`（内部 `draft_store.issue`），否则前端 `currentDraftId` 为 null，真实 preview-save 后端 409；批量卡片 mock 必须给每个 `preview_request` 补 `issue_draft_id(...)`。
-  - 手工探针（非测试）直接调 preview-save 且不传 storage_dir 会写仓库根 `.migu_orca/storage`（`load_storage_config(None)` 默认根），跑浏览器套件前必须 `rm -rf .migu_orca/storage`。
-  - 前端 `currentDraftId` 必须在「渲染已保存请求」与「清空批量详情上下文」时置 null，否则切到已保存详情后误用旧 draft_id。
-  - `RequestPreviewSaveResultDTO` 不能再继承 `RequestCreateResultDTO`（后者新增了 draft_id，而保存响应没有 draft_id）；改为独立定义相同字段。
-  - 旧测试大量断言 `saved_calls[0]["request"]["request_id"]`，US-194 后 preview-save/modify 的 payload 只含 draft_id，断言改为 `saved_calls[0]["draft_id"]` + `"request" not in payload`。
 
-## 2026-08-30 07:30:00 CST - US-195
+## 2026-08-31 01:20:00 CST - US-202
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- 建立 P0 CI 门禁、Python 静态检查与 local-only 部署基线：每次 push/PR 自动执行 compileall → ruff → 非浏览器 pytest → node --check → OpenAPI 漂移 → git diff --check；真实 Chromium 套件在单独 job 运行，CI 下浏览器不可用直接失败而非静默 skip。
-- 新增 `.github/workflows/ci.yml`：`checks` job（astral-sh/setup-uv + setup-python + setup-node，跑全部静态与契约门禁）+ `browser` job（`uv run playwright install --with-deps chromium` + `MIGU_ORCA_CI=1` 跑 tests/browser/）。CI 不保存凭据/真实 endpoint/trace/敏感失败产物。
-- 引入 `ruff` 作为 Python 静态检查（`pyproject.toml` `[tool.ruff.lint]`：F/E4/E7/E9/W/I/UP/B/SIM，`line-length=120`，排除 E402/E501/B009/UP046/UP047/UP031 并在注释记录理由）；加入 dev 依赖（uv.lock 更新），修复全部存量违规（约 116 处：I001 排序、F401 未用导入、UP035/037/012/043 现代化、SIM105/108/210/103 简化、F821 补 pytest 导入）。compileall 降级为纯语法检查，不再冒充静态检查。
-- `src/apps/healthz/views.py`：`/healthz` 保持纯存活探针；`/readiness` 拆分为就绪探针——用 `services._web_storage_root()` + `ensure_storage_layout(load_storage_config(...))` 校验服务端 storage 根目录可创建/可写，失败返回 503 `{"ok": false, "result": "storage_unavailable"}`（不回显路径/敏感值）；两者都不访问真实 MiKan/AB/qB。
-- 测试：`src/apps/healthz/views_test.py` 新增 3 个测试（成功路径用 tmp storage root 避免污染仓库 `.migu_orca/storage`、外部 client 工厂全部 monkeypatch 抛错证明不触碰外部系统、503 失败 envelope 不回显路径）；`tests/browser/test_infrastructure.py` 新增 `test_readiness_reports_ready`；`tests/browser/conftest.py` 在 `MIGU_ORCA_CI=1` 且浏览器不可用时 collection 抛错（不静默 skip）。
-- 文档：README「开发约定」区分 compileall/ruff、「Web UI 与 API」healthz/readiness 语义、新增「本地部署基线」（默认 local-only、未认证禁止直接暴露公网、storage 根目录、健康/就绪探针、CI 门禁）；stage PRD US-195 段、`docs/design/architecture.md` §7、`docs/api/README.md`、`endpoint_inventory.md` §2、`src/apps/migu_orca_web/AGENTS.md` 同步。
-- 质量检查：compileall、ruff、完整 pytest（1019 非浏览器 + 269 真实 Chromium 全绿，含新增 readiness 测试）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
-- Files changed: `.github/workflows/ci.yml`（新）、`pyproject.toml`、`uv.lock`、`src/apps/healthz/views.py`+`views_test.py`、`tests/browser/conftest.py`+`test_infrastructure.py`、`README.md`、`docs/design/architecture.md`、`docs/api/README.md`+`endpoint_inventory.md`、stage PRD、`AGENTS.md`、`scripts/ralph/prd.json`+`progress.txt`，以及 ruff 自动修复的 ~60 个源/测试文件（导入排序、未用导入、UP 现代化、SIM 简化）。
+- What was implemented
+  - 迁移 Request 列表到 `/app/requests`（frontend/src/features/requests/RequestsView.vue）：
+    `GET /api/v1/requests` 走统一 transport（`api.get<ListResult>`，type 来自生成客户端），
+    列表加载/搜索（标题、request_id、字幕组、folder_name）/状态筛选（待确认/已确认/已取消）/
+    排序（默认/标题升序/request_id 升序）/计数（`显示 X / Y`）/空状态（无订阅方案/无匹配）/
+    错误重试全部与旧 `/index` 列表 parity。
+  - 纯函数列表逻辑收敛到 `frontend/src/features/requests/requestsList.ts`
+    （`requestLabel`/`searchableText`/`filterRequests`/`sortRequests`/`availableStatuses`/
+    `statusLabel`/`fieldValue`，zh-CN locale），feature 与单元测试共用，不复制第二套。
+  - 补齐公开 DTO `RequestListResultDTO`（api_contract.py，`requests: list[RequestSummaryDTO]`
+    替换裸 inline 数组）并重新生成 `docs/api/openapi.json` 与
+    `frontend/src/api/generated/api.ts`（openapi_gen.py `_ENDPOINTS` 改用 DTO）；DTO 测试
+    新增 2 例（接受真实 summaries / 拒绝未知字段）。
+  - 选择状态由 URL query `request_id` 驱动：点击列表项 `router.push({path:'/requests',
+    query:{request_id}})`、刷新恢复（onMounted 读 query）、清空/点空项 push 不带 query；
+    watch query 同步选中态。每项提供「复制 request_id」按钮（navigator.clipboard +
+    通知，失败固定中文反馈）。
+  - storage 只从 localStorage 读相对 profile（`sanitizeStorageProfile` 已挡绝对路径/穿越），
+    `query.storage_dir` 只放相对值；`result.requests ?? []` 兜底空数组。
+  - 测试：Vitest 新增 requestsList.test.ts（18）与 RequestsView.test.ts（15，共 128 例全过）；
+    浏览器新增 `tests/browser/test_app_requests.py` 15 例真实 Chromium（加载/计数/搜索/筛选/
+    排序/空状态/选择 push+恢复/复制/脱敏错误（error_type/error_data 不进 DOM）/360px 无横向
+    溢出/错误 role=alert）；更新 `test_app_shell.py` requests 路由断言（新视图无
+    `#requests-heading`，改断言 `#request-list-container`/`#request-list-count`）。
+  - 文档：frontend/AGENTS.md 新增「Request 列表（US-202）」章节；stage PRD US-202 完成记录；
+    README Web UI 段落更新。
+- Files changed
+  - 新增：frontend/src/features/requests/{requestsList.ts, requestsList.test.ts,
+    RequestsView.test.ts}、tests/browser/test_app_requests.py
+  - 修改：frontend/src/features/requests/RequestsView.vue（占位→完整列表）、
+    src/apps/migu_orca_web/{api_contract.py, openapi_gen.py}、docs/api/openapi.json、
+    frontend/src/api/generated/api.ts、tests/api_contract/test_dto_contracts.py、
+    tests/browser/test_app_shell.py、frontend/AGENTS.md、README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、scripts/ralph/{prd.json, progress.txt}
 - **Learnings for future iterations:**
-  - `ruff check --fix` 会移除「仅作再导出」的 import（views.py 的 `api_blueprint` 被 F401 当未用），破坏 `apps.migu_orca_web.__init__` 的再导出；这类 import 必须保留并加 `# noqa: F401` 注释说明用途。
-  - ruff 的 UP037（去引号注解）只在该文件有 `from __future__ import annotations` 时才安全；本仓库全部相关文件都有，且无 `get_type_hints`/`__annotations__` 运行时求值，全套测试通过证明安全。
-  - ruff E501/E402 在本仓库是项目风格（docstring 在 `from __future__` 之后、长中文 UI 字符串），不是正确性问题；在 `[tool.ruff.lint].ignore` 记录理由比强改 ~750 行更符合「适合当前代码」。
-  - 浏览器测试 conftest 的 skip 逻辑在 CI 下要抛 `RuntimeError` 而非静默 skip；`MIGU_ORCA_CI=1` 环境变量是 CI job 与本地运行的开关。
-  - `/readiness` 探针测试必须把 `_web_storage_root` 指到 tmp，否则成功路径会在仓库根创建 `.migu_orca/storage` 挂掉后续浏览器测试（复用 US-193 的 `set_web_storage_root` seam）。
-  - CI 里 `uv sync --all-groups` 会把 ruff/pytest/playwright 都装上；`astral-sh/setup-uv` + `actions/setup-python`（python-version-file 指向 `.python-version`）是 uv 项目标准组合。
-  - `playwright install --with-deps chromium` 在 ubuntu-latest 上能装全系统库；本地沙箱用 `.agents/.chromium-libs` + 同一 bash 命令内 `ln -sfn` 到 `/tmp/chromium-libs`。
+  - Patterns discovered
+    - `_ENDPOINTS` 的 `success` 可以直接写 pydantic DTO（`RequestListResultDTO`）而不必用
+      inline dict `{"requests": [RequestSummaryDTO]}`；inline dict 也能被 `_normalize_property`
+      展开成合法 schema，但 DTO 让 OpenAPI 出现 title + required + additionalProperties:false，
+      对生成客户端更严格。改 DTO 后必须 `uv run python -m apps.migu_orca_web.openapi_gen`
+      + `cd frontend && npm run api:generate` 并提交两个生成文件。
+    - 生成的 `api.ts` 里列表项类型要从 operations 内联提取：
+      `NonNullable<operations['listRequests']['responses']['200']['content']['application/json']['result']['requests']>[number]`；
+      `components.schemas` 只含 envelope DTO（ApiOkEnvelope/ApiErrorEnvelope），不含业务 DTO。
+    - RequestsView 用组件级 `loading` ref 而非 `trackedApi`：列表页自带 LoadingState/ErrorState
+      局部状态，全局 loading bar 由 `api.get` 之外的需求再决定（本 story 未用 trackedApi）。
+    - 浏览器断言列表项用 `.request-list-item`（含 `data-request-id`）、选中用
+      `.request-list-item.is-selected`，不要裸用 `[data-request-id]`（详情页动作按钮也用
+      同属性，会命中多个）。
+    - 360px 无横向溢出断言复用 Settings 模式：`body.scrollWidth <= window.innerWidth`。
+  - Gotchas encountered
+    - Vitest 里 `wrapper.find('#request-list-search').setValue()` 之后 computed 不重算的原因
+      是**测试 fixture 里多条 summary 共享 expected_folder_name**：搜索「芙莉莲」会命中
+      folder_name 字段，三条全匹配。fixture 必须给每条不同 folder_name。
+    - `router.push` 是异步的：点击断言 URL query 必须 `await flushPromises()` 而不是
+      单次 `nextTick()`。
+    - `git diff --check` 会报 AGENTS.md 文件末尾多余空行（`new blank line at EOF`）——
+      编辑后要 `rstrip('\n') + '\n'` 归一。
+    - test_app_shell.py 的 requests 路由断言原来是 `#requests-heading` +
+      `.requests-panel .empty-state`，新视图用 PanelSection（无 `#requests-heading`）、
+      loading 结束后才渲染空状态；迁移任何占位视图都要同步更新该断言。
+  - Useful context
+    - 旧 app.js 列表逻辑在 `filteredAndSortedRequests`/`renderList`/`loadList`（~3880-3960 行），
+      parity 对照基准；`requestLabel`/`searchableText`/`statusLabel`/`fieldValue` 语义已收敛
+      到 requestsList.ts。
+    - US-203 迁移详情面板时，列表项的点击已把 `request_id` 推入 URL query，详情区可直接读
+      route query 加载 `/api/v1/requests/{request_id}`；`selectRequest` 的 push 已就位。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（316 例全过，含新 15 例）。
+---
 
-## 2026-08-30 06:30:00 CST - US-196
+## 2026-08-31 02:35:00 CST - US-203
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
-- Stage 26 收尾：完整单元/API/CLI 与真实 Chromium 用户旅程回归通过，README、主 PRD、架构、M11/M13/M14、backlog、future stages、docs/api 与 Stage 27 handoff 全部同步为「Stage 26 已完成」，并归档 Stage 26 prd/progress。
-- **安全回归发现并修复 US-193 回归**：`services._storage_dir(None|""|"  ")` 原来返回 `None`，所有 Web 路由随后调用 `load_storage_config(None)` 回退 CLI 默认 `DEFAULT_STORAGE_DIR`（仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖（含生产 `MIGU_ORCA_WEB_STORAGE_ROOT`）——完整非浏览器 pytest 会把请求写到仓库根并污染后续浏览器空列表测试。修复：空值返回 `_WEB_STORAGE_ROOT` 本身；新增 golden contract `test_golden_request_create_without_storage_dir_uses_server_root`（不传 storage_dir 的 `save_request=true` 写入服务端根 tmp，且 `DEFAULT_STORAGE_DIR` 不被创建）；views_test 的 `_storage_dir(""|None|"  ")` 断言改为等于 tmp 根。
-- 文档同步：stage26 PRD 状态改「已完成」并记录 US-196 实现；主 PRD（文档状态/Stage 26 段落/模块表 M13/M14/路线图/BL-023 完成/下一步）；backlog（BL-023 完成、BL-024 前置条件满足）；future_stages（Stage 26 已完成、阶段数量判断更新）；架构（Web 边界、storage 空值回落根、OpenAPI/DTO/DraftStore 说明）；M13（Stage 26 行 + UI 调整 + 安全边界）、M14（Stage 26 Web storage 根配置）、M11（Stage 26 storage 根）；docs/api/README.md 与 endpoint_inventory.md（storage_dir 空值回落服务端根）；docs/README.md（最近完成阶段）；Stage 27 PRD（前置条件已满足）。
-- 归档：`scripts/ralph/archive/2026-08-30-stage26-web-api-contract-hardening/` 保存活动 prd.json 与 progress.txt 副本（全部 story passes 为 true）。
-- 质量检查：compileall、ruff、非浏览器 pytest（1020 passed）、真实 Chromium 浏览器套件（269 passed）、node --check、OpenAPI --check、git diff --check 全绿；`.migu_orca/storage` 未被测试污染。
-- Files changed: `src/apps/migu_orca_web/services.py`+`views_test.py`+`AGENTS.md`、`tests/api_contract/test_golden_contracts.py`、`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`、`docs/MiGuOrca_main_PRD.md`、`docs/MiGuOrca_future_stages.md`、`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`、`docs/backlog.md`、`docs/README.md`、`docs/design/architecture.md`、`docs/modules/M11-storage-state-PRD.md`+`M13-web-ui-PRD.md`+`M14-system-config-PRD.md`、`docs/api/README.md`+`endpoint_inventory.md`、`README.md`、`scripts/ralph/prd.json`+`progress.txt`+`archive/2026-08-30-stage26-web-api-contract-hardening/`。
+- What was implemented
+  - 迁移 Request 详情面板到 `/app/requests`（frontend/src/features/requests/RequestDetailPanel.vue，
+    挂载于列表下方，选中 `request_id` 即渲染，`:key="selectedRequestId"` 保证切换重挂载）：
+    `GET /api/v1/requests/{request_id}` 走统一 transport（`api.get<RequestDetailResult>`，
+    path 模板 + 相对 storage query），渲染 Overview / Source / Filter / Seeds（有效种子 →
+    完整种子按字幕组分组 → 排除种子）/ Audit（状态历史 + Auto Bangumi 结果）五个分区，
+    与旧 `/index` 详情 `renderDetailPayload` 行为 parity。
+  - 管理动作按状态分派：PENDING_CONFIRM → 确认/取消/修改；ACCEPTED → 修改/删除/去
+    Settings 提交 Auto Bangumi（入口带 `request_id`+`ab=1`，Settings 返回链接改指
+    `/requests?request_id=...`）；CANCELLED → 只读提示。所有破坏性动作走共享
+    ConfirmDialog（confirm() 返回 Promise<boolean>，danger 用 .danger-button）；
+    成功后面板用服务端返回的 `request` 更新内存快照并重载 `loadDetail()`，列表
+    `@changed` 重新加载；删除成功后 `@deleted` 清空 URL 选择并卸载面板。
+  - 失败语义：确认/取消/修改/删除失败只显示固定中文反馈（绝不渲染服务端
+    `error_message`，可能含凭据）；详情加载失败显示「订阅方案详情加载失败」
+    （role=alert + 重试），原始 `error_type`/`error_data`/RSS URL/`mikan_url` 绝不进
+    DOM（`displayValue` 对 URL 样式字符串脱敏为 `[redacted_url]`，RSS 来源只显示
+    已选择/未选择）。
+  - 补齐详情/历史/AB/action 公开 DTO：`RequestSnapshotDTO`/`RequestInputDTO`/
+    `SourceInfoDTO`/`RssSourceDTO`/`FilterRuleDTO`/`ConfirmableConfigDTO`/
+    `UserActionDTO`/`HistorySectionDTO`/`HistoryEventDTO`/`AbResultSectionDTO`/
+    `AbResultRecordDTO`/`AbSubmitResultRecordDTO`（lenient `extra="allow"` 快照 +
+    strict envelope；create/preview/action DTO 的 request 字段同步改为快照 DTO），
+    并重新生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`。
+  - 纯展示逻辑收敛到 `frontend/src/features/requests/requestDetail.ts`
+    （`displayValue`/`actionLabel`/`selectedRssSource`/`effectiveSeeds`/`excludedSeeds`/
+    `completeSeedGroups`/`totalCompleteSeedCount`/`scrubConfig`/`isPreview`，feature 与
+    Vitest 共用）；相对 storage profile 查询参数收敛到
+    `frontend/src/features/requests/requestStorage.ts`（`storageQuery()`，列表/详情共用，
+    不再复制第二套）。
+  - 修改表单：字幕组 select + 包含/排除规则 + 使用正则/大小写敏感 + folder_name，
+    `modify-clear-*` checkbox 勾选时 watch 清空对应输入（legacy `appendClearControl`
+    行为）并禁用输入，patch 发显式空字符串；空 patch 前端拦截显示
+    「请至少修改或清空一个字段」。
+  - 测试：Vitest 新增 requestDetail.test.ts（16）与 RequestDetailPanel.test.ts（22，
+    共 166 例全过）；浏览器新增 `tests/browser/test_app_request_detail.py` 23 例真实
+    Chromium（分区渲染/URL 状态恢复/缺失 request_id 安全错误/确认/取消/删除/修改
+    patch/脱敏/360px/中文状态码/AB 入口跳转）。
+  - 文档：frontend/AGENTS.md 新增「Request 详情与管理动作（US-203）」章节；stage PRD
+    US-203 完成记录；README Web UI 段落无需改（/app/requests 已列）。
+- Files changed
+  - 新增：frontend/src/features/requests/{requestDetail.ts, requestDetail.test.ts,
+    RequestDetailPanel.vue, RequestDetailPanel.test.ts, requestStorage.ts}、
+    tests/browser/test_app_request_detail.py
+  - 修改：src/apps/migu_orca_web/api_contract.py（详情/历史/AB/action DTO）、
+    tests/api_contract/test_dto_contracts.py（+6 例新 DTO 断言）、docs/api/openapi.json、
+    frontend/src/api/generated/api.ts、frontend/src/features/requests/RequestsView.vue
+    （挂载详情面板 + onDetailChanged/onDetailDeleted）、RequestsView.test.ts、
+    frontend/src/features/settings/SettingsView.vue（返回链接 /workbench → /requests）、
+    SettingsView.test.ts、frontend/AGENTS.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    scripts/ralph/{prd.json, progress.txt}
 - **Learnings for future iterations:**
-  - `_storage_dir` 空值必须返回 `_WEB_STORAGE_ROOT` 而非 `None`：`load_storage_config(None)` 会回退 CLI 默认路径，是 Web storage 根目录边界被绕过的经典坑；新增端点时用「不传 storage_dir 的保存请求」做回归。
-  - 完整测试跑完必须检查仓库根 `.migu_orca/storage` 是否被创建——被创建说明有 Web/CLI 路径绕过了服务端 root，会连锁挂掉浏览器空列表测试（US-196 正是靠这个信号发现回归）。
-  - Stage 收尾归档：把活动 `scripts/ralph/prd.json` 与 `progress.txt` 原样复制到 `archive/<date>-<stage-name>/`，确保最终全 true 状态一致；同步 README、docs/README.md、backlog、future_stages、主 PRD、模块 PRD 的「当前状态/最近完成阶段」。
-  - Stage 27 只通过 OpenAPI/DTO 使用后端（不导入旧 app.js 内部状态），启动时以 `docs/api/openapi.json` 为准复核 stories。
+  - Patterns discovered
+    - 详情面板挂载模式：RequestsView 里 `v-if="selectedRequestId"` + `:key` 重挂载 +
+      `@changed`（列表刷新）/`@deleted`（清 URL + 卸载），父组件不持有详情数据，面板
+      自加载自管理 loading/error/empty——US-204/205 的候选/草案详情可复用该模式。
+    - 快照类 DTO 用 `_SnapshotBase(BaseModel)`（`extra="allow"`）让引擎 dict 可带额外
+      字段过边界，同时给生成客户端稳定显示类型；envelope DTO 仍 strict
+      `extra="forbid"`。运行时视图直接返回引擎 dict 不经过 DTO 重序列化，OpenAPI
+      里快照字段只是「声明」不改变响应。
+    - 动作成功后「用服务端返回 request 更新内存快照 + 重载详情 + 通知列表刷新」避免
+      旧 app.js 的 `loadDetail(requestId); loadList()` 双请求竞态；`emit('changed')`
+      触发父组件列表刷新，`emit('deleted')` 由父组件清 URL。
+    - 浏览器测试动作流程用 ConfirmDialog 的 `.confirm-dialog .danger-button`/
+      `.primary-button` 点击，断言重载后状态用 `wait_for_selector` + `to_contain_text`
+      组合，避免命中重载前的旧面板（detail-actions 选择器会匹配旧面板导致竞态）。
+    - Settings AB 的返回链接指向 `/requests?request_id=...` 而非 `/workbench`（详情在
+      列表页）；`ab=1` query 用于 AB 面板定位（当前 Settings 未用但保留兼容）。
+  - Gotchas encountered
+    - pydantic `extra="allow"` 子模型 + 可选字段：`config.filter_rule ?? {}` 在 TS 里
+      类型是 `{}` 不满足 DTO 形状——用本地 `ModifyConfig` 结构类型收敛字段再比较，
+      不要对 DTO 类型做 `?? {}` 回落。
+    - `isPreview` 检测 `saved_request` 字段：生成的 detail result 类型没有该字段，
+      用 `Record<string, unknown>` 收窄再 `hasOwnProperty`，避免 TS 报错。
+    - 浏览器 route mock `**/api/v1/requests/**` 会同时命中列表和详情：区分用
+      `/api/v1/requests/`（带路径段）vs 裸 `/api/v1/requests`。
+    - 删除成功后详情面板卸载（v-if），不要断言「已删除」文案——断言
+      `#request-detail-container` 不存在 + URL 无 request_id + 磁盘 JSON 不存在。
+    - `displayValue` 数组 join 用中文逗号 `，`（不是英文 `,`）；`scrubConfig` 里
+      key 命中敏感词（如 endpoint/url）优先整体 `[redacted]`，值 URL 检查只对
+      非敏感 key 生效（与旧 app.js 一致）。
+  - Useful context
+    - 旧 app.js 详情渲染在 `renderDetailPayload`（~4791-5110 行），管理动作在
+      `performAction`/`deleteRequest`/`buildModifyForm`/`buildCancelForm`；parity
+      对照基准。
+    - US-204 迁移单个搜索/草案时，`RequestDetailPanel` 的 preview 分支（isPreview +
+      编辑订阅草案 + 保存草案按钮 + draft_id 内存态）尚未实现——本 story 只迁移
+      已保存 Request 的管理动作；预览草案的 preview-modify/preview-save 走 US-204。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（339 例全过，含新 23 例）。
+---
+## 2026-08-31 04:10:00 CST - US-204
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 迁移单个搜索与服务端草案到 `/app/workbench`（frontend/src/features/workbench/）：
+    - `WorkbenchView.vue`：单个搜索表单（POST /api/v1/mikan/candidates）、直连 fallback
+      门控（CheckboxRow `#mikan-fallback-enabled` + `#mikan-fallback-form`）、候选结果区
+      （loading/error/empty + 标题解析摘要 + 候选卡片列表）、DraftPreviewPanel 挂载。
+    - `CandidateCard.vue`：公开白名单候选卡片（标题/MiKan ID/播出进度/推荐标签/搜索词/
+      同源海报）；NEEDS_CONFIRMATION 显示「我确认此合集为第N季」checkbox 勾选后才可选，
+      CONFLICT 显示警告并禁用；绝不自动选候选（即使只有一个）。
+    - `DraftPreviewPanel.vue`：服务端权威草案编辑面板——订阅草案（未保存）note + 保存草案
+      按钮 + 编辑订阅草案表单（字幕组/包含/排除/正则/大小写/folder_name）+ Overview/
+      Source/Filter/Seeds 分区；`preview-modify`（只发 draft_id + 允许 patch，绝不回传
+      完整 Request 快照）重算种子，`preview-save` 一次性消费 draft_id；draft_expired/
+      evicted/replayed → 固定中文「请重新生成订阅草案后再试」并 emit('expired') 清空面板。
+    - `candidateSearch.ts`：纯函数逻辑（validateCandidateQuery/validateFallbackValue/
+      candidateSelectionIsBlocked/needsSeasonConfirmation/parseSeasonNumber/parseSourceLabel/
+      collectPreviewEditPatch/buildCandidateCreatePayload/buildFallbackCreatePayload），
+      feature 与 Vitest 共用，不复制第二套。
+  - 补齐公开 DTO（api_contract.py）：`MikanCandidateDTO`（strict extra="forbid"，白名单
+    bangumi_id/title/mikan_url/poster_url/source_query/aliases/recommendation/
+    total_episodes/season_evidence/candidate_context，engine 字段在边界拒绝）与
+    `SeasonEvidenceDTO`（lenient _SnapshotBase，status/season/requires_review）；
+    `MikanCandidateResultDTO.candidates` 改为 `list[MikanCandidateDTO]`；重生成
+    docs/api/openapi.json 与 frontend/src/api/generated/api.ts（drift check 双守护）。
+  - 测试：Vitest 新增 candidateSearch.test.ts（17）与 WorkbenchView.test.ts（14，共 197 例
+    全过）；浏览器新增 `tests/browser/test_app_workbench.py` 18 例真实 Chromium（搜索/空态/
+    失败重试/解析摘要中文 label/季数确认/冲突禁用/候选选择草案/编辑重算/保存跳转/fallback
+    门控与校验/敏感边界（fallback URL 不进 URL/localStorage/sessionStorage/bodyText）/360px
+    无横向溢出）。
+  - 文档：frontend/AGENTS.md（US-204 章节）、src/apps/migu_orca_web/AGENTS.md（MiKan 候选
+    公开 DTO 章节）、README（Stage 27 段落 + US-204）、stage PRD 文档（US-204 完成记录）、
+    scripts/ralph/prd.json（US-204 passes: true）。
+- Files changed
+  - 新增：frontend/src/features/workbench/{WorkbenchView.vue, CandidateCard.vue,
+    DraftPreviewPanel.vue, candidateSearch.ts, candidateSearch.test.ts, WorkbenchView.test.ts}、
+    tests/browser/test_app_workbench.py
+  - 修改：src/apps/migu_orca_web/api_contract.py（MikanCandidateDTO/SeasonEvidenceDTO +
+    MikanCandidateResultDTO 白名单）、docs/api/openapi.json、frontend/src/api/generated/api.ts、
+    tests/api_contract/test_dto_contracts.py（+1 例敏感字段拒绝）、frontend/AGENTS.md、
+    src/apps/migu_orca_web/AGENTS.md、README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 候选/草案 feature 复用已迁移的 Request 展示逻辑：`effectiveSeeds`/`excludedSeeds`/
+      `completeSeedGroups`/`totalCompleteSeedCount`/`displayValue` 直接来自
+      `features/requests/requestDetail.ts`，DraftPreviewPanel 不复制第二套 Seeds 渲染。
+    - 生成草案 → preview-modify → preview-save 的三段式：draft_id 只存组件局部 ref，
+      保存成功后清空并 `router.push('/requests?request_id=...')` 交给 US-203 面板；与
+      US-194 服务端权威草案边界完全一致。
+    - 候选卡片是「父组件持有确认状态、卡片只发事件」模式：WorkbenchView 用
+      `seasonConfirmations` ref 记录每个 bangumi_id 的确认季数，CandidateCard 只渲染
+      checkbox 并 `update:confirmedSeason`；父组件构造 create payload 时才读取。
+    - MikanCandidateResultDTO 的 candidates 从 `list[dict[str, Any]]` 收紧为
+      `list[MikanCandidateDTO]` 后，生成的 TS 类型自动带上每个候选的字段
+      （season_evidence/candidate_context 等），前端不再需要 `Record<string, unknown>`
+      收窄；OpenAPI 的 additionalProperties:false 也更强。
+  - Gotchas encountered
+    - SPA 通知断言不能用旧页的 `#page-notification`：新前端是
+      `.global-notification:not(:empty)`（aria-live 容器在 App.vue）。
+    - `page.route("**/api/v1/requests")` 只匹配精确路径，不会截获
+      `/api/v1/requests/preview-modify`/`preview-save`——所以 `_register_generation_capture`
+      可以同时让 preview 端点走真实后端（draft 在进程内 draft_store 里）。
+    - CheckboxRow 的 id 直接落在原生 input（inheritAttrs:false 转发），浏览器/单测用
+      `#mikan-fallback-enabled` 即可，不要写成 `#mikan-fallback-enabled input`（后者是
+      wrapper div + input 两层时才会需要）。
+    - 搜索失败时除了 notification.error 还要设置 searchError ref 才能渲染 ErrorState
+      （retry 按钮依赖它）；空 query 校验失败时先清空 searchResult 避免旧结果残留。
+    - WorkbenchView 顶部用独立 `<h2 id="workbench-heading">`（test_app_shell.py 断言
+      `#workbench-heading`），子面板用 PanelSection 的 h2（title prop），避免重复 id。
+  - Useful context
+    - 旧 app.js 对照基准：`searchMikanCandidates`（~3570 行）、`renderCandidateCard`
+      （~3431 行）、`candidateSelectionIsBlocked`（~3643 行）、`createPreviewDraftFromCandidate`
+      （~3690 行）、`buildPreviewEditForm`/`collectPreviewEditPatch`（~4433/4662 行）、
+      `previewModify`/`savePreviewRequest`（~4719/4618 行）、`renderTitleParseSummary`
+      （~1428 行）。
+    - US-205 迁移批量工作台时可复用：CandidateCard（候选浮层）、DraftPreviewPanel 的
+      preview-modify/save 模式（批量卡片 draft_id + preview_request）、candidateSearch 的
+      payload 构造；批量 parse 的 candidates/preview_request 结构在 services.py
+      `_build_batch_preview_request` 已有服务端权威草案。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（357 例全过，含新 18 例）。
+---
+## 2026-08-31 06:55:00 CST - US-205
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 迁移批量工作台到 `/app/workbench`（frontend/src/features/workbench/）：
+    - `BatchWorkbenchView.vue`：挂在 `WorkbenchView.vue` 底部的「批量工作台」
+      PanelSection——批量输入（BaseTextarea，每行一个番剧名）→
+      `POST /api/v1/batches/parse` 返回独立 FOUND/EMPTY/FAILED 卡片与 `batch_id`
+      （`router.replace` 进 URL query 供提交队列刷新恢复；批量卡片服务端不持久化，
+      刷新不恢复卡片，与旧 `/index` parity）。
+    - `BatchCandidatePopover.vue`：FOUND 卡片候选浮层（`role="dialog"`，复用
+      `CandidateCard` 的白名单渲染/季数确认 checkbox/冲突禁用；Escape/关闭后焦点回
+      触发器）；选候选 → `POST /api/v1/requests`（`save_request=false`）生成服务端
+      权威草案，卡片置 `status: DRAFT` + `preview_request` + `draft_id`（内存）。
+    - `BatchDraftPreviewPanel.vue`：DRAFT 卡片复用 `DraftPreviewPanel`（编辑订阅草案
+      + preview-modify/preview-save）+ 批量专属「接受当前批量草案 / 删除当前批量
+      卡片」动作行；接受前经新增的 `DraftPreviewPanel.saveDraftAndReturn()` 走
+      preview-save（一次性消费 draft_id）并返回已保存 Request。
+    - 接受工具栏：全选 CheckboxRow、`已选择 N 项` 计数、批量接受（只发选中 reviewable
+      卡片 + `item_ids`）、全接受（legacy parity 发送**所有卡片**不带 `item_ids`，
+      不可接受卡片显示服务端中文 reason）；统一走
+      `POST /api/v1/batches/{batch_id}/accept`；成功后卡片置 ACCEPTED +
+      `queue_status`（从 accept 响应 queue 同步）+ `draft_id: null`。
+  - 纯函数逻辑收敛 `frontend/src/features/workbench/batchWorkbench.ts`
+    （`batchStatusLabel`/`batchCardTitle`/`batchCardPreferenceSummary`/
+    `batchCardSeedSummary`/`canExpandBatchCard`/`canAcceptBatchCard`/
+    `collectBatchAcceptDescriptors`/`buildBatchAcceptPayload`/`postBatchAccept`/
+    `batchAcceptNotification`/`queueStatusLabel`/`queueItemSummary` 等），feature 与
+    Vitest 共用，不复制第二套。
+  - 补齐批量公开 DTO（src/apps/migu_orca_web/api_contract.py）：`BatchParseItemDTO`
+    （lenient `_SnapshotBase`，含 item_id/raw_title/status/queue_status/candidates/
+    preference 元数据/preview_request/draft_id/error，**内嵌 strict MikanCandidateDTO**）、
+    `BatchQueueDTO`/`BatchQueueItemDTO`/`BatchResultItemDTO`（lenient，accept 带
+    `queued`、submit/retry/recover 带 `attempts`）；重新生成 `docs/api/openapi.json`
+    与 `frontend/src/api/generated/api.ts`（drift check 双守护）。
+  - 测试：Vitest 新增 batchWorkbench.test.ts（18）与 BatchWorkbenchView.test.ts（10，
+    共 225 例全过）；浏览器新增 `tests/browser/test_app_batch_workbench.py` 13 例真实
+    Chromium（解析状态/loading/空输入校验/候选浮层/季数确认/草案详情与删除/脱敏/
+    选择接受/全接受/全选计数/失败保留/360px/敏感边界）；DTO 测试新增 5 例。
+  - 文档：frontend/AGENTS.md（批量工作台章节）、src/apps/migu_orca_web/AGENTS.md
+    （批量公开 DTO 章节）、README（US-205 完成）、stage PRD 文档（US-205 完成记录）、
+    scripts/ralph/prd.json（US-205 passes: true）。
+- Files changed
+  - 新增：frontend/src/features/workbench/{BatchWorkbenchView.vue, BatchCandidatePopover.vue,
+    BatchDraftPreviewPanel.vue, batchWorkbench.ts, batchWorkbench.test.ts,
+    BatchWorkbenchView.test.ts}、tests/browser/test_app_batch_workbench.py
+  - 修改：frontend/src/features/workbench/{DraftPreviewPanel.vue, WorkbenchView.vue}、
+    src/apps/migu_orca_web/api_contract.py、tests/api_contract/test_dto_contracts.py、
+    docs/api/openapi.json、frontend/src/api/generated/api.ts、frontend/AGENTS.md、
+    src/apps/migu_orca_web/AGENTS.md、README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 批量工作台复用单个搜索的组件：FOUND 候选浮层 = `BatchCandidatePopover`（内部
+      CandidateCard）+ `seasonConfirmations`（父组件持有，popover 只发事件）；DRAFT
+      详情 = `BatchDraftPreviewPanel`（内部 DraftPreviewPanel + 批量动作行）。US-206
+      迁移提交队列时可继续复用 accept 响应的 queue 同步逻辑。
+    - 批量接受端点语义（legacy parity 关键）：`acceptBatchItems` 的 `item_ids` 可选——
+      缺省（全接受）时服务端对**所有**传入卡片返回逐卡结果，不可接受卡片带中文
+      reason（unacceptable/failed）；前端全接受必须发全部卡片而不是只发 reviewable。
+    - 批量 DTO 模式：parse item 用 lenient `_SnapshotBase`（允许引擎追加 review
+      元数据）但内嵌 `candidates` 仍 strict `MikanCandidateDTO`（engine 字段在嵌套
+      层拒绝）；queue/result item 用 lenient DTO 覆盖 accept（queued）与
+      submit/retry/recover（attempts）两个 family 的共享字段。
+    - `DraftPreviewPanel` 新增 `saveDraftAndReturn()`（保存并返回已保存 Request）供
+      批量接受流程复用，避免「先保存再查」二次请求。
+  - Gotchas encountered
+    - CheckboxRow 是 `inheritAttrs: false`：在批量卡片上写的
+      `class="batch-card-checkbox-row"` 会落到**原生 input** 而不是包装 div——浏览器
+      测试定位 `.batch-card-checkbox-row` 即可（不要写成 `... input`）。
+    - ConfirmDialog Teleport 到 `body`：浏览器测试断言用全局
+      `.confirm-dialog .primary-button`，不能限定到 `#batch-accept-toolbar .confirm-dialog`。
+    - 生成的 `BatchItem` 类型里 `draft_id`/`queue_status` 是 `string | null`：删除
+      draft 时不能用 `delete obj.draft_id`（TS 报 operand must be optional），要
+      显式赋 `null`；`queue_status` 同步时用 `?? null` 而不是 `?? undefined`。
+    - `vue-tsc` strict 下 `v-for :key` 不接受 `string | null`：用
+      `item.item_id ?? item.raw_title ?? ''`。
+    - 浏览器 route mock `**/api/v1/batches/batch-spa/accept*` 需要 `*` 通配（URL 可能
+      带 storage_dir query）。
+  - Useful context
+    - 旧 app.js 对照基准：`submitBatchAccept`（~2144 行）、`resolveBatchAcceptDescriptors`
+      （~2078）、`applyBatchAcceptResult`（~1982）、`renderBatchCard`（~2403）、
+      `generateBatchRequestFromCandidate`（~3711）、`savePreviewDraftRequest`（~1873）、
+      `batchQueueStatusLabel`/`batchQueueItemSummary`（~2825/2854）。
+    - US-206 迁移提交队列时可复用：BatchWorkbenchView 已同步 accept 响应的
+      `queueItems`/`queue_status`；提交队列面板（读 queue、顺序提交、失败重试、
+      recover）在 `/app/queue` 路由的 QueueView.vue（当前占位）。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（370 例全过，含新 13 例）。
+---
+
+## 2026-08-31 08:05:00 CST - US-206
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 迁移提交队列到 `/app/queue`（frontend/src/features/queue/QueueView.vue）：
+    - 队列读取：`GET /api/v1/batches/{batch_id}/queue` 走统一 transport
+      （`loadQueue`，`{batch_id}` 路径模板 + 相对 storage query）；`batch_id` 是公开
+      标识符，从 URL query 读取（`/app/queue?batch_id=...`），批量工作台（US-205）
+      解析后已把 `batch_id` 推入 URL，因此接受 → 提交队列是同一条链路；无
+      `batch_id` 显示空状态并禁用刷新；URL batch_id 变化 watch 重新读取。
+    - 队列项按状态分派动作：`FAILED`/`RETRYABLE` → 单项「重试」
+      （`POST /api/v1/batches/{batch_id}/retry`，带 `request_id`）；`SUBMITTING`/
+      `RESULT_PERSIST_FAILED` → 「恢复」（`POST .../recover`：先 `action=auto`，
+      服务端返回 `needs_manual` 时经共享 ConfirmDialog 人工核验——确认=已创建
+      订阅→`succeeded`、取消=未创建→`failed`，均带 `confirm: true`）；已成功项
+      绝不重复提交（terminal 状态无动作按钮）。
+    - 提交/重试/恢复共用同一个 Auto Bangumi 凭据表单（auth mode + endpoint +
+      password/token + fallback + 显式 confirm 勾选）：凭据走 `useSensitiveFields`
+      （组件内存），`queuePayload()` 在单次 POST body 构造 `ab_config`；成功后
+      `ab.clearAll()` + `abConfirm=false`，切换认证模式 `ab.reset()`，卸载自动清空。
+    - 失败语义（legacy parity）：HTTP 级失败保留敏感输入与确认勾选便于重试，只显示
+      固定中文反馈（绝不渲染服务端 error_message/error_type）；队列读取失败显示
+      脱敏错误态 + 重试；in-flight 时提交按钮与敏感输入全部禁用。
+  - 纯函数逻辑收敛到 `frontend/src/features/queue/queueWorkbench.ts`
+    （`queueStatusLabel`/`queueStatusClass`/`queueItemSummary`/`queueItemCanRetry`/
+    `queueItemCanRecover`/`queueItemIsStuck`/`queueItemIsTerminal`/`buildAbConfig`/
+    `validateAbConfig`/`batchSubmitSummaryMessage`/`batchSubmitNotification`/
+    `recoverOutcomeNeedsManual`/`recoverNeedsManualMessage` + `loadQueue`/
+    `submitQueue`/`retryQueueItem`/`recoverQueueItem` transport wrappers），feature
+    与 Vitest 共用，不复制第二套（legacy `batchQueueStatusLabel`/`buildAbConfig`
+    parity）。
+  - 测试：Vitest 新增 queueWorkbench.test.ts（13）与 QueueView.test.ts（16，共 254
+    例全过）；浏览器新增 `tests/browser/test_app_queue.py` 16 例真实 Chromium（空
+    状态/读取与状态渲染/读取失败脱敏/360px/提交校验与确认/提交成功清空与防重复/
+    提交失败保留输入/in-flight 禁用/重试按钮分派/重试成功/重试失败/恢复按钮分派/
+    自动恢复/人工核验确认/人工核验取消/敏感边界）；同步 `test_app_shell.py` queue
+    路由断言（`#queue-heading` → `#batch-queue-count`/`#batch-queue-list`）。
+  - 文档：frontend/AGENTS.md（US-206 章节）、README（Stage 27 段落 + US-206）、
+    stage PRD 文档（US-206 完成记录）、scripts/ralph/prd.json（US-206 passes: true）。
+- Files changed
+  - 新增：frontend/src/features/queue/{queueWorkbench.ts, queueWorkbench.test.ts,
+    QueueView.test.ts}、tests/browser/test_app_queue.py
+  - 修改：frontend/src/features/queue/QueueView.vue（占位→完整队列）、
+    tests/browser/test_app_shell.py、frontend/AGENTS.md、README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 队列项按状态分派动作是「纯函数能力位」模式：`queueItemCanRetry`/
+      `queueItemCanRecover` 只判断 status 码，渲染层 v-if 出对应按钮；terminal
+      状态（SUCCEEDED/FAILED）无按钮 → 天然防重复提交，与旧 app.js
+      `renderBatchQueueItem` 一致。
+    - 提交/重试/恢复共用一个凭据表单 + 一个 `queuePayload()` 工厂：ab_config 在
+      单次 POST body 构造（`buildAbConfig` + `validateAbConfig` 纯函数），成功后
+      `clearAll()`、失败保留输入——复用 Settings AB 表单模式，不复制第二套。
+    - recover 三段式：先 `action=auto`（不需要凭据/确认）→ 服务端返回
+      `needs_manual` 才弹 ConfirmDialog → 确认/取消分别走 `succeeded`/`failed`
+      （均带 `confirm: true`）。用 `recoverOutcomeNeedsManual(result.items[0])`
+      判断，注意首次 recover 调用后要重新取 mock calls 数组再断言第二次。
+    - SPA 的 BaseButton `loading` 只显示 spinner + disabled（slot 文本保留），
+      浏览器 in-flight 断言用 `to_be_disabled()` + `aria-busy`，不要断言
+      「处理中…」文本（旧 app.js 是替换按钮文案，新前端不同）。
+  - Gotchas encountered
+    - api_token 模式下模板里**没有** username/password 输入框（v-if 分支）：
+      Vitest/浏览器测试 fill 密码字段前必须先选 password 模式，否则
+      Playwright `#batch-queue-ab-password` 超时。
+    - 切换认证模式 `ab.reset()` 会清空 endpoint（共享字段也清空），与旧 app.js
+      `clearAbSensitiveFields` 语义一致；测试断言共享字段清空 + 密码字段卸载 +
+      token 字段出现为空。
+    - `recoverOutcomeNeedsManual` 参数要接受 `undefined`（`result.items?.[0]`
+      可能缺失），TS strict 下签名要写 `{ status?: string | null } | undefined | null`。
+    - QueueView 的 StatusAlert 作用域是 `#batch-queue-submit-form .status-alert`
+      （页面只有这一个 form 时裸 `.status-alert` 也行，但保持 form 作用域更稳）。
+  - Useful context
+    - 旧 app.js 对照基准：`renderBatchQueueItem`/`loadBatchQueue`/`submitBatchQueue`/
+      `retryBatchQueueItem`/`recoverBatchQueueItem`（~2825-3287 行）、
+      `buildAbConfig`/`clearAbSensitiveFields`（~819/838 行）、
+      `batchQueueSummaryMessage`（~3069 行）。
+    - 队列端点 DTO（BatchQueueDTO/BatchQueueItemDTO/BatchSubmitResultDTO）在
+      US-205 已补齐并入库，本 story 无需改 OpenAPI/生成客户端（drift check 双守护
+      全过）；`serialize_queue` 只回公开脱敏字段，前端直接渲染无需再 displayValue。
+    - US-207 将做跨功能响应式/无障碍收敛；US-208 parity 矩阵可把旧 queue 旅程
+      （提交/重试/恢复/刷新恢复）指向 `/app/queue?batch_id=...`。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（386 例全过，
+      含新 16 例）。
+---
+
+
+## 2026-08-31 08:37:45 CST - US-207
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 键盘可达性：App.vue 增加 `#skip-link`（Tab 首个聚焦目标，href=`#app-main`，聚焦时
+    才可见）+ `main#app-main` 带 `tabindex="-1"` 作为 skip 落点；main.css 增加
+    `.skip-link`/`#app-main:focus` 样式。
+  - 批量候选浮层（BatchCandidatePopover.vue）：打开时焦点移入 dialog（close 按钮），
+    root 上监听 Escape 关闭，卸载时移除 listener；父组件（BatchWorkbenchView）在
+    `openCandidateChoices` 捕获触发按钮（`$event.currentTarget` 或
+    `document.activeElement`），`closeCandidateChoices` **同步**恢复焦点（不用 rAF——
+    浏览器在 popover 卸载时会先把焦点丢到 body）。
+  - 响应式：`top-nav` 改 `flex-wrap`（360px 下 4 个导航链接换行不溢出）；四路由 ×
+    360/768/1280 三视口无横向溢出由新浏览器收敛套件守护。
+  - reduced-motion：LoadingState/BaseButton spinner 在 `prefers-reduced-motion: reduce`
+    下停动画但文本 + `aria-busy`/disabled 保留（既有 CSS 已覆盖，浏览器测试补断言）；
+    conftest 新增 `test-slow-queue` 服务端延迟路由（1.5s）供浏览器观察队列 LoadingState。
+  - production 运行质量：vite.config.ts 用 functional `manualChunks` 把 `node_modules`
+    打进 `vendor-*.js`（保持路由懒加载）；`sourcemap: false` 且 build 永不提交 `.map`。
+    routes_app.py：`/app/assets/*` 返回 `public, max-age=31536000, immutable`，SPA shell
+    与其它 `/app/*` 返回 `no-cache`；`app_shell`/`app_fallback` 改为返回带 Cache-Control
+    的 `Response`（Blueprint 没有 make_response，直接用 flask Response）。
+  - 测试：Vitest 新增 App.test.ts skip-link 1 例 + BatchCandidatePopover.test.ts 3 例
+    （共 258 例全过）；浏览器新增 tests/browser/test_app_responsive_a11y.py 22 例真实
+    Chromium；app_routes_test.py 新增 3 例（asset immutable 缓存/shell no-cache/build
+    无 sourcemap）。
+- Files changed
+  - 修改：frontend/src/App.vue、frontend/src/styles/main.css、frontend/vite.config.ts、
+    frontend/src/features/workbench/BatchCandidatePopover.vue、
+    frontend/src/features/workbench/BatchWorkbenchView.vue、frontend/src/App.test.ts、
+    src/apps/migu_orca_web/routes_app.py、src/apps/migu_orca_web/app_routes_test.py、
+    tests/browser/conftest.py、frontend/AGENTS.md、src/apps/migu_orca_web/AGENTS.md、
+    README.md、docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    scripts/ralph/{prd.json, progress.txt}
+  - 新增：frontend/src/features/workbench/BatchCandidatePopover.test.ts、
+    tests/browser/test_app_responsive_a11y.py
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - `$event.currentTarget` 只在事件分发期间有效：模板里
+      `@click="fn(item, $event.currentTarget)"` 传的是元素本身，函数签名要收
+      `HTMLElement | null`，不要再当 MouseEvent 取 `.currentTarget`。
+    - focus 恢复要在 popover/dialog 卸载**之前**同步做：浏览器移除聚焦元素时会把焦点
+      丢到 body；`requestAnimationFrame` 恢复会竞态失败（浏览器测试暴露）。
+    - `Blueprint` 没有 `make_response`（那是 Flask app 的）；带响应头返回裸字符串路由
+      用 `flask.Response(body, headers={...})`。
+    - Playwright `route.fulfill` 里的 `time.sleep` 会阻塞 sync API 的分发线程，loading
+      态永远不可见；延迟必须放 Flask 测试服务端（conftest `test-slow-*` 路由模式）。
+  - Gotchas encountered
+    - `/app/<path:subpath>` 的 `subpath` 是相对 `/app/` 的（如 `assets/x.js`），判断
+      asset 前缀要拼回 `f"/app/{subpath}"` 再 `startswith('/app/assets/')`。
+    - functional `manualChunks` 用 `id.includes('node_modules')` 返回 'vendor'：object
+      形式（`{ vendor: ['vue'] }`）会警告并可能把全部依赖并成一个 chunk。
+    - reduced-motion 浏览器测试不要依赖真实外部搜索：用 conftest 服务端延迟路由 +
+      queue 页面的 LoadingState 断言（`aria-busy` + 文案），比 mock 候选搜索更稳。
+  - Useful context
+    - US-208 将基于此收敛基线建立旧 269 个 Chromium 旅程到新路由的 parity 矩阵并切换
+      默认入口（/index、/settings → /app/...）；US-209 删除旧资产时保留
+      test_app_responsive_a11y.py 的跨功能断言。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（408 例全过，含新 22 例）。
+---
+
+## 2026-08-31 12:26:32 CST - US-208
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - parity 矩阵（可审查、可自动核对）：`docs/Stage27_parity_matrix.md` 把旧 269 个
+    Chromium 旅程（14 个旧套件 test_shell/test_actions/test_list/test_detail/
+    test_preferences/test_qbittorrent_connection/test_generation/test_fixture_mode/
+    test_batch_workbench/test_mikan_candidates/test_a11y/test_infrastructure/
+    test_ui_quality/test_stage11_real_config_entry 的 `def test_` 数）映射到新前端
+    覆盖套件与 SPA 路由；`tests/api_contract/parity_matrix.py` 是矩阵数据，
+    `tests/api_contract/test_parity_matrix_guard.py`（16 例）重数旧套件测试数、
+    核对每个条目、守护 269 总数与「每个旧套件都被映射」，重命名/删减旧套件即失败。
+  - 默认入口切换：`views.py` 新增 `web_entry_mode()`（服务端环境变量，请求时读取，
+    运行中可翻转）——默认 `spa`：`GET /`、`GET /index` → `/app/workbench`（保留
+    `request_id`/`batch_id` query），`GET /Settings`、`GET /settings` →
+    `/app/settings`（保留 `request_id` query）；`MIGU_ORCA_WEB_ENTRY_LEGACY=1` 恢复
+    旧 `/index`、`/settings` Jinja 页面（回退演练/旧旅程回归）。SPA 重定向只转发公开
+    已保存标识符，endpoint/token/storage 路径等敏感值绝不进入重定向 URL
+    （`test_spa_entry_never_forwards_sensitive_query_values` 守护）。
+  - 回退演练：`tests/browser/test_app_entry_switch.py`（8 例真实 Chromium）——默认
+    SPA 入口（/index、/settings 重定向、兼容入口 request_id/batch_id 保留、敏感值不
+    过 redirect、API/探针/旧静态资产不受影响）+ 回退演练（page.route 拦截入口页
+    模拟 legacy 部署：旧页面恢复、同一 `/api/v1/requests` 与 storage 前后不变、
+    SPA `/app/*` 仍可达、回退不写 storage）。
+  - 旧旅程浏览器套件：14 个 `test_*.py`（非 test_app_*）加
+    `pytestmark = [pytest.mark.browser, pytest.mark.legacy_entry]`；conftest 新增
+    autouse `_legacy_entry_mode` fixture（browser + legacy_entry marker 时设
+    `MIGU_ORCA_WEB_ENTRY_LEGACY=1`），pyproject.toml 注册 legacy_entry marker。
+    SPA 套件不设 marker 跑默认 SPA 入口。
+  - 文档：README（Stage 27 段落、启动后访问清单、本地验收步骤 4/6/8/10/11 改指新
+    入口与回退）、docs/README.md（最近完成阶段）、stage PRD US-208 完成记录、
+    `frontend/AGENTS.md`（/index、/settings 重定向约定）、
+    `src/apps/migu_orca_web/AGENTS.md`（默认入口与回退章节）。
+- Files changed
+  - 新增：docs/Stage27_parity_matrix.md、tests/api_contract/{parity_matrix.py,
+    test_parity_matrix_guard.py}、tests/browser/test_app_entry_switch.py
+  - 修改：src/apps/migu_orca_web/{views.py, views_test.py, app_routes_test.py,
+    AGENTS.md}、tests/browser/{conftest.py, test_app_shell.py} + 14 个旧旅程套件、
+    pyproject.toml、frontend/AGENTS.md、README.md、docs/README.md、
+    docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md、
+    scripts/ralph/{prd.json, progress.txt}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 入口切换 = 服务端环境变量 `web_entry_mode()`（请求时读取，运行中可翻转），
+      旧路由始终注册，切换只决定渲染/重定向哪个页面；`MIGU_ORCA_WEB_ENTRY_LEGACY=1`
+      是回退演练与旧旅程回归的统一开关（conftest autouse fixture 按 marker 设置）。
+    - 旧旅程套件与 SPA 套件并存：旧套件用 `pytest.mark.legacy_entry` 跑 legacy
+      入口，SPA 套件（test_app_*）跑默认入口；新增旧旅程套件必须加 marker，否则
+      /index 重定向会让它失败。parity guard 守护 269 总数与映射完整性。
+    - SPA 重定向只转发公开已保存标识符（request_id/batch_id），敏感值绝不进
+      redirect Location；旧 `/settings?request_id=...#auto-bangumi` 书签经
+      `/app/settings?request_id=...` 保持可用（#anchor 是 no-op）。
+    - 回退演练断言「API 与 storage 不回滚」：用 `page.request.get` 带相对
+      `storage_dir` query 核对同一 handler 前后结果一致，并数 storage 下 *.json
+      数量不变（rollback 不写盘）。
+  - Gotchas encountered
+    - `page.route("**/settings**")` 会同时命中 SPA `/app/settings` 与旧 `/settings`；
+      回退演练只拦截**入口页**（`/index`、`/settings` 精确路径），`route.continue_()`
+      放行其它请求，否则 SPA 也被「回退」。
+    - 旧旅程测试里 `page.request.get("/api/v1/requests")` 不带 storage_dir 时读的是
+      服务端根（tmp 父目录）而非 fixture 的 storage profile——回退断言要带
+      `?storage_dir=<profile>`。
+    - legacy 模式下页面 URL 不会被重定向改写（旧行为），所以「敏感值不进 URL」的
+      断言只对 SPA 重定向有效；legacy 页只断言 body/localStorage 不泄漏。
+    - ruff 的 I001（import 排序）在 `from __future__ import annotations` 重复/放错
+      位置时也会报；先 `ruff check --fix` 再跑其它门禁。
+  - Useful context
+    - views.py 的入口路由现在返回 `object`（str 或 redirect）；`web_entry_mode()`
+      与 `MIGU_ORCA_WEB_STORAGE_ROOT` 模式一致（服务端环境变量，浏览器不可控）。
+    - US-209 删除旧前端时：先删旧主模板/`app.js`/无用 CSS 与测试 helper，再删
+      `/app/components-demo` 脚手架路由与 test_components_primitives；parity 矩阵
+      中旧套件条目随删除同步清理（guard 会强制）。
+    - 浏览器套件本机运行：`LD_LIBRARY_PATH=$PWD/.chromium-deps/extracted/usr/lib/x86_64-linux-gnu
+      UV_CACHE_DIR=$PWD/.uv-cache uv run pytest tests/browser/ -q`（416 例全过，
+      含新 8 例 entry-switch）。
+---
+
+## 2026-08-31 16:10:00 CST - US-209
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 删除旧前端资产：`src/apps/migu_orca_web/static/app.js`、`static/style.css`、
+    `templates/migu_orca_web/{index,settings,_top_nav}.html`（旧 Jinja 主模板）。
+  - 删除 14 个旧旅程浏览器套件（test_shell/test_actions/test_list/test_detail/
+    test_preferences/test_qbittorrent_connection/test_generation/test_fixture_mode/
+    test_batch_workbench/test_mikan_candidates/test_a11y/test_infrastructure/
+    test_ui_quality/test_stage11_real_config_entry）、迁移脚手架
+    test_components_primitives 与回退演练 test_app_entry_switch；删除 parity 矩阵
+    （docs/Stage27_parity_matrix.md + tests/api_contract/parity_matrix.py +
+    test_parity_matrix_guard.py）与 test_frontend_dependencies.py。
+  - `views.py`：去掉 `web_entry_mode()`/`MIGU_ORCA_WEB_ENTRY_LEGACY` legacy 分支，
+    入口路由固定重定向 SPA（`/`、`/index` → /app/workbench；`/Settings`、`/settings`
+    → /app/settings，保留 request_id/batch_id query）。
+  - `blueprints.py`：`web_blueprint` 移除 static/template 文件夹（旧资产已删）；
+    `routes_app.py` 的 `app_blueprint` 自带 template_folder 供 placeholder 渲染，
+    fallback 边界注释更新（去掉 /migu-orca-static 与旧页面）。
+  - conftest.py 移除 `open_dev_fixture_panel`/`_legacy_entry_mode`；pyproject 移除
+    legacy_entry marker；CI 移除 `node --check` 与 Node setup 步骤。
+  - frontend 删除 `/app/components-demo` 路由、ComponentsDemoView.vue 与 App.test.ts
+    对应 stub。
+  - 文档同步：README、docs/README、docs/design/architecture.md（Web 边界现状改为
+    前端工程）、docs/modules/M13-web-ui-PRD.md（Stage 27 状态/技术栈/UI 调整）、
+    docs/backlog.md（BL-024 已完成）、docs/MiGuOrca_future_stages.md、
+    docs/MiGuOrca_main_PRD.md（v0.27）、docs/MiGuOrca_stage27_..._PRD.md（US-209
+    完成记录）、docs/api/endpoint_inventory.md（§5 前端依赖章节改 SPA 契约）、
+    docs/api/README.md、skills（dev-browser/ralph）、AGENTS.md（web/frontend）。
+  - 归档：scripts/ralph/archive/2026-08-31-stage27-frontend-engineering-migration/
+    （prd.json + progress.txt，全部 story passes: true）。
+- Files changed
+  - 删除：旧 static/templates、14 个旧旅程套件、test_components_primitives、
+    test_app_entry_switch、parity 矩阵 3 件、test_frontend_dependencies.py、
+    ComponentsDemoView.vue
+  - 修改：views.py、views_test.py、app_routes_test.py、blueprints.py、routes_app.py、
+    conftest.py、test_inventory_consistency.py、test_app_shell.py、pyproject.toml、
+    .github/workflows/ci.yml、frontend/src/app/router/index.ts、App.test.ts、
+    README.md、docs/*（README/architecture/M13/backlog/future_stages/main_PRD/
+    stage27_PRD/api/endpoint_inventory/api/README）、AGENTS.md × 2、skills × 2、
+    scripts/ralph/{prd.json, progress.txt} + 新增 archive/2026-08-31-.../{prd,progress}
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 删除 web_blueprint 的 template_folder 后，`render_template`（如 placeholder）
+      必须由自带 template_folder 的 app_blueprint 渲染，否则 TemplateNotFound。
+    - 移除 Blueprint 的 static_folder 后，`/migu-orca-static/*` 路由自动消失；
+      入口路由（/、/index、/Settings、/settings）保留在 views.py 只做重定向。
+    - 旧旅程套件删除后，SPA 套件（test_app_*）是浏览器回归的唯一来源；
+      test_app_shell.py 的入口重定向断言改为描述「旧页面已删、入口固定重定向」。
+  - Gotchas encountered
+    - `git diff --check` 会报 conftest.py 末尾多余空行（删除区块后残留）——
+      编辑后 `rstrip('\n') + '\n'` 归一。
+    - ruff 报 `url_for` 未使用（views.py 不再渲染模板）——删 import 即可。
+    - 删除静态测试块用脚本按 `def test_` 边界切割时要保留前导 `def ` 行本身，
+      否则把函数签名也删掉（先 restore 再精确按行删除）。
+  - Useful context
+    - Stage 27 全部 13 个 story（US-197～US-209）已完成；全套门禁：
+      compileall/ruff/OpenAPI drift/git diff --check + 1150 pytest（1019 非浏览器 +
+      131 真实 Chromium SPA）+ frontend typecheck/lint/unit(258)/build/api:check 全绿；
+      仓库根 .migu_orca/storage 不存在。
+    - 归档位置：scripts/ralph/archive/2026-08-31-stage27-frontend-engineering-migration/；
+      下一个 Stage 从 main 新建分支时 ralph.sh 会自动归档（但本 story 已手动归档）。
 ---

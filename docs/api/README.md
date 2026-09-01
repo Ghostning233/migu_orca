@@ -5,7 +5,7 @@
 | 文件 | 说明 |
 | --- | --- |
 | `openapi.json` | OpenAPI 3.1 文档，覆盖全部 `/api/v1` 端点，由确定性脚本生成。 |
-| `endpoint_inventory.md` | US-189 冻结的端点清单、敏感值边界与旧前端依赖（人工可读基线）。 |
+| `endpoint_inventory.md` | US-189 冻结的端点清单、敏感值边界与前端依赖（人工可读基线；US-209 更新）。 |
 
 ## 生成与漂移检查
 
@@ -19,6 +19,28 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
   `src/apps/migu_orca_web/openapi_gen.py` 的 `_ENDPOINTS` 注册表，否则
   `tests/api_contract/test_inventory_consistency.py` 与
   `tests/api_contract/test_openapi_generation.py` 失败。
+- 每个 operation 在 `_ENDPOINTS` 里声明**显式可读的 `operationId`**（如
+  `listRequests`、`submitBatchQueue`）；`tests/api_contract/test_openapi_runtime_consistency.py`
+  核对 operationId 唯一、可读、跨重生成稳定，且 `_ENDPOINTS` 声明的每个
+  error_type/status 与 `extensions/flask_api/api.py:_error_http_status` 的运行时分类一致。
+
+## Stage 27 类型化客户端（US-198）
+
+Stage 27 前端只通过 OpenAPI 生成 TypeScript 类型，不手写第二套响应 interface：
+
+```bash
+cd frontend
+npm run api:generate    # openapi-typescript → src/api/generated/api.ts
+npm run api:check       # 漂移检查：生成结果与入库文件不一致时非零退出
+```
+
+- 生成器是 `openapi-typescript@7.13.0`（锁定在 `frontend/package-lock.json`），
+  输入是 `docs/api/openapi.json`，输出 `frontend/src/api/generated/api.ts`（入库）。
+- `frontend/src/api/generated/` **只由契约生成**，不手工维护；迁移 feature 不得
+  手写重复的 API response interface。
+- CI：frontend job 先跑 `npm run api:check`；Python 套件的
+  `test_openapi_runtime_consistency.py::test_frontend_generated_client_matches_openapi`
+  也执行同一 drift check。
 
 ## 契约要点
 
@@ -43,13 +65,18 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
   `image/jpeg|png|gif|webp` content type 与失败响应（函数视图，不经 JSON envelope；
   US-192 起失败返回 JSON envelope + 分类状态码）。
 - `request_id`/`batch_id`/`draft_id`/`candidate_context` 生命周期见
-  `endpoint_inventory.md` §5.4。
+  `endpoint_inventory.md` §5.3。
 
 ## Stage 27 使用方式
 
-Stage 27 TypeScript 前端只通过本 OpenAPI/DTO 生成客户端类型，不导入旧
-`app.js` 内部状态。生成后按 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`
-handoff 使用。
+Stage 27 TypeScript 前端只通过本 OpenAPI/DTO 生成客户端类型，不手写第二套
+响应 interface。旧 `app.js` 已在 US-209 随旧 Jinja 页面删除，生成客户端是
+Web UI 唯一的前端类型来源。生成后按
+`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md` 使用。
+
+Stage 27 US-198 已用锁定版本的真实生成器（openapi-typescript@7.13.0）完成
+smoke test，校准了运行时错误状态声明、稳定 operationId 与各迁移 feature
+实际读取的深层公开 DTO；业务组件不得手写接口来绕过生成类型。
 
 ## 健康/就绪探针（非 /api/v1 契约）
 

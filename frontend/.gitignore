@@ -1,0 +1,14 @@
+# MiGuOrca frontend (Stage 27, US-197)
+#
+# - node_modules and build output are NOT committed. CI runs `npm ci` then
+#   rebuilds from source (see `.github/workflows/ci.yml`), so the lockfile is
+#   the source of truth, never `dist/`.
+# - Keep `dist/` out of the repo: Flask serves the production build from
+#   `frontend/dist/`, which deployments build at release time.
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local editor/OS noise
+.DS_Store
+*.local

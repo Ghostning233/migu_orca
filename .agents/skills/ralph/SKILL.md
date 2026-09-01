@@ -29,7 +29,7 @@ user-invocable: true
 5. **质量检查**（全部通过才算完成）：
    - `uv run python -m compileall -q src tests`
    - `uv run pytest -q`（完整套件，含浏览器测试）
-   - 若改了 Web 前端：`node --check src/apps/migu_orca_web/static/app.js`
+   - 若改了 Web 前端：`cd frontend && npm run typecheck && npm run lint && npm run test:unit -- --run && npm run build`
    - 若改了浏览器测试/Web UI：`uv run pytest tests/browser/ -q`
    - 浏览器测试前置条件：仓库根 `.migu_orca/storage` 必须不存在（存在陈旧 Request 会挂掉多个浏览器测试）
 6. **浏览器验证**：UI story 需要浏览器验证时，加载 `dev-browser` skill（项目用 Playwright 套件做真实 Chromium 验证，无 MCP 浏览器工具）。
@@ -62,14 +62,14 @@ uv sync                                  # 安装依赖
 uv run pytest -q                         # 完整测试
 uv run pytest tests/browser/ -q          # 浏览器套件（需 Chromium）
 uv run python -m compileall -q src tests # 语法检查
-node --check src/apps/migu_orca_web/static/app.js  # 前端 JS 语法
+cd frontend && npm run typecheck         # 前端 TS 检查（Vue SPA，旧 app.js 已删）
 uv run flask --app wsgi:app run          # 本地启动 Web UI（手动验证）
 ```
 
 ## 常见陷阱（详见 progress.txt Codebase Patterns）
 
 - 浏览器测试用 `page.route("**/api/v1/...", ...)` mock 外部依赖；非 POST 请求要 `route.continue_()` 放行到真实后端
-- fixture 生成表单藏在默认收起的 `<details id="dev-fixture-disclosure">`，驱动它先调 `open_dev_fixture_panel(page)`（`tests/browser/conftest.py`）
+- SPA 测试走 `/app/*` 路由；`/index`、`/settings` 入口默认重定向到 SPA（旧页面已删，US-209 起无 legacy 回退）
 - Seeds 区有两个 `.seed-details` 元素（完整种子/排除种子），断言必须限定到 `.complete-seed-details` / `.excluded-seed-details` / `.effective-seed-group` / `.subgroup-seed-group`
 - 折叠的 `<details>` `inner_text()` 只含 summary，断言内部内容先展开
 - Stage closeout story（如 US-141）需同步 README、`docs/backlog.md`、主 PRD、stage PRD、受影响的 module PRD 与 backlog 状态

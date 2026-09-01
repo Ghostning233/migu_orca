@@ -2,10 +2,10 @@
 
 ## 1. 当前形态
 
-项目采用本地优先的模块化单体结构。Flask 同时提供服务端页面与 JSON API，CLI 和 Web API 复用业务 engine 与存储适配器。当前不包含独立前端构建链、数据库、后台 worker 或多用户认证系统。
+项目采用本地优先的模块化单体结构。Flask 同时提供 JSON API 与 Vue SPA 的同源托管，CLI 和 Web API 复用业务 engine 与存储适配器。前端是独立工程（`frontend/`，Vue 3 + TypeScript + Vite），生产构建由 Flask 在 `/app/` 托管；不包含数据库、后台 worker 或多用户认证系统。
 
 ```text
-CLI                     Flask/Jinja + 原生 JavaScript
+CLI                     Vue SPA (frontend/, Flask 同源 /app/)
  │                                  │
  └──────────── apps / Web API ──────┘
                     │
@@ -55,10 +55,15 @@ CLI                     Flask/Jinja + 原生 JavaScript
 
 ## 5. Web 边界现状
 
-Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程上仍未前后端分离：
+Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 迁移的独立前端工程：
 
-- `/index` 与 `/settings` 由 Jinja 模板渲染。
-- 两个页面共用 `static/app.js` 和 `static/style.css`。
+- `frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程，生产构建输出到 `frontend/dist/`
+  （不入库），由 Flask 在 `/app/` 同源托管（`app_blueprint`，Vite base 固定 `/app/`，
+  SPA fallback 只接管 `/app/*`）；开发用 Vite dev server 代理 `/api/v1` 到本地 Flask。
+- 前端类型只通过 `docs/api/openapi.json` 生成（`openapi-typescript`，US-198），
+  不导入 Python 模型、不手写第二套响应 interface。
+- 入口路由（`/`、`/index`、`/Settings`、`/settings`）始终重定向到 SPA
+  （US-209 起旧 Jinja 页面与 `web_entry_mode()` 回退开关已删除）。
 - Web API 适配层自 Stage 26 起按职责拆分（`apps/migu_orca_web/`）：
   - `schemas.py`：请求/查询 Pydantic 模型。
   - `api_contract.py`：公开响应 DTO（`extra="forbid"`）。
@@ -66,7 +71,7 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
   - `services.py`：用例编排与存储 seam，复用 engine/repository，不复制业务规则。
   - `contexts.py`：短期候选选择上下文。
   - `routes_*.py`：按端点族（requests/mikan/batches/settings/connections）注册路由。
-  - `views.py`：仅保留页面路由与 Blueprint 组装。
+  - `views.py`：入口重定向路由与 Blueprint 组装。
 - `docs/api/` 提供 OpenAPI 契约（`docs/api/openapi.json`，确定性生成），覆盖全部 `/api/v1`
   端点；响应 DTO 在 `api_contract.py`（全部 `extra="forbid"`）。新增/删除端点必须同步
   `docs/api/endpoint_inventory.md` §2、`openapi_gen.py` `_ENDPOINTS` 注册表、`docs/api/openapi.json`
@@ -74,7 +79,9 @@ Web 页面已经通过 `/api/v1/*` JSON API 完成主要业务操作，但工程
 - 未保存草案由 `drafts.py:DraftStore`（进程内单例）权威持有：TTL 30 分钟、容量 128、
   一次性保存与重放保护；客户端只持 opaque `draft_id`，不提交完整 Request 作为权威快照。
 
-因此后续前端工程化应先固化 API 契约和服务端安全边界，再渐进替换页面；不得在没有兼容层的情况下同时重写 API 与全部用户旅程。Stage 26 已完成该固化（清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 前端迁移 handoff 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
+因此前端工程化已先固化 API 契约和服务端安全边界，再渐进替换页面；Stage 26 已完成该固化
+（清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 完成迁移与旧前端删除，handoff
+见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 ## 6. 状态与持久化
 
@@ -98,7 +105,6 @@ uv run python -m compileall -q src tests   # 语法检查（只证明可编译�
 uv run ruff check src tests                # Python 静态检查（US-195，pyproject.toml [tool.ruff.lint]）
 uv run pytest -q -m "not browser"          # 非浏览器测试
 uv run pytest tests/browser/ -q            # 真实 Chromium 浏览器套件
-node --check src/apps/migu_orca_web/static/app.js
 uv run migu-orca-openapi --check           # OpenAPI 漂移检查
 git diff --check
 ```

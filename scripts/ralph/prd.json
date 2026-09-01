@@ -1,135 +1,229 @@
 {
   "project": "MiGuOrca",
-  "branchName": "agent/stage26-web-api-contract-hardening",
-  "description": "Stage 26：在前端工程化迁移前固化 Web API 契约、拆分 Web 适配层职责，并收紧 storage、draft 与默认部署安全边界。",
+  "branchName": "agent/stage27-frontend-engineering-migration",
+  "description": "Stage 27：以 Stage 26 OpenAPI/DTO 为边界，建立 Vue 3 + TypeScript + Vite 前端工程，逐项迁移现有 Web 用户旅程并在完整 parity 后清理旧前端。",
   "userStories": [
     {
-      "id": "US-189",
-      "title": "冻结现有 API 行为与端点清单",
-      "description": "作为开发者，我希望所有现有 Web API 都有可审查的行为清单和 golden contract，使后续拆分不会静默改变旧页面依赖。",
+      "id": "US-197",
+      "title": "建立 Vue TypeScript Vite 工程与 CI 基线",
+      "description": "作为前端开发者，我希望有可重复安装、测试和构建的独立前端工程，使后续功能可以按模块迁移。",
       "acceptanceCriteria": [
-        "枚举全部 /api/v1 端点、HTTP 方法、请求字段、响应字段、公开状态和敏感值边界",
-        "为每类端点建立成功、输入失败、业务失败和脱敏错误 golden contract 测试",
-        "记录旧前端依赖的 URL、request_id/batch_id 参数、localStorage key 和 candidate/draft 生命周期",
-        "清单与实际 Flask url_map 自动核对，漏记端点时测试失败",
-        "不访问真实 MiKan、AutoBangumi 或 qBittorrent",
-        "Tests pass"
+        "创建 frontend 工程、package-lock.json、Vue 3、TypeScript strict、Vite、ESLint、Vitest 与 Vue Test Utils 配置",
+        "固定 Vite base、开发代理、Flask 生产静态托管、SPA fallback 和 build 产物提交或忽略策略",
+        "CI 使用 npm ci 并运行 typecheck、lint、unit test 和 production build，且保留现有 Python/OpenAPI/Chromium 门禁",
+        "最小 /app/ 页面可由 Flask 同源加载，且 /api/v1、海报、healthz、readiness 和旧页面不被 SPA fallback 截获",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "先冻结事实，再拆分文件；不得把 README 示例当作完整 API 契约。"
+      "notes": "US-197 完成：frontend/ Vue3+TS strict+Vite 工程、package-lock.json、ESLint flat、Vitest+Vue Test Utils、生产 build（dist 不入库）；Flask routes_app.py 在 /app/ 同源托管 SPA（Vite base=/app/），SPA fallback 只接管 /app/*，/api/v1、海报、/healthz、/readiness 与旧 /index、/settings 均不被截获；CI 新增 frontend job（npm ci + typecheck/lint/unit/build），browser job 先构建 frontend 再跑真实 Chromium（tests/browser/test_app_shell.py 6 例）；全部门禁通过。US-198 起在此基线上校准 OpenAPI 并生成类型化客户端。"
     },
     {
-      "id": "US-190",
-      "title": "建立请求响应 DTO 与 OpenAPI 生成",
-      "description": "作为后续 TypeScript 前端开发者，我希望 API 有可生成客户端的类型化契约。",
+      "id": "US-198",
+      "title": "校准 OpenAPI 并生成类型化客户端",
+      "description": "作为 TypeScript 客户端开发者，我希望 OpenAPI 能被固定版本的真实生成器稳定消费，并准确描述运行时状态。",
       "acceptanceCriteria": [
-        "为公开成功与失败响应建立 Pydantic DTO，响应序列化拒绝未知敏感字段",
-        "生成覆盖全部 /api/v1 端点的 docs/api/openapi.json",
-        "提供确定性生成和漂移检查命令，重复生成无无关差异",
-        "OpenAPI 示例只使用虚构脱敏值，并标明二进制海报端点 content type",
-        "记录 request_id、batch_id、draft_id 和 candidate context 生命周期",
+        "用真实 OpenAPI 生成器对 docs/api/openapi.json 完成 smoke test，并把选定工具、锁定版本、配置和生成命令提交到 frontend",
+        "修正 Request 详情 404、海报 400/404/502 等已知运行时与 OpenAPI 响应声明差异",
+        "新增自动测试核对运行时 error_type 状态分类与 _ENDPOINTS 错误响应声明，避免再次漂移",
+        "为全部 24 个 operation 固化唯一、可读且确定性的 operationId，重复生成无 diff",
+        "生成目录只由契约生成且有 CI drift check，业务代码不手写重复 API response interface",
+        "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": "DTO 和 OpenAPI 是 Stage 27 的唯一生成类型来源。"
+      "notes": "US-198 完成：选定 openapi-typescript@7.13.0（frontend/package-lock.json 锁定），npm run api:generate 生成 frontend/src/api/generated/api.ts（入库）且 api:check 漂移检查（CI frontend job + test_openapi_runtime_consistency.py 双守护）；修复 OpenAPI schema 合法性（内联数组属性→type:array+items，openapi-typescript smoke test 通过）、Request 详情 404/invalid_request_id、海报 400/404/502/500 结构化错误声明、各端点可达的 mikan/AB/qB 错误状态；24 个 operation 固化显式可读 operationId；新增 test_openapi_runtime_consistency.py 7 例（声明 vs _error_http_status 运行时分类一致、被分类 error_type 全部有声明或显式豁免、operationId 唯一/可读/稳定、前端生成客户端不漂移）。全部 Python（1038 non-browser + 275 browser）与前端 typecheck/lint/unit/build 门禁通过。"
     },
     {
-      "id": "US-191",
-      "title": "拆分 Web schema serializer service 与 route",
-      "description": "作为维护者，我希望 Web 适配层按职责拆分，使路由不再同时承担 schema、序列化、context 和业务编排。",
+      "id": "US-199",
+      "title": "建立统一 API transport 路由与应用外壳",
+      "description": "作为用户，我希望新前端有稳定导航和一致的加载、错误与通知体验。",
       "acceptanceCriteria": [
-        "从 views.py 拆出 schemas、serializers、services、contexts 和按领域划分的 routes",
-        "页面路由与 JSON API Blueprint 仍由现有 app registry 注册",
-        "所有既有 URL、方法、endpoint 名称和公开响应保持 golden contract 兼容",
-        "服务层复用现有 engine/repository，不复制标题、筛选、Request 或提交规则",
-        "不存在 apps 反向依赖或新增循环依赖",
-        "Tests pass"
+        "统一 transport 使用生成类型处理成功/失败 envelope、非 2xx JSON、非 JSON、网络失败、取消和超时",
+        "建立 /app/ 下的工作台、订阅方案、提交队列、Settings 路由和可访问导航",
+        "实现全局加载、空状态、错误边界和 aria-live 通知，错误内容保持中文与脱敏",
+        "feature 不直接拼接 /api/v1 URL，API、海报和 Flask 系统路由不被 SPA fallback 截获",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
       "passes": true,
-      "notes": "按端点族渐进迁移，不做一次性无测试重写。"
+      "notes": "US-199 完成：统一 transport（frontend/src/api/client.ts，apiRequest/api.*/api.poster）处理 envelope、非 2xx JSON、非 JSON 错误体（代理 HTML 归一为安全中文回退）、网络失败（network_error）、AbortSignal 取消（request_cancelled）与超时（默认 15s，request_timeout），失败统一抛 ApiError；路径参数用 {param} 模板，查询参数只放非敏感值，海报端点返回 Blob 不经 envelope。trackedApi（app/composables/useTrackedRequest.ts）驱动全局 loading store；notification store + GlobalNotification.vue 提供 aria-live 通知（error 用 role=alert）；ErrorBoundary.vue 包住 RouterView。SPA 路由扩为 4 条（/app/workbench、/app/requests、/app/queue、/app/settings），导航含工作台/订阅方案/提交队列/Settings；Requests/Queue 为带空状态的占位视图（US-202/US-206 迁移）。Flask 侧无需新增服务端路由，fallback 边界与探针/旧页面不被截获由既有测试守护。Vitest 新增 client.test.ts（16 例）、useTrackedRequest.test.ts（2 例）、loading.test.ts（2 例），App 外壳测试扩至 4 路由+通知（共 29 例）；浏览器 test_app_shell.py 更新为 4 导航与各 route 挂载（6 例真实 Chromium 全过）。全部门禁通过（typecheck/lint/unit/build、compileall/ruff、Python 1038 非浏览器 + 275 浏览器、OpenAPI drift、node --check、git diff --check）。"
     },
     {
-      "id": "US-192",
-      "title": "建立正确 HTTP 状态与兼容错误处理",
-      "description": "作为 API 客户端，我希望 HTTP 状态和 JSON 错误 envelope 同时表达稳定失败语义。",
+      "id": "US-200",
+      "title": "建立设计基础与安全表单组件",
+      "description": "作为功能开发者，我希望复用可访问的布局、反馈和敏感表单组件，避免每个页面重复实现安全行为。",
       "acceptanceCriteria": [
-        "校验失败映射 400，不存在映射 404，状态冲突/重放映射 409",
-        "外部依赖不可达或超时使用稳定 502/504 分类，未知错误返回 500",
-        "成功/失败 JSON envelope 字段保持兼容且全部错误继续脱敏",
-        "旧 app.js fetchJson 同时处理非 2xx JSON、非 JSON 和网络失败并显示中文安全反馈",
-        "API 与浏览器测试覆盖每类状态且不依赖真实外部服务",
-        "Tests pass"
+        "建立 layout、button、input、confirm、credential form、status/alert、loading 和 focus primitives",
+        "敏感字段只在组件局部内存存在，切换认证模式、成功、取消和卸载时主动清空",
+        "组件默认具备 label、键盘、ARIA 状态、reduced motion 和 360px 无横向溢出行为",
+        "Vitest 覆盖确认流程、敏感字段清空和错误/焦点状态",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 4,
       "passes": true,
-      "notes": "允许最小旧前端兼容修改，不改变页面设计。"
+      "notes": "US-200 完成：建立共享组件原语——布局（PanelSection/FormField）、表单控件（BaseButton/BaseInput/BaseTextarea/BaseSelect/CheckboxRow，支持 v-model/$attrs 透传/aria-invalid）、确认对话框（ConfirmDialog.confirm() 返回 Promise<boolean>，role=alertdialog + focus trap + inert 背景 + Escape/backdrop 取消 + 焦点恢复）、焦点陷阱（useFocusTrap）、敏感凭据（useSensitiveFields：字段只存组件局部内存，模式切换/成功/取消/卸载主动清空，snapshot() 只返回非空值）、状态反馈（StatusAlert：error 用 role=alert，状态不只靠颜色）。新增 /app/components-demo 原语演示路由（迁移脚手架，US-209 删除）。Vitest 新增 26 例（useSensitiveFields 10、useFocusTrap 8、ConfirmDialog 8、BaseInput/BaseTextarea 6，共 61 例全过）；浏览器新增 test_components_primitives.py 8 例真实 Chromium（渲染/360px 无横向溢出/确认/取消/Escape+inert/敏感字段清空/必填错误）。全部门禁通过（typecheck/lint/unit/build/api:check、compileall/ruff、Python 1038 非浏览器 + 283 浏览器、node --check、git diff --check），仓库根 .migu_orca/storage 不存在。US-201 将在此基础上迁移 Settings（storage 偏好/非敏感偏好/qB/AB 连接测试/AB 提交上下文）。"
     },
     {
-      "id": "US-193",
-      "title": "收紧 Web storage 根目录",
-      "description": "作为本地部署者，我希望浏览器只能使用服务器允许的 storage 范围，避免远程页面控制任意服务器路径。",
+      "id": "US-201",
+      "title": "迁移 Settings",
+      "description": "作为用户，我希望在新前端管理非敏感偏好并安全测试外部连接。",
       "acceptanceCriteria": [
-        "Web API 默认使用服务端 storage root，客户端不能选择根目录外路径",
-        "如保留 profile/相对目录，拒绝绝对路径、路径穿越、符号链接逃逸和未知 profile",
-        "CLI --storage-dir 显式本地路径行为保持不变",
-        "Settings 平滑迁移旧 localStorage storageDir 值且不泄露绝对路径",
-        "错误、API、日志、测试 trace 和 OpenAPI 示例不包含真实绝对路径",
-        "Tests pass"
+        "在迁移前补齐 preferences、qB/AB connection 和 submit-ab 的公开 DTO，并重新生成 TypeScript 类型",
+        "迁移相对 storage profile、用户偏好、qB/AB 连接测试和 request_id 对应的 AB 提交上下文",
+        "保持恢复默认、真实提交确认、401/502/503/504 分类和中文脱敏反馈",
+        "endpoint、username、password、token、cookie 和原始响应不进入 store 持久化、URL、browser storage、日志、截图或 trace",
+        "旧 /settings 与新 Settings 的成功、失败和窄屏旅程 parity",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 5,
       "passes": true,
-      "notes": "Web 与 CLI 使用不同信任边界，不为兼容浏览器任意路径牺牲服务端安全。"
+      "notes": "US-201 完成：/app/settings 四个分区全部迁移到共享原语——Storage 偏好（storagePreferences.ts，localStorage 只存服务端相对 profile，绝对路径/穿越值回退服务端根）、偏好默认值（preferences.ts + /api/v1/preferences，保存失败回退到上次成功值并清空被拒绝的敏感输入，恢复默认需确认）、qBittorrent（useSensitiveFields + 确认 + 成功后清空）、Auto Bangumi（连接测试 + request_id 提交上下文 + 认证模式切换清空）。补齐公开 DTO：AbSubmitResultDTO、SubtitleGroupPreferenceDTO/FilterDefaultsDTO/NamingPreferenceDTO/SearchPreferenceDTO 并重新生成 docs/api/openapi.json 与 frontend/src/api/generated/api.ts（drift check 双守护）。连接测试/提交失败只显示固定中文反馈，绝不渲染服务端原始错误（可能含凭据）。修复 CheckboxRow：支持 v-model:checked（checked prop + update:checked emit）、inheritAttrs:false 让 id 只落在原生 input。Vitest 新增 34 例（storagePreferences 12、preferences 5、SettingsView 17，共 95 例）；浏览器新增 tests/browser/test_app_settings.py 18 例真实 Chromium；全套 301 浏览器 + 1038 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-202 将在同一基线上迁移 Request 列表。"
     },
     {
-      "id": "US-194",
-      "title": "建立服务端权威 draft 生命周期",
-      "description": "作为用户，我希望未保存草案仍可修改和保存，但客户端不能提交任意完整 Request 作为权威快照。",
+      "id": "US-202",
+      "title": "迁移 Request 列表",
+      "description": "作为用户，我希望在新前端查找、筛选和选择已保存订阅方案。",
       "acceptanceCriteria": [
-        "候选和直连生成返回 opaque draft_id，服务端保存权威 PENDING_CONFIRM 草案",
-        "preview modify 只接受 draft_id 和允许 patch，preview save 只消费有效 draft_id",
-        "draft store 具有 TTL、容量上限、清理、一次性保存和重放保护",
-        "过期、逐出、错配和重放返回稳定 409 envelope，UI 提供重新生成指引",
-        "完整 Request、draft 内容和外部敏感配置不进入 URL 或 browser storage",
-        "Tests pass"
+        "补齐 Request summary DTO 并重新生成类型，不使用手写列表响应 interface",
+        "迁移列表加载、搜索、状态筛选、排序、计数、空状态和详情路由选择",
+        "request_id 可复制和刷新恢复，storage 只使用服务端允许的相对 profile",
+        "旧列表与新列表对相同 API 结果、400/500 失败和空状态表现 parity",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 6,
       "passes": true,
-      "notes": "复用现有 modify/save 业务规则；不要在 context store 中创造第二套 Request 规则。"
+      "notes": ""
     },
     {
-      "id": "US-195",
-      "title": "增加 P0 CI 静态检查与部署基线",
-      "description": "作为维护者，我希望 API 契约和安全边界在每次合并时都有自动门禁。",
+      "id": "US-203",
+      "title": "迁移 Request 详情与管理动作",
+      "description": "作为用户，我希望在新前端审核详情并安全执行修改、取消和删除。",
       "acceptanceCriteria": [
-        "CI 执行 compileall、非浏览器 pytest、node --check、OpenAPI 漂移和 git diff 检查",
-        "可用 runner 执行真实 Chromium 套件，浏览器整体 skip 不得被静默视为 UI 通过",
-        "引入并记录适合当前代码的 Python 静态检查/类型检查，不用 compileall 冒充 typecheck",
-        "readiness 区分应用启动与 storage 可用，不探测或写入真实外部系统",
-        "README 明确 local-only 默认和未认证情况下禁止直接暴露公网",
-        "Tests pass"
+        "补齐 Request detail、history、AB result 和 action DTO 并重新生成类型",
+        "迁移 Filter、Seeds、Source、Audit、history 和 AB result 展示",
+        "迁移修改、取消、删除和 ACCEPTED 状态差异，删除和取消继续显式确认",
+        "404、409、500 和非 JSON 分支有类型化中文安全反馈，URL 详情状态正确恢复或清除",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 7,
       "passes": true,
-      "notes": "CI 不得保存凭据、真实 endpoint、trace 或包含敏感数据的失败产物。"
+      "notes": "US-203 完成：/app/requests 详情面板迁移——RequestDetailPanel.vue 挂列表下方（选中 request_id 渲染，:key 重挂载），渲染 Overview/Source/Filter/Seeds（有效/完整按字幕组分组/排除）/Audit（历史+AB 结果）；管理动作按状态分派（PENDING_CONFIRM→确认/取消/修改，ACCEPTED→修改/删除/去 Settings 提交 AB 且返回链接改指 /requests，CANCELLED→只读提示），破坏性动作走共享 ConfirmDialog，成功后面板用服务端 request 更新内存快照并重载、列表 @changed 刷新，删除清空 URL 卸载面板；失败固定中文反馈（确认失败/取消失败/修改失败/删除失败），详情加载失败 role=alert，error_type/error_message/RSS URL/mikan_url 绝不进 DOM。补齐 RequestSnapshotDTO/HistorySectionDTO/AbResultSectionDTO 等 lenient 快照 DTO + strict envelope 并重新生成 OpenAPI 与生成客户端；纯展示逻辑收敛 requestDetail.ts、storage 查询收敛 requestStorage.ts。Vitest 新增 38 例（共 166 例全过）；浏览器新增 test_app_request_detail.py 23 例真实 Chromium；全套 339 浏览器 + 1043 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-204 迁移单个搜索与服务端草案。"
     },
     {
-      "id": "US-196",
-      "title": "Stage 26 兼容回归与文档收尾",
-      "description": "作为项目维护者，我希望 Stage 26 完整证明旧用户旅程兼容，并给下一阶段提供清晰前端迁移 handoff。",
+      "id": "US-204",
+      "title": "迁移单个搜索与服务端草案",
+      "description": "作为用户，我希望在新前端显式选择真实候选并安全编辑服务端权威草案。",
       "acceptanceCriteria": [
-        "完整单元、API、CLI 和真实 Chromium 套件通过",
-        "README、主 PRD、架构、M13/M14、backlog、future stages 和 docs/api 同步",
-        "安全回归覆盖 API、URL、storage、browser storage、日志、截图和 trace",
-        "Stage 26 prd/progress 正确归档，全部 story passes 为 true",
-        "明确 Stage 27 只通过 OpenAPI/DTO 使用后端，不导入旧 app.js 内部状态",
-        "Tests pass"
+        "补齐候选、季数证据、草案 preview/modify/save DTO 并重新生成类型",
+        "迁移真实候选、直连 fallback、非第一季确认、冲突禁用、同源海报和显式候选选择",
+        "使用服务端 draft_id 完成修改和一次性保存，并覆盖 expired、evicted、replayed 的重新生成路径",
+        "candidate context 和 draft_id 仅存在于内存，不自动选候选、不把 parser 提示当作真实季数证据",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
       "passes": true,
-      "notes": "收尾不实施 Stage 27 页面迁移，只交付可执行 handoff。2026-08-30 完成：修复 US-193 回归——`_storage_dir(None|空)` 原来返回 None 导致 `load_storage_config(None)` 回退 CLI 默认（仓库根 `.migu_orca/storage`），绕过服务端 Web storage root 覆盖；现改为返回 `_WEB_STORAGE_ROOT` 并新增 golden contract 回归（不传 storage_dir 的 save_request=true 写入服务端根而非仓库根）。README/主 PRD/架构/M13/M14/M11/backlog/future stages/docs/api 已同步，Stage 26 prd/progress 已归档。"
+      "notes": "US-204 完成：/app/workbench 迁移单个搜索与服务端草案——WorkbenchView.vue（搜索表单 + 直连 fallback + 候选结果区）、CandidateCard.vue（公开白名单卡片，NEEDS_CONFIRMATION 勾选后可选 / CONFLICT 禁用，绝不自动选候选）、DraftPreviewPanel.vue（编辑订阅草案表单 + preview-modify 种子重算 + preview-save 一次性保存 + draft_expired/evicted/replayed 固定中文「请重新生成」恢复）、candidateSearch.ts（纯函数校验/季数证据/payload 构造，feature 与 Vitest 共用）。补齐 MikanCandidateDTO/SeasonEvidenceDTO 公开白名单（strict extra=forbid，engine 字段 raw_html/raw_rss_xml/token/cookie 在边界拒绝）并重生成 docs/api/openapi.json 与 frontend/src/api/generated/api.ts（drift check 双守护）。candidate_context/draft_id 只在组件内存（seasonConfirmations ref/DraftPreviewPanel 局部 ref），绝不进 URL/browser storage/history/日志；保存成功后 router.push('/requests?request_id=...') 跳转到已保存 Request 列表/详情。Vitest 新增 31 例（candidateSearch 17 + WorkbenchView 14，共 197 例全过）；浏览器新增 tests/browser/test_app_workbench.py 18 例真实 Chromium（搜索/空态/失败重试/解析摘要中文 label/季数确认/冲突禁用/候选选择草案/编辑重算/保存跳转/fallback 门控校验/敏感边界/360px 无横向溢出）。全套 357 浏览器 + 1044 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-205 将复用候选、草案与 Request 组件迁移批量工作台。"
+    },
+    {
+      "id": "US-205",
+      "title": "迁移批量工作台",
+      "description": "作为用户，我希望在新前端逐项审核一批番剧并执行单个或批量接受。",
+      "acceptanceCriteria": [
+        "补齐 batch parse/accept item、候选和草案 DTO 并重新生成类型",
+        "迁移批量输入、独立 FOUND/EMPTY/FAILED、候选浮层、草案详情和删除",
+        "迁移选择、单个接受、批量接受和全接受，明确显示选中数量和不可接受原因",
+        "单个与批量复用候选、草案和 Request 组件，不复制业务规则",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "US-205 完成：/app/workbench 底部挂载 BatchWorkbenchView.vue（批量工作台区）——批量输入（textarea 每行一个番剧名）→ POST /api/v1/batches/parse 返回独立 FOUND/EMPTY/FAILED 卡片与 batch_id（进 URL query 供提交队列刷新恢复）。FOUND 卡片经 BatchCandidatePopover.vue（复用 CandidateCard，role=dialog，季数确认/冲突禁用）选候选 → POST /api/v1/requests（save_request=false）生成服务端权威草案；DRAFT 卡片经 BatchDraftPreviewPanel.vue（复用 DraftPreviewPanel + 批量专属接受当前批量草案/删除当前批量卡片）查看/编辑/保存草案。选择/单个接受/批量接受/全接受统一走 POST /api/v1/batches/{batch_id}/accept（批量接受带 item_ids 只发选中项；全接受按 legacy parity 发送全部卡片不带 item_ids，不可接受卡片显示中文 reason）。纯函数逻辑收敛 batchWorkbench.ts（label/校验/payload/通知，feature 与 Vitest 共用）。补齐批量公开 DTO：BatchParseItemDTO（lenient _SnapshotBase 内嵌 strict MikanCandidateDTO，含 queue_status/preview_request/draft_id）、BatchQueueDTO/BatchQueueItemDTO/BatchResultItemDTO，重生成 OpenAPI 与 TS 客户端（drift check 双守护）。Vitest 新增 28 例（batchWorkbench 18 + BatchWorkbenchView 10，共 225 例全过）；浏览器新增 tests/browser/test_app_batch_workbench.py 13 例真实 Chromium（解析状态/loading/空输入校验/候选浮层/季数确认/草案详情与删除/脱敏/选择接受/全接受/全选计数/失败保留/360px/敏感边界）。全套 370 浏览器 + 1048 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-206 将迁移提交队列（queue/submit/retry/recover）。"
+    },
+    {
+      "id": "US-206",
+      "title": "迁移提交队列",
+      "description": "作为用户，我希望在新前端恢复并安全提交队列，失败项可以独立重试或恢复。",
+      "acceptanceCriteria": [
+        "补齐 queue、submit、retry、recover DTO 并重新生成类型",
+        "迁移队列读取、batch_id 刷新恢复、顺序提交、失败重试、recover 和防重复提交",
+        "成功项不会重复提交，单项失败不阻断其他项，SUBMITTING 和 RESULT_PERSIST_FAILED 有明确恢复路径",
+        "AB 凭据仅存在于当前组件内存和单次 POST body，成功、取消和离开时清空",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "US-206 完成：/app/queue 迁移提交队列——QueueView.vue 从 URL batch_id 读取 GET /api/v1/batches/{batch_id}/queue 恢复队列（批量工作台解析后已把 batch_id 推入 URL），无 batch_id 显示空状态并禁用刷新；队列项按状态分派动作（FAILED/RETRYABLE→重试、SUBMITTING/RESULT_PERSIST_FAILED→恢复：先 action=auto，服务端返回 needs_manual 时经共享 ConfirmDialog 人工核验，确认=已创建订阅→succeeded、取消=未创建→failed，均带 confirm:true），已成功项绝不重复提交。提交/重试/恢复共用同一个 Auto Bangumi 凭据表单（useSensitiveFields 组件内存 + 单次 POST body ab_config，成功/切换认证模式/卸载清空；HTTP 级失败保留输入与确认便于重试，只显示固定中文反馈）。纯函数逻辑收敛 queueWorkbench.ts。Vitest 新增 29 例（共 254 例全过）；浏览器新增 tests/browser/test_app_queue.py 16 例真实 Chromium（共 386 例全过），并同步 test_app_shell.py queue 路由断言。全套 386 浏览器 + 1048 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-207 将做跨功能响应式、无障碍与运行质量收敛。"
+    },
+    {
+      "id": "US-207",
+      "title": "收敛响应式无障碍与运行质量",
+      "description": "作为键盘、窄屏或减少动效的用户，我希望所有已迁移功能具有一致可用体验。",
+      "acceptanceCriteria": [
+        "跨 feature 验证 360px、平板和桌面，无关键操作横向溢出或只靠颜色表达状态",
+        "完成键盘导航、焦点恢复、ARIA live/error、reduced motion 和全局错误边界审计",
+        "检查路由懒加载、production chunk、静态缓存和公开 sourcemap 策略，构建产物不含敏感值",
+        "新增跨功能 Vitest 与真实 Chromium 回归，不重复前面 story 已覆盖的业务断言",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "US-207 完成：跨功能响应式、无障碍与运行质量收敛——App.vue 增加 #skip-link（Tab 首个聚焦目标，聚焦时可见，href=#app-main）+ main#app-main tabindex=-1 焦点落点；BatchCandidatePopover 打开聚焦 close 按钮、Escape 关闭、父组件关闭时同步恢复焦点到触发按钮（不用 rAF，避免 popover 卸载丢焦点）；top-nav 改 flex-wrap（360px 下导航换行不溢出），四路由 × 360/768/1280 无横向溢出由新浏览器收敛套件守护；状态不只靠颜色（status chip 带中文文本 label）；reduced-motion 下 LoadingState/BaseButton spinner 停动画但文本 + aria-busy/disabled 保留（conftest 新增 test-slow-queue 服务端延迟路由供浏览器观察 loading）；vite functional manualChunks 把 node_modules 打进 vendor-*.js（保持路由懒加载）、sourcemap:false 且 build 永不提交 .map；Flask /app/assets/* 返回 immutable 缓存头、SPA shell 与其它 /app/* 返回 no-cache（routes_app.py 的 app_shell/app_fallback 改返回带 Cache-Control 的 Response）。Vitest 新增 4 例（App skip-link 1 + BatchCandidatePopover 3，共 258 例全过）；浏览器新增 tests/browser/test_app_responsive_a11y.py 22 例真实 Chromium；app_routes_test.py 新增 3 例（asset immutable/shell no-cache/build 无 sourcemap）。全套 408 浏览器 + 1051 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-208 将建立 parity 矩阵并切换默认入口。"
+    },
+    {
+      "id": "US-208",
+      "title": "完成 parity 切换默认入口并演练回退",
+      "description": "作为维护者，我希望有证据证明新前端功能对等，并能安全切换或回退入口。",
+      "acceptanceCriteria": [
+        "建立旧 269 个 Chromium 旅程到新路由的可审查 parity 矩阵，关键旅程全部由新前端覆盖",
+        "将 /index、/settings 及 request_id/batch_id 兼容入口切换到新前端，同时保留一个提交窗口的旧资产",
+        "演练一次不修改业务数据的入口回退，确认只回退页面路由和静态资产，不回滚 API 或 storage",
+        "新默认入口通过完整 Python、API contract、Vitest、build 和真实 Chromium 门禁",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "US-208 完成：建立旧 269 个 Chromium 旅程到新路由的可审查 parity 矩阵（docs/Stage27_parity_matrix.md + tests/api_contract/parity_matrix.py + test_parity_matrix_guard.py 自动重数旧套件测试数并守护映射）；默认入口切换到新前端——views.py 新增 web_entry_mode()（默认 spa：GET /、GET /index → /app/workbench 保留 request_id/batch_id query，GET /Settings、GET /settings → /app/settings 保留 request_id query；只转发公开已保存标识符，敏感值绝不进重定向 URL，MIGU_ORCA_WEB_ENTRY_LEGACY=1 回退旧 Jinja 页面）；演练不修改业务数据的入口回退（tests/browser/test_app_entry_switch.py 8 例真实 Chromium：SPA 入口/兼容入口/敏感值不过 redirect/API 与探针不受影响/回退恢复旧页面且同一 /api/v1/requests 与 storage 前后不变）；14 个旧旅程浏览器套件加 pytest.mark.legacy_entry 在 legacy 入口下回归（conftest _legacy_entry_mode autouse fixture），全套 416 浏览器 + 1076 非浏览器 + typecheck/lint/unit/build/api:check/compileall/ruff/node --check/git diff --check 全过，仓库根 .migu_orca/storage 不存在。US-209 将删除旧前端资产并归档 Stage 27。"
+    },
+    {
+      "id": "US-209",
+      "title": "删除旧前端并完成 Stage 27 收尾",
+      "description": "作为维护者，我希望迁移完成后移除双实现并留下可复现的构建、测试和归档记录。",
+      "acceptanceCriteria": [
+        "确认 US-208 parity 与回退演练通过后，删除旧 app.js、旧主模板和无用 CSS/测试 helper",
+        "README、架构、M13、部署说明、测试命令、backlog、future stages 和文档索引同步为 Stage 27 已完成",
+        "完整 npm、Python、OpenAPI 和真实 Chromium 门禁通过，仓库根 .migu_orca/storage 不存在",
+        "Stage 27 prd.json/progress.txt 归档且全部 story passes 为 true，仓库不含构建临时目录或敏感产物",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "US-209 完成：删除旧 app.js、style.css、index/settings/_top_nav Jinja 模板与 14 个旧旅程浏览器套件、test_components_primitives 脚手架、test_app_entry_switch 回退演练、parity 矩阵（docs/Stage27_parity_matrix.md + tests/api_contract/parity_matrix.py + test_parity_matrix_guard.py）与 test_frontend_dependencies.py；views.py 去掉 web_entry_mode() legacy 分支（入口路由固定重定向 SPA）、blueprints.py 移除 static/template 文件夹（app_blueprint 自带 placeholder 模板）、routes_app.py 更新 fallback 边界注释；conftest 移除 open_dev_fixture_panel/_legacy_entry_mode，pyproject 移除 legacy_entry marker，CI 移除 node --check 与 Node setup；frontend 删除 /app/components-demo 路由与 ComponentsDemoView.vue；README、docs/README、architecture、M13、backlog、future stages、主 PRD、stage27 PRD、endpoint_inventory、docs/api/README、skills（dev-browser/ralph）与 AGENTS.md 全部同步为 Stage 27 已完成。全套 1150 测试（1019 非浏览器 + 131 真实 Chromium SPA）+ typecheck/lint/unit/build/api:check/compileall/ruff/OpenAPI drift/git diff --check 全绿，仓库根 .migu_orca/storage 不存在；Stage 27 prd/progress 已归档。"
     }
   ]
 }

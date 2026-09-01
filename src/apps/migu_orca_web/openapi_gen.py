@@ -51,6 +51,7 @@ from apps.migu_orca_web.api_contract import (
     RequestCreateResultDTO,
     RequestDeleteResultDTO,
     RequestDetailResultDTO,
+    RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
 )
@@ -97,17 +98,50 @@ def _dereference(schema: dict[str, Any]) -> dict[str, Any]:
     return resolve(schema)
 
 
+def _normalize_property(value: Any) -> Any:
+    """Normalize a raw result-shape property value into a JSON Schema.
+
+    Supported values:
+
+    - a pydantic model class → its full dereferenced JSON Schema;
+    - a list ``[item]`` → ``{"type": "array", "items": <item schema>}`` where
+      the single element may itself be a model class or a plain dict;
+    - a plain dict → an inline JSON Schema (used for nested objects);
+    - ``None`` → ``{}`` (any value).
+    """
+    if isinstance(value, type) and issubclass(value, BaseModel):
+        return _schema(value)
+    if isinstance(value, list):
+        item = value[0] if value else {}
+        return {"type": "array", "items": _normalize_property(item)}
+    if isinstance(value, dict):
+        return {
+            "type": "object",
+            "properties": {
+                key: _normalize_property(item) for key, item in value.items()
+            },
+        }
+    if value is None:
+        return {}
+    return value
+
+
 def _envelope(model: type[BaseModel] | dict[str, Any] | None) -> dict[str, Any]:
     """Build a JSON Schema for ``{ok: true, result: <model>}``.
 
     ``model`` may be a pydantic DTO (full JSON Schema) or a raw result-shape
     dict (used for the small number of endpoints whose result is a plain
-    inline object, e.g. the request list).
+    inline object, e.g. the request list). Raw result-shape dict values must
+    be valid JSON Schema properties (a property whose value is a bare list is
+    a schema-invalid ``Array`` — use ``[item]`` so it becomes an object with
+    ``type: array``).
     """
     if isinstance(model, dict):
         result_schema: dict[str, Any] = {
             "type": "object",
-            "properties": model,
+            "properties": {
+                key: _normalize_property(item) for key, item in model.items()
+            },
         }
     elif model is not None:
         result_schema = _schema(model)
@@ -204,6 +238,7 @@ def _example_value(prop: dict[str, Any], *, required: bool) -> Any:
 
 _ENDPOINTS: dict[str, dict[str, Any]] = {
     "GET /api/v1/requests": {
+        "operationId": "listRequests",
         "summary": "列出所有已保存订阅方案摘要",
         "description": "返回每个已保存 Request 的公开摘要（request_id、状态、标题、字幕组与种子统计）。storage_dir 为服务端允许根目录下的相对目录 profile。",
         "parameters": [
@@ -215,10 +250,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "schema": {"type": "string"},
             }
         ],
-        "success": {"requests": [{}]},
-        "errors": _STORAGE_DIR_ERRORS,
+        "success": RequestListResultDTO,
+        "errors": {
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_request_id": "已保存订阅方案缺少有效 request_id",
+            },
+            "500": {
+                "storage_error": "读取订阅方案失败",
+                "storage_json_error": "订阅方案 JSON 损坏",
+            },
+        },
     },
     "GET /api/v1/requests/<path:request_id>": {
+        "operationId": "getRequestDetail",
         "summary": "查看单个订阅方案详情",
         "description": "返回 Request 快照、状态历史与 Auto Bangumi 提交结果（ab_result）。",
         "parameters": [
@@ -238,9 +283,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         ],
         "success": RequestDetailResultDTO,
-        "errors": _STORAGE_DIR_ERRORS,
+        "errors": {
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_request_id": "request_id 不能包含路径片段",
+            },
+            "404": {"request_not_found": "订阅方案不存在"},
+            "500": {
+                "storage_error": "读取订阅方案失败",
+                "storage_json_error": "订阅方案 JSON 损坏",
+            },
+        },
     },
     "POST /api/v1/requests": {
+        "operationId": "createRequest",
         "summary": "生成订阅方案（可保存）",
         "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id（US-194：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
         "requestBody": {
@@ -289,14 +345,26 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "400": {
                 "data_validation_errors": "请求参数校验失败",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_input": "请求输入非法",
+                "config_error": "MiKan 配置无效",
+                "rss_parse_failed": "所有候选 RSS 均解析失败",
             },
             "409": {
                 "candidate_context_invalid": "候选上下文已失效或已被消费",
                 "invalid_request_status": "状态冲突",
+                "season_evidence_conflict": "候选季数与确认季数冲突",
+                "season_confirmation_required": "候选缺少可证明季数，需明确确认",
             },
+            "502": {
+                "mikan_connection_failed": "MiKan HTTP 连接失败",
+                "mikan_http_failed": "MiKan HTTP 请求失败",
+                "mikan_parse_failed": "MiKan 页面解析失败",
+            },
+            "504": {"mikan_timeout": "MiKan HTTP 请求超时"},
         },
     },
     "POST /api/v1/requests/preview-modify": {
+        "operationId": "previewModifyRequest",
         "summary": "内存中修改未保存草案",
         "description": "US-194：只接受服务端签发的 draft_id 与允许 patch，返回更新后的内存草案与摘要（不落盘）。客户端不得提交完整 Request 作为权威快照。",
         "requestBody": {
@@ -329,6 +397,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/requests/preview-save": {
+        "operationId": "previewSaveRequest",
         "summary": "保存未修改的预览草案",
         "description": "US-194：消费服务端权威 draft_id（一次性，重放保护），仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
         "requestBody": {
@@ -355,6 +424,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/requests/<path:request_id>/accept": {
+        "operationId": "acceptRequest",
         "summary": "确认订阅方案",
         "requestBody": {
             "type": "object",
@@ -370,6 +440,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/requests/<path:request_id>/cancel": {
+        "operationId": "cancelRequest",
         "summary": "取消订阅方案",
         "requestBody": {
             "type": "object",
@@ -386,6 +457,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/requests/<path:request_id>/modify": {
+        "operationId": "modifyRequest",
         "summary": "修改已保存订阅方案",
         "requestBody": {
             "type": "object",
@@ -408,6 +480,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/requests/<path:request_id>/delete": {
+        "operationId": "deleteRequest",
         "summary": "删除订阅方案",
         "requestBody": {
             "type": "object",
@@ -422,6 +495,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/requests/<path:request_id>/submit-ab": {
+        "operationId": "submitRequestToAutoBangumi",
         "summary": "提交订阅方案到 Auto Bangumi",
         "description": "ab_config 为 request-scoped 凭据，绝不进入 storage、URL、浏览器 storage、日志或 trace。",
         "requestBody": {
@@ -461,12 +535,22 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
         "success": RequestAbSubmitResultDTO,
         "errors": {
-            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "config_error": "Auto Bangumi 配置无效",
+            },
             "404": {"request_not_found": "订阅方案不存在"},
             "409": {"invalid_request_status": "只有已确认订阅方案可以提交"},
+            "502": {
+                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
+                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
+            },
+            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
+            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
         },
     },
     "POST /api/v1/mikan/candidates": {
+        "operationId": "searchMikanCandidates",
         "summary": "搜索 MiKan 候选",
         "description": "按标题搜索 MiKan 候选，返回公开候选元数据。mikan_config 为 request-scoped。",
         "requestBody": {
@@ -489,11 +573,18 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "success": MikanCandidateResultDTO,
         "errors": {
             "400": {"data_validation_errors": "query 为空或非法"},
+            "502": {
+                "mikan_connection_failed": "MiKan HTTP 连接失败",
+                "mikan_http_failed": "MiKan HTTP 请求失败",
+                "mikan_parse_failed": "MiKan 页面解析失败",
+            },
+            "504": {"mikan_timeout": "MiKan HTTP 请求超时"},
         },
     },
     "GET /api/v1/mikan/posters/<key>": {
+        "operationId": "getMikanPoster",
         "summary": "读取候选海报（二进制）",
-        "description": "按 opaque key 读取候选海报图片字节。该端点为函数视图，不经 JSON envelope；失败返回错误 JSON 或非 2xx。",
+        "description": "按 opaque key 读取候选海报图片字节。该端点为函数视图，不经 JSON envelope；失败返回 JSON envelope + 分类状态码（US-192）：400 为非法 key/非法图片（invalid_poster_key/invalid_poster），404 为未注册或过期的 key（poster_not_found），502 为上游获取失败（poster_unavailable），500 为缓存读写错误（storage_error）。",
         "parameters": [
             {
                 "name": "key",
@@ -503,6 +594,16 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "schema": {"type": "string"},
             }
         ],
+        "success": None,
+        "errors": {
+            "400": {
+                "invalid_poster_key": "封面缓存标识无效",
+                "invalid_poster": "封面响应不是支持的图片或地址无效",
+            },
+            "404": {"poster_not_found": "poster key 未注册或已过期"},
+            "502": {"poster_unavailable": "上游封面获取失败"},
+            "500": {"storage_error": "封面缓存读写失败"},
+        },
         "responses": {
             "200": {
                 "description": "海报图片字节。",
@@ -519,11 +620,11 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     }
                 },
             },
-            "404": {"description": "poster key 无效或不存在"},
         },
         "binary": True,
     },
     "GET /api/v1/preferences": {
+        "operationId": "getPreferences",
         "summary": "读取用户偏好",
         "parameters": [
             {
@@ -541,6 +642,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/preferences": {
+        "operationId": "savePreferences",
         "summary": "保存用户偏好",
         "requestBody": {
             "type": "object",
@@ -562,6 +664,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "GET /api/v1/corrections": {
+        "operationId": "listCorrections",
         "summary": "读取标题修正列表",
         "parameters": [
             {
@@ -576,6 +679,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "errors": _STORAGE_DIR_ERRORS,
     },
     "POST /api/v1/corrections": {
+        "operationId": "saveCorrection",
         "summary": "保存一条标题修正",
         "requestBody": {
             "type": "object",
@@ -597,6 +701,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/batches/parse": {
+        "operationId": "parseBatchTitles",
         "summary": "批量解析番剧名称",
         "requestBody": {
             "type": "object",
@@ -625,6 +730,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
     },
     "POST /api/v1/batches/<batch_id>/accept": {
+        "operationId": "acceptBatchItems",
         "summary": "接受批量卡片进入提交前队列",
         "requestBody": {
             "type": "object",
@@ -651,9 +757,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         },
         "success": BatchAcceptResultDTO,
-        "errors": _STORAGE_DIR_ERRORS,
+        "errors": {
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_batch_id": "batch_id 不能包含路径片段",
+            },
+        },
     },
     "GET /api/v1/batches/<batch_id>/queue": {
+        "operationId": "getBatchQueue",
         "summary": "读取提交前队列",
         "parameters": [
             {
@@ -671,9 +783,15 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         ],
         "success": BatchQueueResultDTO,
-        "errors": _STORAGE_DIR_ERRORS,
+        "errors": {
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_batch_id": "batch_id 不能包含路径片段",
+            },
+        },
     },
     "POST /api/v1/batches/<batch_id>/submit": {
+        "operationId": "submitBatchQueue",
         "summary": "提交队列到 Auto Bangumi",
         "requestBody": {
             "type": "object",
@@ -702,11 +820,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "400": {
                 "validation_error": "缺少 ab_config 或 confirm",
                 "queue_not_found": "队列不存在",
+                "invalid_batch_id": "batch_id 不能包含路径片段",
+                "config_error": "Auto Bangumi 配置无效",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
             },
+            "502": {
+                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
+                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
+            },
+            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
+            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
         },
     },
     "POST /api/v1/batches/<batch_id>/retry": {
+        "operationId": "retryBatchQueueItem",
         "summary": "重试队列中单个失败项目",
         "requestBody": {
             "type": "object",
@@ -735,12 +862,21 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "400": {
                 "validation_error": "缺少 ab_config/confirm/request_id",
                 "queue_not_found": "队列不存在",
+                "invalid_batch_id": "batch_id 不能包含路径片段",
+                "config_error": "Auto Bangumi 配置无效",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
             },
             "404": {"queue_item_not_found": "队列中不存在该 request_id"},
+            "502": {
+                "ab_connection_failed": "Auto Bangumi HTTP 连接失败",
+                "ab_submit_failed": "Auto Bangumi HTTP 提交失败",
+            },
+            "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
+            "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
         },
     },
     "POST /api/v1/batches/<batch_id>/recover": {
+        "operationId": "recoverBatchQueueItem",
         "summary": "恢复卡住的队列项目",
         "requestBody": {
             "type": "object",
@@ -759,12 +895,14 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "errors": {
             "400": {
                 "validation_error": "action 非法或缺少确认",
+                "invalid_batch_id": "batch_id 不能包含路径片段",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
             },
             "404": {"queue_item_not_found": "队列中不存在该 request_id"},
         },
     },
     "POST /api/v1/qbittorrent/test-connection": {
+        "operationId": "testQbittorrentConnection",
         "summary": "测试 qBittorrent 连接",
         "description": "qbittorrent_config 为 request-scoped 凭据；成功响应只回白名单字段。",
         "requestBody": {
@@ -787,12 +925,18 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
         "success": QbittorrentConnectionResultDTO,
         "errors": {
+            "400": {"config_error": "qBittorrent 配置无效"},
             "401": {"qbittorrent_auth_failed": "认证失败"},
-            "502": {"qbittorrent_connection_failed": "连接失败"},
+            "502": {
+                "qbittorrent_connection_failed": "连接失败",
+                "qbittorrent_http_failed": "HTTP 请求失败",
+                "qbittorrent_unexpected_response": "响应无法识别",
+            },
             "504": {"qbittorrent_timeout": "请求超时"},
         },
     },
     "POST /api/v1/autobangumi/test-connection": {
+        "operationId": "testAutoBangumiConnection",
         "summary": "测试 Auto Bangumi 连接",
         "description": "ab_config 为 request-scoped 凭据；成功响应只回白名单字段。",
         "requestBody": {
@@ -816,9 +960,16 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         },
         "success": AutoBangumiConnectionResultDTO,
         "errors": {
+            "400": {"config_error": "Auto Bangumi 配置无效"},
             "401": {"ab_auth_failed": "认证失败"},
-            "502": {"ab_connection_failed": "连接失败", "ab_submit_failed": "提交失败"},
-            "503": {"ab_unsupported_version": "版本不受支持"},
+            "502": {
+                "ab_connection_failed": "连接失败",
+                "ab_submit_failed": "提交失败",
+            },
+            "503": {
+                "ab_unsupported_version": "版本不受支持",
+                "ab_probe_unsupported": "当前认证模式不支持此探测方式",
+            },
             "504": {"ab_timeout": "请求超时"},
         },
     },
@@ -867,7 +1018,7 @@ def _build_openapi() -> dict[str, Any]:
                 "`example.invalid` 为文档保留域。凭据字段标记为 "
                 "`x-request-scoped`，绝不进入 storage、URL、浏览器 storage、"
                 "日志或 trace。request_id/batch_id/draft_id/candidate_context 生命周期见 "
-                "`docs/api/endpoint_inventory.md` §5.4。"
+                "`docs/api/endpoint_inventory.md` §5.3。"
             ),
         },
         "paths": ordered_paths,
@@ -889,11 +1040,13 @@ def _path_sort_key(path: str) -> tuple[int, str]:
 def _operation_id(method: str, path: str) -> str:
     """Derive a stable, unique camelCase operationId from method + path.
 
-    ``GET /api/v1/requests/{request_id}`` → ``getRequestsByRequestId``;
-    ``POST /api/v1/batches/{batch_id}/submit`` → ``postBatchesByBatchIdSubmit``.
-    Path params are inlined so each endpoint gets a distinct name and TypeScript
-    client generators get deterministic identifiers without per-endpoint
-    hand-maintenance.
+    This is the fallback for endpoints without an explicit ``operationId`` in
+    ``_ENDPOINTS`` (every current endpoint declares an explicit readable id,
+    so the derivation only guards future additions). ``GET
+    /api/v1/requests/{request_id}`` → ``getRequestsByRequestId``; ``POST
+    /api/v1/batches/{batch_id}/submit`` → ``postBatchesByBatchIdSubmit``.
+    Path params are inlined so each endpoint gets a distinct name and
+    TypeScript client generators get deterministic identifiers.
     """
     segments: list[str] = []
     for part in path.split("/"):
@@ -963,7 +1116,13 @@ def _error_responses(errors: dict[str, dict[str, str]]) -> dict[str, Any]:
 def _success_example(result_schema: Any) -> dict[str, Any]:
     """Build a fictional desensitized success example from a DTO."""
     if isinstance(result_schema, dict):
-        return {"ok": True, "result": result_schema}
+        return {
+            "ok": True,
+            "result": {
+                key: _example_value(_normalize_property(item), required=False)
+                for key, item in result_schema.items()
+            },
+        }
     if result_schema is None:
         return {"ok": True, "result": {}}
     example: dict[str, Any] = {}

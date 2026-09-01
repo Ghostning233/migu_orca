@@ -79,21 +79,161 @@ class RequestSummaryDTO(_StrictBase):
     warnings: list[str]
 
 
+class RequestListResultDTO(_StrictBase):
+    """Public list-result whitelist: every entry is a full summary DTO.
+
+    US-202: the new frontend consumes ``GET /api/v1/requests`` exclusively
+    through the generated TypeScript client, so the result shape is typed at
+    the boundary instead of a bare ``list[dict[str, Any]]``.
+    """
+
+    requests: list[RequestSummaryDTO]
+
+
+class _SnapshotBase(BaseModel):
+    """Base for opaque engine snapshot shapes (detail/action responses).
+
+    Unlike the whitelisted envelope DTOs (``extra="forbid"``), engine
+    snapshot dicts may legitimately gain fields over time. ``extra="allow"``
+    lets them pass through the boundary while the typed fields give the
+    generated TypeScript client stable display types for the fields the UI
+    renders. The response half is not re-serialized through these models at
+    runtime (the views return the engine dicts as-is), so the emitted field
+    set is never altered.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+
+class RequestInputDTO(_SnapshotBase):
+    raw_title: str | None = None
+
+
+class MatchedBangumiDTO(_SnapshotBase):
+    title: str | None = None
+    aliases: list[str] = []
+    mikan_url: str | None = None
+    match_score: float | None = None
+    poster_url: str | None = None
+
+
+class RssSourceDTO(_SnapshotBase):
+    subtitle_group: str | None = None
+    rss_url: str | None = None
+    source_type: str | None = None
+    total_seed_count: int | None = None
+    seed_names: list[str] = []
+    valid_seed_count: int | None = None
+    invalid_seed_count: int | None = None
+    valid_seed_names: list[str] = []
+    excluded_seed_names: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+
+class SourceInfoDTO(_SnapshotBase):
+    matched_bangumi: MatchedBangumiDTO | None = None
+    rss_sources: list[RssSourceDTO] = []
+
+
+class FilterRuleDTO(_SnapshotBase):
+    must_contain: str | None = None
+    must_not_contain: str | None = None
+    use_regex: bool | None = None
+    case_sensitive: bool | None = None
+
+
+class ConfirmableConfigDTO(_SnapshotBase):
+    selected_subtitle_group: str | None = None
+    selected_rss_url: str | None = None
+    filter_rule: FilterRuleDTO | None = None
+    effective_seed_names: list[str] = []
+    expected_folder_name: str | None = None
+    warnings: list[str] = []
+
+
+class UserActionDTO(_SnapshotBase):
+    action: str | None = None
+    reason: str | None = None
+    decided_at: str | None = None
+
+
+class RequestSnapshotDTO(_SnapshotBase):
+    """Typed view of the saved Request snapshot the detail panel renders.
+
+    Only the display fields are typed; the engine may add fields without
+    breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+    ``poster_url`` are declared for schema accuracy but the frontend must
+    never render them (URLs are redacted at display time).
+    """
+
+    request_id: str | None = None
+    status: str | None = None
+    input: RequestInputDTO | None = None
+    source_info: SourceInfoDTO | None = None
+    confirmable_config: ConfirmableConfigDTO | None = None
+    ab_submit_result: dict[str, Any] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    user_action: UserActionDTO | None = None
+
+
+class HistoryEventDTO(_SnapshotBase):
+    request_id: str | None = None
+    previous_status: str | None = None
+    next_status: str | None = None
+    action: str | None = None
+    timestamp: str | None = None
+    details: dict[str, Any] | None = None
+
+
+class HistorySectionDTO(_SnapshotBase):
+    available: bool = True
+    events: list[HistoryEventDTO] = []
+    error: dict[str, Any] | None = None
+
+
+class AbSubmitResultRecordDTO(_SnapshotBase):
+    """Lenient copy of the sanitized AB submit result for the Audit section.
+
+    The strict ``AbSubmitResultDTO`` (extra="forbid") whitelists the
+    submit-ab *response*; records read back from storage may carry extra
+    fields, so the detail panel uses this lenient variant.
+    """
+
+    success: bool | None = None
+    ab_subscription_id: str | None = None
+    ab_response: dict[str, Any] | None = None
+    fallback_config: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+
+
+class AbResultRecordDTO(_SnapshotBase):
+    request_id: str | None = None
+    recorded_at: str | None = None
+    ab_submit_result: AbSubmitResultRecordDTO | None = None
+
+
+class AbResultSectionDTO(_SnapshotBase):
+    available: bool = True
+    record: AbResultRecordDTO | None = None
+    error: dict[str, Any] | None = None
+
+
 class RequestDetailResultDTO(_StrictBase):
-    request: dict[str, Any]
-    history: dict[str, Any]
-    ab_result: dict[str, Any]
+    request: RequestSnapshotDTO
+    history: HistorySectionDTO
+    ab_result: AbResultSectionDTO
 
 
 class RequestCreateResultDTO(_StrictBase):
-    request: dict[str, Any]
+    request: RequestSnapshotDTO
     summary: RequestSummaryDTO
-    saved_request: dict[str, Any] | None = None
+    saved_request: RequestSnapshotDTO | None = None
     draft_id: str | None = None
 
 
 class RequestPreviewModifyResultDTO(_StrictBase):
-    request: dict[str, Any]
+    request: RequestSnapshotDTO
     summary: RequestSummaryDTO
     draft_id: str | None = None
 
@@ -101,9 +241,9 @@ class RequestPreviewModifyResultDTO(_StrictBase):
 class RequestPreviewSaveResultDTO(_StrictBase):
     """preview-save result equals the create result shape (draft consumed)."""
 
-    request: dict[str, Any]
+    request: RequestSnapshotDTO
     summary: RequestSummaryDTO
-    saved_request: dict[str, Any] | None = None
+    saved_request: RequestSnapshotDTO | None = None
 
 
 class RequestActionResultDTO(RequestCreateResultDTO):
@@ -118,8 +258,23 @@ class RequestDeleteResultDTO(_StrictBase):
     deleted: bool
 
 
+class AbSubmitResultDTO(_StrictBase):
+    """Public Auto Bangumi submit-result whitelist.
+
+    ``ab_response`` is sanitized by ``_sanitize_ab_submit_result`` (never
+    carries tokens/cookies/URLs); ``fallback_config`` is an opaque
+    non-sensitive fallback payload when enabled.
+    """
+
+    success: bool
+    ab_subscription_id: str | None
+    ab_response: dict[str, Any]
+    fallback_config: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+
+
 class RequestAbSubmitResultDTO(RequestCreateResultDTO):
-    ab_submit_result: dict[str, Any]
+    ab_submit_result: AbSubmitResultDTO
     saved_ab_result: dict[str, Any] | None = None
 
 
@@ -128,12 +283,50 @@ class RequestAbSubmitResultDTO(RequestCreateResultDTO):
 # ---------------------------------------------------------------------------
 
 
+class SeasonEvidenceDTO(_SnapshotBase):
+    """Public candidate season evidence summary (never parser raw text).
+
+    ``status`` is one of PROVEN / NEEDS_CONFIRMATION / CONFLICT / NONE and
+    ``season`` the proven-or-awaiting number; the frontend only ever renders
+    the confirmation checkbox for NEEDS_CONFIRMATION and blocks CONFLICT.
+    """
+
+    status: str | None = None
+    season: int | None = None
+    requires_review: bool | None = None
+
+
+class MikanCandidateDTO(_StrictBase):
+    """Public whitelist for one MiKan candidate card.
+
+    Only non-sensitive public metadata is exposed: the opaque poster key
+    (served by the poster endpoint), the public bangumi id/title, the source
+    query and aliases. ``mikan_url`` is declared for contract accuracy (the
+    backend uses it to fetch the detail page) but the frontend must never
+    render it. ``candidate_context`` is the one-time opaque season-confirmation
+    capability (request-scoped); ``season_evidence`` is the public review
+    summary. Unknown engine fields (raw HTML/RSS/cookies/tokens) are rejected
+    at the boundary.
+    """
+
+    bangumi_id: str
+    title: str
+    mikan_url: str
+    poster_url: str | None = None
+    source_query: str
+    aliases: list[str] = []
+    recommendation: str | None = None
+    total_episodes: int | None = None
+    season_evidence: SeasonEvidenceDTO | None = None
+    candidate_context: str | None = None
+
+
 class MikanCandidateResultDTO(_StrictBase):
     query: str
     status: str
     parse_result: dict[str, Any]
     attempted_queries: list[dict[str, Any]]
-    candidates: list[dict[str, Any]]
+    candidates: list[MikanCandidateDTO]
     error: dict[str, Any] | None = None
 
 
@@ -142,12 +335,47 @@ class MikanCandidateResultDTO(_StrictBase):
 # ---------------------------------------------------------------------------
 
 
+class SubtitleGroupPreferenceDTO(_StrictBase):
+    """Non-sensitive subtitle-group preference section.
+
+    ``preferred``/``excluded`` are display lists (Chinese business names);
+    ``fallback`` is the stable internal code (``next_preferred``/``none``)
+    rendered via the shared select primitive — never shown as raw text.
+    """
+
+    preferred: list[str]
+    excluded: list[str]
+    fallback: str
+
+
+class FilterDefaultsDTO(_StrictBase):
+    """Non-sensitive default filter rule section."""
+
+    must_contain: str
+    must_not_contain: str
+    use_regex: bool
+    case_sensitive: bool
+
+
+class NamingPreferenceDTO(_StrictBase):
+    """Non-sensitive default naming section (folder-name defaults only)."""
+
+    strategy: str
+    template: str
+
+
+class SearchPreferenceDTO(_StrictBase):
+    """Non-sensitive default search section."""
+
+    reuse_explicit_corrections: bool
+
+
 class PreferenceResultDTO(_StrictBase):
     version: int
-    subtitle_groups: dict[str, Any]
-    filter_defaults: dict[str, Any]
-    naming: dict[str, Any]
-    search: dict[str, Any]
+    subtitle_groups: SubtitleGroupPreferenceDTO
+    filter_defaults: FilterDefaultsDTO
+    naming: NamingPreferenceDTO
+    search: SearchPreferenceDTO
 
 
 class CorrectionsResultDTO(_StrictBase):
@@ -159,21 +387,100 @@ class CorrectionsResultDTO(_StrictBase):
 # ---------------------------------------------------------------------------
 
 
+class BatchParseItemDTO(_SnapshotBase):
+    """One batch card's public parse/search metadata (US-205).
+
+    The parse item carries the auditable title-parse summary, the whitelisted
+    candidate list, and the client-side draft state (``preview_request`` +
+    ``draft_id``) after a candidate is chosen. Lenient (``extra="allow"``) so
+    the engine can keep adding review metadata without breaking the boundary;
+    the nested candidates stay strict (``MikanCandidateDTO``) so raw engine
+    fields never pass.
+    """
+
+    item_id: str | None = None
+    raw_title: str | None = None
+    status: str | None = None
+    queue_status: str | None = None
+    canonical_title_candidates: list[str] = []
+    season_hint: str | None = None
+    search_queries: list[str] = []
+    confidence: float | None = None
+    needs_user_review: bool | None = None
+    source: str | None = None
+    parse_result: dict[str, Any] | None = None
+    attempted_queries: list[dict[str, Any]] = []
+    candidates: list[MikanCandidateDTO] = []
+    applied_preferences: dict[str, Any] | None = None
+    preference_hits: list[dict[str, Any]] = []
+    preference_warnings: list[str] = []
+    review_hints: list[str] = []
+    enhanced_search_queries: list[dict[str, Any]] = []
+    preview_request: RequestSnapshotDTO | None = None
+    draft_id: str | None = None
+    error: dict[str, Any] | None = None
+
+
 class BatchParseResultDTO(_StrictBase):
     batch_id: str
     raw_input: str
-    items: list[dict[str, Any]]
+    items: list[BatchParseItemDTO]
+
+
+class BatchQueueItemDTO(_SnapshotBase):
+    """One public pre-submission queue item (non-sensitive fields only)."""
+
+    queue_id: str | None = None
+    batch_id: str | None = None
+    item_id: str | None = None
+    request_id: str | None = None
+    title: str | None = None
+    status: str | None = None
+    status_label: str | None = None
+    attempts: int | None = None
+    last_error: str | None = None
+    ab_result_summary: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class BatchQueueDTO(_SnapshotBase):
+    """The public pre-submission queue (idempotent, sanitized summaries)."""
+
+    queue_id: str | None = None
+    batch_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    items: list[BatchQueueItemDTO] = []
+
+
+class BatchResultItemDTO(_SnapshotBase):
+    """One accept/submit result item (public Chinese reason only).
+
+    Accept items carry ``queued``; submit/retry/recover items carry
+    ``attempts``. The lenient shape types the shared fields and lets each
+    family's extra field pass without a second DTO.
+    """
+
+    item_id: str | None = None
+    request_id: str | None = None
+    title: str | None = None
+    status: str | None = None
+    reason: str | None = None
+    error_type: str | None = None
+    queued: bool | None = None
+    attempts: int | None = None
 
 
 class BatchQueueResultDTO(_StrictBase):
     batch_id: str
-    queue: dict[str, Any] | None = None
+    queue: BatchQueueDTO | None = None
 
 
 class BatchAcceptResultDTO(_StrictBase):
     batch_id: str
-    queue: dict[str, Any]
-    items: list[dict[str, Any]]
+    queue: BatchQueueDTO
+    items: list[BatchResultItemDTO]
     summary: dict[str, int]
 
 

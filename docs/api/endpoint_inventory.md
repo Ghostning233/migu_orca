@@ -1,7 +1,7 @@
 # MiGuOrca Web API 端点清单（US-189 冻结基线）
 
-> 本文档是 Stage 26 US-189 的产物：先把现有 `/api/v1` 行为、敏感值边界和旧前端依赖
-> 冻结成可审查、可自动核对的事实基线。US-192 已在此基础上修正 HTTP 状态语义
+> 本文档是 Stage 26 US-189 的产物：先把现有 `/api/v1` 行为、敏感值边界和前端依赖
+> 冻结成可审查、可自动核对的事实基线（US-209 已随旧前端删除更新前端依赖章节）。US-192 已在此基础上修正 HTTP 状态语义
 > （envelope 保持不变，状态码表达失败分类），因此 §1 总览描述的是**当前生效**
 > 的状态语义。
 > 它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
@@ -37,8 +37,9 @@
   - `504`：上游超时（`mikan_timeout`、`ab_timeout`、`qbittorrent_timeout`）。
   - `500`：服务端内部错误（`storage_error`、`storage_json_error`、未知异常）。
 - 唯一二进制端点 `/api/v1/mikan/posters/<key>` 不经 JSON envelope，成功返回图片字节；
-  失败返回 JSON envelope + 分类状态码（`invalid_poster_key`/`poster_not_found` → 404，
-  `poster_unavailable` → 502，`invalid_poster` → 400）。
+  失败返回 JSON envelope + 分类状态码（US-198 校准后与 OpenAPI 声明一致）：
+  `invalid_poster_key`/`invalid_poster` → 400，`poster_not_found` → 404，
+  `poster_unavailable` → 502，`storage_error` → 500。
 - 未注册路由返回 Flask 默认 404 HTML，不属于 API envelope。
 - 所有响应在 `failed_response` / `sanitize_error_data` / 各 serializer 白名单中脱敏：
   endpoint、token、cookie、Authorization、SID、password、raw HTML、raw RSS XML、
@@ -73,11 +74,12 @@
 | POST | `/api/v1/qbittorrent/test-connection` | `migu_orca_web_api.QbittorrentTestConnectionView` | QbittorrentTestConnectionView |
 | POST | `/api/v1/autobangumi/test-connection` | `migu_orca_web_api.AutoBangumiTestConnectionView` | AutoBangumiTestConnectionView |
 
-页面路由（非 JSON API，供对照）：`GET /` → 302 `/index`；`GET /index`；
-`GET /Settings` → 302 `/settings`；`GET /settings`；`GET /migu-orca-static/<path:filename>`；
-`GET /healthz`（存活探针）；`GET /readiness`（就绪探针，US-195：服务端 Web storage
-根目录可创建/可写才 200，否则 503 `{"ok": false, "result": "storage_unavailable"}`；
-两者都不访问真实外部系统）。
+页面路由（非 JSON API，供对照）：`GET /` → 302 `/app/workbench`；`GET /index` →
+302 `/app/workbench`（保留 `request_id`/`batch_id` query）；`GET /Settings` →
+302 `/app/settings`；`GET /settings` → 302 `/app/settings`（保留 `request_id` query）；
+`GET /app/*`（SPA 外壳与静态资产，US-197）；`GET /healthz`（存活探针）；
+`GET /readiness`（就绪探针，US-195：服务端 Web storage 根目录可创建/可写才 200，
+否则 503 `{"ok": false, "result": "storage_unavailable"}`；两者都不访问真实外部系统）。
 
 ## 3. 端点族明细
 
@@ -189,30 +191,14 @@ CLI 显式 `--storage-dir` 行为不受影响）。
   容量 128、一次性保存与重放保护，失效/重放统一 409 `draft_expired`/`draft_evicted`/
   `draft_replayed`，错误 details 不回显 draft_id 或草案内容。
 
-## 5. 旧前端依赖（已冻结）
+## 5. 前端依赖（Stage 27 迁移后）
 
-前端：`src/apps/migu_orca_web/static/app.js`（单文件，`/index` 与 `/settings` 共用）。
+旧单文件前端（`static/app.js`）已在 US-209 删除；Web UI 是 `frontend/` 的
+Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托管。新前端
+只通过 `docs/api/openapi.json` 生成 TypeScript 类型/client（US-198），不手写
+第二套响应 interface。以下浏览器侧契约继续生效（与旧前端一致）：
 
-### 5.1 使用的 API URL（`fetchJson` 调用点）
-
-- `GET /api/v1/requests`（`apiPath` 追加 `?storage_dir=`）
-- `GET /api/v1/requests/<request_id>`（`apiPath`）
-- `POST /api/v1/requests`（生成；`buildCreateRequestPayload`）
-- `POST /api/v1/requests/preview-modify`
-- `POST /api/v1/requests/preview-save`
-- `POST /api/v1/requests/<request_id>/accept|cancel|modify|delete`
-- `POST /api/v1/requests/<request_id>/submit-ab`（Settings，按 `request_id` 上下文）
-- `POST /api/v1/mikan/candidates`
-- `GET /api/v1/preferences`、`POST /api/v1/preferences`
-- `GET /api/v1/corrections`、`POST /api/v1/corrections`
-- `POST /api/v1/batches/parse`
-- `POST /api/v1/batches/<batch_id>/accept`
-- `GET /api/v1/batches/<batch_id>/queue`
-- `POST /api/v1/batches/<batch_id>/submit|retry|recover`
-- `POST /api/v1/qbittorrent/test-connection`
-- `POST /api/v1/autobangumi/test-connection`
-
-### 5.2 localStorage key（仅这两个，均为非敏感浏览器偏好）
+### 5.1 localStorage key（仅这两个，均为非敏感浏览器偏好）
 
 - `miguOrca.web.storageDir`（相对 storage profile 字符串；US-193 起只存服务端允许根目录下的
   相对目录名，绝对路径旧值在读取时被忽略并回退默认根目录）
@@ -220,14 +206,14 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 
 其它敏感值（endpoint/token/cookie/密码/qBittorrent 凭据）**绝不**写入 localStorage/sessionStorage。
 
-### 5.3 URL 参数（history 状态）
+### 5.2 URL 参数（SPA history 状态）
 
-- `?request_id=<id>`：详情选择状态（`syncRequestIdToUrl`，pushState/replaceState）。
-- `?batch_id=<id>`：批量队列恢复状态（`syncBatchIdToUrl`，pushState）。
-- `?storage_dir=<profile>`：通过 `apiPath()` 追加到 GET 请求（US-193 起为相对 profile，
+- `?request_id=<id>`：详情选择状态（SPA RequestsView 从 URL query 读取，刷新恢复）。
+- `?batch_id=<id>`：批量队列恢复状态（SPA QueueView 从 URL query 读取）。
+- `?storage_dir=<profile>`：通过统一 transport 追加到 GET 请求（US-193 起为相对 profile，
   绝不携带绝对路径）。
 
-### 5.4 生命周期（US-190 在 OpenAPI 中记录）
+### 5.3 生命周期（US-190 在 OpenAPI 中记录）
 
 - **request_id**：`POST /api/v1/requests` 生成 → 保存后进入待确认流程（PENDING_CONFIRM）→
   accept/cancel/modify/delete/submit-ab；删除后 `request_not_found`。
@@ -254,8 +240,6 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 - `tests/api_contract/test_golden_contracts.py`：每类端点族的成功、输入失败、
   业务失败与脱敏错误 golden contract（全部基于 fake/隔离，无真实外部写操作）；
   US-192 起断言 HTTP 状态（400/404/409/401/502/503/504/500）与 envelope 双语义。
-- `tests/api_contract/test_frontend_dependencies.py`：冻结 localStorage key、URL 参数与
-  前端 fetch 依赖；US-192 起同时断言 `fetchJson` 处理非 2xx JSON、非 JSON 与网络失败。
 - `tests/api_contract/test_dto_contracts.py`（US-190）：公开响应 DTO 拒绝未知/敏感字段。
 - `tests/api_contract/test_openapi_generation.py`（US-190）：OpenAPI 覆盖全部端点、
   确定性生成、脱敏示例、海报二进制 content type 与漂移检查；`_ENDPOINTS` 注册表的

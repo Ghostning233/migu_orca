@@ -93,34 +93,6 @@ def test_inventory_documents_every_json_api_view() -> None:
             seen.add(key)
 
 
-def test_inventory_documents_all_fetch_dependencies() -> None:
-    """Every /api/v1 URL used by app.js must be covered by the inventory.
-
-    app.js builds dynamic URLs with string prefixes (e.g.
-    ``"/api/v1/batches/" + encodeURIComponent(currentBatchId) + "/accept"``),
-    so we collect every ``/api/v1/...`` string literal in the script and assert
-    each one appears inside the inventory's frontend-dependency section.
-    """
-    app_js = (
-        Path(__file__).resolve().parents[2]
-        / "src" / "apps" / "migu_orca_web" / "static" / "app.js"
-    )
-    script = app_js.read_text(encoding="utf-8")
-    inventory = DOC_PATH.read_text(encoding="utf-8")
-
-    section = inventory.split("### 5.1", 1)[1]
-    used: set[str] = set()
-    for match in re.finditer(r'["`](/api/v1/[^"`\s]+)["`]', script):
-        url = match.group(1).split("?")[0]
-        used.add(url)
-
-    missing = sorted(url for url in used if url not in section)
-    assert not missing, (
-        "app.js uses API URL(s) not listed in docs/api/endpoint_inventory.md §5.1: "
-        + ", ".join(missing)
-    )
-
-
 @pytest.mark.parametrize("route", ["/", "/index", "/Settings", "/settings"])
 def test_page_routes_are_registered(route: str) -> None:
     app = create_app("testing")

@@ -12,8 +12,41 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - `drafts.py`（US-194）：服务端权威未保存草案存储（`draft_store` / `DraftStore`，TTL 30 分钟、
   容量 128、一次性保存与重放保护）；`preview-modify`/`preview-save` 只接受 opaque `draft_id`。
 - `routes_requests.py` / `routes_mikan.py` / `routes_batches.py` / `routes_settings.py` / `routes_connections.py`：按端点族注册 `/api/v1` 路由。
-- `views.py`：仅保留 Jinja 页面路由 + 导入 route 模块（导入副作用即注册端点）+ 再导出 blueprints；同时为测试兼容再导出 `CandidateSelectionContextStore` / `candidate_selection_contexts`。
-- `__init__.py` 的 `blueprints = [web_blueprint, api_blueprint]` 由 `apps/registry.py` 消费。
+- `routes_app.py`（US-197）：`app_blueprint` 托管 Vue SPA——`/app/` 外壳、`/app/<path:subpath>`
+  fallback（真实构建文件直接服务，其余 `/app/*` 返回 SPA 外壳）、`_dist_dir()` 指向
+  `frontend/dist/`（无构建时返回依赖无关的占位模板，测试 monkeypatch `_dist_dir`）。
+- `views.py`：仅保留 Web 入口重定向路由（`/`、`/index`、`/Settings`、`/settings` → SPA，
+  US-209 起旧 Jinja 页面已删除）+ 导入 route 模块（导入副作用即注册端点）+ 再导出
+  blueprints；同时为测试兼容再导出 `CandidateSelectionContextStore` /
+  `candidate_selection_contexts`。
+- `__init__.py` 的 `blueprints = [web_blueprint, api_blueprint, app_blueprint]` 由 `apps/registry.py` 消费。
+
+## SPA 托管与 fallback 边界（US-197）
+
+- Vite `base` 固定为 `/app/`，`frontend/dist/` 的 `index.html` 引用 `/app/assets/*`；
+  Flask 的 `app_blueprint` 在 `/app/` 同源托管，生产不依赖 Node 运行时。
+- **fallback 只接管 `/app/*`**：`/api/v1/*`、海报、`/healthz`、`/readiness`、入口路由
+  （`/`、`/index`、`/Settings`、`/settings`）都由各自的 Flask 路由处理，绝不能被
+  `/app/<path:subpath>` 截获（`tests/api_contract/test_inventory_consistency.py` 只核对
+  `/api/v1`，但 `src/apps/migu_orca_web/app_routes_test.py` 断言非 `/app` 路由端点
+  不属于 `migu_orca_app.*`）。
+- `frontend/dist` 不入库；CI 的 frontend/browser job 在跑套件前执行 `npm ci && npm run build`。
+  浏览器测试 `tests/browser/test_app_shell.py` 在 `MIGU_ORCA_CI=1` 下缺构建直接失败（不 skip）。
+- US-199 起 SPA 客户端路由为 4 条：`/app/workbench`、`/app/requests`、`/app/queue`、
+  `/app/settings`（history base `/app/`，见 `frontend/src/app/router/index.ts`）。这些是
+  客户端路由，Flask 侧除 `/app/` 与 `/app/<path:subpath>` fallback 外**不需要**新增任何
+  服务端路由；浏览器测试在 `test_app_shell.py` 断言 4 项导航与各 route 挂载。
+
+## 默认入口（US-209）
+
+- `views.py` 的入口路由**始终重定向到 SPA**（旧 Jinja 页面与 `web_entry_mode()`
+  已在 US-209 删除）：`GET /`、`GET /index` → `/app/workbench`，`GET /Settings`、
+  `GET /settings` → `/app/settings`，保留 `request_id`/`batch_id` query。
+- 重定向只转发公开已保存标识符（`request_id`/`batch_id`），endpoint/token/storage
+  路径等敏感值绝不进入重定向 URL（
+  `app_routes_test.py::test_spa_entry_never_forwards_sensitive_query_values` 守护）。
+- `web_blueprint` 不再挂 `static_folder`/`template_folder`（旧 `app.js`/`style.css`/
+  Jinja 模板已删）；`blueprints.py` 只定义 Blueprint 对象，SPA 由 `app_blueprint` 托管。
 
 ## 路由注册与测试 seam 的坑
 
@@ -37,9 +70,16 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   是唯一分类来源（400/404/409/401/502/503/504/500），路由**不得**硬编码状态码。
 - `openapi_gen.py` 的 `_ENDPOINTS` 注册表 `errors` 声明必须与 `_error_http_status` 分类一致；
   改分类或改注册表都要跑 `uv run python -m apps.migu_orca_web.openapi_gen` 重生成
-  `docs/api/openapi.json`。
+  `docs/api/openapi.json`。`tests/api_contract/test_openapi_runtime_consistency.py`（US-198）
+  自动核对：每个声明 status/error_type 与运行时分类一致、每个被分类的 error_type 都有声明
+  （或列入该文件的显式豁免集）、operationId 唯一/可读/稳定、前端生成客户端不漂移。
 - 新增 `Stage1Error` error_type 时：若它属于已分类语义（not_found/conflict/timeout/
   auth/upstream），直接加入 `_error_http_status` 对应集合；未知 error_type 默认 400。
+  若该 error_type 会作为 API envelope 失败返回，必须在对应 `_ENDPOINTS` 条目声明；
+  若只在 CLI/批内 item 结果等非 envelope 路径出现，加入
+  `test_openapi_runtime_consistency.py` 的 `_UNDOCUMENTED_ERROR_TYPES` 豁免集。
+- `_ENDPOINTS` 每个条目**必须显式声明可读 `operationId`**（如 `listRequests`、
+  `submitBatchQueue`）；不要把新端点交给自动推导，否则可读性测试失败。
 - 海报二进制端点 `GET /api/v1/mikan/posters/<key>`（函数视图）在 `routes_mikan.py` 里
   用 `try/except Stage1Error` + `failed_response(..., status=_error_http_status(...))`
   统一错误处理，成功仍返回图片字节。
@@ -73,7 +113,7 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   在响应里签发 opaque `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch 并回写同一
   draft_id；`preview-save` 一次性消费 `draft_id` 后落盘。
 - 客户端**绝不**把完整 Request 作为权威快照提交；前端只在内存持有 `draft_id`
-  （`app.js` 的 `currentDraftId` / 批量卡片的 `row.draft_id`），不写 URL/browser storage。
+  （新前端 DraftPreviewPanel 的局部 ref / 批量卡片的 `draft_id`），不写 URL/browser storage。
 - 失败语义统一 409：`draft_expired`（过期/未知）、`draft_evicted`（容量满）、
   `draft_replayed`（重复保存）；错误 details 不回显 draft_id 或草案内容。
 - 测试：`DraftStore` 是进程级单例，必须在 `views_test`/`api_contract`/`browser` 的
@@ -81,7 +121,39 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `preview_result_json(request)`（签发真实 draft 并返回 draft_id）与
   `save_preview_handler(calls?)`（消费 draft 并返回保存结果），批量卡片 mock 用
   `issue_draft_id(preview_request)` 给每个 `preview_request` 补 draft_id。
-- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.4 与 OpenAPI 注册表。
+- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.3 与 OpenAPI 注册表。
+
+## MiKan 候选公开 DTO（US-204）
+
+- `POST /api/v1/mikan/candidates` 的 `result.candidates` 在
+  `api_contract.py` 里是 `list[MikanCandidateDTO]`（strict `extra="forbid"`），每个候选只
+  暴露公开白名单：`bangumi_id/title/mikan_url/poster_url/source_query/aliases/
+  recommendation/total_episodes/season_evidence/candidate_context`。engine 字段
+  （raw_html/raw_rss_xml/token/cookie/raw_response_body）在边界被拒绝，测试见
+  `test_dto_contracts.py::test_mikan_candidate_dto_rejects_unknown_or_sensitive_fields`。
+- `season_evidence` 用 lenient `SeasonEvidenceDTO`（`_SnapshotBase`，`extra="allow"`）：
+  `status`（PROVEN/NEEDS_CONFIRMATION/CONFLICT/NONE）+ `season` + `requires_review`，
+  只作公开审核摘要；前端绝不把 parser 提示当作真实季数证据（只有显式确认 checkbox 或
+  服务端一次性 `candidate_context` 能成为证据）。
+- 改 `MikanCandidateResultDTO`/候选白名单后必须重生成 `docs/api/openapi.json` 与
+  `frontend/src/api/generated/api.ts`（drift check 双守护），并同步
+  `test_golden_contracts.py::test_golden_mikan_candidates_success` 的白名单集合断言。
+
+## 批量公开 DTO（US-205）
+
+- `BatchParseResultDTO.items` 是 `list[BatchParseItemDTO]`（lenient `_SnapshotBase`，
+  `extra="allow"`）：类型化 parse 摘要/candidates/preview_request/draft_id/error 等公开
+  字段，同时允许引擎继续追加 review 元数据。**内嵌 `candidates` 仍是 strict
+  `MikanCandidateDTO`**——原始 engine 字段在嵌套层被拒绝（测试见
+  `test_dto_contracts.py::test_batch_parse_dto_accepts_real_serialized_items`）。
+- `BatchQueueResultDTO.queue` / `BatchAcceptResultDTO.queue` 用 lenient
+  `BatchQueueDTO` + `BatchQueueItemDTO`（只含公开非敏感字段：item_id/request_id/title/
+  status/status_label/attempts/last_error/ab_result_summary）；accept/submit 结果项用
+  lenient `BatchResultItemDTO`（accept 带 `queued`、submit/retry/recover 带 `attempts`，
+  一个 lenient shape 覆盖两个 family 的共享字段）。envelope 仍 strict
+  `extra="forbid"`。
+- 改批量 DTO 后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`
+  （drift check 双守护）；`test_dto_contracts.py` 用真实 serializer 输出断言嵌套白名单。
 
 ## 静态检查与就绪探针（US-195）
 
@@ -94,3 +166,17 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   避免创建仓库根 `.migu_orca/storage`。
 - CI（`.github/workflows/ci.yml`）在 `MIGU_ORCA_CI=1` 下浏览器不可用会失败而不是静默
   skip；浏览器测试 conftest 的 `pytest_collection_modifyitems` 处理该逻辑。
+
+## SPA 静态缓存与构建产物（US-207）
+
+- `routes_app.py` 的缓存策略：`/app/assets/*`（Vite 内容哈希文件名）返回
+  `public, max-age=31536000, immutable`；SPA shell（`/app/` 与 `/app/<path:subpath>`
+  的 fallback）返回 `no-cache`——部署换哈希后不会 pin 旧资源。改缓存策略必须同步
+  `app_routes_test.py` 的 `test_app_assets_served_with_immutable_cache` /
+  `test_app_shell_never_cached`。
+- `frontend/dist` 永不提交 `.map` 文件（`sourcemap: false` + gitignore）：
+  `app_routes_test.py::test_build_has_no_sourcemaps` 断言 build 无 `.map` 且 asset
+  无 `sourceMappingURL`，避免公开 sourcemap 泄漏源码与可能的敏感字面量。
+- 路由返回类型：`app_shell`/`app_fallback` 现在返回 `Response`（带 Cache-Control
+  头），不再是裸 `str`；新增 `/app/*` 处理函数时保持 `Response` 返回并显式设置
+  缓存头，不要依赖默认缓存。

@@ -30,6 +30,7 @@ from apps.migu_orca_web.api_contract import (
     RequestCreateResultDTO,
     RequestDeleteResultDTO,
     RequestDetailResultDTO,
+    RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
     RequestSummaryDTO,
@@ -87,11 +88,31 @@ def test_request_summary_dto_rejects_unknown_fields() -> None:
         RequestSummaryDTO.model_validate({**summary, "leaked_secret": "x"})
 
 
+def test_request_list_dto_accepts_real_summaries() -> None:
+    """US-202: the list result is typed as full summary DTOs, not bare dicts."""
+    request = _generated_request()
+    payload = {"requests": [_summary(request), _summary(request)]}
+    validated = RequestListResultDTO.model_validate(payload)
+    assert all(isinstance(item, RequestSummaryDTO) for item in validated.requests)
+
+
+def test_request_list_dto_rejects_unknown_fields() -> None:
+    summary = _summary(_generated_request())
+    with pytest.raises(ValidationError):
+        RequestListResultDTO.model_validate(
+            {"requests": [summary], "leaked_secret": "x"}
+        )
+    with pytest.raises(ValidationError):
+        RequestListResultDTO.model_validate(
+            {"requests": [{**summary, "leaked_secret": "x"}]}
+        )
+
+
 def test_request_create_dto_accepts_real_payload() -> None:
     request = _generated_request()
     payload = {"request": request, "summary": _summary(request)}
     validated = RequestCreateResultDTO.model_validate(payload)
-    assert validated.request["status"] == "PENDING_CONFIRM"
+    assert validated.request.status == "PENDING_CONFIRM"
 
 
 def test_request_create_dto_rejects_unknown_result_field() -> None:
@@ -157,7 +178,23 @@ def test_request_ab_submit_dto_requires_top_level_ab_result() -> None:
         RequestCreateResultDTO.model_validate(
             {**base, "ab_submit_result": {"success": True}}
         )
-    payload = {**base, "ab_submit_result": {"success": True}}
+    # A partial ``ab_submit_result`` (missing the required whitelist fields)
+    # fails the strict AbSubmitResultDTO...
+    with pytest.raises(ValidationError):
+        RequestAbSubmitResultDTO.model_validate(
+            {**base, "ab_submit_result": {"success": True}}
+        )
+    # ...and the full sanitized submit-result shape validates.
+    payload = {
+        **base,
+        "ab_submit_result": {
+            "success": True,
+            "ab_subscription_id": "ab-sub-1",
+            "ab_response": {"id": "ab-sub-1"},
+            "fallback_config": None,
+            "error": None,
+        },
+    }
     assert RequestAbSubmitResultDTO.model_validate(payload) is not None
 
 
@@ -170,6 +207,98 @@ def test_request_detail_dto_shape() -> None:
     assert RequestDetailResultDTO.model_validate(payload) is not None
     with pytest.raises(ValidationError):
         RequestDetailResultDTO.model_validate({**payload, "extra": 1})
+
+
+def test_request_detail_dto_accepts_real_sections() -> None:
+    """US-203: the detail result types the history/AB section shapes the UI renders."""
+    request = _generated_request()
+    payload = {
+        "request": request,
+        "history": {
+            "available": True,
+            "events": [
+                {
+                    "request_id": request["request_id"],
+                    "previous_status": "PENDING_CONFIRM",
+                    "next_status": "ACCEPTED",
+                    "action": "ACCEPT",
+                    "timestamp": "2026-08-31T00:00:00+00:00",
+                    "details": None,
+                }
+            ],
+            "error": None,
+        },
+        "ab_result": {
+            "available": True,
+            "record": {
+                "request_id": request["request_id"],
+                "recorded_at": "2026-08-31T00:00:00+00:00",
+                "ab_submit_result": {
+                    "success": True,
+                    "ab_subscription_id": "ab-sub-1",
+                    "ab_response": {"id": "ab-sub-1"},
+                    "fallback_config": None,
+                    "error": None,
+                },
+            },
+            "error": None,
+        },
+    }
+    validated = RequestDetailResultDTO.model_validate(payload)
+    assert validated.request.status == "PENDING_CONFIRM"
+    assert validated.request.input.raw_title == "芙莉莲"
+    assert validated.request.source_info.rss_sources[0].subtitle_group
+    assert validated.request.confirmable_config.filter_rule.use_regex is False
+    assert validated.history.events[0].action == "ACCEPT"
+    assert validated.ab_result.record.ab_submit_result.ab_subscription_id == "ab-sub-1"
+    # Lenient snapshot shapes still reject unknown envelope fields.
+    with pytest.raises(ValidationError):
+        RequestDetailResultDTO.model_validate({**payload, "leaked": 1})
+
+
+def test_request_detail_dto_accepts_error_sections() -> None:
+    """US-203: history/AB sections may carry a sanitized error dict."""
+    payload = {
+        "request": _generated_request(),
+        "history": {
+            "available": False,
+            "events": [],
+            "error": {
+                "error_type": "storage_error",
+                "error_message": "读取状态历史失败",
+                "failed_step": "load_status_history",
+                "details": {"request_id": "req-1"},
+            },
+        },
+        "ab_result": {
+            "available": False,
+            "record": None,
+            "error": {
+                "error_type": "storage_error",
+                "error_message": "读取提交结果失败",
+                "failed_step": "load_ab_submit_result",
+                "details": {"request_id": "req-1"},
+            },
+        },
+    }
+    validated = RequestDetailResultDTO.model_validate(payload)
+    assert validated.history.error is not None
+    assert validated.ab_result.error is not None
+
+
+def test_request_snapshot_dto_rejects_unknown_envelope_field() -> None:
+    """US-203: the snapshot DTO itself is lenient, but extra request keys are fine.
+
+    The lenient snapshot shape only lives inside the whitelisted detail/action
+    envelopes; the envelope must never gain unexpected top-level keys.
+    """
+    request = _generated_request()
+    request["future_engine_field"] = {"anything": 1}
+    payload = {
+        "request": request,
+        "summary": _summary(request),
+    }
+    assert RequestCreateResultDTO.model_validate(payload) is not None
 
 
 def test_request_delete_dto_shape() -> None:
@@ -202,6 +331,41 @@ def test_mikan_candidate_dto_accepts_optional_error() -> None:
     assert MikanCandidateResultDTO.model_validate(payload) is not None
     with pytest.raises(ValidationError):
         MikanCandidateResultDTO.model_validate({**payload, "raw_html": "<html>"})
+
+
+def test_mikan_candidate_dto_rejects_unknown_or_sensitive_fields() -> None:
+    """US-204: the candidate card whitelist rejects engine-only fields."""
+    candidate = {
+        "bangumi_id": "2353",
+        "title": "葬送的芙莉莲",
+        "mikan_url": "https://mikan.example/Home/Bangumi/2353",
+        "poster_url": None,
+        "source_query": "芙莉莲",
+        "aliases": ["Frieren EN"],
+        "recommendation": None,
+        "total_episodes": 28,
+        "season_evidence": {"status": "NEEDS_CONFIRMATION", "season": 4, "requires_review": True},
+        "candidate_context": "opaque-context",
+    }
+    payload = {
+        "query": "芙莉莲",
+        "status": "FOUND",
+        "parse_result": {},
+        "attempted_queries": [],
+        "candidates": [candidate],
+        "error": None,
+    }
+    assert MikanCandidateResultDTO.model_validate(payload) is not None
+    # A raw engine field (raw HTML / RSS / token / cookie) must never pass the
+    # public candidate boundary.
+    for leaked in ("raw_html", "raw_rss_xml", "token", "cookie", "raw_response_body"):
+        with pytest.raises(ValidationError):
+            MikanCandidateResultDTO.model_validate(
+                {**payload, "candidates": [{**candidate, leaked: "secret"}]}
+            )
+    # Unknown envelope fields are rejected too.
+    with pytest.raises(ValidationError):
+        MikanCandidateResultDTO.model_validate({**payload, "leaked": 1})
 
 
 # ---------------------------------------------------------------------------
@@ -246,10 +410,133 @@ def test_batch_parse_dto_shape() -> None:
         BatchParseResultDTO.model_validate({**payload, "raw_rss": "<rss>"})
 
 
+def test_batch_parse_dto_accepts_real_serialized_items() -> None:
+    """US-205: the batch parse item is typed (parse summary + strict candidates)."""
+    request = _generated_request()
+    item = {
+        "item_id": "item-1",
+        "raw_title": "萌王S4",
+        "status": "FOUND",
+        "canonical_title_candidates": ["关于我转生变成史莱姆这档事 第四季"],
+        "season_hint": "S4",
+        "search_queries": ["转生史莱姆 第四季"],
+        "confidence": 0.9,
+        "needs_user_review": False,
+        "source": "rule",
+        "parse_result": {
+            "normalized_title": "关于我转生变成史莱姆这档事 第四季",
+            "season": {"number": 4, "raw": "s4", "normalized": "第四季", "source": "title_marker"},
+        },
+        "attempted_queries": [{"query": "转生史莱姆 第四季", "source": "rule", "priority": 1}],
+        "candidates": [
+            {
+                "bangumi_id": "42",
+                "title": "关于我转生变成史莱姆这档事 第四季",
+                "mikan_url": "https://mikan.example/Home/Bangumi/42",
+                "poster_url": None,
+                "source_query": "转生史莱姆 第四季",
+                "aliases": [],
+                "recommendation": None,
+                "total_episodes": None,
+                "season_evidence": None,
+                "candidate_context": None,
+            }
+        ],
+        "applied_preferences": None,
+        "preference_hits": [],
+        "preference_warnings": [],
+        "review_hints": [],
+        "enhanced_search_queries": [],
+        "preview_request": request,
+        "draft_id": "opaque-draft-token",
+        "error": None,
+    }
+    payload = {"batch_id": "batch-1", "raw_input": "萌王S4", "items": [item]}
+    validated = BatchParseResultDTO.model_validate(payload)
+    assert validated.items[0].item_id == "item-1"
+    assert validated.items[0].preview_request is not None
+    assert validated.items[0].draft_id == "opaque-draft-token"
+    # A raw engine candidate field must never pass the nested strict whitelist.
+    with pytest.raises(ValidationError):
+        BatchParseResultDTO.model_validate(
+            {
+                **payload,
+                "items": [{**item, "candidates": [{**item["candidates"][0], "raw_html": "<html>"}]}],
+            }
+        )
+
+
+def test_batch_parse_dto_rejects_sensitive_item_fields() -> None:
+    """US-205: engine-only/sensitive item keys are rejected at the boundary."""
+    payload = {
+        "batch_id": "batch-1",
+        "raw_input": "萌王S4",
+        "items": [
+            {
+                "item_id": "item-1",
+                "raw_title": "萌王S4",
+                "status": "FAILED",
+                "canonical_title_candidates": [],
+                "season_hint": None,
+                "search_queries": [],
+                "confidence": 0.0,
+                "needs_user_review": True,
+                "source": "unknown",
+                "parse_result": None,
+                "attempted_queries": [],
+                "candidates": [],
+                "applied_preferences": None,
+                "preference_hits": [],
+                "preference_warnings": [],
+                "review_hints": [],
+                "enhanced_search_queries": [],
+                "preview_request": None,
+                "draft_id": None,
+                "error": None,
+            }
+        ],
+    }
+    # The parse item is lenient (engine may add review metadata), so unknown
+    # non-sensitive fields pass — but the envelope stays strict.
+    assert BatchParseResultDTO.model_validate(payload) is not None
+    with pytest.raises(ValidationError):
+        BatchParseResultDTO.model_validate({**payload, "token": "x"})
+
+
 def test_batch_queue_dto_accepts_null_queue() -> None:
     assert BatchQueueResultDTO.model_validate({"batch_id": "b1", "queue": None}) is not None
     with pytest.raises(ValidationError):
         BatchQueueResultDTO.model_validate({"batch_id": "b1", "queue": None, "x": 1})
+
+
+def test_batch_queue_dto_types_queue_items() -> None:
+    """US-205: queue items carry only non-sensitive public fields."""
+    queue = {
+        "queue_id": "queue-1",
+        "batch_id": "batch-1",
+        "created_at": "2026-08-19T00:00:00+00:00",
+        "updated_at": "2026-08-19T00:00:00+00:00",
+        "items": [
+            {
+                "queue_id": "queue-1",
+                "batch_id": "batch-1",
+                "item_id": "item-1",
+                "request_id": "req-1",
+                "title": "关于我转生变成史莱姆这档事 第四季",
+                "status": "READY_TO_SUBMIT",
+                "status_label": "待提交",
+                "attempts": 0,
+                "last_error": None,
+                "ab_result_summary": None,
+                "created_at": "2026-08-19T00:00:00+00:00",
+                "updated_at": "2026-08-19T00:00:00+00:00",
+            }
+        ],
+    }
+    payload = {"batch_id": "batch-1", "queue": queue}
+    validated = BatchQueueResultDTO.model_validate(payload)
+    assert validated.queue.items[0].status == "READY_TO_SUBMIT"
+    assert validated.queue.items[0].title
 
 
 def test_batch_accept_dto_validates_serialized_result() -> None:
@@ -257,6 +544,45 @@ def test_batch_accept_dto_validates_serialized_result() -> None:
     assert BatchAcceptResultDTO.model_validate(result) is not None
     with pytest.raises(ValidationError):
         BatchAcceptResultDTO.model_validate({**result, "leak": 1})
+
+
+def test_batch_accept_dto_types_result_items() -> None:
+    """US-205: accept result items carry public Chinese reasons only."""
+    queue = {
+        "queue_id": "queue-1",
+        "batch_id": "batch-1",
+        "created_at": "2026-08-19T00:00:00+00:00",
+        "updated_at": "2026-08-19T00:00:00+00:00",
+        "items": [],
+    }
+    payload = {
+        "batch_id": "batch-1",
+        "queue": queue,
+        "items": [
+            {
+                "item_id": "item-1",
+                "request_id": "req-1",
+                "title": "标题",
+                "status": "accepted",
+                "reason": None,
+                "error_type": None,
+                "queued": True,
+            },
+            {
+                "item_id": "item-2",
+                "request_id": None,
+                "title": "标题",
+                "status": "unacceptable",
+                "reason": "卡片缺少订阅草案，无法接受",
+                "error_type": None,
+                "queued": False,
+            },
+        ],
+        "summary": {"accepted": 1, "already_accepted": 0, "unacceptable": 1, "failed": 0},
+    }
+    validated = BatchAcceptResultDTO.model_validate(payload)
+    assert validated.items[0].queued is True
+    assert validated.items[1].reason == "卡片缺少订阅草案，无法接受"
 
 
 def test_batch_submit_dto_shares_accept_shape() -> None:
