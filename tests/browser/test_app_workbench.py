@@ -605,10 +605,12 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         expect(page.locator(".candidate-card")).to_have_count(1)
 
         page.locator(".candidate-card button:has-text('选择此合集')").click()
-        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
-
-        notif = page.locator(".global-notification").inner_text()
-        assert "生成失败" in notif
+        # Candidate search has already populated this persistent notification
+        # node. Wait for its content to change instead of merely waiting for a
+        # non-empty node, which races on slower CI runners.
+        expect(page.locator(".global-notification")).to_contain_text(
+            "生成失败", timeout=5000
+        )
         # Candidate list and the search input are preserved for retry.
         expect(page.locator(".candidate-card")).to_have_count(1)
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
