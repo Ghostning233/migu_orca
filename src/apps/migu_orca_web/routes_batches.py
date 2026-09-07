@@ -5,17 +5,29 @@ from __future__ import annotations
 Migrated from ``views.py`` without behavior change. The parse view orchestrates
 the shared title-parsing / candidate-search / preference-application pipeline;
 accept/submit/retry/recover reuse the batch engine services with the storage
-seams built in ``services.py``.
+seams built in ``services.py``. US-216 adds the batch save-confirm partial-
+success endpoint on top of the single save-confirm service.
 """
 
 from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_web.blueprints import api_blueprint
+from apps.migu_orca_web.routes_requests import _run_draft_save_confirm
+from apps.migu_orca_web.save_confirm_service import (
+    BATCH_OUTCOME_FAILED,
+    ERROR_TYPE_SAVE_CONFIRM_FAILED,
+    BatchSaveConfirmItemResult,
+    SaveConfirmOutcome,
+    build_batch_process_one,
+    run_batch_save_confirm,
+    serialize_batch_save_confirm_result,
+)
 from apps.migu_orca_web.schemas import (
     BatchAcceptPayload,
     BatchParsePayload,
     BatchQueueQuery,
     BatchRecoverPayload,
     BatchRetryPayload,
+    BatchSaveConfirmPayload,
     BatchSubmitPayload,
 )
 from apps.migu_orca_web.serializers import (
@@ -275,6 +287,110 @@ class BatchParseView(PostView):
             "raw_input": batch.raw_input,
             "items": serialized_items,
         }
+
+
+def _batch_item_save_confirm_error(
+    item_id: str, exc: Stage1Error
+) -> BatchSaveConfirmItemResult:
+    """Map a single save-confirm Stage1Error to a sanitized per-item result.
+
+    Expected per-item failures (stale/expired/reserved/replayed draft,
+    idempotency conflict, unexpected error) become a stable ``failed`` result
+    whose ``error_type`` is the public draft/idempotency reason. The failed
+    branch never echoes the draft_id, the idempotency key, the original title,
+    a URL or an absolute path — the client retries a failed item with the same
+    draft_id/base_revision (the draft is released and kept on an expected
+    failure) or re-generates when the draft is gone.
+    """
+    # A saved-but-unconfirmed request is a terminal, durable per-item outcome:
+    # the Request exists (PENDING_CONFIRM) and the client accepts it through
+    # the existing Request accept contract (ACCEPT_SAVED_REQUEST). The per-item
+    # failure carries only the public request_id.
+    if exc.error_type == ERROR_TYPE_SAVE_CONFIRM_FAILED:
+        details = exc.details or {}
+        return BatchSaveConfirmItemResult(
+            item_id=item_id,
+            outcome=BATCH_OUTCOME_FAILED,
+            request_id=str(details.get("request_id") or ""),
+            error_type=ERROR_TYPE_SAVE_CONFIRM_FAILED,
+            error_message="订阅方案已保存但确认失败，请对已保存的方案重试确认",
+        )
+    return BatchSaveConfirmItemResult(
+        item_id=item_id,
+        outcome=BATCH_OUTCOME_FAILED,
+        error_type=exc.error_type,
+        error_message=_sanitize_save_confirm_error_message(exc),
+    )
+
+
+def _sanitize_save_confirm_error_message(exc: Stage1Error) -> str:
+    """Return a fixed Chinese message for a per-item save-confirm error.
+
+    Draft-state/idempotency errors map to the same stable copy the single
+    endpoint uses, so the frontend can branch without echoing draft content.
+    Unexpected/storage errors never surface the raw message (which could hold
+    a path or upstream detail).
+    """
+    return {
+        "draft_expired": "订阅草案已过期或不存在，请重新生成",
+        "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
+        "draft_replayed": "订阅草案已被保存，请勿重复保存",
+        "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
+        "draft_reserved": "订阅草案正在保存中，请稍后重试",
+        "idempotency_conflict": "相同的幂等键不能用于不同的保存确认操作",
+        "invalid_request_status": "只有待确认的订阅方案可以保存",
+    }.get(exc.error_type, "保存确认失败，请稍后重试")
+
+
+@class_route(api_blueprint, "/api/v1/batches/<batch_id>/save-confirm", methods=["POST"])
+class BatchSaveConfirmView(PostView):
+    """Save + confirm selected batch draft cards in one partial-success call.
+
+    US-216: every selected card runs the exact single save-confirm use case
+    (revision check, reservation, persistence, confirmation, idempotent
+    outcome) through ``_run_draft_save_confirm``. Successful items stay
+    confirmed and never roll back because a sibling failed; expected per-item
+    failures return a stable sanitized per-item ``failed`` result (HTTP 200
+    partial success), while request-level shape/storage errors still surface
+    through the normal failure envelope. A same-key idempotent retry replays
+    the same CONFIRMED outcome and never creates a second Request.
+    """
+
+    request_validator_model = BatchSaveConfirmPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, BatchSaveConfirmPayload)
+        payload = self.request_validator_model
+        storage_dir = _storage_dir(payload.storage_dir)
+
+        def process_one_item(
+            item_id: str,
+            draft_id: str,
+            base_revision: int,
+            idempotency_key: str,
+        ) -> SaveConfirmOutcome:
+            return _run_draft_save_confirm(
+                draft_id=draft_id,
+                base_revision=base_revision,
+                idempotency_key=idempotency_key,
+                storage_dir=storage_dir,
+            )
+
+        process_one = build_batch_process_one(
+            process_one_item,
+            map_error=_batch_item_save_confirm_error,
+        )
+        descriptors = [
+            (item.item_id, item.draft_id, item.base_revision, item.idempotency_key)
+            for item in payload.items
+        ]
+        result = run_batch_save_confirm(
+            batch_id=payload.batch_id,
+            items=descriptors,
+            item_ids=payload.item_ids,
+            process_one=process_one,
+        )
+        return serialize_batch_save_confirm_result(result)
 
 
 @class_route(api_blueprint, "/api/v1/batches/<batch_id>/accept", methods=["POST"])

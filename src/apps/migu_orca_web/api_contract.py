@@ -536,6 +536,40 @@ class BatchSubmitResultDTO(BatchAcceptResultDTO):
     """submit/retry/recover results equal the accept result shape."""
 
 
+class BatchSaveConfirmItemResultDTO(_StrictBase):
+    """One batch save-confirm per-item result (US-216).
+
+    Per-item failures are *partial-success* results (``outcome=CONFIRMED`` for
+    successful items, a stable sanitized failure otherwise) and never escalate
+    the whole request to an HTTP failure. ``request_id``/``status`` are only
+    present on the CONFIRMED branch; failed items carry the sanitized
+    ``error_type`` + a fixed Chinese ``error_message`` and stay retryable by
+    the client (the draft is not consumed on an expected failure).
+    """
+
+    item_id: str
+    outcome: str
+    request_id: str | None = None
+    status: str | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+
+class BatchSaveConfirmResultDTO(_StrictBase):
+    """Partial-success batch save-confirm result (US-216).
+
+    ``results`` preserves the input/``item_ids`` order and only carries public
+    per-item metadata; ``summary`` counts ``requested`` (processed items),
+    ``confirmed`` and ``failed``. The queue is intentionally not part of this
+    contract — Stage 28 hands off ACCEPTED Request identities; the tracking
+    phase builds the pre-submit view from them.
+    """
+
+    batch_id: str
+    results: list[BatchSaveConfirmItemResultDTO]
+    summary: dict[str, int]
+
+
 # ---------------------------------------------------------------------------
 # Connection tests family
 # ---------------------------------------------------------------------------

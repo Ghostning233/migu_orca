@@ -225,6 +225,10 @@ Stage 28 新增批量 36 部服务端边界（US-215）：
 
 - `POST /api/v1/batches/parse` 现在按规范化非空行计数并强制单批 1～36 部：0 部沿用 `validation_error`「请至少输入一个番剧名称」；超过 36 部在任何标题解析、MiKan 搜索或持久化 seam 之前返回 HTTP 400 `batch_limit_exceeded`，`error_data.details` 只含 `field=raw_input`、`limit=36` 与 `actual`，绝不回显原始批量输入行。`MAX_BATCH_ITEMS = 36` 定义在 `batch_engine/models`，与前端 UX PRD 的批量上限一致。
 
+Stage 28 新增批量 save-confirm 逐条部分成功端点（US-216）：
+
+- `POST /api/v1/batches/<batch_id>/save-confirm`：一次确认所选批量卡片，每条复用单番 save-confirm 用例（revision 校验、预留、持久化、确认与幂等结果提交）。请求每条只接受公开 `item_id`、服务端签发 `draft_id`/`base_revision` 与 opaque `idempotency_key`——绝不接受完整 Request；`item_ids` 可选，只处理选中项并保持输入顺序，省略时按 `items` 顺序处理全部。成功响应是 HTTP 200 逐条部分成功：`{batch_id, results: [{item_id, outcome, request_id?, status?, error_type?, error_message?}], summary: {requested, confirmed, failed}}`。可预期的单条业务失败（`draft_expired`/`draft_revision_conflict`/`draft_reserved`/`idempotency_conflict`/`save_confirm_failed` 等）返回逐条脱敏 `failed` 结果（固定中文 `error_message`，绝不回显 draft_id/标题/URL/路径），成功项不因失败项回滚；同一请求内重复 `item_id` 返回 `skipped`。同一 item + `idempotency_key` 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。请求级 shape/batch_id/storage profile 错误仍走普通失败 envelope。Stage 28 不创建 tracking record；待提交视图由后续 tracking 阶段从 handoff 建立。
+
 Stage 10 新增 Request 操作端点（确认/取消仅 PENDING_CONFIRM 状态可操作；修改同时接受 PENDING_CONFIRM 与 ACCEPTED）：
 
 - `POST /api/v1/requests/<request_id>/accept`：确认 Request，状态变更为 ACCEPTED。

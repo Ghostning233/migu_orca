@@ -6,6 +6,7 @@ Migrated from ``views.py`` without behavior change. URL, methods and endpoint
 names are identical; the golden contract tests protect this compatibility.
 """
 
+from pathlib import Path
 from typing import Any
 
 from ab_engine.controllers.ab_config import build_ab_config
@@ -34,6 +35,7 @@ from apps.migu_orca_web.save_confirm_service import (
     HANDOFF_STATUS_ACCEPTED,
     STATE_CONFIRMED,
     STATE_SAVED_CONFIRM_FAILED,
+    SaveConfirmOutcome,
     build_saved_confirm_failed_error,
     run_save_confirm,
 )
@@ -343,6 +345,54 @@ class RequestPreviewSaveView(PostView):
             raise
 
 
+def _run_draft_save_confirm(
+    *,
+    draft_id: str,
+    base_revision: int,
+    idempotency_key: str,
+    storage_dir: Path | None,
+) -> SaveConfirmOutcome:
+    """Run the durable single save-confirm use case for one preview draft.
+
+    Shared by the single ``RequestSaveConfirmView`` (US-214) and the batch
+    save-confirm route (US-216): reserves the draft against the revision,
+    persists the PENDING_CONFIRM snapshot, confirms it to ACCEPTED, and
+    records the terminal idempotency outcome. Expected failures raise the
+    ``Stage1Error`` a single-request caller surfaces through the envelope
+    (draft_* 409s, idempotency_conflict); a persisted-but-unconfirmed outcome
+    is returned (not raised) so the single view can build the
+    ``save_confirm_failed`` envelope while the batch view maps it to a stable
+    per-item failed result.
+    """
+
+    def reserve_draft() -> dict[str, Any]:
+        request, reason = draft_store.reserve_for_save(draft_id, base_revision)
+        if request is None or reason != REASON_OK:
+            current_revision = None
+            if reason == REASON_REVISION_CONFLICT:
+                latest_read, latest_reason = draft_store.get(draft_id)
+                if latest_read is not None and latest_reason == REASON_OK:
+                    current_revision = latest_read.revision
+            raise _draft_store_error(reason, current_revision=current_revision)
+        return request
+
+    def commit_draft() -> None:
+        draft_store.commit_save(draft_id)
+
+    def release_draft() -> None:
+        draft_store.release_save(draft_id)
+
+    return run_save_confirm(
+        config=load_storage_config(storage_dir),
+        idempotency_key=idempotency_key,
+        reserve_draft=reserve_draft,
+        persist_pending=_build_save_confirm_persist_pending(storage_dir),
+        confirm_saved=_build_save_confirm_confirm_saved(storage_dir),
+        commit_draft=commit_draft,
+        release_draft=release_draft,
+    )
+
+
 @class_route(api_blueprint, "/api/v1/requests/save-confirm", methods=["POST"])
 class RequestSaveConfirmView(PostView):
     """One save-and-confirm operation over a preview draft (US-214).
@@ -363,35 +413,11 @@ class RequestSaveConfirmView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestSaveConfirmPayload)
         payload = self.request_validator_model
-        storage_dir = _storage_dir(payload.storage_dir)
-
-        def reserve_draft() -> dict[str, Any]:
-            request, reason = draft_store.reserve_for_save(
-                payload.draft_id, payload.base_revision
-            )
-            if request is None or reason != REASON_OK:
-                current_revision = None
-                if reason == REASON_REVISION_CONFLICT:
-                    latest_read, latest_reason = draft_store.get(payload.draft_id)
-                    if latest_read is not None and latest_reason == REASON_OK:
-                        current_revision = latest_read.revision
-                raise _draft_store_error(reason, current_revision=current_revision)
-            return request
-
-        def commit_draft() -> None:
-            draft_store.commit_save(payload.draft_id)
-
-        def release_draft() -> None:
-            draft_store.release_save(payload.draft_id)
-
-        outcome = run_save_confirm(
-            config=load_storage_config(storage_dir),
+        outcome = _run_draft_save_confirm(
+            draft_id=payload.draft_id,
+            base_revision=payload.base_revision,
             idempotency_key=payload.idempotency_key,
-            reserve_draft=reserve_draft,
-            persist_pending=_build_save_confirm_persist_pending(storage_dir),
-            confirm_saved=_build_save_confirm_confirm_saved(storage_dir),
-            commit_draft=commit_draft,
-            release_draft=release_draft,
+            storage_dir=_storage_dir(payload.storage_dir),
         )
         if outcome.outcome == STATE_SAVED_CONFIRM_FAILED:
             # The Request is durable but acceptance failed. This is a terminal

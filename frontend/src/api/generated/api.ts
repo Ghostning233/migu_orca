@@ -269,6 +269,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/batches/{batch_id}/save-confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量保存并确认选中草案（逐条部分成功）
+         * @description US-216：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。Stage 28 不创建 tracking record（D28-09）。
+         */
+        post: operations["saveConfirmBatchItems"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/batches/{batch_id}/submit": {
         parameters: {
             query?: never;
@@ -5577,6 +5597,161 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "ab_timeout",
                      *       "error_message": "Auto Bangumi HTTP 请求超时",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    saveConfirmBatchItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 批量保存并确认选中草案（逐条部分成功） */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "items": [
+                 *         {
+                 *           "item_id": "示例",
+                 *           "base_revision": 1
+                 *         }
+                 *       ],
+                 *       "item_ids": []
+                 *     }
+                 */
+                "application/json": {
+                    /** @description 批量卡片保存确认描述符（公开 item_id + 服务端签发 draft_id/base_revision + opaque 幂等键）。 */
+                    items: {
+                        /** @description 批量卡片的公开 item_id（保持输入顺序）。 */
+                        item_id: string;
+                        /** @description 服务端签发的 opaque draft_id（一次性，成功后失效；request-scoped，不落盘）。 */
+                        draft_id: string;
+                        /** @description 客户端最后观察到的草案 revision（US-216，预留校验；不匹配返回逐条 failed draft_revision_conflict）。 */
+                        base_revision: number;
+                        /** @description 一次明确客户端操作生成的 opaque 幂等键（request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。 */
+                        idempotency_key: string;
+                    }[];
+                    /** @description 可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。 */
+                    item_ids?: string[];
+                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "batch_id": "示例",
+                     *         "results": [
+                     *           {
+                     *             "item_id": "示例",
+                     *             "outcome": "示例",
+                     *             "request_id": null,
+                     *             "status": null,
+                     *             "error_type": null,
+                     *             "error_message": null
+                     *           }
+                     *         ],
+                     *         "summary": {}
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * BatchSaveConfirmResultDTO
+                         * @description Partial-success batch save-confirm result (US-216).
+                         *
+                         *     ``results`` preserves the input/``item_ids`` order and only carries public
+                         *     per-item metadata; ``summary`` counts ``requested`` (processed items),
+                         *     ``confirmed`` and ``failed``. The queue is intentionally not part of this
+                         *     contract — Stage 28 hands off ACCEPTED Request identities; the tracking
+                         *     phase builds the pre-submit view from them.
+                         */
+                        result: {
+                            /** Batch Id */
+                            batch_id: string;
+                            /** Results */
+                            results: {
+                                /** Item Id */
+                                item_id: string;
+                                /** Outcome */
+                                outcome: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /**
+                                 * Error Message
+                                 * @default null
+                                 */
+                                error_message: string | null;
+                            }[];
+                            /** Summary */
+                            summary: {
+                                [key: string]: number;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败（缺失/非法 item 字段或 idempotency_key） / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败（缺失/非法 item 字段或 idempotency_key）",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

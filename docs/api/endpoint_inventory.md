@@ -70,6 +70,7 @@
 | GET | `/api/v1/corrections` | `migu_orca_web_api.CorrectionView` | CorrectionView |
 | POST | `/api/v1/corrections` | `migu_orca_web_api.CorrectionSaveView` | CorrectionSaveView |
 | POST | `/api/v1/batches/parse` | `migu_orca_web_api.BatchParseView` | BatchParseView |
+| POST | `/api/v1/batches/<batch_id>/save-confirm` | `migu_orca_web_api.BatchSaveConfirmView` | BatchSaveConfirmView |
 | POST | `/api/v1/batches/<batch_id>/accept` | `migu_orca_web_api.BatchAcceptView` | BatchAcceptView |
 | GET | `/api/v1/batches/<batch_id>/queue` | `migu_orca_web_api.BatchQueueView` | BatchQueueView |
 | POST | `/api/v1/batches/<batch_id>/submit` | `migu_orca_web_api.BatchSubmitView` | BatchSubmitView |
@@ -138,6 +139,7 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | 端点 | 请求字段 | 成功 `result` | 业务失败示例 |
 | --- | --- | --- | --- |
 | POST `/api/v1/batches/parse` | `raw_input`、`mikan_config?`、`storage_dir?` | `{"batch_id", "raw_input", "items": [item...]}` | 空输入 → `validation_error`「请至少输入一个番剧名称」；超过 36 个非空行 → `batch_limit_exceeded`（400，details 只含 `field=raw_input`/`limit=36`/`actual`，任何标题解析/MiKan/持久化 seam 前拒绝） |
+| POST `/api/v1/batches/<batch_id>/save-confirm` | `batch_id`（路径）、`items[]`（`item_id`/`draft_id`/`base_revision`/`idempotency_key`）、`item_ids?`、`storage_dir?` | `{"batch_id", "results": [{item_id, outcome, request_id?, status?, error_type?, error_message?}], "summary": {requested, confirmed, failed}}`（HTTP 200 逐条部分成功） | 每条复用单番 save-confirm 用例；可预期单条失败（`draft_expired`/`draft_revision_conflict`/`draft_reserved`/`idempotency_conflict`/`save_confirm_failed` 等）→ 逐条 `failed` 脱敏结果，不回滚成功项；重复 `item_id` → `skipped`；请求级错误仍走普通失败 envelope（缺 item 字段/idempotency_key → `data_validation_errors`；非法 storage_dir → `invalid_storage_dir`） |
 | POST `/api/v1/batches/<batch_id>/accept` | `batch_id`（路径）、`items[]`（`item_id`/`request_id?`/`title?`）、`item_ids?`、`storage_dir?` | `serialize_batch_accept_result`：`{batch_id, queue, items[], summary}` | 单卡不可接受 → 项内中文 reason |
 | GET `/api/v1/batches/<batch_id>/queue` | `batch_id`（路径）、`storage_dir?` | `{"batch_id", "queue": {...} | null}` | — |
 | POST `/api/v1/batches/<batch_id>/submit` | `batch_id`（路径）、`ab_config?`、`confirm`、`storage_dir?` | `serialize_batch_submit_result` | 缺 `ab_config` → `validation_error`「请提供 Auto Bangumi 配置」；缺 `confirm` → `validation_error`；queue 缺失 → `queue_not_found` |
@@ -225,6 +227,18 @@ CLI 显式 `--storage-dir` 行为不受影响）。
   `MAX_BATCH_ITEMS = 36`，`batch_engine/models`）。0 部沿用 `validation_error`；37 部及以上
   在任何标题解析、MiKan 搜索或持久化 seam 前返回 HTTP 400 `batch_limit_exceeded`，
   `error_data.details` 只含 `field=raw_input`、`limit=36`、`actual`——绝不回显原始批量输入。
+- US-216：新增 `POST /api/v1/batches/{batch_id}/save-confirm`（`BatchSaveConfirmView`，
+  operationId `saveConfirmBatchItems`），每条复用单番 save-confirm 用例
+  （`routes_requests._run_draft_save_confirm` → US-213 `run_save_confirm`）。请求每条只收
+  `item_id`/`draft_id`/`base_revision`/`idempotency_key`，支持 `item_ids` 选择并保持输入
+  顺序。成功 = HTTP 200 `{batch_id, results[], summary:{requested, confirmed, failed}}`
+  （逐条部分成功）；可预期单条失败返回逐条脱敏 `failed` 结果（`error_type` 为
+  `draft_expired`/`draft_revision_conflict`/`draft_reserved`/`idempotency_conflict`/
+  `save_confirm_failed` 等，`error_message` 固定中文，绝不回显 draft_id/标题/URL/路径），
+  成功项不因失败项回滚；同一 `item_id` 重复 → `skipped`。同一 item + `idempotency_key`
+  幂等重试重放同一 CONFIRMED 结果，不创建第二个 Request。请求级 shape/batch_id/storage
+  profile 错误仍走普通失败 envelope。Stage 28 不创建 tracking record；队列/入队由后续
+  tracking 阶段从 handoff 建立。
 
 ## 5. 前端依赖（Stage 27 迁移后）
 

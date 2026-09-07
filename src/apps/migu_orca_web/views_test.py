@@ -5957,3 +5957,278 @@ def test_preference_api_save_storage_failure_returns_chinese_envelope(
     assert str(tmp_path) not in str(payload)
     assert "https://example.test/api" not in str(payload)
     assert "token" not in str(payload).lower()
+
+
+# ---------------------------------------------------------------------------
+# Batch save-confirm (US-216)
+# ---------------------------------------------------------------------------
+
+
+def _issue_batch_draft_items(
+    client: FlaskClient,
+    titles: list[str],
+) -> list[dict[str, object]]:
+    """Issue one preview draft per title; return batch item descriptors."""
+    items: list[dict[str, object]] = []
+    for index, title in enumerate(titles):
+        issued = client.post(
+            "/api/v1/requests", json={"title": title, "save_request": False}
+        ).get_json()["result"]
+        items.append(
+            {
+                "item_id": f"item-{index}",
+                "draft_id": issued["draft_id"],
+                "base_revision": issued["draft_revision"],
+                "idempotency_key": f"view-batch-key-{index}",
+            }
+        )
+    return items
+
+
+def _batch_save_confirm(
+    client: FlaskClient,
+    items: list[dict[str, object]],
+    *,
+    batch_id: str = "batch-1",
+    item_ids: list[str] | None = None,
+    storage_dir: str = "storage",
+) -> Any:
+    payload: dict[str, object] = {
+        "batch_id": batch_id,
+        "items": items,
+        "storage_dir": storage_dir,
+    }
+    if item_ids is not None:
+        payload["item_ids"] = item_ids
+    return client.post(
+        f"/api/v1/batches/{batch_id}/save-confirm", json=payload
+    )
+
+
+def test_batch_save_confirm_api_returns_partial_success_result(
+    tmp_path: Path,
+) -> None:
+    """US-216: a selected batch confirms per item with a sanitized result."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert set(result) == {"batch_id", "results", "summary"}
+    assert result["batch_id"] == "batch-1"
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+    assert [row["item_id"] for row in result["results"]] == ["item-0", "item-1"]
+    for row in result["results"]:
+        assert row["outcome"] == "CONFIRMED"
+        assert row["status"] == "ACCEPTED"
+        assert row["request_id"]
+        assert row["error_type"] is None
+        assert row["error_message"] is None
+        assert load_request_snapshot(
+            load_storage_config(storage_dir), row["request_id"]
+        )["status"] == "ACCEPTED"
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 2
+
+
+def test_batch_save_confirm_api_stale_item_fails_without_rolling_back_sibling(
+    tmp_path: Path,
+) -> None:
+    """US-216: a stale revision item fails; the confirmed sibling stays."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+    stale = items[1]
+    bump = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": stale["draft_id"],
+            "base_revision": stale["base_revision"],
+            "patch": {"expected_folder_name": "并发修改"},
+        },
+    )
+    assert bump.status_code == 200
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 1, "failed": 1}
+    ok_row = result["results"][0]
+    assert ok_row["outcome"] == "CONFIRMED"
+    assert ok_row["status"] == "ACCEPTED"
+    bad_row = result["results"][1]
+    assert bad_row["outcome"] == "failed"
+    assert bad_row["error_type"] == "draft_revision_conflict"
+    assert bad_row["error_message"] == "草案已被更新，请基于最新版本重试"
+    assert bad_row["request_id"] is None
+    serialized = str(payload)
+    assert stale["draft_id"] not in serialized
+    assert str(tmp_path) not in serialized
+    # One Request file exists; the failed draft survives for a retry at r2.
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 1
+
+
+def test_batch_save_confirm_api_same_key_retry_replays_same_request(
+    tmp_path: Path,
+) -> None:
+    """US-216: a same-key retry of a confirmed item never duplicates it."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    (item,) = _issue_batch_draft_items(client, ["芙莉莲"])
+
+    first = _batch_save_confirm(client, [item])
+    assert first.status_code == 200
+    request_id = first.get_json()["result"]["results"][0]["request_id"]
+
+    second = _batch_save_confirm(client, [item])
+    payload = second.get_json()
+    assert second.status_code == 200
+    row = payload["result"]["results"][0]
+    assert row["outcome"] == "CONFIRMED"
+    assert row["request_id"] == request_id
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 1
+
+
+def test_batch_save_confirm_api_item_ids_selects_preserving_order(
+    tmp_path: Path,
+) -> None:
+    """US-216: item_ids selects a subset while preserving the input order."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战", "芙莉莲"])
+
+    response = _batch_save_confirm(
+        client, items, item_ids=["item-2", "item-0"]
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert [row["item_id"] for row in result["results"]] == ["item-0", "item-2"]
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 2
+
+
+def test_batch_save_confirm_api_confirm_failure_is_per_item_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-216: a saved-but-unconfirmed item is per-item failed, not HTTP 409."""
+    from apps.migu_orca_web import routes_requests
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+
+    def failing_confirm(storage_dir_arg: Any) -> Any:
+        def confirm_saved(_request_id: str) -> dict[str, Any]:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认订阅方案可以执行确认操作",
+                "confirm_request",
+                {"status": "PENDING_CONFIRM"},
+            )
+
+        return confirm_saved
+
+    monkeypatch.setattr(
+        routes_requests, "_build_save_confirm_confirm_saved", failing_confirm
+    )
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 0, "failed": 2}
+    for row in result["results"]:
+        assert row["outcome"] == "failed"
+        assert row["error_type"] == "save_confirm_failed"
+        assert row["error_message"] == "订阅方案已保存但确认失败，请对已保存的方案重试确认"
+        assert isinstance(row["request_id"], str)
+        assert load_request_snapshot(
+            load_storage_config(storage_dir), row["request_id"]
+        )["status"] == "PENDING_CONFIRM"
+    serialized = str(payload)
+    for item in items:
+        assert item["draft_id"] not in serialized
+    assert str(tmp_path) not in serialized
+
+
+def test_batch_save_confirm_api_persist_failure_fails_item_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-216: a persistence failure is a per-item failure, never a 500."""
+    from apps.migu_orca_entry.controllers.entry_controller import (
+        apply_request_save_action as original_save,
+    )
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+    failures = {"count": 0}
+
+    def flaky_save(result: dict[str, Any], save_request: bool, **kwargs: object) -> dict[str, Any]:
+        if failures["count"] == 0:
+            failures["count"] += 1
+            return {
+                "success": False,
+                "request": None,
+                "error": {
+                    "error_type": "storage_error",
+                    "error_message": f"模拟写盘失败 {tmp_path}",
+                    "failed_step": "save_request_snapshot",
+                    "details": {"reason": "disk full"},
+                },
+            }
+        return original_save(result, save_request, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.services.apply_request_save_action", flaky_save
+    )
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 1, "failed": 1}
+    rows = result["results"]
+    failed_row = rows[0]
+    assert failed_row["outcome"] == "failed"
+    assert failed_row["error_type"] == "storage_error"
+    assert failed_row["request_id"] is None
+    serialized = str(payload)
+    assert str(tmp_path) not in serialized
+    # The failed item's draft was released, so the same payload can be retried.
+    retry = _batch_save_confirm(
+        client, [{"item_id": "item-0", **items[0]}]
+    )
+    retry_payload = retry.get_json()
+    assert retry.status_code == 200
+    assert retry_payload["result"]["summary"] == {
+        "requested": 1,
+        "confirmed": 1,
+        "failed": 0,
+    }
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 2
+
+
+def test_batch_save_confirm_api_rejects_request_level_bad_storage(
+    tmp_path: Path,
+) -> None:
+    """US-216: a request-level storage error stays an ordinary failure envelope."""
+    client = _client()
+    (item,) = _issue_batch_draft_items(client, ["芙莉莲"])
+    response = _batch_save_confirm(
+        client, [item], storage_dir="/etc/private"
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_storage_dir"
+    serialized = str(payload)
+    assert item["draft_id"] not in serialized
+    assert "/etc/private" not in serialized

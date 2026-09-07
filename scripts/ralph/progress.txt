@@ -37,6 +37,17 @@
   服务端批量上限常量 `MAX_BATCH_ITEMS = 36` 在 `batch_engine/models`。新增 400 归类 error_type
   （如 `batch_limit_exceeded`）要加 `_error_http_status` 400 集合 + `_ENDPOINTS` 400 errors +
   重生成 openapi.json/TS client。
+- 批量 save-confirm（US-216）逐条部分成功模式：纯协调器 `run_batch_save_confirm(items,
+  item_ids, process_one)` 只做「选择 → 去重 → 逐条调用 → summary{requested,confirmed,failed}」；
+  route 注入 `process_one`（单番 `_run_draft_save_confirm` + `build_batch_process_one` 把
+  SaveConfirmOutcome/Stage1Error 映射成逐条结果）。确定性规则：同请求重复 item_id → `skipped`；
+  同请求两个 item 复用同一 idempotency_key → 逐条 `idempotency_conflict`（必须先于 process_one
+  检查，否则第二个会重放第一个的终态记录误报 CONFIRMED）。单番 save-confirm 编排统一放模块级
+  `_run_draft_save_confirm`（routes_requests），单番/批量共用。可预期失败映射用 HTTP error_type
+  命名空间（draft_expired/draft_revision_conflict/...）+ 固定中文，不是 DraftStore reason。
+- 静态 fixture 标题有限（芙莉莲/咒术回战等）；批量 1/12/36 测试对同一支持标题重复签发 N 个 draft，
+  而非拼 N 个不存在的标题。嵌套 pydantic 校验 field 是点号路径（如 `items.0.idempotency_key`）。
+- `item_ids` 选择保持输入原顺序（filter 后），不是 item_ids 数组顺序——与 batch accept 一致。
 
 ## [2026-09-07] - US-210
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -394,3 +405,61 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - US-216 会新增 `POST /api/v1/batches/{batch_id}/save-confirm`；US-215 只在 parse 入口
       加 1..36 边界，不限制后续 accept/save-confirm 的条数。
 ---
+
+## [2026-09-08] - US-216
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `POST /api/v1/batches/{batch_id}/save-confirm`（`routes_batches.BatchSaveConfirmView`，
+    operationId `saveConfirmBatchItems`）：请求每条只收 `item_id`/`draft_id`/`base_revision`/
+    `idempotency_key`（`BatchItemSaveConfirmPayload`/`BatchSaveConfirmPayload`），`item_ids` 可选
+    选择并保持输入顺序。每条复用单番 save-confirm 用例：`routes_requests` 抽出
+    `_run_draft_save_confirm`（DraftStore reserve/commit/release + `_build_save_confirm_*` seam
+    注入 US-213 `run_save_confirm`），单番 view 与批量 route 共用，不重复编排。
+  - `save_confirm_service` 新增批量部分成功协调器：`run_batch_save_confirm`（重复 item_id →
+    `skipped`；同请求两个不同 item 复用同一 `idempotency_key` → 逐条 `idempotency_conflict`
+    绝不误报第二个 CONFIRMED/绝不重放第一个终态记录；unexpected → 脱敏 failed）、
+    `build_batch_process_one`（把 Stage1Error/SAVED_CONFIRM_FAILED 终态映射成逐条结果）、
+    `serialize_batch_save_confirm_result`、`BatchSaveConfirmItemResult/Result` 与
+    `BATCH_OUTCOME_*` 常量。成功 = HTTP 200 `{batch_id, results[], summary:{requested, confirmed,
+    failed}}`；可预期单条失败（draft_expired/draft_revision_conflict/draft_reserved/
+    idempotency_conflict/save_confirm_failed）返回逐条脱敏 `failed`（固定中文，不回显
+    draft_id/标题/URL/路径），成功项不因失败项回滚；同一 item + 同 `idempotency_key` 幂等重试
+    重放同一 CONFIRMED 不创建第二个 Request。请求级 shape/batch_id/storage profile 错误仍走
+    普通失败 envelope。
+  - DTO：`BatchSaveConfirmItemResultDTO`（strict）+ `BatchSaveConfirmResultDTO`（strict）
+    `{batch_id, results[], summary}`。
+  - 契约同步：`openapi_gen._ENDPOINTS` 新条目 + 重生成 `docs/api/openapi.json` +
+    `frontend/src/api/generated/api.ts` + api.test.ts 期望集（26 个 operationId/path 含
+    save-confirm）+ endpoint inventory §2 总表/§3.4/§4 US-216 + README §Web API + AGENTS.md。
+- Files changed
+  - 后端：`schemas.py`、`api_contract.py`、`save_confirm_service.py`、`routes_requests.py`、
+    `routes_batches.py`、`openapi_gen.py`
+  - 测试：`tests/api_contract/test_golden_contracts.py`（10 例批量 save-confirm）、
+    `test_dto_contracts.py`（2 例）、`test_save_confirm_service.py`（4 例 coordinator）、
+    `src/apps/migu_orca_web/views_test.py`（7 例 view 层）
+  - 文档/生成：`docs/api/openapi.json`、`docs/api/endpoint_inventory.md`、
+    `frontend/src/api/generated/api.ts`、`frontend/src/api/generated/api.test.ts`、README.md、
+    `src/apps/migu_orca_web/AGENTS.md`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 批量 save-confirm 逐条部分成功的编排模式 = 纯协调器 `run_batch_save_confirm(items,
+      item_ids, process_one)` 只负责「选择 → 去重 → 逐条调用 → 汇总」，Web route 注入
+      `process_one`（真实 DraftStore/entry-controller 流）；`build_batch_process_one` 把单番
+      `SaveConfirmOutcome`（含 SAVED_CONFIRM_FAILED 终态）和 `Stage1Error` 映射为逐条结果。
+    - 单番 save-confirm 的整段编排从 view 方法内抽到模块级 `_run_draft_save_confirm` 后，
+      单番 view 与批量 route 共用同一 DraftStore 闭包流；monkeypatch seam 位置不变
+      （`routes_requests._build_save_confirm_confirm_saved`、`services.apply_request_save_action`）。
+    - 批内确定性规则：同请求内重复 `item_id` → `skipped`（不二次触碰 draft）；同请求内两个不同
+      item 复用同一 `idempotency_key` → 逐条 `idempotency_conflict`（必须先于 `process_one`
+      检查，否则第二个会重放第一个的终态记录并误报 CONFIRMED/同一 request_id）。
+    - 每条可预期失败映射为「稳定 error_type + 固定中文 error_message」：error_type 用
+      HTTP error_type 命名空间（draft_expired/draft_revision_conflict/...），不是 DraftStore
+      reason 命名空间（expired/revision_conflict/...）。
+  - Gotchas encountered
+    - 静态 fixture 只支持「芙莉莲」「咒术回战」等少数标题；批量 1/12/36 测试要「同一标题重复
+      签发 N 个 draft」，而不是拼 N 个不存在的标题。
+    - 嵌套 pydantic 校验错误的 field 是点号路径（`items.0.idempotency_key`）。
+    - `item_ids` 选择保持**输入**顺序（filter 后的原顺序），不是 item_ids 数组顺序——与 batch
+      accept 的 `_select_items` 语义一致。
+  - Useful context
+    - US-217 将新增 `GET /api/v1/requests/{request_id}/safe-info`；US-218 归档 prd/progress。

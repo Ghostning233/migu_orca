@@ -23,12 +23,21 @@ import pytest
 
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.save_confirm_service import (
+    BATCH_OUTCOME_CONFIRMED,
+    BATCH_OUTCOME_FAILED,
+    BATCH_OUTCOME_SKIPPED,
     STATE_CONFIRMED,
     STATE_IN_PROGRESS,
     STATE_SAVED_CONFIRM_FAILED,
+    BatchSaveConfirmItemResult,
+    ProcessOne,
+    SaveConfirmOutcome,
+    build_batch_process_one,
     compute_request_fingerprint,
     resolve_in_progress_retry,
+    run_batch_save_confirm,
     run_save_confirm,
+    serialize_batch_save_confirm_result,
 )
 from request_engine.controllers.request_controller import accept_request
 from shared.errors import Stage1Error
@@ -717,3 +726,216 @@ def test_resolve_in_progress_retry_checks_on_disk_request(tmp_path: Path) -> Non
         config=config, record={**base_record, "request_id": "never-saved"}
     )
     assert missing == {"action": "retry_save", "request_id": "never-saved"}
+
+
+# ---------------------------------------------------------------------------
+# Batch save-confirm coordinator (US-216)
+# ---------------------------------------------------------------------------
+
+
+def _fake_batch_process_one(
+    outcomes: dict[str, SaveConfirmOutcome],
+    error: str | None = None,
+) -> ProcessOne:
+    """Return a per-item runner backed by canned outcomes for unit tests."""
+
+    def process_one_item(
+        item_id: str,
+        draft_id: str,
+        base_revision: int,
+        idempotency_key: str,
+    ) -> SaveConfirmOutcome:
+        if error is not None:
+            raise Stage1Error(error, "失败", "batch_save_confirm")
+        return outcomes[item_id]
+
+    return build_batch_process_one(process_one_item, map_error=lambda item_id, exc: BatchSaveConfirmItemResult(
+        item_id=item_id,
+        outcome=BATCH_OUTCOME_FAILED,
+        error_type=exc.error_type,
+        error_message=exc.message,
+    ))
+
+
+def test_batch_save_confirm_coordinator_preserves_order_and_counts() -> None:
+    """US-216: results keep input order and summary counts requested/confirmed."""
+    confirmed = SaveConfirmOutcome(
+        outcome=STATE_CONFIRMED,
+        request_id="request-1",
+        request=accept_request(_draft_request("芙莉莲")),
+        summary=None,
+    )
+    process_one = _fake_batch_process_one({"item-1": confirmed})
+
+    result = run_batch_save_confirm(
+        batch_id="batch-1",
+        items=[
+            ("item-1", "draft-1", 1, "key-1"),
+            ("item-2", "draft-2", 1, "key-2"),
+        ],
+        item_ids=None,
+        process_one=process_one,
+    )
+    # item-2 is not in outcomes → unexpected error folded to a per-item failure.
+    assert [r.item_id for r in result.results] == ["item-1", "item-2"]
+    assert result.results[0].outcome == BATCH_OUTCOME_CONFIRMED
+    assert result.results[0].request_id == "request-1"
+    assert result.results[1].outcome == BATCH_OUTCOME_FAILED
+    assert result.summary() == {"requested": 2, "confirmed": 1, "failed": 1}
+    serialized = serialize_batch_save_confirm_result(result)
+    assert serialized["batch_id"] == "batch-1"
+    assert serialized["summary"] == {"requested": 2, "confirmed": 1, "failed": 1}
+
+
+def test_batch_save_confirm_coordinator_item_ids_selects_subset() -> None:
+    """US-216: item_ids filters items while preserving the input order."""
+    confirmed = SaveConfirmOutcome(
+        outcome=STATE_CONFIRMED,
+        request_id="request-1",
+        request=accept_request(_draft_request("芙莉莲")),
+        summary=None,
+    )
+    process_one = _fake_batch_process_one(
+        {"item-a": confirmed, "item-b": confirmed, "item-c": confirmed}
+    )
+    result = run_batch_save_confirm(
+        batch_id="batch-1",
+        items=[
+            ("item-a", "d-a", 1, "k-a"),
+            ("item-b", "d-b", 1, "k-b"),
+            ("item-c", "d-c", 1, "k-c"),
+        ],
+        item_ids=["item-c", "item-a"],
+        process_one=process_one,
+    )
+    assert [r.item_id for r in result.results] == ["item-a", "item-c"]
+    assert result.summary()["requested"] == 2
+
+
+def test_batch_save_confirm_coordinator_duplicate_item_is_skipped() -> None:
+    """US-216: a duplicate item_id is skipped and never re-touched."""
+    confirmed = SaveConfirmOutcome(
+        outcome=STATE_CONFIRMED,
+        request_id="request-1",
+        request=accept_request(_draft_request("芙莉莲")),
+        summary=None,
+    )
+    process_one = _fake_batch_process_one({"item-1": confirmed})
+    result = run_batch_save_confirm(
+        batch_id="batch-1",
+        items=[
+            ("item-1", "draft-1", 1, "key-1"),
+            ("item-1", "draft-1", 1, "key-2"),
+        ],
+        item_ids=None,
+        process_one=process_one,
+    )
+    assert result.results[0].outcome == BATCH_OUTCOME_CONFIRMED
+    assert result.results[1].outcome == BATCH_OUTCOME_SKIPPED
+    assert result.results[1].error_type == "duplicate_item"
+    # process_one was only ever invoked for the first (non-skipped) occurrence;
+    # the second key never reached the single save-confirm use case.
+    assert result.summary() == {"requested": 2, "confirmed": 1, "failed": 0}
+
+
+def test_batch_save_confirm_coordinator_rejects_shared_key_for_two_items() -> None:
+    """US-216: one key may drive only one item per request.
+
+    Reusing the same key for two different drafts would replay the first item's
+    terminal record and falsely claim the second item confirmed — the second
+    occurrence is a deterministic per-item idempotency_conflict instead.
+    """
+    confirmed = SaveConfirmOutcome(
+        outcome=STATE_CONFIRMED,
+        request_id="request-1",
+        request=accept_request(_draft_request("芙莉莲")),
+        summary=None,
+    )
+
+    def process_one_item(
+        item_id: str,
+        draft_id: str,
+        base_revision: int,
+        idempotency_key: str,
+    ) -> SaveConfirmOutcome:
+        return confirmed
+
+    process_one = build_batch_process_one(
+        process_one_item,
+        map_error=lambda item_id, exc: BatchSaveConfirmItemResult(
+            item_id=item_id,
+            outcome=BATCH_OUTCOME_FAILED,
+            error_type=exc.error_type,
+            error_message=exc.message,
+        ),
+    )
+    result = run_batch_save_confirm(
+        batch_id="batch-1",
+        items=[
+            ("item-1", "draft-1", 1, "shared-key"),
+            ("item-2", "draft-2", 1, "shared-key"),
+        ],
+        item_ids=None,
+        process_one=process_one,
+    )
+    assert result.results[0].outcome == BATCH_OUTCOME_CONFIRMED
+    second = result.results[1]
+    assert second.outcome == BATCH_OUTCOME_FAILED
+    assert second.error_type == "idempotency_conflict"
+    assert second.error_message == "同一请求中幂等键不能重复用于不同条目"
+    assert second.request_id is None
+    # process_one ran exactly once (only for item-1).
+    assert result.summary() == {"requested": 2, "confirmed": 1, "failed": 1}
+
+
+def test_batch_save_confirm_coordinator_maps_expected_error_to_failed() -> None:
+    """US-216: a Stage1Error from one item is folded into a per-item failure."""
+    confirmed = SaveConfirmOutcome(
+        outcome=STATE_CONFIRMED,
+        request_id="request-ok",
+        request=accept_request(_draft_request("芙莉莲")),
+        summary=None,
+    )
+
+    def process_one_item(
+        item_id: str,
+        draft_id: str,
+        base_revision: int,
+        idempotency_key: str,
+    ) -> SaveConfirmOutcome:
+        if item_id == "item-bad":
+            raise Stage1Error(
+                "idempotency_conflict",
+                "相同的幂等键不能用于不同的保存确认操作",
+                "save_confirm_idempotency",
+                {"field": "idempotency_key", "reason": "payload_mismatch"},
+            )
+        return confirmed
+
+    process_one = build_batch_process_one(
+        process_one_item,
+        map_error=lambda item_id, exc: BatchSaveConfirmItemResult(
+            item_id=item_id,
+            outcome=BATCH_OUTCOME_FAILED,
+            error_type=exc.error_type,
+            error_message=exc.message,
+        ),
+    )
+    result = run_batch_save_confirm(
+        batch_id="batch-1",
+        items=[
+            ("item-ok", "d-ok", 1, "k-ok"),
+            ("item-bad", "d-bad", 1, "k-bad"),
+        ],
+        item_ids=None,
+        process_one=process_one,
+    )
+    assert result.results[0].outcome == BATCH_OUTCOME_CONFIRMED
+    bad = result.results[1]
+    assert bad.outcome == BATCH_OUTCOME_FAILED
+    assert bad.error_type == "idempotency_conflict"
+    assert bad.request_id is None
+    assert result.summary() == {"requested": 2, "confirmed": 1, "failed": 1}
+    # The error details (fingerprint/key) never enter the serialized result.
+    serialized = str(serialize_batch_save_confirm_result(result))
+    assert "payload_mismatch" not in serialized

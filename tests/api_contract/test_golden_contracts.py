@@ -1346,6 +1346,421 @@ def test_golden_batch_retry_unknown_item(client: FlaskClient) -> None:
     assert "secret-token" not in str(payload)
 
 
+# Batch save-confirm (US-216)
+# ---------------------------------------------------------------------------
+
+
+def _issue_batch_drafts(
+    client: FlaskClient,
+    titles: list[str],
+    prefix: str = "batch-key",
+) -> list[dict[str, object]]:
+    """Issue one preview draft per title; return batch item descriptors."""
+    items: list[dict[str, object]] = []
+    for index, title in enumerate(titles):
+        result = client.post(
+            "/api/v1/requests", json={"title": title, "save_request": False}
+        ).get_json()["result"]
+        items.append(
+            {
+                "item_id": f"item-{index}",
+                "draft_id": result["draft_id"],
+                "base_revision": result["draft_revision"],
+                "idempotency_key": f"{prefix}-{index}",
+            }
+        )
+    return items
+
+
+def test_golden_batch_save_confirm_success_returns_partial_success_result(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: selected draft cards confirm independently with per-item counts.
+
+    The frozen PRD §6.4 result shape is ``{batch_id, results[], summary:
+    {requested, confirmed, failed}}``. Every successful item is ACCEPTED on
+    disk; the success body never leaks the consumed draft ids.
+    """
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战"])
+    draft_ids = {item["draft_id"] for item in items}
+
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": items, "storage_dir": "storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert set(result) == {"batch_id", "results", "summary"}
+    assert result["batch_id"] == "batch-1"
+    assert [row["item_id"] for row in result["results"]] == ["item-0", "item-1"]
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+    for row in result["results"]:
+        assert row["outcome"] == "CONFIRMED"
+        assert row["status"] == "ACCEPTED"
+        assert isinstance(row["request_id"], str)
+        assert row["error_type"] is None
+        assert row["error_message"] is None
+        assert load_request_snapshot(
+            load_storage_config(tmp_path / "storage"), row["request_id"]
+        )["status"] == "ACCEPTED"
+    # Exactly two Requests exist and no draft_id leaks into the body.
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 2
+    serialized = str(payload)
+    for draft_id in draft_ids:
+        assert draft_id not in serialized
+
+
+def test_golden_batch_save_confirm_item_ids_preserve_input_order(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: item_ids selects a subset while preserving the request order."""
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战", "芙莉莲"])
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": items,
+            "item_ids": ["item-2", "item-0"],
+            "storage_dir": "storage",
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    # item_ids selects a subset; results keep the *input* order (item-0 before
+    # item-2), matching the batch accept selection semantics.
+    assert [row["item_id"] for row in result["results"]] == ["item-0", "item-2"]
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 2
+
+
+def test_golden_batch_save_confirm_partial_success_keeps_failed_item_sanitized(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: one stale item fails without rolling back the successful item."""
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战"])
+    # Bump the second draft's revision so base_revision=1 is stale.
+    stale = items[1]
+    modify = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": stale["draft_id"],
+            "base_revision": stale["base_revision"],
+            "patch": {"expected_folder_name": "并发修改"},
+        },
+    )
+    assert modify.status_code == 200
+
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": items, "storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 1, "failed": 1}
+    confirmed = result["results"][0]
+    assert confirmed["item_id"] == "item-0"
+    assert confirmed["outcome"] == "CONFIRMED"
+    assert confirmed["status"] == "ACCEPTED"
+    failed = result["results"][1]
+    assert failed["outcome"] == "failed"
+    assert failed["request_id"] is None
+    assert failed["status"] is None
+    assert failed["error_type"] == "draft_revision_conflict"
+    assert failed["error_message"] == "草案已被更新，请基于最新版本重试"
+    serialized = str(payload)
+    assert stale["draft_id"] not in serialized
+    assert "咒术回战" not in serialized
+    # Only the successful item produced a Request.
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+    # The failed draft stayed alive for a retry with the new revision.
+    retry = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [
+                {
+                    "item_id": "item-1",
+                    "draft_id": stale["draft_id"],
+                    "base_revision": 2,
+                    "idempotency_key": "batch-key-1",
+                }
+            ],
+            "storage_dir": "storage",
+        },
+    )
+    retry_payload = retry.get_json()
+    assert retry.status_code == 200
+    assert retry_payload["result"]["summary"] == {
+        "requested": 1,
+        "confirmed": 1,
+        "failed": 0,
+    }
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 2
+
+
+def test_golden_batch_save_confirm_duplicate_item_is_skipped(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: a duplicate item_id inside one request is deterministic skipped.
+
+    The first occurrence confirms (consuming its draft); the second occurrence
+    of the same ``item_id`` is reported ``skipped`` and never re-touches the
+    draft — so no second Request is ever created.
+    """
+    (item,) = _issue_batch_drafts(client, ["咒术回战"])
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [item, {**item, "idempotency_key": "dup-key"}],
+            "storage_dir": "storage",
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    rows = payload["result"]["results"]
+    assert rows[0]["item_id"] == "item-0"
+    assert rows[0]["outcome"] == "CONFIRMED"
+    assert rows[1]["outcome"] == "skipped"
+    assert rows[1]["error_type"] == "duplicate_item"
+    assert rows[1]["request_id"] is None
+    assert payload["result"]["summary"] == {
+        "requested": 2,
+        "confirmed": 1,
+        "failed": 0,
+    }
+    # Only one Request file exists (the skipped duplicate never saved).
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+
+
+def test_golden_batch_save_confirm_shared_key_for_two_drafts_conflicts(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: one idempotency_key per request may not drive two drafts.
+
+    A second item reusing the confirmed item's key must be a deterministic
+    per-item ``idempotency_conflict`` (never a silent replay of the first
+    item's terminal record) and must not create a second Request.
+    """
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战"])
+    # Both items share the same key inside one request.
+    shared = [{**items[0], "idempotency_key": "shared-key"},
+             {**items[1], "idempotency_key": "shared-key"}]
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": shared, "storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    rows = payload["result"]["results"]
+    assert rows[0]["outcome"] == "CONFIRMED"
+    assert rows[0]["request_id"]
+    second = rows[1]
+    assert second["outcome"] == "failed"
+    assert second["error_type"] == "idempotency_conflict"
+    assert second["error_message"] == "同一请求中幂等键不能重复用于不同条目"
+    assert second["request_id"] is None
+    assert payload["result"]["summary"] == {
+        "requested": 2,
+        "confirmed": 1,
+        "failed": 1,
+    }
+    # Only the first item produced a Request.
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+
+
+def test_golden_batch_save_confirm_same_key_retry_replays_same_request(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: a same-key idempotent retry never creates a second Request."""
+    (item,) = _issue_batch_drafts(client, ["芙莉莲"])
+    first = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": [item], "storage_dir": "storage"},
+    )
+    assert first.status_code == 200
+    first_request_id = first.get_json()["result"]["results"][0]["request_id"]
+
+    second = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": [item], "storage_dir": "storage"},
+    )
+    assert second.status_code == 200
+    second_payload = second.get_json()
+    assert second_payload["result"]["results"][0]["outcome"] == "CONFIRMED"
+    assert (
+        second_payload["result"]["results"][0]["request_id"] == first_request_id
+    )
+    assert second_payload["result"]["summary"] == {
+        "requested": 1,
+        "confirmed": 1,
+        "failed": 0,
+    }
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+
+
+def test_golden_batch_save_confirm_confirm_failure_is_per_item_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    client: FlaskClient,
+    tmp_path: Path,
+) -> None:
+    """US-216: a saved-but-unconfirmed item fails without failing the batch.
+
+    The per-item failure carries only the public request_id + the
+    ACCEPT_SAVED_REQUEST retry copy; the consumed draft_id and title never
+    leak. The successful sibling is not rolled back.
+    """
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战"])
+
+    def failing_confirm(storage_dir: Any) -> Any:
+        def confirm_saved(_request_id: str) -> dict[str, Any]:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认订阅方案可以执行确认操作",
+                "confirm_request",
+                {"status": "PENDING_CONFIRM"},
+            )
+
+        return confirm_saved
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved",
+        failing_confirm,
+    )
+
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": items, "storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 0, "failed": 2}
+    for row in result["results"]:
+        assert row["outcome"] == "failed"
+        assert row["error_type"] == "save_confirm_failed"
+        assert row["error_message"] == "订阅方案已保存但确认失败，请对已保存的方案重试确认"
+        assert isinstance(row["request_id"], str)
+    serialized = str(payload)
+    for item in items:
+        assert item["draft_id"] not in serialized
+        assert str(tmp_path) not in serialized
+    # Both Requests are durable as PENDING_CONFIRM (accept never ran).
+    for row in result["results"]:
+        assert load_request_snapshot(
+            load_storage_config(tmp_path / "storage"), row["request_id"]
+        )["status"] == "PENDING_CONFIRM"
+
+
+def test_golden_batch_save_confirm_unknown_draft_is_per_item_failed(
+    client: FlaskClient,
+) -> None:
+    """US-216: an unknown draft id is a per-item failed result, never HTTP."""
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [
+                {
+                    "item_id": "item-forged",
+                    "draft_id": "forged-batch-draft",
+                    "base_revision": 1,
+                    "idempotency_key": "key-forged-batch",
+                }
+            ],
+            "storage_dir": "storage",
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    row = payload["result"]["results"][0]
+    assert row["outcome"] == "failed"
+    assert row["error_type"] == "draft_expired"
+    assert row["error_message"] == "订阅草案已过期或不存在，请重新生成"
+    serialized = str(payload)
+    assert "forged-batch-draft" not in serialized
+
+
+def test_golden_batch_save_confirm_request_level_validation_failure(
+    client: FlaskClient,
+) -> None:
+    """US-216: missing/invalid item fields are a normal 400 failure envelope."""
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [
+                {
+                    "item_id": "item-1",
+                    "draft_id": "some-draft",
+                    "base_revision": 1,
+                }
+            ],
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    # The nested item field path is dotted (``items.0.idempotency_key``).
+    assert any(
+        e["field"] == "items.0.idempotency_key"
+        for e in payload["error_data"]["errors"]
+    )
+
+    # A path-like idempotency_key is rejected without echoing the raw value.
+    unsafe = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [
+                {
+                    "item_id": "item-1",
+                    "draft_id": "some-draft",
+                    "base_revision": 1,
+                    "idempotency_key": "../escape/key",
+                }
+            ],
+        },
+    )
+    unsafe_body = unsafe.get_json()
+    assert unsafe.status_code == 400
+    assert unsafe_body["error_type"] == "data_validation_errors"
+    assert "../escape/key" not in str(unsafe_body)
+
+
+def test_golden_batch_save_confirm_supports_1_12_36_items(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: 1/12/36 selected drafts confirm with per-item results.
+
+    Every card needs its own server-issued draft; the same supported fixture
+    title is re-issued per item so the batch has ``count`` distinct drafts.
+    """
+    for count in (1, 12, 36):
+        titles = ["芙莉莲"] * count
+        items = _issue_batch_drafts(client, titles)
+        response = client.post(
+            "/api/v1/batches/batch-1/save-confirm",
+            json={"batch_id": "batch-1", "items": items, "storage_dir": "storage"},
+        )
+        payload = response.get_json()
+        assert response.status_code == 200
+        result = payload["result"]
+        assert result["summary"] == {
+            "requested": count,
+            "confirmed": count,
+            "failed": 0,
+        }
+        assert len(result["results"]) == count
+        assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == count
+
+
 # ---------------------------------------------------------------------------
 # Preferences / Corrections family
 # ---------------------------------------------------------------------------

@@ -34,6 +34,7 @@ const EXPECTED_OPERATION_IDS = [
   'listCorrections',
   'saveCorrection',
   'parseBatchTitles',
+  'saveConfirmBatchItems',
   'acceptBatchItems',
   'getBatchQueue',
   'submitBatchQueue',
@@ -66,6 +67,7 @@ describe('generated API client (US-198)', () => {
       | 'listCorrections'
       | 'saveCorrection'
       | 'parseBatchTitles'
+      | 'saveConfirmBatchItems'
       | 'acceptBatchItems'
       | 'getBatchQueue'
       | 'submitBatchQueue'
@@ -85,6 +87,7 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/batches/{batch_id}/queue'
       | '/api/v1/batches/{batch_id}/recover'
       | '/api/v1/batches/{batch_id}/retry'
+      | '/api/v1/batches/{batch_id}/save-confirm'
       | '/api/v1/batches/{batch_id}/submit'
       | '/api/v1/corrections'
       | '/api/v1/mikan/candidates'
@@ -131,6 +134,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(25)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(26)
   })
 })

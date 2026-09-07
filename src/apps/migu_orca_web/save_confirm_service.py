@@ -420,6 +420,240 @@ def build_saved_confirm_failed_error(
     )
 
 
+#: Public per-item outcome for a confirmed batch save-confirm item (US-216).
+BATCH_OUTCOME_CONFIRMED = "CONFIRMED"
+#: Public per-item outcome for an expected batch save-confirm failure (US-216).
+#: A confirmed request is never reported as failed — the durable idempotency
+#: record replays it as ``BATCH_OUTCOME_CONFIRMED`` on a same-key retry.
+BATCH_OUTCOME_FAILED = "failed"
+#: Public per-item outcome when the same ``item_id`` appears twice in one
+#: request (deterministic; never re-touches a draft a sibling already owns).
+BATCH_OUTCOME_SKIPPED = "skipped"
+
+
+@dataclass(frozen=True)
+class BatchSaveConfirmItemResult:
+    """One batch item's public save-confirm outcome (US-216).
+
+    ``outcome`` is ``CONFIRMED`` when the item's Request is durable and
+    accepted (a same-key idempotent retry replays the same CONFIRMED outcome),
+    ``failed`` for every expected per-item failure, and ``skipped`` for a
+    duplicate ``item_id`` inside one request. ``request_id``/``status`` are only
+    set on the CONFIRMED branch; ``error_type``/``error_message`` only on the
+    failed branch.
+    """
+
+    item_id: str
+    outcome: str
+    request_id: str | None = None
+    status: str | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True)
+class BatchSaveConfirmResult:
+    """The whole batch save-confirm outcome (US-216).
+
+    ``results`` preserves the request input order (filtered by ``item_ids``
+    when provided); ``requested`` is the number of processed items,
+    ``confirmed`` counts the CONFIRMED items (same-key idempotent retries
+    replay the same CONFIRMED outcome), and ``failed`` counts the failed items.
+    """
+
+    batch_id: str
+    results: list[BatchSaveConfirmItemResult]
+
+    def summary(self) -> dict[str, int]:
+        confirmed = sum(
+            item.outcome == BATCH_OUTCOME_CONFIRMED for item in self.results
+        )
+        failed = sum(item.outcome == BATCH_OUTCOME_FAILED for item in self.results)
+        return {
+            "requested": len(self.results),
+            "confirmed": confirmed,
+            "failed": failed,
+        }
+
+
+#: Per-item runner signature for ``run_batch_save_confirm`` (US-216).
+#: The Web route injects a closure that resolves one ``(item_id, draft_id,
+#: base_revision, idempotency_key)`` through the single save-confirm use case
+#: (real DraftStore + entry-controller seams, see the RequestSaveConfirmView
+#: flow) and returns a ``BatchSaveConfirmItemResult`` — already mapping every
+#: expected failure (draft/idempotency/storage) into a sanitized per-item
+#: result so one item's failure never escalates the whole batch.
+ProcessOne = Callable[[str, str, int, str], BatchSaveConfirmItemResult]
+
+
+def run_batch_save_confirm(
+    *,
+    batch_id: str,
+    items: list[tuple[str, str, int, str]],
+    item_ids: list[str] | None,
+    process_one: ProcessOne,
+) -> BatchSaveConfirmResult:
+    """Run one save-confirm attempt per selected batch draft card (US-216).
+
+    ``items`` is the ordered ``(item_id, draft_id, base_revision,
+    idempotency_key)`` descriptor list the client sent; ``item_ids`` optionally
+    selects a subset (preserving input order; omitted means process all).
+    Every item reuses the single save-confirm use case through the injected
+    ``process_one`` and never rolls back successful siblings. A duplicate
+    ``item_id`` inside one request is deterministic: it is reported ``skipped``
+    and never touches a draft a sibling already owns. Reusing one
+    ``idempotency_key`` for two different items inside the same request is a
+    per-item ``idempotency_conflict`` (never a replay of the first item's
+    terminal record). Unexpected exceptions are folded into a sanitized
+    per-item failure (never an HTTP-level failure).
+    """
+    results: list[BatchSaveConfirmItemResult] = []
+    seen_item_ids: set[str] = set()
+    seen_keys: set[str] = set()
+    for item_id, draft_id, base_revision, idempotency_key in _select_batch_items(
+        items, item_ids
+    ):
+        if item_id in seen_item_ids:
+            # A duplicate item_id inside one request never re-touches a draft a
+            # sibling already owns.
+            results.append(
+                BatchSaveConfirmItemResult(
+                    item_id=item_id,
+                    outcome=BATCH_OUTCOME_SKIPPED,
+                    error_type="duplicate_item",
+                    error_message="同一请求中重复的条目",
+                )
+            )
+            continue
+        seen_item_ids.add(item_id)
+        if idempotency_key in seen_keys:
+            # One idempotency_key may only drive one item per request. Reusing a
+            # key for a different draft would replay the first item's terminal
+            # record and falsely claim the second item confirmed — reject it
+            # deterministically instead of touching the draft or the record.
+            results.append(
+                BatchSaveConfirmItemResult(
+                    item_id=item_id,
+                    outcome=BATCH_OUTCOME_FAILED,
+                    error_type="idempotency_conflict",
+                    error_message="同一请求中幂等键不能重复用于不同条目",
+                )
+            )
+            continue
+        seen_keys.add(idempotency_key)
+        try:
+            results.append(
+                process_one(item_id, draft_id, base_revision, idempotency_key)
+            )
+        except Exception:  # pragma: no cover - safety boundary
+            # Never leak draft content, the key, an absolute path or an
+            # upstream detail through an unexpected per-item failure.
+            results.append(
+                BatchSaveConfirmItemResult(
+                    item_id=item_id,
+                    outcome=BATCH_OUTCOME_FAILED,
+                    error_type="unexpected_error",
+                    error_message="保存确认失败，请稍后重试",
+                )
+            )
+    return BatchSaveConfirmResult(batch_id=batch_id, results=results)
+
+
+def _select_batch_items(
+    items: list[tuple[str, str, int, str]],
+    item_ids: list[str] | None,
+) -> list[tuple[str, str, int, str]]:
+    if item_ids is None:
+        return list(items)
+    wanted = set(item_ids)
+    return [item for item in items if item[0] in wanted]
+
+
+def build_batch_process_one(
+    process_one_item: Callable[[str, str, int, str], SaveConfirmOutcome],
+    *,
+    map_error: Callable[[str, Stage1Error], BatchSaveConfirmItemResult],
+) -> ProcessOne:
+    """Build the per-item runner for ``run_batch_save_confirm`` (US-216).
+
+    The Web layer injects:
+    - ``process_one_item`` — runs the durable single save-confirm use case
+      (``run_save_confirm`` wired with the real DraftStore/entry-controller
+      seams) for one item and returns its ``SaveConfirmOutcome``;
+    - ``map_error`` — converts a ``Stage1Error`` raised by the use case
+      (stale/expired/reserved/replayed draft, idempotency conflict, storage
+      failure) into a sanitized per-item failed result carrying the ``item_id``
+      and a fixed Chinese message.
+
+    The batch coordinator then only owns the partial-success result shape;
+    single-item orchestration is never duplicated.
+    """
+
+    def process_one(
+        item_id: str,
+        draft_id: str,
+        base_revision: int,
+        idempotency_key: str,
+    ) -> BatchSaveConfirmItemResult:
+        try:
+            outcome = process_one_item(
+                item_id, draft_id, base_revision, idempotency_key
+            )
+        except Stage1Error as exc:
+            return map_error(item_id, exc)
+        if outcome.outcome == STATE_CONFIRMED:
+            return BatchSaveConfirmItemResult(
+                item_id=item_id,
+                outcome=BATCH_OUTCOME_CONFIRMED,
+                request_id=outcome.request_id,
+                status=outcome.request.get("status")
+                if isinstance(outcome.request, dict)
+                else None,
+            )
+        if outcome.outcome == STATE_SAVED_CONFIRM_FAILED:
+            # The Request is durable (PENDING_CONFIRM on disk) and only the
+            # acceptance step failed. The client accepts the saved Request
+            # through the existing accept contract; the per-item error names
+            # that retry action without leaking the consumed draft id.
+            return BatchSaveConfirmItemResult(
+                item_id=item_id,
+                outcome=BATCH_OUTCOME_FAILED,
+                request_id=outcome.request_id,
+                error_type=ERROR_TYPE_SAVE_CONFIRM_FAILED,
+                error_message="订阅方案已保存但确认失败，请对已保存的方案重试确认",
+            )
+        # pragma: no cover - unexpected terminal outcome
+        return BatchSaveConfirmItemResult(
+            item_id=item_id,
+            outcome=BATCH_OUTCOME_FAILED,
+            error_type="unexpected_error",
+            error_message="保存确认失败，请稍后重试",
+        )
+
+    return process_one
+
+
+def serialize_batch_save_confirm_result(
+    result: BatchSaveConfirmResult,
+) -> dict[str, Any]:
+    """Serialize a batch save-confirm result with only public, safe fields."""
+    return {
+        "batch_id": result.batch_id,
+        "results": [
+            {
+                "item_id": item.item_id,
+                "outcome": item.outcome,
+                "request_id": item.request_id,
+                "status": item.status,
+                "error_type": item.error_type,
+                "error_message": item.error_message,
+            }
+            for item in result.results
+        ],
+        "summary": result.summary(),
+    }
+
+
 __all__ = [
     "OPERATION_SAVE_CONFIRM",
     "STATE_CONFIRMED",
@@ -429,9 +663,18 @@ __all__ = [
     "HANDOFF_NEXT_ACTION_OPEN_TRACKING",
     "RETRY_ACTION_ACCEPT_SAVED_REQUEST",
     "ERROR_TYPE_SAVE_CONFIRM_FAILED",
+    "BATCH_OUTCOME_CONFIRMED",
+    "BATCH_OUTCOME_FAILED",
+    "BATCH_OUTCOME_SKIPPED",
+    "BatchSaveConfirmItemResult",
+    "BatchSaveConfirmResult",
+    "ProcessOne",
     "SaveConfirmOutcome",
+    "build_batch_process_one",
     "build_saved_confirm_failed_error",
     "compute_request_fingerprint",
     "resolve_in_progress_retry",
+    "run_batch_save_confirm",
     "run_save_confirm",
+    "serialize_batch_save_confirm_result",
 ]

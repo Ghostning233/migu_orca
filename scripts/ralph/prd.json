@@ -122,8 +122,8 @@
         "Tests pass"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现：schemas.py 新增 BatchItemSaveConfirmPayload/BatchSaveConfirmPayload（每条 item_id/draft_id/base_revision/idempotency_key，item_ids 可选保持输入顺序）；api_contract.py 新增 strict BatchSaveConfirmItemResultDTO/BatchSaveConfirmResultDTO；save_confirm_service.py 新增 run_batch_save_confirm（逐条部分成功协调器：重复 item_id→skipped，同请求复用同一 idempotency_key→逐条 idempotency_conflict 绝不重放/误报，unexpected→脱敏 failed，summary={requested,confirmed,failed}）+ build_batch_process_one + serialize_batch_save_confirm_result；routes_requests.py 抽出 _run_draft_save_confirm 供单番/批量共用（US-214 seam 不重复）；routes_batches.py 新增 BatchSaveConfirmView（POST /api/v1/batches/{batch_id}/save-confirm，operationId saveConfirmBatchItems）用 _batch_item_save_confirm_error 把 draft_expired/draft_revision_conflict/draft_reserved/idempotency_conflict/save_confirm_failed 映射为固定中文脱敏逐条 failed。成功=HTTP 200 {batch_id,results[],summary}；同 item+同 key 幂等重试重放同一 CONFIRMED 不建第二个 Request；请求级 shape/storage 错误仍走普通失败 envelope。同步 DTO/OpenAPI/_ENDPOINTS/endpoint inventory §2/§3.4/§4/README/AGENTS/生成 TS client/api.test.ts。golden 10 例（部分成功/stale/revision/duplicate/shared-key/save_confirm_failed/unknown draft/validation/1-12-36/same-key replay）+ DTO 2 例 + view 7 例 + coordinator 单测 4 例。非浏览器 1116 + 浏览器 133 + 前端 261 单测 + typecheck/lint/api:check/build/compileall/ruff/openapi --check 全绿。"
     },
     {
       "id": "US-217",

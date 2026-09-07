@@ -41,6 +41,7 @@ from apps.migu_orca_web.api_contract import (
     BatchAcceptResultDTO,
     BatchParseResultDTO,
     BatchQueueResultDTO,
+    BatchSaveConfirmResultDTO,
     BatchSubmitResultDTO,
     CorrectionsResultDTO,
     MikanCandidateResultDTO,
@@ -781,6 +782,56 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             "400": {
                 "validation_error": "请至少输入一个番剧名称",
                 "batch_limit_exceeded": "单批最多支持 36 部（US-215，标题解析/MiKan 前拒绝）",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
+        },
+    },
+    "POST /api/v1/batches/<batch_id>/save-confirm": {
+        "operationId": "saveConfirmBatchItems",
+        "summary": "批量保存并确认选中草案（逐条部分成功）",
+        "description": "US-216：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。Stage 28 不创建 tracking record（D28-09）。",
+        "requestBody": {
+            "type": "object",
+            "required": ["items"],
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "description": "批量卡片保存确认描述符（公开 item_id + 服务端签发 draft_id/base_revision + opaque 幂等键）。",
+                    "items": {
+                        "type": "object",
+                        "required": ["item_id", "draft_id", "base_revision", "idempotency_key"],
+                        "properties": {
+                            "item_id": {"type": "string", "description": "批量卡片的公开 item_id（保持输入顺序）。"},
+                            "draft_id": {
+                                "type": "string",
+                                "description": "服务端签发的 opaque draft_id（一次性，成功后失效；request-scoped，不落盘）。",
+                                "x-request-scoped": True,
+                            },
+                            "base_revision": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "客户端最后观察到的草案 revision（US-216，预留校验；不匹配返回逐条 failed draft_revision_conflict）。",
+                            },
+                            "idempotency_key": {
+                                "type": "string",
+                                "description": "一次明确客户端操作生成的 opaque 幂等键（request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。",
+                                "x-request-scoped": True,
+                            },
+                        },
+                    },
+                },
+                "item_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。",
+                },
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
+            },
+        },
+        "success": BatchSaveConfirmResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败（缺失/非法 item 字段或 idempotency_key）",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
             },
         },

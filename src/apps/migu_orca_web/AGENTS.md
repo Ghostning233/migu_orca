@@ -181,6 +181,30 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - 新增/修改会返回该错误的端点时，把 `batch_limit_exceeded` 声明到对应 `_ENDPOINTS` 的 400
   errors（runtime-consistency 测试要求每个被分类 error_type 都有文档声明）。
 
+## 批量 save-confirm 逐条部分成功（US-216）
+
+- `POST /api/v1/batches/{batch_id}/save-confirm`（`routes_batches.BatchSaveConfirmView`，
+  operationId `saveConfirmBatchItems`）每条复用单番 save-confirm 用例：route 用
+  `_run_draft_save_confirm`（`routes_requests.py`，DraftStore reserve/commit/release +
+  `services._build_save_confirm_*` seam 注入 US-213 `run_save_confirm`）处理一条
+  `(item_id, draft_id, base_revision, idempotency_key)`，再经
+  `save_confirm_service.build_batch_process_one` / `run_batch_save_confirm` /
+  `serialize_batch_save_confirm_result` 返回 HTTP 200 逐条部分成功
+  `{batch_id, results[], summary:{requested, confirmed, failed}}`。
+- 请求 schema `BatchSaveConfirmPayload`（schemas.py）每条 `item_id/draft_id/base_revision/
+  idempotency_key` + 可选 `item_ids`（保持输入顺序）；响应 DTO
+  `BatchSaveConfirmResultDTO` + `BatchSaveConfirmItemResultDTO`（strict `extra="forbid"`）。
+- 可预期单条失败（`draft_*`/`idempotency_conflict`/`save_confirm_failed`/`storage_*`）映射为
+  逐条脱敏 `failed` 结果（HTTP 仍 200），成功项不因失败项回滚；同一请求内重复 `item_id`
+  → `skipped`（不二次触碰 draft）。请求级 shape/batch_id/storage profile 错误仍走普通失败
+  envelope。同一 item + 同 `idempotency_key` 重试重放同一 CONFIRMED；不同键重放已保存草案
+  → 逐条 `draft_replayed` failed。
+- monkeypatch 确认失败要 patch `apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved`
+  （`_run_draft_save_confirm` 在 routes_requests 命名空间调用该工厂）；持久化失败 patch
+  `apps.migu_orca_web.services.apply_request_save_action`。
+- 改批量 save-confirm 后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`，
+  并同步 endpoint inventory §2/§3.4/§4 与 `api.test.ts` 期望集。
+
 ## MiKan 候选公开 DTO（US-204）
 
 - `POST /api/v1/mikan/candidates` 的 `result.candidates` 在

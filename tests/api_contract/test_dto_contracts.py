@@ -20,6 +20,7 @@ from apps.migu_orca_web.api_contract import (
     BatchAcceptResultDTO,
     BatchParseResultDTO,
     BatchQueueResultDTO,
+    BatchSaveConfirmResultDTO,
     BatchSubmitResultDTO,
     CorrectionsResultDTO,
     MikanCandidateResultDTO,
@@ -699,6 +700,69 @@ def test_batch_accept_dto_types_result_items() -> None:
 def test_batch_submit_dto_shares_accept_shape() -> None:
     result = _accept_result()
     assert BatchSubmitResultDTO.model_validate(result) is not None
+
+
+def test_batch_save_confirm_dto_validates_partial_success_result() -> None:
+    """US-216: the batch save-confirm result is strict and public-only."""
+    payload = {
+        "batch_id": "batch-1",
+        "results": [
+            {
+                "item_id": "item-1",
+                "outcome": "CONFIRMED",
+                "request_id": "request-1",
+                "status": "ACCEPTED",
+                "error_type": None,
+                "error_message": None,
+            },
+            {
+                "item_id": "item-2",
+                "outcome": "failed",
+                "request_id": None,
+                "status": None,
+                "error_type": "draft_revision_conflict",
+                "error_message": "草案已被更新，请基于最新版本重试",
+            },
+        ],
+        "summary": {"requested": 2, "confirmed": 1, "failed": 1},
+    }
+    assert BatchSaveConfirmResultDTO.model_validate(payload) is not None
+    with pytest.raises(ValidationError):
+        BatchSaveConfirmResultDTO.model_validate({**payload, "leak": 1})
+
+
+def test_batch_save_confirm_dto_rejects_sensitive_item_fields() -> None:
+    """US-216: per-item results never carry draft content, keys or URLs."""
+    base = {
+        "batch_id": "batch-1",
+        "results": [
+            {
+                "item_id": "item-1",
+                "outcome": "CONFIRMED",
+                "request_id": "request-1",
+                "status": "ACCEPTED",
+            }
+        ],
+        "summary": {"requested": 1, "confirmed": 1, "failed": 0},
+    }
+    assert BatchSaveConfirmResultDTO.model_validate(base) is not None
+    for leaked in (
+        "draft_id",
+        "idempotency_key",
+        "rss_url",
+        "magnet",
+        "token",
+        "password",
+        "storage_dir",
+        "tracking_id",
+    ):
+        with pytest.raises(ValidationError):
+            BatchSaveConfirmResultDTO.model_validate(
+                {
+                    **base,
+                    "results": [{**base["results"][0], leaked: "secret-value"}],
+                }
+            )
 
 
 # ---------------------------------------------------------------------------

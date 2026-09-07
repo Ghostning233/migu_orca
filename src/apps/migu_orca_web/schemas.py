@@ -330,6 +330,59 @@ class RequestSaveConfirmPayload(BaseModel):
         return token
 
 
+class BatchItemSaveConfirmPayload(BaseModel):
+    """One batch card save-confirm descriptor (US-216).
+
+    Each item only carries the public ``item_id`` plus the server-issued
+    ``draft_id``, the ``base_revision`` the client last observed, and an opaque
+    ``idempotency_key``. The full Request never crosses the boundary; the
+    per-item key follows the single save-confirm capability contract (a safe
+    opaque value, never a path segment).
+    """
+
+    item_id: str
+    draft_id: str
+    base_revision: int = Field(ge=1)
+    idempotency_key: str
+
+    @field_validator("item_id")
+    @classmethod
+    def validate_item_id(cls, value: str) -> str:
+        item_id = value.strip()
+        if not item_id:
+            raise ValueError("item_id cannot be empty")
+        return item_id
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def validate_idempotency_key(cls, value: str) -> str:
+        token = value.strip()
+        if (
+            not token
+            or len(token) > 128
+            or not token.replace("-", "").replace("_", "").isalnum()
+        ):
+            raise ValueError("idempotency_key 必须是不含路径的安全 opaque 值")
+        return token
+
+
+class BatchSaveConfirmPayload(BaseModel):
+    """Save + confirm selected batch draft cards in one partial-success call.
+
+    US-216: every selected item runs the same single save-confirm use case
+    (revision check, reservation, persistence, confirmation and idempotent
+    outcome). ``item_ids`` optionally filters which ``items`` are processed;
+    when omitted every item is processed in input order. A per-item expected
+    failure never rolls back successful siblings — it is reported as a
+    sanitized per-item result. ``batch_id`` comes from the URL path.
+    """
+
+    batch_id: str
+    items: list[BatchItemSaveConfirmPayload]
+    item_ids: list[str] | None = None
+    storage_dir: str | None = None
+
+
 class RequestAbConfigPayload(BaseModel):
     auth_mode: Literal["password", "api_token"] = "password"
     base_url: str | None = None
