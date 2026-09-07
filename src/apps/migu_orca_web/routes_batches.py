@@ -52,6 +52,7 @@ from batch_engine.controllers.batch_accept_controller import (
 )
 from batch_engine.controllers.batch_draft_controller import (
     create_batch_draft,
+    split_batch_raw_input,
     update_batch_item_status,
 )
 from batch_engine.controllers.batch_queue_controller import serialize_queue
@@ -67,6 +68,7 @@ from batch_engine.models import (
     BATCH_ITEM_STATUS_EMPTY,
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_FOUND,
+    MAX_BATCH_ITEMS,
 )
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
@@ -84,14 +86,31 @@ class BatchParseView(PostView):
 
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, BatchParsePayload)
-        batch = create_batch_draft(self.request_validator_model.raw_input)
-        if not batch.items:
+        raw_input = self.request_validator_model.raw_input
+        # US-215: count normalized non-empty lines via the same splitter the
+        # engine uses. A 37+ line batch is rejected here — before the title
+        # parser, MiKan search or any persistence seam — with only the
+        # field/limit/actual summary (never echoing the raw batch input).
+        non_empty_lines = split_batch_raw_input(raw_input)
+        if not non_empty_lines:
             raise Stage1Error(
                 "validation_error",
                 "请至少输入一个番剧名称",
                 "batch_parse",
                 {"field": "raw_input"},
             )
+        if len(non_empty_lines) > MAX_BATCH_ITEMS:
+            raise Stage1Error(
+                "batch_limit_exceeded",
+                f"单批最多支持 {MAX_BATCH_ITEMS} 部，当前输入 {len(non_empty_lines)} 部",
+                "batch_parse",
+                {
+                    "field": "raw_input",
+                    "limit": MAX_BATCH_ITEMS,
+                    "actual": len(non_empty_lines),
+                },
+            )
+        batch = create_batch_draft(raw_input)
 
         mikan_config = _resolve_mikan_config(self.request_validator_model.mikan_config)
         config = load_storage_config(

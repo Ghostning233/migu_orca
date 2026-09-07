@@ -59,6 +59,9 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     "invalid_storage_dir",
     "queue_not_found",
     "config_error",
+    # US-215: a single batch parse accepts 1..36 non-empty lines; 37+ is a
+    # client-input error rejected before any title parse/MiKan/persist seam.
+    "batch_limit_exceeded",
 }
 # 404 — the addressed resource does not exist.
 _HTTP_NOT_FOUND_ERROR_TYPES = {

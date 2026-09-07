@@ -169,6 +169,18 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `tests/api_contract/test_openapi_runtime_consistency.py::_UNDOCUMENTED_ERROR_TYPES`
   移到对应 `_ENDPOINTS` 声明。
 
+## 批量 36 部服务端边界（US-215）
+
+- `POST /api/v1/batches/parse` 在 route 里先按规范化非空行计数（
+  `batch_draft_controller.split_batch_raw_input`——`create_batch_draft` 也用同一 splitter，
+  计数与 engine 拆分的 item 数永远一致），**早于** 标题解析 / MiKan / 持久化 seam。
+  0 行 → `validation_error`「请至少输入一个番剧名称」；超过 `MAX_BATCH_ITEMS = 36`（
+  `batch_engine/models` 导出）→ Stage1Error `batch_limit_exceeded`（HTTP 400，属
+  `_error_http_status` 的 `_HTTP_BAD_REQUEST_ERROR_TYPES`），`error_data.details` 只含
+  `field=raw_input`/`limit=36`/`actual`，绝不回显原始批量输入行。
+- 新增/修改会返回该错误的端点时，把 `batch_limit_exceeded` 声明到对应 `_ENDPOINTS` 的 400
+  errors（runtime-consistency 测试要求每个被分类 error_type 都有文档声明）。
+
 ## MiKan 候选公开 DTO（US-204）
 
 - `POST /api/v1/mikan/candidates` 的 `result.candidates` 在

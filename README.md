@@ -221,6 +221,10 @@ Stage 28 新增单番「保存并确认」端点（US-214）：
 
 - `POST /api/v1/requests/save-confirm`：一次完成草案校验（`draft_id` + `base_revision`）、预留、持久化、确认和幂等提交。请求只接受 `draft_id`、`base_revision`、`idempotency_key` 与可选 `storage_dir`，绝不接受完整 Request。成功返回 `CONFIRMED`、已保存的 `ACCEPTED` Request 与 `handoff`（`request_id`/`status=ACCEPTED`/`next_action=OPEN_TRACKING`；Stage 28 不创建 tracking record）。同一 `idempotency_key` 重试返回同一最终结果（终态重放，不触碰草案）；不同键重放已保存草案返回 409 `draft_replayed`；持久化成功但确认失败返回 409 `save_confirm_failed`，`error_data.details` 只含 `outcome=SAVED_CONFIRM_FAILED`、公开 `request_id` 与 `retry_action=ACCEPT_SAVED_REQUEST`，客户端用既有 Request accept 契约重试确认。
 
+Stage 28 新增批量 36 部服务端边界（US-215）：
+
+- `POST /api/v1/batches/parse` 现在按规范化非空行计数并强制单批 1～36 部：0 部沿用 `validation_error`「请至少输入一个番剧名称」；超过 36 部在任何标题解析、MiKan 搜索或持久化 seam 之前返回 HTTP 400 `batch_limit_exceeded`，`error_data.details` 只含 `field=raw_input`、`limit=36` 与 `actual`，绝不回显原始批量输入行。`MAX_BATCH_ITEMS = 36` 定义在 `batch_engine/models`，与前端 UX PRD 的批量上限一致。
+
 Stage 10 新增 Request 操作端点（确认/取消仅 PENDING_CONFIRM 状态可操作；修改同时接受 PENDING_CONFIRM 与 ACCEPTED）：
 
 - `POST /api/v1/requests/<request_id>/accept`：确认 Request，状态变更为 ACCEPTED。
@@ -328,7 +332,7 @@ Stage 17 新增真实 MiKan 候选搜索端点：
 
 Stage 19 新增批量解析端点：
 
-- `POST /api/v1/batches/parse`：接收 `raw_input` 多行文本，忽略空行并为每个非空行生成独立 item。端点先通过 AI 名称解析 provider seam 生成候选标题、季数提示、搜索词、置信度和审核标记，再对每个 search query 复用 MiKan candidate search。单个 provider 或 MiKan 搜索失败只标记当前 item 为 `FAILED`，不阻塞同批次其他 item。响应只包含 batch/item 状态、解析元数据、公开候选字段和卡片展示所需的订阅草案摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径不会进入响应、浏览器 storage、URL 或 Request snapshot。
+- `POST /api/v1/batches/parse`：接收 `raw_input` 多行文本，忽略空行并为每个非空行生成独立 item（服务端强制单批 1～36 部，US-215：0 部返回 `validation_error`，超过 36 部在任何标题解析/MiKan/持久化调用前返回 400 `batch_limit_exceeded`，只报告 `field=raw_input`/`limit=36`/`actual`，不回显原始输入）。端点先通过 AI 名称解析 provider seam 生成候选标题、季数提示、搜索词、置信度和审核标记，再对每个 search query 复用 MiKan candidate search。单个 provider 或 MiKan 搜索失败只标记当前 item 为 `FAILED`，不阻塞同批次其他 item。响应只包含 batch/item 状态、解析元数据、公开候选字段和卡片展示所需的订阅草案摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径不会进入响应、浏览器 storage、URL 或 Request snapshot。
 
 Stage 20 新增批量接受、队列、提交与重试端点（`batch_id` 来自 URL 路径，payload 模型仍声明 `batch_id`）：
 

@@ -1906,6 +1906,87 @@ def test_batch_parse_api_rejects_empty_input_with_chinese_validation_error() -> 
     assert "/home/" not in body
 
 
+def _batch_raw_input(line_count: int) -> str:
+    """Build a batch raw_input with ``line_count`` distinct non-empty lines."""
+    return "\n".join(f"批量番剧{index:02d}" for index in range(1, line_count + 1))
+
+
+@pytest.mark.parametrize("line_count", [1, 12, 36])
+def test_batch_parse_api_accepts_boundary_batch_sizes(
+    monkeypatch: pytest.MonkeyPatch,
+    line_count: int,
+) -> None:
+    """US-215: 1/12/36 non-empty lines are all accepted and parsed."""
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": _batch_raw_input(line_count)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    items = payload["result"]["items"]
+    assert len(items) == line_count
+    assert all(item["raw_title"].startswith("批量番剧") for item in items)
+    assert len({item["item_id"] for item in items}) == line_count
+
+
+def test_batch_parse_api_rejects_over_limit_before_any_seam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-215: the 37th line is rejected before title parse/MiKan/persist."""
+    called: list[str] = []
+
+    def _mark(name: str):
+        def _tracked(*args: object, **kwargs: object) -> object:
+            called.append(name)
+            raise AssertionError(f"{name} must not run for an over-limit batch")
+
+        return _tracked
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches.create_batch_draft", _mark("create_batch_draft")
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        _mark("_batch_title_parsing_provider"),
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        _mark("_search_batch_item_candidates"),
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches.load_storage_config", _mark("load_storage_config")
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": _batch_raw_input(37)},
+    )
+
+    payload = response.get_json()
+    body = response.get_data(as_text=True)
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "batch_limit_exceeded"
+    assert payload["error_message"] == "单批最多支持 36 部，当前输入 37 部"
+    assert payload["error_data"]["failed_step"] == "batch_parse"
+    assert payload["error_data"]["details"] == {
+        "field": "raw_input",
+        "limit": 36,
+        "actual": 37,
+    }
+    assert called == []
+    # The raw batch input is never echoed in the response.
+    assert "批量番剧01" not in body
+    assert "批量番剧37" not in body
+
+
 def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

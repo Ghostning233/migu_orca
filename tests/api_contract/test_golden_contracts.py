@@ -1122,6 +1122,83 @@ def test_golden_batch_parse_validation_failure(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"field": "raw_input"}
 
 
+def _batch_raw_input(line_count: int) -> str:
+    """Build a batch raw_input with ``line_count`` distinct non-empty lines."""
+    return "\n".join(f"番剧名称{index}" for index in range(1, line_count + 1))
+
+
+@pytest.mark.parametrize("line_count", [1, 12, 36])
+def test_golden_batch_parse_accepts_up_to_thirty_six_lines(
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+    line_count: int,
+) -> None:
+    """US-215: 1/12/36 non-empty lines are parsed normally (no early reject)."""
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        lambda queries, config: [],
+    )
+
+    response = client.post(
+        "/api/v1/batches/parse",
+        json={"raw_input": _batch_raw_input(line_count)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert len(payload["result"]["items"]) == line_count
+
+
+def test_golden_batch_parse_rejects_thirty_seven_lines_before_any_seam(
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-215: the 37th line is rejected before title parsing/MiKan/storage.
+
+    Every downstream seam raises if touched; a clean 400 batch_limit_exceeded
+    proves the over-limit batch is refused before any of them runs.
+    """
+    for target in (
+        "apps.migu_orca_web.routes_batches.create_batch_draft",
+        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._resolve_mikan_config",
+        "apps.migu_orca_web.routes_batches._load_preferences_for_batch",
+        "apps.migu_orca_web.routes_batches._load_corrections_for_batch",
+        "apps.migu_orca_web.routes_batches.load_storage_config",
+    ):
+        def _must_not_run(
+            *args: object,
+            _name: str = target,
+            **kwargs: object,
+        ) -> object:
+            raise RuntimeError(f"{_name} must not run for an over-limit batch")
+
+        monkeypatch.setattr(target, _must_not_run)
+
+    response = client.post(
+        "/api/v1/batches/parse",
+        json={"raw_input": _batch_raw_input(37)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "batch_limit_exceeded"
+    assert payload["error_data"]["failed_step"] == "batch_parse"
+    # error_data carries only field/limit/actual — never echoes raw input lines.
+    assert payload["error_data"]["details"] == {
+        "field": "raw_input",
+        "limit": 36,
+        "actual": 37,
+    }
+    body = response.get_data(as_text=True)
+    for index in range(1, 38):
+        assert f"番剧名称{index}" not in body
+    assert "batch_limit_exceeded" in body
+
+
 def test_golden_batch_parse_failed_item_error_sanitized(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

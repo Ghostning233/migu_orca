@@ -23,7 +23,8 @@
 - **HTTP 状态语义（US-192 修正）**：envelope 形状不变，状态码按 `error_type` 分类
   （`extensions/flask_api/api.py:_error_http_status`，与 OpenAPI 注册表一致）：
   - `400`：客户端输入/状态不可用（`data_validation_errors`、`validation_error`、
-    `invalid_*`、`config_error`、`queue_not_found`、`invalid_storage_dir`）。
+    `invalid_*`、`config_error`、`queue_not_found`、`invalid_storage_dir`；
+    US-215 的 `batch_limit_exceeded`（批量超过 36 部）也归此类）。
   - `404`：资源不存在（`request_not_found`、`queue_item_not_found`、`poster_not_found`）。
   - `409`：状态冲突/一次性上下文失效/重放（`invalid_request_status`、`request_cancelled`、
     `season_evidence_conflict`、`season_confirmation_required`、`candidate_context_invalid`；
@@ -136,7 +137,7 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 
 | 端点 | 请求字段 | 成功 `result` | 业务失败示例 |
 | --- | --- | --- | --- |
-| POST `/api/v1/batches/parse` | `raw_input`、`mikan_config?`、`storage_dir?` | `{"batch_id", "raw_input", "items": [item...]}` | 空输入 → `validation_error`「请至少输入一个番剧名称」 |
+| POST `/api/v1/batches/parse` | `raw_input`、`mikan_config?`、`storage_dir?` | `{"batch_id", "raw_input", "items": [item...]}` | 空输入 → `validation_error`「请至少输入一个番剧名称」；超过 36 个非空行 → `batch_limit_exceeded`（400，details 只含 `field=raw_input`/`limit=36`/`actual`，任何标题解析/MiKan/持久化 seam 前拒绝） |
 | POST `/api/v1/batches/<batch_id>/accept` | `batch_id`（路径）、`items[]`（`item_id`/`request_id?`/`title?`）、`item_ids?`、`storage_dir?` | `serialize_batch_accept_result`：`{batch_id, queue, items[], summary}` | 单卡不可接受 → 项内中文 reason |
 | GET `/api/v1/batches/<batch_id>/queue` | `batch_id`（路径）、`storage_dir?` | `{"batch_id", "queue": {...} | null}` | — |
 | POST `/api/v1/batches/<batch_id>/submit` | `batch_id`（路径）、`ab_config?`、`confirm`、`storage_dir?` | `serialize_batch_submit_result` | 缺 `ab_config` → `validation_error`「请提供 Auto Bangumi 配置」；缺 `confirm` → `validation_error`；queue 缺失 → `queue_not_found` |
@@ -220,6 +221,10 @@ CLI 显式 `--storage-dir` 行为不受影响）。
   `error_data.details` 只含 `outcome=SAVED_CONFIRM_FAILED`、`request_id`、
   `retry_action=ACCEPT_SAVED_REQUEST`——已消费 draft_id 与草案内容绝不回显；客户端用既有
   Request accept 契约重试确认。
+- US-215：`POST /api/v1/batches/parse` 按规范化非空行计数，单批接受 1～36 部（
+  `MAX_BATCH_ITEMS = 36`，`batch_engine/models`）。0 部沿用 `validation_error`；37 部及以上
+  在任何标题解析、MiKan 搜索或持久化 seam 前返回 HTTP 400 `batch_limit_exceeded`，
+  `error_data.details` 只含 `field=raw_input`、`limit=36`、`actual`——绝不回显原始批量输入。
 
 ## 5. 前端依赖（Stage 27 迁移后）
 

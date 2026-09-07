@@ -33,6 +33,10 @@
   持久化失败 patch `apps.migu_orca_web.services.apply_request_save_action`，确认失败 patch
   `apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved`。
 - 每次迭代只完成最高优先级的一个未通过 story；完整实现、测试和提交后才把 `passes` 改为 true。
+- 批量行计数用 `batch_draft_controller.split_batch_raw_input`（create_batch_draft 与 route 共用）；
+  服务端批量上限常量 `MAX_BATCH_ITEMS = 36` 在 `batch_engine/models`。新增 400 归类 error_type
+  （如 `batch_limit_exceeded`）要加 `_error_http_status` 400 集合 + `_ENDPOINTS` 400 errors +
+  重生成 openapi.json/TS client。
 
 ## [2026-09-07] - US-210
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -342,3 +346,51 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context
     - US-215 在 `routes_batches.py`/`BatchParsePayload` 做规范化非空行计数（1–36）；US-216 新增
       `POST /api/v1/batches/{batch_id}/save-confirm` 复用 US-214 seam。
+
+## [2026-09-08] - US-215
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `batch_engine.models.MAX_BATCH_ITEMS = 36`（导出到 `__all__`）；新增
+    `batch_draft_controller.split_batch_raw_input(raw_input)` 作为 `create_batch_draft` 与
+    Web route 共用的规范化非空行计数来源（按 splitlines 后 strip 过滤），保证「37 部」的
+    计数与 engine 实际拆分出的 item 数永远一致。
+  - `BatchParseView.save`（`POST /api/v1/batches/parse`）现在先 `split_batch_raw_input`
+    计数再进入任何处理：0 行沿用 `validation_error`「请至少输入一个番剧名称」；超过 36 行
+    在 `create_batch_draft`/标题解析/MiKan/持久化之前返回 HTTP 400 `batch_limit_exceeded`，
+    `error_data.details` 只含 `field=raw_input`/`limit=36`/`actual`，error_message 固定中文
+    且不回显原始批量输入行。
+  - `extensions/flask_api/api.py` 把 `batch_limit_exceeded` 加入 `_HTTP_BAD_REQUEST_ERROR_TYPES`
+    （HTTP 400），并在 `api_test.py` 增加分类断言。
+  - `openapi_gen._ENDPOINTS` 的 parse 条目 400 errors 声明 `batch_limit_exceeded`。
+  - 契约同步：重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`；
+    更新 `docs/api/endpoint_inventory.md` §1 400 语义 + §3.4 parse 行 + §4 US-215 小节、
+    README §批量解析端点、`src/apps/migu_orca_web/AGENTS.md`（US-215 seam/错误模式）。
+- Files changed
+  - 后端：`src/batch_engine/models/__init__.py`、`src/batch_engine/controllers/batch_draft_controller.py`、
+    `src/apps/migu_orca_web/routes_batches.py`、`src/extensions/flask_api/api.py`、
+    `src/apps/migu_orca_web/openapi_gen.py`
+  - 测试：`src/batch_engine/controllers/batch_draft_controller_test.py`（splitter 单测）、
+    `tests/api_contract/test_golden_contracts.py`（1/12/36 通过 + 37 部 seam 全不调用 +
+    不回显输入）、`src/apps/migu_orca_web/views_test.py`（边界 + seam + error_message/details）、
+    `src/extensions/flask_api/api_test.py`
+  - 文档/生成：`docs/api/openapi.json`、`docs/api/endpoint_inventory.md`、
+    `frontend/src/api/generated/api.ts`、README.md、`src/apps/migu_orca_web/AGENTS.md`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 批量行计数必须与 engine 拆分共用同一 helper（`split_batch_raw_input`），不要在 route
+      里手写第二套 split 规则，否则边界会与 item 数分叉。
+    - 超限 seam 测试把 `create_batch_draft`、`_batch_title_parsing_provider`、
+      `_search_batch_item_candidates`、`load_storage_config`、`_resolve_mikan_config`、
+      `_load_preferences_for_batch`、`_load_corrections_for_batch` 全部 patch 成抛错函数，
+      断言 `called == []` 即证明拒绝发生在任何解析/MiKan/持久化之前。
+    - 新增归类 error_type（batch_limit_exceeded）必须同时加 `_error_http_status` 400 集合 +
+      对应 `_ENDPOINTS` 400 errors + 重生成 openapi.json/TS client（runtime-consistency 双守护）。
+  - Gotchas encountered
+    - B023 ruff 规则：在循环里定义闭包引用循环变量（`target`）会报错，要用默认参数
+      `_name: str = target` 绑定。
+    - monkeypatch lambda 抛错会变成 generator throw 的晦涩写法；直接用默认参数绑定的
+      具名函数更清晰且过 ruff。
+  - Useful context
+    - US-216 会新增 `POST /api/v1/batches/{batch_id}/save-confirm`；US-215 只在 parse 入口
+      加 1..36 边界，不限制后续 accept/save-confirm 的条数。
+---

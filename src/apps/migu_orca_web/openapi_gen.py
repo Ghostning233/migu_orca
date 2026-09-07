@@ -780,6 +780,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "errors": {
             "400": {
                 "validation_error": "请至少输入一个番剧名称",
+                "batch_limit_exceeded": "单批最多支持 36 部（US-215，标题解析/MiKan 前拒绝）",
                 "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
             },
         },

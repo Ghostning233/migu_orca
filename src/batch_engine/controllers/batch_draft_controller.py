@@ -9,6 +9,18 @@ from batch_engine.models import BatchDraft, BatchDraftItem
 IdFactory = Callable[[], str]
 
 
+def split_batch_raw_input(raw_input: str) -> list[str]:
+    """Split a batch raw_input into its normalized non-empty title lines.
+
+    This is the single source of truth for how ``create_batch_draft`` counts
+    items. The Web parse route uses it for the US-215 1..36 boundary check so
+    the "37th line" is rejected exactly when the engine would create a 37th
+    item — never more (blank/whitespace lines are ignored) and never less.
+    """
+
+    return [line for line in raw_input.splitlines() if line.strip()]
+
+
 def create_batch_draft(
     raw_input: str,
     *,
@@ -21,8 +33,7 @@ def create_batch_draft(
             item_id=_next_id("item", item_id_factory),
             raw_title=line,
         )
-        for line in raw_input.splitlines()
-        if line.strip()
+        for line in split_batch_raw_input(raw_input)
     ]
     return BatchDraft(batch_id=batch_id, raw_input=raw_input, items=items)
 

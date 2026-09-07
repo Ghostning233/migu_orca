@@ -4,6 +4,7 @@ import pytest
 
 from batch_engine.controllers.batch_draft_controller import (
     create_batch_draft,
+    split_batch_raw_input,
     update_batch_item_status,
 )
 
@@ -38,6 +39,16 @@ def test_create_batch_draft_ignores_empty_and_whitespace_only_lines() -> None:
     )
 
     assert [item.raw_title for item in draft.items] == ["萌王S4", "路哥S4"]
+
+
+def test_split_batch_raw_input_counts_only_non_empty_lines() -> None:
+    """US-215: the boundary count ignores blank/whitespace-only lines."""
+    assert split_batch_raw_input("\n萌王S4\n   \n\t\n路哥S4\n") == [
+        "萌王S4",
+        "路哥S4",
+    ]
+    assert split_batch_raw_input("") == []
+    assert split_batch_raw_input("  \n\t\n") == []
 
 
 def test_create_batch_draft_preserves_non_empty_line_raw_text() -> None:
