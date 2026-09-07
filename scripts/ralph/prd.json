@@ -87,8 +87,8 @@
         "Tests pass"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现：新增严格请求/响应 DTO（RequestSaveConfirmPayload 校验 idempotency_key 为不含路径的安全 opaque 值；RequestSaveConfirmResultDTO + RequestSaveConfirmHandoffDTO strict；SaveConfirmFailedErrorDataDTO 冻结 error_data.details 白名单）。routes_requests.RequestSaveConfirmView（POST /api/v1/requests/save-confirm, operationId confirmRequestSave）用 services._build_save_confirm_persist_pending/_build_save_confirm_confirm_saved + DraftStore reserve/commit/release 闭包接入 US-213 run_save_confirm：成功返回 CONFIRMED + 已保存 ACCEPTED Request + handoff(request_id/status=ACCEPTED/next_action=OPEN_TRACKING)；同一 idempotency_key 重试终态重放返回同一 Request；不同键重放已保存 draft → 409 draft_replayed；持久化失败 release 可重试；持久化成功但确认失败 → 409 save_confirm_failed（details 只含 outcome=SAVED_CONFIRM_FAILED/request_id/retry_action=ACCEPT_SAVED_REQUEST，build_saved_confirm_failed_error 构造）；同键不同 payload/操作 → 409 idempotency_conflict 不回显 payload。save_confirm_failed 加入 _error_http_status 409 集合；idempotency_conflict 从 runtime-consistency 豁免集移入 _ENDPOINTS 声明。同步 OpenAPI/inventory/生成 TS client/api.test.ts/README/AGENTS。golden(9 例)+DTO(3 例)+view(4 例)+分类/一致性覆盖：全成功、保存失败可重试、确认失败、同键重试、异键重放、revision 冲突、未知 draft、缺/非法 idempotency_key、plan 冲突、递归脱敏与敏感字段缺失。非浏览器 1083 + 浏览器 133 + 前端 261 单测 + typecheck/lint/api:check/build/compileall/ruff 全绿。"
     },
     {
       "id": "US-215",

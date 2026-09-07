@@ -217,6 +217,10 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 }
 ```
 
+Stage 28 新增单番「保存并确认」端点（US-214）：
+
+- `POST /api/v1/requests/save-confirm`：一次完成草案校验（`draft_id` + `base_revision`）、预留、持久化、确认和幂等提交。请求只接受 `draft_id`、`base_revision`、`idempotency_key` 与可选 `storage_dir`，绝不接受完整 Request。成功返回 `CONFIRMED`、已保存的 `ACCEPTED` Request 与 `handoff`（`request_id`/`status=ACCEPTED`/`next_action=OPEN_TRACKING`；Stage 28 不创建 tracking record）。同一 `idempotency_key` 重试返回同一最终结果（终态重放，不触碰草案）；不同键重放已保存草案返回 409 `draft_replayed`；持久化成功但确认失败返回 409 `save_confirm_failed`，`error_data.details` 只含 `outcome=SAVED_CONFIRM_FAILED`、公开 `request_id` 与 `retry_action=ACCEPT_SAVED_REQUEST`，客户端用既有 Request accept 契约重试确认。
+
 Stage 10 新增 Request 操作端点（确认/取消仅 PENDING_CONFIRM 状态可操作；修改同时接受 PENDING_CONFIRM 与 ACCEPTED）：
 
 - `POST /api/v1/requests/<request_id>/accept`：确认 Request，状态变更为 ACCEPTED。

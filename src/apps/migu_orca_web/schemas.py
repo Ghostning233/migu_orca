@@ -301,6 +301,35 @@ class RequestPreviewSavePayload(BaseModel):
     storage_dir: str | None = None
 
 
+class RequestSaveConfirmPayload(BaseModel):
+    """Save + confirm one preview draft in a single durable operation.
+
+    US-213/US-214: the request only carries the server-issued ``draft_id``,
+    the ``base_revision`` the client last observed, and an opaque
+    ``idempotency_key`` that makes retries converge to one public outcome —
+    the full Request never crosses the boundary. ``idempotency_key`` is a
+    request-scoped opaque value validated as a safe filename token (never a
+    path segment), mirroring the ``candidate_context`` capability contract.
+    """
+
+    draft_id: str
+    base_revision: int = Field(ge=1)
+    idempotency_key: str
+    storage_dir: str | None = None
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def validate_idempotency_key(cls, value: str) -> str:
+        token = value.strip()
+        if (
+            not token
+            or len(token) > 128
+            or not token.replace("-", "").replace("_", "").isalnum()
+        ):
+            raise ValueError("idempotency_key 必须是不含路径的安全 opaque 值")
+        return token
+
+
 class RequestAbConfigPayload(BaseModel):
     auth_mode: Literal["password", "api_token"] = "password"
     base_url: str | None = None

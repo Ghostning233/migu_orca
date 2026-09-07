@@ -24,6 +24,14 @@
   `compute_request_fingerprint`/`run_save_confirm`/`resolve_in_progress_retry` 负责协议。
   记录文件 = `<storage>/idempotency/<opaque-key>.json`，字段白名单
   `idempotency_key/operation/request_fingerprint/request_id/state/created_at/updated_at`。
+- save-confirm（US-214）接线模式：route 用 `services._build_save_confirm_persist_pending` /
+  `_build_save_confirm_confirm_saved` + DraftStore `reserve_for_save`/`commit_save`/
+  `release_save` 闭包注入 `run_save_confirm`。成功 = `{outcome: CONFIRMED, request, summary,
+  handoff:{request_id, status: ACCEPTED, next_action: OPEN_TRACKING}}`（strict DTO）；确认失败
+  （Request 已落盘）→ 409 `save_confirm_failed`，details 白名单只含 `outcome=SAVED_CONFIRM_FAILED`/
+  `request_id`/`retry_action=ACCEPT_SAVED_REQUEST`。patch seam 要打实际调用命名空间：
+  持久化失败 patch `apps.migu_orca_web.services.apply_request_save_action`，确认失败 patch
+  `apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved`。
 - 每次迭代只完成最高优先级的一个未通过 story；完整实现、测试和提交后才把 `passes` 改为 true。
 
 ## [2026-09-07] - US-210
@@ -272,3 +280,65 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       entry-controller 接 `run_save_confirm` 的 seams；到时把 `idempotency_conflict` 从
       豁免集移入 `_ENDPOINTS` 并同步 DTO/OpenAPI/inventory/TS client。
 ---
+
+## [2026-09-08] - US-214
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `POST /api/v1/requests/save-confirm`（`routes_requests.RequestSaveConfirmView`，operationId
+    `confirmRequestSave`）：请求只收 `draft_id`/`base_revision`/`idempotency_key`/`storage_dir?`，
+    绝不收完整 Request。route 用 `services._build_save_confirm_persist_pending` /
+    `_build_save_confirm_confirm_saved` + DraftStore `reserve_for_save`/`commit_save`/
+    `release_save` 闭包注入 US-213 `run_save_confirm` 协调器。
+  - 成功返回 `{outcome: CONFIRMED, request, summary, handoff:{request_id, status: ACCEPTED,
+    next_action: OPEN_TRACKING}}`（Stage 28 不创建 tracking record，D28-09）。同一
+    idempotency_key 重试终态重放返回同一 Request（不触碰已消费 draft）；不同键重放已保存草案
+    → 409 `draft_replayed`；持久化失败 release 草案可重试；持久化成功但确认失败 → 409
+    `save_confirm_failed`（details 只含 `outcome=SAVED_CONFIRM_FAILED`/`request_id`/
+    `retry_action=ACCEPT_SAVED_REQUEST`，`save_confirm_service.build_saved_confirm_failed_error`
+    构造）；同键不同 payload/操作 → 409 `idempotency_conflict` 不回显 payload。
+  - DTO：`RequestSaveConfirmResultDTO` + `RequestSaveConfirmHandoffDTO`（strict）冻结成功 result；
+    `SaveConfirmFailedErrorDataDTO`（strict）冻结失败 details 白名单。`save_confirm_failed` 加入
+    `_error_http_status` 409 集合；`idempotency_conflict` 从 runtime-consistency 豁免集移入
+    `_ENDPOINTS` 声明。
+  - 契约同步：`openapi_gen._ENDPOINTS` 新条目 + 重生成 `docs/api/openapi.json` + endpoint
+    inventory §1/§2/§3.1/§4.3 + 重生成 `frontend/src/api/generated/api.ts` + api.test.ts 期望集 +
+    README §API + `AGENTS.md` US-214 接线说明。
+- Files changed
+  - 后端：`schemas.py`（RequestSaveConfirmPayload）、`api_contract.py`（3 个 DTO）、
+    `save_confirm_service.py`（handoff/retry/error 常量 + build_saved_confirm_failed_error）、
+    `services.py`（persist/confirm seam builders）、`routes_requests.py`（save-confirm 视图）、
+    `extensions/flask_api/api.py`（save_confirm_failed → 409）
+  - 测试：`tests/api_contract/test_golden_contracts.py`（9 例 save-confirm）、
+    `test_dto_contracts.py`（3 例）、`test_openapi_runtime_consistency.py`（移除豁免）、
+    `src/apps/migu_orca_web/views_test.py`（4 例 view 层）、`extensions/flask_api/api_test.py`
+  - 文档/生成：`docs/api/openapi.json`、`docs/api/endpoint_inventory.md`、
+    `frontend/src/api/generated/api.ts`、`frontend/src/api/generated/api.test.ts`、README.md、
+    `src/apps/migu_orca_web/AGENTS.md`
+- Verification
+  - `uv run pytest -m "not browser" -q` → 1083 passed, 133 deselected
+  - `uv run pytest -q` → 1216 passed（含 133 真实 Chromium 浏览器测试）
+  - 前端 `npm run typecheck`/`lint`/`test:unit`(261)/`api:generate`/`api:check`/`build` 全绿
+  - `uv run ruff check src tests`、`uv run python -m compileall -q src tests`、
+    `uv run python -m apps.migu_orca_web.openapi_gen --check`、`git diff --check` 全绿
+  - 仓库根 `.migu_orca/storage` 不存在；无未提交 build/trace/截图
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 单番 save-confirm 的成功 result 形状 = `{outcome: CONFIRMED, request, summary, handoff}`；
+      SAVED_CONFIRM_FAILED 是失败 envelope（HTTP 409），details 白名单只含 outcome/request_id/
+      retry_action——不是成功分支。
+    - US-216 批量会复用同一套 `services._build_save_confirm_*` seam 与 DraftStore 闭包，逐条
+      调用 `run_save_confirm`，无需再发明单番编排。
+    - `reserve_draft` seam 抛 Stage1Error（_draft_store_error 映射 DraftStore reason），
+      `run_save_confirm` 只 catch 自己调用的 confirm/persist；draft 类 409 直接冒泡到统一 handler。
+  - Gotchas encountered
+    - seam 的 monkeypatch 命名空间：persist_pending 在 `services.py` 内调用
+      `apply_request_save_action` → patch `apps.migu_orca_web.services.apply_request_save_action`
+      （不是 routes_requests）；confirm_saved 被 routes 以 `_build_save_confirm_confirm_saved(...)`
+      工厂调用 → patch `routes_requests._build_save_confirm_confirm_saved`。
+    - 新增归类 error_type（save_confirm_failed）必须同时加 `_error_http_status` 409 集合 + 对应
+      `_ENDPOINTS.errors` 声明；把 `idempotency_conflict` 从豁免集移除后该端点必须声明它。
+    - idempotency_key 走 schema 层安全校验（无路径片段 + 长度 ≤128 + alnum/-/_），错误经 pydantic
+      envelope 不回显原始值。
+  - Useful context
+    - US-215 在 `routes_batches.py`/`BatchParsePayload` 做规范化非空行计数（1–36）；US-216 新增
+      `POST /api/v1/batches/{batch_id}/save-confirm` 复用 US-214 seam。

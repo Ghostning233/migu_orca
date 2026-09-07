@@ -59,7 +59,10 @@ from mikan_engine.controllers.mikan_config import (
     MikanConfig,
     default_mikan_config,
 )
-from request_engine.controllers.request_controller import PENDING_CONFIRM
+from request_engine.controllers.request_controller import (
+    ACCEPTED,
+    PENDING_CONFIRM,
+)
 from shared.errors import Stage1Error
 from shared.models import TitleCorrection, VersionedUserPreference
 from storage_engine.controllers.ab_result_repository import (
@@ -554,3 +557,78 @@ def _load_ab_result_section(config: StorageConfig, request_id: str) -> dict[str,
         if exc.error_type == "ab_result_not_found":
             return {"available": False, "record": None, "error": None}
         return {"available": False, "record": None, "error": _optional_error(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Save-confirm application seams (US-214)
+# ---------------------------------------------------------------------------
+# These builders wire the real DraftStore + entry-controller flow into the
+# durable ``run_save_confirm`` coordinator (US-213). US-216 reuses the exact
+# same per-draft seams for every batch item, so they live in services.py and
+# stay independent of the single-item request schema.
+
+def _build_save_confirm_persist_pending(storage_dir: Path | None):
+    """Build the seam that durably persists a PENDING_CONFIRM snapshot.
+
+    Mirrors ``preview-save``: only a PENDING_CONFIRM draft may enter the saved
+    confirmation flow (accept/cancel/modify/delete). The draft content is the
+    authoritative server-side snapshot returned by ``reserve_for_save`` — never
+    a client-supplied Request.
+    """
+
+    def persist_pending(request: dict[str, Any]) -> dict[str, Any]:
+        if request.get("status") != PENDING_CONFIRM:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认的订阅草案可以保存",
+                "save_confirm_persist",
+                {"status": request.get("status")},
+            )
+        result = apply_request_save_action(
+            {"success": True, "request": request, "error": None},
+            True,
+            storage_dir=storage_dir,
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        return result["request"]
+
+    return persist_pending
+
+
+def _build_save_confirm_confirm_saved(storage_dir: Path | None):
+    """Build the seam that idempotently accepts a saved PENDING_CONFIRM Request.
+
+    Mirrors the single-request accept view: load the snapshot, apply the shared
+    accept action, record an ACCEPT history event, and persist the updated
+    ACCEPTED Request. An already-ACCEPTED request is a success (the outcome is
+    already CONFIRMED), never a failure, so a repeated confirm converges.
+    """
+    config = load_storage_config(storage_dir)
+
+    def confirm_saved(request_id: str) -> dict[str, Any]:
+        request = load_request_snapshot(config, request_id)
+        if request.get("status") == ACCEPTED:
+            return request
+        result = apply_confirmation_action(
+            {"success": True, "request": request, "error": None},
+            "accept",
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        history_event = _build_history_event(
+            request,
+            result["request"],
+            action="ACCEPT",
+        )
+        result = apply_request_save_action(
+            result,
+            True,
+            storage_dir=storage_dir,
+            history_events=[history_event],
+        )
+        if not result["success"]:
+            _raise_result_error(result)
+        return result["request"]
+
+    return confirm_saved

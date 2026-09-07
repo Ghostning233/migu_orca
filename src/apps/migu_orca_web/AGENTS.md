@@ -156,6 +156,15 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
     `ACCEPT_SAVED_REQUEST` 动作重试。
   - 同键不同 operation/payload → Stage1Error `idempotency_conflict`（409，details 只含
     `field`/`reason`），错误经 `_error_http_status`/`sanitize_error_data` 不回显 payload。
+- `POST /api/v1/requests/save-confirm`（US-214）接线：route 用 `services._build_save_confirm_persist_pending`
+  /`_build_save_confirm_confirm_saved` + DraftStore `reserve_for_save`/`commit_save`/`release_save`
+  闭包注入 `run_save_confirm`。成功 = `{outcome: CONFIRMED, request, summary, handoff:{request_id,
+  status: ACCEPTED, next_action: OPEN_TRACKING}}`（DTO `RequestSaveConfirmResultDTO` strict）；
+  确认失败（Request 已落盘）→ Stage1Error `save_confirm_failed`（409，details 白名单只含
+  `outcome=SAVED_CONFIRM_FAILED`/`request_id`/`retry_action=ACCEPT_SAVED_REQUEST`，
+  `build_saved_confirm_failed_error` 构造）。monkeypatch 持久化失败要 patch
+  `apps.migu_orca_web.services.apply_request_save_action`（seam 在 services 命名空间调用），
+  确认失败 patch `apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved`。
 - 新增会触发该错误的端点时，把 `idempotency_conflict` 从
   `tests/api_contract/test_openapi_runtime_consistency.py::_UNDOCUMENTED_ERROR_TYPES`
   移到对应 `_ENDPOINTS` 声明。

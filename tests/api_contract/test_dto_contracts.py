@@ -33,12 +33,17 @@ from apps.migu_orca_web.api_contract import (
     RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
+    RequestSaveConfirmResultDTO,
     RequestSummaryDTO,
+    SaveConfirmFailedErrorDataDTO,
 )
 from batch_engine.controllers.batch_draft_controller import create_batch_draft
 from batch_engine.controllers.batch_queue_controller import serialize_queue
 from batch_engine.models import BatchSubmissionQueue
-from request_engine.controllers.request_controller import summarize_request
+from request_engine.controllers.request_controller import (
+    accept_request,
+    summarize_request,
+)
 from shared.models import EntryRequest
 
 
@@ -208,6 +213,100 @@ def test_request_ab_submit_dto_requires_top_level_ab_result() -> None:
         },
     }
     assert RequestAbSubmitResultDTO.model_validate(payload) is not None
+
+
+def test_request_save_confirm_result_dto_accepts_accepted_payload() -> None:
+    """US-214: the save-confirm success result whitelists the CONFIRMED handoff."""
+    request = accept_request(_generated_request())
+    payload = {
+        "outcome": "CONFIRMED",
+        "request": request,
+        "summary": _summary(request),
+        "handoff": {
+            "request_id": request["request_id"],
+            "status": "ACCEPTED",
+            "next_action": "OPEN_TRACKING",
+        },
+    }
+    validated = RequestSaveConfirmResultDTO.model_validate(payload)
+    assert validated.outcome == "CONFIRMED"
+    assert validated.handoff.request_id == request["request_id"]
+    assert validated.handoff.status == "ACCEPTED"
+    assert validated.handoff.next_action == "OPEN_TRACKING"
+
+
+def test_request_save_confirm_result_dto_rejects_unknown_or_sensitive_fields() -> None:
+    """US-214: the save-confirm success envelope is strict and leak-free.
+
+    The frozen PRD §6.3 success result is ``{outcome, request, summary,
+    handoff}``. A draft_id, a tracking id, credentials or any unknown field
+    must be rejected at the boundary; the handoff itself only carries the
+    public request_id + ACCEPTED status + the stable OPEN_TRACKING next_action.
+    """
+    request = accept_request(_generated_request())
+    base = {
+        "outcome": "CONFIRMED",
+        "request": request,
+        "summary": _summary(request),
+        "handoff": {
+            "request_id": request["request_id"],
+            "status": "ACCEPTED",
+            "next_action": "OPEN_TRACKING",
+        },
+    }
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate({**base, "draft_id": "opaque"})
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate(
+            {**base, "tracking_id": "tracking-1"}
+        )
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate(
+            {**base, "handoff": {**base["handoff"], "ab_url": "https://example.invalid"}}
+        )
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate(
+            {**base, "handoff": {**base["handoff"], "request_id": request["request_id"], "secret_token": "x"}}
+        )
+
+
+def test_save_confirm_failed_error_data_dto_whitelists_details() -> None:
+    """US-214: the confirm-failed failure details are exactly the PRD whitelist.
+
+    Only outcome + public request_id + retry_action may appear; a draft_id,
+    title, URL or path must be rejected so the boundary never carries draft
+    content or credentials into the failure envelope.
+    """
+    base = {
+        "outcome": "SAVED_CONFIRM_FAILED",
+        "request_id": "public-request-1",
+        "retry_action": "ACCEPT_SAVED_REQUEST",
+    }
+    assert SaveConfirmFailedErrorDataDTO.model_validate(base) is not None
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "draft_id": "consumed-draft"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "title": "芙莉莲"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "rss_url": "https://mikan.example/secret"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "token": "secret-token"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "storage_dir": "/home/user/private"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "tracking_id": "tracking-1"}
+        )
 
 
 def test_request_detail_dto_shape() -> None:

@@ -91,6 +91,8 @@ def test_error_http_status_maps_semantic_categories() -> None:
     assert _error_http_status("draft_mismatch") == 409
     # US-213 save-confirm idempotency conflicts → 409.
     assert _error_http_status("idempotency_conflict") == 409
+    # US-214 save-confirm acceptance-failure (Request saved, not confirmed) → 409.
+    assert _error_http_status("save_confirm_failed") == 409
     # External auth → 401
     assert _error_http_status("ab_auth_failed") == 401
     assert _error_http_status("qbittorrent_auth_failed") == 401

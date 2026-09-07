@@ -6,6 +6,8 @@ Migrated from ``views.py`` without behavior change. URL, methods and endpoint
 names are identical; the golden contract tests protect this compatibility.
 """
 
+from typing import Any
+
 from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_entry.controllers.entry_controller import (
     _build_history_event,
@@ -27,6 +29,14 @@ from apps.migu_orca_web.drafts import (
     DraftRead,
     draft_store,
 )
+from apps.migu_orca_web.save_confirm_service import (
+    HANDOFF_NEXT_ACTION_OPEN_TRACKING,
+    HANDOFF_STATUS_ACCEPTED,
+    STATE_CONFIRMED,
+    STATE_SAVED_CONFIRM_FAILED,
+    build_saved_confirm_failed_error,
+    run_save_confirm,
+)
 from apps.migu_orca_web.schemas import (
     RequestAbSubmitPayload,
     RequestActionPayload,
@@ -37,12 +47,15 @@ from apps.migu_orca_web.schemas import (
     RequestModifyPayload,
     RequestPreviewModifyPayload,
     RequestPreviewSavePayload,
+    RequestSaveConfirmPayload,
 )
 from apps.migu_orca_web.serializers import (
     _raise_result_error,
     _sanitize_ab_submit_result,
 )
 from apps.migu_orca_web.services import (
+    _build_save_confirm_confirm_saved,
+    _build_save_confirm_persist_pending,
     _load_ab_result_section,
     _load_history_section,
     _resolve_mikan_config,
@@ -328,6 +341,79 @@ class RequestPreviewSaveView(PostView):
             # exact same save.
             draft_store.release_save(payload.draft_id)
             raise
+
+
+@class_route(api_blueprint, "/api/v1/requests/save-confirm", methods=["POST"])
+class RequestSaveConfirmView(PostView):
+    """One save-and-confirm operation over a preview draft (US-214).
+
+    The client sends only the server-issued ``draft_id``, the ``base_revision``
+    it last observed, and an opaque ``idempotency_key`` — never a full Request.
+    The durable coordinator (``run_save_confirm``, US-213) reserves the draft
+    against the revision, persists the PENDING_CONFIRM snapshot, confirms it to
+    ACCEPTED, and records the terminal idempotency outcome. A retry with the
+    same key converges on the same saved Request; a different key replaying an
+    already-consumed draft is a 409 ``draft_replayed``; a confirmation failure
+    after the save landed returns the SAVED_CONFIRM_FAILED failure envelope
+    with only the public request_id and the ACCEPT_SAVED_REQUEST retry action.
+    """
+
+    request_validator_model = RequestSaveConfirmPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestSaveConfirmPayload)
+        payload = self.request_validator_model
+        storage_dir = _storage_dir(payload.storage_dir)
+
+        def reserve_draft() -> dict[str, Any]:
+            request, reason = draft_store.reserve_for_save(
+                payload.draft_id, payload.base_revision
+            )
+            if request is None or reason != REASON_OK:
+                current_revision = None
+                if reason == REASON_REVISION_CONFLICT:
+                    latest_read, latest_reason = draft_store.get(payload.draft_id)
+                    if latest_read is not None and latest_reason == REASON_OK:
+                        current_revision = latest_read.revision
+                raise _draft_store_error(reason, current_revision=current_revision)
+            return request
+
+        def commit_draft() -> None:
+            draft_store.commit_save(payload.draft_id)
+
+        def release_draft() -> None:
+            draft_store.release_save(payload.draft_id)
+
+        outcome = run_save_confirm(
+            config=load_storage_config(storage_dir),
+            idempotency_key=payload.idempotency_key,
+            reserve_draft=reserve_draft,
+            persist_pending=_build_save_confirm_persist_pending(storage_dir),
+            confirm_saved=_build_save_confirm_confirm_saved(storage_dir),
+            commit_draft=commit_draft,
+            release_draft=release_draft,
+        )
+        if outcome.outcome == STATE_SAVED_CONFIRM_FAILED:
+            # The Request is durable but acceptance failed. This is a terminal
+            # outcome for the key and returns through the failure envelope
+            # (409 save_confirm_failed) with only the public request_id + retry
+            # action. The client accepts the already-saved Request directly.
+            request_id = outcome.request_id or ""
+            raise build_saved_confirm_failed_error(request_id)
+        assert outcome.outcome == STATE_CONFIRMED
+        assert outcome.request_id is not None
+        assert outcome.request is not None
+        assert outcome.summary is not None
+        return {
+            "outcome": STATE_CONFIRMED,
+            "request": outcome.request,
+            "summary": outcome.summary,
+            "handoff": {
+                "request_id": outcome.request_id,
+                "status": HANDOFF_STATUS_ACCEPTED,
+                "next_action": HANDOFF_NEXT_ACTION_OPEN_TRACKING,
+            },
+        }
 
 
 @class_route(api_blueprint, "/api/v1/requests/<path:request_id>/accept", methods=["POST"])

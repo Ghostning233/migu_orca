@@ -29,7 +29,7 @@
     `season_evidence_conflict`、`season_confirmation_required`、`candidate_context_invalid`；
     US-194 的 `draft_expired`/`draft_evicted`/`draft_replayed`/`draft_mismatch` 与
     US-211 的 `draft_revision_conflict`、US-212 的 `draft_reserved`、US-213 的
-    `idempotency_conflict` 也归此类）。
+    `idempotency_conflict`、US-214 的 `save_confirm_failed` 也归此类）。
   - `401`：外部服务认证失败（`ab_auth_failed`、`qbittorrent_auth_failed`）。
   - `502`：上游不可达/不健康（`mikan_connection_failed`、`mikan_http_failed`、
     `mikan_parse_failed`、`poster_unavailable`、`ab_connection_failed`、`ab_submit_failed`、
@@ -56,6 +56,7 @@
 | POST | `/api/v1/requests` | `migu_orca_web_api.RequestCreateView` | RequestCreateView |
 | POST | `/api/v1/requests/preview-modify` | `migu_orca_web_api.RequestPreviewModifyView` | RequestPreviewModifyView |
 | POST | `/api/v1/requests/preview-save` | `migu_orca_web_api.RequestPreviewSaveView` | RequestPreviewSaveView |
+| POST | `/api/v1/requests/save-confirm` | `migu_orca_web_api.RequestSaveConfirmView` | RequestSaveConfirmView |
 | POST | `/api/v1/requests/<path:request_id>/accept` | `migu_orca_web_api.RequestAcceptView` | RequestAcceptView |
 | POST | `/api/v1/requests/<path:request_id>/cancel` | `migu_orca_web_api.RequestCancelView` | RequestCancelView |
 | POST | `/api/v1/requests/<path:request_id>/modify` | `migu_orca_web_api.RequestModifyView` | RequestModifyView |
@@ -99,6 +100,7 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`save_request`（默认 false）、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "saved_request"?}`；`save_request=false` 时另含 `draft_id` + `draft_revision`（US-194/211：服务端权威草案 opaque id 与单调 revision） | `data_validation_errors`（title 缺失）；`candidate_context_invalid`；保存失败 → `storage_error` |
 | POST `/api/v1/requests/preview-modify` | `draft_id`（US-194，不再收完整 `request`）、`base_revision`（US-211 必填，compare-and-swap）、`patch`、`storage_dir?` | `{"request", "summary", "draft_id", "draft_revision"}` | `invalid_modify_patch_field`；draft 失效 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`（409，error_data 只含 `field`/`current_revision`） |
 | POST `/api/v1/requests/preview-save` | `draft_id`（US-194，一次性预留）、`base_revision`（US-212 必填，预留校验）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | draft 失效/重放 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`；正在保存 → `draft_reserved`（409） |
+| POST `/api/v1/requests/save-confirm` | `draft_id`、`base_revision`、`idempotency_key`、`storage_dir?`（US-214；不接受完整 Request） | `{"outcome": "CONFIRMED", "request", "summary", "handoff": {request_id, status: "ACCEPTED", next_action: "OPEN_TRACKING"}}` | 同 preview-save 的 draft 409；同键不同 payload/操作 → `idempotency_conflict`（409）；确认失败 → `save_confirm_failed`（409，details 只含 `outcome=SAVED_CONFIRM_FAILED`/`request_id`/`retry_action=ACCEPT_SAVED_REQUEST`） |
 | POST `/api/v1/requests/<request_id>/accept` | `request_id`（路径）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 缺失 → `request_not_found`；状态冲突 → `invalid_request_status` |
 | POST `/api/v1/requests/<request_id>/cancel` | `request_id`（路径）、`cancel_reason?`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 同上 |
 | POST `/api/v1/requests/<request_id>/modify` | `request_id`（路径）、`patch`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | `invalid_modify_patch_field` |
@@ -210,6 +212,14 @@ CLI 显式 `--storage-dir` 行为不受影响）。
   终态同键重放同一公开结果；`IN_PROGRESS` 重试先核对已落盘 Request（§7 rule 3）再决定继续
   确认或安全重试保存；同键绑定不同 operation/payload → 409 `idempotency_conflict`，错误不回显
   原始 payload。`idempotency_key` 是 request-scoped opaque 值，只进请求体与页面内存。
+- US-214：新增 `POST /api/v1/requests/save-confirm`，把 US-213 协调器接真实
+  DraftStore/entry-controller 流（`services._build_save_confirm_persist_pending` /
+  `_build_save_confirm_confirm_saved`）。成功返回 `CONFIRMED` + 已保存 ACCEPTED Request +
+  `handoff`（`request_id`/`status=ACCEPTED`/`next_action=OPEN_TRACKING`；Stage 28 不创建
+  tracking record）。持久化成功但确认失败返回 HTTP 409 `save_confirm_failed`，
+  `error_data.details` 只含 `outcome=SAVED_CONFIRM_FAILED`、`request_id`、
+  `retry_action=ACCEPT_SAVED_REQUEST`——已消费 draft_id 与草案内容绝不回显；客户端用既有
+  Request accept 契约重试确认。
 
 ## 5. 前端依赖（Stage 27 迁移后）
 

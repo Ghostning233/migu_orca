@@ -248,6 +248,51 @@ class RequestPreviewSaveResultDTO(_StrictBase):
     saved_request: RequestSnapshotDTO | None = None
 
 
+class RequestSaveConfirmHandoffDTO(_StrictBase):
+    """Public ``handoff`` of a confirmed save (US-214).
+
+    Stage 28 deliberately does **not** create a tracking record (D28-09); the
+    handoff hands the frontend the durable ACCEPTED Request identity so the
+    tracking phase can later build a record idempotently. ``next_action`` is
+    the stable B-B hook.
+    """
+
+    request_id: str
+    status: str
+    next_action: str
+
+
+class RequestSaveConfirmResultDTO(_StrictBase):
+    """Save-confirm success result (US-214).
+
+    ``outcome`` is always ``CONFIRMED`` here (the SAVED_CONFIRM_FAILED branch
+    is returned through the failure envelope's ``error_data``, whose shape is
+    frozen by ``test_dto_contracts``). ``request``/``summary`` carry the saved
+    ACCEPTED Request; ``handoff`` hands the durable public identity onward.
+    """
+
+    outcome: str
+    request: RequestSnapshotDTO
+    summary: RequestSummaryDTO
+    handoff: RequestSaveConfirmHandoffDTO
+
+
+class SaveConfirmFailedErrorDataDTO(_StrictBase):
+    """Failure-envelope ``error_data.details`` whitelist for a saved-but-
+    unconfirmed attempt (US-214).
+
+    Mirrors the Stage 28 PRD §6.3 SAVED_CONFIRM_FAILED contract: the saved
+    Request exists on disk and only the acceptance/confirmation step failed, so
+    the client must retry with the existing Request accept contract. Only the
+    public request_id, the outcome marker and the retry action are allowed;
+    the consumed draft_id and the draft content never appear.
+    """
+
+    outcome: str
+    request_id: str
+    retry_action: str
+
+
 class RequestActionResultDTO(RequestCreateResultDTO):
     """accept/cancel/modify results equal the create result shape."""
 

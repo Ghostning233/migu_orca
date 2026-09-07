@@ -60,6 +60,9 @@ from storage_engine.controllers.history_repository import (
     append_status_history,
     load_status_history,
 )
+from storage_engine.controllers.idempotency_repository import (
+    load_idempotency_record,
+)
 from storage_engine.controllers.preference_repository import save_user_preferences
 from storage_engine.controllers.queue_repository import (
     load_submission_queue,
@@ -3404,6 +3407,166 @@ def test_preview_save_persistence_failure_keeps_draft_for_retry(
     )
     assert third.status_code == 409
     assert third.get_json()["error_type"] == "draft_replayed"
+
+
+def _save_confirm(
+    client: FlaskClient,
+    draft_id: str,
+    base_revision: int,
+    key: str,
+    storage_dir: str | None = "storage",
+):
+    return client.post(
+        "/api/v1/requests/save-confirm",
+        json={
+            "draft_id": draft_id,
+            "base_revision": base_revision,
+            "idempotency_key": key,
+            **({"storage_dir": storage_dir} if storage_dir is not None else {}),
+        },
+    )
+
+
+def test_save_confirm_persists_confirms_and_returns_handoff(tmp_path: Path) -> None:
+    """US-214: one save-confirm call persists, accepts and hands off ACCEPTED."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    issued = client.post(
+        "/api/v1/requests", json={"title": "芙莉莲", "save_request": False}
+    ).get_json()["result"]
+    draft_id = issued["draft_id"]
+    request_id = issued["request"]["request_id"]
+
+    response = _save_confirm(client, draft_id, 1, "view-key-1", _profile(tmp_path, storage_dir.name))
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert result["outcome"] == "CONFIRMED"
+    assert result["request"]["status"] == "ACCEPTED"
+    assert result["request"]["request_id"] == request_id
+    assert result["handoff"]["request_id"] == request_id
+    assert result["handoff"]["status"] == "ACCEPTED"
+    assert result["handoff"]["next_action"] == "OPEN_TRACKING"
+    # On-disk state: one ACCEPTED request + one CONFIRMED idempotency record.
+    saved = load_request_snapshot(load_storage_config(storage_dir), request_id)
+    assert saved["status"] == "ACCEPTED"
+    assert sorted(path.name for path in (storage_dir / "requests").glob("*.json")) == [
+        f"{request_id}.json"
+    ]
+    record = load_idempotency_record(load_storage_config(storage_dir), "view-key-1")
+    assert record is not None
+    assert record["state"] == "CONFIRMED"
+    assert record["request_id"] == request_id
+
+
+def test_save_confirm_same_key_retry_returns_same_request(tmp_path: Path) -> None:
+    """US-214: a same-key retry replays the terminal CONFIRMED outcome."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+    profile = _profile(tmp_path, storage_dir.name)
+
+    first = _save_confirm(client, draft_id, 1, "view-retry-key", profile)
+    assert first.status_code == 200
+    first_handoff = first.get_json()["result"]["handoff"]
+
+    second = _save_confirm(client, draft_id, 1, "view-retry-key", profile)
+    assert second.status_code == 200
+    second_handoff = second.get_json()["result"]["handoff"]
+    assert second_handoff == first_handoff
+    assert sorted(path.name for path in (storage_dir / "requests").glob("*.json")) == [
+        f"{first_handoff['request_id']}.json"
+    ]
+
+
+def test_save_confirm_confirm_failure_returns_saved_confirm_failed_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-214: saved-but-unconfirmed returns the frozen SAVED_CONFIRM_FAILED details."""
+    from apps.migu_orca_web import routes_requests
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    issued = client.post(
+        "/api/v1/requests", json={"title": "芙莉莲", "save_request": False}
+    ).get_json()["result"]
+    draft_id = issued["draft_id"]
+    request_id = issued["request"]["request_id"]
+
+    def failing_confirm(storage_dir_arg: Any) -> Any:
+        def confirm_saved(_request_id: str) -> dict[str, Any]:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认订阅方案可以执行确认操作",
+                "confirm_request",
+                {"status": "PENDING_CONFIRM"},
+            )
+
+        return confirm_saved
+
+    monkeypatch.setattr(routes_requests, "_build_save_confirm_confirm_saved", failing_confirm)
+
+    response = _save_confirm(client, draft_id, 1, "view-confirm-fail", _profile(tmp_path, storage_dir.name))
+    payload = response.get_json()
+    assert response.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "save_confirm_failed"
+    assert payload["error_data"]["details"] == {
+        "outcome": "SAVED_CONFIRM_FAILED",
+        "request_id": request_id,
+        "retry_action": "ACCEPT_SAVED_REQUEST",
+    }
+    serialized = str(payload)
+    assert draft_id not in serialized
+    assert str(tmp_path) not in serialized
+    # The saved request stays PENDING_CONFIRM (accept never ran) and is on disk.
+    assert load_request_snapshot(load_storage_config(storage_dir), request_id)["status"] == "PENDING_CONFIRM"
+
+
+def test_save_confirm_persist_failure_releases_draft_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-214: a persistence failure keeps the draft; a same-id/key retry succeeds."""
+    from apps.migu_orca_entry.controllers.entry_controller import apply_request_save_action as original_save
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+    profile = _profile(tmp_path, storage_dir.name)
+    failures = {"count": 0}
+
+    def flaky_save(result: dict[str, Any], save_request: bool, **kwargs: object) -> dict[str, Any]:
+        if failures["count"] == 0:
+            failures["count"] += 1
+            return {
+                "success": False,
+                "request": None,
+                "error": Stage1Error(
+                    "storage_error",
+                    "模拟写盘失败",
+                    "save_request_snapshot",
+                    {"reason": "disk full"},
+                ).as_dict(),
+            }
+        return original_save(result, save_request, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.services.apply_request_save_action", flaky_save
+    )
+
+    first = _save_confirm(client, draft_id, 1, "view-persist-fail", profile)
+    assert first.status_code == 500
+    assert first.get_json()["error_type"] == "storage_error"
+
+    second = _save_confirm(client, draft_id, 1, "view-persist-fail", profile)
+    assert second.status_code == 200
+    result = second.get_json()["result"]
+    assert result["outcome"] == "CONFIRMED"
+    # Exactly one Request exists.
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 1
 
 
 def test_create_request_returns_validation_error_for_missing_title() -> None:

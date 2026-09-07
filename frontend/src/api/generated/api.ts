@@ -181,6 +181,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/requests/save-confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 保存并确认单个订阅方案草案
+         * @description US-214：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与 handoff（Stage 28 不创建 tracking record，D28-09）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。
+         */
+        post: operations["confirmRequestSave"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/batches/{batch_id}/accept": {
         parameters: {
             query?: never;
@@ -3994,6 +4014,430 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "invalid_request_status",
                      *       "error_message": "只有待确认的订阅草案可以保存",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    confirmRequestSave: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 保存并确认单个订阅方案草案 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "base_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /** @description 生成/修改时服务端签发的 opaque draft_id（一次性，成功后失效）。 */
+                    draft_id: string;
+                    /** @description 客户端最后观察到的草案 revision（US-214，预留校验；不匹配返回 409 draft_revision_conflict）。 */
+                    base_revision: number;
+                    /** @description 一次明确客户端操作生成的 opaque 幂等键（US-213/214，request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。 */
+                    idempotency_key: string;
+                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "outcome": "示例",
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
+                     *         "summary": {
+                     *           "request_id": "示例",
+                     *           "status": "示例",
+                     *           "bangumi_title": "示例",
+                     *           "candidate_subtitle_groups": [
+                     *             {}
+                     *           ],
+                     *           "selected_subtitle_group": "示例",
+                     *           "effective_seed_count": 1,
+                     *           "expected_folder_name": "示例",
+                     *           "warnings": []
+                     *         },
+                     *         "handoff": {
+                     *           "request_id": "示例",
+                     *           "status": "示例",
+                     *           "next_action": "示例"
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * RequestSaveConfirmResultDTO
+                         * @description Save-confirm success result (US-214).
+                         *
+                         *     ``outcome`` is always ``CONFIRMED`` here (the SAVED_CONFIRM_FAILED branch
+                         *     is returned through the failure envelope's ``error_data``, whose shape is
+                         *     frozen by ``test_dto_contracts``). ``request``/``summary`` carry the saved
+                         *     ACCEPTED Request; ``handoff`` hands the durable public identity onward.
+                         */
+                        result: {
+                            /** Outcome */
+                            outcome: string;
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
+                            request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                            /**
+                             * RequestSummaryDTO
+                             * @description Public ``summary`` shape produced by ``summarize_request``.
+                             */
+                            summary: {
+                                /** Request Id */
+                                request_id: string | null;
+                                /** Status */
+                                status: string | null;
+                                /** Bangumi Title */
+                                bangumi_title: string | null;
+                                /** Candidate Subtitle Groups */
+                                candidate_subtitle_groups: {
+                                    [key: string]: unknown;
+                                }[];
+                                /** Selected Subtitle Group */
+                                selected_subtitle_group: string | null;
+                                /** Effective Seed Count */
+                                effective_seed_count: number;
+                                /** Expected Folder Name */
+                                expected_folder_name: string | null;
+                                /** Warnings */
+                                warnings: string[];
+                            };
+                            /**
+                             * RequestSaveConfirmHandoffDTO
+                             * @description Public ``handoff`` of a confirmed save (US-214).
+                             *
+                             *     Stage 28 deliberately does **not** create a tracking record (D28-09); the
+                             *     handoff hands the frontend the durable ACCEPTED Request identity so the
+                             *     tracking phase can later build a record idempotently. ``next_action`` is
+                             *     the stable B-B hook.
+                             */
+                            handoff: {
+                                /** Request Id */
+                                request_id: string;
+                                /** Status */
+                                status: string;
+                                /** Next Action */
+                                next_action: string;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "invalid_storage_dir",
+                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description invalid_request_status: 只有待确认的订阅方案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 / draft_revision_conflict: 草案已被更新，请基于最新版本重试 / draft_reserved: 订阅草案正在保存中，请稍后重试 / idempotency_conflict: 相同的幂等键不能用于不同的保存确认操作 / save_confirm_failed: 订阅方案已保存但确认失败，请对已保存的方案重试确认 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "invalid_request_status",
+                     *       "error_message": "只有待确认的订阅方案可以保存",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

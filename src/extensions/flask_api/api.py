@@ -83,6 +83,11 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     "draft_revision_conflict",
     "draft_reserved",
     "idempotency_conflict",
+    # US-214: the Request was persisted but the confirmation step failed. The
+    # outcome is durable and terminal for the key (SAVED_CONFIRM_FAILED); a
+    # retry with the accept action converges on the same saved Request, so the
+    # conflict-with-server-state semantics (409) fit better than a 500.
+    "save_confirm_failed",
 }
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {

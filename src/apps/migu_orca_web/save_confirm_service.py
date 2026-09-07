@@ -66,6 +66,13 @@ STATE_IN_PROGRESS = IDEMPOTENCY_STATE_IN_PROGRESS
 STATE_SAVED_CONFIRM_FAILED = IDEMPOTENCY_STATE_SAVED_CONFIRM_FAILED
 STATE_CONFIRMED = IDEMPOTENCY_STATE_CONFIRMED
 
+#: Stable public strings for the save-confirm HTTP contract (US-214). The
+#: frontend branches on these; they are frozen by golden/DTO tests.
+HANDOFF_STATUS_ACCEPTED = "ACCEPTED"
+HANDOFF_NEXT_ACTION_OPEN_TRACKING = "OPEN_TRACKING"
+RETRY_ACTION_ACCEPT_SAVED_REQUEST = "ACCEPT_SAVED_REQUEST"
+ERROR_TYPE_SAVE_CONFIRM_FAILED = "save_confirm_failed"
+
 _TERMINAL_STATES = frozenset({STATE_SAVED_CONFIRM_FAILED, STATE_CONFIRMED})
 
 
@@ -387,12 +394,43 @@ def _idempotency_conflict(record: dict[str, Any], reason: str) -> Stage1Error:
     )
 
 
+def build_saved_confirm_failed_error(
+    request_id: str,
+    *,
+    failed_step: str = "save_confirm",
+) -> Stage1Error:
+    """Build the SAVED_CONFIRM_FAILED failure envelope (US-214).
+
+    The Request is already durable (PENDING_CONFIRM on disk) and only the
+    acceptance/confirmation step failed. The error surfaces through the normal
+    envelope with the PRD §6.3 ``error_data.details`` whitelist:
+    ``{outcome, request_id, retry_action}`` — never the consumed draft_id or
+    any draft content. The client retries confirmation through the existing
+    Request accept endpoint (``ACCEPT_SAVED_REQUEST``).
+    """
+    return Stage1Error(
+        ERROR_TYPE_SAVE_CONFIRM_FAILED,
+        "订阅方案已保存但确认失败，请对已保存的方案重试确认",
+        failed_step,
+        {
+            "outcome": STATE_SAVED_CONFIRM_FAILED,
+            "request_id": request_id,
+            "retry_action": RETRY_ACTION_ACCEPT_SAVED_REQUEST,
+        },
+    )
+
+
 __all__ = [
     "OPERATION_SAVE_CONFIRM",
     "STATE_CONFIRMED",
     "STATE_IN_PROGRESS",
     "STATE_SAVED_CONFIRM_FAILED",
+    "HANDOFF_STATUS_ACCEPTED",
+    "HANDOFF_NEXT_ACTION_OPEN_TRACKING",
+    "RETRY_ACTION_ACCEPT_SAVED_REQUEST",
+    "ERROR_TYPE_SAVE_CONFIRM_FAILED",
     "SaveConfirmOutcome",
+    "build_saved_confirm_failed_error",
     "compute_request_fingerprint",
     "resolve_in_progress_retry",
     "run_save_confirm",

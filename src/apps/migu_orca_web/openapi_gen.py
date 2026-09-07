@@ -54,6 +54,7 @@ from apps.migu_orca_web.api_contract import (
     RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
+    RequestSaveConfirmResultDTO,
 )
 
 OPENAPI_VERSION = "3.1.0"
@@ -433,6 +434,47 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_replayed": "订阅草案已被保存，请勿重复保存",
                 "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
                 "draft_reserved": "订阅草案正在保存中，请稍后重试",
+            },
+        },
+    },
+    "POST /api/v1/requests/save-confirm": {
+        "operationId": "confirmRequestSave",
+        "summary": "保存并确认单个订阅方案草案",
+        "description": "US-214：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与 handoff（Stage 28 不创建 tracking record，D28-09）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。",
+        "requestBody": {
+            "type": "object",
+            "required": ["draft_id", "base_revision", "idempotency_key"],
+            "properties": {
+                "draft_id": {
+                    "type": "string",
+                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，成功后失效）。",
+                    "x-request-scoped": True,
+                },
+                "base_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的草案 revision（US-214，预留校验；不匹配返回 409 draft_revision_conflict）。",
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": "一次明确客户端操作生成的 opaque 幂等键（US-213/214，request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。",
+                    "x-request-scoped": True,
+                },
+                "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
+            },
+        },
+        "success": RequestSaveConfirmResultDTO,
+        "errors": {
+            "400": {"invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录"},
+            "409": {
+                "invalid_request_status": "只有待确认的订阅方案可以保存",
+                "draft_expired": "订阅草案已过期或不存在，请重新生成",
+                "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
+                "draft_replayed": "订阅草案已被保存，请勿重复保存",
+                "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
+                "draft_reserved": "订阅草案正在保存中，请稍后重试",
+                "idempotency_conflict": "相同的幂等键不能用于不同的保存确认操作",
+                "save_confirm_failed": "订阅方案已保存但确认失败，请对已保存的方案重试确认",
             },
         },
     },
