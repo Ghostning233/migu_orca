@@ -18,7 +18,7 @@
       ],
       "priority": 1,
       "passes": true,
-      "notes": "已实现 DraftHandle(revision=1)/DraftRead/compare_and_swap + REASON_REVISION_CONFLICT；get 返回当前 revision；TTL/LRU/evict/replay/clear 兼容；单元测试 14 例通过。"
+      "notes": "已实现 DraftHandle(revision=1)/DraftRead/compare_and_swap + REASON_REVISION_CONFLICT；get 返回当前 revision；全部生命周期操作由 RLock 串行化，真实并发同 revision 双写仅一项成功；读写边界深拷贝防止绕过 CAS 修改；TTL/LRU/evict/replay/clear 兼容；单元测试 16 例通过。"
     },
     {
       "id": "US-211",

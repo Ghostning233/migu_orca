@@ -44,8 +44,10 @@ Security/robustness properties
 
 from collections import OrderedDict
 from collections.abc import Callable
+from copy import deepcopy
 from dataclasses import dataclass
 from secrets import token_urlsafe
+from threading import RLock
 from time import monotonic
 from typing import Any
 
@@ -125,6 +127,10 @@ class DraftStore:
         self._ttl_seconds = ttl_seconds
         self._max_entries = max_entries
         self._now = now or monotonic
+        # Flask may serve multiple requests concurrently.  Every lifecycle
+        # transition must therefore share one lock; otherwise two writers can
+        # both observe the same revision and both report a successful CAS.
+        self._lock = RLock()
         self._entries: OrderedDict[str, _DraftEntry] = OrderedDict()
         #: Tombstones for ids that disappeared: draft_id -> (reason, at).
         #: ``replayed`` for a consumed save, ``expired``/``evicted`` for a
@@ -138,19 +144,20 @@ class DraftStore:
 
         Evicts expired entries first, then the oldest entry when at capacity.
         """
-        self._purge()
-        while len(self._entries) >= self._max_entries:
-            evicted_id, _ = self._entries.popitem(last=False)
-            self._tombstones[evicted_id] = (REASON_EVICTED, self._now())
-        draft_id = token_urlsafe(24)
-        now = self._now()
-        self._entries[draft_id] = _DraftEntry(
-            request=request,
-            revision=1,
-            created_at=now,
-            used_at=now,
-        )
-        return DraftHandle(draft_id=draft_id, revision=1)
+        with self._lock:
+            self._purge()
+            while len(self._entries) >= self._max_entries:
+                evicted_id, _ = self._entries.popitem(last=False)
+                self._tombstones[evicted_id] = (REASON_EVICTED, self._now())
+            draft_id = token_urlsafe(24)
+            now = self._now()
+            self._entries[draft_id] = _DraftEntry(
+                request=deepcopy(request),
+                revision=1,
+                created_at=now,
+                used_at=now,
+            )
+            return DraftHandle(draft_id=draft_id, revision=1)
 
     def get(self, draft_id: str | None) -> tuple[DraftRead | None, str]:
         """Return ``(DraftRead, reason)`` for a dry-run modify (never consumes).
@@ -160,20 +167,24 @@ class DraftStore:
         ``replayed`` when it was consumed by an earlier save, ``expired``/
         ``evicted`` when it was purged/evicted, otherwise ``unknown``.
         """
-        self._purge()
-        if not draft_id:
-            return None, REASON_UNKNOWN
-        entry = self._entries.get(draft_id)
-        if entry is None:
-            return None, self._missing_reason(draft_id)
-        self._entries.move_to_end(draft_id)
-        self._entries[draft_id] = _DraftEntry(
-            request=entry.request,
-            revision=entry.revision,
-            created_at=entry.created_at,
-            used_at=self._now(),
-        )
-        return DraftRead(request=entry.request, revision=entry.revision), REASON_OK
+        with self._lock:
+            self._purge()
+            if not draft_id:
+                return None, REASON_UNKNOWN
+            entry = self._entries.get(draft_id)
+            if entry is None:
+                return None, self._missing_reason(draft_id)
+            self._entries.move_to_end(draft_id)
+            self._entries[draft_id] = _DraftEntry(
+                request=entry.request,
+                revision=entry.revision,
+                created_at=entry.created_at,
+                used_at=self._now(),
+            )
+            return (
+                DraftRead(request=deepcopy(entry.request), revision=entry.revision),
+                REASON_OK,
+            )
 
     def compare_and_swap(
         self,
@@ -190,24 +201,25 @@ class DraftStore:
         unknown id returns ``(None, draft_* reason)``; the caller maps it to a
         stable 409 error.
         """
-        self._purge()
-        if not draft_id:
-            return None, REASON_UNKNOWN
-        entry = self._entries.get(draft_id)
-        if entry is None:
-            return None, self._missing_reason(draft_id)
-        if entry.revision != base_revision:
-            return None, REASON_REVISION_CONFLICT
-        new_revision = entry.revision + 1
-        now = self._now()
-        self._entries[draft_id] = _DraftEntry(
-            request=request,
-            revision=new_revision,
-            created_at=entry.created_at,
-            used_at=now,
-        )
-        self._entries.move_to_end(draft_id)
-        return new_revision, REASON_OK
+        with self._lock:
+            self._purge()
+            if not draft_id:
+                return None, REASON_UNKNOWN
+            entry = self._entries.get(draft_id)
+            if entry is None:
+                return None, self._missing_reason(draft_id)
+            if entry.revision != base_revision:
+                return None, REASON_REVISION_CONFLICT
+            new_revision = entry.revision + 1
+            now = self._now()
+            self._entries[draft_id] = _DraftEntry(
+                request=deepcopy(request),
+                revision=new_revision,
+                created_at=entry.created_at,
+                used_at=now,
+            )
+            self._entries.move_to_end(draft_id)
+            return new_revision, REASON_OK
 
     def consume_for_save(self, draft_id: str | None) -> tuple[dict[str, Any] | None, str]:
         """Atomically remove and return a draft if it is still usable.
@@ -216,14 +228,15 @@ class DraftStore:
         is detected as ``replayed``. An expired/evicted/unknown id returns a
         ``draft_*`` reason; the caller maps it to a stable 409 error.
         """
-        self._purge()
-        if not draft_id:
-            return None, REASON_UNKNOWN
-        entry = self._entries.pop(draft_id, None)
-        if entry is None:
-            return None, self._missing_reason(draft_id)
-        self._tombstones[draft_id] = (REASON_REPLAYED, self._now())
-        return entry.request, REASON_OK
+        with self._lock:
+            self._purge()
+            if not draft_id:
+                return None, REASON_UNKNOWN
+            entry = self._entries.pop(draft_id, None)
+            if entry is None:
+                return None, self._missing_reason(draft_id)
+            self._tombstones[draft_id] = (REASON_REPLAYED, self._now())
+            return entry.request, REASON_OK
 
     def update(self, draft_id: str, request: dict[str, Any]) -> bool:
         """Replace the stored payload for an existing draft (legacy helper).
@@ -235,29 +248,33 @@ class DraftStore:
         internal primitive ``compare_and_swap`` builds on. Returns False when
         the draft is no longer present (expired/evicted/consumed).
         """
-        if not draft_id:
-            return False
-        entry = self._entries.get(draft_id)
-        if entry is None:
-            return False
-        new_revision = entry.revision + 1
-        now = self._now()
-        self._entries[draft_id] = _DraftEntry(
-            request=request,
-            revision=new_revision,
-            created_at=entry.created_at,
-            used_at=now,
-        )
-        self._entries.move_to_end(draft_id)
-        return True
+        with self._lock:
+            self._purge()
+            if not draft_id:
+                return False
+            entry = self._entries.get(draft_id)
+            if entry is None:
+                return False
+            new_revision = entry.revision + 1
+            now = self._now()
+            self._entries[draft_id] = _DraftEntry(
+                request=deepcopy(request),
+                revision=new_revision,
+                created_at=entry.created_at,
+                used_at=now,
+            )
+            self._entries.move_to_end(draft_id)
+            return True
 
     def clear(self) -> None:
-        self._entries.clear()
-        self._tombstones.clear()
+        with self._lock:
+            self._entries.clear()
+            self._tombstones.clear()
 
     def __len__(self) -> int:
-        self._purge()
-        return len(self._entries)
+        with self._lock:
+            self._purge()
+            return len(self._entries)
 
     # -- internals ----------------------------------------------------------
 

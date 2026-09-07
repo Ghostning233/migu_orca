@@ -9,6 +9,9 @@ compare-and-swap primitive and the reason codes routes map to stable 409
 ``draft_*`` errors.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
+from time import sleep
 from typing import Any
 
 from apps.migu_orca_web.drafts import (
@@ -30,6 +33,21 @@ def _request(request_id: str = "req-1") -> dict[str, Any]:
         "status": "PENDING_CONFIRM",
         "input": {"raw_title": "示例"},
     }
+
+
+class _SlowClock:
+    """Yield inside CAS so an implementation without a lock loses an update."""
+
+    def __init__(self) -> None:
+        self._armed = Event()
+
+    def arm(self) -> None:
+        self._armed.set()
+
+    def __call__(self) -> float:
+        if self._armed.is_set():
+            sleep(0.02)
+        return 1_000.0
 
 
 def test_issue_returns_opaque_handle_with_revision_1() -> None:
@@ -69,6 +87,24 @@ def test_get_does_not_consume_or_bump_revision() -> None:
     request, reason = store.consume_for_save(draft_id)
     assert reason == REASON_OK
     assert request is not None
+
+
+def test_get_returns_an_isolated_snapshot() -> None:
+    store = DraftStore()
+    original = _request()
+    draft_id = store.issue(original).draft_id
+
+    original["input"]["raw_title"] = "调用方后来修改"
+    draft_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert draft_read is not None
+    assert draft_read.request["input"]["raw_title"] == "示例"
+
+    draft_read.request["input"]["raw_title"] = "读取方绕过 CAS 修改"
+    second_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert second_read is not None
+    assert second_read.request["input"]["raw_title"] == "示例"
 
 
 def test_compare_and_swap_bumps_revision_on_success() -> None:
@@ -126,6 +162,32 @@ def test_compare_and_swap_stale_base_is_a_revision_conflict() -> None:
     assert draft_read is not None
     assert draft_read.request["request_id"] == "req-a"
     assert draft_read.revision == 2
+
+
+def test_compare_and_swap_is_atomic_for_concurrent_writers() -> None:
+    """Only one writer may commit when both start from the same revision."""
+    slow_clock = _SlowClock()
+    store = DraftStore(now=slow_clock)
+    draft_id = store.issue(_request("req-original")).draft_id
+    slow_clock.arm()
+    start = Barrier(2)
+
+    def write(request_id: str) -> tuple[int | None, str]:
+        start.wait(timeout=2)
+        return store.compare_and_swap(draft_id, 1, _request(request_id))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(write, ("req-a", "req-b")))
+
+    assert sorted(results, key=lambda result: result[1]) == [
+        (2, REASON_OK),
+        (None, REASON_REVISION_CONFLICT),
+    ]
+    draft_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert draft_read is not None
+    assert draft_read.revision == 2
+    assert draft_read.request["request_id"] in {"req-a", "req-b"}
 
 
 def test_compare_and_swap_unknown_draft_returns_unknown() -> None:

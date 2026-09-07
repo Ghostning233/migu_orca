@@ -106,3 +106,27 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - browser 测试要重新 `npm run build`（SPA 从 frontend/dist 服务），改了 .vue 后不
       build 会跑旧产物导致「预览修改失败 400」这类误报。
 ---
+
+## [2026-09-07 23:38] - US-210/US-211 并发验收修复
+Thread: current Codex project-management session
+- What was implemented
+  - 审计发现原 `compare_and_swap` 只有 revision 检查，没有并发锁；两个 Flask 请求可能同时
+    读取同一 revision、同时返回成功并发生静默覆盖。现在 `DraftStore` 的 issue/get/CAS/
+    consume/update/clear/len 全部通过同一 `RLock` 保护，revision 校验与替换成为单一临界区。
+  - issue/CAS/update 入库及 get 出库均深拷贝 Request，避免调用方持有可变引用并绕过 CAS
+    修改服务端权威草案。legacy update 同时补齐 TTL purge，过期语义与文档一致。
+  - 新增稳定的真实线程并发测试：两个 writer 同时使用 base_revision=1 时，严格断言仅一个
+    返回 revision=2/ok，另一个返回 revision_conflict；并新增读写快照隔离测试。
+- Verification
+  - `uv run pytest tests/api_contract/test_draft_store.py -q` → 16 passed
+  - `uv run pytest -m "not browser" -q` → 1030 passed, 133 deselected
+  - `uv run pytest -q` → 1163 passed（含 133 项真实 Chromium 浏览器测试）
+  - `uv run ruff check src tests` → passed
+  - `uv run python -m compileall -q src tests` → passed
+  - 本次仅修改后端内存存储与 API contract 单测，无前端行为/构建产物变化。
+- **Learnings for future iterations:**
+  - revision check + replace 必须处在同一个锁保护的临界区；顺序 stale-write 测试不能证明 CAS
+    在多线程 Flask 服务下具有原子性。
+  - DraftStore 返回可变 dict 时必须返回隔离快照，否则调用方可在不增加 revision 的情况下改变
+    权威 payload，破坏后续 US-212 reservation 与 US-213 幂等指纹的可靠性。
+---
