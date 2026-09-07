@@ -159,8 +159,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现 Stage 28 契约回归与文档 handoff：同步 README/docs-README/主 PRD(M01/M09/M11/M13 行+路线图+D-MAIN-10+下一步)/architecture（DraftStore revision+预留生命周期+idempotency repository+save-confirm 边界）/M01（Stage 28 草案一致性扩展）/M09（save-confirm 组合确认小节）/M11（9.1 幂等记录）/M13（Stage 28 行+UI 调整+敏感边界）/backlog（BL-025 B-A 已完成）/future stages（Stage 28 handoff：B-B 统一追番记录）/docs/api（README+endpoint_inventory header）/frontend-ux 两份候选 PRD/work-goals。输出 B-B tracking handoff：Stage 28 只返回 ACCEPTED Request handoff（request_id+status=ACCEPTED+next_action=OPEN_TRACKING），不创建或伪造 tracking record；B-B 从持久化 ACCEPTED Request 与 handoff 幂等建立统一 tracking record（记录于 future_stages/stage28 PRD/主 PRD/M09/endpoint_inventory）。新旧 preview/save/accept/batch 端点兼容 + 全部非浏览器（1127 passed）+ 真实 Chromium（133 passed）回归通过；前端 typecheck/lint/unit(261)/api:check/build 全绿；compileall/ruff/OpenAPI drift/git diff --check 通过。实现偏差：契约内最小扩展，无范围外 feature（未实现 tracking/AB 管理/新页面视觉）。剩余风险：draft 单进程内存权威（多 worker 需外部化）、批量上限只约束 parse 入口、safe-info total_episodes 无数据源恒 null。仓库根 .migu_orca/storage 不存在，无未提交 build/trace/截图。Stage 28 prd/progress 已归档至 scripts/ralph/archive/2026-09-08-stage28-draft-consistency/，US-210～US-218 全部 passes=true。"
     }
   ]
 }

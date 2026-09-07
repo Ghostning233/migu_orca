@@ -27,10 +27,10 @@
   字体、间距、组件状态和桌面布局基线见[前端设计 Token V1](design/frontend-ux-design-tokens-v1.md)。
 - 候选开发边界见[前端体验重构：后端支撑 PRD](MiGuOrca_frontend_ux_backend_support_PRD.md)与
   [前端体验重构：前端分片实施 PRD](MiGuOrca_frontend_ux_implementation_PRD.md)。两份文档尚待
-  分包评审；其中 B-A 已确认为[Stage 28：草案一致性与原子保存确认](MiGuOrca_stage28_draft_consistency_PRD.md)，
+  分包评审；其中 B-A 已完成并交付为[Stage 28：草案一致性与原子保存确认](MiGuOrca_stage28_draft_consistency_PRD.md)，
   其余工作包仍未分配 Stage。
 
-截至 2026-08-31，最近完成阶段为 Stage 27「前端工程化迁移与页面重构」（US-197～US-209 全部完成，默认 Web 入口为新前端 `/app/*`，旧 `/index`、`/settings` Jinja 页面与 `app.js` 已在 US-209 删除；入口路由固定重定向到 SPA）。
+截至 2026-09-08，最近完成阶段为 Stage 28「草案一致性与原子保存确认」（US-210～US-218 全部完成：服务端草案 revision 与 CAS、保存预留生命周期、持久化 save-confirm 幂等记录、单番/批量 save-confirm、36 部服务端边界与 Request safe-info 白名单；Stage 28 只返回 ACCEPTED handoff，不创建 tracking record）。
 
 ## Stage PRD
 
@@ -42,7 +42,7 @@
 - Stage 25：正式番名、季数证据与共享查询计划
 - Stage 26：Web API 契约、服务端安全边界与前端迁移基线（已完成）
 - Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（US-197～US-209 全部完成，旧前端已删除）
-- Stage 28：草案一致性与原子保存确认（已规划，US-210～US-218，待独立开发会话执行）
+- Stage 28：草案一致性与原子保存确认（US-210～US-218 全部完成，已归档；只返回 ACCEPTED handoff，不创建 tracking record）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

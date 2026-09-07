@@ -29,7 +29,7 @@
 | 17 | BL-018 | 正式番名与季数解析 | 已完成 (Stage 25, 2026-08-27) |
 | 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
 | 19 | BL-024 | 前端工程化迁移与页面重构 | 已完成 (Stage 27, 2026-08-31) |
-| 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | 部分已规划：B-A 为 Stage 28；B-B～B-D 待评审 |
+| 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | 部分已完成：B-A 为 Stage 28（已完成，2026-09-08）；B-B～B-D 待评审 |
 | 21 | BL-026 | 桌面端前端体验分片重构 | 候选，PRD 待 Gate 4 评审 |
 | 22 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
@@ -471,23 +471,32 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-025: 前端体验重构的后端支撑与 Auto Bangumi 管理契约
 
-- 状态：B-A 已确认为 Stage 28；B-B～B-D 仍待 Gate 4 评审
+- 状态：B-A 已完成 (Stage 28, 2026-09-08)；B-B～B-D 仍待 Gate 4 评审
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：20，P0
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_backend_support_PRD.md`
 - Stage 28 执行 PRD：`docs/MiGuOrca_stage28_draft_consistency_PRD.md`
+- 执行分支：`ralph/stage28-draft-consistency`；Ralph stories 为 US-210～US-218
 
-候选范围：
+完成情况（Stage 28）：
 
-- 为服务端权威 draft 增加 revision，提供单番/批量“保存并确认”组合契约和 36 部服务端上限。
-- 建立统一 tracking record、提交前复核、单番/批量一致的幂等提交、超时确认与人工恢复。
-- 以 Auto Bangumi 3.1.18 为完整管理基线，增加逐项 capability、稳定 DTO、外部 ID 映射、
-  列表/详情/修改/启停/删除与 RSS 刷新。
-- 提供 Request “全部信息”专用安全白名单 DTO，保持凭据 request-scoped 和所有错误脱敏。
+- 为服务端权威 draft 增加单调 revision（签发为 1、成功 CAS 修改 +1），`preview-modify` 必填
+  `base_revision` 做 compare-and-swap（过期 base → 409 `draft_revision_conflict`，只报
+  field/current_revision）。
+- `preview-save`/save-confirm 改为「预留 → 持久化 → 提交/释放」：写盘失败保留原 revision 可重试，
+  正在保存 → 409 `draft_reserved`，重放 → 409 `draft_replayed`。
+- storage engine 新增持久化 save-confirm 幂等记录（`<storage>/idempotency/`，非敏感白名单字段，
+  终态同键重放），单番 `POST /api/v1/requests/save-confirm` 与批量
+  `POST /api/v1/batches/{batch_id}/save-confirm` 一次完成校验/保存/确认/幂等提交，
+  批量 parse 强制 1～36 部服务端边界（超限 → 400 `batch_limit_exceeded`）。
+- 新增 `GET /api/v1/requests/{request_id}/safe-info` 严格白名单 DTO（`extra="forbid"`）作为
+  “全部信息”唯一安全数据源。成功 handoff 只返回 `request_id` + `ACCEPTED`，**不创建或伪造
+  tracking record**。
 
 不包含数据库、后台 worker、未保存批量会话恢复、当前已更新集数、移动端或媒体文件删除。
-B-A 已按 US-210～US-218 独立进入 Stage 28；B-B～B-D 继续分别评审，不能把 tracking 迁移和
-全部外部写动作追加回 Stage 28。
+B-A 已按 US-210～US-218 独立完成 Stage 28；B-B～B-D 继续分别评审，不能把 tracking 迁移和
+全部外部写动作追加回 Stage 28。B-B tracking 阶段可从持久化 ACCEPTED Request 与 handoff
+幂等建立统一 tracking record。
 
 ### BL-026: 桌面端前端体验分片重构
 

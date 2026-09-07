@@ -141,6 +141,20 @@ Stage 18 预览草案扩展：
 - 预览草案的修改范围与已保存 Request 的受限修改一致（`selected_subtitle_group`、`filter_rule`、`expected_folder_name`），并应用相同的 `use_regex`/`case_sensitive` 筛选语义。
 - 用户可见 `error_message` 已中文化（例如「只有待确认订阅方案可以执行确认操作」「只有待确认或已确认订阅方案可以修改」），内部字段名与 API 字段保持不变。
 
+Stage 28 草案一致性扩展：
+
+- 每个服务端权威草案带单调 revision（`DraftStore.issue` 签发 `revision=1`，成功
+  compare-and-swap 修改 +1）。`POST /api/v1/requests/preview-modify` 请求必填 `base_revision`
+  （`ge=1`），服务端用 `compare_and_swap(draft_id, base_revision, request)` 原子替换；
+  base 过期 → 409 `draft_revision_conflict`，`error_data` 只含 `field=base_revision` 与
+  `current_revision`，绝不回显 draft_id 或草案内容。乱序旧重算请求因此不能覆盖最新草案。
+- 保存不再先消费草案：`DraftStore` 提供 `reserve_for_save`/`commit_save`/`release_save`
+  生命周期。`preview-save`/save-confirm 先按 `draft_id` + `base_revision` 预留草案，只有
+  Request 持久化成功后才 `commit_save`（写重放 tombstone）；持久化异常 `release_save` 并保留
+  原 revision，同一草案写盘失败后可重试。预留期间草案不可被 get/CAS/consume/逐出/过期处理，
+  其他修改或保存返回稳定 409（`draft_reserved`/`draft_revision_conflict`/`draft_replayed`）。
+- `draft_id`、revision 与幂等键只在请求体和组件内存中流转，绝不进入 URL 或浏览器 storage。
+
 ## 7. 异常场景
 
 | 场景 | 处理方式 |

@@ -26,7 +26,9 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
 
 ## Stage 27 类型化客户端（US-198）
 
-Stage 27 前端只通过 OpenAPI 生成 TypeScript 类型，不手写第二套响应 interface：
+Stage 27 前端只通过 OpenAPI 生成 TypeScript 类型，不手写第二套响应 interface；Stage 28 在
+同一契约基线上新增单番/批量 save-confirm、36 部边界与 Request safe-info 端点，均同步
+OpenAPI/生成 client/endpoint inventory。
 
 ```bash
 cd frontend

@@ -2,7 +2,7 @@
 
 ## 1. 模块目标
 
-M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7～26 已逐步完成 Flask Web UI、Request 操作、Settings、真实 MiKan 候选、可编辑预览、批量工作台、提交前队列、偏好展示、媒体缓存、AutoBangumi 兼容、标题季数解析展示和 Web API 契约固化。单个/批量入口通过分段控件管理，标题解析、真实候选和订阅草案状态明确分离；Stage 27 已在 OpenAPI/DTO 基线上把页面迁移到独立前端工程（Vue 3 + TypeScript + Vite，Flask 在 `/app/` 同源托管），并删除旧 Flask/Jinja 页面与 `app.js`。
+M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确认操作、管理配置和查看历史记录。Stage 7～26 已逐步完成 Flask Web UI、Request 操作、Settings、真实 MiKan 候选、可编辑预览、批量工作台、提交前队列、偏好展示、媒体缓存、AutoBangumi 兼容、标题季数解析展示和 Web API 契约固化。单个/批量入口通过分段控件管理，标题解析、真实候选和订阅草案状态明确分离；Stage 27 已在 OpenAPI/DTO 基线上把页面迁移到独立前端工程（Vue 3 + TypeScript + Vite，Flask 在 `/app/` 同源托管），并删除旧 Flask/Jinja 页面与 `app.js`；Stage 28 已接入草案 revision、可靠保存与保存确认，`draft_id`/revision/idempotency_key 只在页面内存流转。
 
 ## 2. 模块边界
 
@@ -55,8 +55,9 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 25 | 正式番名与季数解析 | 已接入 | 单个/批量入口展示共享解析摘要、实际查询和季数证据；非第一季缺少公开证据时要求明确确认，冲突候选不可选择 |
 | Stage 26 | Web API 契约固化与服务端边界治理 | 已接入 | `/api/v1` 端点清单与 golden contract 冻结、响应 DTO 与 OpenAPI 生成；稳定 HTTP 状态（400/404/409/401/502/503/504/500）；Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）；未保存草案由服务端 DraftStore 权威持有，客户端只持 opaque `draft_id`；旧页面在不改变主要视觉与用户流程的前提下保持兼容 |
 | Stage 27 | 前端工程化迁移与页面重构 | 已接入 | Vue 3 + TypeScript(strict) + Vite 独立前端工程（`frontend/`，Flask 在 `/app/` 同源托管，SPA fallback 只接管 `/app/*`）；4 条 SPA 路由（工作台/订阅方案/提交队列/Settings）与统一 API transport；全部 Web 旅程迁移完成（Settings/Request 列表与详情/单个与批量搜索/草案/提交队列）；入口路由固定重定向到 SPA；US-209 删除旧 `app.js`、旧 Jinja 主模板与无用 CSS/测试 helper |
+| Stage 28 | 草案一致性与原子保存确认 | 已接入 | 草案 `draft_id`/`draft_revision`/`idempotency_key` 只在组件内存维护（父组件持有 revision，`changed`/`draft-changed` 事件回写批量卡片），`preview-modify` 发送 `base_revision`、`preview-save` 预留草案；保存失败保留草案面板可重试（仅 `draft_expired` 等确认失效才清除）；单番/批量 save-confirm 一次完成保存确认，返回 `CONFIRMED` + ACCEPTED handoff（Stage 28 不创建 tracking） |
 
-以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 20 的提交前队列只展示队列项目标题、状态、尝试次数、时间和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径必须被忽略或脱敏，AB 配置只存在于当前提交 POST body，不写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot。Stage 21 的偏好表单是非敏感表面，只提交已定义的非敏感偏好字段，拒绝的敏感输入回退到上次有效值；批量卡片只渲染 `preference_hits`/`preference_warnings`/`review_hints`/`applied_preferences`/`enhanced_search_queries` 中的公开规则摘要和中文提示，endpoint、token、cookie、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 26 的 `storage_dir` 只允许服务端根目录下的相对 profile（空值回落服务端根，绝对路径/穿越/符号链接逃逸被拒绝），未保存草案只通过 opaque `draft_id` 交互，完整 Request、draft 内容与外部敏感配置绝不进入 URL 或浏览器 storage；OpenAPI 示例全部使用虚构脱敏值，凭据字段标记 `x-request-scoped`。
+以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 20 的提交前队列只展示队列项目标题、状态、尝试次数、时间和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径必须被忽略或脱敏，AB 配置只存在于当前提交 POST body，不写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot。Stage 21 的偏好表单是非敏感表面，只提交已定义的非敏感偏好字段，拒绝的敏感输入回退到上次有效值；批量卡片只渲染 `preference_hits`/`preference_warnings`/`review_hints`/`applied_preferences`/`enhanced_search_queries` 中的公开规则摘要和中文提示，endpoint、token、cookie、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 26 的 `storage_dir` 只允许服务端根目录下的相对 profile（空值回落服务端根，绝对路径/穿越/符号链接逃逸被拒绝），未保存草案只通过 opaque `draft_id` 交互，完整 Request、draft 内容与外部敏感配置绝不进入 URL 或浏览器 storage；OpenAPI 示例全部使用虚构脱敏值，凭据字段标记 `x-request-scoped`。Stage 28 的 `draft_revision`/`idempotency_key` 与 `draft_id` 一样只在请求体与组件内存中流转，绝不进入 URL/browser storage；save-confirm 错误与批量逐条结果只返回脱敏 error_type + 固定中文，`safe-info` 是“全部信息”的唯一允许数据源（`extra="forbid"` DTO + 默认拒绝 serializer）。
 
 Stage 15 UI 质量要求：
 
@@ -170,6 +171,21 @@ Stage 27 UI 调整（已完成，US-209 删除旧前端）：
 3. 敏感值（endpoint/token/cookie/password/原始响应等）只存在于组件局部内存与单次 POST
    body；不进入 URL、browser storage、日志、截图或 trace。前端类型只来自生成的 OpenAPI
    客户端，不手写第二套响应 interface。
+
+Stage 28 UI 调整（已完成）：
+
+1. 未保存草案的 `draft_id` 与单调 `draft_revision` 只在组件内存维护：生成时从 create/
+   parse 结果取 revision，每次 `preview-modify` 发送当前 `base_revision` 并用返回的新
+   `draft_revision` 更新本地 ref；批量卡片在 `items` 内保存 `draft_revision`，修改后经
+   `changed`/`draft-changed` 事件回写父组件。revision/draft_id 绝不写入 URL 或 browser
+   storage，`draft_revision_conflict` 并入 409 重生成提示。
+2. `preview-save`/save-confirm 发送 `draft_id` + `base_revision`。保存写盘失败（如
+   `storage_error`）保留草案面板让用户重试同一草案；只有服务端确认草案失效
+   （`draft_expired`/`draft_evicted`/`draft_replayed`/`draft_revision_conflict`）才清除并
+   提示重新生成。`draft_reserved` 是瞬态并发冲突，也保留草案并提示稍后重试。
+3. 保存确认使用 opaque `idempotency_key`（客户端为一次明确操作生成，传输重试必须复用），
+   只在单次请求体与内存中出现；成功返回 `ACCEPTED` handoff，Stage 28 前端不展示或伪造
+   tracking 状态。
 
 ## 4. 后续能力规划
 

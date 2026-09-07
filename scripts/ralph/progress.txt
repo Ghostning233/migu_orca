@@ -58,6 +58,11 @@
   `total_episodes` 目前无数据源恒 null。
 - 新增 GET 端点（如 safe-info）若与泛型 `<path:request_id>` GET 并存，Werkzeug 按静态优先匹配，
   `/requests/{id}/safe-info` 不会落入 `/requests/{id}`；url_map 同时列出两者，inventory/OpenAPI 都要记。
+- Stage 收尾/归档（US-218 模式）：文档 handoff 同步主干集合 = 根 README + docs/README + 主 PRD
+  （模块表/路线图/总结段/D-MAIN/下一步）+ architecture + backlog + future_stages（加独立
+  「Stage N handoff」小节）+ 受影响模块 PRD + docs/api + 候选 PRD 状态表 + 阶段 PRD 自身
+  （状态行 + 完成记录节）。归档 = 复制到 `scripts/ralph/archive/<date>-<stage-name>/`，
+  并在根 README「Ralph 开发流」更新最近完成阶段与执行记录。
 
 ## [2026-09-07] - US-210
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -534,3 +539,44 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - US-218 将做 Stage 28 收尾：同步 README/架构/M01/M09/M13/backlog/future stages、归档
       prd/progress、确认无 `.migu_orca/storage` 与未提交 build/trace/截图。
 
+---
+
+## [2026-09-08] - US-218
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - Stage 28 文档 handoff：把 README/docs-README/主 PRD/architecture/M01/M09/M11/M13/backlog/
+    future stages/docs/api/frontend-ux 候选 PRD/work-goals 全部同步为 Stage 28 已完成（B-A 交付，
+    只返回 ACCEPTED handoff，不创建 tracking record）。
+  - B-B tracking handoff 输出：Stage 28 只返回 ACCEPTED Request handoff
+    （`request_id` + `status=ACCEPTED` + `next_action=OPEN_TRACKING`），**不创建或伪造 tracking
+    record**；B-B 阶段从持久化 ACCEPTED Request 与 handoff 幂等建立统一 tracking record
+    （记录在 future_stages「Stage 28 handoff」/stage28 PRD §12/M09 §7/endpoint_inventory §5）。
+  - `scripts/ralph/prd.json`：US-218 passes=true（US-210～US-218 全部完成）。
+  - 归档：新建 `scripts/ralph/archive/2026-09-08-stage28-draft-consistency/`，拷贝 prd.json +
+    progress.txt。
+- Verification
+  - `uv run python -m compileall -q src tests` → passed
+  - `uv run ruff check src tests` → passed
+  - `uv run pytest -m "not browser" -q` → 1127 passed, 133 deselected
+  - `uv run pytest tests/browser/ -q` → 133 passed（真实 Chromium）
+  - `uv run python -m apps.migu_orca_web.openapi_gen --check` → OpenAPI up to date
+  - 前端 `npm run typecheck`/`lint`/`test:unit`(261)/`api:check`/`build` 全绿
+  - `git diff --check` 通过；仓库根 `.migu_orca/storage` 不存在；无未提交 build/trace/截图
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 文档 handoff 的「已规划 → 已完成」需要同步的主干集合：README/docs-README/主 PRD/architecture/
+      backlog/future_stages + 受影响模块 PRD（M01/M09/M11/M13）+ 候选 PRD 状态表 + 阶段 PRD 自身
+      （状态行 + 完成记录节）；只改其中一部分会留下与 active `scripts/ralph/prd.json` 相矛盾的表述。
+    - Stage 收尾归档 = 复制到 `archive/<date>-<stage-name>/{prd.json,progress.txt}`；
+      README Ralph 开发流的归档清单也要同步。
+  - Gotchas encountered
+    - 涉及模块能力变化时，主 PRD 的模块表、路线图「已完成」标记和总结段要一起改，
+      不能只改模块 PRD。
+    - future_stages 需要单独加「Stage N handoff」小节承载给下一阶段的显式移交（本例为 B-B
+      tracking），这类跨阶段 handoff 不属于单篇模块 PRD。
+  - Useful context
+    - Stage 28 完成：非浏览器 1127 + 浏览器 133 + 前端 261 单测；实现偏差=契约内最小扩展；
+      剩余风险=draft 单进程内存权威、批量上限只约束 parse、safe-info total_episodes 无源恒 null。
+    - B-B tracking 阶段的输入：持久化 ACCEPTED Request + save-confirm handoff 幂等记录；
+      不得把 tracking 迁移追加回 Stage 28。
+---

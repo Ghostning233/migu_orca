@@ -3,7 +3,8 @@
 > 本文档是 Stage 26 US-189 的产物：先把现有 `/api/v1` 行为、敏感值边界和前端依赖
 > 冻结成可审查、可自动核对的事实基线（US-209 已随旧前端删除更新前端依赖章节）。US-192 已在此基础上修正 HTTP 状态语义
 > （envelope 保持不变，状态码表达失败分类），因此 §1 总览描述的是**当前生效**
-> 的状态语义。
+> 的状态语义。Stage 28（US-211～US-217）已把 draft revision、save-confirm、批量 36 部边界
+> 与 safe-info 端点/错误并入同一基线并保持无漂移。
 > 它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
 > 见 `docs/api/README.md`），也不替代 README 的示例用法。
 >

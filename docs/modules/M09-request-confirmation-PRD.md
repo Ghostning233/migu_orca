@@ -127,3 +127,27 @@ M09 负责 Request 确认交互能力，包括向用户展示 Request，并支�
 | Q-M09-02 | RSS 变化达到什么程度需要用户二次确认？ | 是 | 待确认 |
 | Q-M09-03 | 修改补丁格式如何定义？ | 是 | 已确认：`patch` 对象只允许 `selected_subtitle_group`、`filter_rule`、`expected_folder_name`；`filter_rule` 内含 `must_contain` / `must_not_contain` / `use_regex` / `case_sensitive` |
 | Q-M09-04 | 第一版确认交互是 CLI、API，还是 Web UI？ | 是 | 待确认 |
+
+## 7. Stage 28 save-confirm 组合确认（已完成）
+
+Stage 28 为单番与批量新增“保存并确认”组合端点，把 revision 校验、草案预留、Request
+持久化、确认与幂等结果提交合并为一次用户操作：
+
+- `POST /api/v1/requests/save-confirm`（单番）：请求只接受 `draft_id`、`base_revision`、
+  opaque `idempotency_key` 与可选安全 `storage_dir`，绝不接受完整 Request。成功一次完成
+  `DraftStore.reserve_for_save` → 持久化 Request → `commit_save` → 幂等记录 `CONFIRMED`，
+  返回 `{outcome: CONFIRMED, request, summary, handoff: {request_id, status: ACCEPTED,
+  next_action: OPEN_TRACKING}}`。
+- `POST /api/v1/batches/{batch_id}/save-confirm`（批量）：每条只接受 `item_id`/`draft_id`/
+  `base_revision`/`idempotency_key`，逐条复用单番用例；`item_ids` 可选并按输入顺序处理。
+  响应是 HTTP 200 逐条部分成功 `{batch_id, results[], summary:{requested, confirmed, failed}}`，
+  可预期单条失败映射为脱敏 `failed` 结果，成功项不因失败项回滚；同一请求内重复 `item_id`
+  返回 `skipped`。
+- 幂等语义（US-213）：storage engine 在 `<storage>/idempotency/<opaque-key>.json` 持久化
+  只含非敏感白名单字段的原子记录。同一 `idempotency_key` 重试返回同一最终结果（终态重放）；
+  同键不同 operation/payload → 409 `idempotency_conflict`（不回显原始 payload）；
+  `IN_PROGRESS` 重试先核对已落盘 Request，存在则继续确认、不存在才在持有有效预留时安全重试保存，
+  不无条件创建新 Request。持久化成功但确认失败 → 409 `save_confirm_failed`，details 只含
+  `outcome=SAVED_CONFIRM_FAILED`/公开 `request_id`/`retry_action=ACCEPT_SAVED_REQUEST`。
+- Stage 28 **不创建或伪造 tracking record**：成功 handoff 只返回 `request_id` + `ACCEPTED`；
+  后续 B-B tracking 阶段从持久化 ACCEPTED Request 与 handoff 幂等建立统一 tracking record。

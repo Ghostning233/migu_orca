@@ -186,27 +186,31 @@ Stage 26 不引入新前端框架、不改变主要页面设计；前端工程�
 
 Stage 27 已作为 BL-024 完成（`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`）。它使用 Vue 3、TypeScript 和 Vite，先通过真实生成器校准 Stage 26 OpenAPI，再按应用外壳/安全组件、Settings、Request 列表/详情、单个搜索、批量工作台与提交队列顺序渐进迁移，在完整 parity 和回退演练后切换默认入口；US-209 已删除旧 `app.js`、旧 Jinja 主模板与无用 CSS/测试 helper，入口路由固定重定向到 SPA。
 
+### Stage 28 handoff：B-B 统一追番记录
+
+Stage 28 已作为 BL-025 的 B-A 完成（`docs/MiGuOrca_stage28_draft_consistency_PRD.md`，Ralph stories US-210～US-218，归档于 `scripts/ralph/archive/2026-09-08-stage28-draft-consistency/`）。它为 DraftStore 增加单调 revision 与 compare-and-swap、把保存改为预留生命周期、建立持久化 save-confirm 幂等记录、新增单番/批量 save-confirm 与 36 部服务端边界，并以 `safe-info` 严格白名单 DTO 提供“全部信息”安全数据源。**Stage 28 只返回 ACCEPTED Request handoff（`request_id` + `status=ACCEPTED` + `next_action=OPEN_TRACKING`），不创建或伪造 tracking record**；B-B 阶段应从持久化 ACCEPTED Request 与 handoff 幂等建立统一 tracking record，旧单番/批量提交写入成功后也必须更新同一 tracking record，避免两套状态源分叉。
+
 ## 10. Gate 1～3 之后的前端体验重构方向
 
 2026-09-07 已完成桌面端前端体验重构的产品方向、混合低保真、组件级交互和视觉方案评审。
-新增两项工作，其中 B-A 已确认，其他工作包在 Gate 4 前不分配正式 Stage 编号：
+2026-09-08 B-A 已作为 Stage 28 完成并交付；其余工作包在 Gate 4 前不分配正式 Stage 编号：
 
-1. BL-025 后端支撑：B-A 已确认为 Stage 28，覆盖 draft revision、可靠保存、单番/批量保存
-   确认、36 部上限和 safe-info；B-B～B-D 的统一 tracking、提交前复核、幂等外部提交与
-   Auto Bangumi 3.1.18 管理仍待评审。总体候选 PRD 为
+1. BL-025 后端支撑：B-A 已作为 Stage 28 完成，覆盖 draft revision、可靠保存、单番/批量保存
+   确认、36 部上限和 safe-info（见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；B-B～B-D 的
+   统一 tracking、提交前复核、幂等外部提交与 Auto Bangumi 3.1.18 管理仍待评审。总体候选 PRD 为
    `docs/MiGuOrca_frontend_ux_backend_support_PRD.md`。
 2. BL-026 前端分片：四项导航、单番三步、1/12/36 部批量审核、追番方案、追番管理和设置。
    候选 PRD 为 `docs/MiGuOrca_frontend_ux_implementation_PRD.md`。
 
-后端按 B-A～B-D、前端按 F-A～F-G 表达依赖。B-A 已按 9 个单次迭代 story 生成
-`docs/MiGuOrca_stage28_draft_consistency_PRD.md` 和活动 `scripts/ralph/prd.json`；其余正式 Stage
+后端按 B-A～B-D、前端按 F-A～F-G 表达依赖。B-A 已按 9 个单次迭代 story（US-210～US-218）作为
+Stage 28 完成并归档到 `scripts/ralph/archive/2026-09-08-stage28-draft-consistency/`；其余正式 Stage
 仍应在 PRD 评审后按可独立验收的工作量生成，不要求一个 backlog 对应一个 Stage，也不要求连续
-编号一次全部锁定。Stage 27 的现有功能、OpenAPI 生成客户端和浏览器测试作为迁移基线保留，
+编号一次全部锁定。Stage 28 的现有功能、OpenAPI 生成客户端和浏览器测试作为迁移基线保留，
 不能用一次性大重写替换。
 
 ## 11. 未开发事项优先级池
 
-除已经完成的 Stage 26 和 Stage 27 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
+除已经完成的 Stage 26、Stage 27 和 Stage 28 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
 
 ### 未排期与条件触发事项
 
@@ -253,10 +257,10 @@ Stage 27 已作为 BL-024 完成（`docs/MiGuOrca_stage27_frontend_engineering_m
 7. Stage 25：正式番名与季数解析（已完成）。
 8. Stage 26：Web API 契约固化与服务端边界治理（已完成）。
 9. Stage 27：前端工程化迁移与页面重构（已完成，US-209 删除旧前端）。
-10. Stage 28：草案一致性与原子保存确认（已规划，US-210～US-218，待执行）。
+10. Stage 28：草案一致性与原子保存确认（已完成，US-210～US-218；只返回 ACCEPTED handoff，不创建 tracking record）。
 
-因此，Stage 19 到 Stage 27 的原产品闭环与前后端工程基线已经完成，Stage 26 作为 P0 后端基础
-阶段已交付，Stage 27 作为 P1 前端迁移阶段已交付。BL-025 的 B-A 已确认为 Stage 28；
-B-B～B-D 与 BL-026 仍处于候选 PRD 评审，Gate 4 前不预留更多具体 Stage 编号。评审后再按
-B/F 工作包的依赖和真实工作量拆分。
+因此，Stage 19 到 Stage 28 的原产品闭环与前后端工程基线已经完成，Stage 26 作为 P0 后端基础
+阶段已交付，Stage 27 作为 P1 前端迁移阶段已交付，Stage 28 作为 BL-025 的 B-A 草案一致性
+阶段已交付。BL-025 的 B-B～B-D 与 BL-026 仍处于候选 PRD 评审，Gate 4 前不预留更多具体 Stage
+编号。评审后再按 B/F 工作包的依赖和真实工作量拆分。
 流式封面代理等未排期方向继续记录在 `docs/optional_features.md`。

@@ -94,6 +94,23 @@ Stage 18 补充：
 2. `storage_dir` 未传/空值时回落服务端根本身（`services._storage_dir` 返回 `_WEB_STORAGE_ROOT`，绝不返回 `None`——返回 `None` 会让 `load_storage_config(None)` 回退 CLI 默认路径，绕过服务端 root 覆盖；US-196 回归修复）。
 3. CLI `--storage-dir` 是独立信任边界，接受显式本地路径；Web 与 CLI 使用不同 storage 信任边界。
 
+## 9.1 Stage 28 save-confirm 幂等记录（已完成）
+
+1. `StorageConfig` 新增 `idempotency_dir`（`<storage>/idempotency`），由
+   `ensure_storage_layout` 统一创建。新增存储族必须同步 `storage_config.py` +
+   `storage_config_test.py`。
+2. `storage_engine/controllers/idempotency_repository.py` 提供原子读写的 save-confirm 幂等
+   repository：每条 = `<storage>/idempotency/<opaque-key>.json`，写用 temp 文件 + `os.replace`
+   原子替换，读缺失返回 None、损坏/非对象返回稳定 `storage_json_error`；key 校验拒绝路径片段
+   与穿越，文件名永不取自用户输入。
+3. 记录只含白名单字段 `idempotency_key/operation/request_fingerprint/request_id/state/
+   created_at/updated_at`；调用方即使误传 draft/标题/URL/凭据/路径也绝不落盘。
+   `request_fingerprint` 是 `save_confirm_service.compute_request_fingerprint` 对业务字段
+   规范化排序的 sha256，不可逆且排除 request_id 与敏感字段。
+4. 状态机 `IN_PROGRESS → CONFIRMED | SAVED_CONFIRM_FAILED`：终态同键重放直接返回持久化公开
+   结果；`IN_PROGRESS` 重试先核对已落盘 Request 再决定继续确认或安全重试保存；同一进程内按 key
+   RLock 串行并发同键尝试。
+
 ## 8. 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |

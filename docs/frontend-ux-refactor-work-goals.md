@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 工作目标 / 设计讨论基线（不是执行 PRD） |
-| 当前状态 | Gate 1～3 已完成；B-A 已确认为 Stage 28 并生成 Ralph PRD，其余后端/前端工作包仍待 Gate 4 评审，尚未授权全面开发 |
+| 当前状态 | Gate 1～3 已完成；B-A 已完成 (Stage 28, 2026-09-08)，其余后端/前端工作包仍待 Gate 4 评审，尚未授权全面开发 |
 | 创建日期 | 2026-09-07 |
 | 适用范围 | MiGuOrca Web 前端的信息架构、用户流程、页面设计、视觉方案与后续实现 |
 | 前置事实 | Stage 26、Stage 27 已完成；Vue 3、TypeScript、Vite、OpenAPI 客户端和浏览器测试基线继续保留 |
@@ -379,7 +379,7 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 | --- | --- | --- | --- |
 | 产品与 UX 设计 | 已完成 | 用户旅程、页面地图、混合低保真、交互与状态规格 | 已通过 Gate 1～2 |
 | 视觉设计 | 已完成 | 选定方向、修正版、关键异常状态、设计 Token | 已通过 Gate 3 |
-| B-A 草案一致性 | Stage 28 已确认，待执行 | revision、可靠保存、组合确认、36 部上限、安全信息 | 已生成 US-210～US-218 与 Ralph PRD |
+| B-A 草案一致性 | Stage 28 已完成 (2026-09-08) | revision、可靠保存、组合确认、36 部上限、安全信息 | US-210～US-218 全部 passes，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md` |
 | B-B～B-D 后端支撑 | PRD 待评审 | tracking、Auto Bangumi 管理、契约收尾 | Gate 4 确认具体路由、DTO 和 PR 边界 |
 | F-A～F-G 前端分片 | PRD 待评审 | 壳层、共享审核、单番、批量、方案、管理、设置/收尾 | 对应后端能力已冻结或合入 |
 | 独立发布验收 | 待规划 | 跨流程 Chromium、无障碍/多视口/安全报告、文档切换 | 全部实现切片验收通过 |
@@ -467,10 +467,11 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 
 ## 12. 下一步工作
 
-Gate 1～3 已完成，两份总体候选 PRD 已落盘；B-A 已转换为 Stage 28，当前管理会话仍不写生产代码：
+Gate 1～3 已完成，两份总体候选 PRD 已落盘；B-A 已作为 Stage 28 完成（US-210～US-218 全部
+passes，2026-09-08，执行与完成记录见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）：
 
-1. 将[Stage 28 草案一致性 PRD](MiGuOrca_stage28_draft_consistency_PRD.md)交给独立开发会话，按
-   US-210～US-218 执行；主会话只接收提交、测试证据、偏差和阻塞项。
+1. B-A 已完成：revision/可靠保存/单番与批量 save-confirm/36 部边界/safe-info 已交付，
+   成功只返回 ACCEPTED handoff，不创建 tracking record。
 2. 继续评审[后端支撑 PRD](MiGuOrca_frontend_ux_backend_support_PRD.md)中的 B-B～B-D、tracking
    持久化和 Auto Bangumi 3.1.18 adapter 边界。
 3. 评审[前端分片实施 PRD](MiGuOrca_frontend_ux_implementation_PRD.md)中的 F-A～F-G、依赖顺序、
