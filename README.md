@@ -2,7 +2,9 @@
 
 MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台，目标是在 MiKanProject 与 Auto Bangumi 之间提供 MiKan 订阅源发现、筛选预览、批量草案审核与提交辅助能力。
 
-Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI（compileall/ruff/非浏览器 pytest/node/OpenAPI 漂移/git diff）与真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；Stage 27 前端迁移 handoff 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
+Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
+
+Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI、静态检查、OpenAPI 漂移检查、真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。
 
 Stage 25「正式番名与季数解析」已完成：单个与批量搜索共用结构化 season（`number/raw/normalized/source`）、确定性解析和有界查询计划；真实 MiKan 合集仍由用户显式选择，非第一季缺少候选公开证据时必须明确确认。AutoBangumi 3.1.18 可选使用服务端解析并校验的 MiKan 原始海报作为 `poster_link`，绝不使用浏览器 opaque 代理地址。实现与验收见 `docs/MiGuOrca_stage25_title_season_parsing_PRD.md`。
 
@@ -29,6 +31,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - Stage 19 已把批量新番订阅前置工作台接入 `/index`：批量输入按非空行生成独立条目，AI 名称解析 fake provider 和 provider seam 输出候选标题/搜索词，批量 API 对每个条目独立搜索 MiKan 候选，卡片网格支持删除、展开、单卡修改回流和单卡接受。
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
 - Stage 24 AutoBangumi 真实认证与订阅兼容闭环与 Stage 25 BL-018 均已完成。部署/配置向导及其他条件触发事项继续记录在 `docs/backlog.md`，流式封面代理记录在 `docs/optional_features.md`；后续阶段按 backlog 动态规划。
+- Stage 27「前端工程化迁移与页面重构」已完成：Vue 3 + TypeScript(strict) + Vite 工程、OpenAPI 类型化客户端、统一 API transport、4 条 SPA 路由以及全部 Web 用户旅程均已迁移；US-209 已删除旧 Jinja 主页面、`app.js`、旧 CSS 与迁移期测试脚手架，默认入口固定重定向到 `/app/*`。
 - Stage 26「Web API 契约固化与服务端边界治理」已完成：`/api/v1` 端点清单与 golden contract 冻结、响应 DTO（`extra="forbid"`）与确定性 OpenAPI、Web 适配层按职责拆分（schemas/serializers/services/contexts/routes_*）、稳定 HTTP 状态语义、Web storage 根目录限制（空值回落服务端根）与服务端权威 draft 生命周期、CI 与 local-only 部署基线；本阶段未更换页面框架，页面主要视觉与用户流程保持不变。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
@@ -452,16 +455,11 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 ## Ralph 开发流
 
-> **⚠️ 本项目的 Ralph 是经过魔改的版本**，与上游 Ralph Wiggum 循环（仅 `amp` / `claude` / `codex`）不同：
->
-> - 新增 **`--tool dsh`**：通过 DeepSeek Harness（DSH）的 headless profile 运行 Ralph 循环，是本项目当前推荐的开发方式。
-> - 新增 **`--provider` / `--model`** 参数，可显式指定 DSH 的 LLM provider 与模型（如 Command Code 的 `commandcode` / `deepseek/deepseek-v4-flash`，或 DeepSeek 官方 API 的 `deepseek-official` / `deepseek-v4-flash`）。
-> - 首次运行会自动向 DSH headless profile 幂等安装 Command Code provider，并在每轮结束时自动清理临时 settings，不修改全局 `$DSH_HOME/settings.yaml`。
->
-> 魔改用法详见下方「使用 DSH 运行 Ralph」小节；`amp` / `claude` / `codex` 三个原始工具分支保持兼容可用。
+> 当前 `ralph.sh` 只支持 `amp`、`claude`、`codex` 三种执行工具，不包含 DSH 或 provider 配置。项目保留的轻量定制是可通过 `--model`、`--claude-model` 或 `RALPH_MODEL` 指定模型；模型参数会传给 Claude 和 Codex，Amp 分支不使用该参数。
 
-- 当前 Ralph PRD：Stage 27，前端工程化迁移与页面重构（启动校准已完成，进入开发准备）
-- 最近完成阶段：Stage 26，Web API 契约固化与服务端边界治理
+- 当前 Ralph 状态快照：Stage 27 已完成并归档；`scripts/ralph/prd.json` 与 `progress.txt` 暂时保留该阶段的最终完成快照，下一 Stage 启动时再替换
+- 最近完成阶段：Stage 27，前端工程化迁移与页面重构
+- 前一完成阶段：Stage 26，Web API 契约固化与服务端边界治理
 - 前一完成阶段：Stage 25，正式番名与季数解析
 - 前一完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
 - 前一完成阶段：Stage 23，媒体缓存、MiKan 读取优化与批量审核体验
@@ -480,18 +478,18 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 前一完成阶段：Stage 9，浏览器自动化测试 PRD
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - Stage 26 执行：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196（已全部完成）
-- Stage 27 执行：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`；执行分支 `agent/stage27-frontend-engineering-migration`，Ralph stories 为 US-197～US-209（初始均未完成）
+- Stage 27 执行：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`；执行分支 `agent/stage27-frontend-engineering-migration`，Ralph stories 为 US-197～US-209（已全部完成并归档）
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
-- Ralph 循环命令（DSH，推荐）：`./scripts/ralph/ralph.sh --tool dsh --provider commandcode --model deepseek/deepseek-v4-flash 7`
-- Ralph 循环命令（Claude）：`./scripts/ralph/ralph.sh --tool claude --model Hiku 7`
-- Ralph 循环命令（Codex 备用）：`./scripts/ralph/ralph.sh --tool codex 7`
+- Ralph 循环命令（Claude，可指定模型）：`./scripts/ralph/ralph.sh --tool claude --model claude-model-id 7`
+- Ralph 循环命令（Codex，可指定模型）：`./scripts/ralph/ralph.sh --tool codex --model codex-model-id 7`
+- Ralph 循环命令（Amp）：`./scripts/ralph/ralph.sh --tool amp 7`
 
 ### Ralph 阶段开发规范
 
 Stage 开发必须通过 Ralph 循环完成，不应绕过 `scripts/ralph/prd.json` 手工挑 story 开发。每次启动一个 Stage 前，应先确认 `scripts/ralph/prd.json` 是当前 Stage 的 PRD，`scripts/ralph/progress.txt` 已记录本 Stage 的约束和进度。
 
-Stage 开发期间，Ralph 每轮应以完成当前 Stage 的全部 user story 为目标运行。`scripts/ralph/prd.json` 中的 user story 拆分用于明确验收粒度、依赖顺序和进度记录，不表示开发 Agent 只能处理一个 story。每轮完成后应更新全部已完成 story 的 `passes` 状态和 `scripts/ralph/progress.txt`，并运行当前 Stage 要求的验证命令；涉及 Web UI 的 Stage 必须运行浏览器测试或记录无法运行的明确原因。
+Stage 开发期间，Ralph 每轮只选择并完成一个最高优先级、`passes: false` 的 user story；完成实现和该 story 所需的质量检查后，更新对应 `passes` 状态与 `scripts/ralph/progress.txt`。脚本通过多轮迭代依次推进，直到全部 story 完成并输出 `<promise>COMPLETE</promise>`。涉及 Web UI 的 story 必须运行真实浏览器测试或记录无法运行的明确原因。
 
 一个 Stage 全部 story 完成后，必须执行收尾流程：
 
@@ -506,51 +504,27 @@ Ralph 运行过程中由下属 Agent 产生的本地中间提交不强制使用�
 
 ### 使用 Claude 运行 Ralph
 
-当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex|dsh` 选择执行工具（`dsh` 为本项目魔改新增，见下一小节）。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
+当前项目的 `scripts/ralph/ralph.sh` 支持 `--tool amp|claude|codex` 选择执行工具。使用 Claude 时，脚本会读取 `scripts/ralph/CLAUDE.md`，并通过 `claude --dangerously-skip-permissions --print` 启动一次无交互开发迭代。
 
 Claude 模型可以通过命令行参数显式指定。当前仓库里可直接运行的示例是：
 
 ```bash
-./scripts/ralph/ralph.sh --tool claude --model deepseek-v4-flash 7
+./scripts/ralph/ralph.sh --tool claude --model claude-model-id 7
 ```
 
 也可以通过环境变量指定：
 
 ```bash
-RALPH_MODEL=deepseek-v4-flash ./scripts/ralph/ralph.sh --tool claude 7
+RALPH_MODEL=claude-model-id ./scripts/ralph/ralph.sh --tool claude 7
 ```
 
 `--claude-model` 是 `--model` 的等价写法：
 
 ```bash
-./scripts/ralph/ralph.sh --tool claude --claude-model deepseek-v4-flash 7
+./scripts/ralph/ralph.sh --tool claude --claude-model claude-model-id 7
 ```
 
-如果你的 Claude 环境已经为别名做了额外映射，也可以换成对应别名；但在本仓库当前环境中，`deepseek-v4-flash` 是可直接运行的模型名。
-
-`--model` 会传递给 Claude 或 DSH 分支；当 `--tool` 为 `amp` 或 `codex` 时，脚本会忽略该参数并输出提示。
-
-### 使用 DSH 运行 Ralph（魔改新增，推荐）
-
-`--tool dsh` 是本项目对 Ralph 循环的魔改扩展，通过 DeepSeek Harness 的 headless profile（`dsh --profile headless`）运行：每轮把 `scripts/ralph/prompt.md` 作为一次性任务提交，headless 完成整轮开发后把最终 assistant 消息（含 `<promise>COMPLETE</promise>` 完成标记）写到 stdout，脚本据此判断是否全部 story 完成。
-
-默认模型来自 `$DSH_HOME/settings.yaml` 的 `agent-default-model` 段。当前项目常用配置是 Command Code 的 `deepseek/deepseek-v4-flash`：
-
-```bash
-./scripts/ralph/ralph.sh --tool dsh --provider commandcode --model deepseek/deepseek-v4-flash 7
-```
-
-- `--provider` 指定 DSH LLM provider。`commandcode`（Command Code API，脚本首次运行会自动向 headless profile 幂等安装 `@mars-sea/dsh-commandcode-provider`）与 `deepseek-official`（DeepSeek 官方 API）均已配置凭据，可按需选用。
-- `--model` 是模型标识符，原样写入临时 settings 覆盖（不做拆分）。注意保留 provider 自己的前缀约定：`commandcode` 需要 `deepseek/deepseek-v4-flash` 这种带 `deepseek/` 前缀的完整标识；`deepseek-official` 用裸名 `deepseek-v4-flash` 即可。
-- 只传 `--model` 时，provider 自动沿用全局 settings.yaml 的默认值；显式传 `--provider` 时两者都必须给出。
-- 未传 `--provider`/`--model` 时完全沿用全局 settings.yaml，不生成任何临时覆盖。
-- 临时 settings/patch 文件位于系统临时目录，运行结束自动清理，不会修改 `$DSH_HOME/settings.yaml`。
-
-也可以通过环境变量指定：
-
-```bash
-RALPH_PROVIDER=commandcode RALPH_MODEL=deepseek/deepseek-v4-flash ./scripts/ralph/ralph.sh --tool dsh 7
-```
+`claude-model-id` 是占位符，应替换为当前 Claude CLI 可识别的模型名或本地别名。`--model` 同样可传给 Codex；Amp 分支忽略模型参数。
 
 Stage 7 已在 Stage 6 本地 JSON Request 持久化基础上，增加 Flask app factory、Blueprint registry、统一 JSON API 响应层、Pydantic 校验、Request 查询/生成 API、服务端渲染 Web UI、状态历史展示和 AB 提交结果展示，同时保持默认 CLI 流程不隐式写入磁盘。
 
