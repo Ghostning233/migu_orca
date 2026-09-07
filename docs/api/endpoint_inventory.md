@@ -54,6 +54,7 @@
 | --- | --- | --- | --- |
 | GET | `/api/v1/requests` | `migu_orca_web_api.RequestListView` | RequestListView |
 | GET | `/api/v1/requests/<path:request_id>` | `migu_orca_web_api.RequestDetailView` | RequestDetailView |
+| GET | `/api/v1/requests/<path:request_id>/safe-info` | `migu_orca_web_api.RequestSafeInfoView` | RequestSafeInfoView |
 | POST | `/api/v1/requests` | `migu_orca_web_api.RequestCreateView` | RequestCreateView |
 | POST | `/api/v1/requests/preview-modify` | `migu_orca_web_api.RequestPreviewModifyView` | RequestPreviewModifyView |
 | POST | `/api/v1/requests/preview-save` | `migu_orca_web_api.RequestPreviewSaveView` | RequestPreviewSaveView |
@@ -99,6 +100,7 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | --- | --- | --- | --- |
 | GET `/api/v1/requests` | `storage_dir?` | `{"requests": [summary...]}` | 损坏 snapshot → `storage_json_error` |
 | GET `/api/v1/requests/<request_id>` | `request_id`（路径）、`storage_dir?` | `{"request": <snapshot>, "history": {available, events, error}, "ab_result": {available, record, error}}` | 缺失 → `request_not_found`；路径片段 → `invalid_request_id` |
+| GET `/api/v1/requests/<request_id>/safe-info` | `request_id`（路径）、`storage_dir?` | `{"safe_info": <RequestSafeInfoDTO>}`（US-217 严格白名单，`extra="forbid"`） | 缺失 → `request_not_found`；路径片段 → `invalid_request_id`；损坏 → `storage_json_error` |
 | POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`save_request`（默认 false）、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "saved_request"?}`；`save_request=false` 时另含 `draft_id` + `draft_revision`（US-194/211：服务端权威草案 opaque id 与单调 revision） | `data_validation_errors`（title 缺失）；`candidate_context_invalid`；保存失败 → `storage_error` |
 | POST `/api/v1/requests/preview-modify` | `draft_id`（US-194，不再收完整 `request`）、`base_revision`（US-211 必填，compare-and-swap）、`patch`、`storage_dir?` | `{"request", "summary", "draft_id", "draft_revision"}` | `invalid_modify_patch_field`；draft 失效 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`（409，error_data 只含 `field`/`current_revision`） |
 | POST `/api/v1/requests/preview-save` | `draft_id`（US-194，一次性预留）、`base_revision`（US-212 必填，预留校验）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | draft 失效/重放 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`；正在保存 → `draft_reserved`（409） |
@@ -113,6 +115,23 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 `request_id`、`status`、`bangumi_title`、`candidate_subtitle_groups[]`
 （`subtitle_group`/`rss_url`/`total_seed_count`/`valid_seed_count`/`invalid_seed_count`）、
 `selected_subtitle_group`、`effective_seed_count`、`expected_folder_name`、`warnings[]`。
+
+`safe-info` 形状（`RequestSafeInfoDTO`，US-217 严格白名单，`extra="forbid"`）：
+`request_id`、`status`、`raw_title`/`title`/`aliases[]`、`season`/`season_raw`/
+`season_evidence`、`mikan_collection{title, bangumi_id}`（只含公开合集标题与编号，
+**不含完整合集/RSS URL**）、`subtitle_groups[]`
+（`subtitle_group`/`total_resource_count`/`valid_resource_count`/
+`invalid_resource_count`/`warnings[]`，无 RSS URL/种子原文）、
+`selected_subtitle_group`、`filter_rule`（用户可读摘要）、`resources`
+（`selected_subtitle_group`/`valid_resource_count`/`invalid_resource_count`/
+`complete_resource_count`/`valid_file_names[]`/`excluded_file_names[]`，只含脱敏
+torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安全文件夹名）、
+`storage_profile`（相对 profile 或 `null`）、`total_episodes`（默认 `null`，无公开数据）、
+`updated_episode: null`、`updated_episode_status: "NOT_IMPLEMENTED"`（BL-020 不实现，
+绝不从种子/RSS/下载状态猜测）、`history_summary[]`
+（`action`/`previous_status`/`next_status`/`timestamp`，丢弃 details/诊断）、
+`ab_status{submitted, success?, ab_subscription_id?, error_type?}`（不含 endpoint/凭据/
+原始响应）。
 
 ### 3.2 MiKan 候选（`/api/v1/mikan/...`）
 
@@ -239,6 +258,13 @@ CLI 显式 `--storage-dir` 行为不受影响）。
   幂等重试重放同一 CONFIRMED 结果，不创建第二个 Request。请求级 shape/batch_id/storage
   profile 错误仍走普通失败 envelope。Stage 28 不创建 tracking record；队列/入队由后续
   tracking 阶段从 handoff 建立。
+- US-217：新增 `GET /api/v1/requests/{request_id}/safe-info`（`RequestSafeInfoView`，
+  operationId `getRequestSafeInfo`）。`serialize_request_safe_info` 按 D28-10 默认拒绝
+  显式构造白名单（绝不先返回完整 snapshot 再让前端隐藏），返回 `{safe_info: <DTO>}`。
+  完整合集/RSS URL、magnet、endpoint、token/cookie/password/Authorization、原始响应与
+  本地绝对路径不出现在成功/错误/OpenAPI 示例；`updated_episode=null` 且
+  `updated_episode_status=NOT_IMPLEMENTED`（不猜测当前集数）。404/非法 request_id/
+  storage profile 错误沿用详情端点同一 envelope 分类。
 
 ## 5. 前端依赖（Stage 27 迁移后）
 

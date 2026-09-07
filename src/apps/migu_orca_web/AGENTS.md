@@ -205,6 +205,32 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - 改批量 save-confirm 后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`，
   并同步 endpoint inventory §2/§3.4/§4 与 `api.test.ts` 期望集。
 
+## Request safe-info 严格白名单（US-217）
+
+- `GET /api/v1/requests/{request_id}/safe-info`（`routes_requests.RequestSafeInfoView`，
+  operationId `getRequestSafeInfo`）返回 `{safe_info: <RequestSafeInfoDTO>}`。route 只读
+  `RequestDetailQuery`（request_id 路径 + 可选 storage_dir），失败（404/非法 request_id/
+  storage profile 错误）沿用详情端点同一 envelope 分类。
+- DTO（`api_contract.py`）全 strict `extra="forbid"`：`RequestSafeInfoDTO` +
+  `RequestSafeInfoCollectionDTO`/`RequestSafeInfoSubtitleGroupDTO`/
+  `RequestSafeInfoFilterRuleDTO`/`RequestSafeInfoExcludedFileDTO`/
+  `RequestSafeInfoResourcesDTO`/`RequestSafeInfoHistoryEventDTO`/
+  `RequestSafeInfoAbStatusDTO` + 外层 `RequestSafeInfoResultDTO`。未知嵌套字段、
+  endpoint、URL、token/cookie/password/Authorization、magnet、原始响应与绝对路径在边界
+  被拒绝或完全省略。
+- **默认拒绝**：`serializers.serialize_request_safe_info` 逐字段显式构造白名单，绝不返回
+  完整 snapshot 再让前端隐藏。`updated_episode` 恒为 `null`、
+  `updated_episode_status` 恒为 `NOT_IMPLEMENTED`（BL-020 不实现，绝不从种子/RSS/下载
+  数量猜测当前集数）。
+- 免费文本 label 经 `_safe_label` 二次脱敏：`http(s)://`、`magnet:?`、`/` 开头与
+  Windows 盘符绝对路径 → `[redacted]`。`total_episodes` 目前无数据源，serializer 恒置
+  `null`（不要从 `MikanCandidate.total_episodes` 推断）。
+- `storage_profile` 用 `services._storage_profile(storage_dir)`（解析后相对服务端
+  Web storage root 的首段 profile 名，根目录/越界 → `None`）。不要回传原始 snapshot。
+- 改 safe-info DTO/serializer 后必须重生成 `docs/api/openapi.json` 与
+  `frontend/src/api/generated/api.ts`，并同步 endpoint inventory §2/§3.1/§4 与
+  `api.test.ts` 期望集（operationId 数 26 → 27）。
+
 ## MiKan 候选公开 DTO（US-204）
 
 - `POST /api/v1/mikan/candidates` 的 `result.candidates` 在

@@ -55,6 +55,7 @@ from apps.migu_orca_web.api_contract import (
     RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
+    RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
 )
 
@@ -435,6 +436,39 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_replayed": "订阅草案已被保存，请勿重复保存",
                 "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
                 "draft_reserved": "订阅草案正在保存中，请稍后重试",
+            },
+        },
+    },
+    "GET /api/v1/requests/<path:request_id>/safe-info": {
+        "operationId": "getRequestSafeInfo",
+        "summary": "查看订阅方案安全信息白名单",
+        "description": "US-217：返回“全部信息”只读弹窗专用的严格安全白名单（RequestSafeInfoDTO，extra=forbid）。serializer 默认拒绝，逐字段显式构造：request_id、标题/别名/季度/公开季数证据摘要、选定 MiKan 合集标题与公开编号（不含完整合集/RSS URL）、字幕组/过滤规则用户可读摘要/相对 storage profile/安全文件夹名、有效/完整/排除资源数量与脱敏文件名摘要、总集数与 updated_episode=null/updated_episode_status=NOT_IMPLEMENTED、Request 状态、脱敏历史与安全 Auto Bangumi 状态摘要。完整 URL、RSS、magnet、endpoint、token、cookie、password、Authorization、原始响应与绝对路径绝不出现在成功响应、错误或 OpenAPI 示例。",
+        "parameters": [
+            {
+                "name": "request_id",
+                "in": "path",
+                "required": True,
+                "description": "已保存订阅方案的 request_id。",
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "storage_dir",
+                "in": "query",
+                "required": False,
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                "schema": {"type": "string"},
+            },
+        ],
+        "success": RequestSafeInfoResultDTO,
+        "errors": {
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_request_id": "request_id 不能包含路径片段",
+            },
+            "404": {"request_not_found": "订阅方案不存在"},
+            "500": {
+                "storage_error": "读取订阅方案失败",
+                "storage_json_error": "订阅方案 JSON 损坏",
             },
         },
     },

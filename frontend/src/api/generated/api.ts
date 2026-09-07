@@ -414,6 +414,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/requests/{request_id}/safe-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查看订阅方案安全信息白名单
+         * @description US-217：返回“全部信息”只读弹窗专用的严格安全白名单（RequestSafeInfoDTO，extra=forbid）。serializer 默认拒绝，逐字段显式构造：request_id、标题/别名/季度/公开季数证据摘要、选定 MiKan 合集标题与公开编号（不含完整合集/RSS URL）、字幕组/过滤规则用户可读摘要/相对 storage profile/安全文件夹名、有效/完整/排除资源数量与脱敏文件名摘要、总集数与 updated_episode=null/updated_episode_status=NOT_IMPLEMENTED、Request 状态、脱敏历史与安全 Auto Bangumi 状态摘要。完整 URL、RSS、magnet、endpoint、token、cookie、password、Authorization、原始响应与绝对路径绝不出现在成功响应、错误或 OpenAPI 示例。
+         */
+        get: operations["getRequestSafeInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/requests/{request_id}/submit-ab": {
         parameters: {
             query?: never;
@@ -8849,6 +8869,443 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "request_not_found",
                      *       "error_message": "订阅方案不存在",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    getRequestSafeInfo: {
+        parameters: {
+            query?: {
+                /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                storage_dir?: string;
+            };
+            header?: never;
+            path: {
+                /** @description 已保存订阅方案的 request_id。 */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "safe_info": {
+                     *           "request_id": "示例",
+                     *           "status": "示例",
+                     *           "raw_title": null,
+                     *           "title": null,
+                     *           "aliases": [],
+                     *           "season": null,
+                     *           "season_raw": null,
+                     *           "season_evidence": null,
+                     *           "mikan_collection": null,
+                     *           "subtitle_groups": [
+                     *             {
+                     *               "subtitle_group": null,
+                     *               "total_resource_count": 0,
+                     *               "valid_resource_count": 0,
+                     *               "invalid_resource_count": 0,
+                     *               "warnings": []
+                     *             }
+                     *           ],
+                     *           "selected_subtitle_group": null,
+                     *           "filter_rule": {
+                     *             "must_contain": "",
+                     *             "must_not_contain": "",
+                     *             "use_regex": false,
+                     *             "case_sensitive": false
+                     *           },
+                     *           "resources": {
+                     *             "selected_subtitle_group": null,
+                     *             "valid_resource_count": 0,
+                     *             "invalid_resource_count": 0,
+                     *             "complete_resource_count": 0,
+                     *             "valid_file_names": [],
+                     *             "excluded_file_names": [
+                     *               {
+                     *                 "name": "",
+                     *                 "reason": ""
+                     *               }
+                     *             ]
+                     *           },
+                     *           "folder_name": null,
+                     *           "storage_profile": null,
+                     *           "total_episodes": null,
+                     *           "updated_episode": null,
+                     *           "updated_episode_status": "NOT_IMPLEMENTED",
+                     *           "history_summary": [
+                     *             {
+                     *               "action": null,
+                     *               "previous_status": null,
+                     *               "next_status": null,
+                     *               "timestamp": null
+                     *             }
+                     *           ],
+                     *           "ab_status": null
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * RequestSafeInfoResultDTO
+                         * @description Envelope for the safe-info endpoint: only the whitelist object.
+                         *
+                         *     The endpoint result is ``{"safe_info": {...}}`` — no raw request snapshot,
+                         *     history section or AB section is ever attached.
+                         */
+                        result: {
+                            /**
+                             * RequestSafeInfoDTO
+                             * @description The strict safe-info whitelist for one saved Request (US-217).
+                             *
+                             *     ``extra="forbid"``: unknown nested fields, endpoints, URLs, credentials,
+                             *     raw responses and absolute paths are rejected instead of passing through.
+                             *     ``updated_episode`` is always ``None`` and ``updated_episode_status`` is
+                             *     always ``NOT_IMPLEMENTED`` — Stage 28 never guesses current-episode
+                             *     progress from seeds/RSS/download state (BL-020 is out of scope).
+                             */
+                            safe_info: {
+                                /** Request Id */
+                                request_id: string;
+                                /** Status */
+                                status: string;
+                                /**
+                                 * Raw Title
+                                 * @default null
+                                 */
+                                raw_title: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /** Aliases */
+                                aliases?: string[];
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Season Raw
+                                 * @default null
+                                 */
+                                season_raw: string | null;
+                                /**
+                                 * Season Evidence
+                                 * @default null
+                                 */
+                                season_evidence: string | null;
+                                /** @default null */
+                                mikan_collection: {
+                                    /**
+                                     * Title
+                                     * @default null
+                                     */
+                                    title: string | null;
+                                    /**
+                                     * Bangumi Id
+                                     * @default null
+                                     */
+                                    bangumi_id: string | null;
+                                } | null;
+                                /** Subtitle Groups */
+                                subtitle_groups?: {
+                                    /**
+                                     * Subtitle Group
+                                     * @default null
+                                     */
+                                    subtitle_group: string | null;
+                                    /**
+                                     * Total Resource Count
+                                     * @default 0
+                                     */
+                                    total_resource_count: number;
+                                    /**
+                                     * Valid Resource Count
+                                     * @default 0
+                                     */
+                                    valid_resource_count: number;
+                                    /**
+                                     * Invalid Resource Count
+                                     * @default 0
+                                     */
+                                    invalid_resource_count: number;
+                                    /** Warnings */
+                                    warnings?: string[];
+                                }[];
+                                /**
+                                 * Selected Subtitle Group
+                                 * @default null
+                                 */
+                                selected_subtitle_group: string | null;
+                                /**
+                                 * RequestSafeInfoFilterRuleDTO
+                                 * @description User-readable filter rule summary (safe, user-controlled text).
+                                 */
+                                filter_rule?: {
+                                    /**
+                                     * Must Contain
+                                     * @default
+                                     */
+                                    must_contain: string;
+                                    /**
+                                     * Must Not Contain
+                                     * @default
+                                     */
+                                    must_not_contain: string;
+                                    /**
+                                     * Use Regex
+                                     * @default false
+                                     */
+                                    use_regex: boolean;
+                                    /**
+                                     * Case Sensitive
+                                     * @default false
+                                     */
+                                    case_sensitive: boolean;
+                                };
+                                /**
+                                 * RequestSafeInfoResourcesDTO
+                                 * @description Resource counts and sanitized file-name summaries.
+                                 *
+                                 *     Only torrent *names* (file titles) are exposed — never magnet links,
+                                 *     download URLs or raw RSS. ``valid`` is the currently selected subtitle
+                                 *     group's effective seeds; ``excluded`` its excluded seeds; ``complete`` is
+                                 *     the combined unique seeds across every candidate group.
+                                 */
+                                resources?: {
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Valid Resource Count
+                                     * @default 0
+                                     */
+                                    valid_resource_count: number;
+                                    /**
+                                     * Invalid Resource Count
+                                     * @default 0
+                                     */
+                                    invalid_resource_count: number;
+                                    /**
+                                     * Complete Resource Count
+                                     * @default 0
+                                     */
+                                    complete_resource_count: number;
+                                    /** Valid File Names */
+                                    valid_file_names?: string[];
+                                    /** Excluded File Names */
+                                    excluded_file_names?: {
+                                        /**
+                                         * Name
+                                         * @default
+                                         */
+                                        name: string;
+                                        /**
+                                         * Reason
+                                         * @default
+                                         */
+                                        reason: string;
+                                    }[];
+                                };
+                                /**
+                                 * Folder Name
+                                 * @default null
+                                 */
+                                folder_name: string | null;
+                                /**
+                                 * Storage Profile
+                                 * @default null
+                                 */
+                                storage_profile: string | null;
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /** History Summary */
+                                history_summary?: {
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Previous Status
+                                     * @default null
+                                     */
+                                    previous_status: string | null;
+                                    /**
+                                     * Next Status
+                                     * @default null
+                                     */
+                                    next_status: string | null;
+                                    /**
+                                     * Timestamp
+                                     * @default null
+                                     */
+                                    timestamp: string | null;
+                                }[];
+                                /** @default null */
+                                ab_status: {
+                                    /**
+                                     * Submitted
+                                     * @default false
+                                     */
+                                    submitted: boolean;
+                                    /**
+                                     * Success
+                                     * @default null
+                                     */
+                                    success: boolean | null;
+                                    /**
+                                     * Ab Subscription Id
+                                     * @default null
+                                     */
+                                    ab_subscription_id: string | null;
+                                    /**
+                                     * Error Type
+                                     * @default null
+                                     */
+                                    error_type: string | null;
+                                } | null;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_request_id: request_id 不能包含路径片段 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "invalid_storage_dir",
+                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description request_not_found: 订阅方案不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "request_not_found",
+                     *       "error_message": "订阅方案不存在",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 读取订阅方案失败 / storage_json_error: 订阅方案 JSON 损坏 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "读取订阅方案失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

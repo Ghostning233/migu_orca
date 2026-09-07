@@ -18,6 +18,7 @@ import type {
 const EXPECTED_OPERATION_IDS = [
   'listRequests',
   'getRequestDetail',
+  'getRequestSafeInfo',
   'createRequest',
   'previewModifyRequest',
   'previewSaveRequest',
@@ -51,6 +52,7 @@ describe('generated API client (US-198)', () => {
     expectTypeOf<OperationKeys>().toEqualTypeOf<
       | 'listRequests'
       | 'getRequestDetail'
+      | 'getRequestSafeInfo'
       | 'createRequest'
       | 'previewModifyRequest'
       | 'previewSaveRequest'
@@ -103,6 +105,7 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/requests/{request_id}/cancel'
       | '/api/v1/requests/{request_id}/delete'
       | '/api/v1/requests/{request_id}/modify'
+      | '/api/v1/requests/{request_id}/safe-info'
       | '/api/v1/requests/{request_id}/submit-ab'
     >()
   })
@@ -134,6 +137,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(26)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(27)
   })
 })

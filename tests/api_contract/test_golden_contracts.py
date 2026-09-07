@@ -114,6 +114,89 @@ def test_golden_request_detail_success(client: FlaskClient, tmp_path: Path) -> N
     assert set(payload["result"]["ab_result"]) == {"available", "record", "error"}
 
 
+def test_golden_request_safe_info_success(client: FlaskClient, tmp_path: Path) -> None:
+    """US-217: safe-info returns exactly the strict whitelist envelope."""
+    saved_request(tmp_path, "芙莉莲", "request-1")
+
+    response = client.get(
+        "/api/v1/requests/request-1/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert set(payload["result"]) == {"safe_info"}
+    safe = payload["result"]["safe_info"]
+    # The frozen safe-info public shape (extra=forbid producer).
+    assert set(safe) == {
+        "request_id",
+        "status",
+        "raw_title",
+        "title",
+        "aliases",
+        "season",
+        "season_raw",
+        "season_evidence",
+        "mikan_collection",
+        "subtitle_groups",
+        "selected_subtitle_group",
+        "filter_rule",
+        "resources",
+        "folder_name",
+        "storage_profile",
+        "total_episodes",
+        "updated_episode",
+        "updated_episode_status",
+        "history_summary",
+        "ab_status",
+    }
+    assert safe["request_id"] == "request-1"
+    assert safe["status"] == "PENDING_CONFIRM"
+    assert safe["updated_episode"] is None
+    assert safe["updated_episode_status"] == "NOT_IMPLEMENTED"
+    assert safe["total_episodes"] is None
+    assert safe["mikan_collection"] == {"title": "葬送的芙莉莲", "bangumi_id": None}
+    assert safe["ab_status"] == {
+        "submitted": False,
+        "success": None,
+        "ab_subscription_id": None,
+        "error_type": None,
+    }
+    # The raw snapshot URLs never appear in the safe-info payload.
+    body_text = response.get_data(as_text=True)
+    assert "rss" not in body_text.lower()
+    assert "mikan_url" not in body_text.lower()
+    assert "http" not in body_text.lower()
+    assert "magnet" not in body_text.lower()
+
+
+def test_golden_request_safe_info_missing_request(client: FlaskClient) -> None:
+    """US-217: safe-info 404 classification matches the detail endpoint."""
+    response = client.get("/api/v1/requests/missing-request/safe-info")
+
+    payload = response.get_json()
+    assert response.status_code == 404
+    assert payload["ok"] is False
+    assert payload["error_type"] == "request_not_found"
+    assert payload["error_message"] == "未找到已保存的订阅方案"
+    assert payload["error_data"]["failed_step"] == "load_request_snapshot"
+    assert payload["error_data"]["details"] == {"request_id": "missing-request"}
+
+
+def test_golden_request_safe_info_invalid_request_id(client: FlaskClient) -> None:
+    """US-217: a path-fragment request_id is a 400, never a storage leak."""
+    response = client.get("/api/v1/requests/nested%2Frequest/safe-info")
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_request_id"
+    assert payload["error_message"] == "request_id 不能包含路径片段"
+    assert payload["error_data"]["failed_step"] == "load_request_snapshot"
+    assert payload["error_data"]["details"] == {"field": "request_id"}
+
+
 def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> None:
     response = client.post(
         "/api/v1/requests",

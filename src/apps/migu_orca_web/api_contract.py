@@ -26,7 +26,7 @@ Scope notes
   (e.g. the connection-test whitelist and the request ``summary``).
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -568,6 +568,143 @@ class BatchSaveConfirmResultDTO(_StrictBase):
     batch_id: str
     results: list[BatchSaveConfirmItemResultDTO]
     summary: dict[str, int]
+
+
+# ---------------------------------------------------------------------------
+# Request safe-info (US-217)
+# ---------------------------------------------------------------------------
+# The ``GET /api/v1/requests/{request_id}/safe-info`` result is the single
+# safe data source for the "全部信息" read-only dialog. It is built by an
+# explicit default-deny serializer (never by copying the snapshot and hiding
+# fields in the frontend), and every nested shape is ``extra="forbid"`` so an
+# unknown/engine/URL/credential field is rejected at the boundary. The raw
+# snapshot's ``mikan_url``/``rss_url``/``poster_url``/``selected_rss_url`` and
+# any endpoint/token/cookie/response-body/absolute-path values never appear.
+
+
+class RequestSafeInfoCollectionDTO(_StrictBase):
+    """Selected MiKan collection public identity (never the full URL)."""
+
+    title: str | None = None
+    bangumi_id: str | None = None
+
+
+class RequestSafeInfoSubtitleGroupDTO(_StrictBase):
+    """One subtitle-group resource summary (no RSS URL, seeds or raw feed)."""
+
+    subtitle_group: str | None = None
+    total_resource_count: int = 0
+    valid_resource_count: int = 0
+    invalid_resource_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class RequestSafeInfoFilterRuleDTO(_StrictBase):
+    """User-readable filter rule summary (safe, user-controlled text)."""
+
+    must_contain: str = ""
+    must_not_contain: str = ""
+    use_regex: bool = False
+    case_sensitive: bool = False
+
+
+class RequestSafeInfoExcludedFileDTO(_StrictBase):
+    """One excluded torrent-file name plus its readable filter reason."""
+
+    name: str = ""
+    reason: str = ""
+
+
+class RequestSafeInfoResourcesDTO(_StrictBase):
+    """Resource counts and sanitized file-name summaries.
+
+    Only torrent *names* (file titles) are exposed — never magnet links,
+    download URLs or raw RSS. ``valid`` is the currently selected subtitle
+    group's effective seeds; ``excluded`` its excluded seeds; ``complete`` is
+    the combined unique seeds across every candidate group.
+    """
+
+    selected_subtitle_group: str | None = None
+    valid_resource_count: int = 0
+    invalid_resource_count: int = 0
+    complete_resource_count: int = 0
+    valid_file_names: list[str] = Field(default_factory=list)
+    excluded_file_names: list[RequestSafeInfoExcludedFileDTO] = Field(
+        default_factory=list
+    )
+
+
+class RequestSafeInfoHistoryEventDTO(_StrictBase):
+    """One sanitized status-history event (details/diagnostics dropped)."""
+
+    action: str | None = None
+    previous_status: str | None = None
+    next_status: str | None = None
+    timestamp: str | None = None
+
+
+class RequestSafeInfoAbStatusDTO(_StrictBase):
+    """Safe Auto Bangumi submission summary (no endpoint/raw response).
+
+    ``submitted`` reports whether a submission result exists; ``success`` and
+    ``ab_subscription_id`` are the public outcome; ``error_type`` is a stable
+    classified failure marker when the submission did not succeed.
+    """
+
+    submitted: bool = False
+    success: bool | None = None
+    ab_subscription_id: str | None = None
+    error_type: str | None = None
+
+
+class RequestSafeInfoDTO(_StrictBase):
+    """The strict safe-info whitelist for one saved Request (US-217).
+
+    ``extra="forbid"``: unknown nested fields, endpoints, URLs, credentials,
+    raw responses and absolute paths are rejected instead of passing through.
+    ``updated_episode`` is always ``None`` and ``updated_episode_status`` is
+    always ``NOT_IMPLEMENTED`` — Stage 28 never guesses current-episode
+    progress from seeds/RSS/download state (BL-020 is out of scope).
+    """
+
+    request_id: str
+    status: str
+    raw_title: str | None = None
+    title: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    season: int | None = None
+    season_raw: str | None = None
+    season_evidence: str | None = None
+    mikan_collection: RequestSafeInfoCollectionDTO | None = None
+    subtitle_groups: list[RequestSafeInfoSubtitleGroupDTO] = Field(
+        default_factory=list
+    )
+    selected_subtitle_group: str | None = None
+    filter_rule: RequestSafeInfoFilterRuleDTO = Field(
+        default_factory=RequestSafeInfoFilterRuleDTO
+    )
+    resources: RequestSafeInfoResourcesDTO = Field(
+        default_factory=RequestSafeInfoResourcesDTO
+    )
+    folder_name: str | None = None
+    storage_profile: str | None = None
+    total_episodes: int | None = None
+    updated_episode: None = None
+    updated_episode_status: Literal["NOT_IMPLEMENTED"] = "NOT_IMPLEMENTED"
+    history_summary: list[RequestSafeInfoHistoryEventDTO] = Field(
+        default_factory=list
+    )
+    ab_status: RequestSafeInfoAbStatusDTO | None = None
+
+
+class RequestSafeInfoResultDTO(_StrictBase):
+    """Envelope for the safe-info endpoint: only the whitelist object.
+
+    The endpoint result is ``{"safe_info": {...}}`` — no raw request snapshot,
+    history section or AB section is ever attached.
+    """
+
+    safe_info: RequestSafeInfoDTO
 
 
 # ---------------------------------------------------------------------------

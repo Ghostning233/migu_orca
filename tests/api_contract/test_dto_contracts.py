@@ -34,10 +34,13 @@ from apps.migu_orca_web.api_contract import (
     RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
+    RequestSafeInfoDTO,
+    RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
     RequestSummaryDTO,
     SaveConfirmFailedErrorDataDTO,
 )
+from apps.migu_orca_web.serializers import serialize_request_safe_info
 from batch_engine.controllers.batch_draft_controller import create_batch_draft
 from batch_engine.controllers.batch_queue_controller import serialize_queue
 from batch_engine.models import BatchSubmissionQueue
@@ -424,6 +427,170 @@ def test_request_delete_dto_shape() -> None:
     assert RequestDeleteResultDTO.model_validate(payload) is not None
     with pytest.raises(ValidationError):
         RequestDeleteResultDTO.model_validate({**payload, "absolute_path": "/etc"})
+
+
+def _safe_info_payload() -> dict[str, Any]:
+    """Build the real serializer output for a generated Request."""
+    request = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-1",
+    }
+    return serialize_request_safe_info(
+        request,
+        history_events=[],
+        ab_submit_result=None,
+        storage_profile="storage",
+    )
+
+
+def test_request_safe_info_dto_accepts_real_serializer_output() -> None:
+    """US-217: the strict safe-info DTO validates real serializer output."""
+    payload = _safe_info_payload()
+    validated = RequestSafeInfoResultDTO.model_validate({"safe_info": payload})
+    assert validated.safe_info.request_id == "request-1"
+    assert validated.safe_info.title == "葬送的芙莉莲"
+    assert validated.safe_info.updated_episode is None
+    assert validated.safe_info.updated_episode_status == "NOT_IMPLEMENTED"
+    assert validated.safe_info.resources.valid_file_names
+    assert validated.safe_info.mikan_collection.title == "葬送的芙莉莲"
+    # extra="forbid" holds on the envelope too.
+    with pytest.raises(ValidationError):
+        RequestSafeInfoResultDTO.model_validate(
+            {"safe_info": payload, "leaked_secret": "x"}
+        )
+
+
+def test_request_safe_info_dto_whitelists_top_level_fields() -> None:
+    """US-217: only the frozen PRD whitelist may appear on the safe-info result."""
+    base = {
+        "request_id": "request-1",
+        "status": "ACCEPTED",
+        "raw_title": "芙莉莲",
+        "title": "葬送的芙莉莲",
+        "aliases": ["芙莉莲", "Frieren"],
+        "season": 1,
+        "season_raw": None,
+        "season_evidence": None,
+        "mikan_collection": {"title": "葬送的芙莉莲", "bangumi_id": "2353"},
+        "subtitle_groups": [],
+        "selected_subtitle_group": "喵萌",
+        "filter_rule": {
+            "must_contain": "",
+            "must_not_contain": "",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
+        "resources": {
+            "selected_subtitle_group": "喵萌",
+            "valid_resource_count": 1,
+            "invalid_resource_count": 0,
+            "complete_resource_count": 1,
+            "valid_file_names": ["[喵萌] 葬送的芙莉莲 - 01.mkv"],
+            "excluded_file_names": [],
+        },
+        "folder_name": "葬送的芙莉莲",
+        "storage_profile": "storage",
+        "total_episodes": None,
+        "updated_episode": None,
+        "updated_episode_status": "NOT_IMPLEMENTED",
+        "history_summary": [],
+        "ab_status": None,
+    }
+    assert RequestSafeInfoDTO.model_validate(base) is not None
+    # A URL-looking extra key, a raw snapshot key, or a credential field must
+    # be rejected at the boundary, not silently passed through.
+    for leaked in (
+        "rss_url",
+        "mikan_url",
+        "poster_url",
+        "selected_rss_url",
+        "token",
+        "password",
+        "raw_response",
+        "absolute_path",
+        "request",
+        "source_info",
+        "confirmable_config",
+    ):
+        with pytest.raises(ValidationError):
+            RequestSafeInfoDTO.model_validate({**base, leaked: "secret-value"})
+
+
+def test_request_safe_info_dto_rejects_nested_sensitive_fields() -> None:
+    """US-217: nested whitelists (collection/resources/groups/history/ab) are strict."""
+    base = _safe_info_payload()
+    # The collection may never carry a full URL, magnet or alias-of-URL.
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "mikan_collection": {**base["mikan_collection"], "mikan_url": "https://mikan.example/x"}}
+        )
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "mikan_collection": {**base["mikan_collection"], "rss_url": "https://mikan.example/x"}}
+        )
+    # A subtitle group entry may not carry the raw RSS URL or seed list.
+    leaked_group = {
+        **base["subtitle_groups"][0],
+        "rss_url": "https://mikan.example/RSS/Bangumi?bangumiId=1",
+        "seed_names": ["secret-seed"],
+    }
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "subtitle_groups": [leaked_group]}
+        )
+    # Resource entries may not carry an extra raw-snapshot/credential key.
+    leaked_file = {
+        **base["resources"],
+        "magnet": "magnet:?xt=urn:btih:deadbeef",
+    }
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "resources": leaked_file})
+    leaked_file_list = {
+        **base["resources"],
+        "valid_file_names": ["magnet:?xt=urn:btih:deadbeef"],
+        "download_url": "https://mikan.example/dl/1",
+    }
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "resources": leaked_file_list})
+    leaked_history = [
+        {
+            "action": "ACCEPT",
+            "previous_status": "PENDING_CONFIRM",
+            "next_status": "ACCEPTED",
+            "timestamp": "2026-09-08T00:00:00+00:00",
+            "details": {"rss_url": "https://mikan.example/x"},
+        }
+    ]
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "history_summary": leaked_history}
+        )
+    # AB status never carries the endpoint or raw upstream response.
+    leaked_ab = {
+        "submitted": True,
+        "success": False,
+        "ab_subscription_id": None,
+        "error_type": "ab_connection_failed",
+        "base_url": "https://ab.example",
+        "ab_response": {"id": 1},
+    }
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "ab_status": leaked_ab})
+
+
+def test_request_safe_info_dto_requires_updated_episode_not_implemented() -> None:
+    """US-217: updated_episode is pinned null and status is the literal marker."""
+    base = _safe_info_payload()
+    # A real "current episode" value is never allowed (BL-020 not implemented).
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "updated_episode": 3})
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "updated_episode_status": "IMPLEMENTED"}
+        )
+    # Unknown top-level fields are rejected.
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "tracking_id": "tracking-1"})
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 Migrated from ``views.py`` without behavior change. URL, methods and endpoint
 names are identical; the golden contract tests protect this compatibility.
+US-217 adds ``GET /api/v1/requests/<request_id>/safe-info`` — the strict
+safe-info whitelist for the read-only "全部信息" dialog.
 """
 
 from pathlib import Path
@@ -54,6 +56,7 @@ from apps.migu_orca_web.schemas import (
 from apps.migu_orca_web.serializers import (
     _raise_result_error,
     _sanitize_ab_submit_result,
+    serialize_request_safe_info,
 )
 from apps.migu_orca_web.services import (
     _build_save_confirm_confirm_saved,
@@ -62,6 +65,7 @@ from apps.migu_orca_web.services import (
     _load_history_section,
     _resolve_mikan_config,
     _storage_dir,
+    _storage_profile,
 )
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
@@ -130,6 +134,51 @@ def _draft_store_error(reason: str, current_revision: int | None = None) -> Stag
         "load_preview_draft",
         {"field": "draft_id"},
     )
+
+
+@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/safe-info", methods=["GET"])
+class RequestSafeInfoView(GetView):
+    """Return the strict safe-info whitelist for one saved Request (US-217).
+
+    This is the single safe data source for the "全部信息" read-only dialog. The
+    explicit ``serialize_request_safe_info`` serializer builds the whitelist
+    field-by-field (default-deny, D28-10) and never returns the snapshot
+    unchanged, so full collection/RSS URLs, endpoints, credentials, raw
+    upstream responses and absolute paths cannot reach the page or the DOM.
+    ``updated_episode`` is always null and ``updated_episode_status`` is always
+    NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+    """
+
+    request_validator_model = RequestDetailQuery
+
+    def get_object(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestDetailQuery)
+        storage_dir = _storage_dir(self.request_validator_model.storage_dir)
+        config = load_storage_config(storage_dir)
+        request_id = self.request_validator_model.request_id
+        request = load_request_snapshot(config, request_id)
+        history_events: list[dict[str, object]] = []
+        ab_submit_result: dict[str, object] | None = None
+        history_section = _load_history_section(config, request_id)
+        if history_section.get("available") is True:
+            loaded_events = history_section.get("events")
+            if isinstance(loaded_events, list):
+                history_events = loaded_events
+        ab_section = _load_ab_result_section(config, request_id)
+        if ab_section.get("available") is True:
+            record = ab_section.get("record")
+            if isinstance(record, dict):
+                loaded_ab = record.get("ab_submit_result")
+                if isinstance(loaded_ab, dict):
+                    ab_submit_result = loaded_ab
+        return {
+            "safe_info": serialize_request_safe_info(
+                request,
+                history_events=history_events,
+                ab_submit_result=ab_submit_result,
+                storage_profile=_storage_profile(storage_dir),
+            )
+        }
 
 
 @class_route(api_blueprint, "/api/v1/requests", methods=["GET"])

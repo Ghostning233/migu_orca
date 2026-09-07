@@ -125,6 +125,31 @@ def _storage_dir(value: str | None) -> Path | None:
     return candidate
 
 
+def _storage_profile(storage_dir: Path | None) -> str | None:
+    """Return a safe, displayable relative profile for a resolved storage dir.
+
+    When ``storage_dir`` is the server-side root itself (the ``None``/empty
+    fallback) this is ``None`` so the safe-info DTO renders "默认"; otherwise it
+    is the resolved directory's ``name`` (a single relative profile segment,
+    never an absolute path). Used only for safe-info display — never for
+    resolving another path.
+    """
+    if storage_dir is None:
+        return None
+    resolved = storage_dir.expanduser().resolve()
+    root = _WEB_STORAGE_ROOT
+    if resolved == root:
+        return None
+    try:
+        relative = resolved.relative_to(root)
+    except ValueError:
+        return None
+    name = relative.parts[0] if relative.parts else None
+    if not name or name in {"", ".", ".."} or "/" in name or "\\" in name:
+        return None
+    return name
+
+
 # ---------------------------------------------------------------------------
 # Web storage root (US-193)
 # ---------------------------------------------------------------------------

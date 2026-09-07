@@ -48,6 +48,16 @@
 - 静态 fixture 标题有限（芙莉莲/咒术回战等）；批量 1/12/36 测试对同一支持标题重复签发 N 个 draft，
   而非拼 N 个不存在的标题。嵌套 pydantic 校验 field 是点号路径（如 `items.0.idempotency_key`）。
 - `item_ids` 选择保持输入原顺序（filter 后），不是 item_ids 数组顺序——与 batch accept 一致。
+- safe-info（US-217）模式：serializer 默认拒绝显式构造白名单（绝不全量返回 snapshot 再隐藏），
+  免费文本 label 用 `_safe_label` 二次脱敏（http(s)://、magnet:?、`/` 开头、Windows 盘符 → `[redacted]`）；
+  DTO 全 `extra="forbid"` 并逐层嵌套；`_extract_public_bangumi_id` 只从 `/Home/Bangumi/<id>` 提取公开 id。
+  资源完整数 = 各字幕组 valid+excluded 去重文件名数（`_combined_source_seed_count`）；有效文件名取自
+  选中字幕组 `valid_seed_names`（回退 `effective_seed_names`）。AB 结果从 `ab_results/<id>.json` 读
+  （`ab_submit_result` 也写在 snapshot，但 `_load_ab_result_section` 读独立文件——测试要
+  `save_ab_submit_result`）。`updated_episode` 恒 null、`updated_episode_status=NOT_IMPLEMENTED`，
+  `total_episodes` 目前无数据源恒 null。
+- 新增 GET 端点（如 safe-info）若与泛型 `<path:request_id>` GET 并存，Werkzeug 按静态优先匹配，
+  `/requests/{id}/safe-info` 不会落入 `/requests/{id}`；url_map 同时列出两者，inventory/OpenAPI 都要记。
 
 ## [2026-09-07] - US-210
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -463,3 +473,64 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       accept 的 `_select_items` 语义一致。
   - Useful context
     - US-217 将新增 `GET /api/v1/requests/{request_id}/safe-info`；US-218 归档 prd/progress。
+
+## [2026-09-08] - US-217
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `GET /api/v1/requests/{request_id}/safe-info`（`routes_requests.RequestSafeInfoView`，
+    operationId `getRequestSafeInfo`）：请求只读 `RequestDetailQuery`（request_id 路径 + 可选
+    storage_dir），复用详情端点的 `_storage_dir`/`load_request_snapshot`/
+    `_load_history_section`/`_load_ab_result_section`，返回 `{safe_info: <DTO>}`。404/非法
+    request_id/storage profile 错误沿用详情端点同一 envelope 分类。
+  - `serializers.serialize_request_safe_info` 按 D28-10 **默认拒绝**逐字段显式构造白名单，绝不
+    返回完整 snapshot 再让前端隐藏。字段：`request_id/status/raw_title/title/aliases/season/
+    season_raw/season_evidence/mikan_collection{title,bangumi_id}/subtitle_groups[]/
+    selected_subtitle_group/filter_rule/resources/folder_name/storage_profile/
+    total_episodes(null)/updated_episode(null)/updated_episode_status(NOT_IMPLEMENTED)/
+    history_summary[]/ab_status`。免费文本 label 经 `_safe_label` 二次脱敏（`http(s)://`、
+    `magnet:?`、`/` 开头、Windows 盘符绝对路径 → `[redacted]`）；
+    `_extract_public_bangumi_id` 只从 `/Home/Bangumi/<id>` 提取公开 id；`_combined_source_seed_count`
+    计算各字幕组 valid+excluded 去重文件名作为 complete 计数；AB 状态只保留
+    submitted/success/ab_subscription_id/error_type。
+  - DTO（`api_contract.py`）全 `extra="forbid"`：`RequestSafeInfoDTO` 及嵌套
+    Collection/SubtitleGroup/FilterRule/ExcludedFile/Resources/HistoryEvent/AbStatus，外加外层
+    `RequestSafeInfoResultDTO`。`updated_episode: None`（type null）、
+    `updated_episode_status: Literal["NOT_IMPLEMENTED"]`。
+  - `services._storage_profile(storage_dir)`：解析后相对服务端 Web storage root 的首段 profile
+    名；根目录/越界 → `None`（安全 info 展示用，绝不回传原始路径）。
+- Files changed
+  - 后端：`api_contract.py`（DTO）、`serializers.py`（serialize_request_safe_info + _safe_label 等）、
+    `routes_requests.py`（RequestSafeInfoView）、`services.py`（_storage_profile）、`openapi_gen.py`
+    （_ENDPOINTS 新条目）
+  - 测试：`views_test.py`（4 例 view + 递归泄漏）、`test_dto_contracts.py`（4 例 DTO 白名单/嵌套/更新集数）、
+    `test_golden_contracts.py`（3 例 golden）
+  - 文档/生成：`docs/api/openapi.json`（重生成）、`docs/api/endpoint_inventory.md`（§2/§3.1/§4）、
+    `frontend/src/api/generated/api.ts` + `api.test.ts`（26→27）、README.md、
+    `src/apps/migu_orca_web/AGENTS.md`（US-217 模式）
+- Verification
+  - `uv run pytest -m "not browser" -q` → 1127 passed, 133 deselected
+  - `uv run pytest -q` → 1260 passed（含 133 真实 Chromium 浏览器测试）
+  - 前端 `npm run typecheck`/`lint`/`test:unit`(261)/`api:check`/`build` 全绿
+  - `uv run ruff check src tests`、`uv run python -m compileall -q src tests`、
+    `uv run python -m apps.migu_orca_web.openapi_gen --check`、`git diff --check` 全绿
+  - 仓库根 `.migu_orca/storage` 不存在；无未提交 build/trace/截图
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - safe-info serializer 是“默认拒绝 + 逐字段显式白名单”的范式：不要先 deepcopy snapshot 再删
+      字段。免费文本一律过 `_safe_label`（scheme/magnet/绝对路径标记 → `[redacted]`），因此即使
+      fixture 把 magnet 塞进 seed_name 也不会泄漏。
+    - Werkzeug 静态路由优先于 `<path:...>` 泛型路由：`/requests/{id}/safe-info` 不会落入
+      `/requests/{id}`，url_map 会同时列出两条 GET。
+    - 递归泄漏测试 helper：`_walk_json` 遍历 dict keys + list + scalar，断言任何 leaf 不含
+      `https://`/`magnet:`/绝对路径；整包 body 再查 `rss_url`/`mikan_url`/`token` 等 marker。
+  - Gotchas encountered
+    - safe-info 的 AB 摘要从 `ab_results/<id>.json` 读（`_load_ab_result_section`），不是读 snapshot
+      里的 `ab_submit_result`——测试只 save snapshot 不够，还要 `save_ab_submit_result`。
+    - `RequestSafeInfoDTO.resources.valid_file_names` 是 `list[str]`，DTO 的 `extra=forbid` 只能拒
+      **键**不能拒**值**；magnet/URL 必须由 serializer 的 `_safe_label` 在源头脱敏，DTO 测试只验结构。
+    - OpenAPI 示例由 DTO JSON Schema 生成，safe-info 内嵌对象走 `anyOf [<deref object>, null]`；
+      `_dereference` 正确展开嵌套 DTO 且 example 无泄漏。
+  - Useful context
+    - US-218 将做 Stage 28 收尾：同步 README/架构/M01/M09/M13/backlog/future stages、归档
+      prd/progress、确认无 `.migu_orca/storage` 与未提交 build/trace/截图。
+

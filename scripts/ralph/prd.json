@@ -140,8 +140,8 @@
         "Tests pass"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现：新增 GET /api/v1/requests/{request_id}/safe-info（RequestSafeInfoView，operationId getRequestSafeInfo）。serializers.serialize_request_safe_info 按 D28-10 默认拒绝逐字段构造白名单，返回 {safe_info: <RequestSafeInfoDTO>}；DTO 全 strict extra=forbid（RequestSafeInfoDTO + Collection/SubtitleGroup/FilterRule/ExcludedFile/Resources/HistoryEvent/AbStatus 嵌套 + RequestSafeInfoResultDTO）。字段含 request_id/status/raw_title/title/aliases/season/season_raw/season_evidence/mikan_collection{title,bangumi_id}（不含完整合集/RSS URL）/subtitle_groups[]（计数+脱敏 warnings，无 RSS/种子原文）/selected_subtitle_group/filter_rule/resources（valid/invalid/complete 计数 + 脱敏文件名列表，不含 magnet/下载 URL）/folder_name/storage_profile（services._storage_profile 相对 profile 或 null）/total_episodes=null/updated_episode=null/updated_episode_status=NOT_IMPLEMENTED/history_summary[]（action/状态/时间，丢弃 details）/ab_status{submitted,success,ab_subscription_id,error_type}。免费文本 label 经 _safe_label 二次脱敏（http(s)://、magnet:?、/ 开头与 Windows 盘符 → [redacted]）；请求只读 RequestDetailQuery（404/非法 request_id/storage profile 沿用详情端点分类）；未传 storage_dir 回落服务端根且 storage_profile=null。完整 URL/RSS/magnet/endpoint/token/cookie/password/Authorization/原始响应/绝对路径不出现在成功/错误/OpenAPI 示例；递归 DTO/泄漏测试覆盖顶层/嵌套/列表/404/非法 request_id/storage 错误/ab+history 泄漏。同步 OpenAPI/endpoint inventory §2/§3.1/§4/AGENTS.md/README/生成 TS client（api.test.ts 26→27）。非浏览器 1127 + 浏览器 133 + 前端 261 单测 + typecheck/lint/api:check/build/compileall/ruff/openapi --check 全绿；仓库根 .migu_orca/storage 不存在，无未提交 build/trace/截图。"
     },
     {
       "id": "US-218",

@@ -642,6 +642,273 @@ def test_delete_request_returns_unified_error_for_missing_request(
     assert str(tmp_path) not in str(payload)
 
 
+# ---------------------------------------------------------------------------
+# Request safe-info (US-217)
+# ---------------------------------------------------------------------------
+
+
+def _walk_json(value: Any) -> Any:
+    """Yield every scalar leaf (and every key) recursively through JSON data."""
+    if isinstance(value, dict):
+        yield from value.keys()
+        for child in value.values():
+            yield from _walk_json(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_json(child)
+    else:
+        yield value
+
+
+def test_safe_info_returns_strict_whitelist_for_saved_request(
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path, "芙莉莲", "request-1")
+    config = load_storage_config(tmp_path / "storage")
+    event = {
+        "request_id": "request-1",
+        "previous_status": "PENDING_CONFIRM",
+        "next_status": "ACCEPTED",
+        "action": "ACCEPT",
+        "timestamp": "2026-09-08T12:00:00+00:00",
+    }
+    append_status_history(config, event)
+    request["ab_submit_result"] = {
+        "success": True,
+        "ab_subscription_id": "ab-sub-1",
+        "ab_response": {"id": "ab-sub-1"},
+        "fallback_config": None,
+        "error": None,
+    }
+    save_ab_submit_result(config, request)
+
+    response = _client().get(
+        "/api/v1/requests/request-1/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert set(payload["result"]) == {"safe_info"}
+    safe = payload["result"]["safe_info"]
+    assert safe["request_id"] == "request-1"
+    assert safe["status"] == "ACCEPTED"
+    assert safe["title"] == "葬送的芙莉莲"
+    assert safe["raw_title"] == "芙莉莲"
+    assert safe["selected_subtitle_group"] == "喵萌"
+    assert safe["updated_episode"] is None
+    assert safe["updated_episode_status"] == "NOT_IMPLEMENTED"
+    assert safe["storage_profile"] == "storage"
+    assert safe["folder_name"] == "葬送的芙莉莲"
+    # Resource counts and sanitized names only.
+    assert safe["resources"]["valid_resource_count"] == 1
+    assert safe["resources"]["valid_file_names"] == [
+        "[喵萌] 葬送的芙莉莲 - 01 [1080p][CHS].mkv"
+    ]
+    # AB status summary only — no endpoint/raw response/fallback body.
+    assert safe["ab_status"] == {
+        "submitted": True,
+        "success": True,
+        "ab_subscription_id": "ab-sub-1",
+        "error_type": None,
+    }
+    assert safe["history_summary"] == [
+        {
+            "action": "ACCEPT",
+            "previous_status": "PENDING_CONFIRM",
+            "next_status": "ACCEPTED",
+            "timestamp": "2026-09-08T12:00:00+00:00",
+        }
+    ]
+    # The safe-info body never carries a URL, magnet, credential, or path.
+    body_text = response.get_data(as_text=True)
+    assert "https://" not in body_text
+    assert "http://" not in body_text
+    assert "magnet:" not in body_text.lower()
+    assert "rss" not in body_text.lower()
+    assert str(tmp_path) not in body_text
+
+
+def test_safe_info_omits_sensitive_snapshot_fields_recursively(
+    tmp_path: Path,
+) -> None:
+    """US-217: recursive leak check over the whole safe-info JSON tree.
+
+    Even when the stored snapshot carries raw URLs, magnets, credentials and
+    absolute paths, none of them may survive into the safe-info response —
+    including nested keys and scalar string values (magnet/file names).
+    """
+    request = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-1",
+        "source_info": {
+            "matched_bangumi": {
+                "title": "葬送的芙莉莲",
+                "aliases": ["芙莉莲", "Frieren"],
+                "mikan_url": "https://private.example/Home/Bangumi/99",
+                "match_score": 1.0,
+                "poster_url": "https://private.example/poster.jpg",
+            },
+            "rss_sources": [
+                {
+                    "subtitle_group": "喵萌",
+                    "rss_url": "https://private.example/RSS/Bangumi?bangumiId=99",
+                    "source_type": "mikan_http",
+                    "total_seed_count": 2,
+                    "seed_names": [
+                        "[喵萌] 葬送的芙莉莲 - 01.mkv",
+                        "magnet:?xt=urn:btih:deadbeef",
+                    ],
+                    "valid_seed_count": 2,
+                    "invalid_seed_count": 1,
+                    "valid_seed_names": [
+                        "[喵萌] 葬送的芙莉莲 - 01.mkv",
+                        "magnet:?xt=urn:btih:deadbeef",
+                    ],
+                    "excluded_seed_names": [
+                        {
+                            "name": "[喵萌] 葬送的芙莉莲 - 02.mkv",
+                            "reason": "未命中包含规则：1080p",
+                            "rule": "must_contain",
+                        }
+                    ],
+                    "warnings": [],
+                }
+            ],
+        },
+        "confirmable_config": {
+            "selected_subtitle_group": "喵萌",
+            "selected_rss_url": "https://private.example/RSS/Bangumi?bangumiId=99",
+            "filter_rule": {
+                "must_contain": "1080p",
+                "must_not_contain": "",
+                "use_regex": False,
+                "case_sensitive": False,
+            },
+            "effective_seed_names": [
+                "[喵萌] 葬送的芙莉莲 - 01.mkv",
+                "magnet:?xt=urn:btih:deadbeef",
+            ],
+            "expected_folder_name": "葬送的芙莉莲",
+            "warnings": [],
+        },
+        "ab_submit_result": {
+            "success": False,
+            "ab_subscription_id": None,
+            "ab_response": {"raw": "<html>secret</html>"},
+            "fallback_config": {
+                "title": "葬送的芙莉莲",
+                "rss_url": "https://private.example/rss.xml",
+                "save_path": "/private/absolute/path",
+            },
+            "error": {
+                "error_type": "ab_connection_failed",
+                "error_message": "连不上 https://private.example:8080",
+                "failed_step": "submit_ab_subscription",
+                "details": {"base_url": "https://private.example"},
+            },
+        },
+    }
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+    save_ab_submit_result(load_storage_config(tmp_path / "storage"), request)
+
+    response = _client().get(
+        "/api/v1/requests/request-1/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    body_text = response.get_data(as_text=True)
+    # Nothing sensitive survives in the serialized tree, including substrings.
+    for marker in (
+        "https://",
+        "http://",
+        "magnet:",
+        "private.example",
+        "/private/absolute",
+        "token",
+        "cookie",
+        "password",
+        "Authorization",
+        "raw_response",
+        "rss_url",
+        "mikan_url",
+        "poster_url",
+        "selected_rss_url",
+        "fallback_config",
+        "ab_response",
+        "<html",
+    ):
+        assert marker not in body_text.lower(), f"leaked {marker!r} in {body_text}"
+    # The magnet seed name must be redacted, not surfaced as a file name.
+    safe = payload["result"]["safe_info"]
+    for leaf in _walk_json(safe):
+        if isinstance(leaf, str):
+            assert "magnet:?" not in leaf.lower()
+            assert "http://" not in leaf.lower()
+            assert "https://" not in leaf.lower()
+            assert "/private/" not in leaf
+    assert safe["title"] == "葬送的芙莉莲"
+    assert safe["ab_status"]["error_type"] == "ab_connection_failed"
+    # The raw_title and whitelisted filter labels stay intact.
+    assert safe["raw_title"] == "芙莉莲"
+    assert safe["filter_rule"]["must_contain"] == "1080p"
+
+
+def test_safe_info_reuses_detail_error_classification(tmp_path: Path) -> None:
+    """404/illegal request_id/storage-profile errors match the detail endpoint."""
+    missing = _client().get(
+        "/api/v1/requests/missing-request/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+    missing_payload = missing.get_json()
+    assert missing.status_code == 404
+    assert missing_payload["error_type"] == "request_not_found"
+    assert missing_payload["error_data"]["failed_step"] == "load_request_snapshot"
+    assert str(tmp_path) not in str(missing_payload)
+
+    invalid = _client().get(
+        "/api/v1/requests/nested%2Frequest/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+    invalid_payload = invalid.get_json()
+    assert invalid.status_code == 400
+    assert invalid_payload["error_type"] == "invalid_request_id"
+    assert invalid_payload["error_data"]["details"] == {"field": "request_id"}
+
+    bad_profile = _client().get(
+        "/api/v1/requests/request-1/safe-info",
+        query_string={"storage_dir": "/etc/secret"},
+    )
+    bad_profile_payload = bad_profile.get_json()
+    assert bad_profile.status_code == 400
+    assert bad_profile_payload["error_type"] == "invalid_storage_dir"
+    assert "/etc/secret" not in str(bad_profile_payload)
+
+
+def test_safe_info_without_storage_dir_uses_server_root_and_null_profile(
+    tmp_path: Path,
+) -> None:
+    """US-217: omitting storage_dir resolves to the server root and reports
+    storage_profile=null (the root itself), never a CLI default path."""
+    request = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-1",
+    }
+    save_request_snapshot(load_storage_config(tmp_path), request)
+
+    response = _client().get("/api/v1/requests/request-1/safe-info")
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    safe = payload["result"]["safe_info"]
+    assert safe["request_id"] == "request-1"
+    assert safe["storage_profile"] is None
+    assert str(tmp_path) not in str(payload)
+
+
 def test_delete_request_rejects_path_fragments_without_leaking_storage_path(
     tmp_path: Path,
 ) -> None:
