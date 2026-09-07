@@ -14,6 +14,16 @@ the server the authority for unsaved drafts:
 - ``preview-save`` consumes a *valid* ``draft_id`` once and persists the
   server-held draft, with replay protection.
 
+US-210 adds a monotonic ``revision`` to every server-authoritative draft so the
+server can reject out-of-order stale writes:
+
+- ``issue`` returns a ``DraftHandle`` whose ``revision`` starts at 1;
+- ``get`` returns a ``DraftRead`` carrying the authoritative draft *and* its
+  current revision;
+- ``compare_and_swap`` replaces the draft atomically only when ``base_revision``
+  matches the current revision (bumping the revision by 1); a mismatch leaves
+  both payload and revision untouched and returns ``REASON_REVISION_CONFLICT``.
+
 Security/robustness properties
 ------------------------------
 - Draft contents are request-scoped and ephemeral: they are never written to
@@ -23,9 +33,9 @@ Security/robustness properties
   self-cleaning on every access, and one-shot for saves.
 - Every failure mode maps to a stable 409 ``draft_*`` error type
   (``draft_expired`` / ``draft_evicted`` / ``draft_replayed`` /
-  ``draft_mismatch``), which ``extensions/flask_api/api.py`` classifies as
-  HTTP 409; the UI offers a "重新生成" (re-generate) hint instead of leaking
-  draft content.
+  ``draft_revision_conflict`` / ``draft_mismatch``), which
+  ``extensions/flask_api/api.py`` classifies as HTTP 409; the UI offers a
+  "重新生成" (re-generate) hint instead of leaking draft content.
 - Like ``CandidateSelectionContextStore``, the store is a process-level
   singleton whose capacity is intentionally small: drafts are short-lived
   working state, not durable storage.
@@ -43,12 +53,39 @@ REASON_OK = "ok"
 REASON_EXPIRED = "expired"
 REASON_EVICTED = "evicted"
 REASON_REPLAYED = "replayed"
+REASON_REVISION_CONFLICT = "revision_conflict"
 REASON_UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class DraftHandle:
+    """Public handle returned by ``issue``.
+
+    Carries the opaque ``draft_id`` and the draft's initial ``revision`` (=1).
+    Only the opaque id is ever sent to the client; the revision stays in the
+    current response/request body and component memory (US-211).
+    """
+
+    draft_id: str
+    revision: int
+
+
+@dataclass(frozen=True)
+class DraftRead:
+    """Authoritative draft snapshot plus its current revision (``get``).
+
+    ``get`` never consumes the draft; it returns the payload and the revision
+    the caller must send back as ``base_revision`` for the next atomic update.
+    """
+
+    request: dict[str, Any]
+    revision: int
 
 
 @dataclass(frozen=True)
 class _DraftEntry:
     request: dict[str, Any]
+    revision: int
     created_at: float
     used_at: float
 
@@ -56,18 +93,25 @@ class _DraftEntry:
 class DraftStore:
     """Bounded, expiring, one-time-save store for unsaved preview drafts.
 
-    ``issue`` stores a generated draft and returns an opaque ``draft_id``.
-    ``get`` reads a draft for dry-run modification without consuming it.
-    ``consume_for_save`` atomically removes and returns a draft, so a saved
-    draft can never be saved twice (replay protection).
+    ``issue`` stores a generated draft and returns a ``DraftHandle`` carrying
+    the opaque ``draft_id`` and ``revision=1``. ``get`` reads a draft for
+    dry-run modification without consuming it, returning both the payload and
+    its current revision. ``consume_for_save`` atomically removes and returns a
+    draft, so a saved draft can never be saved twice (replay protection).
+
+    Updates go through ``compare_and_swap``: the caller supplies the
+    ``base_revision`` it last observed, and the store replaces the payload
+    atomically (bumping the revision by 1) only when the base matches the
+    current revision. A stale base leaves the payload and revision untouched.
 
     Lookups return a ``(value_or_None, reason)`` tuple so the routes can map
     the failure to a stable 409 ``draft_*`` error type:
 
-    - ``expired``  — the draft lived past its TTL (or was purged as stale);
-    - ``evicted``  — the draft was evicted because the store was at capacity;
-    - ``replayed`` — the draft id was already consumed by a previous save;
-    - ``unknown``  — the id was never issued (or long since forgotten).
+    - ``expired``            — the draft lived past its TTL (or was purged);
+    - ``evicted``            — the draft was evicted because the store was full;
+    - ``replayed``           — the draft id was consumed by a previous save;
+    - ``revision_conflict``  — the caller's ``base_revision`` is stale;
+    - ``unknown``            — the id was never issued (or long forgotten).
     """
 
     def __init__(
@@ -88,8 +132,8 @@ class DraftStore:
 
     # -- lifecycle ----------------------------------------------------------
 
-    def issue(self, request: dict[str, Any]) -> str:
-        """Store ``request`` and return a new opaque draft id.
+    def issue(self, request: dict[str, Any]) -> DraftHandle:
+        """Store ``request`` and return a handle with an opaque id, revision 1.
 
         Evicts expired entries first, then the oldest entry when at capacity.
         """
@@ -101,13 +145,14 @@ class DraftStore:
         now = self._now()
         self._entries[draft_id] = _DraftEntry(
             request=request,
+            revision=1,
             created_at=now,
             used_at=now,
         )
-        return draft_id
+        return DraftHandle(draft_id=draft_id, revision=1)
 
-    def get(self, draft_id: str | None) -> tuple[dict[str, Any] | None, str]:
-        """Return ``(draft, reason)`` for a dry-run modify (never consumes).
+    def get(self, draft_id: str | None) -> tuple[DraftRead | None, str]:
+        """Return ``(DraftRead, reason)`` for a dry-run modify (never consumes).
 
         Reading refreshes ``used_at`` (recently-modified drafts stay alive),
         but does not invalidate the entry. A missing id is reported as
@@ -123,10 +168,45 @@ class DraftStore:
         self._entries.move_to_end(draft_id)
         self._entries[draft_id] = _DraftEntry(
             request=entry.request,
+            revision=entry.revision,
             created_at=entry.created_at,
             used_at=self._now(),
         )
-        return entry.request, REASON_OK
+        return DraftRead(request=entry.request, revision=entry.revision), REASON_OK
+
+    def compare_and_swap(
+        self,
+        draft_id: str | None,
+        base_revision: int,
+        request: dict[str, Any],
+    ) -> tuple[int | None, str]:
+        """Atomically replace ``request`` iff ``base_revision`` is current.
+
+        On success the revision is bumped by 1 and ``(new_revision,
+        REASON_OK)`` is returned. When ``base_revision`` is stale the payload
+        and revision are left untouched and ``(None,
+        REASON_REVISION_CONFLICT)`` is returned. An expired/evicted/consumed/
+        unknown id returns ``(None, draft_* reason)``; the caller maps it to a
+        stable 409 error.
+        """
+        self._purge()
+        if not draft_id:
+            return None, REASON_UNKNOWN
+        entry = self._entries.get(draft_id)
+        if entry is None:
+            return None, self._missing_reason(draft_id)
+        if entry.revision != base_revision:
+            return None, REASON_REVISION_CONFLICT
+        new_revision = entry.revision + 1
+        now = self._now()
+        self._entries[draft_id] = _DraftEntry(
+            request=request,
+            revision=new_revision,
+            created_at=entry.created_at,
+            used_at=now,
+        )
+        self._entries.move_to_end(draft_id)
+        return new_revision, REASON_OK
 
     def consume_for_save(self, draft_id: str | None) -> tuple[dict[str, Any] | None, str]:
         """Atomically remove and return a draft if it is still usable.
@@ -148,17 +228,20 @@ class DraftStore:
         """Replace the stored payload for an existing draft (post-modify).
 
         Only used by preview-modify after a successful dry-run so the next
-        modify/save sees the latest server-side state. Returns False when the
-        draft is no longer present (expired/evicted/consumed).
+        modify/save sees the latest server-side state; the revision is bumped
+        exactly like a successful CAS against the current revision. Returns
+        False when the draft is no longer present (expired/evicted/consumed).
         """
         if not draft_id:
             return False
         entry = self._entries.get(draft_id)
         if entry is None:
             return False
+        new_revision = entry.revision + 1
         now = self._now()
         self._entries[draft_id] = _DraftEntry(
             request=request,
+            revision=new_revision,
             created_at=entry.created_at,
             used_at=now,
         )

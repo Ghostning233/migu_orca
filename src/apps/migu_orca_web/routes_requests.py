@@ -22,6 +22,8 @@ from apps.migu_orca_web.drafts import (
     REASON_EVICTED,
     REASON_OK,
     REASON_REPLAYED,
+    REASON_REVISION_CONFLICT,
+    DraftRead,
     draft_store,
 )
 from apps.migu_orca_web.schemas import (
@@ -67,8 +69,17 @@ def _draft_store_error(reason: str) -> Stage1Error:
 
     US-194: expired/evicted/replayed/mismatched drafts are state conflicts
     (409) with a Chinese message telling the user to regenerate, never a leak
-    of draft content or an absolute path.
+    of draft content or an absolute path. US-210: a stale ``base_revision`` is
+    its own ``draft_revision_conflict`` (the payload/revision are untouched),
+    still 409 but with the current revision in the safe error data.
     """
+    if reason == REASON_REVISION_CONFLICT:
+        return Stage1Error(
+            "draft_revision_conflict",
+            "草案已被更新，请基于最新版本重试",
+            "compare_and_swap_draft",
+            {"field": "base_revision"},
+        )
     if reason == REASON_REPLAYED:
         return Stage1Error(
             "draft_replayed",
@@ -178,8 +189,9 @@ class RequestCreateView(PostView):
             # bounded draft store and hand the client only an opaque draft_id;
             # preview-modify/preview-save reference this id instead of a
             # client-supplied full Request. The draft itself never enters URL,
-            # browser storage, history, logs or screenshots.
-            response["draft_id"] = draft_store.issue(request)
+            # browser storage, history, logs or screenshots. The revision stays
+            # server-side for now (US-211 wires it into the response contract).
+            response["draft_id"] = draft_store.issue(request).draft_id
         return response
 
 
@@ -196,11 +208,15 @@ class RequestPreviewModifyView(PostView):
         # trusted from the client. modify_request recomputes per-source seed
         # filters and the selected group's effective seeds without saving, so
         # the UI can show live seed updates before the user saves the draft.
-        draft, draft_reason = draft_store.get(payload.draft_id)
-        if draft is None or draft_reason != REASON_OK:
+        # US-210: ``get`` returns the current revision alongside the payload so
+        # the next modify/save can carry it as base_revision (US-211 wires the
+        # conflict check into this route).
+        draft_read: DraftRead | None
+        draft_read, draft_reason = draft_store.get(payload.draft_id)
+        if draft_read is None or draft_reason != REASON_OK:
             raise _draft_store_error(draft_reason)
         result = apply_modify_action(
-            {"success": True, "request": draft, "error": None},
+            {"success": True, "request": draft_read.request, "error": None},
             payload.patch,
         )
         if not result["success"]:

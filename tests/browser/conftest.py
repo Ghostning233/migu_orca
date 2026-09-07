@@ -320,7 +320,7 @@ def preview_result_json(
     from request_engine.controllers.request_controller import summarize_request
 
     if draft_id is None:
-        draft_id = draft_store.issue(request)
+        draft_id = draft_store.issue(request).draft_id
     body = {
         "ok": True,
         "result": {
@@ -340,7 +340,7 @@ def issue_draft_id(request: dict[str, Any]) -> str:
     """
     from apps.migu_orca_web.drafts import draft_store
 
-    return draft_store.issue(request)
+    return draft_store.issue(request).draft_id
 
 
 def save_preview_handler(calls: list[dict[str, Any]] | None = None):

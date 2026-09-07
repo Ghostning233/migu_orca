@@ -17,8 +17,8 @@
         "Tests pass"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现 DraftHandle(revision=1)/DraftRead/compare_and_swap + REASON_REVISION_CONFLICT；get 返回当前 revision；TTL/LRU/evict/replay/clear 兼容；单元测试 14 例通过。"
     },
     {
       "id": "US-211",

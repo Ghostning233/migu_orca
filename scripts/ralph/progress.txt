@@ -14,3 +14,41 @@
 - `draft_id`、revision、idempotency key 只存在请求体和页面内存，不进入 URL 或 browser storage。
 - Python 使用 `uv`，前端使用 `npm ci`；自动化通过 fixture/fake transport，禁止访问真实外部服务。
 - 每次迭代只完成最高优先级的一个未通过 story；完整实现、测试和提交后才把 `passes` 改为 true。
+
+## [2026-09-07] - US-210
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - `DraftStore.issue` 现在返回 `DraftHandle(draft_id, revision=1)`；`DraftStore.get` 返回
+    `DraftRead(request, revision)`（不消费、不自增）；新增 compare-and-swap：
+    `compare_and_swap(draft_id, base_revision, request)` 匹配时原子替换并将 revision +1，
+    不匹配时 payload/revision 均不变并返回新 reason `REASON_REVISION_CONFLICT`。
+  - `routes_requests._draft_store_error` 增加 `REASON_REVISION_CONFLICT` → 409
+    `draft_revision_conflict`（error_data 只含 field=base_revision，暂未带 current_revision；
+    US-211 接入 base_revision 请求契约时补全）。
+  - `routes_requests` 的 `preview-modify`/`preview-save` 生产路径改为读取
+    `DraftRead.request` / `.draft_id`；对外 HTTP 响应在 US-210 阶段保持不变（仍只返回
+    opaque `draft_id`，不返回 revision）——revision 完全留在服务端，避免提前改动契约。
+- Files changed
+  - 修改：`src/apps/migu_orca_web/drafts.py`（DraftHandle/DraftRead/revision/CAS/REASON_REVISION_CONFLICT）
+  - 修改：`src/apps/migu_orca_web/routes_requests.py`（读取 DraftRead、issue().draft_id、
+    _draft_store_error 增加 revision conflict 映射）
+  - 修改：`tests/browser/conftest.py`（2 处 issue() 改 `.draft_id`，供 mock 返回 string）
+  - 修改：`tests/api_contract/test_draft_store.py`（重写为 14 例 revision/CAS/兼容测试）
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - DraftStore 生命周期约定：`issue` 建 revision=1，`get` 只读返回当前 revision 并刷新
+      used_at，CAS 匹配才 +1；`update`（旧 preview-modify 内部写）与 CAS 同语义 +1。
+    - 全仓库 draft_id 由 `DraftStore` 单例签发的 string 消费点：routes_requests.py、
+      tests/browser/conftest.py 的 `preview_result_json`/`issue_draft_id`。
+    - 单元测试用 `now=lambda: now[0]` + `now[0] += ttl+1` 推进假时钟测过期/逐出。
+  - Gotchas encountered
+    - 仓库根 `.migu_orca/storage` 是 gitignored 的旧本地 CLI 产物；Stage 28 golden 测试
+      `test_golden_request_create_without_storage_dir_uses_server_root` 要求它不存在，
+      与本改动无关但会令完整套件失败——删除该 gitignored 本地产物即可（保留 mikan_posters_v1）。
+    - `uv run pytest -m "not browser"` 是主要回归门禁；Stage 28 PRD 的验收命令要求
+      compileall/ruff/openapi/前端/浏览器全绿，但 US-210 只改 Python，前端不动。
+  - Useful context
+    - 当前 active prd.json 在 `scripts/ralph/`；archive 里保留旧 stage 的 prd/progress 对。
+    - revision 尚未进入任何请求/响应 DTO 或 OpenAPI（属 US-211）；US-212 会在 save 生命周期
+      增加 reserve/commit/release 并复用 CAS reason。
+---
