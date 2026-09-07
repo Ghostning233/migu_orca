@@ -276,9 +276,13 @@ class RequestPreviewModifyPayload(BaseModel):
     US-194: the server is authoritative for unsaved drafts. The client sends
     only the opaque ``draft_id`` it received from generation (or a previous
     modify) plus an allowed patch; it never sends the full Request snapshot.
+    US-211: ``base_revision`` is the revision the client last observed; the
+    server replaces the draft only when it still matches (compare-and-swap), so
+    a stale out-of-order modify cannot overwrite a newer result.
     """
 
     draft_id: str
+    base_revision: int = Field(ge=1)
     patch: dict[str, Any]
     storage_dir: str | None = None
 

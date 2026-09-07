@@ -35,8 +35,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已完成：create 在 save_request=false 返回 draft_id+draft_revision(=1)；preview-modify 必填 base_revision(>=1) 走 compare_and_swap，成功返回同 draft_id+新 draft_revision；stale base 返回 409 draft_revision_conflict，error_data 只含 field=base_revision 与 current_revision（已修 _error_http_status 分类从 400→409）；Vue 草案调用只在组件内存维护 draft_id/draft_revision（DraftPreviewPanel 局部 ref + changed 事件回传父组件/批量卡片），不写 URL/browser storage。同步 DTO、OpenAPI、endpoint inventory、生成 TS client 无漂移；golden/views/DTO/browser/fixture 测试覆盖。1028 非浏览器 + 133 浏览器 + 前端 260 单测 + typecheck/lint/api:check/build 全绿。"
     },
     {
       "id": "US-212",

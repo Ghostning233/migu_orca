@@ -125,9 +125,9 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["ok"] is True
-    # US-194: an unsaved generation returns an opaque draft_id (server owns the
-    # authoritative draft) alongside the display snapshot.
-    assert set(payload["result"]) == {"request", "summary", "draft_id"}
+    # US-194/211: an unsaved generation returns an opaque draft_id and the
+    # initial monotonic draft_revision (=1) alongside the display snapshot.
+    assert set(payload["result"]) == {"request", "summary", "draft_id", "draft_revision"}
     assert payload["result"]["request"]["input"]["raw_title"] == "芙莉莲"
     assert payload["result"]["request"]["status"] == "PENDING_CONFIRM"
     assert payload["result"]["summary"] == summarize_request(
@@ -135,6 +135,7 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
     )
     assert isinstance(payload["result"]["draft_id"], str)
     assert len(payload["result"]["draft_id"]) >= 16
+    assert payload["result"]["draft_revision"] == 1
     # Preview generation never writes storage unless save_request=true.
     assert not (tmp_path / "storage").exists()
 
@@ -198,24 +199,30 @@ def test_golden_request_detail_business_failure(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"request_id": "missing-request"}
 
 
-def _issue_preview_draft(client: FlaskClient, title: str = "芙莉莲") -> str:
-    """Generate an unsaved preview draft and return its opaque draft_id."""
+def _issue_preview_draft(
+    client: FlaskClient, title: str = "芙莉莲"
+) -> tuple[str, int]:
+    """Generate an unsaved preview draft; return ``(draft_id, draft_revision)``."""
     response = client.post(
         "/api/v1/requests",
         json={"title": title, "save_request": False},
     )
     payload = response.get_json()
     assert response.status_code == 200
-    return payload["result"]["draft_id"]
+    result = payload["result"]
+    assert isinstance(result["draft_id"], str)
+    assert result["draft_revision"] == 1
+    return result["draft_id"], result["draft_revision"]
 
 
 def test_golden_preview_modify_rejects_illegal_patch(client: FlaskClient) -> None:
-    draft_id = _issue_preview_draft(client)
+    draft_id, draft_revision = _issue_preview_draft(client)
 
     response = client.post(
         "/api/v1/requests/preview-modify",
         json={
             "draft_id": draft_id,
+            "base_revision": draft_revision,
             "patch": {"bogus_field": 1},
         },
     )
@@ -230,6 +237,123 @@ def test_golden_preview_modify_rejects_illegal_patch(client: FlaskClient) -> Non
         "filter_rule",
         "selected_subtitle_group",
     ]
+
+
+def test_golden_preview_modify_success_returns_new_revision(
+    client: FlaskClient,
+) -> None:
+    """US-211: preview-modify with a matching base_revision atomically bumps
+    the revision and returns the same draft_id + the new draft_revision."""
+    draft_id, draft_revision = _issue_preview_draft(client)
+    assert draft_revision == 1
+
+    response = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": draft_revision,
+            "patch": {"filter_rule": {"must_not_contain": "V2", "use_regex": False, "case_sensitive": False}},
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["draft_id"] == draft_id
+    assert payload["result"]["draft_revision"] == 2
+    modified = payload["result"]["request"]
+    assert modified["confirmable_config"]["filter_rule"]["must_not_contain"] == "V2"
+    # The response shape is the frozen public create/modify envelope + revision.
+    assert set(payload["result"]) == {"request", "summary", "draft_id", "draft_revision"}
+
+    # A second modify carries the bumped revision (revision 3).
+    second = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": payload["result"]["draft_revision"],
+            "patch": {"expected_folder_name": "自定义"},
+        },
+    )
+    assert second.status_code == 200
+    assert second.get_json()["result"]["draft_revision"] == 3
+
+
+def test_golden_preview_modify_stale_revision_conflicts(client: FlaskClient) -> None:
+    """US-211: a stale base_revision never overwrites the newer draft.
+
+    The error is a 409 draft_revision_conflict whose error_data carries only
+    field=base_revision and the current_revision — never the draft id or any
+    draft content.
+    """
+    draft_id, _ = _issue_preview_draft(client)
+    # First writer succeeds (revision 1 → 2).
+    first = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"filter_rule": {"must_not_contain": "V2", "use_regex": False, "case_sensitive": False}},
+        },
+    )
+    assert first.status_code == 200
+
+    # A stale writer still sends base_revision=1: rejected, draft untouched.
+    stale = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "不该写入"},
+        },
+    )
+    payload = stale.get_json()
+    assert stale.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_revision_conflict"
+    assert payload["error_message"] == "草案已被更新，请基于最新版本重试"
+    assert payload["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    # The raw draft_id never leaks into the error body.
+    assert draft_id not in str(payload)
+    assert "不该写入" not in str(payload)
+
+    # A follow-up modify with the true current revision still works (proving the
+    # stale write left the server-side draft intact at revision 2).
+    retry = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 2,
+            "patch": {"expected_folder_name": "正确写入"},
+        },
+    )
+    assert retry.status_code == 200
+    assert retry.get_json()["result"]["draft_revision"] == 3
+    assert (
+        retry.get_json()["result"]["request"]["confirmable_config"]["filter_rule"][
+            "must_not_contain"
+        ]
+        == "V2"
+    )
+
+
+def test_golden_preview_modify_missing_base_revision_is_validation_error(
+    client: FlaskClient,
+) -> None:
+    """US-211: base_revision is a required request field (>=1)."""
+    draft_id, _ = _issue_preview_draft(client)
+    response = client.post(
+        "/api/v1/requests/preview-modify",
+        json={"draft_id": draft_id, "patch": {"expected_folder_name": "x"}},
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(e["field"] == "base_revision" for e in payload["error_data"]["errors"])
 
 
 def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
@@ -250,7 +374,7 @@ def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
 
 def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
     """US-194: preview-save is one-shot; a second save is a 409 replay."""
-    draft_id = _issue_preview_draft(client)
+    draft_id, _ = _issue_preview_draft(client)
 
     first = client.post(
         "/api/v1/requests/preview-save",

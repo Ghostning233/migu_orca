@@ -71,6 +71,7 @@ const fallbackLoading = ref(false)
 // Draft-preview state (component memory only).
 const draftRequest = ref<RequestSnapshot | null>(null)
 const draftId = ref('')
+const draftRevision = ref(1)
 const draftLoading = ref(false)
 
 const hasResults = computed(() => (searchResult.value?.candidates?.length ?? 0) > 0)
@@ -195,6 +196,9 @@ async function generateDraft(payload: Record<string, unknown>): Promise<boolean>
     if (result?.draft_id && result?.request) {
       draftId.value = result.draft_id
       draftRequest.value = result.request as RequestSnapshot
+      // US-211: keep the monotonic draft_revision in component memory only.
+      draftRevision.value =
+        typeof result.draft_revision === 'number' ? result.draft_revision : 1
       notification.success('预览已生成', '这是未保存的订阅草案；保存后可确认、修改或删除。')
       return true
     }
@@ -225,6 +229,7 @@ function setConfirmedSeason(candidate: MikanCandidate, season: number | null): v
 function onSaved(requestId: string): void {
   draftRequest.value = null
   draftId.value = ''
+  draftRevision.value = 1
   seasonConfirmations.value = {}
   notification.success('保存成功', `已保存订阅草案 ${requestId}`)
   void router.push({ path: '/requests', query: { request_id: requestId } })
@@ -233,6 +238,13 @@ function onSaved(requestId: string): void {
 function onDraftExpired(): void {
   draftRequest.value = null
   draftId.value = ''
+  draftRevision.value = 1
+}
+
+function onDraftChanged(state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void {
+  draftRequest.value = state.request
+  draftId.value = state.draftId
+  draftRevision.value = state.draftRevision
 }
 
 onMounted(() => {
@@ -373,9 +385,11 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     :key="draftId"
     :request="draftRequest"
     :draft-id="draftId"
+    :draft-revision="draftRevision"
     @saved="onSaved"
     @expired="onDraftExpired"
     @failed="onDraftExpired"
+    @changed="onDraftChanged"
   />
   <LoadingState v-if="draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />
 

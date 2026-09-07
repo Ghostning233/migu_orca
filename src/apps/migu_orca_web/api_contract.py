@@ -230,12 +230,14 @@ class RequestCreateResultDTO(_StrictBase):
     summary: RequestSummaryDTO
     saved_request: RequestSnapshotDTO | None = None
     draft_id: str | None = None
+    draft_revision: int | None = None
 
 
 class RequestPreviewModifyResultDTO(_StrictBase):
     request: RequestSnapshotDTO
     summary: RequestSummaryDTO
     draft_id: str | None = None
+    draft_revision: int | None = None
 
 
 class RequestPreviewSaveResultDTO(_StrictBase):
@@ -418,6 +420,7 @@ class BatchParseItemDTO(_SnapshotBase):
     enhanced_search_queries: list[dict[str, Any]] = []
     preview_request: RequestSnapshotDTO | None = None
     draft_id: str | None = None
+    draft_revision: int | None = None
     error: dict[str, Any] | None = None
 
 

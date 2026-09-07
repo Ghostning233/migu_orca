@@ -32,6 +32,9 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'accepted', item: BatchItem, savedRequest: RequestSnapshot): void
   (e: 'deleted', itemId: string): void
+  // US-211: preview-modify bumped the draft_revision; keep the card's
+  // in-memory draft_id/draft_revision in sync so a re-open sends the true base.
+  (e: 'draft-changed', itemId: string, state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void
 }>()
 
 const notification = useNotificationStore()
@@ -64,6 +67,11 @@ async function acceptCurrentDraft(): Promise<void> {
   }
 }
 
+function onDraftChanged(state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void {
+  const itemId = props.item.item_id ?? ''
+  emit('draft-changed', itemId, state)
+}
+
 function removeCard(): void {
   emit('deleted', props.item.item_id ?? '')
 }
@@ -77,6 +85,8 @@ defineExpose({ acceptCurrentDraft })
       ref="draftPanel"
       :request="(item.preview_request as RequestSnapshot)"
       :draft-id="(item.draft_id ?? '')"
+      :draft-revision="item.draft_revision ?? 1"
+      @changed="onDraftChanged"
     />
 
     <div class="batch-draft-actions" aria-label="批量卡片操作">

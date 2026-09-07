@@ -106,22 +106,27 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `_web_storage_root` fixture 指向 tmp 父目录；不要往 localStorage/URL/payload 里放绝对路径。
 - 修改 `_error_http_status` 或 `_ENDPOINTS` 的 errors 后必须重生成 `docs/api/openapi.json`。
 
-## 服务端权威草案（US-194）
+## 服务端权威草案（US-194 / US-210 / US-211）
 
 - 未保存预览草案由服务端 `drafts.py:DraftStore` 持有（进程内单例 `draft_store`，TTL 30 分钟、
   容量 128、自动清理、一次性保存 + 重放保护）。`POST /api/v1/requests`（`save_request=false`）
-  在响应里签发 opaque `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch 并回写同一
-  draft_id；`preview-save` 一次性消费 `draft_id` 后落盘。
-- 客户端**绝不**把完整 Request 作为权威快照提交；前端只在内存持有 `draft_id`
-  （新前端 DraftPreviewPanel 的局部 ref / 批量卡片的 `draft_id`），不写 URL/browser storage。
+  在响应里签发 opaque `draft_id` **和单调 `draft_revision`（=1）**；`preview-modify` 只收
+  `draft_id` + `base_revision` + 允许 patch，做 compare-and-swap（成功 revision+1，返回新
+  `draft_revision`）；`preview-save` 一次性消费 `draft_id` 后落盘。
+- 客户端**绝不**把完整 Request 作为权威快照提交；前端只在内存持有 `draft_id`/`draft_revision`
+  （新前端 DraftPreviewPanel 的局部 ref / 批量卡片的字段），不写 URL/browser storage。
 - 失败语义统一 409：`draft_expired`（过期/未知）、`draft_evicted`（容量满）、
-  `draft_replayed`（重复保存）；错误 details 不回显 draft_id 或草案内容。
+  `draft_replayed`（重复保存）、`draft_revision_conflict`（base_revision 过期，US-211）；
+  错误 details 不回显 draft_id、revision 以外的值或草案内容（conflict 只含
+  `field=base_revision` + `current_revision`）。
+- `preview-modify` 的 `base_revision` 校验走 `draft_store.compare_and_swap`，不要用旧的
+  `draft_store.update`（无 CAS，属 US-210 前语义）。
 - 测试：`DraftStore` 是进程级单例，必须在 `views_test`/`api_contract`/`browser` 的
   autouse fixture 里 `draft_store.clear()`；浏览器 mock 用 conftest 的
-  `preview_result_json(request)`（签发真实 draft 并返回 draft_id）与
+  `preview_result_json(request)`（签发真实 draft 并返回 draft_id + draft_revision）与
   `save_preview_handler(calls?)`（消费 draft 并返回保存结果），批量卡片 mock 用
   `issue_draft_id(preview_request)` 给每个 `preview_request` 补 draft_id。
-- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.3 与 OpenAPI 注册表。
+- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§4.2/§5.3 与 OpenAPI 注册表。
 
 ## MiKan 候选公开 DTO（US-204）
 

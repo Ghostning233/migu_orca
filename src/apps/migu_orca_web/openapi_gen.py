@@ -298,7 +298,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests": {
         "operationId": "createRequest",
         "summary": "生成订阅方案（可保存）",
-        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id（US-194：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
+        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id 与 draft_revision（US-194/211：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request；US-211 起响应同时携带单调 draft_revision 供下次修改作为 base_revision）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
         "requestBody": {
             "type": "object",
             "properties": {
@@ -366,15 +366,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests/preview-modify": {
         "operationId": "previewModifyRequest",
         "summary": "内存中修改未保存草案",
-        "description": "US-194：只接受服务端签发的 draft_id 与允许 patch，返回更新后的内存草案与摘要（不落盘）。客户端不得提交完整 Request 作为权威快照。",
+        "description": "US-194/211：只接受服务端签发的 draft_id、base_revision 与允许 patch，返回更新后的内存草案、同一 draft_id 与新 draft_revision（不落盘）。base_revision 不匹配时返回 409 draft_revision_conflict（error_data 只含 field=base_revision 与 current_revision）。客户端不得提交完整 Request 作为权威快照。",
         "requestBody": {
             "type": "object",
-            "required": ["draft_id", "patch"],
+            "required": ["draft_id", "base_revision", "patch"],
             "properties": {
                 "draft_id": {
                     "type": "string",
                     "description": "生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。",
                     "x-request-scoped": True,
+                },
+                "base_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的草案 revision（US-211，compare-and-swap）。",
                 },
                 "patch": {
                     "type": "object",
@@ -393,6 +398,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_expired": "订阅草案已过期或不存在，请重新生成",
                 "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
                 "draft_replayed": "订阅草案已被保存，请勿重复保存",
+                "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
             },
         },
     },

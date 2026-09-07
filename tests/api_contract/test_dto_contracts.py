@@ -134,37 +134,49 @@ def test_request_preview_modify_save_accept_cancel_share_shape() -> None:
 
 
 def test_request_create_dto_accepts_draft_id_for_unsaved_preview() -> None:
-    """US-194: an unsaved generation returns an opaque draft_id."""
+    """US-194/211: an unsaved generation returns draft_id and draft_revision."""
     request = _generated_request()
     payload = {
         "request": request,
         "summary": _summary(request),
         "draft_id": "opaque-draft-token",
+        "draft_revision": 1,
     }
     validated = RequestCreateResultDTO.model_validate(payload)
     assert validated.draft_id == "opaque-draft-token"
+    assert validated.draft_revision == 1
 
 
-def test_request_preview_modify_dto_accepts_draft_id() -> None:
-    """US-194: preview-modify returns the same draft_id for the next call."""
+def test_request_preview_modify_dto_accepts_draft_id_and_revision() -> None:
+    """US-211: preview-modify returns draft_id + the new draft_revision."""
     request = _generated_request()
     payload = {
         "request": request,
         "summary": _summary(request),
         "draft_id": "opaque-draft-token",
+        "draft_revision": 2,
     }
     validated = RequestPreviewModifyResultDTO.model_validate(payload)
     assert validated.draft_id == "opaque-draft-token"
+    assert validated.draft_revision == 2
 
 
 def test_request_preview_save_dto_rejects_draft_id() -> None:
-    """US-194: preview-save consumes the draft; the response has no draft_id."""
+    """US-194: preview-save consumes the draft; the response has no draft_id.
+
+    US-211: the save response equally has no draft_revision (the draft is gone
+    after a successful save).
+    """
     request = _generated_request()
     base = {"request": request, "summary": _summary(request)}
     assert RequestPreviewSaveResultDTO.model_validate(base) is not None
     with pytest.raises(ValidationError):
         RequestPreviewSaveResultDTO.model_validate(
             {**base, "draft_id": "opaque-draft-token"}
+        )
+    with pytest.raises(ValidationError):
+        RequestPreviewSaveResultDTO.model_validate(
+            {**base, "draft_revision": 1}
         )
 
 

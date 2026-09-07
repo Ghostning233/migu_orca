@@ -3082,25 +3082,30 @@ def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
     assert saved_path.exists()
 
 
-def _issue_draft(client: FlaskClient, title: str = "咒术回战") -> str:
-    """Generate an unsaved preview draft and return its opaque draft_id."""
+def _issue_draft(
+    client: FlaskClient, title: str = "咒术回战"
+) -> tuple[str, int]:
+    """Generate an unsaved preview draft; return (draft_id, draft_revision)."""
     response = client.post(
         "/api/v1/requests",
         json={"title": title, "save_request": False},
     )
     payload = response.get_json()
     assert response.status_code == 200
-    assert isinstance(payload["result"]["draft_id"], str)
-    return payload["result"]["draft_id"]
+    result = payload["result"]
+    assert isinstance(result["draft_id"], str)
+    assert result["draft_revision"] == 1
+    return result["draft_id"], result["draft_revision"]
 
 
 def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
-    draft_id = _issue_draft(_client(), "咒术回战")
+    draft_id, draft_revision = _issue_draft(_client(), "咒术回战")
 
     response = _client().post(
         "/api/v1/requests/preview-modify",
         json={
             "draft_id": draft_id,
+            "base_revision": draft_revision,
             "patch": {
                 "filter_rule": {
                     "must_not_contain": "V2",
@@ -3116,8 +3121,10 @@ def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
     assert payload["ok"] is True
     modified = payload["result"]["request"]
     assert modified["confirmable_config"]["filter_rule"]["must_not_contain"] == "V2"
-    # US-194: the modify result keeps the same draft_id so the client can save.
+    # US-194/211: the modify result keeps the same draft_id and returns the
+    # bumped draft_revision so the client can save with the latest base.
     assert payload["result"]["draft_id"] == draft_id
+    assert payload["result"]["draft_revision"] == 2
     # The preview is recomputed in memory and never written to storage.
     assert not (tmp_path / "storage").exists()
 
@@ -3138,7 +3145,7 @@ def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
 
 def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None:
     client = _client()
-    draft_id = _issue_draft(client, "咒术回战")
+    draft_id, draft_revision = _issue_draft(client, "咒术回战")
     # The stored draft's groups mirror the fixture; read them via the response.
     issued = client.post(
         "/api/v1/requests",
@@ -3153,12 +3160,14 @@ def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None
         "/api/v1/requests/preview-modify",
         json={
             "draft_id": draft_id,
+            "base_revision": draft_revision,
             "patch": {"selected_subtitle_group": other},
         },
     )
 
     payload = response.get_json()
     assert payload["ok"] is True
+    assert payload["result"]["draft_revision"] == 2
     modified = payload["result"]["request"]
     confirmable = modified["confirmable_config"]
     assert confirmable["selected_subtitle_group"] == other
@@ -3172,11 +3181,15 @@ def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None
 
 
 def test_preview_modify_rejects_invalid_patch_field() -> None:
-    draft_id = _issue_draft(_client(), "芙莉莲")
+    draft_id, draft_revision = _issue_draft(_client(), "芙莉莲")
 
     response = _client().post(
         "/api/v1/requests/preview-modify",
-        json={"draft_id": draft_id, "patch": {"illegal_field": "x"}},
+        json={
+            "draft_id": draft_id,
+            "base_revision": draft_revision,
+            "patch": {"illegal_field": "x"},
+        },
     )
 
     payload = response.get_json()
@@ -3185,10 +3198,51 @@ def test_preview_modify_rejects_invalid_patch_field() -> None:
     assert payload["error_type"] == "invalid_modify_patch_field"
 
 
+def test_preview_modify_stale_base_revision_conflicts() -> None:
+    """US-211: a stale base_revision leaves the server-side draft untouched."""
+    client = _client()
+    draft_id, draft_revision = _issue_draft(client, "芙莉莲")
+    assert draft_revision == 1
+
+    first = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"filter_rule": {"must_not_contain": "V2", "use_regex": False, "case_sensitive": False}},
+        },
+    )
+    assert first.status_code == 200
+    assert first.get_json()["result"]["draft_revision"] == 2
+
+    stale = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "stale-write"},
+        },
+    )
+    payload = stale.get_json()
+    assert stale.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_revision_conflict"
+    assert payload["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    assert draft_id not in str(payload)
+    assert "stale-write" not in str(payload)
+
+
 def test_preview_modify_rejects_unknown_draft() -> None:
     response = _client().post(
         "/api/v1/requests/preview-modify",
-        json={"draft_id": "not-issued", "patch": {"expected_folder_name": "x"}},
+        json={
+            "draft_id": "not-issued",
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "x"},
+        },
     )
 
     payload = response.get_json()
@@ -3233,7 +3287,7 @@ def test_preview_save_rejects_replayed_draft(tmp_path: Path) -> None:
     """A saved draft is consumed; a second save of the same id is a 409."""
     storage_dir = tmp_path / "storage"
     client = _client()
-    draft_id = _issue_draft(client, "芙莉莲")
+    draft_id, _ = _issue_draft(client, "芙莉莲")
 
     first = client.post(
         "/api/v1/requests/preview-save",

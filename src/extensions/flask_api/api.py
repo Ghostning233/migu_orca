@@ -79,6 +79,7 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     "draft_evicted",
     "draft_replayed",
     "draft_mismatch",
+    "draft_revision_conflict",
 }
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {

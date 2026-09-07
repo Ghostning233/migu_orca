@@ -52,3 +52,57 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - revision 尚未进入任何请求/响应 DTO 或 OpenAPI（属 US-211）；US-212 会在 save 生命周期
       增加 reserve/commit/release 并复用 CAS reason。
 ---
+
+## [2026-09-07 22:54] - US-211
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - `POST /api/v1/requests`（save_request=false）现在签发 `draft_id` + `draft_revision(=1)`
+    （`DraftStore.issue` 的 `DraftHandle.revision`）。
+  - `POST /api/v1/requests/preview-modify` 请求新增必填 `base_revision`（Pydantic `ge=1`），
+    服务端改为 `DraftStore.compare_and_swap(draft_id, base_revision, req)`：匹配时原子替换并
+    revision+1，成功返回同一 `draft_id` + 新 `draft_revision`；不匹配返回 409
+    `draft_revision_conflict`，error_data 只含 `{field: base_revision, current_revision}`。
+    - 修复 `_error_http_status`：`draft_revision_conflict` 之前落 400，现加入
+      `_HTTP_CONFLICT_ERROR_TYPES` 归 409（US-210 漏接线）。
+    - conflict 分支会 re-get 一次以携带真实 current_revision（防并发窗口返回旧值）。
+  - `routes_requests` 不再调用旧的 `DraftStore.update`（无 CAS 语义），路由改用 CAS；
+    `update` 保留作 US-210 单测原语并更新 docstring 说明。
+  - 响应 DTO：`RequestCreateResultDTO`/`RequestPreviewModifyResultDTO` 增加可选
+    `draft_revision`；`BatchParseItemDTO` 增加可选 `draft_revision`（批量卡片内存态）。
+  - 前端（WorkbenchView / DraftPreviewPanel / BatchWorkbenchView / BatchDraftPreviewPanel）：
+    `draft_id`/`draft_revision` 只在组件内存。生成时从 create 结果取 revision；每次
+    preview-modify 发送 `base_revision` 并用返回的 `draft_revision` 更新本地 ref；
+    批量卡片在 `items` 里存 `draft_revision`（修改后经 `changed`/`draft-changed` 事件回写）。
+    `draft_revision_conflict` 并入 409 重生成提示（fixed Chinese）。
+  - 契约同步：DTO/`openapi_gen._ENDPOINTS`/`docs/api/openapi.json`/
+    `frontend/src/api/generated/api.ts`/`endpoint_inventory.md`/README/docs/api README/AGENTS.md。
+- Files changed
+  - 后端：`routes_requests.py`、`schemas.py`（base_revision）、`api_contract.py`、
+    `drafts.py`（docstring）、`openapi_gen.py`、`extensions/flask_api/api.py`（409 分类）
+  - 前端：`WorkbenchView.vue`、`DraftPreviewPanel.vue`、`BatchWorkbenchView.vue`、
+    `BatchDraftPreviewPanel.vue`、`generated/api.ts`（再生成）
+  - 测试：`test_golden_contracts.py`（create result 断言 + revision success/stale conflict/
+    missing-base 新例）、`test_dto_contracts.py`、`views_test.py`（helper 返回 revision +
+    stale conflict 新例）、`tests/browser/conftest.py`（preview_result_json 补 draft_revision）、
+    `test_app_workbench.py`（base_revision 载荷捕获 + conflict 重生成 hint）、
+    `test_app_batch_workbench.py`（batch item 补 draft_revision）
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - preview-modify 的成功响应固定形状 = `{request, summary, draft_id, draft_revision}`；
+      create 未保存固定形状 = `{request, summary, draft_id, draft_revision}`（DTO 里
+      draft_* 均 optional，因为 saved 路径没有）。
+    - 前端 revision 必须由父级持有（或经 `changed` 事件回写父级/批量 items），否则卡片
+      重新展开后会用旧 base_revision 触发误 conflict。
+    - batch 卡片的 `draft_id`/`draft_revision` 是客户端内存态，不来自批量 parse 后端；
+      browser 测试 mock 用 `issue_draft_id()` + `draft_revision=1`。
+  - Gotchas encountered
+    - `_error_http_status` 的 409 集合必须包含 `draft_revision_conflict`，否则 Stage1Error
+      落 400 与 OpenAPI 声明不一致（consistency 测试会抓）。
+    - 前端 `:key` 只能绑 `draftId`，不能绑 revision（否则每次 modify 都 remount 面板，
+      丢焦点/表单态）。
+    - `npm run api:generate`/`openapi_gen` 必须成对重生成：openapi.json 变了 TS client
+      立刻漂移（drift check 双守护）。
+  - Useful context
+    - browser 测试要重新 `npm run build`（SPA 从 frontend/dist 服务），改了 .vue 后不
+      build 会跑旧产物导致「预览修改失败 400」这类误报。
+---

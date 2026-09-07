@@ -8,9 +8,10 @@ the server the authority for unsaved drafts:
 
 - generation endpoints (``POST /api/v1/requests`` with ``save_request=false``)
   store the authoritative PENDING_CONFIRM draft in this bounded store and
-  return only an opaque ``draft_id``;
-- ``preview-modify`` accepts ``draft_id`` + an allowed patch (never a client
-  full Request) and returns the updated in-memory draft;
+  return an opaque ``draft_id`` plus its initial ``draft_revision`` (US-211);
+- ``preview-modify`` accepts ``draft_id`` + ``base_revision`` + an allowed patch
+  (never a client full Request), performs a compare-and-swap, and returns the
+  updated in-memory draft with the bumped ``draft_revision``;
 - ``preview-save`` consumes a *valid* ``draft_id`` once and persists the
   server-held draft, with replay protection.
 
@@ -225,12 +226,14 @@ class DraftStore:
         return entry.request, REASON_OK
 
     def update(self, draft_id: str, request: dict[str, Any]) -> bool:
-        """Replace the stored payload for an existing draft (post-modify).
+        """Replace the stored payload for an existing draft (legacy helper).
 
-        Only used by preview-modify after a successful dry-run so the next
-        modify/save sees the latest server-side state; the revision is bumped
-        exactly like a successful CAS against the current revision. Returns
-        False when the draft is no longer present (expired/evicted/consumed).
+        Bumps the revision exactly like a successful CAS against the current
+        revision, but performs **no base check** (callers that must reject
+        out-of-order writes use ``compare_and_swap`` instead — US-211 routes
+        no longer call this). Retained for US-210 unit coverage and as the
+        internal primitive ``compare_and_swap`` builds on. Returns False when
+        the draft is no longer present (expired/evicted/consumed).
         """
         if not draft_id:
             return False

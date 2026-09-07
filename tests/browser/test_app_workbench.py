@@ -526,6 +526,115 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         # Editing never writes storage.
         assert not storage_dir.exists() or not any(storage_dir.iterdir())
 
+    def test_preview_modify_sends_base_revision_and_keeps_it_in_memory(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """US-211: the Vue draft panel sends base_revision on every modify and
+        never lets draft_id/revision reach the URL, localStorage or DOM."""
+        preview = _preview_request("芙莉莲", "req-wb-rev")
+        modify_calls: list[dict[str, Any]] = []
+        _register_generation_capture(page, [], body=preview_result_json(preview))
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [_candidate(bangumi_id="2353", title="葬送的芙莉莲", mikan_url="https://mikan.example/Home/Bangumi/2353")],
+                ),
+            ),
+        )
+
+        def _modify(route: Any, request: Any) -> None:
+            payload = request.post_data_json
+            if request.url.endswith("/api/v1/requests/preview-modify"):
+                modify_calls.append(payload)
+                # Recompute against the in-process draft_store (real backend).
+                route.continue_()
+                return
+            route.continue_()
+
+        page.route("**/api/v1/requests/preview-modify", _modify)
+        set_storage_preferences(page, storage_dir)
+        _goto_workbench(page, live_server_url)
+        page.fill("#mikan-candidate-query", "芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        page.locator(".candidate-card button:has-text('选择此合集')").click()
+        page.wait_for_selector("#detail-preview-edit-form", timeout=5000)
+
+        page.fill("#preview-must-not-contain", "V2")
+        page.click("#preview-apply-button")
+        page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
+
+        assert modify_calls, "preview-modify should have been called"
+        assert modify_calls[0]["base_revision"] == 1
+        assert modify_calls[0]["draft_id"]
+        # The revision/draft id stay out of the URL and DOM.
+        assert "request_id=" not in page.url and "revision" not in page.url
+        body_text = page.locator("body").inner_text()
+        assert "draft_revision" not in body_text
+
+    def test_draft_revision_conflict_offers_regeneration_hint(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """US-211: a 409 draft_revision_conflict shows the fixed regeneration
+        hint and restores the search state — never raw error details."""
+        preview = _preview_request("芙莉莲", "req-wb-conflict")
+        _register_generation_capture(page, [], body=preview_result_json(preview))
+
+        def _conflict(route: Any, request: Any) -> None:
+            if request.url.endswith("/api/v1/requests/preview-modify"):
+                route.fulfill(
+                    status=409,
+                    content_type="application/json",
+                    body=json.dumps(
+                        {
+                            "ok": False,
+                            "error_type": "draft_revision_conflict",
+                            "error_message": "草案已被更新，请基于最新版本重试",
+                            "error_data": {
+                                "failed_step": "compare_and_swap_draft",
+                                "details": {"field": "base_revision", "current_revision": 2},
+                            },
+                        },
+                        ensure_ascii=False,
+                    ),
+                )
+                return
+            route.continue_()
+
+        page.route("**/api/v1/requests/preview-modify", _conflict)
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [_candidate(bangumi_id="2353", title="葬送的芙莉莲", mikan_url="https://mikan.example/Home/Bangumi/2353")],
+                ),
+            ),
+        )
+        set_storage_preferences(page, storage_dir)
+        _goto_workbench(page, live_server_url)
+        page.fill("#mikan-candidate-query", "芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        page.locator(".candidate-card button:has-text('选择此合集')").click()
+        page.wait_for_selector("#detail-preview-edit-form", timeout=5000)
+
+        page.fill("#preview-must-not-contain", "V2")
+        page.click("#preview-apply-button")
+        expect(page.locator(".global-notification")).to_contain_text("订阅草案已失效", timeout=5000)
+        # Draft panel is dismissed; the search/candidate state is preserved.
+        expect(page.locator("#detail-preview-edit-form")).to_have_count(0)
+        expect(page.locator(".candidate-card")).to_have_count(1)
+        body_text = page.locator("body").inner_text()
+        assert "draft_revision_conflict" not in body_text
+        assert "base_revision" not in body_text
+
     def test_save_draft_persists_and_routes_to_saved_request(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:

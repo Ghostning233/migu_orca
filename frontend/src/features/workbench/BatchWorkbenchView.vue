@@ -216,9 +216,11 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
       throw new Error('candidate preview returned no request')
     }
     const draftId = result?.draft_id ?? ''
+    const draftRevision =
+      typeof result?.draft_revision === 'number' ? result.draft_revision : 1
     items.value = items.value.map((current) =>
       current.item_id === item.item_id
-        ? { ...current, status: 'DRAFT', preview_request: request, draft_id: draftId }
+        ? { ...current, status: 'DRAFT', preview_request: request, draft_id: draftId, draft_revision: draftRevision }
         : current,
     )
     activeCandidateItemId.value = null
@@ -296,8 +298,9 @@ function applyAcceptResult(result: BatchAcceptResult, savedRequests: Map<string,
           status: 'ACCEPTED',
           preview_request: { ...(savedRequest as RequestSnapshot), status: 'ACCEPTED' },
           // The draft was consumed by preview-save before accept; a consumed
-          // draft must never be re-referenced.
+          // draft must never be re-referenced (draft_id or revision).
           draft_id: null,
+          draft_revision: null,
           queue_status: item.status === 'accepted' ? 'READY_TO_SUBMIT' : row.queue_status ?? null,
         }
         const selected = new Set(selectedItemIds.value)
@@ -389,6 +392,22 @@ async function onAccepted(item: BatchItem, savedRequest: RequestSnapshot): Promi
   // Single-card accept from the draft panel (preview already saved).
   const row = { ...item, preview_request: savedRequest, status: 'DRAFT' }
   await submitBatchAccept([row], { single: true })
+}
+
+function onDraftChanged(
+  itemId: string,
+  state: { request: RequestSnapshot; draftId: string; draftRevision: number },
+): void {
+  items.value = items.value.map((current) =>
+    current.item_id === itemId
+      ? {
+          ...current,
+          preview_request: state.request,
+          draft_id: state.draftId,
+          draft_revision: state.draftRevision,
+        }
+      : current,
+  )
 }
 
 function onDraftDeleted(itemId: string): void {
@@ -614,6 +633,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
       :item="detailItem"
       @accepted="onAccepted"
       @deleted="onDraftDeleted"
+      @draft-changed="onDraftChanged"
     />
 
     <ConfirmDialog ref="confirmDialog" />

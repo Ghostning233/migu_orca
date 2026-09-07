@@ -64,21 +64,25 @@ from storage_engine.controllers.request_repository import (
 from storage_engine.controllers.storage_config import load_storage_config
 
 
-def _draft_store_error(reason: str) -> Stage1Error:
+def _draft_store_error(reason: str, current_revision: int | None = None) -> Stage1Error:
     """Map a DraftStore lookup reason to a stable 409 draft_* error.
 
     US-194: expired/evicted/replayed/mismatched drafts are state conflicts
     (409) with a Chinese message telling the user to regenerate, never a leak
     of draft content or an absolute path. US-210: a stale ``base_revision`` is
     its own ``draft_revision_conflict`` (the payload/revision are untouched),
-    still 409 but with the current revision in the safe error data.
+    still 409 but with only the current revision in the safe error data
+    (US-211: never the draft id or any draft content).
     """
     if reason == REASON_REVISION_CONFLICT:
+        details: dict[str, object] = {"field": "base_revision"}
+        if current_revision is not None:
+            details["current_revision"] = current_revision
         return Stage1Error(
             "draft_revision_conflict",
             "草案已被更新，请基于最新版本重试",
             "compare_and_swap_draft",
-            {"field": "base_revision"},
+            details,
         )
     if reason == REASON_REPLAYED:
         return Stage1Error(
@@ -189,9 +193,12 @@ class RequestCreateView(PostView):
             # bounded draft store and hand the client only an opaque draft_id;
             # preview-modify/preview-save reference this id instead of a
             # client-supplied full Request. The draft itself never enters URL,
-            # browser storage, history, logs or screenshots. The revision stays
-            # server-side for now (US-211 wires it into the response contract).
-            response["draft_id"] = draft_store.issue(request).draft_id
+            # browser storage, history, logs or screenshots. US-211: the
+            # monotonic draft_revision is returned alongside the id so the
+            # next modify/save can send it back as base_revision.
+            handle = draft_store.issue(request)
+            response["draft_id"] = handle.draft_id
+            response["draft_revision"] = handle.revision
         return response
 
 
@@ -208,9 +215,10 @@ class RequestPreviewModifyView(PostView):
         # trusted from the client. modify_request recomputes per-source seed
         # filters and the selected group's effective seeds without saving, so
         # the UI can show live seed updates before the user saves the draft.
-        # US-210: ``get`` returns the current revision alongside the payload so
-        # the next modify/save can carry it as base_revision (US-211 wires the
-        # conflict check into this route).
+        # US-210/US-211: ``get`` returns the current revision alongside the
+        # payload so the modify is a compare-and-swap against the client's
+        # ``base_revision``; a stale base is a 409 draft_revision_conflict and
+        # never overwrites the newer draft.
         draft_read: DraftRead | None
         draft_read, draft_reason = draft_store.get(payload.draft_id)
         if draft_read is None or draft_reason != REASON_OK:
@@ -222,10 +230,29 @@ class RequestPreviewModifyView(PostView):
         if not result["success"]:
             _raise_result_error(result)
         req = result["request"]
-        # Keep the server-side draft in sync so preview-save persists the
-        # modified state the user just reviewed.
-        draft_store.update(payload.draft_id, req)
-        return {"request": req, "summary": summarize_request(req), "draft_id": payload.draft_id}
+        # CAS against the revision the client observed. On success the
+        # server-side draft is replaced atomically and the revision bumps by 1
+        # so preview-save persists the exact state the user just reviewed.
+        new_revision, swap_reason = draft_store.compare_and_swap(
+            payload.draft_id,
+            payload.base_revision,
+            req,
+        )
+        if new_revision is None or swap_reason != REASON_OK:
+            # Re-read so the safe error data carries the true current revision
+            # (a concurrent modify may have bumped it after the first read).
+            current_revision = None
+            if swap_reason == REASON_REVISION_CONFLICT:
+                latest_read, latest_reason = draft_store.get(payload.draft_id)
+                if latest_read is not None and latest_reason == REASON_OK:
+                    current_revision = latest_read.revision
+            raise _draft_store_error(swap_reason, current_revision=current_revision)
+        return {
+            "request": req,
+            "summary": summarize_request(req),
+            "draft_id": payload.draft_id,
+            "draft_revision": new_revision,
+        }
 
 
 @class_route(api_blueprint, "/api/v1/requests/preview-save", methods=["POST"])

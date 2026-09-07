@@ -327,6 +327,7 @@ def preview_result_json(
             "request": request,
             "summary": summary if summary is not None else summarize_request(request),
             "draft_id": draft_id,
+            "draft_revision": 1,
         }
     }
     return json.dumps(body, ensure_ascii=False)
