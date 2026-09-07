@@ -1,22 +1,6 @@
 #!/bin/bash
 # Ralph Wiggum - Long-running AI agent loop
-# Usage: ./ralph.sh [--tool amp|claude|codex|dsh] [--provider PROVIDER] [--model MODEL] [max_iterations]
-#
-# --tool dsh    Run through the DeepSeek Harness headless profile
-#               (dsh --profile headless). The default model comes from
-#               $DSH_HOME/settings.yaml's agent-default-model section
-#               (e.g. commandcode / deepseek/deepseek-v4-flash).
-# --provider    DSH LLM provider for --tool dsh. Examples:
-#                 commandcode      - Command Code API (needs @mars-sea/dsh-commandcode-provider
-#                                    installed in the headless profile; model ids carry a
-#                                    deepseek/ prefix, e.g. deepseek/deepseek-v4-flash)
-#                 deepseek-official- DeepSeek official API (model ids are bare, e.g.
-#                                    deepseek-v4-flash)
-#               When omitted, the provider from $DSH_HOME/settings.yaml is used.
-# --model       The model identifier passed straight through to the settings
-#               agent-default-model.model field, verbatim. Keep the provider's
-#               own prefix convention (commandcode wants deepseek/deepseek-v4-flash).
-# --claude-model Alias for --model kept for backwards compatibility (codex/claude only).
+# Usage: ./ralph.sh [--tool amp|claude|codex] [--model MODEL] [max_iterations]
 
 set -e
 
@@ -24,7 +8,6 @@ set -e
 TOOL="codex" # Default to the available local Codex CLI for this project.
 MAX_ITERATIONS=10
 MODEL="${RALPH_MODEL:-}"
-PROVIDER="${RALPH_PROVIDER:-}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -34,14 +17,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --tool=*)
       TOOL="${1#*=}"
-      shift
-      ;;
-    --provider)
-      PROVIDER="$2"
-      shift 2
-      ;;
-    --provider=*)
-      PROVIDER="${1#*=}"
       shift
       ;;
     --model)
@@ -71,8 +46,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Validate tool choice
-if [[ "$TOOL" != "amp" && "$TOOL" != "claude" && "$TOOL" != "codex" && "$TOOL" != "dsh" ]]; then
-  echo "Error: Invalid tool '$TOOL'. Must be 'amp', 'claude', 'codex', or 'dsh'."
+if [[ "$TOOL" != "amp" && "$TOOL" != "claude" && "$TOOL" != "codex" ]]; then
+  echo "Error: Invalid tool '$TOOL'. Must be 'amp', 'claude', or 'codex'."
   exit 1
 fi
 
@@ -123,85 +98,7 @@ if [ ! -f "$PROGRESS_FILE" ]; then
 fi
 
 MODEL_LABEL="${MODEL:-default}"
-PROVIDER_LABEL="${PROVIDER:-default}"
-echo "Starting Ralph - Tool: $TOOL - Model: $MODEL_LABEL - Provider: $PROVIDER_LABEL - Max iterations: $MAX_ITERATIONS"
-
-# --- dsh-specific setup ---------------------------------------------------
-# The headless profile (dsh --profile headless) ships with only the base and
-# headless bundles; the Command Code provider used by this project
-# (@mars-sea/dsh-commandcode-provider) is NOT included by default. Install it
-# into the headless profile on demand (idempotent, safe to re-run) so
-# --provider commandcode works out of the box on any machine.
-#
-# When --provider/--model are given for --tool dsh, point the settings-file
-# plugin at a temporary document carrying the agent-default-model override so
-# the global $DSH_HOME/settings.yaml is never touched. The patch + document
-# live under a mktemp dir and are removed when the loop exits.
-DSH_PATCH_FILE=""
-DSH_SETTINGS_FILE=""
-DSH_TMP_DIR=""
-
-cleanup_dsh_tmp() {
-  if [[ -n "$DSH_TMP_DIR" && -d "$DSH_TMP_DIR" ]]; then
-    rm -rf "$DSH_TMP_DIR"
-  fi
-}
-trap cleanup_dsh_tmp EXIT
-
-if [[ "$TOOL" == "dsh" ]]; then
-  if ! command -v dsh >/dev/null 2>&1; then
-    echo "Error: --tool dsh requires the 'dsh' CLI (DeepSeek Harness) on PATH." >&2
-    exit 1
-  fi
-  # Idempotently make the Command Code provider available to the headless profile.
-  if [[ -n "$PROVIDER" && "$PROVIDER" == "commandcode" ]] || [[ -z "$PROVIDER" ]]; then
-    if ! grep -q "dsh-commandcode-provider" "$DSH_HOME/profiles/headless/package.json" 2>/dev/null; then
-      echo "dsh: installing @mars-sea/dsh-commandcode-provider into the headless profile..."
-      dsh plugin --profile headless add @mars-sea/dsh-commandcode-provider >/dev/null 2>&1 || true
-    fi
-  fi
-fi
-
-if [[ "$TOOL" == "dsh" && ( -n "$PROVIDER" || -n "$MODEL" ) ]]; then
-  # --provider alone is meaningless; --model alone keeps the settings.yaml
-  # default provider (the temporary document only overrides the model field).
-  if [[ -z "$MODEL" && -n "$PROVIDER" ]]; then
-    echo "Error: --tool dsh with --provider needs --model." >&2
-    exit 1
-  fi
-  DSH_TMP_DIR="$(mktemp -d)"
-  DSH_SETTINGS_FILE="$DSH_TMP_DIR/settings.yml"
-  DSH_PATCH_FILE="$DSH_TMP_DIR/patch.yml"
-  if [[ -n "$PROVIDER" ]]; then
-    cat > "$DSH_SETTINGS_FILE" <<EOF
-agent-default-model:
-  provider: $PROVIDER
-  model: $MODEL
-EOF
-    echo "dsh: overriding agent-default-model via temporary settings ($PROVIDER / $MODEL)"
-  else
-    # Only the model is overridden; the provider stays whatever the global
-    # settings.yaml resolves to (settings merge keeps the base provider when
-    # this section omits it? No - agent-default-model requires both fields, so
-    # read the current provider from the global settings and carry it over).
-    GLOBAL_PROVIDER=$(grep -A2 '^agent-default-model:' "$DSH_HOME/settings.yaml" 2>/dev/null | grep 'provider:' | head -1 | sed 's/.*provider:[[:space:]]*//')
-    if [[ -z "$GLOBAL_PROVIDER" ]]; then
-      GLOBAL_PROVIDER="commandcode"
-    fi
-    cat > "$DSH_SETTINGS_FILE" <<EOF
-agent-default-model:
-  provider: $GLOBAL_PROVIDER
-  model: $MODEL
-EOF
-    echo "dsh: overriding agent-default-model model only ($GLOBAL_PROVIDER / $MODEL)"
-  fi
-  cat > "$DSH_PATCH_FILE" <<EOF
-- id: settings
-  config:
-    path: $DSH_SETTINGS_FILE
-EOF
-fi
-
+echo "Starting Ralph - Tool: $TOOL - Model: $MODEL_LABEL - Max iterations: $MAX_ITERATIONS"
 for i in $(seq 1 $MAX_ITERATIONS); do
   echo ""
   echo "==============================================================="
@@ -222,16 +119,6 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     OUTPUT=$(codex "${CODEX_ARGS[@]}" < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr) || true
     COMPLETION_OUTPUT=$(cat "$LAST_MESSAGE_FILE" 2>/dev/null || true)
     rm -f "$LAST_MESSAGE_FILE"
-  elif [[ "$TOOL" == "dsh" ]]; then
-    DSH_ARGS=(--profile headless)
-    if [[ -n "$DSH_PATCH_FILE" ]]; then
-      DSH_ARGS+=(--patch "$DSH_PATCH_FILE")
-    fi
-    # The task text is the ralph prompt; dsh headless prints the final
-    # assistant message to stdout, which carries the <promise>COMPLETE</promise>
-    # marker when every story is done.
-    OUTPUT=$(dsh "${DSH_ARGS[@]}" "$(cat "$SCRIPT_DIR/prompt.md")" 2>&1 | tee /dev/stderr) || true
-    COMPLETION_OUTPUT="$OUTPUT"
   else
     # Claude Code: use --dangerously-skip-permissions for autonomous operation, --print for output
     CLAUDE_ARGS=(--dangerously-skip-permissions --print)
