@@ -11,6 +11,25 @@
 - 未实现事项和触发条件：[Backlog](backlog.md)
 - 尚未承诺排期的可选能力：[可选功能](optional_features.md)
 
+## 当前工作目标
+
+- 前端体验全面重构的 Gate 1～3 已完成，产品方向、低保真骨架、交互规格、视觉方向和设计
+  Token 均已冻结；后端支撑与前端分片候选 PRD 已落盘待评审，尚未达到 Gate 4 或授权大规模
+  页面编码。
+  工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
+  [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
+- 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
+  OpenAPI 边界及验收计划，再交由对应实现 Agent 分片开发。
+- 第一轮产品方向和混合低保真结构已经确认，详见
+  [桌面端低保真页面方案](design/frontend-ux-low-fidelity-options.md)；组件行为、状态矩阵和后端
+  依赖见[桌面端前端交互规格](design/frontend-ux-interaction-spec.md)。已经通过 Gate 3 的关键页面、
+  修正版和异常状态参考见[视觉方向 V1](design/frontend-ux-visual-direction-v1.md)，可编码的颜色、
+  字体、间距、组件状态和桌面布局基线见[前端设计 Token V1](design/frontend-ux-design-tokens-v1.md)。
+- 候选开发边界见[前端体验重构：后端支撑 PRD](MiGuOrca_frontend_ux_backend_support_PRD.md)与
+  [前端体验重构：前端分片实施 PRD](MiGuOrca_frontend_ux_implementation_PRD.md)。两份文档尚待
+  分包评审；其中 B-A 已确认为[Stage 28：草案一致性与原子保存确认](MiGuOrca_stage28_draft_consistency_PRD.md)，
+  其余工作包仍未分配 Stage。
+
 截至 2026-08-31，最近完成阶段为 Stage 27「前端工程化迁移与页面重构」（US-197～US-209 全部完成，默认 Web 入口为新前端 `/app/*`，旧 `/index`、`/settings` Jinja 页面与 `app.js` 已在 US-209 删除；入口路由固定重定向到 SPA）。
 
 ## Stage PRD
@@ -23,6 +42,7 @@
 - Stage 25：正式番名、季数证据与共享查询计划
 - Stage 26：Web API 契约、服务端安全边界与前端迁移基线（已完成）
 - Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（US-197～US-209 全部完成，旧前端已删除）
+- Stage 28：草案一致性与原子保存确认（已规划，US-210～US-218，待独立开发会话执行）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 
