@@ -290,11 +290,14 @@ class RequestPreviewModifyPayload(BaseModel):
 class RequestPreviewSavePayload(BaseModel):
     """Persist an unsaved, already-modified preview draft.
 
-    US-194: ``draft_id`` is a one-time capability. The server consumes it
-    atomically, so saving the same draft twice is a replay (409).
+    US-194: ``draft_id`` is a one-time capability. US-212: the save reserves
+    the draft against ``base_revision`` and only commits the replay tombstone
+    after the Request is written to disk; a failed persist releases the draft
+    so the same id/revision can be retried instead of forcing a re-search.
     """
 
     draft_id: str
+    base_revision: int = Field(ge=1)
     storage_dir: str | None = None
 
 

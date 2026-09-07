@@ -3264,7 +3264,7 @@ def test_preview_save_persists_draft_and_enters_confirmation_flow(tmp_path: Path
 
     response = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -3291,18 +3291,119 @@ def test_preview_save_rejects_replayed_draft(tmp_path: Path) -> None:
 
     first = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
     assert first.status_code == 200
 
     second = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
     payload = second.get_json()
     assert second.status_code == 409
     assert payload["ok"] is False
     assert payload["error_type"] == "draft_replayed"
+
+
+def test_preview_save_stale_base_revision_conflicts(tmp_path: Path) -> None:
+    """US-212: a save with a stale base_revision reserves nothing and is a 409."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+    # Bump the draft revision 1 → 2 through a dry-run modify.
+    modified = client.post(
+        "/api/v1/requests/preview-modify",
+        json={"draft_id": draft_id, "base_revision": 1, "patch": {"expected_folder_name": "并发修改"}},
+    )
+    assert modified.status_code == 200
+
+    stale = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    payload = stale.get_json()
+    assert stale.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_revision_conflict"
+    assert payload["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    # Nothing was persisted by the stale save.
+    assert not (storage_dir / "requests").exists()
+
+
+def test_preview_save_persistence_failure_keeps_draft_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-212: a failed disk write releases the draft; retry persists once.
+
+    The old consume-before-persist flow destroyed the draft on write failure,
+    forcing the user to re-search. The reservation lifecycle keeps the same
+    draft_id/revision usable so a retry succeeds and only one Request is ever
+    written.
+    """
+    from apps.migu_orca_entry.controllers.entry_controller import apply_request_save_action as original_save
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+
+    failures = {"count": 0}
+
+    def flaky_save(result: dict[str, Any], save_request: bool, **kwargs: object) -> dict[str, Any]:
+        if failures["count"] == 0:
+            failures["count"] += 1
+            return {
+                "success": False,
+                "request": None,
+                "error": {
+                    "error_type": "storage_error",
+                    "error_message": f"模拟写盘失败 {tmp_path}",
+                    "failed_step": "save_request_snapshot",
+                    "details": {"reason": "disk full"},
+                },
+            }
+        return original_save(result, save_request, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_requests.apply_request_save_action", flaky_save
+    )
+
+    # First save fails at the persistence seam.
+    first = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    payload = first.get_json()
+    assert first.status_code == 500
+    assert payload["ok"] is False
+    assert payload["error_type"] == "storage_error"
+    serialized = str(payload)
+    assert str(tmp_path) not in serialized
+
+    # The draft survived the failure at its original revision; retry the exact
+    # save (reservation must still accept base_revision=1).
+    second = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    spayload = second.get_json()
+    assert second.status_code == 200
+    assert spayload["ok"] is True
+    saved_request_id = spayload["result"]["request"]["request_id"]
+    # Exactly one Request file exists for the saved id.
+    saved_files = list((storage_dir / "requests").glob(f"{saved_request_id}.json"))
+    assert len(saved_files) == 1
+
+    # A third save is a replay (draft consumed by the successful retry).
+    third = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    assert third.status_code == 409
+    assert third.get_json()["error_type"] == "draft_replayed"
 
 
 def test_create_request_returns_validation_error_for_missing_title() -> None:

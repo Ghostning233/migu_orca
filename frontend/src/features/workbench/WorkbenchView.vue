@@ -241,6 +241,14 @@ function onDraftExpired(): void {
   draftRevision.value = 1
 }
 
+// US-212: a generic operation failure (e.g. a disk-write error on save) must
+// keep the draft panel open — the server releases the reservation on a failed
+// persist, so the same draft/revision can be retried without re-searching.
+// Only ``expired`` (the server reports the draft is truly gone) clears state.
+function onDraftOperationFailed(): void {
+  // The shared panel already surfaced the sanitized error notification.
+}
+
 function onDraftChanged(state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void {
   draftRequest.value = state.request
   draftId.value = state.draftId
@@ -388,7 +396,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     :draft-revision="draftRevision"
     @saved="onSaved"
     @expired="onDraftExpired"
-    @failed="onDraftExpired"
+    @failed="onDraftOperationFailed"
     @changed="onDraftChanged"
   />
   <LoadingState v-if="draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />

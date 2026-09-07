@@ -462,10 +462,44 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await flushPromises()
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/preview-save', {
-      body: { draft_id: 'opaque-draft-token', storage_dir: null },
+      // US-212: the save reserves the draft against the last-observed revision.
+      body: { draft_id: 'opaque-draft-token', base_revision: 1, storage_dir: null },
     })
     expect(router.currentRoute.value.path).toBe('/requests')
     expect(router.currentRoute.value.query.request_id).toBe('req-draft-1')
+  })
+
+  it('keeps the draft panel open when a save fails (US-212 retryable)', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      // A disk-write failure (storage_error 500): the server releases the
+      // reservation, so the panel must stay open for a retry — never force a
+      // re-search.
+      .mockRejectedValueOnce({
+        type: 'storage_error',
+        message: '保存订阅方案 JSON 失败',
+        status: 500,
+        details: { failed_step: 'save_request_snapshot', details: { request_id: 'req-draft-1' } },
+      })
+    const { wrapper, router } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#draft-save-button').trigger('click')
+    await flushPromises()
+
+    const { useNotificationStore } = await import('@/app/stores/notification')
+    const notification = useNotificationStore()
+    expect(notification.current?.title).toBe('保存失败')
+    // The draft panel (and its draft_id/revision) is preserved for retry.
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+    expect(wrapper.find('#draft-save-button').exists()).toBe(true)
+    expect(router.currentRoute.value.path).toBe('/workbench')
   })
 
   it('shows a safe error and keeps the search state when generation fails', async () => {

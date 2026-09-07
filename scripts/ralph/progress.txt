@@ -13,6 +13,9 @@
 - Web `storage_dir` 只能是服务端根下的相对 profile；空值必须回落服务端 Web root，测试使用临时根。
 - `draft_id`、revision、idempotency key 只存在请求体和页面内存，不进入 URL 或 browser storage。
 - Python 使用 `uv`，前端使用 `npm ci`；自动化通过 fixture/fake transport，禁止访问真实外部服务。
+- DraftStore 保存生命周期：`reserve_for_save(draft_id, base_revision)` → 持久化 → 成功
+  `commit_save(draft_id)` / 异常 `release_save(draft_id)`；预留期间草案不可被 get/CAS/
+  consume/update/逐出/过期处理，返回 `REASON_RESERVED` → 路由映射 409 `draft_reserved`。
 - 每次迭代只完成最高优先级的一个未通过 story；完整实现、测试和提交后才把 `passes` 改为 true。
 
 ## [2026-09-07] - US-210
@@ -129,4 +132,69 @@ Thread: current Codex project-management session
     在多线程 Flask 服务下具有原子性。
   - DraftStore 返回可变 dict 时必须返回隔离快照，否则调用方可在不增加 revision 的情况下改变
     权威 payload，破坏后续 US-212 reservation 与 US-213 幂等指纹的可靠性。
+---
+
+## [2026-09-08] - US-212
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - `DraftStore` 新增 US-212 保存生命周期，替代「先 pop 后持久化」：
+    - `reserve_for_save(draft_id, base_revision)`：同一 RLock 临界区内校验 id + revision，
+      校验通过把 entry 标记 `reserved=True` 并返回权威 Request 深拷贝；base 过期返回
+      `REVISION_CONFLICT`，已被别的 save 预留返回 `RESERVED`。
+    - `commit_save(draft_id)`：持久化成功后把预留 entry 转成 `replayed` tombstone（消费）。
+    - `release_save(draft_id)`：持久化异常后解除预留，payload/revision 原样保留可重试。
+    - reserved entry 对 `get`/`compare_and_swap`/`consume_for_save`/`update` 返回
+      `REASON_RESERVED`；`_purge` 跳过 reserved entry；`issue` 容量逐出只驱逐最旧未预留项。
+    - `_DraftEntry` 增加 `reserved: bool = False`。
+  - `POST /api/v1/requests/preview-save` 请求新增必填 `base_revision`（`ge=1`），路由改为
+    reserve → status 校验 → `apply_request_save_action` 持久化 → 成功才 `commit_save`；
+    `except Exception` 里 `release_save` 再 re-raise。revision conflict 分支 re-get 携带真实
+    `current_revision`（与 preview-modify 对齐）。
+  - 新增 409 `draft_reserved`（`_error_http_status` 的 `_HTTP_CONFLICT_ERROR_TYPES` +
+    `openapi_gen._ENDPOINTS` 声明；failed_step `reserve_preview_draft`）。`draft_replayed`
+    failed_step 从 `consume_preview_draft` 改为 `reserve_preview_draft`。
+  - 前端：`DraftPreviewPanel` 两处 preview-save 调用补 `base_revision`（用当前内存
+    draft_revision）；`WorkbenchView` 把 `@failed` 从「清除草案」改为「保留草案面板」，使保存
+    失败可重试（只 `@expired` 才清除，对应服务器确认草案已失效）。
+- Files changed
+  - 后端：`drafts.py`、`routes_requests.py`、`schemas.py`（base_revision）、
+    `extensions/flask_api/api.py`（draft_reserved 409）、`openapi_gen.py`（schema+errors）
+  - 文档：`docs/api/openapi.json`（再生成）、`docs/api/endpoint_inventory.md`、
+    `docs/api/README.md`、`README.md`、`src/apps/migu_orca_web/AGENTS.md`
+  - 前端：`DraftPreviewPanel.vue`（base_revision）、`WorkbenchView.vue`（failed 不清除）、
+    `generated/api.ts`（再生成）、`WorkbenchView.test.ts`
+  - 测试：`tests/api_contract/test_draft_store.py`（+8 例 reservation）、
+    `test_golden_contracts.py`（stale/reserved/required-base 新例）、
+    `views_test.py`（stale conflict + 持久化失败重试只产生一个 Request）、
+    `tests/browser/conftest.py`（save_preview_handler 改 reserve/commit + base_revision 校验）
+- Verification
+  - `uv run pytest tests/api_contract/test_draft_store.py -q` → 24 passed
+  - `uv run pytest -m "not browser" -q` → 1042 passed, 133 deselected
+  - `uv run pytest tests/browser/ -q` → 133 passed（真实 Chromium）
+  - 前端 `npm run typecheck`/`lint`/`test:unit`(261)/`api:check`/`build` 全绿
+  - `uv run ruff check src tests`、`uv run python -m compileall -q src tests`、`git diff --check` 通过
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - `reserve_for_save` 返回的 `(request, reason)` 就是权威快照；route 在持久化前不要再 `get`
+      一次（会因 reserved 返回 RESERVED）。提交/释放以 `draft_id` 为 token（同一把锁内只能有
+      一个 reservation）。
+    - 预留期间 `_purge` 必须跳过 reserved entry，且 `issue` 的容量逐出要「找最旧未预留项」而非
+      `popitem(last=False)`，否则保存中的草案会被逐出/过期。
+    - 前端层面：保存写盘失败（如 `storage_error`）必须保留草案面板让用户重试；只有服务器明确
+      说草案没了（`draft_expired`/`draft_evicted`/`draft_replayed`/`draft_revision_conflict`）
+      才走 `expired` → 清除。`draft_reserved` 是瞬态并发冲突，也走保留 + 提示稍后重试。
+  - Gotchas encountered
+    - monkeypatch `apply_request_save_action` 要按字符串路径 patch
+      `apps.migu_orca_web.routes_requests.apply_request_save_action`（routes 命名空间），
+      不能 `monkeypatch.setattr(module_import, name, fn)` 对函数本身设属性。
+    - preview-save 的新增 `base_revision` 是必填，遗漏会让所有旧 client 400
+      `data_validation_errors`（golden `test_golden_preview_save_rejects_non_pending` 断言
+      fields 同时含 draft_id 与 base_revision）。
+    - `storage_error` 分类为 HTTP 500（不是 400）；写盘失败注入测试要断言 500。
+    - 改 `_error_http_status`/`_ENDPOINTS` 后必须重生成 `docs/api/openapi.json` 与
+      `frontend/src/api/generated/api.ts`（drift check 双守护）。
+  - Useful context
+    - US-213 会在 storage engine 增加持久化幂等记录（idempotency repository）并保留
+      `IN_PROGRESS/SAVED_CONFIRM_FAILED/CONFIRMED` 状态；US-212 的 reservation 只解决
+      进程内不丢草案，跨重启/响应丢失靠 US-213。
 ---

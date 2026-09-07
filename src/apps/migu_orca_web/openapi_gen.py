@@ -405,15 +405,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests/preview-save": {
         "operationId": "previewSaveRequest",
         "summary": "保存未修改的预览草案",
-        "description": "US-194：消费服务端权威 draft_id（一次性，重放保护），仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
+        "description": "US-194/US-212：以 draft_id + base_revision 预留服务端权威草案，持久化成功后才提交重放 tombstone；持久化失败会释放预留，同一 draft/revision 可安全重试，不再因写盘失败丢失草案。仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
         "requestBody": {
             "type": "object",
-            "required": ["draft_id"],
+            "required": ["draft_id", "base_revision"],
             "properties": {
                 "draft_id": {
                     "type": "string",
-                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存后失效）。",
+                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存成功后失效）。",
                     "x-request-scoped": True,
+                },
+                "base_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的草案 revision（US-212，预留校验；不匹配返回 409 draft_revision_conflict）。",
                 },
                 "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
@@ -426,6 +431,8 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "draft_expired": "订阅草案已过期或不存在，请重新生成",
                 "draft_evicted": "订阅草案已失效（服务器容量已满），请重新生成",
                 "draft_replayed": "订阅草案已被保存，请勿重复保存",
+                "draft_revision_conflict": "草案已被更新，请基于最新版本重试",
+                "draft_reserved": "订阅草案正在保存中，请稍后重试",
             },
         },
     },

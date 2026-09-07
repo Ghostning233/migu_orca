@@ -12,8 +12,9 @@ the server the authority for unsaved drafts:
 - ``preview-modify`` accepts ``draft_id`` + ``base_revision`` + an allowed patch
   (never a client full Request), performs a compare-and-swap, and returns the
   updated in-memory draft with the bumped ``draft_revision``;
-- ``preview-save`` consumes a *valid* ``draft_id`` once and persists the
-  server-held draft, with replay protection.
+- ``preview-save`` reserves a *valid* ``draft_id`` for persistence, commits the
+  replay tombstone only after the Request is written, and releases the draft on
+  a failed persist so the same draft/revision can be retried (US-212).
 
 US-210 adds a monotonic ``revision`` to every server-authoritative draft so the
 server can reject out-of-order stale writes:
@@ -24,6 +25,17 @@ server can reject out-of-order stale writes:
 - ``compare_and_swap`` replaces the draft atomically only when ``base_revision``
   matches the current revision (bumping the revision by 1); a mismatch leaves
   both payload and revision untouched and returns ``REASON_REVISION_CONFLICT``.
+
+US-212 fixes "consume before persist" so a failed disk write never destroys a
+draft the user must re-search for:
+
+- ``reserve_for_save`` validates ``draft_id`` + ``base_revision`` and pins the
+  draft while it is being persisted; during the reservation the draft cannot be
+  modified, consumed, or reserved again by a different save operation;
+- ``commit_save`` records the replay tombstone (the draft is now consumed) after
+  the caller persisted the authoritative snapshot;
+- ``release_save`` returns a reserved draft to the usable pool with its payload
+  and revision untouched after a persistence failure.
 
 Security/robustness properties
 ------------------------------
@@ -57,6 +69,7 @@ REASON_EXPIRED = "expired"
 REASON_EVICTED = "evicted"
 REASON_REPLAYED = "replayed"
 REASON_REVISION_CONFLICT = "revision_conflict"
+REASON_RESERVED = "reserved"
 REASON_UNKNOWN = "unknown"
 
 
@@ -91,10 +104,15 @@ class _DraftEntry:
     revision: int
     created_at: float
     used_at: float
+    #: When truthy the draft is reserved by a save-in-progress (US-212). A
+    #: reserved entry is skipped by purge/eviction and rejected by
+    #: get/compare_and_swap/update/consume so a persistence attempt owns the
+    #: exact payload/revision it is about to write.
+    reserved: bool = False
 
 
 class DraftStore:
-    """Bounded, expiring, one-time-save store for unsaved preview drafts.
+    """Bounded, expiring, save-lifecycle store for unsaved preview drafts.
 
     ``issue`` stores a generated draft and returns a ``DraftHandle`` carrying
     the opaque ``draft_id`` and ``revision=1``. ``get`` reads a draft for
@@ -107,6 +125,19 @@ class DraftStore:
     atomically (bumping the revision by 1) only when the base matches the
     current revision. A stale base leaves the payload and revision untouched.
 
+    Saving uses the US-212 reservation lifecycle so a failed disk write never
+    destroys the draft:
+
+    - ``reserve_for_save`` validates ``draft_id`` + ``base_revision`` and pins
+      the draft; while reserved the draft cannot be modified, consumed, purged,
+      evicted, or reserved again, so the exact payload/revision being persisted
+      stays stable;
+    - ``commit_save`` turns the reservation into the replay tombstone (the
+      caller has persisted the Request — a later save of the same id is
+      ``replayed``);
+    - ``release_save`` drops the reservation and keeps the draft usable with
+      its payload and revision untouched (the persistence failed).
+
     Lookups return a ``(value_or_None, reason)`` tuple so the routes can map
     the failure to a stable 409 ``draft_*`` error type:
 
@@ -114,6 +145,7 @@ class DraftStore:
     - ``evicted``            — the draft was evicted because the store was full;
     - ``replayed``           — the draft id was consumed by a previous save;
     - ``revision_conflict``  — the caller's ``base_revision`` is stale;
+    - ``reserved``           — a save-in-progress owns the draft (US-212);
     - ``unknown``            — the id was never issued (or long forgotten).
     """
 
@@ -142,13 +174,28 @@ class DraftStore:
     def issue(self, request: dict[str, Any]) -> DraftHandle:
         """Store ``request`` and return a handle with an opaque id, revision 1.
 
-        Evicts expired entries first, then the oldest entry when at capacity.
+        Evicts expired entries first, then the oldest **unreserved** entry when
+        at capacity (a reserved draft is never evicted mid-save).
         """
         with self._lock:
             self._purge()
             while len(self._entries) >= self._max_entries:
-                evicted_id, _ = self._entries.popitem(last=False)
-                self._tombstones[evicted_id] = (REASON_EVICTED, self._now())
+                # Evict the oldest *unreserved* entry. A reserved draft is
+                # pinned mid-save and must never disappear under the caller;
+                # when every entry is reserved the store allows a transient
+                # over-capacity entry until one reservation resolves.
+                evictable = next(
+                    (
+                        candidate_id
+                        for candidate_id, entry in self._entries.items()
+                        if not entry.reserved
+                    ),
+                    None,
+                )
+                if evictable is None:
+                    break
+                del self._entries[evictable]
+                self._tombstones[evictable] = (REASON_EVICTED, self._now())
             draft_id = token_urlsafe(24)
             now = self._now()
             self._entries[draft_id] = _DraftEntry(
@@ -174,6 +221,11 @@ class DraftStore:
             entry = self._entries.get(draft_id)
             if entry is None:
                 return None, self._missing_reason(draft_id)
+            if entry.reserved:
+                # A save-in-progress owns the exact payload/revision it is
+                # persisting; a concurrent dry-run modify must not read against
+                # it (US-212).
+                return None, REASON_RESERVED
             self._entries.move_to_end(draft_id)
             self._entries[draft_id] = _DraftEntry(
                 request=entry.request,
@@ -208,6 +260,10 @@ class DraftStore:
             entry = self._entries.get(draft_id)
             if entry is None:
                 return None, self._missing_reason(draft_id)
+            if entry.reserved:
+                # The save-in-progress pins the payload/revision; a concurrent
+                # modify must not move the revision out from under it (US-212).
+                return None, REASON_RESERVED
             if entry.revision != base_revision:
                 return None, REASON_REVISION_CONFLICT
             new_revision = entry.revision + 1
@@ -235,6 +291,12 @@ class DraftStore:
             entry = self._entries.pop(draft_id, None)
             if entry is None:
                 return None, self._missing_reason(draft_id)
+            if entry.reserved:
+                # Never consume a draft a save-in-progress owns (US-212): the
+                # reserved entry must be committed/released by its reservation,
+                # not double-saved by a concurrent consumer.
+                self._entries[draft_id] = entry
+                return None, REASON_RESERVED
             self._tombstones[draft_id] = (REASON_REPLAYED, self._now())
             return entry.request, REASON_OK
 
@@ -255,6 +317,8 @@ class DraftStore:
             entry = self._entries.get(draft_id)
             if entry is None:
                 return False
+            if entry.reserved:
+                return False
             new_revision = entry.revision + 1
             now = self._now()
             self._entries[draft_id] = _DraftEntry(
@@ -265,6 +329,82 @@ class DraftStore:
             )
             self._entries.move_to_end(draft_id)
             return True
+
+    # -- US-212 reservation lifecycle --------------------------------------
+
+    def reserve_for_save(
+        self,
+        draft_id: str | None,
+        base_revision: int,
+    ) -> tuple[dict[str, Any] | None, str]:
+        """Pin a draft for persistence iff ``base_revision`` is still current.
+
+        Returns the authoritative ``(request, REASON_OK)`` the caller must
+        persist. A stale revision returns ``revision_conflict`` (nothing is
+        changed); an expired/evicted/replayed/unknown id returns the matching
+        ``draft_*`` reason. While reserved the entry is invisible to
+        get/compare_and_swap/update/consume and is skipped by purge/eviction so
+        the caller persists a stable payload/revision. The reservation is
+        resolved by ``commit_save`` (success) or ``release_save`` (failure).
+        """
+        with self._lock:
+            self._purge()
+            if not draft_id:
+                return None, REASON_UNKNOWN
+            entry = self._entries.get(draft_id)
+            if entry is None:
+                return None, self._missing_reason(draft_id)
+            if entry.reserved:
+                return None, REASON_RESERVED
+            if entry.revision != base_revision:
+                return None, REASON_REVISION_CONFLICT
+            self._entries[draft_id] = _DraftEntry(
+                request=entry.request,
+                revision=entry.revision,
+                created_at=entry.created_at,
+                used_at=self._now(),
+                reserved=True,
+            )
+            self._entries.move_to_end(draft_id)
+            return deepcopy(entry.request), REASON_OK
+
+    def commit_save(self, draft_id: str | None) -> None:
+        """Record the replay tombstone for a reservation whose Request persisted.
+
+        After commit the draft is consumed: a later save of the same id is
+        reported ``replayed``. A draft that is no longer reserved (already
+        committed/released/cleared) is a no-op so an interrupted save can never
+        poison another save's outcome.
+        """
+        with self._lock:
+            if not draft_id:
+                return
+            entry = self._entries.get(draft_id)
+            if entry is None or not entry.reserved:
+                return
+            del self._entries[draft_id]
+            self._tombstones[draft_id] = (REASON_REPLAYED, self._now())
+
+    def release_save(self, draft_id: str | None) -> None:
+        """Unpin a reservation after a persistence failure, keeping the draft.
+
+        The draft's payload and revision are untouched, so the same
+        ``draft_id``/``base_revision`` can be retried and the user never loses
+        their edit. A draft that is no longer reserved is a no-op.
+        """
+        with self._lock:
+            if not draft_id:
+                return
+            entry = self._entries.get(draft_id)
+            if entry is None or not entry.reserved:
+                return
+            self._entries[draft_id] = _DraftEntry(
+                request=entry.request,
+                revision=entry.revision,
+                created_at=entry.created_at,
+                used_at=self._now(),
+            )
+            self._entries.move_to_end(draft_id)
 
     def clear(self) -> None:
         with self._lock:
@@ -287,6 +427,11 @@ class DraftStore:
     def _purge(self) -> None:
         threshold = self._now() - self._ttl_seconds
         for draft_id, entry in list(self._entries.items()):
+            if entry.reserved:
+                # A save-in-progress pins the draft even past its TTL; the TTL
+                # resumes after commit/release. This prevents a long persist
+                # from having its draft purged mid-write.
+                continue
             if entry.created_at <= threshold or entry.used_at <= threshold:
                 del self._entries[draft_id]
                 self._tombstones.setdefault(draft_id, (REASON_EXPIRED, self._now()))

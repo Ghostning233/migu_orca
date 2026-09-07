@@ -52,8 +52,8 @@
         "Tests pass"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现：DraftStore 新增 reserve_for_save(draft_id, base_revision)/commit_save/release_save（RLock 临界区），预留期间 get/CAS/update/consume/逐出/过期均拒绝并返回 REASON_RESERVED；preview-save 必填 base_revision(>=1)，持久化成功才 commit 写重放 tombstone，异常时 release 保留原 revision；新增 409 draft_reserved（_error_http_status + OpenAPI 声明）；前端 DraftPreviewPanel 发送 base_revision，WorkbenchView 保存失败不再清除草案（可重试）。单元测试 24 例 + golden/views 注入写盘失败证明同 draft 重试只产生一个 Request；OpenAPI/inventory/TS client/README/AGENTS 同步。非浏览器 1042 + 浏览器 133 + 前端 261 全绿，typecheck/lint/api:check/build/compileall/ruff 通过。"
     },
     {
       "id": "US-213",

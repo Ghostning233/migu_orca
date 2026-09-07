@@ -55,9 +55,11 @@ npm run api:check       # 漂移检查：生成结果与入库文件不一致时
 - 凭据/外部配置字段（`mikan_config`、`ab_config`、`qbittorrent_config`、
   `candidate_context`、`draft_id`）标记为 `x-request-scoped: true`：
   request-scoped，绝不进入 storage JSON、URL、浏览器 storage、日志或 trace。
-  US-194/211：未保存草案由服务端权威持有，客户端只持有 opaque `draft_id` 与单调
+  US-194/211/212：未保存草案由服务端权威持有，客户端只持有 opaque `draft_id` 与单调
   `draft_revision`，`preview-modify` 只接受 `draft_id` + `base_revision` + 允许 patch
-  （CAS，冲突 → 409 `draft_revision_conflict`），`preview-save` 不再接受客户端完整 Request。
+  （CAS，冲突 → 409 `draft_revision_conflict`），`preview-save` 以 `draft_id` +
+  `base_revision` 预留草案、持久化成功后才消费（写盘失败释放预留可重试；
+  正在保存 → 409 `draft_reserved`），不再接受客户端完整 Request。
 - `storage_dir`（US-193 起）是服务端允许根目录下的**相对 profile**：拒绝绝对路径/
   穿越/符号链接逃逸（400 `invalid_storage_dir`），details 不回显原始路径；**未传时回落
   服务端根**（`services._storage_dir` 返回 `_WEB_STORAGE_ROOT`，默认 `.migu_orca/storage`，

@@ -9,8 +9,9 @@
 //   - the always-visible 编辑订阅草案 form (字幕组/包含/排除/正则/大小写/
 //     folder_name) calls the dry-run `preview-modify` endpoint, which
 //     recomputes seed display without persisting;
-//   - 保存草案 consumes the draft through `preview-save` (one-shot, replay
-//     protected) and emits `saved` so the workbench can hand the user to the
+//   - 保存草案 reserves the draft through `preview-save` (US-212: persist
+//     first, replay-tombstone after; a failed disk write keeps the draft for
+//     retry) and emits `saved` so the workbench can hand the user to the
 //     saved-Request list/detail.
 //
 // Security boundary (US-194): the client holds only the opaque `draft_id`
@@ -224,7 +225,15 @@ async function saveDraft(): Promise<void> {
       if (!modified) return
     }
     const saved = await api.post<PreviewSaveResult>('/api/v1/requests/preview-save', {
-      body: { draft_id: draftId.value, storage_dir: storageQuery().storage_dir ?? null },
+      body: {
+        draft_id: draftId.value,
+        // US-212: the save reserves the draft against the base_revision the
+        // server last issued, so a concurrent modify cannot move the revision
+        // out from under the persist; on a failed disk write the server keeps
+        // this draft/revision alive for a retry.
+        base_revision: draftRevision.value,
+        storage_dir: storageQuery().storage_dir ?? null,
+      },
     })
     // The draft was consumed by the save; clear the in-memory capability so a
     // replay can never reference a stale draft.
@@ -312,7 +321,15 @@ async function saveDraftAndReturn(): Promise<RequestSnapshot | null> {
       if (!modified) return null
     }
     const saved = await api.post<PreviewSaveResult>('/api/v1/requests/preview-save', {
-      body: { draft_id: draftId.value, storage_dir: storageQuery().storage_dir ?? null },
+      body: {
+        draft_id: draftId.value,
+        // US-212: the save reserves the draft against the base_revision the
+        // server last issued, so a concurrent modify cannot move the revision
+        // out from under the persist; on a failed disk write the server keeps
+        // this draft/revision alive for a retry.
+        base_revision: draftRevision.value,
+        storage_dir: storageQuery().storage_dir ?? null,
+      },
     })
     draftId.value = ''
     const savedRequest = saved?.request as RequestSnapshot | undefined

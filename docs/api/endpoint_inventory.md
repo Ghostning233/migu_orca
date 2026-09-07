@@ -97,7 +97,7 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | GET `/api/v1/requests/<request_id>` | `request_id`（路径）、`storage_dir?` | `{"request": <snapshot>, "history": {available, events, error}, "ab_result": {available, record, error}}` | 缺失 → `request_not_found`；路径片段 → `invalid_request_id` |
 | POST `/api/v1/requests` | `title`、`source`（`static-fixture`/`mikan`）、`mikan_config?`、`mikan_bangumi?`、`storage_dir?`、`save_request`（默认 false）、`season_confirmation?`、`candidate_context?` | `{"request", "summary", "saved_request"?}`；`save_request=false` 时另含 `draft_id` + `draft_revision`（US-194/211：服务端权威草案 opaque id 与单调 revision） | `data_validation_errors`（title 缺失）；`candidate_context_invalid`；保存失败 → `storage_error` |
 | POST `/api/v1/requests/preview-modify` | `draft_id`（US-194，不再收完整 `request`）、`base_revision`（US-211 必填，compare-and-swap）、`patch`、`storage_dir?` | `{"request", "summary", "draft_id", "draft_revision"}` | `invalid_modify_patch_field`；draft 失效 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`（409，error_data 只含 `field`/`current_revision`） |
-| POST `/api/v1/requests/preview-save` | `draft_id`（US-194，一次性消费）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | draft 失效/重放 → `draft_expired`/`draft_evicted`/`draft_replayed`（409） |
+| POST `/api/v1/requests/preview-save` | `draft_id`（US-194，一次性预留）、`base_revision`（US-212 必填，预留校验）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | draft 失效/重放 → `draft_expired`/`draft_evicted`/`draft_replayed`（409）；`base_revision` 过期 → `draft_revision_conflict`；正在保存 → `draft_reserved`（409） |
 | POST `/api/v1/requests/<request_id>/accept` | `request_id`（路径）、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 缺失 → `request_not_found`；状态冲突 → `invalid_request_status` |
 | POST `/api/v1/requests/<request_id>/cancel` | `request_id`（路径）、`cancel_reason?`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | 同上 |
 | POST `/api/v1/requests/<request_id>/modify` | `request_id`（路径）、`patch`、`storage_dir?` | `{"request", "summary", "saved_request"?}` | `invalid_modify_patch_field` |
@@ -196,6 +196,10 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 - US-210/211：每个草案带单调 revision（签发为 1，成功 CAS 修改 +1）。`preview-modify`
   必填 `base_revision` 做 compare-and-swap，过期 base → 409 `draft_revision_conflict`，
   error_data 只含 `field=base_revision` 与 `current_revision`，绝不回显 draft_id 或草案内容。
+- US-212：`preview-save` 改为「预留 → 持久化 → 提交/释放」。`draft_id` + `base_revision`
+  通过 `reserve_for_save` 校验并预留草案；Request 成功落盘后才 `commit_save`（写入重放
+  tombstone），持久化异常用 `release_save` 释放并保留原 revision——同一草案写盘失败后可重试，
+  不再先 pop 后持久化导致用户重新搜索。预留期间的并发修改/保存返回 409 `draft_reserved`。
 
 ## 5. 前端依赖（Stage 27 迁移后）
 
@@ -224,7 +228,8 @@ Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托�
 - **request_id**：`POST /api/v1/requests` 生成 → 保存后进入待确认流程（PENDING_CONFIRM）→
   accept/cancel/modify/delete/submit-ab；删除后 `request_not_found`。
   预览草案（`save_request: false`）由服务端权威 draft 持有（见 draft_id），
-  `preview-save` 消费 draft 后才获得持久 request_id。
+  `preview-save` 持久化成功后才消费 draft（US-212：写盘失败释放预留可重试），随后获得持久
+  request_id。
 - **batch_id**：`POST /api/v1/batches/parse` 返回 → accept 建立队列 → queue/submit/retry/recover
   通过 URL `batch_id` 恢复；服务端不持久化解析后的批量（客户端回传卡片）。
 - **candidate_context**：`POST /api/v1/mikan/candidates` 在季数需确认时签发（`CandidateSelectionContextStore`，
@@ -233,12 +238,13 @@ Vue 3 + TypeScript + Vite 工程，生产构建由 Flask 在 `/app/` 同源托�
 - **draft_id**（US-194）：候选与直连生成（`save_request=false`）签发 opaque `draft_id`，
   服务端在 `DraftStore`（`apps/migu_orca_web/drafts.py`）保存权威 PENDING_CONFIRM 草案；
   `preview-modify` 只收 `draft_id` + `base_revision` + 允许 patch（返回更新草案、同一
-  draft_id 与新 draft_revision，US-211），`preview-save` 一次性消费有效 `draft_id`（重放
-  → 409 `draft_replayed`）。draft store 有 TTL（默认 30 分钟）、容量上限（128）、自动清理
-  与一次性保存/重放保护；过期/逐出/未知 → 409 `draft_expired`/`draft_evicted`；
-  `base_revision` 过期 → 409 `draft_revision_conflict`。客户端**不再**提交完整 Request；
-  draft 内容、draft_id 与 revision 绝不进入 URL、browser storage、日志、截图或 trace，
-  API 只暴露 opaque id 与单调 revision。
+  draft_id 与新 draft_revision，US-211），`preview-save` 预留并持久化有效 `draft_id` +
+  `base_revision`（成功后才消费，重放 → 409 `draft_replayed`；US-212 起写盘失败不丢草案）。
+  draft store 有 TTL（默认 30 分钟）、容量上限（128）、自动清理与一次性保存/重放保护；
+  过期/逐出/未知 → 409 `draft_expired`/`draft_evicted`；`base_revision` 过期 → 409
+  `draft_revision_conflict`；正在保存 → 409 `draft_reserved`。客户端**不再**提交完整
+  Request；draft 内容、draft_id 与 revision 绝不进入 URL、browser storage、日志、截图或
+  trace，API 只暴露 opaque id 与单调 revision。
 - **poster key**：`_serialize_candidate` 通过 `poster_service.register` 签发，同源代理读取，进程内注册表。
 
 ## 6. 测试证明

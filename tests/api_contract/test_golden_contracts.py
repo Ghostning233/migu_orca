@@ -358,8 +358,8 @@ def test_golden_preview_modify_missing_base_revision_is_validation_error(
 
 def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
     # A draft is always PENDING_CONFIRM server-side; a *client-supplied* full
-    # Request is no longer accepted (US-194). Missing draft_id is a validation
-    # error; a consumed/unknown draft is a 409.
+    # Request is no longer accepted (US-194). Missing draft_id/base_revision is
+    # a validation error; a consumed/unknown draft is a 409.
     response = client.post(
         "/api/v1/requests/preview-save",
         json={},
@@ -369,16 +369,19 @@ def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
     assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
-    assert any(e["field"] == "draft_id" for e in payload["error_data"]["errors"])
+    fields = {e["field"] for e in payload["error_data"]["errors"]}
+    assert "draft_id" in fields
+    # US-212: base_revision is a required request field (>=1).
+    assert "base_revision" in fields
 
 
 def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
-    """US-194: preview-save is one-shot; a second save is a 409 replay."""
+    """US-194/US-212: preview-save is one-shot; a second save is a 409 replay."""
     draft_id, _ = _issue_preview_draft(client)
 
     first = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id},
+        json={"draft_id": draft_id, "base_revision": 1},
     )
     assert first.status_code == 200
     assert first.get_json()["ok"] is True
@@ -386,7 +389,7 @@ def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
 
     second = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id},
+        json={"draft_id": draft_id, "base_revision": 1},
     )
     payload = second.get_json()
     assert second.status_code == 409
@@ -396,11 +399,54 @@ def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"field": "draft_id"}
 
 
+def test_golden_preview_save_stale_revision_conflicts(client: FlaskClient) -> None:
+    """US-212: a save with a stale base_revision never persists the draft.
+
+    The save reserves against the client's last-observed revision; after a
+    concurrent modify bumps the revision, an old save is a 409
+    draft_revision_conflict and the draft stays intact at the newer revision.
+    """
+    draft_id, _ = _issue_preview_draft(client)
+    # A concurrent modify bumps the revision 1 → 2.
+    modify = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "并发修改"},
+        },
+    )
+    assert modify.status_code == 200
+
+    # A stale save still sends base_revision=1: rejected, draft untouched.
+    stale = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1},
+    )
+    payload = stale.get_json()
+    assert stale.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_revision_conflict"
+    assert payload["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    assert draft_id not in str(payload)
+
+    # A retry with the true current revision still saves exactly one Request.
+    retry = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 2},
+    )
+    assert retry.status_code == 200
+    assert retry.get_json()["result"]["request"]["request_id"] is not None
+
+
 def test_golden_preview_save_rejects_unknown_draft(client: FlaskClient) -> None:
     """A never-issued / expired draft id is a stable 409, never a leak."""
     response = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": "forged-or-expired-draft-id"},
+        json={"draft_id": "forged-or-expired-draft-id", "base_revision": 1},
     )
 
     payload = response.get_json()
@@ -411,6 +457,36 @@ def test_golden_preview_save_rejects_unknown_draft(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"field": "draft_id"}
     # The raw draft id is never echoed back.
     assert "forged-or-expired-draft-id" not in str(payload)
+
+
+def test_golden_preview_save_reserved_draft_conflicts(client: FlaskClient) -> None:
+    """US-212: a save-in-progress owns the draft → 409 draft_reserved.
+
+    The reservation is pinned server-side; a concurrent save (or modify) of the
+    same draft reports draft_reserved and the safe error data never leaks the
+    draft id or content.
+    """
+    from apps.migu_orca_web.drafts import draft_store
+
+    draft_id, _ = _issue_preview_draft(client)
+    # Another save-in-progress has reserved the draft.
+    reserved, reason = draft_store.reserve_for_save(draft_id, 1)
+    assert reserved is not None
+    assert reason == "ok"
+    try:
+        response = client.post(
+            "/api/v1/requests/preview-save",
+            json={"draft_id": draft_id, "base_revision": 1},
+        )
+        payload = response.get_json()
+        assert response.status_code == 409
+        assert payload["ok"] is False
+        assert payload["error_type"] == "draft_reserved"
+        assert payload["error_message"] == "订阅草案正在保存中，请稍后重试"
+        assert payload["error_data"]["details"] == {"field": "draft_id"}
+        assert draft_id not in str(payload)
+    finally:
+        draft_store.release_save(draft_id)
 
 
 def test_golden_request_actions_error_sanitized(

@@ -68,7 +68,8 @@ _HTTP_NOT_FOUND_ERROR_TYPES = {
 }
 # 409 — the request conflicts with the current server state (replay/expired/
 #       stale/status conflict). US-194 draft-store failures (draft_expired,
-#       draft_evicted, draft_replayed, draft_mismatch) land here too.
+#       draft_evicted, draft_replayed, draft_mismatch) land here too; US-212
+#       adds draft_reserved (a save-in-progress owns the draft).
 _HTTP_CONFLICT_ERROR_TYPES = {
     "invalid_request_status",
     "request_cancelled",
@@ -80,6 +81,7 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     "draft_replayed",
     "draft_mismatch",
     "draft_revision_conflict",
+    "draft_reserved",
 }
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {
