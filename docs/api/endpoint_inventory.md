@@ -28,7 +28,8 @@
   - `409`：状态冲突/一次性上下文失效/重放（`invalid_request_status`、`request_cancelled`、
     `season_evidence_conflict`、`season_confirmation_required`、`candidate_context_invalid`；
     US-194 的 `draft_expired`/`draft_evicted`/`draft_replayed`/`draft_mismatch` 与
-    US-211 的 `draft_revision_conflict` 也归此类）。
+    US-211 的 `draft_revision_conflict`、US-212 的 `draft_reserved`、US-213 的
+    `idempotency_conflict` 也归此类）。
   - `401`：外部服务认证失败（`ab_auth_failed`、`qbittorrent_auth_failed`）。
   - `502`：上游不可达/不健康（`mikan_connection_failed`、`mikan_http_failed`、
     `mikan_parse_failed`、`poster_unavailable`、`ab_connection_failed`、`ab_submit_failed`、
@@ -200,6 +201,15 @@ CLI 显式 `--storage-dir` 行为不受影响）。
   通过 `reserve_for_save` 校验并预留草案；Request 成功落盘后才 `commit_save`（写入重放
   tombstone），持久化异常用 `release_save` 释放并保留原 revision——同一草案写盘失败后可重试，
   不再先 pop 后持久化导致用户重新搜索。预留期间的并发修改/保存返回 409 `draft_reserved`。
+- US-213：storage engine 新增持久化 save-confirm 幂等记录（`<storage>/idempotency/` 下
+  `<opaque-key>.json`，见 `storage_engine/controllers/idempotency_repository.py`）。记录只含
+  `idempotency_key`、`operation=SAVE_CONFIRM`、不可逆 `request_fingerprint`（sha256 over
+  allowed business fields）、`request_id?`、`state`
+  （`IN_PROGRESS`/`SAVED_CONFIRM_FAILED`/`CONFIRMED`）与时间戳；绝不保存 draft、标题、URL、
+  凭据或绝对路径。应用层协议见 `apps/migu_orca_web/save_confirm_service.py`：
+  终态同键重放同一公开结果；`IN_PROGRESS` 重试先核对已落盘 Request（§7 rule 3）再决定继续
+  确认或安全重试保存；同键绑定不同 operation/payload → 409 `idempotency_conflict`，错误不回显
+  原始 payload。`idempotency_key` 是 request-scoped opaque 值，只进请求体与页面内存。
 
 ## 5. 前端依赖（Stage 27 迁移后）
 

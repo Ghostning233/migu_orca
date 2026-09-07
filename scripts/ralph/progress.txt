@@ -16,6 +16,14 @@
 - DraftStore 保存生命周期：`reserve_for_save(draft_id, base_revision)` → 持久化 → 成功
   `commit_save(draft_id)` / 异常 `release_save(draft_id)`；预留期间草案不可被 get/CAS/
   consume/update/逐出/过期处理，返回 `REASON_RESERVED` → 路由映射 409 `draft_reserved`。
+- StorageConfig 目录以 `*.dir` 数据类字段给出（`requests/history/ab_results/queue/
+  preferences/corrections/idempotency`），`ensure_storage_layout` 统一建目录；新增存储族
+  必须同步 `storage_config.py` + `storage_config_test.py`。
+- 幂等记录（US-213）模式：storage engine 的 repository 负责原子读写 + 白名单字段 + 路径安全
+  （temp 文件 + `os.replace`）；`apps/migu_orca_web/save_confirm_service.py` 的
+  `compute_request_fingerprint`/`run_save_confirm`/`resolve_in_progress_retry` 负责协议。
+  记录文件 = `<storage>/idempotency/<opaque-key>.json`，字段白名单
+  `idempotency_key/operation/request_fingerprint/request_id/state/created_at/updated_at`。
 - 每次迭代只完成最高优先级的一个未通过 story；完整实现、测试和提交后才把 `passes` 改为 true。
 
 ## [2026-09-07] - US-210
@@ -197,4 +205,70 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - US-213 会在 storage engine 增加持久化幂等记录（idempotency repository）并保留
       `IN_PROGRESS/SAVED_CONFIRM_FAILED/CONFIRMED` 状态；US-212 的 reservation 只解决
       进程内不丢草案，跨重启/响应丢失靠 US-213。
+---
+
+## [2026-09-08] - US-213
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - `StorageConfig`/`load_storage_config`/`ensure_storage_layout` 新增 `idempotency_dir`
+    （`<storage>/idempotency`），同步 `storage_config_test.py` 的 3 处断言。
+  - 新增 `storage_engine/controllers/idempotency_repository.py`：save-confirm 幂等记录的
+    原子读写。每条 = `<storage>/idempotency/<opaque-key>.json`；记录只含白名单字段
+    `idempotency_key/operation/request_fingerprint/request_id/state/created_at/updated_at`；
+    `save_idempotency_record` 用 temp 文件 + `os.replace` 原子写，`load_idempotency_record`
+    缺失返回 None、损坏/非对象返回稳定 `storage_json_error`；key 校验拒绝路径片段/穿越。
+    `save` 只写 `_RECORD_FIELDS` 白名单——调用方即使误传 draft/URL/凭据也绝不落盘。
+  - 新增 `apps/migu_orca_web/save_confirm_service.py`（US-214 将接线）：
+    - `compute_request_fingerprint(request)`：对 status/raw_title/bangumi_title/
+      selected_subtitle_group/filter_rule/expected_folder_name 规范化 sha256；
+      排除 `request_id` 与一切敏感字段（URL/magnet/种子/凭据/路径）。
+    - `run_save_confirm(...)` 可复用组合协调器（注入 reserve/persist/confirm/commit/release）：
+      终态（CONFIRMED/SAVED_CONFIRM_FAILED）同键重放、绝不触碰 draft；`IN_PROGRESS` 重试先
+      `resolve_in_progress_retry` 核对已落盘 Request（在 → 继续确认；不在 → 安全重试保存），
+      不无条件新建；记录在首次落盘前绑定 key+fingerprint+request_id（IN_PROGRESS），
+      确认成功才 CONFIRMED，确认失败 commit_draft + SAVED_CONFIRM_FAILED（返回公开
+      request_id + PENDING_CONFIRM）；同键不同 operation/payload → 409 `idempotency_conflict`。
+      进程级按 key RLock 串行并发同键尝试。
+  - `_error_http_status` 409 集合加入 `idempotency_conflict`；`api_test.py` 增加分类断言。
+  - `test_openapi_runtime_consistency.py` 把 `idempotency_conflict` 列入
+    `_UNDOCUMENTED_ERROR_TYPES`（US-214 暴露端点时移到 `_ENDPOINTS` 声明）。
+  - 文档同步：`docs/api/endpoint_inventory.md` §1 409 分类 + §4 幂等记录生命周期小节、
+    `src/apps/migu_orca_web/AGENTS.md` 增加 US-213 幂等协议模式。
+- Files changed
+  - 新增：`src/storage_engine/controllers/idempotency_repository.py`、
+    `src/storage_engine/controllers/idempotency_repository_test.py`（9 例）、
+    `src/apps/migu_orca_web/save_confirm_service.py`、
+    `tests/api_contract/test_save_confirm_service.py`（16 例）
+  - 修改：`src/storage_engine/controllers/storage_config.py`、
+    `src/storage_engine/controllers/storage_config_test.py`、
+    `src/extensions/flask_api/api.py`（409 分类）、`src/extensions/flask_api/api_test.py`、
+    `tests/api_contract/test_openapi_runtime_consistency.py`、
+    `docs/api/endpoint_inventory.md`、`src/apps/migu_orca_web/AGENTS.md`
+- Verification
+  - `uv run pytest -m "not browser" -q` → 1067 passed, 133 deselected
+  - `uv run ruff check src tests`、`uv run python -m compileall -q src tests`、
+    `uv run python -m apps.migu_orca_web.openapi_gen --check`（无漂移）、`git diff --check` 全绿
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 幂等记录状态机（供 US-214/216 复用）：终态重放 → operation 检查 → IN_PROGRESS 重试
+      rule-3 决策 → 预留草案算指纹 → 绑定 key（fresh IN_PROGRESS 即带 request_id，
+      崩溃后重试靠 rule 3 收敛）→ 持久化 → confirm → CONFIRMED；确认失败不释放 draft
+      （已落盘防重复），转 SAVED_CONFIRM_FAILED 让客户端用 ACCEPT_SAVED_REQUEST 重试。
+    - `compute_request_fingerprint` 是"同一用户重生成草案=同一操作"的关键：排除 request_id，
+      只对业务字段排序序列化做 sha256；敏感字段永不参与。
+    - 原子写模式 = temp 文件 + `os.replace`（`save_user_preferences` 同款）；写文件固定文件名
+      永不取自用户输入，key 只作文件 stem。
+  - Gotchas encountered
+    - 记录不能把"持久化成功前"的 request_id 留在 IN_PROGRESS 里当成已落盘——`IN_PROGRESS`
+      重试必须先查磁盘（`load_request_snapshot`），Request 不存在 → retry_save。
+    - 新增分类到 `_error_http_status` 的 error_type 若尚无端点暴露，必须加入
+      `test_openapi_runtime_consistency.py::_UNDOCUMENTED_ERROR_TYPES`，否则
+      `test_every_classified_error_type_is_documented` 失败。
+    - `ensure_storage_layout` 每次保存幂等记录都会建目录，单测断言"没写盘"要断言无 `*.json`
+      而非目录不存在。
+  - Useful context
+    - US-214 将新增 `POST /api/v1/requests/save-confirm`：schema 收
+      draft_id/base_revision/idempotency_key/storage_dir，service 用真实 DraftStore +
+      entry-controller 接 `run_save_confirm` 的 seams；到时把 `idempotency_conflict` 从
+      豁免集移入 `_ENDPOINTS` 并同步 DTO/OpenAPI/inventory/TS client。
 ---

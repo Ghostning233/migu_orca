@@ -18,6 +18,10 @@ class StorageConfig:
     queue_dir: Path
     preferences_dir: Path
     corrections_dir: Path
+    #: Durable save-confirm idempotency records (US-213). One JSON file per
+    #: opaque client ``idempotency_key``; records are non-sensitive and hold no
+    #: draft/request/URL/credential/absolute-path content.
+    idempotency_dir: Path
 
 
 def load_storage_config(storage_dir: Path | None = None) -> StorageConfig:
@@ -30,6 +34,7 @@ def load_storage_config(storage_dir: Path | None = None) -> StorageConfig:
         queue_dir=root / "queue",
         preferences_dir=root / "preferences",
         corrections_dir=root / "corrections",
+        idempotency_dir=root / "idempotency",
     )
 
 
@@ -42,6 +47,7 @@ def ensure_storage_layout(config: StorageConfig) -> StorageConfig:
         config.queue_dir,
         config.preferences_dir,
         config.corrections_dir,
+        config.idempotency_dir,
     ):
         try:
             directory.mkdir(parents=True, exist_ok=True)

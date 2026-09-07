@@ -89,6 +89,8 @@ def test_error_http_status_maps_semantic_categories() -> None:
     assert _error_http_status("draft_evicted") == 409
     assert _error_http_status("draft_replayed") == 409
     assert _error_http_status("draft_mismatch") == 409
+    # US-213 save-confirm idempotency conflicts → 409.
+    assert _error_http_status("idempotency_conflict") == 409
     # External auth → 401
     assert _error_http_status("ab_auth_failed") == 401
     assert _error_http_status("qbittorrent_auth_failed") == 401
@@ -262,6 +264,15 @@ def test_stage1_error_maps_to_semantic_http_status(app: Flask) -> None:
                 "invalid_request_status", "状态冲突", "confirm", {"status": "x"}
             ),
         )
+        idempotency_conflict = handle_exception(
+            "test_view",
+            Stage1Error(
+                "idempotency_conflict",
+                "相同的幂等键不能用于不同的保存确认操作",
+                "save_confirm_idempotency",
+                {"field": "idempotency_key", "reason": "payload_mismatch"},
+            ),
+        )
         timeout = handle_exception(
             "test_view",
             Stage1Error("mikan_timeout", "MiKan 请求超时", "search"),
@@ -275,6 +286,11 @@ def test_stage1_error_maps_to_semantic_http_status(app: Flask) -> None:
     assert not_found.get_json()["error_type"] == "request_not_found"
     assert conflict.status_code == 409
     assert conflict.get_json()["error_type"] == "invalid_request_status"
+    assert idempotency_conflict.status_code == 409
+    assert idempotency_conflict.get_json()["error_data"]["details"] == {
+        "field": "idempotency_key",
+        "reason": "payload_mismatch",
+    }
     assert timeout.status_code == 504
     assert timeout.get_json()["error_type"] == "mikan_timeout"
     assert gateway.status_code == 502

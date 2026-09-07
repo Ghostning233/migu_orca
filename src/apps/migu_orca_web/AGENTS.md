@@ -135,6 +135,31 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `issue_draft_id(preview_request)` 给每个 `preview_request` 补 draft_id。
 - 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§4.2/§5.3 与 OpenAPI 注册表。
 
+## 保存确认幂等协议（US-213，US-214 将接线）
+
+- 持久化幂等记录在 storage profile 的 `<storage>/idempotency/<opaque-key>.json`（
+  `storage_engine.controllers.idempotency_repository`）。记录字段白名单：
+  `idempotency_key/operation/request_fingerprint/request_id/state/created_at/updated_at`；
+  原子写 = temp 文件 + `os.replace`，绝不保存 draft/标题/URL/凭据/绝对路径。
+- 指纹：`apps/migu_orca_web/save_confirm_service.compute_request_fingerprint(request)`
+  只对允许业务字段（status/raw_title/bangumi_title/selected_subtitle_group/filter_rule/
+  expected_folder_name）做规范化 sha256；排除 `request_id`（重新生成的草案是同一用户操作）与
+  一切敏感字段。
+- `run_save_confirm(...)` 是可复用组合协调器，US-214 用注入 seam（reserve_draft /
+  persist_pending / confirm_saved / commit_draft / release_draft）接真实
+  DraftStore/entry-controller 流。状态机要点：
+  - 终态（`CONFIRMED`/`SAVED_CONFIRM_FAILED`）同键重放，绝不触碰 draft；
+  - `IN_PROGRESS` 重试先用 `resolve_in_progress_retry` 核对已落盘 Request（在 → 继续确认；
+    不在 → 只在仍持有效 reservation 时重试保存），不无条件新建 Request；
+  - 首次写盘成功后记录保持 `IN_PROGRESS` 并绑定 `request_id`，崩溃后重试靠 rule 3 收敛；
+    确认失败才转 `SAVED_CONFIRM_FAILED`（消费 draft 防重复）并让客户端用
+    `ACCEPT_SAVED_REQUEST` 动作重试。
+  - 同键不同 operation/payload → Stage1Error `idempotency_conflict`（409，details 只含
+    `field`/`reason`），错误经 `_error_http_status`/`sanitize_error_data` 不回显 payload。
+- 新增会触发该错误的端点时，把 `idempotency_conflict` 从
+  `tests/api_contract/test_openapi_runtime_consistency.py::_UNDOCUMENTED_ERROR_TYPES`
+  移到对应 `_ENDPOINTS` 声明。
+
 ## MiKan 候选公开 DTO（US-204）
 
 - `POST /api/v1/mikan/candidates` 的 `result.candidates` 在

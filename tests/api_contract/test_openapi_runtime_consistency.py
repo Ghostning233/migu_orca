@@ -53,6 +53,10 @@ _UNDOCUMENTED_ERROR_TYPES = {
     "ab_http_failed",  # only in the classifier set; routes raise ab_submit_failed
     "draft_mismatch",  # DraftStore comment only; routes map to draft_expired/evicted/replayed
     "request_cancelled",  # folded into batch item results, never an envelope error
+    # US-213: the save-confirm idempotency repository raises this as a
+    # Stage1Error, but no /api/v1 route surfaces it yet — the save-confirm
+    # endpoint (US-214) declares it in _ENDPOINTS.
+    "idempotency_conflict",
 }
 
 
