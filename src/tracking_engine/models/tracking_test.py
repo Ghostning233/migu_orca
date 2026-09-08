@@ -19,6 +19,7 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_REVALIDATION_PASSED,
     TRACKING_AUDIT_SUBMIT_FAILED,
     TRACKING_AUDIT_TRACKING_CREATED,
+    TRACKING_ORIGIN_EXTERNAL_SYNC,
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_SCHEMA_VERSION,
     TRACKING_STATUS_ACTIVE,
@@ -33,8 +34,10 @@ from tracking_engine.models.tracking import (
     TrackingRecord,
     append_audit_event,
     build_audit_event,
+    create_external_tracking_record,
     create_tracking_record,
     tracking_from_storage_dict,
+    tracking_id_for_external,
     tracking_id_for_request,
     tracking_status_group,
     tracking_to_storage_dict,
@@ -80,6 +83,60 @@ def test_tracking_id_is_opaque_and_prefix_namespaced() -> None:
     # Opaque id must be a single safe path/URL segment.
     assert "/" not in tracking_id
     assert "\\" not in tracking_id
+
+
+def test_external_tracking_id_uses_frozen_versioned_namespace() -> None:
+    first = tracking_id_for_external("legacy_3_1", "subscription", "sub-123")
+    second = tracking_id_for_external("legacy_3_1", "subscription", "sub-123")
+
+    assert first == second
+    assert first == "trk_" + __import__("hashlib").sha256(
+        b"migu-orca/tracking/external/v1\x00legacy_3_1\x00subscription\x00sub-123"
+    ).hexdigest()[:32]
+    assert "sub-123" not in first
+    with pytest.raises(ValueError):
+        tracking_id_for_external("legacy_3_1", "subscription", "https://bad")
+
+
+def test_external_record_has_no_request_and_round_trips_strict_mapping() -> None:
+    record = create_external_tracking_record(
+        adapter="legacy_3_1",
+        object_kind="subscription",
+        external_id="sub-123",
+        title="葬送的芙莉莲",
+        season=2,
+        subtitle_group="字幕组",
+        subscription_id="sub-123",
+        rss_ids=["rss-a", "rss-a", "rss-b"],
+        now="2026-09-09T00:00:00+00:00",
+    )
+    restored = tracking_from_storage_dict(tracking_to_storage_dict(record))
+
+    assert record.origin == TRACKING_ORIGIN_EXTERNAL_SYNC
+    assert record.request_id is None
+    assert record.external_mapping["rss_ids"] == ["rss-a", "rss-b"]
+    assert restored == record
+
+
+def test_external_mapping_v1_rejects_unknown_fields_but_legacy_is_preserved() -> None:
+    storage = tracking_to_storage_dict(_record())
+    storage["external_mapping"] = {
+        "schema_version": 1,
+        "adapter": "legacy_3_1",
+        "subscription_id": None,
+        "rss_ids": [],
+        "match_reason": "EXTERNAL_ONLY",
+        "external_deleted": False,
+        "enabled": True,
+        "missing_sync_count": 0,
+        "last_verified_at": None,
+        "unexpected": "reject",
+    }
+    with pytest.raises(ValueError, match="unknown external_mapping fields"):
+        tracking_from_storage_dict(storage)
+
+    storage["external_mapping"] = {"legacy_key": "legacy-value"}
+    assert tracking_from_storage_dict(storage).external_mapping == storage["external_mapping"]
 
 
 def test_tracking_id_rejects_empty_request_id() -> None:

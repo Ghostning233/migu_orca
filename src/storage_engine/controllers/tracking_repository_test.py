@@ -31,6 +31,7 @@ from tracking_engine.models.tracking import (
     TRACKING_STATUS_PENDING_SUBMIT,
     TRACKING_STATUS_REVALIDATING,
     TrackingRecord,
+    create_external_tracking_record,
     create_tracking_record,
     tracking_id_for_request,
     tracking_to_storage_dict,
@@ -75,6 +76,26 @@ def test_ensure_then_load_round_trips_all_public_fields(tmp_path: Path) -> None:
     assert saved == record
     assert loaded == record
     assert (config.tracking_dir / f"{record.tracking_id}.json").exists()
+
+
+def test_external_ensure_converges_without_request_or_revision_bump(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    record = create_external_tracking_record(
+        adapter="legacy_3_1",
+        object_kind="subscription",
+        external_id="sub-123",
+        subscription_id="sub-123",
+        now="2026-09-09T00:00:00+00:00",
+    )
+
+    first, created_first = ensure_tracking_record(config, record)
+    second, created_second = ensure_tracking_record(config, replace(record, plan_summary={"title": "changed"}))
+
+    assert created_first is True
+    assert created_second is False
+    assert first == second
+    assert second.request_id is None
+    assert second.revision == 1
 
 
 def test_ensure_is_create_if_absent_and_never_overwrites(tmp_path: Path) -> None:

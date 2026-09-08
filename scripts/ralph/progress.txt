@@ -30,6 +30,7 @@
   `ralph.sh` 会把新 PRD 误归档到上一阶段目录并重置 progress。本轮已同步为 Stage 30。
 - US-228～US-235 只跑受影响定向测试、相关 ruff/compileall 和必要 drift check；US-236 才运行
   一次完整非浏览器、前端与 Chromium 门禁。禁止无修改重复跑全套。
+- ExternalMapping v1 在 `tracking.py` 内严格校验；无 `schema_version` 的 Stage 29 legacy mapping 只做安全保留读取，不猜测迁移。
 
 ## [2026-09-09 01:58:43 +0800] - US-228
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -93,4 +94,23 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 ## [2026-09-09 02:06:00 +0800] - US-229 审核修复
 - 审核发现新增 capability OpenAPI operation 后，`frontend/src/api/generated/api.test.ts` 的 operationId/path/数量断言未同步，导致前端 typecheck 失败。
 - 已同步 generated contract fixture，并验证 `npm run typecheck`、`npm run test:unit -- --run`、`npm run lint` 与 `npm run build` 全部通过。
+---
+
+## [2026-09-09 02:30:00 +0800] - US-230
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `EXTERNAL_SYNC` origin、D30-09 版本化 SHA-256 external tracking ID 与无 Request 的 `create_external_tracking_record`。
+  - 冻结 ExternalMapping v1 白名单、opaque ID/RSS 有界校验、RSS 有序去重和安全外部计划投影。
+  - 保留 Stage 29 legacy opaque mapping 兼容读取；外部记录 repository ensure 按 deterministic tracking ID 幂等收敛。
+- Files changed
+  - `src/tracking_engine/models/tracking.py`
+  - `src/tracking_engine/models/__init__.py`
+  - `src/tracking_engine/models/tracking_test.py`
+  - `src/storage_engine/controllers/tracking_repository.py`
+  - `src/storage_engine/controllers/tracking_repository_test.py`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - External mapping v1 必须只在存在 `schema_version` 时严格解析；无版本的 Stage 29 opaque mapping 需要保留但不能推断字段含义。
+  - 外部孤立 record 的 `request_id` 必须为 null，repository ensure 以 deterministic external tracking ID 作为唯一键且重复 ensure 不 bump revision。
+  - 验证命令：tracking/model/API/migration 定向套件 204 passed，compileall 与 Ruff 全绿。
 ---
