@@ -402,6 +402,16 @@ typecheck/lint/api:check/build/compileall/ruff/OpenAPI drift/git diff --check �
   真实 Chromium 133 passed、前端 Vitest 261 passed，typecheck/lint/api:check/build/
   compileall/ruff/OpenAPI drift/git diff --check 全绿。
 
+2026-09-08 追加「Stage 28 边界修复（Unicode-aware 路径边界）」：
+- `_SAFE_UNIX_ABS_RE` 边界改为 Unicode-aware `(?<![\w/])`，`\w` 覆盖 CJK 与 ASCII 单词字符，
+  使 `简/繁字幕`、`中文/日文`、`命运/冠位指定`、`字幕组/压制组`、`新增/修改` 等中文/日文
+  词内斜杠不再被误判为绝对路径；等号/冒号/引号/括号/CJK 标点/字符串开头/空白等非词边界
+  仍识别为路径。
+- 新增 `_SAFE_CN_PATH_CONTEXT_RE` 识别无分隔符中文路径引导词（`路径为/data`、
+  `路径是/private`、`路径/data`、`路径：/data`）。本轮实际验证：非浏览器 1140 passed、
+  真实 Chromium 133 passed、前端 Vitest 261 passed，typecheck/lint/api:check/build/
+  compileall/ruff/OpenAPI drift/git diff --check 全绿。
+
 实现偏差：均为契约内最小扩展，无范围外 feature（未实现 tracking/AB 管理/新页面视觉）。
 剩余风险：draft 仍为单进程内存权威（多 worker 部署需外部化）；批量上限只约束 parse 入口，
 不限制后续 accept/save-confirm 条数；`safe-info` 的 `total_episodes` 暂无数据源恒为 null。

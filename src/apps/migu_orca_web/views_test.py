@@ -6783,6 +6783,9 @@ def test_safe_label_redacts_all_sensitive_markers() -> None:
         "dest:/var/lib/data",
         "(/srv/backup)",
         "结果:/custom-root/x",
+        # Chinese path-context without a separator.
+        "路径/data",
+        "路径：/data",
     ):
         assert _safe_label(sensitive) == redacted, f"failed to redact {sensitive!r}"
 
@@ -6802,3 +6805,9 @@ def test_safe_label_redacts_all_sensitive_markers() -> None:
     assert _safe_label("A/B 测试") == "A/B 测试"
     assert _safe_label("[喵萌] 番剧名称 - 01.mkv") == "[喵萌] 番剧名称 - 01.mkv"
     assert _safe_label("v1/1080p 发布") == "v1/1080p 发布"
+    # CJK word-internal slashes are NOT absolute paths (Unicode-aware boundary).
+    assert _safe_label("简/繁字幕") == "简/繁字幕"
+    assert _safe_label("中文/日文") == "中文/日文"
+    assert _safe_label("命运/冠位指定") == "命运/冠位指定"
+    assert _safe_label("字幕组/压制组") == "字幕组/压制组"
+    assert _safe_label("新增/修改") == "新增/修改"

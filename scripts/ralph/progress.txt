@@ -689,3 +689,38 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context
     - 本轮为 Stage 28 边界修复补充，不改 Stage 29/tracking/AB 管理范围。
 ---
+
+## [2026-09-08 13:58 CST] - Stage 28 边界修复（Unicode-aware POSIX 路径边界，消除中文斜杠误判）
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - `_SAFE_UNIX_ABS_RE` 边界从 `(?<![A-Za-z0-9_])/` 改为 Unicode-aware
+    `(?<![\w/])/`：`\w` 覆盖 CJK 与 ASCII 单词字符，`/` 前是中文/日文/汉字/字母/数字/
+    下划线或另一个 `/` 时视为词内斜杠不误杀；等号/冒号/引号/括号/CJK 标点/字符串开头/空白
+    等非词边界仍识别为绝对路径。
+  - 新增 `_SAFE_CN_PATH_CONTEXT_RE` 识别无分隔符的中文路径引导词（`路径为/data`、
+    `路径是/private`、`路径/data`、`路径：/data` 等），弥补通用负向后行规则对「中文紧贴 /」
+    的漏检。
+  - 测试补充中文词内斜杠不误杀（简/繁字幕、中文/日文、命运/冠位指定、字幕组/压制组、
+    新增/修改）+ 保留全部敏感路径与 ASCII 词内斜杠用例。
+- Files changed
+  - src/apps/migu_orca_web/serializers.py（_SAFE_UNIX_ABS_RE Unicode-aware + _SAFE_CN_PATH_CONTEXT_RE）
+  - src/apps/migu_orca_web/views_test.py（中文词内斜杠不误杀 + 中文路径上下文用例）
+- Verification（本轮实际执行）
+  - `uv run python -m compileall -q src tests` → passed
+  - `uv run ruff check src tests` → All checks passed
+  - `uv run pytest -q -m "not browser"` → 1140 passed, 133 deselected
+  - `uv run python -m apps.migu_orca_web.openapi_gen --check` → OpenAPI up to date
+  - 前端 `npm run api:check`/`typecheck`/`lint`/`test:unit`(261)/`build` 全绿
+  - `uv run pytest tests/browser/ -q` → 133 passed（真实 Chromium）
+  - `git diff --check` 通过；仓库根 `.migu_orca/storage` 不存在
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 绝对路径边界判定用 Unicode-aware `(?<![\w/])` 才能同时避免中文/日文词内斜杠误杀；
+      纯 ASCII `[A-Za-z0-9_]` 会把「简/繁」「中文/日文」误判为绝对路径。
+    - 无分隔符中文路径引导词（`路径为/data`）无法靠通用负向后行识别，需单独的上下文正则
+      `路径\s*(?:为|是|在|位于|至|于|到)?\s*(?::|：)?/` 兜底。
+  - Gotchas encountered
+    - Python `re` 的 `\w` 默认匹配 Unicode 字母（含 CJK），可直接用于词边界判定。
+  - Useful context
+    - 本轮为 Stage 28 边界修复，不改 Stage 29/tracking/AB 管理范围。
+---

@@ -320,16 +320,22 @@ _SAFE_URL_SCHEME_RE = re.compile(
 )
 _SAFE_MAGNET_RE = re.compile(r"magnet:\?", re.IGNORECASE)
 #: Generic POSIX absolute path detected *anywhere* in a string. The ``/`` must
-#: NOT be immediately preceded by an ASCII word character (letter/digit/
-#: underscore) — a negative-lookbehind boundary that covers the string start,
-#: whitespace, ``=``, ``:``, quotes, parentheses and CJK punctuation/characters
-#: alike. It is followed by one or more non-whitespace/non-slash path segments.
-#: This avoids a fixed root whitelist (``/usr``, ``/etc``, …) so ``/data``,
-#: ``/mnt``, ``/private``, ``/Users`` or any custom root are all redacted even
-#: when embedded (``path=/mnt/secret``, ``"路径为/data/secret"``), while legal
-#: slash-bearing titles like ``Fate/stay night`` or ``A/B 测试`` (where ``/`` is
-#: preceded by a word character) are NOT misclassified as absolute paths.
-_SAFE_UNIX_ABS_RE = re.compile(r"(?<![A-Za-z0-9_])/([^\s/]+(?:/[^\s/]+)*)")
+#: NOT be immediately preceded by a word character (Unicode-aware ``\w``,
+#: covering CJK as well as ASCII) or another ``/`` — a negative-lookbehind
+#: boundary that still fires at the string start, whitespace, ``=``, ``:``,
+#: quotes, parentheses and CJK punctuation. It is followed by one or more
+#: non-whitespace/non-slash path segments. This avoids a fixed root whitelist
+#: (``/usr``, ``/etc``, …) so ``/data``, ``/mnt``, ``/private``, ``/Users`` or
+#: any custom root are all redacted even when embedded (``path=/mnt/secret``,
+#: ``"/opt"``, ``（/Users/name）``), while legal slash-bearing titles like
+#: ``Fate/stay night``, ``A/B 测试``, ``简/繁字幕`` or ``中文/日文`` are NOT
+#: misclassified as absolute paths.
+_SAFE_UNIX_ABS_RE = re.compile(r"(?<![\w/])/([^\s/]+(?:/[^\s/]+)*)")
+#: Chinese path-context marker: ``路径为/data`` / ``路径是/private`` / ``路径/data``
+#: where a CJK path-introducing word abuts ``/`` directly (no punctuation
+#: boundary). The generic rule above cannot see these (the preceding CJK char is
+#: a word char), so a dedicated context rule recognises the leading word.
+_SAFE_CN_PATH_CONTEXT_RE = re.compile(r"路径\s*(?:为|是|在|位于|至|于|到)?\s*(?::|：)?/")
 _SAFE_WINDOWS_ABS_RE = re.compile(r"\b[a-zA-Z]:[\\/]")
 _SAFE_UNC_RE = re.compile(r"(?:^|[^\w])(?:\\\\|//)[^\s\\/]+[\\/]")
 #: key=value / key:value / "Key value" markers for secrets and endpoints.
@@ -365,6 +371,7 @@ def _safe_label(value: Any) -> str | None:
         _SAFE_URL_SCHEME_RE.search(text)
         or _SAFE_MAGNET_RE.search(text)
         or _SAFE_UNIX_ABS_RE.search(text)
+        or _SAFE_CN_PATH_CONTEXT_RE.search(text)
         or _SAFE_WINDOWS_ABS_RE.search(text)
         or _SAFE_UNC_RE.search(text)
         or _SAFE_SECRET_KEY_RE.search(text)
