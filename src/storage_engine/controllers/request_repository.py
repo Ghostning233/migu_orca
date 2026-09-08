@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,23 @@ from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
 )
+
+
+@dataclass(frozen=True)
+class RequestListResult:
+    """Healthy Request snapshots plus the opaque ids of damaged files.
+
+    Used by the migration runner (US-221) so one damaged snapshot never blocks
+    migrating the healthy requests; the damaged ids are only counted/reported,
+    never exposed as file paths or raw content.
+    """
+
+    requests: tuple[dict[str, Any], ...]
+    damaged_request_ids: tuple[str, ...]
+
+    @property
+    def unreadable_count(self) -> int:
+        return len(self.damaged_request_ids)
 
 
 def save_request_snapshot(
@@ -142,6 +160,54 @@ def list_request_snapshots(config: StorageConfig) -> list[dict[str, Any]]:
     for request_file in request_files:
         snapshots.append(load_request_snapshot(config, request_file.stem))
     return snapshots
+
+
+def list_request_snapshots_tolerant(config: StorageConfig) -> RequestListResult:
+    """Return healthy snapshots plus ids of damaged files (US-221).
+
+    A damaged single snapshot is never deleted and never blocks the healthy
+    list; the opaque damaged ids let the migration runner count/report safely.
+    A file whose inner ``request_id`` does not match its file name is treated as
+    damaged (the file name is the legacy key).
+    """
+    if not config.requests_dir.exists():
+        return RequestListResult(requests=(), damaged_request_ids=())
+    if not config.requests_dir.is_dir():
+        raise Stage1Error(
+            "storage_error",
+            "本地 Request 存储路径不是目录",
+            "list_request_snapshots_tolerant",
+            {"directory": config.requests_dir.name},
+        )
+
+    requests: list[dict[str, Any]] = []
+    damaged: list[str] = []
+    try:
+        request_files = sorted(config.requests_dir.glob("*.json"))
+    except OSError as exc:
+        raise Stage1Error(
+            "storage_error",
+            "列出已保存订阅方案失败",
+            "list_request_snapshots_tolerant",
+            {"directory": config.requests_dir.name},
+        ) from exc
+
+    for request_file in request_files:
+        candidate_id = request_file.stem
+        try:
+            loaded = load_request_snapshot(config, candidate_id)
+        except Stage1Error:
+            damaged.append(candidate_id)
+            continue
+        inner_id = loaded.get("request_id")
+        if not isinstance(inner_id, str) or not inner_id.strip() or inner_id != candidate_id:
+            damaged.append(candidate_id)
+            continue
+        requests.append(loaded)
+    return RequestListResult(
+        requests=tuple(requests),
+        damaged_request_ids=tuple(damaged),
+    )
 
 
 def _extract_request_id(request: dict[str, Any], failed_step: str) -> str:

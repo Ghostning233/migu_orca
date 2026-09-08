@@ -38,6 +38,13 @@
   `bind_tracking_operation` 同键同绑定重放、异绑定抛 `tracking_idempotency_conflict`；CAS 用 on-disk
   state == expected_state 做乐观并发，禁止改写 immutable 绑定字段。模型提供
   `transition_tracking_operation` 构造 next op，服务层不得在 route 复制状态机。
+- US-221 迁移：manifest 固定存 `<storage>/tracking_migrations/schema-v1.json`（模型严格白名单 + repository
+  temp/os.replace 原子写）；COMPLETE 后不再全量扫描，PARTIAL 会重试；manifest 只保存时间窗与安全计数。
+- US-221 纯分类在 `tracking_engine/controllers/migration.py`（无 storage import），协调器放
+  `apps/migu_orca_web/tracking_migration_service.py`；扫描对损坏源文件用 storage repository 的
+  damage-aware list（健康项 + 损坏 opaque id），单条损坏不阻塞健康清单，绝不暴露文件名/路径/原始 JSON。
+- 迁移审计 = `TRACKING_BACKFILLED` + actor `MIGRATION`；record 保持 revision=1，一致多来源追加审计不 bump
+  revision；ensure 收敛同一确定性 tracking_id，重复运行不新增记录/不重复审计。
 
 ## [2026-09-08] - US-219
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -138,5 +145,63 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       测试用字面量 `EXPECTED_OPERATION_ID` 固定 op_id 算法防漂移。
     - `transition_tracking_operation` 直接从 PREPARED 跳 SUCCEEDED 会抛 ValueError；终态必须先到
       IN_PROGRESS 再转移——模型测试里直接对 PREPARED 调 SUCCEEDED 是无效迁移。
+---
+
+## [2026-09-08] - US-221
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `tracking_engine/models/migration.py`：MigrationManifest/MigrationCounts 冻结模型 + 严格
+    schema v1 白名单（schema_version/state/started_at/finished_at/counts），COMPLETE/PARTIAL 状态机，
+    读侧未知字段/负数/非 int/非法 state 全部 fail closed；manifest 只保存时间窗与
+    created/existing/recovery_required/unreadable 计数，绝不保存 request id/文件名/路径/原始 JSON。
+  - 新增 `storage_engine/controllers/migration_repository.py`：manifest 原子读写到固定
+    `<storage>/tracking_migrations/schema-v1.json`（temp + os.replace）；缺失返回 None，损坏抛稳定
+    `storage_json_error`。
+  - 新增纯控制器 `tracking_engine/controllers/migration.py`：证据 dataclass（RequestBackfillEvidence /
+    QueueMigrationEvidence / AbMigrationEvidence）、`classify_backfill` 实现 §10.2 证据优先级与全表映射
+    （ACCEPTED 单独/queue READY/SUBMITTING/FAILED/RETRYABLE/RESULT_PERSIST_FAILED/SUCCEEDED、AB
+    成败/缺失/损坏/未知、非 ACCEPTED 但提交证据、多 queue 冲突、一致多来源保留最早 batch_id）、
+    `plan_summary_from_request`（只读 matched title/season/selected_subtitle_group，不含 poster_path）、
+    `build_backfill_record`（revision=1 + TRACKING_BACKFILLED/MIGRATION 审计；失败/恢复写安全
+    last_error；一致多 queue 来源各追加一条安全审计）。固定 reason_code 枚举全部为安全字符串。
+  - 在三个 storage repository 增加容错 list：`list_request_snapshots_tolerant` /
+    `list_submission_queues_tolerant` / `list_ab_submit_results_tolerant`（均返回健康项 + 损坏 opaque id
+    计数，单条损坏不阻塞健康清单）。
+  - 新增协调器 `apps/migu_orca_web/tracking_migration_service.py`：`run_tracking_migration`
+    读 manifest（COMPLETE 直接重放不扫描）；否则扫描本地 Request/queue/AB result（不访问外部），逐
+    Request 分类 + ensure 收敛同一 tracking_id，写 COMPLETE/PARTIAL manifest；返回 `TrackingMigrationResult`
+    (manifest + replayed)，`warning()` 只在 PARTIAL 返回固定 warning。
+- Files changed
+  - 新增：`src/tracking_engine/models/migration.py`、`src/tracking_engine/models/migration_test.py`
+  - 新增：`src/tracking_engine/controllers/__init__.py`、`src/tracking_engine/controllers/migration.py`、
+    `src/tracking_engine/controllers/migration_test.py`
+  - 新增：`src/storage_engine/controllers/migration_repository.py`、
+    `src/storage_engine/controllers/migration_repository_test.py`
+  - 修改：`src/storage_engine/controllers/request_repository.py`、`queue_repository.py`、
+    `ab_result_repository.py`（各加 damage-aware list 与 dataclass）
+  - 新增：`src/apps/migu_orca_web/tracking_migration_service.py`、
+    `src/apps/migu_orca_web/tracking_migration_service_test.py`
+  - 修改：`src/tracking_engine/models/__init__.py`（再导出 migration 公共名）、
+    `scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 历史回填协调器放在 Web 服务层（`apps/migu_orca_web/tracking_migration_service.py`），因为它组合
+      多个 storage repository（request/queue/ab）与 tracking ensure，且 storage_engine 与 tracking_engine
+      已互相单向依赖——engine 层保持纯控制器（无 storage import）以避免环。
+    - 扫描需要容忍单条损坏时，不要改既有 `list_request_snapshots` 等抛错语义；另加 damage-aware list
+      函数返回「健康项 + 损坏 opaque id」，与 `list_tracking_records` 同构（请求/queue/AB 各一个）。
+    - `classify_backfill` 是纯函数，输入证据 dataclass、输出 BackfillDecision（create/status/origin/
+      reason_code/batch_id/extra_queue_source_count）；协调器负责扫描与 ensure，绝不把映射逻辑放进
+      repository 或 service 循环。
+    - 迁移审计用 `TRACKING_BACKFILLED` + actor `MIGRATION`；record 保持 revision=1，多个一致来源追加
+      审计不 bump revision（audit 内嵌 record 原子落盘）。
+  - Gotchas encountered
+    - `_clean_plan_summary` 会保留字符串原样（包括 poster_path 这类以 `/` 开头的同源代理路径），所以不能
+      在模型层对 plan_summary 字符串做 URL/绝对路径脱敏——否则会把 poster_path 打码；迁移只放 matched
+      title/season/subtitle_group，poster_path 置空。
+    - queue 同 request 出现在多个 queue 文件时用 `(created_at, batch_id)` 稳定取「最早」；测试断言保持
+      deterministic（同 created_at 时按 batch_id 字典序）。
+    - 损坏 AB result 文件单独存在时不能当作「无 AB 结果」降级为 PENDING_SUBMIT（会允许重复外部提交）；
+      对 ACCEPTED+queue 非提交中/成功，或已损坏文件无其他证据的 Request 保守映射 RECOVERY_REQUIRED。
 ---
 
