@@ -545,7 +545,7 @@ export interface paths {
         put?: never;
         /**
          * 恢复统一追番记录（AUTO 纯本地或人工核验）
-         * @description US-226：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 只允许 AUTO/MARK_SUCCEEDED/MARK_FAILED：AUTO 只读取本地 operation、Request 脱敏 AB result 等证据，不访问外部系统，无明确证据时保持 RECOVERY_REQUIRED；两个人工动作必须 confirm=true 并写 USER 审计；MARK_SUCCEEDED 不接收外部 ID/URL/原始结果。已落盘恢复结果（ACTIVE/SUBMIT_FAILED/RECOVERY_REQUIRED）仍返回 HTTP 200。expected_revision 过期 → 409 tracking_revision_conflict；非可恢复状态 → 409 tracking_state_conflict；人工动作未确认 → 400 tracking_confirmation_required。
+         * @description US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。
          */
         post: operations["recoverTrackingItem"];
         delete?: never;
@@ -11774,14 +11774,24 @@ export interface operations {
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 恢复）。 */
                     expected_revision: number;
                     /**
-                     * @description 恢复动作：AUTO=纯本地自动恢复；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
+                     * @description 恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 request-scoped ab_config）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
                      * @enum {string}
                      */
-                    action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED";
+                    action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
                     /** @description 人工动作必须为 true；AUTO 忽略该字段。 */
                     confirm?: boolean;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string;
+                    /** @description 仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。 */
+                    ab_config?: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
                 };
             };
         };

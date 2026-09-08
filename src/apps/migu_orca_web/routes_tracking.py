@@ -223,12 +223,17 @@ class TrackingItemRecoverView(PostView):
         assert isinstance(self.request_validator_model, TrackingRecoverPayload)
         payload = self.request_validator_model
         config = load_storage_config(_storage_dir(payload.storage_dir))
+        ab_config = None
+        if payload.action == "VERIFY_EXTERNAL":
+            assert payload.ab_config is not None
+            ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
         return run_tracking_recover(
             config,
             tracking_id=payload.tracking_id,
             expected_revision=payload.expected_revision,
             action=payload.action,
             confirm=payload.confirm,
+            ab_config=ab_config,
         )
 
 

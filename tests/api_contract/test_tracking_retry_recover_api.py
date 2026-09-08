@@ -19,12 +19,15 @@ import pytest
 from flask.testing import FlaskClient
 
 from ab_engine.controllers.ab_client import FakeAutoBangumiClient
+from ab_engine.controllers.ab_config import build_ab_config
+from ab_engine.models.management import AutoBangumiCapabilities, ExternalSubscription
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.api_contract import (
     TrackingRecoverResultDTO,
     TrackingSubmitResultDTO,
 )
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
+from apps.migu_orca_web.tracking_recovery_service import run_tracking_recover
 from request_engine.controllers.request_controller import accept_request
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import (
@@ -502,3 +505,56 @@ def test_recover_does_not_accept_external_id_or_url(
     )
     assert response.status_code == 400
     assert response.get_json()["error_type"] == "data_validation_errors"
+
+
+class _ManagementSnapshot:
+    def __init__(self, subscriptions: list[ExternalSubscription], *, status: str = "VERIFIED") -> None:
+        self.subscriptions = subscriptions
+        self.capabilities = AutoBangumiCapabilities(
+            probe_status=status,
+            version="3.1.18" if status == "VERIFIED" else None,
+            adapter="legacy_3_1",
+            subscription_list="SUPPORTED" if status == "VERIFIED" else "UNKNOWN",
+            subscription_detail="SUPPORTED" if status == "VERIFIED" else "UNKNOWN",
+            rss_list="SUPPORTED" if status == "VERIFIED" else "UNKNOWN",
+            external_verify="SUPPORTED" if status == "VERIFIED" else "UNKNOWN",
+        )
+
+    def read_snapshot(self):
+        return self.capabilities, self.subscriptions, []
+
+
+def test_verify_external_uses_read_only_snapshot_and_resolves_unique_match(tmp_path: Path) -> None:
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    verifying = _move_record(tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL)
+    mapped = replace(verifying, revision=verifying.revision + 1, external_mapping={"schema_version": 1, "adapter": "legacy_3_1", "subscription_id": "ab-1", "rss_ids": [], "match_reason": "EXTERNAL_ID", "external_deleted": False, "enabled": True, "missing_sync_count": 0, "last_verified_at": None})
+    verifying = compare_and_swap_tracking_record(_config(tmp_path), record.tracking_id, base_revision=verifying.revision, record=mapped)
+    result = run_tracking_recover(
+        _config(tmp_path),
+        tracking_id=record.tracking_id,
+        expected_revision=verifying.revision,
+        action="VERIFY_EXTERNAL",
+        confirm=False,
+        ab_config=build_ab_config(AB_CONFIG),
+        management_client=_ManagementSnapshot([ExternalSubscription("ab-1", "芙莉莲", None, None)]),
+    )
+    assert result["outcome"] == TRACKING_STATUS_ACTIVE
+    assert result["needs_manual"] is False
+
+
+def test_verify_external_unknown_capability_is_fail_closed(tmp_path: Path) -> None:
+    request = _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path, request)
+    verifying = _move_record(tmp_path, record, TRACKING_STATUS_VERIFYING_EXTERNAL)
+    result = run_tracking_recover(
+        _config(tmp_path),
+        tracking_id=record.tracking_id,
+        expected_revision=verifying.revision,
+        action="VERIFY_EXTERNAL",
+        confirm=False,
+        ab_config=build_ab_config(AB_CONFIG),
+        management_client=_ManagementSnapshot([], status="FAILED"),
+    )
+    assert result["outcome"] == TRACKING_STATUS_RECOVERY_REQUIRED
+    assert result["needs_manual"] is True

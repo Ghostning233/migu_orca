@@ -10,7 +10,7 @@ response DTOs stay in ``api_contract.py`` (which is the Stage 27 contract).
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_GROUP_ACTIVE,
@@ -639,7 +639,7 @@ class TrackingSubmitPayload(BaseModel):
 
 #: Fixed recovery-action enum accepted by
 #: ``POST /api/v1/tracking/items/{tracking_id}/recover`` (Stage 29 PRD §11.8).
-_RECOVERY_ACTIONS = frozenset({"AUTO", "MARK_SUCCEEDED", "MARK_FAILED"})
+_RECOVERY_ACTIONS = frozenset({"AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"})
 
 
 class TrackingRecoverPayload(BaseModel):
@@ -661,6 +661,15 @@ class TrackingRecoverPayload(BaseModel):
     action: str
     confirm: bool = False
     storage_dir: str | None = None
+    ab_config: RequestAbConfigPayload | None = None
+
+    @model_validator(mode="after")
+    def _verify_external_requires_config(self) -> TrackingRecoverPayload:
+        if self.action == "VERIFY_EXTERNAL" and self.ab_config is None:
+            raise ValueError("VERIFY_EXTERNAL requires ab_config")
+        if self.action != "VERIFY_EXTERNAL" and self.ab_config is not None:
+            raise ValueError("ab_config is only accepted by VERIFY_EXTERNAL")
+        return self
 
     @field_validator("tracking_id")
     @classmethod

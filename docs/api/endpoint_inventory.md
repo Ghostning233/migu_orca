@@ -308,7 +308,8 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   profile 错误仍走普通失败 envelope。
 - US-226：新增 `POST /api/v1/tracking/items/{tracking_id}/retry`（`TrackingItemRetryView`，
   operationId `retryTrackingItem`）与 `POST /api/v1/tracking/items/{tracking_id}/recover`
-  （`TrackingItemRecoverView`，operationId `recoverTrackingItem`）。retry 请求 shape 与 submit
+  （`TrackingItemRecoverView`，operationId `recoverTrackingItem`）。recover 支持 AUTO、人工确认及
+  request-scoped `VERIFY_EXTERNAL` 只读核验；retry 请求 shape 与 submit
   相同，但只允许从 `SUBMIT_FAILED` 开始（`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED` 必须先
   recover，不能盲重试 D29-07）；复用 `run_tracking_submit` 的完整可靠序列（新键 bind 新
   operation、SUBMITTING 预写、单次外部调用、结果分类）。recover 的 `AUTO` 由

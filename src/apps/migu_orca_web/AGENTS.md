@@ -88,6 +88,9 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 
 - 外部 endpoint、token、cookie、password、raw HTML/RSS、完整失败 URL、magnet、本地绝对路径不得进入 API 展示、storage、URL、browser storage、日志或 trace。
 - 新增响应字段时走 `serializers.py` 的白名单/脱敏路径，不要直接回传 engine dict。
+- `tracking/.../recover` 的 `VERIFY_EXTERNAL` 是唯一允许外部管理读取的恢复动作；它只接收
+  request-scoped `ab_config`，必须经 3.1.18 read-only capability 验证，未验证/无匹配/多匹配
+  一律保持 `RECOVERY_REQUIRED`，不能降级成可重试失败或调用任何管理写操作。
 
 ## Web storage 根目录（US-193）
 

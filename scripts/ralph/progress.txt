@@ -185,3 +185,29 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 审核发现 sync endpoint 缺少专门 API/递归敏感字段回归；新增真实 Flask route 测试，覆盖 strict `confirm=true` 与 request-scoped endpoint/账号/密码不回显。
 - 定向 API 测试和 Ruff 通过。
 ---
+
+## [2026-09-09 02:35:00 +0800] - US-234
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 扩展 recover action=VERIFY_EXTERNAL；仅该动作接受 request-scoped ab_config，并调用 3.1.18 只读 management snapshot。
+  - 外部 ID 优先，缺 ID 时仅使用严格标题/季度/字幕组唯一匹配；精确命中恢复 ACTIVE/DISABLED，缺失、歧义、能力未知或读取失败进入 RECOVERY_REQUIRED。
+  - AUTO/MARK_SUCCEEDED/MARK_FAILED 保持原有纯本地/人工确认语义；增加无外部写请求回归测试与 OpenAPI/生成客户端同步。
+- Files changed
+  - `src/apps/migu_orca_web/tracking_recovery_service.py`
+  - `src/apps/migu_orca_web/routes_tracking.py`
+  - `src/apps/migu_orca_web/schemas.py`
+  - `src/tracking_engine/controllers/recover.py`
+  - `src/tracking_engine/models/tracking.py`
+  - `tests/api_contract/test_tracking_retry_recover_api.py`
+  - `src/tracking_engine/controllers/recover_test.py`
+  - `src/apps/migu_orca_web/openapi_gen.py`
+  - `docs/api/openapi.json`
+  - `docs/api/endpoint_inventory.md`
+  - `frontend/src/api/generated/api.ts`
+  - `src/apps/migu_orca_web/AGENTS.md`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - `VERIFY_EXTERNAL` 必须在 schema 层拒绝缺失或非该动作携带的 `ab_config`，避免连接配置进入 AUTO/人工恢复路径。
+  - 外部核验成功只写安全状态和审计；未验证证据绝不能推断为外部未创建并转成可重试失败。
+  - 验证：定向后端/OpenAPI 49 passed，ruff、compileall、OpenAPI drift、前端 typecheck/lint/unit(261)/build 全部通过。
+---
