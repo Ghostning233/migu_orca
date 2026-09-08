@@ -72,6 +72,24 @@
 - migration manifest 写盘是唯一单文件写入点，必须持进程级锁
   （`migration_repository._MANIFEST_LOCK`）；并发 tracking API 首次访问同时跑 migration
   coordinator，固定 `.tmp` 无锁会互相 replace/unlink 报 storage_error。
+- US-226 纯恢复分类在 `tracking_engine/controllers/recover.py`（无 storage import）：
+  `classify_auto_recovery(RecoveryEvidence(operation_state, ab_result))` 先看 operation 终态
+  （SUCCEEDED→ACTIVE、FAILED→SUBMIT_FAILED），再看 Request 持久化 AB result（复用
+  `classify_external_submit_result`），无证据 → RECOVERY_REQUIRED unresolved。
+  recoverable 状态 = VERIFYING_EXTERNAL/RECOVERY_REQUIRED/UNKNOWN；AUTO 对已 RECOVERY_REQUIRED
+  无证据 = 无变化恢复（不 bump/不审计），对 VERIFYING_EXTERNAL/UNKNOWN 无证据 → RECOVERY_REQUIRED
+  （audit RECOVERY_NEEDS_MANUAL）。
+- retry 是 submit 的特例：`run_tracking_submit` 增加 `start_statuses`（默认 SUBMIT_FROM_STATUSES），
+  `run_tracking_retry` 传 `{SUBMIT_FAILED}`；同键终态重放在状态守卫前 resolve，所以重试用新键。
+  不要在 route 层复制 submit/recover 编排。
+- 恢复会终态化 IN_PROGRESS operation（SUCCEEDED/FAILED/RECOVERY_REQUIRED），PREPARED 不动
+  （外部未调用，留给同键 submit 恢复）；人工动作 `confirm=true` + USER audit，
+  MARK_SUCCEEDED 不接收外部 ID/URL/原始结果。
+- 旧 queue 兼容投影在 `apps/migu_orca_web/tracking_queue_compat.py`（双向 best-effort）：
+  `reflect_queue_outcome_into_tracking`（queue→tracking，§10.2 映射）由旧 batch submit/retry/
+  recover route 与单番 submit-ab 操作后调用；`sync_queue_projection_for_tracking`
+  （tracking→queue）由统一 submit/retry/recover service 在 SUBMITTING 边界/终态后调用。
+  已 SUCCEEDED queue item 绝不覆盖（§13.3），ACTIVE tracking 不被过期 queue 降级。
 
 ## [2026-09-08] - US-219
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -502,3 +520,76 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       （_resume_missing_request：op PREPARED→FAILED + record →NEEDS_RECONFIRM）。
     - migration manifest 单文件并发写需要进程级锁（其他 repository 的 per-key 锁模式在此不适用，
       因为 manifest 是固定文件名）；并发测试会稳定复现，已加 `_MANIFEST_LOCK`。
+
+---
+
+## [2026-09-08] - US-226
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增纯恢复分类 `src/tracking_engine/controllers/recover.py`：`RECOVERABLE_STATUSES`
+    （VERIFYING_EXTERNAL/RECOVERY_REQUIRED/UNKNOWN）、action 固定
+    AUTO/MARK_SUCCEEDED/MARK_FAILED、`RecoveryEvidence`/`AutoRecoveryDecision` 与
+    `classify_auto_recovery`（terminal op 先决 → Request 持久化 AB result →
+    无证据 RECOVERY_REQUIRED unresolved）、`recovery_outcome_for_manual`、固定脱敏中文文案。
+    不 import storage/web。
+  - 新增统一恢复 Web 服务 `src/apps/migu_orca_web/tracking_recovery_service.py`：
+    `run_tracking_recover(config, tracking_id, expected_revision, action, confirm)` —— 先
+    migration coordinator → load record → 校验 expected_revision（409）→ recoverable
+    status（409）→ 校验 action → 人工动作 confirm=true（400 tracking_confirmation_required）
+    → 纯本地证据（operation 状态 + Request ab_submit_result，绝不访问外部）→ AUTO 分类 /
+    人工映射 → `transition_record` + 一次 CAS → 终态化 IN_PROGRESS operation（SUCCEEDED/
+    FAILED/RECOVERY_REQUIRED，PREPARED 不动）→ §11.8 payload（action/outcome/checked_revision/
+    next_revision/operation_id/needs_manual/tracking summary）。
+  - `run_tracking_submit` 新增 `start_statuses` 参数（默认 SUBMIT_FROM_STATUSES）+ 薄包装
+    `run_tracking_retry`（只允许 SUBMIT_FAILED）；retry 复用同一可靠 submit 序列（新键新 op、
+    SUBMITTING 预写、单外部调用、结果分类），`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED` 必须先
+    recover（409）。
+  - 新端点 `POST /api/v1/tracking/items/{tracking_id}/retry`（TrackingItemRetryView，
+    operationId retryTrackingItem，复用 TrackingSubmitPayload）与
+    `POST /api/v1/tracking/items/{tracking_id}/recover`（TrackingItemRecoverView，
+    operationId recoverTrackingItem，新 TrackingRecoverPayload strict extra=forbid）；
+    api_contract.py 新增 `TrackingRecoverResultDTO`（strict）。
+  - 新增旧队列兼容投影 `src/apps/migu_orca_web/tracking_queue_compat.py`（双向 best-effort，
+    never raising）：`reflect_queue_outcome_into_tracking`（queue→tracking，§10.2 映射）、
+    `reflect_ab_result_into_tracking`（单番 submit-ab 经 classify_external_submit_result 分类）、
+    `sync_queue_projection_for_tracking`（tracking→queue，经纯 queue 迁移 start/complete；
+    已 SUCCEEDED queue item 绝不覆盖 §13.3；ACTIVE tracking 不被过期 queue 降级；queue READY
+    不重置已推进 tracking）。
+  - 接线：旧 batch submit/retry/recover route（routes_batches `_reflect_batch_queue_tracking`）
+    与单番 submit-ab route（routes_requests）在操作后反映 queue/AB outcome → tracking；
+    统一 tracking submit/retry/recover service 在 SUBMITTING 边界/终态后
+    `sync_queue_projection_for_tracking` 把 tracking 状态写回旧 queue projection。
+  - 同步生成物/文档：openapi_gen._ENDPOINTS 新增 retry/recover 两条并重生成
+    docs/api/openapi.json；`npm run api:generate` 重生成 api.ts；api.test.ts 增加
+    retryTrackingItem/recoverTrackingItem + 两条 path + 计数 31→33；endpoint_inventory.md
+    §2 总表 + §3.6（US-226）+ milestone；AGENTS.md「统一追番恢复/重试与旧队列投影（US-226）」段；
+    progress Codebase Patterns 增补 recover/retry/compat 模式。
+- Files changed
+  - 新增：`src/tracking_engine/controllers/recover.py`、`recover_test.py`（16 单测）、
+    `src/apps/migu_orca_web/tracking_recovery_service.py`、`tracking_recovery_service_test.py`
+    （19 单测：AUTO 成功/失败/无证据/终态化/人工 confirm/守卫/retry）、
+    `src/apps/migu_orca_web/tracking_queue_compat.py`、`tracking_queue_compat_test.py`（9 单测）、
+    `tests/api_contract/test_tracking_retry_recover_api.py`（16 路由/契约测试）
+  - 修改：`tracking_submission_service.py`（start_statuses + run_tracking_retry + queue sync）、
+    `routes_tracking.py`（两个新视图）、`schemas.py`（TrackingRecoverPayload）、
+    `api_contract.py`（TrackingRecoverResultDTO）、`openapi_gen.py`、`docs/api/openapi.json`、
+    `docs/api/endpoint_inventory.md`、`frontend/src/api/generated/api.ts`、`api.test.ts`、
+    `routes_batches.py`（_reflect_batch_queue_tracking）、`routes_requests.py`
+    （submit-ab reflect）、`src/apps/migu_orca_web/AGENTS.md`、`scripts/ralph/prd.json`
+    （US-226 passes=true）、`scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - retry = submit 的 start_statuses 特例；recover 的 AUTO 纯本地证据分类放
+      tracking_engine/controllers/recover.py；不要复制 submit/recover 编排到 route。
+    - 恢复对 IN_PROGRESS operation 终态化到匹配 terminal（SUCCEEDED/FAILED/RECOVERY_REQUIRED）；
+      PREPARED 不动（外部未调用，留给同键 submit 恢复）；terminal op 不能改写。
+    - queue 兼容投影是双向 best-effort：queue→tracking 用 §10.2 映射，tracking→queue 用纯
+      queue 迁移（READY/FAILED/RETRYABLE→SUBMITTING→terminal）；已 SUCCEEDED 绝不覆盖。
+  - Gotchas encountered
+    - recover 的 AUTO 对「已 RECOVERY_REQUIRED 且无新证据」必须是无变化恢复（不 bump revision、
+      不重复审计），否则每次点击 recover 都刷 revision。
+    - `transition_record`/audit 需要固定合法 action；用字面量 "SUBMIT_FAILED" 等于审计 action
+      `TRACKING_AUDIT_SUBMIT_FAILED` 字符串，但应显式引用常量。
+    - 新增端点同步链路：openapi_gen._ENDPOINTS + 重生成 openapi.json + api:generate +
+      api.test.ts 计数/operationId/path + endpoint_inventory §2/§3.6 + DTO/golden 契约测试；
+      `test_inventory_covers_every_api_rule` 立即抓缺失端点。

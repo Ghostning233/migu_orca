@@ -47,6 +47,7 @@ from apps.migu_orca_web.serializers import (
     serialize_request_safe_info,
 )
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
+from apps.migu_orca_web.tracking_queue_compat import sync_queue_projection_for_tracking
 from apps.migu_orca_web.tracking_serializers import (
     tracking_available_actions,
     tracking_summary_fields,
@@ -149,6 +150,7 @@ def run_tracking_submit(
     idempotency_key: str,
     confirm: bool,
     ab_config: Any,
+    start_statuses: frozenset[str] | None = None,
     submit_one: SubmitOne | None = None,
     persist_ab_result: PersistAbResult | None = None,
     now: str | None = None,
@@ -161,7 +163,17 @@ def run_tracking_submit(
     HTTP-200-safe result dict; only preconditions (missing record, stale
     revision, non-submittable state, idempotency conflict, in-flight operation)
     raise.
+
+    ``start_statuses`` restricts the fresh-key submit to a subset of
+    ``SUBMIT_FROM_STATUSES``.  The unified ``retry`` entry point (US-226) passes
+    ``{SUBMIT_FAILED}`` so a retry is only accepted from a definitely-failed
+    submission; a same-key terminal replay is still resolved before this guard
+    (an idempotent replay of a previous attempt is never re-run externally).
     """
+    allowed_start = start_statuses or SUBMIT_FROM_STATUSES
+    if not allowed_start.issubset(SUBMIT_FROM_STATUSES):
+        raise ValueError("start_statuses must be a subset of SUBMIT_FROM_STATUSES")
+
     run_tracking_migration(config=config)
 
     timestamp = now or utc_now()
@@ -196,7 +208,7 @@ def run_tracking_submit(
     # A fresh idempotency key: an in-flight operation (any key) must be resolved
     # through recover before a new external attempt may start.
     _guard_no_inflight_operation(config, record)
-    if record.status not in SUBMIT_FROM_STATUSES:
+    if record.status not in allowed_start:
         _raise_state_conflict(record)
     _guard_expected_revision(expected_revision, record)
 
@@ -236,6 +248,42 @@ def run_tracking_submit(
         submit_one=submit_one,
         persist_ab_result=persist_ab_result,
         timestamp=timestamp,
+    )
+
+
+def run_tracking_retry(
+    config: StorageConfig,
+    *,
+    tracking_id: str,
+    expected_revision: int,
+    idempotency_key: str,
+    confirm: bool,
+    ab_config: Any,
+    submit_one: SubmitOne | None = None,
+    persist_ab_result: PersistAbResult | None = None,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Run the unified retry for one definitely-failed tracking item (US-226).
+
+    ``POST .../retry`` shares the entire reliable submit sequence with
+    ``run_tracking_submit`` — the fresh Request re-read + revalidation, the
+    PREPARED operation bind, the SUBMITTING pre-write, the single external call
+    and the result classification — but only starts from ``SUBMIT_FAILED``.
+    ``VERIFYING_EXTERNAL``/``RECOVERY_REQUIRED`` must be recovered first (they
+    are never blindly retried, D29-07); a request against those states raises
+    ``tracking_state_conflict`` (409).
+    """
+    return run_tracking_submit(
+        config,
+        tracking_id=tracking_id,
+        expected_revision=expected_revision,
+        idempotency_key=idempotency_key,
+        confirm=confirm,
+        ab_config=ab_config,
+        start_statuses=frozenset({TRACKING_STATUS_SUBMIT_FAILED}),
+        submit_one=submit_one,
+        persist_ab_result=persist_ab_result,
+        now=now,
     )
 
 
@@ -495,6 +543,11 @@ def _submit_through_external(
     elif record.current_operation_id != operation.operation_id:
         _raise_operation_in_progress(record)
 
+    # §13.2: when a legacy batch queue still holds this Request, mirror the
+    # SUBMITTING boundary into it before the external call (best-effort; a
+    # damaged/unwritable queue never blocks the authoritative submit).
+    _sync_queue_projection(config, record, TRACKING_STATUS_SUBMITTING)
+
     # Durable external boundary: only the caller that wins the PREPARED ->
     # IN_PROGRESS compare-and-swap may touch Auto Bangumi.
     try:
@@ -625,6 +678,10 @@ def _finalize_external_outcome(
             now=timestamp,
         ),
     )
+    # §13.3: mirror the final tracking state into any legacy queue projection
+    # (best-effort; a post-call queue write failure never overwrites a durable
+    # success and never rolls back the authoritative record).
+    _sync_queue_projection(config, record_final, outcome)
     return _submit_result_payload(
         record=record_final,
         outcome=outcome,
@@ -687,6 +744,7 @@ def _persist_failure_recovery(
             now=timestamp,
         ),
     )
+    _sync_queue_projection(config, record_final, TRACKING_STATUS_RECOVERY_REQUIRED)
     return _submit_result_payload(
         record=record_final,
         outcome=TRACKING_STATUS_RECOVERY_REQUIRED,
@@ -840,7 +898,12 @@ def _raise_operation_in_progress(record: TrackingRecord) -> None:
     )
 
 
-def _raise_state_conflict(record: TrackingRecord) -> None:
+def _raise_state_conflict(
+    record: TrackingRecord,
+    *,
+    message: str = "当前追番记录状态不允许提交",
+    failed_step: str = "tracking_submit",
+) -> None:
     action_codes = [
         action.get("code")
         for action in tracking_available_actions(record.status)
@@ -848,8 +911,8 @@ def _raise_state_conflict(record: TrackingRecord) -> None:
     ]
     raise Stage1Error(
         "tracking_state_conflict",
-        "当前追番记录状态不允许提交",
-        "tracking_submit",
+        message,
+        failed_step,
         {
             "field": "status",
             "current_status": record.status,
@@ -885,6 +948,26 @@ def _tolerant_load_request(
         return loaded if isinstance(loaded, dict) else None
     except Stage1Error:
         return None
+
+
+def _sync_queue_projection(
+    config: StorageConfig,
+    record: TrackingRecord,
+    tracking_status: str,
+) -> None:
+    """Best-effort mirror of a tracking state into any legacy queue item.
+
+    Used at the §13.2 SUBMITTING boundary and after §13.3 terminal outcomes so
+    the old batch queue stays a faithful compat projection of the authoritative
+    TrackingRecord.  Never raises and never overwrites a durable queue success.
+    """
+    if not record.request_id:
+        return
+    sync_queue_projection_for_tracking(
+        config,
+        request_id=record.request_id,
+        tracking_status=tracking_status,
+    )
 
 
 def _run_submit_one(
@@ -966,4 +1049,4 @@ def _submit_result_payload(
     }
 
 
-__all__ = ["PersistAbResult", "SubmitOne", "run_tracking_submit"]
+__all__ = ["PersistAbResult", "SubmitOne", "run_tracking_retry", "run_tracking_submit"]

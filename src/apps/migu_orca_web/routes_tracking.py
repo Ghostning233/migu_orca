@@ -19,6 +19,7 @@ from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
     TrackingDetailQuery,
     TrackingListQuery,
+    TrackingRecoverPayload,
     TrackingRevalidatePayload,
     TrackingSubmitPayload,
 )
@@ -27,8 +28,12 @@ from apps.migu_orca_web.tracking_read_service import (
     build_tracking_detail,
     list_tracking_items,
 )
+from apps.migu_orca_web.tracking_recovery_service import run_tracking_recover
 from apps.migu_orca_web.tracking_revalidate_service import run_tracking_revalidate
-from apps.migu_orca_web.tracking_submission_service import run_tracking_submit
+from apps.migu_orca_web.tracking_submission_service import (
+    run_tracking_retry,
+    run_tracking_submit,
+)
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from storage_engine.controllers.storage_config import load_storage_config
@@ -131,9 +136,78 @@ class TrackingItemSubmitView(PostView):
         )
 
 
+@class_route(
+    api_blueprint,
+    "/api/v1/tracking/items/<path:tracking_id>/retry",
+    methods=["POST"],
+)
+class TrackingItemRetryView(PostView):
+    """Retry a definitely-failed unified submission (US-226).
+
+    Only ``SUBMIT_FAILED`` records are retryable — an unknown/incomplete outcome
+    (``VERIFYING_EXTERNAL``/``RECOVERY_REQUIRED``) must be recovered first.  The
+    request shape is identical to ``submit`` (``confirm`` strictly true,
+    request-scoped ``ab_config``, an opaque idempotency key); the unified
+    service re-reads the latest Request and revalidates before creating a fresh
+    operation and calling Auto Bangumi once.  A persisted business outcome is
+    HTTP 200; only preconditions (missing record, stale revision,
+    non-retryable state, idempotency conflict, in-flight operation) raise.
+    """
+
+    request_validator_model = TrackingSubmitPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingSubmitPayload)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
+        return run_tracking_retry(
+            config,
+            tracking_id=payload.tracking_id,
+            expected_revision=payload.expected_revision,
+            idempotency_key=payload.idempotency_key,
+            confirm=payload.confirm,
+            ab_config=ab_config,
+        )
+
+
+@class_route(
+    api_blueprint,
+    "/api/v1/tracking/items/<path:tracking_id>/recover",
+    methods=["POST"],
+)
+class TrackingItemRecoverView(PostView):
+    """Resolve an unknown/incomplete unified tracking outcome (US-226).
+
+    ``action=AUTO`` reads only local operation / Request safe AB-result evidence
+    and never contacts an external system; ``MARK_SUCCEEDED``/``MARK_FAILED``
+    require ``confirm=true`` and write a USER audit.  The endpoint never accepts
+    an external id/URL/raw result.  A persisted recovery outcome
+    (``ACTIVE``/``SUBMIT_FAILED``/``RECOVERY_REQUIRED``) is HTTP 200; only
+    preconditions (missing record, stale revision, non-recoverable state,
+    missing manual confirmation) raise.
+    """
+
+    request_validator_model = TrackingRecoverPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingRecoverPayload)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        return run_tracking_recover(
+            config,
+            tracking_id=payload.tracking_id,
+            expected_revision=payload.expected_revision,
+            action=payload.action,
+            confirm=payload.confirm,
+        )
+
+
 __all__ = [
     "TrackingItemDetailView",
     "TrackingItemListView",
+    "TrackingItemRecoverView",
+    "TrackingItemRetryView",
     "TrackingItemRevalidateView",
     "TrackingItemSubmitView",
 ]

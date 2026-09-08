@@ -62,6 +62,9 @@ from apps.migu_orca_web.tracking_handoff import (
     ensure_confirmed_request_tracking,
     unavailable_tracking_handoff,
 )
+from apps.migu_orca_web.tracking_queue_compat import (
+    reflect_queue_outcome_into_tracking,
+)
 from batch_engine.controllers.anime_title_parser import (
     RuleAnimeTitleParsingProvider,
     parse_anime_title,
@@ -90,6 +93,7 @@ from batch_engine.models import (
     BATCH_ITEM_STATUS_FAILED,
     BATCH_ITEM_STATUS_FOUND,
     MAX_BATCH_ITEMS,
+    BatchSubmissionQueue,
 )
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
@@ -409,6 +413,26 @@ def _tracking_handoff_for_confirmed_item(
         return unavailable_tracking_handoff(request_id)
 
 
+def _reflect_batch_queue_tracking(
+    config: StorageConfig,
+    queue: BatchSubmissionQueue,
+) -> None:
+    """Mirror every legacy queue item's state into its unified TrackingRecord.
+
+    Best-effort per item and never raising: the old batch queue is the compat
+    projection, so after an old batch submit/retry/recover the authoritative
+    TrackingRecord is advanced to the matching terminal state (SUCCEEDED ->
+    ACTIVE, FAILED/RETRYABLE -> SUBMIT_FAILED, RESULT_PERSIST_FAILED ->
+    RECOVERY_REQUIRED).  A failure for one item never blocks a sibling.
+    """
+    for item in queue.items:
+        reflect_queue_outcome_into_tracking(
+            config,
+            request_id=item.request_id,
+            queue_status=item.status,
+        )
+
+
 @class_route(api_blueprint, "/api/v1/batches/<batch_id>/save-confirm", methods=["POST"])
 class BatchSaveConfirmView(PostView):
     """Save + confirm selected batch draft cards in one partial-success call.
@@ -555,6 +579,10 @@ class BatchSubmitView(PostView):
         # service already flushed each item's SUBMITTING and final status before
         # returning, so a crash mid-batch cannot resurrect READY_TO_SUBMIT.
         save_submission_queue(config, result.queue)
+        # US-226 compat projection: the old batch queue stays the driver for the
+        # legacy path, so mirror each item's final state into its authoritative
+        # unified TrackingRecord (best-effort, never raising).
+        _reflect_batch_queue_tracking(config, result.queue)
         return serialize_batch_submit_result(result)
 
 
@@ -614,6 +642,9 @@ class BatchRetryView(PostView):
         # Persist the updated queue so queue reads observe the retried status.
         # The request-scoped ab_config is never stored.
         save_submission_queue(config, result.queue)
+        # US-226 compat projection: mirror the retried item's terminal state
+        # into its unified TrackingRecord (best-effort, never raising).
+        _reflect_batch_queue_tracking(config, result.queue)
         return serialize_batch_submit_result(result)
 
 
@@ -669,4 +700,7 @@ class BatchRecoverView(PostView):
             ) from exc
         # Persist the recovered queue so queue reads observe the new status.
         save_submission_queue(config, result.queue)
+        # US-226 compat projection: mirror the recovered item's terminal state
+        # into its unified TrackingRecord (best-effort, never raising).
+        _reflect_batch_queue_tracking(config, result.queue)
         return serialize_batch_submit_result(result)

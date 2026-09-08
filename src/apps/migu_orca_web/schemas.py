@@ -607,3 +607,45 @@ class TrackingSubmitPayload(BaseModel):
         if isinstance(value, bool):
             raise ValueError("expected_revision 必须为正整数")
         return value
+
+
+#: Fixed recovery-action enum accepted by
+#: ``POST /api/v1/tracking/items/{tracking_id}/recover`` (Stage 29 PRD §11.8).
+_RECOVERY_ACTIONS = frozenset({"AUTO", "MARK_SUCCEEDED", "MARK_FAILED"})
+
+
+class TrackingRecoverPayload(BaseModel):
+    """Body for ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
+
+    ``action`` is one of ``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED``; the two
+    manual actions require ``confirm=true`` (written as a USER audit).  ``AUTO``
+    only reads local operation/Request/AB-result evidence and never contacts an
+    external system, and it never accepts an external id/URL/raw result.
+    ``expected_revision`` is the server-observed revision the user is acting
+    on.  ``extra="forbid"`` rejects leaked fields.  ``tracking_id`` comes from
+    the URL path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    expected_revision: int = Field(ge=1)
+    action: str
+    confirm: bool = False
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+    @field_validator("action")
+    @classmethod
+    def _clean_action(cls, value: str) -> str:
+        action = value.strip().upper()
+        if action not in _RECOVERY_ACTIONS:
+            raise ValueError("action 必须为 AUTO、MARK_SUCCEEDED 或 MARK_FAILED")
+        return action

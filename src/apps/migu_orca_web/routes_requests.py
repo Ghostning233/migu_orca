@@ -68,6 +68,7 @@ from apps.migu_orca_web.services import (
     _storage_profile,
 )
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
+from apps.migu_orca_web.tracking_queue_compat import reflect_ab_result_into_tracking
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from request_engine.controllers.request_controller import (
@@ -701,6 +702,15 @@ class RequestAbSubmitView(PostView):
         )
         if not result["success"]:
             _raise_result_error(result)
+
+        # US-226 compat projection: the legacy single submit-ab path drives the
+        # old Request submit, so mirror its classified outcome into the unified
+        # TrackingRecord (best-effort, never raising, never downgrading ACTIVE).
+        reflect_ab_result_into_tracking(
+            config,
+            request_id=payload.request_id,
+            ab_result=result["ab_submit_result"],
+        )
 
         req = result["request"]
         response: dict[str, object] = {

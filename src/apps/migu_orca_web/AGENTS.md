@@ -377,6 +377,40 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   tracking API 首次访问会同时跑 migration coordinator，固定 `.tmp` 无锁会互相
   replace/unlink（storage_error）。改 manifest 写路径后跑 migration repo/service 回归。
 
+## 统一追番恢复/重试与旧队列投影（US-226）
+
+- `POST /api/v1/tracking/items/{tracking_id}/retry`（`TrackingItemRetryView`，
+  operationId `retryTrackingItem`）请求 shape 与 submit 完全相同（
+  `TrackingSubmitPayload`），只允许从 `SUBMIT_FAILED` 开始：它复用
+  `tracking_submission_service.run_tracking_submit`（新增 `start_statuses` 参数，
+  retry 传 `frozenset({SUBMIT_FAILED})`）。`run_tracking_retry` 是薄包装；
+  `VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`/`UNKNOWN` 先 recover 再 retry（409
+  `tracking_state_conflict`）。同键终态重放在状态守卫前先 resolve（网络重放不重跑外部）。
+- `POST /api/v1/tracking/items/{tracking_id}/recover`（`TrackingItemRecoverView`，
+  operationId `recoverTrackingItem`）编排在
+  `apps/migu_orca_web/tracking_recovery_service.py::run_tracking_recover`。纯分类在
+  `tracking_engine/controllers/recover.py::classify_auto_recovery`（无 storage import）：
+  terminal operation 先决（SUCCEEDED→ACTIVE、FAILED→SUBMIT_FAILED），否则用 Request
+  持久化 AB result 走 `classify_external_submit_result` 映射；无证据 → RECOVERY_REQUIRED
+  （unresolved）。人工动作必须 `confirm=true`（400 `tracking_confirmation_required`）
+  并写 USER 审计；`IN_PROGRESS` operation 恢复时终态化到 SUCCEEDED/FAILED/
+  RECOVERY_REQUIRED（PREPARED 不动）。响应 DTO `TrackingRecoverResultDTO` 带
+  `action`/`needs_manual`（AUTO 无证据时 true）。
+- recoverable 状态 = `VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`/`UNKNOWN`；AUTO 在
+  `RECOVERY_REQUIRED` 上无证据是「无变化恢复」（不 bump revision/不重复审计），在
+  `VERIFYING_EXTERNAL`/`UNKNOWN` 上无证据会移到 `RECOVERY_REQUIRED`
+  （audit `RECOVERY_NEEDS_MANUAL`）。
+- 旧队列兼容投影在 `apps/migu_orca_web/tracking_queue_compat.py`（双向 best-effort，
+  never raising）：`reflect_queue_outcome_into_tracking`（queue→tracking，§10.2 映射）
+  由旧 batch submit/retry/recover route 与单番 submit-ab（`reflect_ab_result_into_tracking`）
+  在操作后调用；`sync_queue_projection_for_tracking`（tracking→queue）由统一
+  submit/retry/recover service 在 SUBMITTING 边界与终态后调用。规则：queue item 已
+  SUCCEEDED 绝不覆盖（§13.3 调用后失败不覆盖成功）；tracking ACTIVE 不被过期 queue
+  降级；queue READY 不重置已推进 tracking 记录。
+- 新增 retry/recover 端点后已同步 openapi_gen `_ENDPOINTS`、`docs/api/openapi.json`、
+  endpoint_inventory §2/§3.6、`frontend/src/api/generated/api.ts` 与 `api.test.ts`
+  （operationId `retryTrackingItem`/`recoverTrackingItem`，计数 31→33）。
+
 ## 静态检查与就绪探针（US-195）
 
 - 静态检查是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：

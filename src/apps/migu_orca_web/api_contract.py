@@ -927,6 +927,33 @@ class TrackingSubmitResultDTO(_StrictBase):
     tracking: TrackingItemDTO
 
 
+class TrackingRecoverResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
+
+    A persisted recovery result is HTTP 200: ``action`` echoes the requested
+    action (``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED``) and ``outcome`` is the
+    record's final status (``ACTIVE``/``SUBMIT_FAILED``/``RECOVERY_REQUIRED``).
+    ``checked_revision`` is the revision the client acted on; ``next_revision``
+    is the record's revision after the outcome persisted (unchanged when an
+    ``AUTO`` recovery finds no new evidence on an already-``RECOVERY_REQUIRED``
+    record).  ``operation_id`` is set when the record references a submit
+    operation.  ``needs_manual`` is True when an ``AUTO`` recovery could not
+    resolve the outcome from local evidence and only a manual action can
+    progress.  ``tracking`` is the safe summary of the persisted record so the
+    client can update the list item without a second read.
+    """
+
+    tracking_id: str
+    action: str
+    outcome: str
+    checked_revision: int
+    next_revision: int
+    checked_at: str
+    operation_id: str | None = None
+    needs_manual: bool = False
+    tracking: TrackingItemDTO
+
+
 # ---------------------------------------------------------------------------
 # Connection tests family
 # ---------------------------------------------------------------------------
