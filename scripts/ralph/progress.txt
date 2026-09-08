@@ -22,3 +22,67 @@
   repository（`<storage>/idempotency/`）、单番/批量 save-confirm 端点、Request safe-info 白名单。Stage 29
   复用这些能力：tracking ensure 从 ACCEPTED Request + save-confirm handoff 建立 record；TrackingOperation
   是独立 repository，不扩展 save-confirm 幂等 repository（D29-04）。
+- Stage 29 新增 `tracking_engine` engine（US-219）：TrackingRecord 模型、状态/状态组/审计模型、确定性
+  `tracking_id_for_request` 在 `tracking_engine/models/tracking.py`；持久化 repository 按仓库惯例放在
+  `storage_engine/controllers/tracking_repository.py`（repository 导入 tracking_engine 模型，类似
+  queue_repository 导入 batch_engine.models）。`StorageConfig` 目录族新增
+  `tracking/tracking_operations/tracking_migrations`，新增存储族必须同步 `storage_config.py` +
+  `storage_config_test.py`；新 engine 需加入 `pyproject.toml` 的 hatch wheel `packages`。
+- TrackingRecord repository（US-219）模式：`ensure`（create-if-absent，keyed by 确定性 ID，绝不覆盖已有）、
+  `load`、`compare_and_swap`（revision 精确 +1，冲突抛 `tracking_revision_conflict`）、`list`（健康记录 +
+  damaged opaque ids，损坏文件不阻塞不删除）。写用 temp + `os.replace` 原子替换；进程内按 tracking_id RLock
+  串行并发 ensure/CAS（多 worker 共享 storage 仍不支持）。schema 校验在模型层抛 `ValueError`，repository
+  映射为稳定 `storage_json_error`/`invalid_tracking_record`/`invalid_tracking_id`，绝不泄露路径/原始字节。
+
+## [2026-09-08] - US-219
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `tracking_engine` engine 与 `tracking_engine/models/tracking.py`：TrackingRecord 冻结数据类、
+    schema v1 严格白名单（17 个顶层字段）、全量 12 状态 + B-B 九状态集、状态组映射与中文 label、
+    17 个审计 action + SYSTEM/USER/MIGRATION actor、4 个 origin。`tracking_id_for_request` 用版本化
+    命名空间 `migu-orca/tracking/v1\x00` + request_id 的 sha256 前 32 hex，生成 `trk_` 前缀 opaque ID，
+    并用 `EXPECTED_TRACKING_ID` 字面量测试固定算法。
+  - 提供 `create_tracking_record`（revision=1 + 初始审计事件）、`transition_record`（状态变化 = revision+1
+    + 内嵌审计，D29-05）、`append_audit_event`、`build_audit_event`、`tracking_to/from_storage_dict`
+    （写侧白名单归一化 + 深层清理 future opaque 对象；读侧未知顶层字段/schema 版本/状态/origin/类型全部
+    fail closed）。
+  - `storage_engine/controllers/tracking_repository.py`：`ensure`（create-if-absent，按 request_id 派生 ID，
+    已有记录绝不覆盖，返回 `(record, created)`）、`load`、`compare_and_swap`（先加载判断不存在/冲突，再校验
+    next revision == base+1，原子写）、`list`（返回 `TrackingListResult(records, damaged_tracking_ids)`，
+    单条损坏不阻塞健康列表）。写用 temp + `os.replace`；进程内 `_KEY_LOCKS` 按 tracking_id RLock。
+  - `StorageConfig` 新增 `tracking_dir`/`tracking_operations_dir`/`tracking_migrations_dir` 并加入
+    `ensure_storage_layout`；`pyproject.toml` hatch packages 增加 `src/tracking_engine`。
+  - 错误类型：`tracking_not_found`/`tracking_revision_conflict`/`invalid_tracking_id`/
+    `invalid_tracking_record`（repository 层，暂无 API 路由所以不进入 `_error_http_status`/OpenAPI）；
+    损坏/非对象/未知字段文件映射稳定 `storage_json_error`。
+- Files changed
+  - 新增：`src/tracking_engine/__init__.py`、`src/tracking_engine/models/__init__.py`、
+    `src/tracking_engine/models/tracking.py`、`src/tracking_engine/models/tracking_test.py`
+  - 新增：`src/storage_engine/controllers/tracking_repository.py`、
+    `src/storage_engine/controllers/tracking_repository_test.py`
+  - 修改：`src/storage_engine/controllers/storage_config.py`、
+    `src/storage_engine/controllers/storage_config_test.py`、`pyproject.toml`、
+    `scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - TrackingRecord 模型 = 内容契约（无持久化依赖）；repository 按仓库惯例放 `storage_engine/controllers`
+      并 import `tracking_engine.models`（与 queue_repository → batch_engine.models 同构）。
+    - CAS 的 revision 语义：repository 负责「加载当前 → 校验 base → 校验 next.revision == base+1 → 原子写」；
+      状态/审计/revision 在同一记录内原子落盘。US-224+ 的 revalidate/submit/retry/recover 服务只构造
+      `transition_record` 结果再 CAS，不要在路由层复制 revision 逻辑。
+    - fail-closed 分两层：模型层 `tracking_from_storage_dict` 抛 `ValueError`（unknown 顶层字段/schema 版本/
+      状态/origin/类型）；repository 层把 `ValueError` 映射为稳定 `storage_json_error`。list 对损坏文件吞
+      Stage1Error 并只报告 opaque damaged ids。
+    - 新增存储族三处必改：`storage_config.py` 的 dataclass + `load_storage_config` +
+      `ensure_storage_layout` 目录元组，再同步 `storage_config_test.py` 与 hatch `packages`（若是新 engine）。
+  - Gotchas encountered
+    - compare-and-swap 的校验顺序：必须先 load 当前记录（missing → `tracking_not_found`）再校验
+      next record 的 revision 不变量，否则对不存在记录做 CAS 会误报 `invalid_tracking_record`。
+    - `uv run pytest` 自动重建 editable wheel；新增顶层 `tracking_engine` 后 `pyproject.toml` packages
+      未更新会导致 import 失败——先加 package 再跑测试。
+    - ruff 会自动重排 import；`tracking.py`/`models/__init__.py`/测试文件在首次 `ruff --fix` 后被改写，
+      提交前以 `ruff check src tests` + 定向 pytest 为准。
+    - `_LAST_ERROR_FIELDS` 用 tuple（不是 frozenset）保证 last_error JSON 键序确定；frozenset 迭代顺序跨
+      进程不稳定。
+---
+

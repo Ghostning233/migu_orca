@@ -22,6 +22,15 @@ class StorageConfig:
     #: opaque client ``idempotency_key``; records are non-sensitive and hold no
     #: draft/request/URL/credential/absolute-path content.
     idempotency_dir: Path
+    #: Unified tracking records (US-219). One JSON file per deterministic
+    #: ``tracking_id`` under ``<storage>/tracking``.
+    tracking_dir: Path
+    #: Durable submit operations (US-220). One JSON file per ``operation_id``
+    #: under ``<storage>/tracking_operations``.
+    tracking_operations_dir: Path
+    #: Migration manifest for the historical backfill (US-221). Only the fixed
+    #: ``schema-v1.json`` manifest lives under ``<storage>/tracking_migrations``.
+    tracking_migrations_dir: Path
 
 
 def load_storage_config(storage_dir: Path | None = None) -> StorageConfig:
@@ -35,6 +44,9 @@ def load_storage_config(storage_dir: Path | None = None) -> StorageConfig:
         preferences_dir=root / "preferences",
         corrections_dir=root / "corrections",
         idempotency_dir=root / "idempotency",
+        tracking_dir=root / "tracking",
+        tracking_operations_dir=root / "tracking_operations",
+        tracking_migrations_dir=root / "tracking_migrations",
     )
 
 
@@ -48,6 +60,9 @@ def ensure_storage_layout(config: StorageConfig) -> StorageConfig:
         config.preferences_dir,
         config.corrections_dir,
         config.idempotency_dir,
+        config.tracking_dir,
+        config.tracking_operations_dir,
+        config.tracking_migrations_dir,
     ):
         try:
             directory.mkdir(parents=True, exist_ok=True)
