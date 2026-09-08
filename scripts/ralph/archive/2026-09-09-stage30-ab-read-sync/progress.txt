@@ -1,0 +1,258 @@
+# MiGuOrca Ralph Progress - Stage 30
+
+## Codebase Patterns
+
+- 本阶段只实现 B-C1：Auto Bangumi 3.1.18 capability、番剧/RSS 只读 adapter、安全投影、
+  external mapping、严格对账、tracking sync、EXTERNAL_ONLY 与 VERIFY_EXTERNAL。
+- 禁止实现或调用外部 create/modify/enable/disable/delete/refresh 等管理写动作；现有 Stage 29
+  submit 创建路径只做兼容回归，不在本阶段改语义。
+- 正式执行 PRD：`docs/MiGuOrca_stage30_ab_read_sync_PRD.md`；分支：
+  `ralph/stage30-ab-read-sync`；stories：US-228～US-236。
+- 3.1.18 已核实只读路径：POST `/api/v1/auth/login`、GET `/api/v1/status`、GET
+  `/api/v1/bangumi/get/all`、GET `/api/v1/bangumi/get/{id}`、GET `/api/v1/rss`。
+- password management client 必须一次登录、同一请求内复用同源 token Cookie，请求结束释放；
+  API Token 管理读取和未知版本全部 fail closed。
+- 原始 Bangumi/RSS 只存在 adapter/service 内存。完整 RSS URL 可用于当前同步的 exact 比对，但
+  不得进入持久化、DTO、错误、日志、repr、trace 或 fixture 快照。
+- 对账顺序：已保存 external ID > 正式标题+季度+字幕组（双方有 RSS URL 时追加 exact 比对）。
+  只允许唯一候选自动关联；0 匹配建 EXTERNAL_ONLY；多匹配返回固定歧义，不选第一项。
+- 外部孤立 ID 使用 PRD D30-09 的版本化 SHA-256 算法；request_id=null、origin=EXTERNAL_SYNC，
+  不创建或伪造 Request。
+- sync 读取任一失败不得把未知当空列表；逐条 ensure/CAS，部分失败不回滚健康项，永不删除本地
+  Request、TrackingRecord、审计或媒体。
+- Stage 29 `recover(AUTO)` 必须继续纯本地。只有新 `VERIFY_EXTERNAL` 接收 request-scoped
+  ab_config 并调用只读 adapter；无/多匹配不证明外部未创建，不得直接变为可重试。
+- Web API 继续按 `routes_*.py`/schemas/api_contract/serializer/service 分层；新增端点同步
+  endpoint inventory、openapi_gen、openapi.json、TS generated client 与 contract tests。
+- 外部响应 DTO 和 TrackingRecord nested mapping 必须严格白名单；绝不直接返回上游 dict。
+- 每次迭代只完成最高优先级的一个未通过 story，提交后再把 passes 设为 true 并记录验证。
+- 规划基线已手动切换时，`scripts/ralph/.last-branch` 必须与 prd `branchName` 一致；否则
+  `ralph.sh` 会把新 PRD 误归档到上一阶段目录并重置 progress。本轮已同步为 Stage 30。
+- US-228～US-235 只跑受影响定向测试、相关 ruff/compileall 和必要 drift check；US-236 才运行
+  一次完整非浏览器、前端与 Chromium 门禁。禁止无修改重复跑全套。
+- ExternalMapping v1 在 `tracking.py` 内严格校验；无 `schema_version` 的 Stage 29 legacy mapping 只做安全保留读取，不猜测迁移。
+- 同步协调器构造本地对账 evidence 时必须排除 `EXTERNAL_SYNC` 投影记录，否则重复快照会把外部孤立记录自匹配并产生 revision/audit 漂移。
+- tracking 默认列表必须过滤 `recovery.merged_into_tracking_id` 别名；详情的 external mapping 只能经安全 serializer 投影状态字段，不能回显 external/rss ID。
+
+## [2026-09-09 01:58:43 +0800] - US-228
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 冻结 3.1.18 request-scoped capability、ExternalSubscription/ExternalRss 及安全投影模型。
+  - 新增 password management adapter：一次登录、同源 token Cookie 复用，读取 status、番剧列表、番剧详情和 RSS；未知版本/API Token 管理读取 fail closed。
+  - 增加脱敏字段边界、URL/opaque ID 校验和 recording fake transport 测试，确认不触发外部管理写请求。
+- Files changed
+  - `src/ab_engine/models/management.py`
+  - `src/ab_engine/controllers/ab_management_client.py`
+  - `src/ab_engine/controllers/ab_management_client_test.py`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - Management adapter 的上游原始 URL 只能留在 request-scoped 内部对象，`repr` 和 safe projection 必须显式排除 URL。
+  - 3.1.18 只读列表请求必须沿用登录产生的同源 Cookie；每个 adapter 操作结束都清除 token。
+  - 验证 adapter 时用固定响应序列的 fake transport，可同时断言 method/path/header 顺序与没有写请求。
+---
+
+## Stage 29 Handoff
+
+- `TrackingRecord`、`TrackingOperation`、确定性 request-backed tracking_id、revision CAS、内嵌
+  审计和 tracking repository 已存在；B-C 扩展不能改变 Stage 29 提交/恢复的纯本地语义。
+- `external_mapping`、`recovery`、`last_synced_at` 和 DISABLED/EXTERNAL_DELETED/EXTERNAL_ONLY
+  状态已预留，但 nested mapping 仍需 Stage 30 冻结。
+- tracking 列表/详情/revalidate/submit/retry/recover 已注册；summary/detail serializer 与
+  Request safe-info 是安全输出唯一 producer，应扩展复用而非复制。
+- 历史迁移完成后 tracking API 不再全量扫描；外部 sync 是独立、显式、request-scoped 操作。
+- 多 worker 共享 storage 仍非支持范围；保持进程内按键锁与 CAS，不在 Stage 30 引入数据库/worker。
+
+## Cost Control
+
+- 一个 story 一个上下文窗口；不要顺带开发 B-C2 或前端页面。
+- 纯模型/controller story 不生成 OpenAPI/前端客户端；API story 只跑对应 contract 和 drift 子集。
+- 最终 story 之前不执行全量 pytest 或完整 Chromium。
+- 测试失败时记录最小失败命令；无代码变化不重复运行同一全量命令。
+
+## [2026-09-09 02:10:00 +0800] - US-229
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 request-scoped capability probe 与 `POST /api/v1/autobangumi/capabilities`。
+  - password + 3.1.18 精确标记已验证只读能力；未知版本、API Token 管理读取和探测失败均 fail closed。
+  - 新增 strict request/response DTO，并同步 endpoint inventory、OpenAPI registry、OpenAPI JSON 和生成 TypeScript client。
+- Files changed
+  - `src/ab_engine/controllers/ab_capability_service.py`
+  - `src/ab_engine/controllers/ab_management_client.py`
+  - `src/ab_engine/models/management.py`
+  - `src/apps/migu_orca_web/schemas.py`
+  - `src/apps/migu_orca_web/api_contract.py`
+  - `src/apps/migu_orca_web/routes_connections.py`
+  - `src/apps/migu_orca_web/openapi_gen.py`
+  - `docs/api/endpoint_inventory.md`
+  - `docs/api/openapi.json`
+  - `frontend/src/api/generated/api.ts`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - capability endpoint 的失败应返回全 UNKNOWN 的安全 DTO；只有配置校验错误走 API error envelope。
+  - 新增 OpenAPI endpoint 后，当前仓库的 runtime drift guard 会要求同步生成 TypeScript client。
+  - capability 请求使用独立 `extra=forbid` 嵌套 DTO，避免沿用历史宽松配置模型而吞掉未知敏感字段。
+---
+
+## [2026-09-09 02:06:00 +0800] - US-229 审核修复
+- 审核发现新增 capability OpenAPI operation 后，`frontend/src/api/generated/api.test.ts` 的 operationId/path/数量断言未同步，导致前端 typecheck 失败。
+- 已同步 generated contract fixture，并验证 `npm run typecheck`、`npm run test:unit -- --run`、`npm run lint` 与 `npm run build` 全部通过。
+---
+
+## [2026-09-09 02:30:00 +0800] - US-230
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `EXTERNAL_SYNC` origin、D30-09 版本化 SHA-256 external tracking ID 与无 Request 的 `create_external_tracking_record`。
+  - 冻结 ExternalMapping v1 白名单、opaque ID/RSS 有界校验、RSS 有序去重和安全外部计划投影。
+  - 保留 Stage 29 legacy opaque mapping 兼容读取；外部记录 repository ensure 按 deterministic tracking ID 幂等收敛。
+- Files changed
+  - `src/tracking_engine/models/tracking.py`
+  - `src/tracking_engine/models/__init__.py`
+  - `src/tracking_engine/models/tracking_test.py`
+  - `src/storage_engine/controllers/tracking_repository.py`
+  - `src/storage_engine/controllers/tracking_repository_test.py`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - External mapping v1 必须只在存在 `schema_version` 时严格解析；无版本的 Stage 29 opaque mapping 需要保留但不能推断字段含义。
+  - 外部孤立 record 的 `request_id` 必须为 null，repository ensure 以 deterministic external tracking ID 作为唯一键且重复 ensure 不 bump revision。
+- 验证命令：tracking/model/API/migration 定向套件 204 passed，compileall 与 Ruff 全绿。
+---
+
+## [2026-09-09 02:45:00 +0800] - US-231
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增无 storage/web 依赖的纯对账 controller，按已保存 external subscription ID、严格标题/季度/字幕组及可选 RSS URL 等值证据顺序匹配。
+  - 唯一候选才自动关联；零候选或歧义安全落为 EXTERNAL_ONLY，并返回固定 AMBIGUOUS_EXTERNAL_MATCH warning；RSS URL 不进入决策 repr 或安全 mapping。
+  - 增加外部 deleted、完整列表缺失和 SUBMITTING/REVALIDATING 进行中状态保护的状态映射。
+- Files changed
+  - `src/ab_engine/controllers/reconcile.py`
+  - `src/ab_engine/controllers/reconcile_test.py`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - 纯对账输入应使用 request-scoped evidence，输出只携带 tracking ID、opaque mapping 字段和固定 warning，不携带 RSS URL。
+  - 外部对象的唯一 ID 命中优先于字段匹配；严格字段多匹配必须保持未关联，不能选择第一项。
+  - 验证命令：`uv run pytest -q src/ab_engine src/tracking_engine`（234 passed）、compileall 与 Ruff 全绿。
+---
+
+## [2026-09-09 03:20:00 +0800] - US-232
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 request-scoped tracking sync coordinator，按 capability/read snapshot/reconcile/逐条 ensure 或 CAS 顺序执行。
+  - 支持完整/失败/部分结果安全计数、损坏记录与 CAS 冲突隔离、外部孤立记录幂等收敛，以及唯一关联后的 `merged_into_tracking_id` 安全别名指针。
+  - 防止 `EXTERNAL_SYNC` 记录参与自身对账，重复完整 fixture 不新增记录、不重复审计、不 bump revision。
+- Files changed
+  - `src/apps/migu_orca_web/tracking_sync_service.py`
+  - `src/apps/migu_orca_web/tracking_sync_service_test.py`
+  - `src/ab_engine/controllers/reconcile.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - 同步状态变化、mapping、audit 和 revision 必须作为一个 CAS payload 写入；无语义变化时完全跳过写盘。
+  - 外部读取异常不能降级为空列表，否则会错误标记本地映射为 `EXTERNAL_DELETED`。
+  - 验证：相关后端套件 743 passed，compileall 与 Ruff 全绿。
+---
+
+## [2026-09-09 03:31:00 +0800] - US-232 审核修复
+- 审核发现同步协调器把每次检查时间直接写入 mapping/record，导致相同快照在不同时刻重复同步仍触发 CAS、revision 和审计。
+- 现仅在状态或外部投影证据实际变化时更新时间；补充跨时间重复同步的幂等回归断言，定向测试与 Ruff 通过。
+---
+
+## [2026-09-09 02:26:00 +0800] - US-233
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `POST /api/v1/tracking/sync`，严格接收 request-scoped `ab_config`、`confirm=true` 和可选相对 `storage_dir`，复用现有只读同步协调器。
+  - 新增严格同步响应 DTO，返回安全 capabilities、counts、warnings 与复用 tracking summary serializer 的安全列表项；合并别名不再出现在默认列表。
+  - tracking 详情 external mapping 改为仅返回 match/status/verification 安全摘要，隐藏 subscription_id 与 rss_ids。
+  - 同步 endpoint inventory、OpenAPI、生成 TypeScript client 及 operation/path fixture。
+- Files changed
+  - `src/apps/migu_orca_web/routes_tracking.py`
+  - `src/apps/migu_orca_web/schemas.py`
+  - `src/apps/migu_orca_web/api_contract.py`
+  - `src/apps/migu_orca_web/tracking_read_service.py`
+  - `src/apps/migu_orca_web/tracking_serializers.py`
+  - `src/apps/migu_orca_web/openapi_gen.py`
+  - `docs/api/endpoint_inventory.md`
+  - `docs/api/openapi.json`
+  - `frontend/src/api/generated/api.ts`
+  - `frontend/src/api/generated/api.test.ts`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - OpenAPI endpoint additions require updating both generated client output and `api.test.ts` operation/path/count fixture.
+  - API sync responses can safely combine the coordinator result with a post-sync local list read; all external data remains behind the existing serializer boundary.
+  - 验证：tracking/API 定向测试、DTO/OpenAPI/inventory drift、Ruff 与前端 typecheck/lint/unit/build 全部通过；未运行最终 story 的全量 Chromium 门禁。
+---
+
+## [2026-09-09 03:42:00 +0800] - US-233 审核修复
+- 审核发现 sync endpoint 缺少专门 API/递归敏感字段回归；新增真实 Flask route 测试，覆盖 strict `confirm=true` 与 request-scoped endpoint/账号/密码不回显。
+- 定向 API 测试和 Ruff 通过。
+---
+
+## [2026-09-09 02:35:00 +0800] - US-234
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 扩展 recover action=VERIFY_EXTERNAL；仅该动作接受 request-scoped ab_config，并调用 3.1.18 只读 management snapshot。
+  - 外部 ID 优先，缺 ID 时仅使用严格标题/季度/字幕组唯一匹配；精确命中恢复 ACTIVE/DISABLED，缺失、歧义、能力未知或读取失败进入 RECOVERY_REQUIRED。
+  - AUTO/MARK_SUCCEEDED/MARK_FAILED 保持原有纯本地/人工确认语义；增加无外部写请求回归测试与 OpenAPI/生成客户端同步。
+- Files changed
+  - `src/apps/migu_orca_web/tracking_recovery_service.py`
+  - `src/apps/migu_orca_web/routes_tracking.py`
+  - `src/apps/migu_orca_web/schemas.py`
+  - `src/tracking_engine/controllers/recover.py`
+  - `src/tracking_engine/models/tracking.py`
+  - `tests/api_contract/test_tracking_retry_recover_api.py`
+  - `src/tracking_engine/controllers/recover_test.py`
+  - `src/apps/migu_orca_web/openapi_gen.py`
+  - `docs/api/openapi.json`
+  - `docs/api/endpoint_inventory.md`
+  - `frontend/src/api/generated/api.ts`
+  - `src/apps/migu_orca_web/AGENTS.md`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - `VERIFY_EXTERNAL` 必须在 schema 层拒绝缺失或非该动作携带的 `ab_config`，避免连接配置进入 AUTO/人工恢复路径。
+  - 外部核验成功只写安全状态和审计；未验证证据绝不能推断为外部未创建并转成可重试失败。
+  - 验证：定向后端/OpenAPI 49 passed，ruff、compileall、OpenAPI drift、前端 typecheck/lint/unit(261)/build 全部通过。
+---
+
+## [2026-09-09 04:10:00 +0800] - US-235
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 完成 Stage 30 B-C1 文档收尾：同步 README、docs 索引、主 PRD、架构、M10/M11/M12/M13、backlog、future stages、前端工作目标与 endpoint inventory。
+  - 明确 3.1.18 官方源码契约、Stage 30 只读范围、未知版本/API Token 管理读取 fail closed、安全外部投影边界和 B-C2 的 `MODIFY`/`SET_ENABLED`/`DELETE_EXTERNAL`/`REFRESH_RSS` handoff。
+  - 确认 capability/sync endpoint 已在 OpenAPI registry/JSON、生成 TypeScript client 与 operation fixture 中同步，且没有新增正式页面或外部管理写 endpoint。
+- Files changed
+  - `README.md`
+  - `docs/README.md`
+  - `docs/MiGuOrca_main_PRD.md`
+  - `docs/MiGuOrca_stage30_ab_read_sync_PRD.md`
+  - `docs/MiGuOrca_future_stages.md`
+  - `docs/backlog.md`
+  - `docs/design/architecture.md`
+  - `docs/frontend-ux-refactor-work-goals.md`
+  - `docs/modules/M10-auto-bangumi-integration-PRD.md`
+  - `docs/modules/M11-storage-state-PRD.md`
+  - `docs/modules/M12-log-error-PRD.md`
+  - `docs/modules/M13-web-ui-PRD.md`
+  - `docs/api/endpoint_inventory.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - OpenAPI 生成文件本轮已由 US-228～US-234 同步；US-235 的文档收尾应优先做 `migu-orca-openapi --check`、inventory consistency 和 OpenAPI generation tests，避免无意义重生成。
+  - B-C2 写操作必须沿用 TrackingOperation 的 confirm、幂等键、expected revision、CAS 与结果未知恢复边界，并强制 `DELETE_EXTERNAL` 的 `file=false`。
+
+## [2026-09-09 02:44:00 +0800] - US-236
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 完成 Stage 30 B-C1 最终离线同步/回归审计；现有脱敏 fixture 覆盖首次/重复同步、外部孤立、唯一关联、歧义、外部缺失、部分读取失败、VERIFY_EXTERNAL 与回退路径。
+  - 审计 recording/fake transports 与测试断言，确认没有真实 Auto Bangumi 网络访问、外部 create/modify/enable/disable/delete/refresh 请求，也没有敏感 fixture、trace、截图或构建产物进入仓库。
+  - US-228 至 US-236 全部通过，Stage 30 PRD 已冻结并归档。
+- Files changed
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+  - `scripts/ralph/archive/2026-09-09-stage30-ab-read-sync/prd.json`
+  - `scripts/ralph/archive/2026-09-09-stage30-ab-read-sync/progress.txt`
+- 验证结果：`uv run python -m compileall -q src tests`、`uv run ruff check src tests`、`uv run migu-orca-openapi --check`、`git diff --check` 通过；`uv run pytest -q -m 'not browser'` 为 1516 passed / 133 deselected；前端 typecheck、lint、unit 为 261 passed、build 通过；`uv run pytest tests/browser/ -q` 为 133 passed（真实 Chromium）。
+- 实现偏差与剩余风险：无本轮实现偏差；Stage 30 仍明确不提供正式追番管理页面或外部管理写 endpoint，B-C2 写操作 handoff 风险按 US-235 文档保留。
+- **Learnings for future iterations:**
+  - 最终门禁需在仓库根 `.migu_orca/storage` 不存在时运行，否则陈旧开发态 Request 会污染浏览器测试。
+  - `uv run pytest -q -m 'not browser'` 是本项目最终非浏览器回归口径；真实 Chromium 需另行运行 `uv run pytest tests/browser/ -q`。
+---
+---

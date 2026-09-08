@@ -237,4 +237,22 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - OpenAPI 生成文件本轮已由 US-228～US-234 同步；US-235 的文档收尾应优先做 `migu-orca-openapi --check`、inventory consistency 和 OpenAPI generation tests，避免无意义重生成。
   - B-C2 写操作必须沿用 TrackingOperation 的 confirm、幂等键、expected revision、CAS 与结果未知恢复边界，并强制 `DELETE_EXTERNAL` 的 `file=false`。
+
+## [2026-09-09 02:44:00 +0800] - US-236
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 完成 Stage 30 B-C1 最终离线同步/回归审计；现有脱敏 fixture 覆盖首次/重复同步、外部孤立、唯一关联、歧义、外部缺失、部分读取失败、VERIFY_EXTERNAL 与回退路径。
+  - 审计 recording/fake transports 与测试断言，确认没有真实 Auto Bangumi 网络访问、外部 create/modify/enable/disable/delete/refresh 请求，也没有敏感 fixture、trace、截图或构建产物进入仓库。
+  - US-228 至 US-236 全部通过，Stage 30 PRD 已冻结并归档。
+- Files changed
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+  - `scripts/ralph/archive/2026-09-09-stage30-ab-read-sync/prd.json`
+  - `scripts/ralph/archive/2026-09-09-stage30-ab-read-sync/progress.txt`
+- 验证结果：`uv run python -m compileall -q src tests`、`uv run ruff check src tests`、`uv run migu-orca-openapi --check`、`git diff --check` 通过；`uv run pytest -q -m 'not browser'` 为 1516 passed / 133 deselected；前端 typecheck、lint、unit 为 261 passed、build 通过；`uv run pytest tests/browser/ -q` 为 133 passed（真实 Chromium）。
+- 实现偏差与剩余风险：无本轮实现偏差；Stage 30 仍明确不提供正式追番管理页面或外部管理写 endpoint，B-C2 写操作 handoff 风险按 US-235 文档保留。
+- **Learnings for future iterations:**
+  - 最终门禁需在仓库根 `.migu_orca/storage` 不存在时运行，否则陈旧开发态 Request 会污染浏览器测试。
+  - `uv run pytest -q -m 'not browser'` 是本项目最终非浏览器回归口径；真实 Chromium 需另行运行 `uv run pytest tests/browser/ -q`。
+---
 ---
