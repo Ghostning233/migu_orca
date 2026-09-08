@@ -479,6 +479,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "requestBody": {
             "type": "object",
             "required": ["draft_id", "base_revision", "idempotency_key"],
+            "additionalProperties": False,
             "properties": {
                 "draft_id": {
                     "type": "string",
@@ -827,6 +828,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "requestBody": {
             "type": "object",
             "required": ["items"],
+            "additionalProperties": False,
             "properties": {
                 "items": {
                     "type": "array",
@@ -834,6 +836,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "items": {
                         "type": "object",
                         "required": ["item_id", "draft_id", "base_revision", "idempotency_key"],
+                        "additionalProperties": False,
                         "properties": {
                             "item_id": {"type": "string", "description": "批量卡片的公开 item_id（保持输入顺序）。"},
                             "draft_id": {

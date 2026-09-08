@@ -369,8 +369,24 @@ Stage 28 已完成并合入 `ralph/stage28-draft-consistency`，US-210～US-218 
   api 文档同步；新旧 preview/save/accept/batch 兼容 + 全部非浏览器 + 真实 Chromium 回归通过；
   输出 B-B tracking handoff；归档 prd/progress）。
 
-实际测试数量：非浏览器 1127 passed、真实 Chromium 133 passed、前端 Vitest 261 passed，
+实际测试数量（初版交付）：非浏览器 1127 passed、真实 Chromium 133 passed、前端 Vitest 261 passed，
 外加 typecheck/lint/api:check/build/compileall/ruff/OpenAPI drift/git diff --check 全绿。
+
+2026-09-08 追加一轮「Stage 28 静态审查修复」（不改变产品范围）：
+- 终态幂等键重放前经无副作用 `DraftStore.peek` 核对仍存在草案的 fingerprint，同键异草案 →
+  409 `idempotency_conflict`（草案保持可用，不被预留/消费）；draft 缺失/预留时仍安全重放。
+- `run_save_confirm` 用显式 `persisted` 阶段标志，保证 reserve 后到持久化成功前的任一异常
+  都 `release_draft`，落盘后不再释放。
+- save-confirm 请求模型改 `extra="forbid"`，OpenAPI 三个 requestBody 同步
+  `additionalProperties: false`。
+- `_safe_label` 对非字符串返回 None、对任意位置的 URL/magnet/绝对路径/key=value 敏感文本
+  稳定脱敏；bool/整数类型显式归一化。
+- `_KEY_LOCKS` 改引用计数按键锁；批量 summary 的 skipped 计入 failed 保持
+  `requested == confirmed + failed` 闭合。
+
+修复后门禁：非浏览器 1137 passed、真实 Chromium 133 passed、前端 Vitest 261 passed，
+typecheck/lint/api:check/build/compileall/ruff/OpenAPI drift/git diff --check 全绿。
+
 实现偏差：均为契约内最小扩展，无范围外 feature（未实现 tracking/AB 管理/新页面视觉）。
 剩余风险：draft 仍为单进程内存权威（多 worker 部署需外部化）；批量上限只约束 parse 入口，
 不限制后续 accept/save-confirm 条数；`safe-info` 的 `total_episodes` 暂无数据源恒为 null。

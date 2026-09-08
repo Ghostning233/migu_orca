@@ -6499,3 +6499,196 @@ def test_batch_save_confirm_api_rejects_request_level_bad_storage(
     serialized = str(payload)
     assert item["draft_id"] not in serialized
     assert "/etc/private" not in serialized
+
+
+# ---------------------------------------------------------------------------
+# Stage 28 static-review fixes: strict save-confirm DTOs (US-213/214/216)
+# ---------------------------------------------------------------------------
+
+
+def test_save_confirm_rejects_unknown_sensitive_fields(tmp_path: Path) -> None:
+    """US-213 fix: single save-confirm rejects unknown fields instead of ignoring.
+
+    A leaked ``request``/``draft``/``token`` key must fail with 400
+    ``data_validation_errors`` and must never echo the sensitive value.
+    """
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+
+    response = client.post(
+        "/api/v1/requests/save-confirm",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "idempotency_key": "strict-key-1",
+            "storage_dir": _profile(tmp_path, storage_dir.name),
+            "token": "super-secret-token",
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert "super-secret-token" not in str(payload)
+    # A full Request payload is rejected too.
+    response2 = client.post(
+        "/api/v1/requests/save-confirm",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "idempotency_key": "strict-key-2",
+            "storage_dir": _profile(tmp_path, storage_dir.name),
+            "request": {"status": "ACCEPTED", "title": "芙莉莲"},
+        },
+    )
+    assert response2.status_code == 400
+    assert response2.get_json()["error_type"] == "data_validation_errors"
+
+
+def test_batch_save_confirm_rejects_unknown_top_level_and_item_fields(
+    tmp_path: Path,
+) -> None:
+    """US-213 fix: batch save-confirm rejects unknown top-level and item fields."""
+    client = _client()
+    (item,) = _issue_batch_draft_items(client, ["芙莉莲"])
+
+    # Top-level unknown field.
+    top = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [item],
+            "storage_dir": "storage",
+            "token": "leaked-token",
+        },
+    )
+    assert top.status_code == 400
+    assert top.get_json()["error_type"] == "data_validation_errors"
+    assert "leaked-token" not in str(top.get_json())
+
+    # Item-level unknown field (a full Request leak).
+    item_with_request = {**item, "request": {"status": "ACCEPTED"}}
+    nested = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [item_with_request],
+            "storage_dir": "storage",
+        },
+    )
+    assert nested.status_code == 400
+    assert nested.get_json()["error_type"] == "data_validation_errors"
+
+
+# ---------------------------------------------------------------------------
+# Stage 28 static-review fixes: safe-info value-level redaction (US-217)
+# ---------------------------------------------------------------------------
+
+
+def test_safe_info_redacts_embedded_sensitive_text_and_non_string_values(
+    tmp_path: Path,
+) -> None:
+    """US-217 fix: sensitive text embedded inside a label is redacted and a
+    non-string value never surfaces via str(dict)/str(list)."""
+    request = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-redact",
+        "source_info": {
+            "matched_bangumi": {
+                "title": "葬送的芙莉莲",
+                # A URL embedded in otherwise-legal text.
+                "aliases": ["芙莉莲 via https://evil.example/x", "Frieren"],
+                "mikan_url": "https://private.example/Home/Bangumi/99",
+            },
+            "rss_sources": [
+                {
+                    "subtitle_group": "喵萌",
+                    "rss_url": "https://private.example/rss",
+                    "total_seed_count": 1,
+                    "valid_seed_count": 1,
+                    "invalid_seed_count": 0,
+                    "valid_seed_names": ["file://etc/passwd-in-name"],
+                    "excluded_seed_names": [],
+                    "warnings": ["token=abc123 泄漏"],
+                }
+            ],
+        },
+        "confirmable_config": {
+            "selected_subtitle_group": "喵萌",
+            "filter_rule": {
+                "must_contain": "1080p",
+                "must_not_contain": "password=hunter2",
+                "use_regex": False,
+                "case_sensitive": False,
+            },
+            "effective_seed_names": ["file://etc/passwd-in-name"],
+            "expected_folder_name": {"nested": "secret"},
+            "warnings": [],
+        },
+    }
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+
+    response = _client().get(
+        "/api/v1/requests/request-redact/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    safe = payload["result"]["safe_info"]
+    body_text = response.get_data(as_text=True)
+
+    # Embedded URL in an alias → the whole alias is redacted.
+    assert safe["aliases"] == ["[redacted]", "Frieren"]
+    # file:// embedded in a seed name → redacted.
+    assert safe["resources"]["valid_file_names"] == ["[redacted]"]
+    # key=value secret in a warning → redacted.
+    assert safe["subtitle_groups"][0]["warnings"] == ["[redacted]"]
+    # key=value secret in a filter rule → redacted.
+    assert safe["filter_rule"]["must_not_contain"] == "[redacted]"
+    # Non-string folder_name (a nested dict) → None, never str(dict).
+    assert safe["folder_name"] is None
+    # Nothing sensitive survives in the body.
+    for marker in ("evil.example", "file://", "hunter2", "abc123", "token="):
+        assert marker not in body_text
+    # Legal labels are untouched.
+    assert safe["title"] == "葬送的芙莉莲"
+    assert safe["raw_title"] == "芙莉莲"
+    assert safe["filter_rule"]["must_contain"] == "1080p"
+
+
+def test_safe_label_redacts_all_sensitive_markers() -> None:
+    """US-217 fix: ``_safe_label`` redacts URL/magnet/path/credential markers
+    anywhere in a string, returns None for non-strings, and keeps legal text."""
+    from apps.migu_orca_web.serializers import _safe_label
+
+    redacted = "[redacted]"
+    for sensitive in (
+        "前 http://example.com 后",       # embedded http://
+        "前 https://example.com 后",      # embedded https://
+        "magnet:?xt=urn:btih:deadbeef",   # magnet
+        "前 file://etc/passwd 后",        # file://
+        "/usr/local/bin",                 # Unix absolute path
+        "C:\\Users\\secret",              # Windows drive path
+        "\\\\server\\share",              # UNC path
+        "token=abc123",                   # key=value secret
+        "Authorization: Bearer xyz",      # key:value secret
+        "password=hunter2",               # password key=value
+        "cookie=session-id",              # cookie key=value
+        "rss_url=https://x/y",            # rss_url key=value
+        "/tmp/abs",                       # leading slash
+    ):
+        assert _safe_label(sensitive) == redacted, f"failed to redact {sensitive!r}"
+
+    # Non-string values never become str(dict)/str(list).
+    assert _safe_label({"a": 1}) is None
+    assert _safe_label([1, 2]) is None
+    assert _safe_label(42) is None
+    assert _safe_label(True) is None
+    assert _safe_label(None) is None
+
+    # Legal Chinese labels and file names stay intact.
+    assert _safe_label("葬送的芙莉莲") == "葬送的芙莉莲"
+    assert _safe_label("[喵萌] 葬送的芙莉莲 - 01.mkv") == "[喵萌] 葬送的芙莉莲 - 01.mkv"
+    assert _safe_label("1080p") == "1080p"
+    assert _safe_label("喵萌") == "喵萌"

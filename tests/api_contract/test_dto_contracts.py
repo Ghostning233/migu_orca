@@ -960,3 +960,108 @@ def test_ab_connection_dto_rejects_credentials() -> None:
         AutoBangumiConnectionResultDTO.model_validate(
             {**payload, "token": "secret-token"}
         )
+
+
+# ---------------------------------------------------------------------------
+# Stage 28 static-review fixes: strict save-confirm request schemas
+# ---------------------------------------------------------------------------
+
+
+def test_save_confirm_request_schemas_reject_unknown_fields() -> None:
+    """US-213 fix: the save-confirm request models are ``extra="forbid"``."""
+    from apps.migu_orca_web.schemas import (
+        BatchItemSaveConfirmPayload,
+        BatchSaveConfirmPayload,
+        RequestSaveConfirmPayload,
+    )
+
+    # Single save-confirm: a leaked token/request key is rejected.
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmPayload.model_validate(
+            {
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "storage_dir": "storage",
+                "token": "secret",
+            }
+        )
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmPayload.model_validate(
+            {
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "request": {"status": "ACCEPTED"},
+            }
+        )
+    # A valid single request still validates.
+    assert (
+        RequestSaveConfirmPayload.model_validate(
+            {
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "storage_dir": "storage",
+            }
+        )
+        is not None
+    )
+
+    # Batch item: a leaked full Request or unknown field is rejected.
+    with pytest.raises(ValidationError):
+        BatchItemSaveConfirmPayload.model_validate(
+            {
+                "item_id": "item-1",
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "request": {"status": "ACCEPTED"},
+            }
+        )
+    with pytest.raises(ValidationError):
+        BatchItemSaveConfirmPayload.model_validate(
+            {
+                "item_id": "item-1",
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "draft": {"title": "secret"},
+            }
+        )
+
+    # Batch top-level: unknown field is rejected.
+    with pytest.raises(ValidationError):
+        BatchSaveConfirmPayload.model_validate(
+            {
+                "batch_id": "batch-1",
+                "items": [
+                    {
+                        "item_id": "item-1",
+                        "draft_id": "draft-1",
+                        "base_revision": 1,
+                        "idempotency_key": "key-1",
+                    }
+                ],
+                "storage_dir": "storage",
+                "token": "secret",
+            }
+        )
+    # A valid batch request still validates.
+    assert (
+        BatchSaveConfirmPayload.model_validate(
+            {
+                "batch_id": "batch-1",
+                "items": [
+                    {
+                        "item_id": "item-1",
+                        "draft_id": "draft-1",
+                        "base_revision": 1,
+                        "idempotency_key": "key-1",
+                    }
+                ],
+                "storage_dir": "storage",
+            }
+        )
+        is not None
+    )

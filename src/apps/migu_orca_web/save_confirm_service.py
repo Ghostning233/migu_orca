@@ -100,7 +100,12 @@ class SaveConfirmOutcome:
 #: reuse is the ``idempotency_conflict`` case) while cross-restart safety comes
 #: from the durable record.
 _KEY_LOCK_GUARD: RLock = RLock()
-_KEY_LOCKS: dict[str, RLock] = {}
+#: Reference-counted per-key locks. Each lock's count tracks *holders plus
+#: waiters* (a waiter increments the count before blocking on the RLock), so a
+#: lock is only dropped when the last holder/waiters have all left — a third
+#: thread can never observe a key with no lock and acquire a different RLock
+#: while the earlier holder is still inside the critical section.
+_KEY_LOCKS: dict[str, tuple[RLock, int]] = {}
 
 
 def compute_request_fingerprint(request: dict[str, Any]) -> str:
@@ -177,6 +182,7 @@ def run_save_confirm(
     confirm_saved: Callable[[str], dict[str, Any]],
     commit_draft: Callable[[], None],
     release_draft: Callable[[], None],
+    peek_draft: Callable[[], dict[str, Any] | None] | None = None,
     now: str | None = None,
 ) -> SaveConfirmOutcome:
     """Run one durable save-confirm attempt under ``idempotency_key``.
@@ -191,11 +197,19 @@ def run_save_confirm(
     - ``confirm_saved(request_id)`` idempotently accepts the saved Request and
       returns the updated ACCEPTED Request (an already-ACCEPTED request is a
       success, not a failure);
-    - ``commit_draft`` / ``release_draft`` resolve the reservation.
+    - ``commit_draft`` / ``release_draft`` resolve the reservation;
+    - ``peek_draft`` (optional) returns the still-present draft **without any
+      side effect** (``DraftStore.peek``) or ``None`` when the draft is gone/
+      reserved/stale — used only to verify a terminal record's fingerprint
+      against a live draft, never to consume or pin it.
 
     Terminal outcomes are replayed without touching the draft, so retrying a
     key after a process restart (when the in-memory DraftStore is empty) never
-    creates a duplicate Request.
+    creates a duplicate Request. When ``peek_draft`` is provided and the draft
+    is still present, a terminal record is only replayed if the live draft's
+    fingerprint still matches the record; a *different* still-present draft
+    under the same key is a 409 ``idempotency_conflict`` (the live draft is
+    left untouched, usable, and not reserved).
     """
     with _key_lock(idempotency_key):
         existing = load_idempotency_record(config, idempotency_key)
@@ -205,8 +219,13 @@ def run_save_confirm(
         if existing is not None and existing.get("operation") != OPERATION_SAVE_CONFIRM:
             raise _idempotency_conflict(existing, "operation_mismatch")
 
-        # 1. A bound key that already reached a terminal state is replayed.
+        # 1. A bound key that already reached a terminal state is replayed —
+        #    but only after verifying the still-present draft's fingerprint.
         if existing is not None and existing.get("state") in _TERMINAL_STATES:
+            _guard_terminal_replay_against_live_draft(
+                existing=existing,
+                peek_draft=peek_draft,
+            )
             return _terminal_outcome(config, existing, replayed=True)
 
         # 2. An IN_PROGRESS retry first checks the on-disk Request.
@@ -227,38 +246,47 @@ def run_save_confirm(
             # action == retry_save: the save never landed; fall through.
 
         # 3. Fresh attempt or a safe retry-save: reserve the draft to obtain the
-        #    authoritative Request, bind the key, persist, then confirm.
+        #    authoritative Request, bind the key, persist, then confirm. From
+        #    here until ``persist_pending`` succeeds, *any* exception must
+        #    release the reservation (US-212/US-213 fix): a still-unpersisted
+        #    draft stays usable at its original revision.
         request = reserve_draft()
-        request_id = _draft_request_id(request, "run_save_confirm")
-        fingerprint = compute_request_fingerprint(request)
-
-        if existing is not None:
-            # IN_PROGRESS retry-save: same operation is mandatory and the plan
-            # must be identical; a changed plan under one key is a conflict.
-            if existing.get("request_fingerprint") != fingerprint:
-                release_draft()
-                raise _idempotency_conflict(existing, "payload_mismatch")
-            # Re-arm the IN_PROGRESS record and bind the public request_id
-            # *before* persisting. If the process crashes after the atomic
-            # Request write but before the next durable update, the retry sees
-            # request_id + IN_PROGRESS and resolves against the on-disk Request
-            # (rule 3) instead of blindly re-saving a duplicate.
-            record = _update_state(config, existing, STATE_IN_PROGRESS, request_id, now)
-        else:
-            record = create_idempotency_record(
-                idempotency_key=idempotency_key,
-                operation=OPERATION_SAVE_CONFIRM,
-                request_fingerprint=fingerprint,
-                request_id=request_id,
-                state=STATE_IN_PROGRESS,
-                now=now,
-            )
-            save_idempotency_record(config, record)
-
+        persisted = False
         try:
+            request_id = _draft_request_id(request, "run_save_confirm")
+            fingerprint = compute_request_fingerprint(request)
+
+            if existing is not None:
+                # IN_PROGRESS retry-save: same operation is mandatory and the plan
+                # must be identical; a changed plan under one key is a conflict.
+                if existing.get("request_fingerprint") != fingerprint:
+                    raise _idempotency_conflict(existing, "payload_mismatch")
+                # Re-arm the IN_PROGRESS record and bind the public request_id
+                # *before* persisting. If the process crashes after the atomic
+                # Request write but before the next durable update, the retry sees
+                # request_id + IN_PROGRESS and resolves against the on-disk Request
+                # (rule 3) instead of blindly re-saving a duplicate.
+                record = _update_state(
+                    config, existing, STATE_IN_PROGRESS, request_id, now
+                )
+            else:
+                record = create_idempotency_record(
+                    idempotency_key=idempotency_key,
+                    operation=OPERATION_SAVE_CONFIRM,
+                    request_fingerprint=fingerprint,
+                    request_id=request_id,
+                    state=STATE_IN_PROGRESS,
+                    now=now,
+                )
+                save_idempotency_record(config, record)
+
+            # The Request is about to be durable; once ``persist_pending``
+            # returns successfully we must never release the reservation again.
             persist_pending(request)
+            persisted = True
         except Exception:
-            release_draft()
+            if not persisted:
+                release_draft()
             raise
 
         try:
@@ -278,17 +306,80 @@ def run_save_confirm(
         return _confirmed_outcome(accepted, request_id, replayed=False)
 
 
+def _guard_terminal_replay_against_live_draft(
+    *,
+    existing: dict[str, Any],
+    peek_draft: Callable[[], dict[str, Any] | None] | None,
+) -> None:
+    """Reject a terminal replay when the key is reused for a *different* live draft.
+
+    US-213 fix: a terminal record must not silently replay for a second,
+    different draft that reused the same key. When a ``peek_draft`` seam is
+    provided and it returns a still-present draft, the draft's fingerprint must
+    match the record's fingerprint; a mismatch raises ``idempotency_conflict``
+    (details only ``field``/``reason``) and leaves the live draft untouched,
+    usable and not reserved. A missing/reserved/stale draft (or no seam) simply
+    allows the terminal replay — matching the process-restart safety guarantee.
+    """
+    if peek_draft is None:
+        return
+    live = peek_draft()
+    if live is None:
+        return
+    if compute_request_fingerprint(live) != existing.get("request_fingerprint"):
+        raise _idempotency_conflict(existing, "payload_mismatch")
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
 
 
-def _key_lock(idempotency_key: str) -> RLock:
-    with _KEY_LOCK_GUARD:
-        lock = _KEY_LOCKS.get(idempotency_key)
-        if lock is None:
-            lock = _KEY_LOCKS[idempotency_key] = RLock()
-        return lock
+class _KeyLock:
+    """Reference-counted per-key lock context (US-213 fix).
+
+    Entering increments the key's reference count (holders + waiters) *before*
+    acquiring the RLock, and exiting decrements it after releasing. The lock
+    entry is removed from ``_KEY_LOCKS`` only when the count returns to zero, so
+    two threads that both observed/created the same lock never race a deletion
+    that would let a third thread grab a fresh lock and break serialization.
+    """
+
+    def __init__(self, idempotency_key: str) -> None:
+        self._key = idempotency_key
+        self._lock: RLock | None = None
+
+    def __enter__(self) -> _KeyLock:
+        with _KEY_LOCK_GUARD:
+            entry = _KEY_LOCKS.get(self._key)
+            if entry is None:
+                lock = RLock()
+                entry = (lock, 0)
+                _KEY_LOCKS[self._key] = entry
+            self._lock, count = entry
+            # Count holders + waiters: the count is bumped before blocking on
+            # the RLock, so the entry survives as long as anyone is waiting.
+            _KEY_LOCKS[self._key] = (self._lock, count + 1)
+        self._lock.acquire()
+        return self
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        assert self._lock is not None
+        try:
+            self._lock.release()
+        finally:
+            with _KEY_LOCK_GUARD:
+                entry = _KEY_LOCKS.get(self._key)
+                if entry is not None:
+                    lock, count = entry
+                    if count <= 1:
+                        _KEY_LOCKS.pop(self._key, None)
+                    else:
+                        _KEY_LOCKS[self._key] = (lock, count - 1)
+
+
+def _key_lock(idempotency_key: str) -> _KeyLock:
+    return _KeyLock(idempotency_key)
 
 
 def _update_state(
@@ -468,7 +559,14 @@ class BatchSaveConfirmResult:
         confirmed = sum(
             item.outcome == BATCH_OUTCOME_CONFIRMED for item in self.results
         )
-        failed = sum(item.outcome == BATCH_OUTCOME_FAILED for item in self.results)
+        # ``skipped`` (duplicate item_id) is not a confirmation, so it must be
+        # counted as a failure to keep ``requested == confirmed + failed``
+        # closed — the public summary stays ``{requested, confirmed, failed}``
+        # (no new field), which keeps the Stage 28 contract backward compatible.
+        failed = sum(
+            item.outcome in (BATCH_OUTCOME_FAILED, BATCH_OUTCOME_SKIPPED)
+            for item in self.results
+        )
         return {
             "requested": len(self.results),
             "confirmed": confirmed,

@@ -9,7 +9,7 @@ response DTOs stay in ``api_contract.py`` (which is the Stage 27 contract).
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class RequestListQuery(BaseModel):
@@ -301,7 +301,20 @@ class RequestPreviewSavePayload(BaseModel):
     storage_dir: str | None = None
 
 
-class RequestSaveConfirmPayload(BaseModel):
+class _SaveConfirmStrictBase(BaseModel):
+    """Strict base for the Stage 28 save-confirm request models (US-213 fix).
+
+    ``extra="forbid"`` makes an unknown field (a leaked ``request``/``draft``/
+    ``token`` key, or any future accidental addition) fail validation with the
+    existing 400 ``data_validation_errors`` envelope instead of being silently
+    ignored. Only the save-confirm family is tightened here — historical
+    request models keep their existing lenient behavior.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RequestSaveConfirmPayload(_SaveConfirmStrictBase):
     """Save + confirm one preview draft in a single durable operation.
 
     US-213/US-214: the request only carries the server-issued ``draft_id``,
@@ -310,6 +323,7 @@ class RequestSaveConfirmPayload(BaseModel):
     the full Request never crosses the boundary. ``idempotency_key`` is a
     request-scoped opaque value validated as a safe filename token (never a
     path segment), mirroring the ``candidate_context`` capability contract.
+    ``extra="forbid"`` rejects unknown/sensitive keys instead of ignoring them.
     """
 
     draft_id: str
@@ -330,14 +344,15 @@ class RequestSaveConfirmPayload(BaseModel):
         return token
 
 
-class BatchItemSaveConfirmPayload(BaseModel):
+class BatchItemSaveConfirmPayload(_SaveConfirmStrictBase):
     """One batch card save-confirm descriptor (US-216).
 
     Each item only carries the public ``item_id`` plus the server-issued
     ``draft_id``, the ``base_revision`` the client last observed, and an opaque
     ``idempotency_key``. The full Request never crosses the boundary; the
     per-item key follows the single save-confirm capability contract (a safe
-    opaque value, never a path segment).
+    opaque value, never a path segment). ``extra="forbid"`` rejects a leaked
+    full Request or unknown field inside an item.
     """
 
     item_id: str
@@ -366,7 +381,7 @@ class BatchItemSaveConfirmPayload(BaseModel):
         return token
 
 
-class BatchSaveConfirmPayload(BaseModel):
+class BatchSaveConfirmPayload(_SaveConfirmStrictBase):
     """Save + confirm selected batch draft cards in one partial-success call.
 
     US-216: every selected item runs the same single save-confirm use case
@@ -375,6 +390,7 @@ class BatchSaveConfirmPayload(BaseModel):
     when omitted every item is processed in input order. A per-item expected
     failure never rolls back successful siblings — it is reported as a
     sanitized per-item result. ``batch_id`` comes from the URL path.
+    ``extra="forbid"`` rejects unknown top-level keys.
     """
 
     batch_id: str

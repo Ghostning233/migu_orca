@@ -580,3 +580,52 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - B-B tracking 阶段的输入：持久化 ACCEPTED Request + save-confirm handoff 幂等记录；
       不得把 tracking 迁移追加回 Stage 28。
 ---
+
+## [2026-09-08 12:20 CST] - Stage 28 静态审查修复
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 修复终态幂等键错误重放：`run_save_confirm` 新增可选 `peek_draft` seam（无副作用，经
+    `DraftStore.peek`）；终态（CONFIRMED/SAVED_CONFIRM_FAILED）重放前先核对仍存在的草案
+    fingerprint，不同草案复用同键 → 409 `idempotency_conflict`（details 只含 field/reason），
+    草案保持可用不被预留/消费；draft 缺失/预留/无 seam 时仍安全重放（进程重启恢复不变）。
+  - 修复持久化前异常释放草案预留：`run_save_confirm` 在 `reserve_draft` 后引入显式
+    `persisted` 阶段标志；`request_id`/fingerprint 处理、首次写幂等记录、`_update_state`
+    重 arm IN_PROGRESS、`persist_pending` 任一失败（且尚未落盘）都 `release_draft`；落盘后
+    不再释放，确认失败按现有语义 `commit_draft`。
+  - save-confirm 请求模型改严格 DTO：`RequestSaveConfirmPayload`/`BatchItemSaveConfirmPayload`/
+    `BatchSaveConfirmPayload` 继承 `_SaveConfirmStrictBase`（`extra="forbid"`）；OpenAPI 三个
+    requestBody 同步 `additionalProperties: false` 并重生成 openapi.json + TS client。
+  - safe-info 值级脱敏收紧：`_safe_label` 非字符串一律返回 None（不再 str(dict/list)），
+    嵌入任意位置的 http/https/ftp/file/ws、magnet、Unix 绝对路径、Windows 盘符、UNC、
+    token/password/cookie/authorization/endpoint/rss_url 等 key=value 文本均稳定脱敏；
+    filter_rule bool 与 ab_status success 显式类型归一化。
+  - `_KEY_LOCKS` 改为引用计数按键锁（holders+waiters 计入，最后一个离开才删除，避免竞态）。
+  - 批量 skipped summary 闭合：skipped 计入 failed（保持 `requested == confirmed + failed`，
+    不新增公开字段）。
+- Files changed
+  - src/apps/migu_orca_web/drafts.py（新增无副作用 `peek`）
+  - src/apps/migu_orca_web/save_confirm_service.py（peek seam + persisted 阶段 + 引用计数锁 + summary）
+  - src/apps/migu_orca_web/routes_requests.py（注入 peek_draft）
+  - src/apps/migu_orca_web/schemas.py（strict 基类）
+  - src/apps/migu_orca_web/serializers.py（_safe_label/_safe_bool/_safe_count 收紧）
+  - src/apps/migu_orca_web/openapi_gen.py + docs/api/openapi.json + frontend/src/api/generated/api.ts
+  - 测试：test_save_confirm_service.py / test_dto_contracts.py / test_golden_contracts.py /
+    views_test.py
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 终态幂等重放不能无条件返回旧结果：当 key 被另一份仍存在的草案复用时，必须经无副作用
+      `peek` 比较 fingerprint；「无草案」与「不同草案」要区分开（前者重放、后者冲突）。
+    - 持久化前异常释放必须用显式「是否已落盘」标志，而不是宽泛 try/finally——落盘后 release
+      会导致重复保存。
+    - 请求级 `extra="forbid"` 与 OpenAPI `additionalProperties: false` 要成对维护，否则 TS
+      客户端语义与实际校验不一致。
+    - `_safe_label` 必须对非字符串返回 None 并对字符串做「任意位置」的敏感标记匹配，
+      而不是只查开头或 str(value) 强转。
+  - Gotchas encountered
+    - `_KEY_LOCKS` 永久增长：改用引用计数（含等待者）并在计数归零时删除，避免内存泄漏与
+      删除竞态。
+    - 批量 summary 的 skipped 若不计入 failed 会破坏 requested == confirmed + failed 的不变量。
+    - ruff B012（finally 内 return）与 F841（未用变量）在新增代码时容易触发。
+  - Useful context
+    - 本次为 Stage 28 的静态审查修复提交，不改动 Stage 29/tracking/AB 管理范围。
+---

@@ -310,33 +310,66 @@ def _sanitize_ab_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
 # absolute paths are omitted at the field level; free-text labels are still
 # scrubbed so a poisoned value that *looks* like a URL/magnet/path cannot pass.
 
-_SAFE_ABSOLUTE_LABEL_RE = re.compile(r"^[a-zA-Z]:[\\/]")
+#: Embedded URL / magnet / absolute-path / credential markers detected anywhere
+#: in a free-text label (US-217 fix). These are matched case-insensitively on a
+#: substring basis (not just at the start), so a URL or secret buried inside an
+#: otherwise-legal Chinese title is still redacted.
+_SAFE_URL_SCHEME_RE = re.compile(
+    r"(?:https?|ftp|file|ws|wss)://",
+    re.IGNORECASE,
+)
+_SAFE_MAGNET_RE = re.compile(r"magnet:\?", re.IGNORECASE)
+_SAFE_UNIX_ABS_RE = re.compile(r"(?:^|[^\w])(/(?:usr|etc|var|tmp|home|root|opt|srv)/)", re.IGNORECASE)
+_SAFE_WINDOWS_ABS_RE = re.compile(r"\b[a-zA-Z]:[\\/]")
+_SAFE_UNC_RE = re.compile(r"(?:^|[^\w])(?:\\\\|//)[^\s\\/]+[\\/]")
+#: key=value / key:value / "Key value" markers for secrets and endpoints.
+_SAFE_SECRET_KEY_RE = re.compile(
+    r"(?:^|[\s;&|,])("
+    r"token|password|passwd|pass|secret|cookie|authorization|auth|bearer|"
+    r"endpoint|api[_-]?key|access[_-]?key|rss[_-]?url|magnet"
+    r")\s*[:=]\s*\S+",
+    re.IGNORECASE,
+)
 
 
 def _safe_label(value: Any) -> str | None:
-    """Return a public display label or ``[redacted]`` for URL/magnet/path text.
+    """Return a public display label, or ``[redacted]`` for sensitive text.
 
-    ``None``/non-string values become ``None`` so the DTO can render them as
-    "未设置"; a string that carries a scheme, magnet marker or absolute path is
-    replaced with the stable ``[redacted]`` marker.
+    US-217 fix — the previous version only blocked values *starting* with
+    ``http(s)://`` and coerced any non-string to ``str``. Now:
+
+    - non-string values (dict/list/bool/int/float) return ``None`` — never
+      ``str(dict)``/``str(list)`` which could leak nested secrets;
+    - a URL/magnet scheme, absolute path (Unix / Windows / UNC) or a sensitive
+      ``key=value``/``key:value`` marker anywhere in the string is replaced with
+      the stable ``[redacted]`` marker;
+    - ordinary Chinese titles, subtitle-group names, file names and filter
+      rules are returned unchanged (trimmed).
     """
-    if value is None:
+    if not isinstance(value, str):
         return None
-    text = str(value).strip()
-    lowered = text.lower()
+    text = value.strip()
+    if not text:
+        return None
     if (
-        "magnet:?" in lowered
-        or lowered.startswith("http://")
-        or lowered.startswith("https://")
+        _SAFE_URL_SCHEME_RE.search(text)
+        or _SAFE_MAGNET_RE.search(text)
+        or _SAFE_UNIX_ABS_RE.search(text)
+        or _SAFE_WINDOWS_ABS_RE.search(text)
+        or _SAFE_UNC_RE.search(text)
+        or _SAFE_SECRET_KEY_RE.search(text)
         or text.startswith("/")
-        or _SAFE_ABSOLUTE_LABEL_RE.match(text)
     ):
         return "[redacted]"
     return text
 
 
 def _safe_count(value: Any) -> int:
-    return value if isinstance(value, int) and value >= 0 else 0
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _safe_bool(value: Any) -> bool:
+    return value if isinstance(value, bool) else False
 
 
 def _extract_public_bangumi_id(mikan_url: Any) -> str | None:
@@ -486,7 +519,8 @@ def serialize_request_safe_info(
     }
     if isinstance(ab_submit_result, dict):
         ab_status["submitted"] = True
-        ab_status["success"] = ab_submit_result.get("success")
+        success = ab_submit_result.get("success")
+        ab_status["success"] = success if isinstance(success, bool) else None
         ab_subscription_id = ab_submit_result.get("ab_subscription_id")
         ab_status["ab_subscription_id"] = _safe_label(ab_subscription_id)
         if ab_status["success"] is False:
@@ -509,8 +543,8 @@ def serialize_request_safe_info(
         "filter_rule": {
             "must_contain": _safe_label(filter_rule.get("must_contain")) or "",
             "must_not_contain": _safe_label(filter_rule.get("must_not_contain")) or "",
-            "use_regex": bool(filter_rule.get("use_regex")),
-            "case_sensitive": bool(filter_rule.get("case_sensitive")),
+            "use_regex": _safe_bool(filter_rule.get("use_regex")),
+            "case_sensitive": _safe_bool(filter_rule.get("case_sensitive")),
         },
         "resources": resources,
         "folder_name": _safe_label(confirmable.get("expected_folder_name")),

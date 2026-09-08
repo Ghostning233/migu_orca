@@ -458,6 +458,274 @@ def test_in_progress_retry_same_key_different_plan_conflicts(tmp_path: Path) -> 
     assert record["state"] == STATE_IN_PROGRESS
 
 
+def test_terminal_record_with_different_live_draft_conflicts(tmp_path: Path) -> None:
+    """US-213 fix: a terminal record must not replay for a *different* live draft.
+
+    ``key-A`` confirmed draft-1; a second, still-present draft-2 reuses key-A.
+    The terminal replay path must compare fingerprints via ``peek_draft`` and
+    return a 409 ``idempotency_conflict`` (details only field/reason), leaving
+    draft-2 usable and not reserved/consumed.
+    """
+    config = _config(tmp_path)
+    first = _draft_request("芙莉莲")
+    first_id = first["request_id"]
+    save_request_snapshot(config, accept_request(first))
+    record = create_idempotency_record(
+        idempotency_key="key-reuse",
+        operation="SAVE_CONFIRM",
+        request_fingerprint=compute_request_fingerprint(first),
+        request_id=first_id,
+        state=STATE_CONFIRMED,
+        now=NOW,
+    )
+    save_idempotency_record(config, record)
+
+    # A different, still-present draft reuses the key.
+    second = _draft_request("咒术回战")
+    harness = _SaveConfirmHarness(config, second)
+
+    with pytest.raises(Stage1Error) as error:
+        run_save_confirm(
+            config=config,
+            idempotency_key="key-reuse",
+            reserve_draft=harness.reserve_draft,
+            persist_pending=harness.persist_pending,
+            confirm_saved=harness.confirm_saved,
+            commit_draft=harness.commit_draft,
+            release_draft=harness.release_draft,
+            peek_draft=lambda: second,
+            now=NOW,
+        )
+
+    assert error.value.error_type == "idempotency_conflict"
+    assert error.value.details == {
+        "field": "idempotency_key",
+        "reason": "payload_mismatch",
+    }
+    # The second draft is untouched: never reserved/committed/released/persisted.
+    assert harness.reservations == []
+    assert harness.commits == 0
+    assert harness.releases == 0
+    # No second Request exists; only the first confirmed Request remains.
+    assert sorted(path.name for path in config.requests_dir.glob("*.json")) == [
+        f"{first_id}.json"
+    ]
+
+
+def test_terminal_record_with_matching_live_draft_replays(tmp_path: Path) -> None:
+    """US-213 fix: a matching live draft under a terminal key replays safely.
+
+    ``peek_draft`` returns a draft whose fingerprint matches the record, so the
+    terminal outcome is replayed *without* consuming/reserving the live draft.
+    """
+    config = _config(tmp_path)
+    draft = _draft_request()
+    request_id = draft["request_id"]
+    save_request_snapshot(config, accept_request(draft))
+    record = create_idempotency_record(
+        idempotency_key="key-match",
+        operation="SAVE_CONFIRM",
+        request_fingerprint=compute_request_fingerprint(draft),
+        request_id=request_id,
+        state=STATE_CONFIRMED,
+        now=NOW,
+    )
+    save_idempotency_record(config, record)
+    harness = _SaveConfirmHarness(config, draft)
+
+    outcome = run_save_confirm(
+        config=config,
+        idempotency_key="key-match",
+        reserve_draft=harness.reserve_draft,
+        persist_pending=harness.persist_pending,
+        confirm_saved=harness.confirm_saved,
+        commit_draft=harness.commit_draft,
+        release_draft=harness.release_draft,
+        peek_draft=lambda: draft,
+        now=NOW,
+    )
+
+    assert outcome.outcome == STATE_CONFIRMED
+    assert outcome.request_id == request_id
+    assert outcome.replayed is True
+    assert harness.reservations == []
+    assert harness.commits == 0
+    assert harness.releases == 0
+
+
+def test_terminal_record_with_missing_draft_replays(tmp_path: Path) -> None:
+    """US-213 fix: a missing draft (process restart) still replays the terminal
+    record — ``peek_draft`` returns None and the replay is allowed."""
+    config = _config(tmp_path)
+    draft = _draft_request()
+    request_id = draft["request_id"]
+    save_request_snapshot(config, accept_request(draft))
+    record = create_idempotency_record(
+        idempotency_key="key-restart",
+        operation="SAVE_CONFIRM",
+        request_fingerprint=compute_request_fingerprint(draft),
+        request_id=request_id,
+        state=STATE_CONFIRMED,
+        now=NOW,
+    )
+    save_idempotency_record(config, record)
+    harness = _SaveConfirmHarness(config, draft)
+
+    outcome = run_save_confirm(
+        config=config,
+        idempotency_key="key-restart",
+        reserve_draft=harness.reserve_draft,
+        persist_pending=harness.persist_pending,
+        confirm_saved=harness.confirm_saved,
+        commit_draft=harness.commit_draft,
+        release_draft=harness.release_draft,
+        peek_draft=lambda: None,  # draft gone after restart
+        now=NOW,
+    )
+
+    assert outcome.outcome == STATE_CONFIRMED
+    assert outcome.request_id == request_id
+    assert outcome.replayed is True
+    assert harness.reservations == []
+
+
+def test_record_creation_failure_releases_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """US-213 fix: a first-record write failure releases the reservation.
+
+    ``save_idempotency_record`` raising before ``persist_pending`` must not leave
+    the draft permanently reserved — the same draft/revision can reserve again
+    and the failed attempt must not leave a Request on disk.
+    """
+    from apps.migu_orca_web import save_confirm_service as scs
+
+    config = _config(tmp_path)
+    draft = _draft_request()
+    harness = _SaveConfirmHarness(config, draft)
+
+    def fail_record(conf, record):
+        raise Stage1Error(
+            "storage_error", "幂等记录写入失败", "save_idempotency_record",
+            {"reason": "disk full"},
+        )
+
+    monkeypatch.setattr(scs, "save_idempotency_record", fail_record)
+
+    with pytest.raises(Stage1Error) as error:
+        run_save_confirm(
+            config=config,
+            idempotency_key="key-record-fail",
+            reserve_draft=harness.reserve_draft,
+            persist_pending=harness.persist_pending,
+            confirm_saved=harness.confirm_saved,
+            commit_draft=harness.commit_draft,
+            release_draft=harness.release_draft,
+            now=NOW,
+        )
+
+    assert error.value.error_type == "storage_error"
+    assert harness.releases == 1
+    assert harness.commits == 0
+    assert list(config.requests_dir.glob("*.json")) == []
+
+    # The draft was released: a clean retry (record write restored) succeeds
+    # and produces exactly one Request.
+    monkeypatch.setattr(
+        scs, "save_idempotency_record", save_idempotency_record
+    )
+    outcome = run_save_confirm(
+        config=config,
+        idempotency_key="key-record-fail",
+        reserve_draft=harness.reserve_draft,
+        persist_pending=harness.persist_pending,
+        confirm_saved=harness.confirm_saved,
+        commit_draft=harness.commit_draft,
+        release_draft=harness.release_draft,
+        now=NOW,
+    )
+    assert outcome.outcome == STATE_CONFIRMED
+    assert sorted(path.name for path in config.requests_dir.glob("*.json")) == [
+        f"{draft['request_id']}.json"
+    ]
+
+
+def test_in_progress_update_failure_releases_draft(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """US-213 fix: re-arming an IN_PROGRESS record failure releases the draft.
+
+    ``_update_state`` (which calls ``save_idempotency_record``) failing before
+    ``persist_pending`` must release the reservation, leaving the same
+    draft/revision usable and no Request on disk.
+    """
+    from apps.migu_orca_web import save_confirm_service as scs
+
+    config = _config(tmp_path)
+    draft = _draft_request()
+    request_id = draft["request_id"]
+    # Pre-bind the key IN_PROGRESS with no on-disk Request (retry_save path).
+    record = create_idempotency_record(
+        idempotency_key="key-inprogress-fail",
+        operation="SAVE_CONFIRM",
+        request_fingerprint=compute_request_fingerprint(draft),
+        request_id=None,
+        state=STATE_IN_PROGRESS,
+        now=NOW,
+    )
+    save_idempotency_record(config, record)
+    harness = _SaveConfirmHarness(config, draft)
+
+    calls = {"n": 0}
+
+    def flaky_record(conf, record_to_save):
+        # First write after the pre-seed is the _update_state re-arm: fail it.
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise Stage1Error(
+                "storage_error", "幂等记录更新失败", "save_idempotency_record",
+                {"reason": "disk full"},
+            )
+        return save_idempotency_record(conf, record_to_save)
+
+    monkeypatch.setattr(scs, "save_idempotency_record", flaky_record)
+
+    with pytest.raises(Stage1Error) as error:
+        run_save_confirm(
+            config=config,
+            idempotency_key="key-inprogress-fail",
+            reserve_draft=harness.reserve_draft,
+            persist_pending=harness.persist_pending,
+            confirm_saved=harness.confirm_saved,
+            commit_draft=harness.commit_draft,
+            release_draft=harness.release_draft,
+            now=NOW,
+        )
+
+    assert error.value.error_type == "storage_error"
+    assert harness.releases == 1
+    assert harness.commits == 0
+    assert list(config.requests_dir.glob("*.json")) == []
+
+    # Restore the write path and retry the same draft/revision: it succeeds once.
+    monkeypatch.setattr(scs, "save_idempotency_record", save_idempotency_record)
+    outcome = run_save_confirm(
+        config=config,
+        idempotency_key="key-inprogress-fail",
+        reserve_draft=harness.reserve_draft,
+        persist_pending=harness.persist_pending,
+        confirm_saved=harness.confirm_saved,
+        commit_draft=harness.commit_draft,
+        release_draft=harness.release_draft,
+        now=NOW,
+    )
+    assert outcome.outcome == STATE_CONFIRMED
+    assert outcome.request_id == request_id
+    assert sorted(path.name for path in config.requests_dir.glob("*.json")) == [
+        f"{request_id}.json"
+    ]
+
+
 def test_reused_key_with_different_operation_conflicts(tmp_path: Path) -> None:
     """A key bound to SAVE_CONFIRM may never be reused for another operation."""
     config = _config(tmp_path)
@@ -835,7 +1103,9 @@ def test_batch_save_confirm_coordinator_duplicate_item_is_skipped() -> None:
     assert result.results[1].error_type == "duplicate_item"
     # process_one was only ever invoked for the first (non-skipped) occurrence;
     # the second key never reached the single save-confirm use case.
-    assert result.summary() == {"requested": 2, "confirmed": 1, "failed": 0}
+    # US-213 fix: a skipped item is not a confirmation, so it is counted as a
+    # failure to keep requested == confirmed + failed closed.
+    assert result.summary() == {"requested": 2, "confirmed": 1, "failed": 1}
 
 
 def test_batch_save_confirm_coordinator_rejects_shared_key_for_two_items() -> None:

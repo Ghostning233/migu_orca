@@ -431,6 +431,16 @@ def _run_draft_save_confirm(
     def release_draft() -> None:
         draft_store.release_save(draft_id)
 
+    def peek_draft() -> dict[str, Any] | None:
+        # Non-mutating observation for terminal-replay fingerprint verification
+        # (US-213 fix). ``peek`` never reserves/consumes/refreshes the draft; a
+        # reserved/expired/replayed/unknown draft simply reports "no live draft"
+        # so the terminal record can still replay safely after a restart.
+        request, reason = draft_store.peek(draft_id)
+        if request is None or reason != REASON_OK:
+            return None
+        return request
+
     return run_save_confirm(
         config=load_storage_config(storage_dir),
         idempotency_key=idempotency_key,
@@ -439,6 +449,7 @@ def _run_draft_save_confirm(
         confirm_saved=_build_save_confirm_confirm_saved(storage_dir),
         commit_draft=commit_draft,
         release_draft=release_draft,
+        peek_draft=peek_draft,
     )
 
 

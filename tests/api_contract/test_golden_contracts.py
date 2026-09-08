@@ -1612,10 +1612,12 @@ def test_golden_batch_save_confirm_duplicate_item_is_skipped(
     assert rows[1]["outcome"] == "skipped"
     assert rows[1]["error_type"] == "duplicate_item"
     assert rows[1]["request_id"] is None
+    # US-213 fix: a skipped item is not a confirmation, so it is counted as a
+    # failure to keep requested == confirmed + failed closed.
     assert payload["result"]["summary"] == {
         "requested": 2,
         "confirmed": 1,
-        "failed": 0,
+        "failed": 1,
     }
     # Only one Request file exists (the skipped duplicate never saved).
     assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1

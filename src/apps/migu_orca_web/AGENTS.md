@@ -148,7 +148,9 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - `run_save_confirm(...)` 是可复用组合协调器，US-214 用注入 seam（reserve_draft /
   persist_pending / confirm_saved / commit_draft / release_draft）接真实
   DraftStore/entry-controller 流。状态机要点：
-  - 终态（`CONFIRMED`/`SAVED_CONFIRM_FAILED`）同键重放，绝不触碰 draft；
+  - 终态（`CONFIRMED`/`SAVED_CONFIRM_FAILED`）同键重放前经无副作用 `peek_draft`
+    （`DraftStore.peek`）核对仍存在草案的 fingerprint：指纹不一致 → 409
+    `idempotency_conflict`（草案保持可用，不被预留/消费）；草案缺失/预留/无 seam → 安全重放；
   - `IN_PROGRESS` 重试先用 `resolve_in_progress_retry` 核对已落盘 Request（在 → 继续确认；
     不在 → 只在仍持有效 reservation 时重试保存），不无条件新建 Request；
   - 首次写盘成功后记录保持 `IN_PROGRESS` 并绑定 `request_id`，崩溃后重试靠 rule 3 收敛；
@@ -222,9 +224,12 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   完整 snapshot 再让前端隐藏。`updated_episode` 恒为 `null`、
   `updated_episode_status` 恒为 `NOT_IMPLEMENTED`（BL-020 不实现，绝不从种子/RSS/下载
   数量猜测当前集数）。
-- 免费文本 label 经 `_safe_label` 二次脱敏：`http(s)://`、`magnet:?`、`/` 开头与
-  Windows 盘符绝对路径 → `[redacted]`。`total_episodes` 目前无数据源，serializer 恒置
-  `null`（不要从 `MikanCandidate.total_episodes` 推断）。
+- 免费文本 label 经 `_safe_label` 二次脱敏（Stage 28 静态审查修复后收紧）：非字符串值
+  一律返回 `None`（绝不 `str(dict/list)`）；字符串中**任意位置**出现的 `http(s)/ftp/file/ws`
+  等 scheme、`magnet:?`、Unix 绝对路径、Windows 盘符、UNC 路径与
+  `token/password/cookie/authorization/endpoint/rss_url` 等 `key=value`/`key:value` 敏感文本
+  都稳定替换为 `[redacted]`；普通中文标题/字幕组/文件名/过滤规则不被误删。`total_episodes`
+  目前无数据源，serializer 恒置 `null`（不要从 `MikanCandidate.total_episodes` 推断）。
 - `storage_profile` 用 `services._storage_profile(storage_dir)`（解析后相对服务端
   Web storage root 的首段 profile 名，根目录/越界 → `None`）。不要回传原始 snapshot。
 - 改 safe-info DTO/serializer 后必须重生成 `docs/api/openapi.json` 与

@@ -206,6 +206,30 @@ class DraftStore:
             )
             return DraftHandle(draft_id=draft_id, revision=1)
 
+    def peek(self, draft_id: str | None) -> tuple[dict[str, Any] | None, str]:
+        """Observe a draft with **no side effect** (US-213 fix).
+
+        Unlike ``get`` this never refreshes ``used_at``, never moves the entry
+        within the LRU order, and never touches tombstones — it is a pure
+        observation used to compare a *terminal* idempotency record's
+        fingerprint against a still-present draft without consuming, reserving
+        or pinning it. A reserved draft is reported ``reserved`` (a
+        save-in-progress owns it); a missing id reports the tombstone reason
+        (``replayed`` after a successful save, ``expired``/``evicted`` when
+        purged/evicted, otherwise ``unknown``). The caller maps every
+        non-``ok`` reason to "no live draft to verify".
+        """
+        with self._lock:
+            self._purge()
+            if not draft_id:
+                return None, REASON_UNKNOWN
+            entry = self._entries.get(draft_id)
+            if entry is None:
+                return None, self._missing_reason(draft_id)
+            if entry.reserved:
+                return None, REASON_RESERVED
+            return deepcopy(entry.request), REASON_OK
+
     def get(self, draft_id: str | None) -> tuple[DraftRead | None, str]:
         """Return ``(DraftRead, reason)`` for a dry-run modify (never consumes).
 
