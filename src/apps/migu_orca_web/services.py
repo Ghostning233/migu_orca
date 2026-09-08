@@ -29,6 +29,7 @@ from apps.migu_orca_web.serializers import (
     _sanitize_ab_submit_result,
     _serialize_candidate,
 )
+from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
 from batch_engine.controllers.anime_title_parser import (
     AnimeTitleParsingProvider,
     RuleAnimeTitleParsingProvider,
@@ -85,6 +86,7 @@ from storage_engine.controllers.storage_config import (
     StorageConfig,
     load_storage_config,
 )
+from tracking_engine.models.tracking import TRACKING_ORIGIN_LEGACY_ACCEPT
 
 
 def _storage_dir(value: str | None) -> Path | None:
@@ -511,6 +513,14 @@ def _build_batch_accept_one(storage_dir: Path | None) -> AcceptOne:
         )
         if not result["success"]:
             _raise_result_error(result)
+        # US-222: the batch accept entry also converges a newly ACCEPTED Request
+        # into the unified tracking list (legacy accept origin). A tracking
+        # write failure never rolls the confirmed Request back.
+        ensure_confirmed_request_tracking(
+            config=config,
+            request=result["request"],
+            origin=TRACKING_ORIGIN_LEGACY_ACCEPT,
+        )
         return result["request"]
 
     return accept_one

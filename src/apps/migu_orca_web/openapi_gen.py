@@ -57,6 +57,11 @@ from apps.migu_orca_web.api_contract import (
     RequestPreviewSaveResultDTO,
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
+    TrackingDetailResultDTO,
+    TrackingItemListResultDTO,
+    TrackingRecoverResultDTO,
+    TrackingRevalidateResultDTO,
+    TrackingSubmitResultDTO,
 )
 
 OPENAPI_VERSION = "3.1.0"
@@ -475,7 +480,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/requests/save-confirm": {
         "operationId": "confirmRequestSave",
         "summary": "保存并确认单个订阅方案草案",
-        "description": "US-214：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与 handoff（Stage 28 不创建 tracking record，D28-09）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。",
+        "description": "US-214/US-222：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与扩展 handoff（US-222 起 handoff 额外携带 tracking_id/tracking_status/tracking_ready/safe_message，确认的 Request 同步进入统一追番列表；tracking 写失败不回滚已确认 Request，tracking_ready=false + 固定 safe_message 后续访问补偿）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案且再次 ensure 收敛同一 tracking_id）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。",
         "requestBody": {
             "type": "object",
             "required": ["draft_id", "base_revision", "idempotency_key"],
@@ -638,6 +643,341 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
             "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
             "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
+        },
+    },
+    "GET /api/v1/tracking/items": {
+        "operationId": "listTrackingItems",
+        "summary": "列出统一追番记录安全摘要",
+        "description": "US-223：读取本地统一追番记录安全投影，支持可选 q（标题/字幕组）、status_group 与 sort（固定枚举）筛选排序，返回 summary 计数与固定 warnings。执行前先运行历史回填协调器（manifest COMPLETE 后不重复全量扫描）；只读取本地存储，绝不访问外部系统。单条 tracking JSON 损坏不阻塞健康列表，只增加 unreadable 计数与固定 warning。",
+        "parameters": [
+            {
+                "name": "storage_dir",
+                "in": "query",
+                "required": False,
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "q",
+                "in": "query",
+                "required": False,
+                "description": "按标题或字幕组过滤的可选搜索词。",
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "status_group",
+                "in": "query",
+                "required": False,
+                "description": "按用户状态组过滤（PENDING/PROCESSING/ACTIVE/ATTENTION/INACTIVE）。",
+                "schema": {
+                    "type": "string",
+                    "enum": ["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"],
+                },
+            },
+            {
+                "name": "sort",
+                "in": "query",
+                "required": False,
+                "description": "固定排序枚举（updated_at 倒序/title/status）。",
+                "schema": {
+                    "type": "string",
+                    "enum": ["updated_at", "title", "status"],
+                },
+            },
+        ],
+        "success": TrackingItemListResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
+            "500": {
+                "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "GET /api/v1/tracking/items/<path:tracking_id>": {
+        "operationId": "getTrackingItemDetail",
+        "summary": "查看统一追番记录安全详情",
+        "description": "US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。",
+        "parameters": [
+            {
+                "name": "tracking_id",
+                "in": "path",
+                "required": True,
+                "description": "统一追番记录的 tracking_id。",
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "storage_dir",
+                "in": "query",
+                "required": False,
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                "schema": {"type": "string"},
+            },
+        ],
+        "success": TrackingDetailResultDTO,
+        "errors": {
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "500": {
+                "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/revalidate": {
+        "operationId": "revalidateTrackingItem",
+        "summary": "复核统一追番方案（纯本地）",
+        "description": "US-224：对单条统一追番记录执行 revision-aware 纯本地复核。请求只接受 expected_revision 与可选 storage profile，绝不接收 ab_config/连接/capability 配置。服务端重新读取最新本地 Request 并复核（存在且 ACCEPTED、fingerprint、标题/季度、MiKan 合集、字幕组、有效资源、外部映射、未完成 operation 与当前 tracking 状态），业务复核失败仍返回 HTTP 200：ready=false、next_status=NEEDS_RECONFIRM 与固定 §11.5 issue code 列表；通过时 ready=true。expected_revision 过期 → 409 tracking_revision_conflict；非可复核状态 → 409 tracking_state_conflict。",
+        "requestBody": {
+            "type": "object",
+            "required": ["expected_revision"],
+            "properties": {
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision（revision-aware 复核）。",
+                },
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingRevalidateResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+                "tracking_state_conflict": "当前追番记录状态不允许复核",
+            },
+            "500": {
+                "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/submit": {
+        "operationId": "submitTrackingItem",
+        "summary": "提交统一追番方案到 Auto Bangumi（可靠顺序）",
+        "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，ab_config 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。",
+        "requestBody": {
+            "type": "object",
+            "required": ["expected_revision", "idempotency_key", "confirm", "ab_config"],
+            "properties": {
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision（revision-aware 提交）。",
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": "opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。",
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "enum": [True],
+                    "description": "必须为 true：用户显式确认提交最新方案。",
+                },
+                "ab_config": {
+                    "type": "object",
+                    "x-request-scoped": True,
+                    "properties": {
+                        "auth_mode": {
+                            "type": "string",
+                            "enum": ["password", "api_token"],
+                        },
+                        "base_url": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "username": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "password": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "token": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "fallback_enabled": {"type": "boolean"},
+                    },
+                    "required": ["auth_mode", "fallback_enabled"],
+                },
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingSubmitResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+                "tracking_confirmation_required": "提交 Auto Bangumi 必须显式确认最新方案",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+                "tracking_state_conflict": "当前追番记录状态不允许提交",
+                "tracking_idempotency_conflict": "同一幂等键已绑定不同的提交内容，不能复用",
+                "tracking_operation_in_progress": "存在尚未完成的提交操作，请先恢复后再提交",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/retry": {
+        "operationId": "retryTrackingItem",
+        "summary": "重试明确失败的统一追番提交（可靠顺序）",
+        "description": "US-226：只允许从 SUBMIT_FAILED 重试；VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 再 retry。请求 shape 与 submit 相同（confirm 严格 true、ab_config 只在单次请求内存、opaque idempotency_key）。服务复用统一提交序列：重新读取最新本地 Request 并复核、bind 新 operation=PREPARED、持久化 TrackingRecord=SUBMITTING、operation=IN_PROGRESS 作为外部边界、单次 Auto Bangumi 调用、结果分类与落盘。同 idempotency_key 网络重放复用原 operation。expected_revision 过期 → 409 tracking_revision_conflict；非 SUBMIT_FAILED → 409 tracking_state_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict。",
+        "requestBody": {
+            "type": "object",
+            "required": ["expected_revision", "idempotency_key", "confirm", "ab_config"],
+            "properties": {
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision（revision-aware 重试）。",
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": "opaque 客户端重试操作 id；一次点击一个新 operation，同键网络重放复用原 operation。只进请求体与页面内存。",
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "enum": [True],
+                    "description": "必须为 true：用户显式确认重试提交最新方案。",
+                },
+                "ab_config": {
+                    "type": "object",
+                    "x-request-scoped": True,
+                    "properties": {
+                        "auth_mode": {
+                            "type": "string",
+                            "enum": ["password", "api_token"],
+                        },
+                        "base_url": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "username": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "password": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "token": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "fallback_enabled": {"type": "boolean"},
+                    },
+                    "required": ["auth_mode", "fallback_enabled"],
+                },
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingSubmitResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+                "tracking_confirmation_required": "提交 Auto Bangumi 必须显式确认最新方案",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+                "tracking_state_conflict": "只有明确提交失败的记录可以重试",
+                "tracking_idempotency_conflict": "同一幂等键已绑定不同的提交内容，不能复用",
+                "tracking_operation_in_progress": "存在尚未完成的提交操作，请先恢复后再提交",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/recover": {
+        "operationId": "recoverTrackingItem",
+        "summary": "恢复统一追番记录（AUTO 纯本地或人工核验）",
+        "description": "US-226：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 只允许 AUTO/MARK_SUCCEEDED/MARK_FAILED：AUTO 只读取本地 operation、Request 脱敏 AB result 等证据，不访问外部系统，无明确证据时保持 RECOVERY_REQUIRED；两个人工动作必须 confirm=true 并写 USER 审计；MARK_SUCCEEDED 不接收外部 ID/URL/原始结果。已落盘恢复结果（ACTIVE/SUBMIT_FAILED/RECOVERY_REQUIRED）仍返回 HTTP 200。expected_revision 过期 → 409 tracking_revision_conflict；非可恢复状态 → 409 tracking_state_conflict；人工动作未确认 → 400 tracking_confirmation_required。",
+        "requestBody": {
+            "type": "object",
+            "required": ["expected_revision", "action"],
+            "properties": {
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision（revision-aware 恢复）。",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["AUTO", "MARK_SUCCEEDED", "MARK_FAILED"],
+                    "description": "恢复动作：AUTO=纯本地自动恢复；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。",
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "description": "人工动作必须为 true；AUTO 忽略该字段。",
+                },
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingRecoverResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+                "tracking_confirmation_required": "人工恢复必须显式确认核验结果",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+                "tracking_state_conflict": "当前追番记录状态不允许恢复",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
         },
     },
     "POST /api/v1/mikan/candidates": {
@@ -824,7 +1164,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/batches/<batch_id>/save-confirm": {
         "operationId": "saveConfirmBatchItems",
         "summary": "批量保存并确认选中草案（逐条部分成功）",
-        "description": "US-216：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。Stage 28 不创建 tracking record（D28-09）。",
+        "description": "US-216/US-222：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。US-222 起每条 CONFIRMED 项同步进入统一追番列表并返回 tracking_id/tracking_ready，单条 tracking 写失败不回滚该已确认项或其他条目。",
         "requestBody": {
             "type": "object",
             "required": ["items"],

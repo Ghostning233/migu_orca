@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,18 @@ from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
 )
+
+
+@dataclass(frozen=True)
+class AbResultListResult:
+    """Healthy saved AB-result records plus opaque damaged request ids (US-221)."""
+
+    records: tuple[dict[str, Any], ...]
+    damaged_request_ids: tuple[str, ...]
+
+    @property
+    def unreadable_count(self) -> int:
+        return len(self.damaged_request_ids)
 
 
 def save_ab_submit_result(
@@ -94,6 +107,45 @@ def load_ab_submit_result(
             {"request_id": request_id},
         )
     return deepcopy(loaded)
+
+
+def list_ab_submit_results_tolerant(config: StorageConfig) -> AbResultListResult:
+    """Return healthy saved AB-result records plus damaged request ids (US-221)."""
+    if not config.ab_results_dir.exists():
+        return AbResultListResult(records=(), damaged_request_ids=())
+    if not config.ab_results_dir.is_dir():
+        raise Stage1Error(
+            "storage_error",
+            "本地 Auto Bangumi 结果存储路径不是目录",
+            "list_ab_submit_results_tolerant",
+            {"directory": config.ab_results_dir.name},
+        )
+
+    records: list[dict[str, Any]] = []
+    damaged: list[str] = []
+    try:
+        result_files = sorted(config.ab_results_dir.glob("*.json"))
+    except OSError as exc:
+        raise Stage1Error(
+            "storage_error",
+            "列出 Auto Bangumi 提交结果失败",
+            "list_ab_submit_results_tolerant",
+            {"directory": config.ab_results_dir.name},
+        ) from exc
+
+    for result_file in result_files:
+        candidate_id = result_file.stem
+        try:
+            record = load_ab_submit_result(config, candidate_id)
+        except Stage1Error:
+            damaged.append(candidate_id)
+            continue
+        inner_id = record.get("request_id")
+        if not isinstance(inner_id, str) or not inner_id.strip() or inner_id != candidate_id:
+            damaged.append(candidate_id)
+            continue
+        records.append(record)
+    return AbResultListResult(records=tuple(records), damaged_request_ids=tuple(damaged))
 
 
 def _extract_request_id(request: dict[str, Any], failed_step: str) -> str:

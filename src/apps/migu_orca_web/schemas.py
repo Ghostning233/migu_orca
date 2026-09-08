@@ -7,9 +7,18 @@ gives the route modules a single place for request validation while the public
 response DTOs stay in ``api_contract.py`` (which is the Stage 27 contract).
 """
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from tracking_engine.models.tracking import (
+    TRACKING_STATUS_GROUP_ACTIVE,
+    TRACKING_STATUS_GROUP_ATTENTION,
+    TRACKING_STATUS_GROUP_INACTIVE,
+    TRACKING_STATUS_GROUP_PENDING,
+    TRACKING_STATUS_GROUP_PROCESSING,
+)
 
 
 class RequestListQuery(BaseModel):
@@ -452,3 +461,191 @@ class QbittorrentConfigPayload(BaseModel):
 
 class QbittorrentTestConnectionPayload(BaseModel):
     qbittorrent_config: QbittorrentConfigPayload
+
+
+# ---------------------------------------------------------------------------
+# Tracking list/detail queries (US-223)
+# ---------------------------------------------------------------------------
+
+#: Fixed user status-group enum accepted by ``GET /api/v1/tracking/items``
+#: (Stage 29 PRD §11.2).  ``INACTIVE`` groups B-C reserved statuses.
+_TRACKING_LIST_STATUS_GROUPS = frozenset(
+    {
+        TRACKING_STATUS_GROUP_PENDING,
+        TRACKING_STATUS_GROUP_PROCESSING,
+        TRACKING_STATUS_GROUP_ACTIVE,
+        TRACKING_STATUS_GROUP_ATTENTION,
+        TRACKING_STATUS_GROUP_INACTIVE,
+    }
+)
+
+#: Fixed sort enum for the tracking list (§11.2): updated time / title / status.
+_TRACKING_LIST_SORTS = frozenset({"updated_at", "title", "status"})
+
+#: Bound on the free-text ``q`` filter (the list is local and small; the bound
+#: only stops an absurd query string, never truncates a real title match).
+_TRACKING_Q_MAX_LENGTH = 200
+
+
+class TrackingListQuery(BaseModel):
+    """Query args for ``GET /api/v1/tracking/items`` (URL query only)."""
+
+    storage_dir: str | None = None
+    q: str | None = None
+    status_group: str | None = None
+    sort: str | None = None
+
+    @field_validator("q")
+    @classmethod
+    def _clean_q(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        query = value.strip()
+        return query[:_TRACKING_Q_MAX_LENGTH] or None
+
+    @field_validator("status_group")
+    @classmethod
+    def _validate_status_group(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        token = value.strip().upper()
+        if token not in _TRACKING_LIST_STATUS_GROUPS:
+            raise ValueError("status_group 必须为 PENDING/PROCESSING/ACTIVE/ATTENTION/INACTIVE")
+        return token
+
+    @field_validator("sort")
+    @classmethod
+    def _validate_sort(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        token = value.strip().lower()
+        if token not in _TRACKING_LIST_SORTS:
+            raise ValueError("sort 必须为 updated_at/title/status")
+        return token
+
+
+class TrackingDetailQuery(BaseModel):
+    """Query args for ``GET /api/v1/tracking/items/{tracking_id}``.
+
+    ``tracking_id`` comes from the URL path; ``storage_dir`` from the query.
+    """
+
+    tracking_id: str
+    storage_dir: str | None = None
+
+
+class TrackingRevalidatePayload(BaseModel):
+    """Body for ``POST /api/v1/tracking/items/{tracking_id}/revalidate`` (US-224).
+
+    The request carries only the server-observed ``expected_revision`` (a
+    revision-aware compare, so a stale client never silently re-checks an
+    outdated record) and an optional storage profile.  ``extra="forbid"``
+    rejects ``ab_config``/credentials/other leaked fields: revalidation is a
+    pure-local check that never accepts connection or capability config.
+    ``tracking_id`` comes from the URL path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    expected_revision: int = Field(ge=1)
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+
+#: Opaque idempotency-key shape for the unified submit (mirrors the operation
+#: model's printable-token contract so a bad key fails at the boundary).
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")
+
+
+class TrackingSubmitPayload(BaseModel):
+    """Body for ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
+
+    ``confirm`` must be strictly true and ``ab_config`` is request-scoped memory
+    only — it is never persisted, logged or returned.  ``expected_revision`` is
+    the server-observed revision the user is confirming; ``idempotency_key`` is
+    the opaque client operation id that makes network replays converge to one
+    external call.  ``extra="forbid"`` rejects leaked fields.
+    ``tracking_id`` comes from the URL path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    expected_revision: int = Field(ge=1)
+    idempotency_key: str
+    confirm: bool
+    ab_config: RequestAbConfigPayload
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_idempotency_key(cls, value: str) -> str:
+        key = value.strip()
+        if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
+            raise ValueError("idempotency_key 包含不合法字符")
+        return key
+
+    @field_validator("expected_revision")
+    @classmethod
+    def _reject_bool_revision(cls, value: int) -> int:
+        if isinstance(value, bool):
+            raise ValueError("expected_revision 必须为正整数")
+        return value
+
+
+#: Fixed recovery-action enum accepted by
+#: ``POST /api/v1/tracking/items/{tracking_id}/recover`` (Stage 29 PRD §11.8).
+_RECOVERY_ACTIONS = frozenset({"AUTO", "MARK_SUCCEEDED", "MARK_FAILED"})
+
+
+class TrackingRecoverPayload(BaseModel):
+    """Body for ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
+
+    ``action`` is one of ``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED``; the two
+    manual actions require ``confirm=true`` (written as a USER audit).  ``AUTO``
+    only reads local operation/Request/AB-result evidence and never contacts an
+    external system, and it never accepts an external id/URL/raw result.
+    ``expected_revision`` is the server-observed revision the user is acting
+    on.  ``extra="forbid"`` rejects leaked fields.  ``tracking_id`` comes from
+    the URL path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    expected_revision: int = Field(ge=1)
+    action: str
+    confirm: bool = False
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+    @field_validator("action")
+    @classmethod
+    def _clean_action(cls, value: str) -> str:
+        action = value.strip().upper()
+        if action not in _RECOVERY_ACTIONS:
+            raise ValueError("action 必须为 AUTO、MARK_SUCCEEDED 或 MARK_FAILED")
+        return action

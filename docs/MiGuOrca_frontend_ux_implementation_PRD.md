@@ -232,8 +232,12 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 
 > 状态注记（2026-09-08）：B-A 已作为 Stage 28 完成（revision、可靠保存、单番/批量 save-confirm、
 > 36 部边界与 safe-info 均已交付，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；
-> 上表 F-B～F-E 依赖的「B-A 部分能力」现已可用。B-B tracking 记录仍未建立，F-C/F-D 的
-> 「保存确认后跳转追番管理」与 F-E/F-F 仍需等待 B-B/B-C。
+> B-B 已作为 Stage 29 完成（统一追番记录：确定性 tracking、纯本地迁移、handoff 扩展、
+> 列表/详情/revalidate/submit/retry/recover 与旧入口收敛，执行 PRD 见
+> `docs/MiGuOrca_stage29_unified_tracking_PRD.md`，B-C handoff 见 future_stages）。
+> 上表 F-B～F-E 依赖的「B-A 部分能力」与「B-B tracking」现已可用，F-C/F-D 的
+> 「保存确认后跳转追番管理」可以开始接入本地 tracking 列表；F-F 仍需等待 B-C/B-D 的
+> Auto Bangumi 管理契约冻结，不能使用 mock-only 页面先冒充功能完成。
 
 ## 10. PR 与回退边界
 

@@ -25,6 +25,9 @@ def test_load_storage_config_uses_predictable_default_layout() -> None:
     assert config.preferences_dir == DEFAULT_STORAGE_DIR / "preferences"
     assert config.corrections_dir == DEFAULT_STORAGE_DIR / "corrections"
     assert config.idempotency_dir == DEFAULT_STORAGE_DIR / "idempotency"
+    assert config.tracking_dir == DEFAULT_STORAGE_DIR / "tracking"
+    assert config.tracking_operations_dir == DEFAULT_STORAGE_DIR / "tracking_operations"
+    assert config.tracking_migrations_dir == DEFAULT_STORAGE_DIR / "tracking_migrations"
 
 
 def test_load_storage_config_allows_caller_override(tmp_path: Path) -> None:
@@ -40,6 +43,9 @@ def test_load_storage_config_allows_caller_override(tmp_path: Path) -> None:
     assert config.preferences_dir == storage_dir / "preferences"
     assert config.corrections_dir == storage_dir / "corrections"
     assert config.idempotency_dir == storage_dir / "idempotency"
+    assert config.tracking_dir == storage_dir / "tracking"
+    assert config.tracking_operations_dir == storage_dir / "tracking_operations"
+    assert config.tracking_migrations_dir == storage_dir / "tracking_migrations"
 
 
 def test_ensure_storage_layout_creates_json_storage_directories(tmp_path: Path) -> None:
@@ -56,6 +62,9 @@ def test_ensure_storage_layout_creates_json_storage_directories(tmp_path: Path) 
     assert config.preferences_dir.is_dir()
     assert config.corrections_dir.is_dir()
     assert config.idempotency_dir.is_dir()
+    assert config.tracking_dir.is_dir()
+    assert config.tracking_operations_dir.is_dir()
+    assert config.tracking_migrations_dir.is_dir()
 
 
 def test_ensure_storage_layout_returns_stable_error_for_file_path(

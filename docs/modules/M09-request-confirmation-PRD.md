@@ -151,3 +151,22 @@ Stage 28 为单番与批量新增“保存并确认”组合端点，把 revisio
   `outcome=SAVED_CONFIRM_FAILED`/公开 `request_id`/`retry_action=ACCEPT_SAVED_REQUEST`。
 - Stage 28 **不创建或伪造 tracking record**：成功 handoff 只返回 `request_id` + `ACCEPTED`；
   后续 B-B tracking 阶段从持久化 ACCEPTED Request 与 handoff 幂等建立统一 tracking record。
+
+## 8. Stage 29 tracking handoff 扩展（已完成）
+
+Stage 29（US-222）在不改变 Stage 28 语义的前提下扩展确认 handoff：
+
+- 单番 accept、单番 save-confirm、批量 save-confirm 与终态重放成功后都会调用
+  `ensure_confirmed_request_tracking`，把同一 Request 收敛到同一条确定性 `tracking_id`。
+- handoff 保留 `status=ACCEPTED` 与 `next_action=OPEN_TRACKING`，并新增
+  `tracking_id`/`tracking_status`/`tracking_ready`/`safe_message`：
+  - 正常：`tracking_id=trk_…`、`tracking_status=PENDING_SUBMIT…`、`tracking_ready=true`、
+    `safe_message=null`；
+  - tracking 写失败：**不回滚已确认 Request**，也不伪造 tracking 状态——
+    `tracking_ready=false`、`tracking_status=null`、固定中文 `safe_message`
+    「方案已保存，追番列表将在打开时自动恢复」，后续打开列表/详情、终态重放或任何 accept
+    入口都会再次 ensure 补偿。
+- 批量 save-confirm 逐条返回 `tracking_id`/`tracking_status`/`tracking_ready`；单条 tracking
+  写失败不失败 HTTP、也不回滚同批其他已确认条目。
+- 确认后的“下一步”统一为 OPEN_TRACKING；统一的追番列表/详情/revalidate/submit/retry/recover
+  入口见 M13 与 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`。

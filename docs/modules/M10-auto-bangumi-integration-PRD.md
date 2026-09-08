@@ -133,3 +133,22 @@ Stage 12 已在独立 qBittorrent 边界中实现显式连接测试，用于验�
 6. 自动化只使用 fake transport；真实实例只允许只读烟雾，写入必须由用户在 Web UI 显式确认。
 
 Stage 25 实际边界：标题 parser 的 season hint 不得直接进入 AutoBangumi payload。M10 只消费 accepted Request 中由真实候选公开标题/元数据或用户显式确认支持的 `season` / `season_raw`；冲突或无法证明的显式非第一季继续 fail closed。3.1.18 的可选 `data.poster_link` 只使用服务端校验过的 MiKan 原始公开 HTTP(S) 海报 URL；缺失时为空且不阻断订阅，opaque 代理地址或客户端字段绝不传播。
+
+## 10. Stage 29 统一提交/恢复边界（已完成）
+
+Stage 29（US-225/226）把“外部调用”收敛到一个可靠提交服务，M10 的 AB create seam 只作为默认
+`submit_one` 被统一 submission service 复用，route 层不复制 payload/client/结果分类逻辑：
+
+1. `apps/migu_orca_web/tracking_submission_service.py::run_tracking_submit/run_tracking_retry`
+   是唯一入口：先纯本地 revalidate（不通过则不访问 AB），再持久化 TrackingRecord `SUBMITTING`
+   与 operation `IN_PROGRESS`，之后才调用 AB create seam；结果经
+   `tracking_engine/controllers/submit.py::classify_external_submit_result` 分类为
+   SUCCEEDED/FAILED/OUTCOME_UNKNOWN（timeout/connection/5xx/未知 code 保守 UNKNOWN，4xx/auth/
+   config 明确 FAILED），再写本地 AB result 与 tracking/operation 终态。
+2. recover（US-226）只做纯本地证据核验：读 operation 状态与 Request 内脱敏 AB result，绝不访问
+   Auto Bangumi；AUTO 无证据 → `RECOVERY_REQUIRED`，人工 `MARK_SUCCEEDED`/`MARK_FAILED` 必须
+   `confirm=true` 且不接收外部 ID/URL/原始结果。
+3. operation 永不保存 AB 配置、endpoint、凭据、上游响应、标题、URL、magnet 或路径；AB 结果只
+   以安全白名单（success/公开 external id/固定 error_type）落盘。
+4. Stage 29 **不实现** AB 订阅/RSS 的列表、详情、修改、启停、删除、刷新或 capability 探测
+   （B-C）；旧 `submit-ab`/批量 submit/retry/recover 继续保留一个发布周期，删除由独立 PRD 决定。

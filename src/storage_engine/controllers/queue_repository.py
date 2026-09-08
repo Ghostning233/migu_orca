@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,18 @@ from storage_engine.controllers.storage_config import (
     StorageConfig,
     ensure_storage_layout,
 )
+
+
+@dataclass(frozen=True)
+class QueueListResult:
+    """Healthy batch queues plus the opaque batch ids of damaged files (US-221)."""
+
+    queues: tuple[BatchSubmissionQueue, ...]
+    damaged_batch_ids: tuple[str, ...]
+
+    @property
+    def unreadable_count(self) -> int:
+        return len(self.damaged_batch_ids)
 
 
 def save_submission_queue(
@@ -96,6 +109,39 @@ def load_submission_queue(
     return deepcopy(queue)
 
 
+def list_submission_queues_tolerant(config: StorageConfig) -> QueueListResult:
+    """Return healthy queues plus opaque batch ids of damaged files (US-221)."""
+    if not config.queue_dir.exists():
+        return QueueListResult(queues=(), damaged_batch_ids=())
+    if not config.queue_dir.is_dir():
+        raise Stage1Error(
+            "storage_error",
+            "本地提交队列存储路径不是目录",
+            "list_submission_queues_tolerant",
+            {"directory": config.queue_dir.name},
+        )
+
+    queues: list[BatchSubmissionQueue] = []
+    damaged: list[str] = []
+    try:
+        queue_files = sorted(config.queue_dir.glob("*.json"))
+    except OSError as exc:
+        raise Stage1Error(
+            "storage_error",
+            "列出提交队列失败",
+            "list_submission_queues_tolerant",
+            {"directory": config.queue_dir.name},
+        ) from exc
+
+    for queue_file in queue_files:
+        candidate_id = queue_file.stem
+        try:
+            queues.append(load_submission_queue(config, candidate_id))
+        except Stage1Error:
+            damaged.append(candidate_id)
+    return QueueListResult(queues=tuple(queues), damaged_batch_ids=tuple(damaged))
+
+
 def _extract_batch_id(queue: BatchSubmissionQueue, failed_step: str) -> str:
     batch_id = queue.batch_id
     if not isinstance(batch_id, str) or not batch_id.strip():
@@ -151,6 +197,8 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 
 
 __all__ = [
+    "QueueListResult",
+    "list_submission_queues_tolerant",
     "load_submission_queue",
     "save_submission_queue",
 ]

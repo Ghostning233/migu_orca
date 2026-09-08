@@ -28,7 +28,11 @@ uv run migu-orca-openapi --check    # 漂移检查（CI 使用，非零退出表
 
 Stage 27 前端只通过 OpenAPI 生成 TypeScript 类型，不手写第二套响应 interface；Stage 28 在
 同一契约基线上新增单番/批量 save-confirm、36 部边界与 Request safe-info 端点，均同步
-OpenAPI/生成 client/endpoint inventory。
+OpenAPI/生成 client/endpoint inventory。Stage 29 在同一基线上新增统一追番族
+`/api/v1/tracking/items` 列表/详情/revalidate/submit/retry/recover（US-223～US-226），
+operationId 为 `listTrackingItems`/`getTrackingItemDetail`/`revalidateTrackingItem`/
+`submitTrackingItem`/`retryTrackingItem`/`recoverTrackingItem`，全部严格 DTO
+（`extra="forbid"`）与可读 operationId 同步 OpenAPI、endpoint inventory 和生成 client。
 
 ```bash
 cd frontend

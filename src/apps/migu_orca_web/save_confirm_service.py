@@ -531,7 +531,10 @@ class BatchSaveConfirmItemResult:
     ``failed`` for every expected per-item failure, and ``skipped`` for a
     duplicate ``item_id`` inside one request. ``request_id``/``status`` are only
     set on the CONFIRMED branch; ``error_type``/``error_message`` only on the
-    failed branch.
+    failed branch. ``tracking_id``/``tracking_ready`` are set on the CONFIRMED
+    branch after the item has entered the unified tracking list (US-222); a
+    confirmed item whose tracking write failed still reports CONFIRMED with
+    ``tracking_ready=False`` so its siblings never roll back.
     """
 
     item_id: str
@@ -540,6 +543,8 @@ class BatchSaveConfirmItemResult:
     status: str | None = None
     error_type: str | None = None
     error_message: str | None = None
+    tracking_id: str | None = None
+    tracking_ready: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -745,6 +750,8 @@ def serialize_batch_save_confirm_result(
                 "status": item.status,
                 "error_type": item.error_type,
                 "error_message": item.error_message,
+                "tracking_id": item.tracking_id,
+                "tracking_ready": item.tracking_ready,
             }
             for item in result.results
         ],

@@ -270,6 +270,147 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - 改批量 DTO 后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`
   （drift check 双守护）；`test_dto_contracts.py` 用真实 serializer 输出断言嵌套白名单。
 
+## 统一追番记录 handoff（US-222）
+
+- `apps/migu_orca_web/tracking_handoff.py` 是所有「已确认 Request → 统一追番列表」的公共入口：
+  `ensure_confirmed_request_tracking(config, request, origin=...)` 构造 revision=1 的
+  `TrackingRecord`（plan_summary 复用 `tracking_engine.controllers.migration.plan_summary_from_request`，
+  确定性 `tracking_id_for_request`）并调 `ensure_tracking_record`（create-if-absent，绝不覆盖已有；
+  同 Request 并发/重放/迁移收敛同一条记录，重复 ensure 不 bump revision/不重复审计）。
+- **必须接入的入口**：单番 accept（origin `LEGACY_ACCEPT`）、单番 save-confirm 与批量
+  save-confirm（origin `SAVE_CONFIRM`）、save-confirm 终态重放；US-226 起的统一 submit 服务也复用
+  本模块做 ensure/revalidate/operation 编排。
+- **tracking 写失败绝不允许回滚已确认 Request**：`ensure_confirmed_request_tracking` 捕获
+  repository `Stage1Error` 并返回 not-ready handoff（`tracking_ready=False` + `tracking_status=None`
+  不伪造状态 + 固定中文 `safe_message` =「方案已保存，追番列表将在打开时自动恢复」），后续任一
+  tracking 访问再次 ensure 补偿。不要在 route 层 try/except 吞掉非 tracking 错误。
+- 单番 save-confirm 的 `handoff` DTO（`RequestSaveConfirmHandoffDTO`）与批量 save-confirm 的
+  CONFIRMED 逐条结果（`BatchSaveConfirmItemResult`）都携带
+  `tracking_id`/`tracking_status`/`tracking_ready`/`safe_message`（批量只加
+  `tracking_id`/`tracking_ready`）。批量路径在 `routes_batches._ensure_batch_tracking` 对 CONFIRMED
+  项**逐条 best-effort** enrich（一个 tracking 写失败不失败整个 HTTP 响应），不要放进
+  `run_batch_save_confirm`/`build_batch_process_one` 业务层。
+- 改这两类响应 DTO/字段后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`，
+  并同步 `docs/api/endpoint_inventory.md` §3.1/§3.4/§4 与 `api.test.ts`/DTO/golden 契约测试。
+
+## 统一追番列表/详情读模型（US-223）
+
+- `routes_tracking.py` 只注册两个 GET 视图；编排在 `tracking_read_service.py`
+  （`list_tracking_items` / `build_tracking_detail`），公开白名单在
+  `tracking_serializers.py`。任一 tracking 读 API 都先调 `run_tracking_migration(config)`
+  （manifest COMPLETE 后只是重放，不重复全量扫描）。
+- `tracking_serializers.tracking_summary_fields` 是列表/详情共用的 summary 白名单：free-text
+  标题/字幕组必须经 `serializers._safe_label` 二次脱敏；`poster_path` 只允许严格同源
+  `/api/v1/mikan/posters/<opaque-key>`（模型只保证「应」为同源路径，读侧必须强校验）；
+  `available_actions` 由服务端按 tracking status 计算，只返回当前可执行动作，禁止在前端推断。
+- 列表 `valid_resource_count` 复用 `serialize_request_safe_info`（唯一 producer）；缺/损坏 Request
+  时该项降级为 0，detail 的 `safe_info` 降级为 `None` + 固定 warning，绝不失败整个响应。
+- 单条损坏 tracking JSON 不阻塞健康列表：`list_tracking_records` 返回
+  `(records, damaged_tracking_ids)`，API 层只暴露 `unreadable` 计数与固定 warning。
+- 改 tracking 读 DTO/路由后必须同步 `docs/api/openapi.json`、`docs/api/endpoint_inventory.md`
+  §2/§3.6、`frontend/src/api/generated/api.ts` 与 `api.test.ts`（operationId/path 联合 + 计数）。
+  新增 tracking 错误类型（如 `tracking_not_found`/`tracking_storage_error`/
+  `tracking_migration_error`）要同时进 `extensions/flask_api/api.py` 的 HTTP 分类与 `_ENDPOINTS`。
+
+## 统一追番复核（US-224）
+
+- `POST /api/v1/tracking/items/{tracking_id}/revalidate`（`TrackingItemRevalidateView`，
+  operationId `revalidateTrackingItem`）是 revision-aware 纯本地复核：请求只接受
+  `expected_revision`（必填正整数）与可选 `storage_dir`，`TrackingRevalidatePayload`
+  用 `extra="forbid"` 拒绝 `ab_config`/未知字段。业务复核失败仍 HTTP 200
+  （`ready=false` + `next_status=NEEDS_RECONFIRM` + 固定 §11.5 issue 列表）；只有
+  revision/state 冲突才抛 409。
+- 编排在 `apps/migu_orca_web/tracking_revalidate_service.py::run_tracking_revalidate`：
+  先 `run_tracking_migration` → `load_tracking_record` → 校验
+  `expected_revision == record.revision`（否则 409 `tracking_revision_conflict`）→ 状态必须在
+  `REVALIDATABLE_STATUSES`（PENDING_SUBMIT/NEEDS_RECONFIRM/SUBMIT_FAILED，否则 409
+  `tracking_state_conflict`）→ 容错加载最新 Request（损坏/缺失 → `REQUEST_MISSING` 业务 issue，
+  绝不泄露路径）→ 计算当前 fingerprint → 纯分类。纯分类在
+  `tracking_engine/controllers/revalidate.py`（无 storage import，`classify_revalidation`），
+  校验结果通过 `RevalidationIssue` dataclass 表达，**web 服务不得在 route 复制 checklist**。
+- 状态迁移（由服务层用 `transition_record` + 一次 CAS 原子落盘，绝不在 route 层复制 revision
+  逻辑）：失败把 `PENDING_SUBMIT`/`SUBMIT_FAILED` → `NEEDS_RECONFIRM`（+1 revision +
+  审计 `PLAN_CHANGE_DETECTED`（REQ_CHANGED）或 `REVALIDATION_FAILED`）；通过把
+  `NEEDS_RECONFIRM` → `PENDING_SUBMIT`（+1 + `REVALIDATION_PASSED`）；
+  `PENDING_SUBMIT`/`SUBMIT_FAILED` 通过与 `NEEDS_RECONFIRM` 重复失败都是「无变化复核」：
+  不 bump revision、不重复审计（§9）。`request_fingerprint` **不**在复核中更新——采纳新方案是
+  US-225 的 `confirm=true` submit 决定，所以 REQUEST_CHANGED 会持续到确认后消失。
+- 审计 actor 用 SYSTEM（服务端自动本地复核）；错误 details 只含
+  `field`/`current_status`/`available_actions`/`current_revision`，经
+  `sanitize_error_data` 落在 `error_data.details`（测试断言取 `details`）。
+- 改 revalidate 响应/路由后同步 `docs/api/openapi.json`、`endpoint_inventory.md` §2/§3.6、
+  `api.ts` 与 `api.test.ts`；新增 409 错误类型 `tracking_revision_conflict`/
+  `tracking_state_conflict` 已进 `extensions/flask_api/api.py` 分类集，必须在
+  `_ENDPOINTS` 对应端点声明。
+
+## 统一追番提交（US-225）
+
+- `POST /api/v1/tracking/items/{tracking_id}/submit`（`TrackingItemSubmitView`，
+  operationId `submitTrackingItem`）编排在
+  `apps/migu_orca_web/tracking_submission_service.py::run_tracking_submit`：先跑
+  migration coordinator → load TrackingRecord → `confirm` 严格 true（否则 400
+  `tracking_confirmation_required`）→ 重新读取最新 Request 跑
+  `classify_revalidation`（纯本地，不信任浏览器 fingerprint）。复核阻塞时
+  `NEEDS_RECONFIRM` 是已落盘业务结果（HTTP 200 + 固定 issue），绝不访问 Auto Bangumi；
+  只有「仅 fingerprint 变化」且 `confirm=true` 才在 SUBMITTING 写入中采纳新方案并继续。
+- 可靠顺序（§13.2/§13.3）：bind operation=PREPARED → TrackingRecord CAS=SUBMITTING
+  （同一原子写更新 request_fingerprint/current_operation_id/审计）→ operation CAS
+  PREPARED→IN_PROGRESS（外部可能发生的持久化边界，只有胜出者可调用外部）→ 外部调用 →
+  先持久化 AB 安全结果（`_sanitize_ab_submit_result` + request snapshot +
+  `save_ab_submit_result`）→ TrackingRecord 终态 → operation 终态。AB 结果落盘失败 →
+  TrackingRecord/operation 都到 RECOVERY_REQUIRED（绝不写成可直接重试的 FAILED）。
+- 结果分类在纯模块 `tracking_engine/controllers/submit.py`
+  （`classify_external_submit_result`，无 storage import）：`success=true` → SUCCEEDED；
+  `ab_timeout`/`ab_connection_failed`/5xx `ab_submit_failed`/`invalid_ab_*`/未知 error_type
+  → OUTCOME_UNKNOWN；4xx `ab_submit_failed`/`ab_auth_failed`/config 类 → FAILED。分类为
+  `ACTIVE`/`SUBMIT_FAILED`/`VERIFYING_EXTERNAL` 是已落盘业务结果 → HTTP 200。
+- 幂等/并发：`bind_tracking_operation` 同键同绑定重放（终态返回原 outcome、PREPARED 安全
+  恢复、IN_PROGRESS → 409 `tracking_operation_in_progress`）；同键不同绑定 → 409
+  `tracking_idempotency_conflict`；进行中 operation（任意键）阻断新提交。新增两类 409
+  错误类型必须进 `api.py` 的 409 集合并声明到 `_ENDPOINTS`。
+- 复用 `batch_engine.controllers.batch_submit_controller.compose_ab_submit_one` 作为默认
+  AB create seam（不复制 payload/client 逻辑）；service 测试注入 fake `submit_one`/
+  `persist_ab_result`，route/contract 测试 monkeypatch
+  `ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client`。`ab_config`
+  只存在于单次请求内存，绝不持久化/记录/回显。
+- migration manifest 写入必须持进程级锁（`migration_repository._MANIFEST_LOCK`）——并发
+  tracking API 首次访问会同时跑 migration coordinator，固定 `.tmp` 无锁会互相
+  replace/unlink（storage_error）。改 manifest 写路径后跑 migration repo/service 回归。
+
+## 统一追番恢复/重试与旧队列投影（US-226）
+
+- `POST /api/v1/tracking/items/{tracking_id}/retry`（`TrackingItemRetryView`，
+  operationId `retryTrackingItem`）请求 shape 与 submit 完全相同（
+  `TrackingSubmitPayload`），只允许从 `SUBMIT_FAILED` 开始：它复用
+  `tracking_submission_service.run_tracking_submit`（新增 `start_statuses` 参数，
+  retry 传 `frozenset({SUBMIT_FAILED})`）。`run_tracking_retry` 是薄包装；
+  `VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`/`UNKNOWN` 先 recover 再 retry（409
+  `tracking_state_conflict`）。同键终态重放在状态守卫前先 resolve（网络重放不重跑外部）。
+- `POST /api/v1/tracking/items/{tracking_id}/recover`（`TrackingItemRecoverView`，
+  operationId `recoverTrackingItem`）编排在
+  `apps/migu_orca_web/tracking_recovery_service.py::run_tracking_recover`。纯分类在
+  `tracking_engine/controllers/recover.py::classify_auto_recovery`（无 storage import）：
+  terminal operation 先决（SUCCEEDED→ACTIVE、FAILED→SUBMIT_FAILED），否则用 Request
+  持久化 AB result 走 `classify_external_submit_result` 映射；无证据 → RECOVERY_REQUIRED
+  （unresolved）。人工动作必须 `confirm=true`（400 `tracking_confirmation_required`）
+  并写 USER 审计；`IN_PROGRESS` operation 恢复时终态化到 SUCCEEDED/FAILED/
+  RECOVERY_REQUIRED（PREPARED 不动）。响应 DTO `TrackingRecoverResultDTO` 带
+  `action`/`needs_manual`（AUTO 无证据时 true）。
+- recoverable 状态 = `VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`/`UNKNOWN`；AUTO 在
+  `RECOVERY_REQUIRED` 上无证据是「无变化恢复」（不 bump revision/不重复审计），在
+  `VERIFYING_EXTERNAL`/`UNKNOWN` 上无证据会移到 `RECOVERY_REQUIRED`
+  （audit `RECOVERY_NEEDS_MANUAL`）。
+- 旧队列兼容投影在 `apps/migu_orca_web/tracking_queue_compat.py`（双向 best-effort，
+  never raising）：`reflect_queue_outcome_into_tracking`（queue→tracking，§10.2 映射）
+  由旧 batch submit/retry/recover route 与单番 submit-ab（`reflect_ab_result_into_tracking`）
+  在操作后调用；`sync_queue_projection_for_tracking`（tracking→queue）由统一
+  submit/retry/recover service 在 SUBMITTING 边界与终态后调用。规则：queue item 已
+  SUCCEEDED 绝不覆盖（§13.3 调用后失败不覆盖成功）；tracking ACTIVE 不被过期 queue
+  降级；queue READY 不重置已推进 tracking 记录。
+- 新增 retry/recover 端点后已同步 openapi_gen `_ENDPOINTS`、`docs/api/openapi.json`、
+  endpoint_inventory §2/§3.6、`frontend/src/api/generated/api.ts` 与 `api.test.ts`
+  （operationId `retryTrackingItem`/`recoverTrackingItem`，计数 31→33）。
+
 ## 静态检查与就绪探针（US-195）
 
 - 静态检查是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：

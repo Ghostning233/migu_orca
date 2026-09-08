@@ -220,7 +220,36 @@ def test_request_ab_submit_dto_requires_top_level_ab_result() -> None:
 
 
 def test_request_save_confirm_result_dto_accepts_accepted_payload() -> None:
-    """US-214: the save-confirm success result whitelists the CONFIRMED handoff."""
+    """US-214/US-222: the save-confirm success result whitelists the handoff."""
+    request = accept_request(_generated_request())
+    handoff = {
+        "request_id": request["request_id"],
+        "status": "ACCEPTED",
+        "next_action": "OPEN_TRACKING",
+        "tracking_id": "trk_" + "a" * 32,
+        "tracking_status": "PENDING_SUBMIT",
+        "tracking_ready": True,
+        "safe_message": None,
+    }
+    payload = {
+        "outcome": "CONFIRMED",
+        "request": request,
+        "summary": _summary(request),
+        "handoff": handoff,
+    }
+    validated = RequestSaveConfirmResultDTO.model_validate(payload)
+    assert validated.outcome == "CONFIRMED"
+    assert validated.handoff.request_id == request["request_id"]
+    assert validated.handoff.status == "ACCEPTED"
+    assert validated.handoff.next_action == "OPEN_TRACKING"
+    assert validated.handoff.tracking_id == handoff["tracking_id"]
+    assert validated.handoff.tracking_status == "PENDING_SUBMIT"
+    assert validated.handoff.tracking_ready is True
+    assert validated.handoff.safe_message is None
+
+
+def test_request_save_confirm_result_dto_accepts_tracking_unavailable_handoff() -> None:
+    """US-222: a tracking write failure still validates (never faked status)."""
     request = accept_request(_generated_request())
     payload = {
         "outcome": "CONFIRMED",
@@ -230,22 +259,26 @@ def test_request_save_confirm_result_dto_accepts_accepted_payload() -> None:
             "request_id": request["request_id"],
             "status": "ACCEPTED",
             "next_action": "OPEN_TRACKING",
+            "tracking_id": "trk_" + "b" * 32,
+            "tracking_status": None,
+            "tracking_ready": False,
+            "safe_message": "方案已保存，追番列表将在打开时自动恢复",
         },
     }
     validated = RequestSaveConfirmResultDTO.model_validate(payload)
-    assert validated.outcome == "CONFIRMED"
-    assert validated.handoff.request_id == request["request_id"]
-    assert validated.handoff.status == "ACCEPTED"
-    assert validated.handoff.next_action == "OPEN_TRACKING"
+    assert validated.handoff.tracking_ready is False
+    assert validated.handoff.tracking_status is None
+    assert validated.handoff.safe_message is not None
 
 
 def test_request_save_confirm_result_dto_rejects_unknown_or_sensitive_fields() -> None:
-    """US-214: the save-confirm success envelope is strict and leak-free.
+    """US-214/US-222: the save-confirm success envelope is strict and leak-free.
 
-    The frozen PRD §6.3 success result is ``{outcome, request, summary,
-    handoff}``. A draft_id, a tracking id, credentials or any unknown field
-    must be rejected at the boundary; the handoff itself only carries the
-    public request_id + ACCEPTED status + the stable OPEN_TRACKING next_action.
+    The frozen success result is ``{outcome, request, summary, handoff}``. A
+    draft_id, credentials or any unknown field must be rejected at the boundary;
+    the handoff carries the public request_id + ACCEPTED status + the stable
+    OPEN_TRACKING next_action + the whitelisted US-222 tracking fields, and
+    rejects any unknown/secret value.
     """
     request = accept_request(_generated_request())
     base = {
@@ -256,14 +289,14 @@ def test_request_save_confirm_result_dto_rejects_unknown_or_sensitive_fields() -
             "request_id": request["request_id"],
             "status": "ACCEPTED",
             "next_action": "OPEN_TRACKING",
+            "tracking_id": "trk_" + "c" * 32,
+            "tracking_status": "PENDING_SUBMIT",
+            "tracking_ready": True,
+            "safe_message": None,
         },
     }
     with pytest.raises(ValidationError):
         RequestSaveConfirmResultDTO.model_validate({**base, "draft_id": "opaque"})
-    with pytest.raises(ValidationError):
-        RequestSaveConfirmResultDTO.model_validate(
-            {**base, "tracking_id": "tracking-1"}
-        )
     with pytest.raises(ValidationError):
         RequestSaveConfirmResultDTO.model_validate(
             {**base, "handoff": {**base["handoff"], "ab_url": "https://example.invalid"}}
@@ -271,6 +304,15 @@ def test_request_save_confirm_result_dto_rejects_unknown_or_sensitive_fields() -
     with pytest.raises(ValidationError):
         RequestSaveConfirmResultDTO.model_validate(
             {**base, "handoff": {**base["handoff"], "request_id": request["request_id"], "secret_token": "x"}}
+        )
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate(
+            {**base, "handoff": {**base["handoff"], "tracking_status": 1}}
+        )
+    # A missing tracking field on the strict handoff is a validation error.
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate(
+            {**base, "handoff": {k: v for k, v in base["handoff"].items() if k != "tracking_ready"}}
         )
 
 
@@ -870,7 +912,7 @@ def test_batch_submit_dto_shares_accept_shape() -> None:
 
 
 def test_batch_save_confirm_dto_validates_partial_success_result() -> None:
-    """US-216: the batch save-confirm result is strict and public-only."""
+    """US-216/US-222: the batch save-confirm result is strict and public-only."""
     payload = {
         "batch_id": "batch-1",
         "results": [
@@ -881,6 +923,8 @@ def test_batch_save_confirm_dto_validates_partial_success_result() -> None:
                 "status": "ACCEPTED",
                 "error_type": None,
                 "error_message": None,
+                "tracking_id": "trk_" + "a" * 32,
+                "tracking_ready": True,
             },
             {
                 "item_id": "item-2",
@@ -893,7 +937,11 @@ def test_batch_save_confirm_dto_validates_partial_success_result() -> None:
         ],
         "summary": {"requested": 2, "confirmed": 1, "failed": 1},
     }
-    assert BatchSaveConfirmResultDTO.model_validate(payload) is not None
+    validated = BatchSaveConfirmResultDTO.model_validate(payload)
+    assert validated is not None
+    assert validated.results[0].tracking_id is not None
+    assert validated.results[0].tracking_ready is True
+    assert validated.results[1].tracking_id is None
     with pytest.raises(ValidationError):
         BatchSaveConfirmResultDTO.model_validate({**payload, "leak": 1})
 
@@ -921,7 +969,6 @@ def test_batch_save_confirm_dto_rejects_sensitive_item_fields() -> None:
         "token",
         "password",
         "storage_dir",
-        "tracking_id",
     ):
         with pytest.raises(ValidationError):
             BatchSaveConfirmResultDTO.model_validate(

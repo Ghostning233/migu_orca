@@ -62,12 +62,16 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     # US-215: a single batch parse accepts 1..36 non-empty lines; 37+ is a
     # client-input error rejected before any title parse/MiKan/persist seam.
     "batch_limit_exceeded",
+    # US-225: submit/retry must be explicitly confirmed (confirm=true); a
+    # false/missing confirmation is a client-input error (Stage 29 PRD §14).
+    "tracking_confirmation_required",
 }
 # 404 — the addressed resource does not exist.
 _HTTP_NOT_FOUND_ERROR_TYPES = {
     "request_not_found",
     "poster_not_found",
     "queue_item_not_found",
+    "tracking_not_found",
 }
 # 409 — the request conflicts with the current server state (replay/expired/
 #       stale/status conflict). US-194 draft-store failures (draft_expired,
@@ -91,6 +95,15 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     # retry with the accept action converges on the same saved Request, so the
     # conflict-with-server-state semantics (409) fit better than a 500.
     "save_confirm_failed",
+    # US-224: revalidate/submit are revision-aware and state-aware. A stale
+    # expected_revision or a non-revalidatable tracking status conflicts with
+    # the current server state (Stage 29 PRD §14).
+    "tracking_revision_conflict",
+    "tracking_state_conflict",
+    # US-225: a same key bound to different content, or an in-flight submit
+    # operation that only recovery may resolve (Stage 29 PRD §14).
+    "tracking_idempotency_conflict",
+    "tracking_operation_in_progress",
 }
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {
@@ -124,6 +137,14 @@ _HTTP_GATEWAY_TIMEOUT_ERROR_TYPES = {
     "ab_timeout",
     "qbittorrent_timeout",
 }
+# 500 — internal/local-storage failures that are never the client's fault.
+_HTTP_INTERNAL_SERVER_ERROR_TYPES = {
+    "internal_server_error",
+    "storage_error",
+    "storage_json_error",
+    "tracking_storage_error",
+    "tracking_migration_error",
+}
 
 
 def _error_http_status(error_type: str) -> int:
@@ -147,11 +168,7 @@ def _error_http_status(error_type: str) -> int:
         return 400
     # Unknown error types default to 400 so a new Stage1Error still gets a
     # client-visible 4xx rather than an unexpected 500.
-    if lowered in {
-        "storage_error",
-        "storage_json_error",
-        "internal_server_error",
-    }:
+    if lowered in _HTTP_INTERNAL_SERVER_ERROR_TYPES:
         return 500
     return 400
 

@@ -111,6 +111,28 @@ Stage 18 补充：
    结果；`IN_PROGRESS` 重试先核对已落盘 Request 再决定继续确认或安全重试保存；同一进程内按 key
    RLock 串行并发同键尝试。
 
+## 9.2 Stage 29 tracking 存储族（已完成）
+
+1. `StorageConfig` 新增 `tracking_dir`/`tracking_operations_dir`/`tracking_migrations_dir`
+   （`<storage>/tracking/`、`<storage>/tracking_operations/`、`<storage>/tracking_migrations/`），
+   由 `ensure_storage_layout` 统一创建；新增存储族必须同步 `storage_config.py` +
+   `storage_config_test.py`（US-219）。
+2. `storage_engine/controllers/tracking_repository.py`：每条 TrackingRecord =
+   `<storage>/tracking/<tracking_id>.json`，schema v1 严格白名单 + revision CAS（base 必须等于
+   当前 revision，next = base+1），写用 temp + `os.replace`，进程内按 tracking_id RLock；
+   `ensure` create-if-absent（确定性 `tracking_id` = 版本命名空间 + request_id 摘要），
+   `list` 返回健康记录 + damaged opaque id，单条损坏不阻塞不删除。
+3. `storage_engine/controllers/operation_repository.py`：每条 operation =
+   `<storage>/tracking_operations/<operation_id>.json`，`operation_id` = 版本命名空间 +
+   idempotency_key 摘要；绑定同键同绑定重放、异绑定 409；乐观并发用 on-disk state CAS；
+   operation 永不保存 AB 配置/凭据/标题/URL/magnet/路径（US-220）。
+4. `storage_engine/controllers/migration_repository.py`：manifest 固定单文件
+   `<storage>/tracking_migrations/schema-v1.json`，只存版本、COMPLETE/PARTIAL 与时间窗和
+   created/existing/recovery_required/unreadable 计数；单文件写盘持进程级
+   `_MANIFEST_LOCK`（并发首次访问会同时触发 coordinator，见 US-225）。
+5. 迁移扫描复用 damage-aware list：Request/queue/AB result 各自的 tolerant list 返回健康项 +
+   损坏 opaque id 计数，损坏文件不回显文件名/路径/原文，PARTIAL 后续访问持续重试直到修复。
+
 ## 8. 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |

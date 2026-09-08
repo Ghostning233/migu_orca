@@ -39,6 +39,7 @@ from apps.migu_orca_web import (  # noqa: F401
     routes_mikan,
     routes_requests,
     routes_settings,
+    routes_tracking,
 )
 from apps.migu_orca_web.blueprints import (  # noqa: F401 - api_blueprint is re-exported for apps.migu_orca_web.__init__
     api_blueprint,

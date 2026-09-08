@@ -1,0 +1,541 @@
+"""Recovery orchestration for unknown/incomplete tracking outcomes (US-226).
+
+``POST /api/v1/tracking/items/{tracking_id}/recover`` resolves a tracking
+record whose external outcome is unknown (``VERIFYING_EXTERNAL``), whose local
+result could not be made durable (``RECOVERY_REQUIRED``), or whose state is
+``UNKNOWN``.  Stage 29 PRD §8.3/§11.8 — a record in one of these states must
+never be blindly retried (D29-07); only an explicit recovery may move it to
+``ACTIVE`` / ``SUBMIT_FAILED`` / ``RECOVERY_REQUIRED``.
+
+This module is the Web-service layer that
+
+1. re-runs the historical-backfill coordinator (every tracking API access does);
+2. loads the TrackingRecord and guards ``expected_revision`` (409
+   ``tracking_revision_conflict``) and the recoverable tracking status (409
+   ``tracking_state_conflict``);
+3. guards the manual actions (``MARK_SUCCEEDED``/``MARK_FAILED`` require
+   ``confirm=true`` → 400 ``tracking_confirmation_required``);
+4. gathers **local-only** evidence (the current operation's state + the
+   Request's persisted safe AB result — never an external call) and runs the
+   pure :func:`classify_auto_recovery` decision for ``AUTO``, or maps a manual
+   action to its outcome;
+5. persists the resulting TrackingRecord transition (status + audit + revision
+   through one CAS) and advances an in-flight operation to its matching
+   terminal state, then returns the safe §11.8 payload.
+
+Security: recovery never contacts Auto Bangumi, never accepts an external
+id/URL/raw result, and manual actions write ``USER`` audit events.  No file
+name, path, credential, URL, magnet or raw upstream text is ever returned.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from apps.migu_orca_web.serializers import serialize_request_safe_info
+from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
+from apps.migu_orca_web.tracking_queue_compat import (
+    sync_queue_projection_for_tracking,
+)
+from apps.migu_orca_web.tracking_serializers import (
+    tracking_available_actions,
+    tracking_summary_fields,
+)
+from shared.errors import Stage1Error
+from storage_engine.controllers.operation_repository import (
+    compare_and_swap_tracking_operation,
+    load_tracking_operation,
+)
+from storage_engine.controllers.request_repository import load_request_snapshot
+from storage_engine.controllers.storage_config import StorageConfig
+from storage_engine.controllers.tracking_repository import (
+    compare_and_swap_tracking_record,
+    load_tracking_record,
+)
+from tracking_engine.controllers.recover import (
+    RECOVERABLE_STATUSES,
+    RECOVERY_ACTION_AUTO,
+    RECOVERY_ACTION_MARK_FAILED,
+    RECOVERY_ACTION_MARK_SUCCEEDED,
+    RECOVERY_ACTIONS,
+    RECOVERY_AUTO_FAILED_MESSAGE,
+    RECOVERY_AUTO_SUCCEEDED_MESSAGE,
+    RECOVERY_MANUAL_FAILED_MESSAGE,
+    RECOVERY_MANUAL_SUCCEEDED_MESSAGE,
+    RECOVERY_NEEDS_MANUAL_MESSAGE,
+    AutoRecoveryDecision,
+    RecoveryEvidence,
+    classify_auto_recovery,
+    recovery_outcome_for_manual,
+)
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_IN_PROGRESS,
+    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
+    TrackingOperation,
+    transition_tracking_operation,
+)
+from tracking_engine.models.tracking import (
+    TRACKING_AUDIT_ACTOR_SYSTEM,
+    TRACKING_AUDIT_ACTOR_USER,
+    TRACKING_AUDIT_RECOVERY_AUTO_FAILED,
+    TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED,
+    TRACKING_AUDIT_RECOVERY_MANUAL_FAILED,
+    TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED,
+    TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL,
+    TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_RECOVERY_REQUIRED,
+    TrackingRecord,
+    transition_record,
+    utc_now,
+)
+
+_RECOVER_FAILED_STEP = "tracking_recover"
+
+
+def run_tracking_recover(
+    config: StorageConfig,
+    *,
+    tracking_id: str,
+    expected_revision: int,
+    action: str,
+    confirm: bool,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Run one explicit recovery for a tracking item.
+
+    ``AUTO`` is a pure-local reconciliation that never touches Auto Bangumi;
+    ``MARK_SUCCEEDED``/``MARK_FAILED`` require ``confirm=true`` and write a
+    ``USER`` audit.  A persisted recovery outcome (``ACTIVE``/``SUBMIT_FAILED``/
+    ``RECOVERY_REQUIRED``) is returned as an HTTP-200-safe result dict; only
+    preconditions (missing record, stale revision, non-recoverable state,
+    missing manual confirmation) raise.
+    """
+    run_tracking_migration(config=config)
+
+    timestamp = now or utc_now()
+    record = load_tracking_record(config, tracking_id)
+    checked_revision = record.revision
+    _guard_expected_revision(expected_revision, record)
+
+    if record.status not in RECOVERABLE_STATUSES:
+        _raise_state_conflict(record)
+
+    if action not in RECOVERY_ACTIONS:
+        raise Stage1Error(
+            "validation_error",
+            "恢复动作必须是 AUTO、MARK_SUCCEEDED 或 MARK_FAILED",
+            _RECOVER_FAILED_STEP,
+            {"field": "action"},
+        )
+
+    manual = action in {RECOVERY_ACTION_MARK_SUCCEEDED, RECOVERY_ACTION_MARK_FAILED}
+    if manual and confirm is not True:
+        raise Stage1Error(
+            "tracking_confirmation_required",
+            "人工恢复必须显式确认核验结果",
+            _RECOVER_FAILED_STEP,
+            {"field": "confirm"},
+        )
+
+    operation = _load_current_operation(config, record)
+    request = _tolerant_load_request(config, record)
+    ab_result = _ab_result_of(request)
+
+    if action == RECOVERY_ACTION_AUTO:
+        decision = classify_auto_recovery(
+            RecoveryEvidence(
+                operation_state=operation.state if operation is not None else None,
+                ab_result=ab_result,
+            )
+        )
+        return _apply_auto_recovery(
+            config,
+            record=record,
+            operation=operation,
+            request=request,
+            decision=decision,
+            checked_revision=checked_revision,
+            timestamp=timestamp,
+        )
+
+    outcome = recovery_outcome_for_manual(action)
+    audit_action = (
+        TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED
+        if outcome == TRACKING_STATUS_ACTIVE
+        else TRACKING_AUDIT_RECOVERY_MANUAL_FAILED
+    )
+    safe_message = (
+        RECOVERY_MANUAL_SUCCEEDED_MESSAGE
+        if outcome == TRACKING_STATUS_ACTIVE
+        else RECOVERY_MANUAL_FAILED_MESSAGE
+    )
+    reason_code = (
+        "manual_recovery_succeeded" if outcome == TRACKING_STATUS_ACTIVE else "manual_recovery_failed"
+    )
+    return _persist_recovery_outcome(
+        config,
+        action=action,
+        record=record,
+        operation=operation,
+        target_status=outcome,
+        audit_action=audit_action,
+        audit_actor=TRACKING_AUDIT_ACTOR_USER,
+        reason_code=reason_code,
+        safe_message=safe_message,
+        target_operation_state=(
+            TRACKING_OPERATION_STATE_SUCCEEDED
+            if outcome == TRACKING_STATUS_ACTIVE
+            else TRACKING_OPERATION_STATE_FAILED
+        ),
+        request=request,
+        checked_revision=checked_revision,
+        needs_manual=False,
+        timestamp=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# AUTO decision application
+# ---------------------------------------------------------------------------
+
+
+def _apply_auto_recovery(
+    config: StorageConfig,
+    *,
+    record: TrackingRecord,
+    operation: TrackingOperation | None,
+    request: dict[str, Any] | None,
+    decision: AutoRecoveryDecision,
+    checked_revision: int,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Persist the AUTO recovery outcome from the pure classifier."""
+    if not decision.resolved:
+        # No clear local evidence: the record must be resolved manually.  A
+        # VERIFYING_EXTERNAL/UNKNOWN record moves to RECOVERY_REQUIRED; one that
+        # is already RECOVERY_REQUIRED stays (an unchanged state is reported
+        # without a revision bump/audit).  An in-flight operation is finalised
+        # to RECOVERY_REQUIRED as durable evidence that only recovery applies.
+        if record.status == TRACKING_STATUS_RECOVERY_REQUIRED:
+            next_record = record
+            needs_manual = True
+            _terminalize_in_flight_operation(
+                config,
+                operation,
+                target_operation_state=TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+                error_type="requires_manual_recovery",
+                timestamp=timestamp,
+            )
+        else:
+            next_record = transition_record(
+                record,
+                status=TRACKING_STATUS_RECOVERY_REQUIRED,
+                audit_action=TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL,
+                audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
+                operation_id=operation.operation_id if operation is not None else None,
+                reason_code="requires_manual_recovery",
+                safe_message=RECOVERY_NEEDS_MANUAL_MESSAGE,
+                now=timestamp,
+            )
+            next_record = compare_and_swap_tracking_record(
+                config,
+                record.tracking_id,
+                base_revision=record.revision,
+                record=next_record,
+            )
+            needs_manual = True
+            _terminalize_in_flight_operation(
+                config,
+                operation,
+                target_operation_state=TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+                error_type="requires_manual_recovery",
+                timestamp=timestamp,
+            )
+        _sync_queue_projection(
+            config,
+            next_record,
+            TRACKING_STATUS_RECOVERY_REQUIRED,
+        )
+        return _recover_result_payload(
+            record=next_record,
+            action=RECOVERY_ACTION_AUTO,
+            outcome=TRACKING_STATUS_RECOVERY_REQUIRED,
+            checked_revision=checked_revision,
+            operation_id=operation.operation_id if operation is not None else None,
+            needs_manual=needs_manual,
+            request=request,
+            timestamp=timestamp,
+        )
+
+    if decision.outcome == TRACKING_STATUS_ACTIVE:
+        audit_action = TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED
+        safe_message = RECOVERY_AUTO_SUCCEEDED_MESSAGE
+        reason_code = "auto_recovery_succeeded"
+        target_operation_state = TRACKING_OPERATION_STATE_SUCCEEDED
+    else:
+        audit_action = TRACKING_AUDIT_RECOVERY_AUTO_FAILED
+        safe_message = RECOVERY_AUTO_FAILED_MESSAGE
+        reason_code = "auto_recovery_failed"
+        target_operation_state = TRACKING_OPERATION_STATE_FAILED
+
+    return _persist_recovery_outcome(
+        config,
+        action=RECOVERY_ACTION_AUTO,
+        record=record,
+        operation=operation,
+        target_status=decision.outcome,
+        audit_action=audit_action,
+        audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
+        reason_code=reason_code,
+        safe_message=safe_message,
+        target_operation_state=target_operation_state,
+        request=request,
+        checked_revision=checked_revision,
+        needs_manual=False,
+        timestamp=timestamp,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Persisting a resolved recovery
+# ---------------------------------------------------------------------------
+
+
+def _persist_recovery_outcome(
+    config: StorageConfig,
+    *,
+    action: str,
+    record: TrackingRecord,
+    operation: TrackingOperation | None,
+    target_status: str,
+    audit_action: str,
+    audit_actor: str,
+    reason_code: str,
+    safe_message: str,
+    request: dict[str, Any] | None,
+    checked_revision: int,
+    needs_manual: bool,
+    timestamp: str,
+    target_operation_state: str | None = None,
+) -> dict[str, Any]:
+    """Transition the record (and its in-flight operation) to a resolved state."""
+    operation_id = operation.operation_id if operation is not None else None
+    next_record = transition_record(
+        record,
+        status=target_status,
+        audit_action=audit_action,
+        audit_actor=audit_actor,
+        operation_id=operation_id,
+        reason_code=reason_code,
+        safe_message=safe_message,
+        now=timestamp,
+    )
+    record_final = compare_and_swap_tracking_record(
+        config,
+        record.tracking_id,
+        base_revision=record.revision,
+        record=next_record,
+    )
+
+    if target_operation_state is not None:
+        _terminalize_in_flight_operation(
+            config,
+            operation,
+            target_operation_state=target_operation_state,
+            error_type=reason_code,
+            timestamp=timestamp,
+        )
+    _sync_queue_projection(config, record_final, target_status)
+    return _recover_result_payload(
+        record=record_final,
+        action=action,
+        outcome=target_status,
+        checked_revision=checked_revision,
+        operation_id=operation_id,
+        needs_manual=needs_manual,
+        request=request,
+        timestamp=timestamp,
+    )
+
+
+def _terminalize_in_flight_operation(
+    config: StorageConfig,
+    operation: TrackingOperation | None,
+    *,
+    target_operation_state: str,
+    error_type: str | None,
+    timestamp: str,
+) -> None:
+    """Advance an ``IN_PROGRESS`` operation to its matching terminal state.
+
+    A PREPARED operation proves the external was never called and is left for a
+    same-key submit to resume; a terminal operation is already final.  Only the
+    ``IN_PROGRESS`` boundary (an external call may have happened) is advanced to
+    the terminal recovery verdict so the durable operation record matches the
+    recovered tracking state.
+    """
+    if operation is None or operation.state != TRACKING_OPERATION_STATE_IN_PROGRESS:
+        return
+    terminal_state = _operation_terminal_for(target_operation_state)
+    try:
+        compare_and_swap_tracking_operation(
+            config,
+            operation.operation_id,
+            expected_state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+            record=transition_tracking_operation(
+                operation,
+                state=terminal_state,
+                error_type=error_type,
+                now=timestamp,
+            ),
+        )
+    except Stage1Error:
+        # A concurrent actor already advanced/failed the operation; the record
+        # outcome above is authoritative and the operation is now terminal.
+        return
+
+
+def _operation_terminal_for(target_operation_state: str) -> str:
+    """Map a recovery target operation state to an allowed terminal state.
+
+    ``SUCCEEDED``/``FAILED``/``RECOVERY_REQUIRED`` are all valid operation
+    terminal states (IN_PROGRESS has an edge to each of them).
+    """
+    if target_operation_state not in {
+        TRACKING_OPERATION_STATE_SUCCEEDED,
+        TRACKING_OPERATION_STATE_FAILED,
+        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    }:
+        raise ValueError(f"invalid recovery operation target: {target_operation_state}")
+    return target_operation_state
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+
+def _guard_expected_revision(expected_revision: int, record: TrackingRecord) -> None:
+    if not isinstance(expected_revision, int) or isinstance(expected_revision, bool):
+        raise Stage1Error(
+            "tracking_revision_conflict",
+            "expected_revision 必须是正整数",
+            _RECOVER_FAILED_STEP,
+            {"field": "expected_revision", "current_revision": record.revision},
+        )
+    if expected_revision != record.revision:
+        raise Stage1Error(
+            "tracking_revision_conflict",
+            "追番记录版本已变化，请刷新后重试",
+            _RECOVER_FAILED_STEP,
+            {
+                "field": "expected_revision",
+                "expected_revision": expected_revision,
+                "current_revision": record.revision,
+            },
+        )
+
+
+def _raise_state_conflict(record: TrackingRecord) -> None:
+    action_codes = [
+        action.get("code")
+        for action in tracking_available_actions(record.status)
+        if isinstance(action.get("code"), str)
+    ]
+    raise Stage1Error(
+        "tracking_state_conflict",
+        "当前追番记录状态不允许恢复",
+        _RECOVER_FAILED_STEP,
+        {
+            "field": "status",
+            "current_status": record.status,
+            "available_actions": action_codes,
+        },
+    )
+
+
+def _load_current_operation(
+    config: StorageConfig,
+    record: TrackingRecord,
+) -> TrackingOperation | None:
+    """Load the record's current operation, tolerating an unreadable reference."""
+    operation_id = record.current_operation_id
+    if not operation_id:
+        return None
+    try:
+        operation = load_tracking_operation(config, operation_id)
+        return operation if isinstance(operation, TrackingOperation) else None
+    except Stage1Error:
+        return None
+
+
+def _tolerant_load_request(
+    config: StorageConfig,
+    record: TrackingRecord,
+) -> dict[str, Any] | None:
+    if not record.request_id:
+        return None
+    try:
+        loaded = load_request_snapshot(config, record.request_id)
+        return loaded if isinstance(loaded, dict) else None
+    except Stage1Error:
+        return None
+
+
+def _ab_result_of(request: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Return the Request's persisted safe AB result, or None when absent."""
+    if not isinstance(request, dict):
+        return None
+    ab_result = request.get("ab_submit_result")
+    return ab_result if isinstance(ab_result, dict) else None
+
+
+def _sync_queue_projection(
+    config: StorageConfig,
+    record: TrackingRecord,
+    tracking_status: str,
+) -> None:
+    """Best-effort mirror of a recovery outcome into any legacy queue item."""
+    if not record.request_id:
+        return
+    sync_queue_projection_for_tracking(
+        config,
+        request_id=record.request_id,
+        tracking_status=tracking_status,
+    )
+
+
+def _recover_result_payload(
+    *,
+    record: TrackingRecord,
+    action: str,
+    outcome: str,
+    checked_revision: int,
+    operation_id: str | None,
+    needs_manual: bool,
+    request: dict[str, Any] | None,
+    timestamp: str,
+) -> dict[str, Any]:
+    """Build the safe §11.8 recover result (HTTP 200 business result)."""
+    valid_count = 0
+    if isinstance(request, dict):
+        resources = serialize_request_safe_info(request, storage_profile=None).get("resources")
+        if isinstance(resources, dict):
+            count = resources.get("valid_resource_count")
+            valid_count = count if isinstance(count, int) and count >= 0 else 0
+    return {
+        "tracking_id": record.tracking_id,
+        "action": action,
+        "outcome": outcome,
+        "checked_revision": checked_revision,
+        "next_revision": record.revision,
+        "checked_at": timestamp,
+        "operation_id": operation_id,
+        "needs_manual": needs_manual,
+        "tracking": tracking_summary_fields(record, valid_resource_count=valid_count),
+    }
+
+
+__all__ = ["run_tracking_recover"]

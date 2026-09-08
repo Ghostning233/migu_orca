@@ -74,3 +74,20 @@ ErrorResult 独立于 Request。Stage 1 不通过 `FAILED` Request 表达流程�
 3. 查询数量与长度必须有界；单条查询失败可继续 fallback，但全部失败不得伪装为 EMPTY。
 4. endpoint、token、Cookie、Authorization、raw HTML/RSS、原始响应、完整失败 URL和本地绝对路径不得进入解析/API/UI/log/trace。
 5. 非第一季确认失败、冲突和非法海报 URL只返回稳定类别；不得回显客户端 aliases、海报 URL、凭据或外部响应。
+
+## 10. Stage 29 tracking 错误边界（已完成）
+
+Stage 29（US-223～US-226）为统一追番 API 增加稳定的 tracking 错误分类并继续执行安全细节边界：
+
+1. HTTP 分类固定（§14）：`tracking_not_found` → 404；`tracking_revision_conflict` /
+   `tracking_state_conflict` / `tracking_operation_in_progress` /
+   `tracking_idempotency_conflict` → 409（details 只含 field/current_revision/current_status/
+   固定 reason）；`tracking_confirmation_required` → 400；`tracking_storage_error` /
+   `tracking_migration_error` → 500。NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/
+   RECOVERY_REQUIRED 是已落盘业务结果，用 HTTP 200 result，不伪装成传输错误。
+2. migration manifest 只暴露时间窗与安全计数（created/existing/recovery_required/unreadable）；
+   PARTIAL 只返回固定中文 warning，绝不回显文件名、路径、request id 或原始 JSON/解析错误。
+3. TrackingRecord/operation/manifest 与 DTO 全部默认拒绝、严格白名单；损坏文件不自动删除、
+   覆盖或回显。
+4. `ab_config`、endpoint、凭据、上游响应、完整 URL、magnet、绝对路径、raw RSS/HTML 与
+   traceback 不得进入 tracking 错误、审计事件、日志、截图或 trace。

@@ -249,17 +249,25 @@ class RequestPreviewSaveResultDTO(_StrictBase):
 
 
 class RequestSaveConfirmHandoffDTO(_StrictBase):
-    """Public ``handoff`` of a confirmed save (US-214).
+    """Public ``handoff`` of a confirmed save (US-214 + US-222).
 
-    Stage 28 deliberately does **not** create a tracking record (D28-09); the
-    handoff hands the frontend the durable ACCEPTED Request identity so the
-    tracking phase can later build a record idempotently. ``next_action`` is
-    the stable B-B hook.
+    The handoff hands the frontend the durable ACCEPTED Request identity plus
+    its unified tracking identity. ``tracking_id`` is always the deterministic
+    id derived from the Request id; ``tracking_ready`` is True when a usable
+    TrackingRecord exists, False when the tracking write failed (the confirmed
+    Request is never rolled back and the record is recovered on the next
+    tracking access — ``tracking_status`` stays null so a state is never
+    faked). ``safe_message`` carries a fixed recovery copy only in that case.
+    ``next_action`` remains the stable B-B hook.
     """
 
     request_id: str
     status: str
     next_action: str
+    tracking_id: str
+    tracking_status: str | None
+    tracking_ready: bool
+    safe_message: str | None
 
 
 class RequestSaveConfirmResultDTO(_StrictBase):
@@ -545,6 +553,9 @@ class BatchSaveConfirmItemResultDTO(_StrictBase):
     present on the CONFIRMED branch; failed items carry the sanitized
     ``error_type`` + a fixed Chinese ``error_message`` and stay retryable by
     the client (the draft is not consumed on an expected failure).
+    ``tracking_id``/``tracking_ready`` are present on the CONFIRMED branch
+    (US-222): the item also entered the unified tracking list, and a tracking
+    write failure still keeps the item confirmed with ``tracking_ready=False``.
     """
 
     item_id: str
@@ -553,6 +564,8 @@ class BatchSaveConfirmItemResultDTO(_StrictBase):
     status: str | None = None
     error_type: str | None = None
     error_message: str | None = None
+    tracking_id: str | None = None
+    tracking_ready: bool | None = None
 
 
 class BatchSaveConfirmResultDTO(_StrictBase):
@@ -705,6 +718,240 @@ class RequestSafeInfoResultDTO(_StrictBase):
     """
 
     safe_info: RequestSafeInfoDTO
+
+
+# ---------------------------------------------------------------------------
+# Tracking items family (US-223)
+# ---------------------------------------------------------------------------
+# The unified tracking list/detail read contract.  Every shape is
+# ``extra="forbid"`` (unknown/engine/URL/credential fields fail at the
+# boundary).  The list item only exposes the non-sensitive record summary plus
+# the server-computed ``available_actions``; the detail additionally reuses the
+# Request safe-info whitelist and returns the current operation's safe summary,
+# revalidation issues, external mapping summary and the most recent audit
+# events — never the full Request, upstream raw JSON, URLs, credentials,
+# magnets or absolute paths.
+
+
+class TrackingAvailableActionDTO(_StrictBase):
+    """One server-computed action (Stage 29 PRD §11.4).
+
+    ``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the
+    fixed §11.4 candidates.  Only currently-executable actions are returned —
+    never a disabled fake action.
+    """
+
+    code: str
+    label: str
+    style: str
+    requires_confirmation: bool
+
+
+class TrackingAuditEventDTO(_StrictBase):
+    """One safe embedded audit event (Stage 29 PRD §9)."""
+
+    event_id: str
+    action: str
+    actor: str
+    from_status: str | None = None
+    to_status: str | None = None
+    tracking_revision: int
+    operation_id: str | None = None
+    reason_code: str | None = None
+    safe_message: str | None = None
+    created_at: str
+
+
+class TrackingRevalidationIssueDTO(_StrictBase):
+    """One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).
+
+    ``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.
+    """
+
+    code: str
+    field: str | None = None
+    message: str
+    recovery_action: str
+
+
+class TrackingOperationSummaryDTO(_StrictBase):
+    """Safe summary of the current TrackingOperation (US-223 detail).
+
+    Only the non-sensitive operation identity/state/outcome markers are
+    exposed — never the idempotency binding, fingerprint, request body, AB
+    config, upstream response or credentials.
+    """
+
+    operation_id: str
+    operation: str
+    state: str
+    attempt: int
+    external_result_id: str | None = None
+    error_type: str | None = None
+    created_at: str
+    updated_at: str
+    completed_at: str | None = None
+
+
+class TrackingItemDTO(_StrictBase):
+    """One unified tracking list item (Stage 29 PRD §11.2).
+
+    ``updated_episode`` is always null and ``updated_episode_status`` is always
+    NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+    ``poster_path`` may only be a same-origin opaque poster proxy route.
+    """
+
+    tracking_id: str
+    request_id: str | None = None
+    title: str | None = None
+    season: int | None = None
+    subtitle_group: str | None = None
+    poster_path: str | None = None
+    status: str
+    status_label: str
+    status_group: str
+    available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
+    valid_resource_count: int = 0
+    updated_episode: None = None
+    updated_episode_status: Literal["NOT_IMPLEMENTED"] = "NOT_IMPLEMENTED"
+    total_episodes: int | None = None
+    revision: int
+    updated_at: str | None = None
+
+
+class TrackingItemListSummaryDTO(_StrictBase):
+    """Safe summary counts for the tracking list (§11.2)."""
+
+    total: int
+    pending: int
+    processing: int
+    active: int
+    needs_attention: int
+    unreadable: int
+
+
+class TrackingItemListResultDTO(_StrictBase):
+    """Result of ``GET /api/v1/tracking/items``."""
+
+    items: list[TrackingItemDTO]
+    summary: TrackingItemListSummaryDTO
+    warnings: list[str] = Field(default_factory=list)
+
+
+class TrackingDetailResultDTO(_StrictBase):
+    """Result of ``GET /api/v1/tracking/items/{tracking_id}`` (§11.3).
+
+    Reuses the strict Request ``safe_info`` whitelist and additionally returns
+    only the current operation's safe summary, revalidation issues, external
+    mapping summary and the most recent 20 audit events.  ``safe_info`` is null
+    only when the backing Request cannot be read (damaged/deleted); a fixed
+    warning is added instead of failing the whole detail.
+    """
+
+    tracking_id: str
+    request_id: str | None = None
+    title: str | None = None
+    season: int | None = None
+    subtitle_group: str | None = None
+    poster_path: str | None = None
+    status: str
+    status_label: str
+    status_group: str
+    available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
+    valid_resource_count: int = 0
+    updated_episode: None = None
+    updated_episode_status: Literal["NOT_IMPLEMENTED"] = "NOT_IMPLEMENTED"
+    total_episodes: int | None = None
+    revision: int
+    origin: str
+    batch_id: str | None = None
+    created_at: str
+    updated_at: str | None = None
+    last_synced_at: str | None = None
+    safe_info: RequestSafeInfoDTO | None = None
+    current_operation: TrackingOperationSummaryDTO | None = None
+    revalidation_issues: list[TrackingRevalidationIssueDTO] = Field(
+        default_factory=list
+    )
+    external_mapping: dict[str, Any] | None = None
+    audit_events: list[TrackingAuditEventDTO] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class TrackingRevalidateResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/revalidate`` (§11.5).
+
+    A business revalidation failure is still HTTP 200: ``ready=false``,
+    ``next_status=NEEDS_RECONFIRM`` and the fixed §11.5 issue codes.  A passing
+    check returns ``ready=true`` with ``next_status=PENDING_SUBMIT`` (or keeps
+    ``SUBMIT_FAILED`` when the record is a failed submission whose plan is still
+    valid).  ``checked_revision`` is the revision the client expected;
+    ``next_revision`` is the record's revision after the outcome persisted (they
+    differ only when the outcome changed the record's status).  ``tracking`` is
+    the safe summary of the persisted record so the client can update the list
+    item without a second read; ``issues`` reuse the fixed §11.5 shape and never
+    leak file names/paths/raw content.
+    """
+
+    tracking_id: str
+    ready: bool
+    checked_revision: int
+    next_revision: int
+    checked_at: str
+    next_status: str
+    issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
+    tracking: TrackingItemDTO
+
+
+class TrackingSubmitResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
+
+    A persisted business result is HTTP 200: ``outcome`` is the record's final
+    status (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/
+    ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the
+    revision the client confirmed; ``next_revision`` is the record's revision
+    after the outcome persisted.  ``operation_id`` is set when a submit
+    operation was created/reused; ``issues`` carry the fixed §11.5 codes when
+    the submit was blocked before any external call.  ``tracking`` is the safe
+    summary of the persisted record so the client can update the list item
+    without a second read.
+    """
+
+    tracking_id: str
+    outcome: str
+    checked_revision: int
+    next_revision: int
+    checked_at: str
+    operation_id: str | None = None
+    issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
+    tracking: TrackingItemDTO
+
+
+class TrackingRecoverResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/recover`` (US-226).
+
+    A persisted recovery result is HTTP 200: ``action`` echoes the requested
+    action (``AUTO``/``MARK_SUCCEEDED``/``MARK_FAILED``) and ``outcome`` is the
+    record's final status (``ACTIVE``/``SUBMIT_FAILED``/``RECOVERY_REQUIRED``).
+    ``checked_revision`` is the revision the client acted on; ``next_revision``
+    is the record's revision after the outcome persisted (unchanged when an
+    ``AUTO`` recovery finds no new evidence on an already-``RECOVERY_REQUIRED``
+    record).  ``operation_id`` is set when the record references a submit
+    operation.  ``needs_manual`` is True when an ``AUTO`` recovery could not
+    resolve the outcome from local evidence and only a manual action can
+    progress.  ``tracking`` is the safe summary of the persisted record so the
+    client can update the list item without a second read.
+    """
+
+    tracking_id: str
+    action: str
+    outcome: str
+    checked_revision: int
+    next_revision: int
+    checked_at: str
+    operation_id: str | None = None
+    needs_manual: bool = False
+    tracking: TrackingItemDTO
 
 
 # ---------------------------------------------------------------------------

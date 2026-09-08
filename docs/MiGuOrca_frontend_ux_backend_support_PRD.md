@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | B-A 已完成 (Stage 28, 2026-09-08)；B-B～B-D 仍待 Gate 4 评审 |
+| 当前状态 | B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C～B-D 待评审 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-025 |
 | 优先级 | P0，阻塞依赖目标能力的前端切片 |
@@ -19,18 +19,10 @@
 
 Stage 26 已建立 Flask `/api/v1`、严格响应 DTO、确定性 OpenAPI、服务端权威 draft 和默认
 local-only 安全边界；Stage 27 已建立 Vue 3、TypeScript、Vite、生成客户端与真实 Chromium
-基线。新体验设计继续复用这些资产，但以下目标行为还没有完整后端契约：
-
-1. 单番与批量的“保存并确认”仍需前端串联保存、接受和入队，无法提供稳定的原子用户语义。
-2. `preview-modify` 没有服务端 revision，快速切换字幕组时只能由客户端忽略晚到结果，不能阻止
-   旧请求覆盖新草案。
-3. 批量输入没有 36 部服务端上限。
-4. 现有单番提交和批量队列可靠性不同，缺少统一提交前复核、幂等和超时结果确认。
-5. Auto Bangumi adapter 只覆盖认证、状态和创建订阅；尚不能支撑列表、详情、修改、启停、删除
-   和 RSS 刷新。
-6. 当前 Request 详情范围大于“全部信息”弹窗允许公开的范围，不能依赖前端隐藏敏感字段。
-7. 现有批量队列按 `batch_id` 组织，不能直接形成包含单番、本地方案和已存在外部订阅的统一
-   “追番管理”视图。
+基线；Stage 28 已完成 revision、可靠保存、单番/批量 save-confirm、36 部边界和 safe-info。
+Stage 29 已完成统一单番/批量提交状态与恢复（tracking 投影、纯本地复核、可靠提交与人工恢复），
+执行细节以 `docs/MiGuOrca_stage29_unified_tracking_PRD.md` 为准；B-C～B-D（Auto Bangumi
+列表、详情、修改、启停、删除和 RSS 管理）继续由本文承载候选边界。
 
 ## 3. 目标
 
@@ -230,8 +222,9 @@ safe_message: string | null
 }
 ```
 
-`modify` 额外包含严格白名单 `patch`；`set-enabled` 额外包含 `enabled`；`recover` 额外包含
-`action: "AUTO" | "SUCCEEDED" | "FAILED"`。人工成功/失败必须二次确认并写审计记录。
+`modify` 额外包含严格白名单 `patch`；`set-enabled` 额外包含 `enabled`。B-B 的 `recover` 使用
+`action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED"`，其中 AUTO 只检查本地证据；B-C 另增外部
+核验动作。人工成功/失败必须二次确认并写审计记录。
 
 ### 7.4 提交前复核
 
@@ -252,12 +245,15 @@ next_status: PENDING_SUBMIT | NEEDS_RECONFIRM
 2. 标题、季度、真实 MiKan 合集和用户确认依据仍完整。
 3. 字幕组、过滤结果和有效资源仍满足提交要求。
 4. tracking revision 与 Request/映射一致，没有被另一个页面修改。
-5. Auto Bangumi 连接有效，目标 adapter 和创建能力已证明。
-6. 已存在映射或对账命中时不得再次创建；应转入同步/恢复。
+5. 已存在映射或本地证据表明可能已创建时不得再次创建；应转入恢复。
+
+独立 `revalidate` 是纯本地操作，不携带 `ab_config`、不探测连接或 capability。提交动作仍须在
+同一服务端用例中重新执行本地复核并校验 request-scoped AB 配置；外部 capability 探测属于 B-C。
 
 `issues[].code` 采用稳定枚举，例如 `REQUEST_MISSING`、`REQUEST_NOT_ACCEPTED`、
-`SEASON_REVIEW_REQUIRED`、`NO_VALID_RESOURCES`、`REVISION_CONFLICT`、`CONNECTION_REQUIRED`、
-`CAPABILITY_UNKNOWN`、`EXTERNAL_ALREADY_EXISTS`。文案为脱敏中文，不能包含上游响应。
+`REQUEST_CHANGED`、`SEASON_REVIEW_REQUIRED`、`MIKAN_SELECTION_MISSING`、
+`SUBTITLE_GROUP_MISSING`、`NO_VALID_RESOURCES`、`EXTERNAL_ALREADY_LINKED`、
+`OPERATION_IN_PROGRESS`、`TRACKING_STATE_INVALID`。文案为脱敏中文，不能包含上游响应。
 
 ## 8. DTO 白名单
 
@@ -323,11 +319,11 @@ serializer 必须按默认拒绝原则显式构造字段。不能先输出 Reque
 | 实施包 | 内容 | 可独立验收结果 | 依赖 |
 | --- | --- | --- | --- |
 | B-A 草案一致性（Stage 28） | revision、可靠保存、单番/批量保存确认、36 部上限、安全信息 DTO | 新添加与批量审核不再串联保存/接受；确认结果可由 B-B 幂等迁移 | 已完成 (Stage 28, 2026-09-08)，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md` |
-| B-B 统一追番记录 | tracking repository、回填、状态映射、复核、幂等/恢复 | 单番与批量进入同一待提交列表 | B-A |
+| B-B 统一追番记录 | Stage 29：tracking repository、回填、状态映射、纯本地复核、幂等提交/恢复 | 单番与批量进入同一待提交列表 | 已完成 (Stage 29, 2026-09-08)，执行 PRD 见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`；B-C 由此扩展 |
 | B-C AB 管理 adapter | 3.1.18 capability、列表/详情/修改/启停/删除/RSS 刷新、映射对账 | 3.1.18 完整管理闭环可由 API 验收 | B-B |
 | B-D 契约收尾 | OpenAPI、TS client、泄漏回归、兼容与迁移演练 | 后端 handoff 冻结，可启动全部依赖前端切片 | B-A～B-C |
 
-B-A 可以先行；B-B 与 B-C 不应塞进前端实现 PR。B-C 风险最高，建议使用独立分支和独立 PR，
+B-A 已完成（Stage 28），B-B 已完成（Stage 29）；B-B 与 B-C 不应塞进前端实现 PR。B-C 风险最高，建议使用独立分支和独立 PR，
 避免一次提交同时改草案事务、存储迁移和多个外部写动作。
 
 ## 12. 验收
