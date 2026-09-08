@@ -180,3 +180,8 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - API sync responses can safely combine the coordinator result with a post-sync local list read; all external data remains behind the existing serializer boundary.
   - 验证：tracking/API 定向测试、DTO/OpenAPI/inventory drift、Ruff 与前端 typecheck/lint/unit/build 全部通过；未运行最终 story 的全量 Chromium 门禁。
 ---
+
+## [2026-09-09 03:42:00 +0800] - US-233 审核修复
+- 审核发现 sync endpoint 缺少专门 API/递归敏感字段回归；新增真实 Flask route 测试，覆盖 strict `confirm=true` 与 request-scoped endpoint/账号/密码不回显。
+- 定向 API 测试和 Ruff 通过。
+---
