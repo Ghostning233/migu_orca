@@ -7,6 +7,7 @@ gives the route modules a single place for request validation while the public
 response DTOs stay in ``api_contract.py`` (which is the Stage 27 contract).
 """
 
+import re
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -557,6 +558,48 @@ class TrackingRevalidatePayload(BaseModel):
         if not tracking_id:
             raise ValueError("tracking_id cannot be empty")
         return tracking_id
+
+
+#: Opaque idempotency-key shape for the unified submit (mirrors the operation
+#: model's printable-token contract so a bad key fails at the boundary).
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-:=]{0,199}$")
+
+
+class TrackingSubmitPayload(BaseModel):
+    """Body for ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
+
+    ``confirm`` must be strictly true and ``ab_config`` is request-scoped memory
+    only — it is never persisted, logged or returned.  ``expected_revision`` is
+    the server-observed revision the user is confirming; ``idempotency_key`` is
+    the opaque client operation id that makes network replays converge to one
+    external call.  ``extra="forbid"`` rejects leaked fields.
+    ``tracking_id`` comes from the URL path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    expected_revision: int = Field(ge=1)
+    idempotency_key: str
+    confirm: bool
+    ab_config: RequestAbConfigPayload
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_idempotency_key(cls, value: str) -> str:
+        key = value.strip()
+        if not _IDEMPOTENCY_KEY_RE.fullmatch(key):
+            raise ValueError("idempotency_key 包含不合法字符")
+        return key
 
     @field_validator("expected_revision")
     @classmethod

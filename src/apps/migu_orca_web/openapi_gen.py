@@ -60,6 +60,7 @@ from apps.migu_orca_web.api_contract import (
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
     TrackingRevalidateResultDTO,
+    TrackingSubmitResultDTO,
 )
 
 OPENAPI_VERSION = "3.1.0"
@@ -765,6 +766,85 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
             "500": {
                 "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/submit": {
+        "operationId": "submitTrackingItem",
+        "summary": "提交统一追番方案到 Auto Bangumi（可靠顺序）",
+        "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，ab_config 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。",
+        "requestBody": {
+            "type": "object",
+            "required": ["expected_revision", "idempotency_key", "confirm", "ab_config"],
+            "properties": {
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision（revision-aware 提交）。",
+                },
+                "idempotency_key": {
+                    "type": "string",
+                    "description": "opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。",
+                },
+                "confirm": {
+                    "type": "boolean",
+                    "enum": [True],
+                    "description": "必须为 true：用户显式确认提交最新方案。",
+                },
+                "ab_config": {
+                    "type": "object",
+                    "x-request-scoped": True,
+                    "properties": {
+                        "auth_mode": {
+                            "type": "string",
+                            "enum": ["password", "api_token"],
+                        },
+                        "base_url": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "username": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "password": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "token": {
+                            "type": "string",
+                            "x-request-scoped": True,
+                        },
+                        "fallback_enabled": {"type": "boolean"},
+                    },
+                    "required": ["auth_mode", "fallback_enabled"],
+                },
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingSubmitResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+                "tracking_confirmation_required": "提交 Auto Bangumi 必须显式确认最新方案",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+                "tracking_state_conflict": "当前追番记录状态不允许提交",
+                "tracking_idempotency_conflict": "同一幂等键已绑定不同的提交内容，不能复用",
+                "tracking_operation_in_progress": "存在尚未完成的提交操作，请先恢复后再提交",
+            },
+            "500": {
+                "storage_error": "写入/读取追番记录失败",
                 "storage_json_error": "追番记录 JSON 损坏",
                 "tracking_storage_error": "追番记录存储失败",
                 "tracking_migration_error": "历史数据迁移失败",

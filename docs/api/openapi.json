@@ -20737,6 +20737,633 @@
           "description": "复核统一追番方案（纯本地）"
         }
       }
+    },
+    "/api/v1/tracking/items/{tracking_id}/submit": {
+      "post": {
+        "summary": "提交统一追番方案到 Auto Bangumi（可靠顺序）",
+        "description": "US-225：对单条统一追番记录执行可靠提交流程。confirm 必须严格为 true，ab_config 只在单次请求内存中存在（绝不进入 storage/URL/日志/trace）。服务端重新读取最新本地 Request 并执行完整本地复核（纯本地，不信任浏览器 fingerprint）；复核不通过时不访问 Auto Bangumi，已落盘业务结果仍返回 HTTP 200，outcome 为 NEEDS_RECONFIRM/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/ACTIVE。仅 Request fingerprint 变化且其余复核通过时，confirm=true 表示采纳最新方案并继续同一次提交。外部调用前先持久化 TrackingRecord=SUBMITTING 与 operation=IN_PROGRESS 作为外部可能发生的持久化边界；同 idempotency_key 重放复用原 operation，并发同键只允许一次外部调用。expected_revision 过期 → 409 tracking_revision_conflict；confirm=false → 400 tracking_confirmation_required；同键不同绑定 → 409 tracking_idempotency_conflict；进行中的提交操作 → 409 tracking_operation_in_progress。",
+        "operationId": "submitTrackingItem",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "result"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "description": "Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).\n\nA persisted business result is HTTP 200: ``outcome`` is the record's final\nstatus (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/\n``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the\nrevision the client confirmed; ``next_revision`` is the record's revision\nafter the outcome persisted.  ``operation_id`` is set when a submit\noperation was created/reused; ``issues`` carry the fixed §11.5 codes when\nthe submit was blocked before any external call.  ``tracking`` is the safe\nsummary of the persisted record so the client can update the list item\nwithout a second read.",
+                      "properties": {
+                        "tracking_id": {
+                          "title": "Tracking Id",
+                          "type": "string"
+                        },
+                        "outcome": {
+                          "title": "Outcome",
+                          "type": "string"
+                        },
+                        "checked_revision": {
+                          "title": "Checked Revision",
+                          "type": "integer"
+                        },
+                        "next_revision": {
+                          "title": "Next Revision",
+                          "type": "integer"
+                        },
+                        "checked_at": {
+                          "title": "Checked At",
+                          "type": "string"
+                        },
+                        "operation_id": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Operation Id"
+                        },
+                        "issues": {
+                          "items": {
+                            "additionalProperties": false,
+                            "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
+                            "properties": {
+                              "code": {
+                                "title": "Code",
+                                "type": "string"
+                              },
+                              "field": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Field"
+                              },
+                              "message": {
+                                "title": "Message",
+                                "type": "string"
+                              },
+                              "recovery_action": {
+                                "title": "Recovery Action",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "code",
+                              "message",
+                              "recovery_action"
+                            ],
+                            "title": "TrackingRevalidationIssueDTO",
+                            "type": "object"
+                          },
+                          "title": "Issues",
+                          "type": "array"
+                        },
+                        "tracking": {
+                          "additionalProperties": false,
+                          "description": "One unified tracking list item (Stage 29 PRD §11.2).\n\n``updated_episode`` is always null and ``updated_episode_status`` is always\nNOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).\n``poster_path`` may only be a same-origin opaque poster proxy route.",
+                          "properties": {
+                            "tracking_id": {
+                              "title": "Tracking Id",
+                              "type": "string"
+                            },
+                            "request_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Request Id"
+                            },
+                            "title": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Title"
+                            },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Season"
+                            },
+                            "subtitle_group": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Subtitle Group"
+                            },
+                            "poster_path": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Poster Path"
+                            },
+                            "status": {
+                              "title": "Status",
+                              "type": "string"
+                            },
+                            "status_label": {
+                              "title": "Status Label",
+                              "type": "string"
+                            },
+                            "status_group": {
+                              "title": "Status Group",
+                              "type": "string"
+                            },
+                            "available_actions": {
+                              "items": {
+                                "additionalProperties": false,
+                                "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
+                                "properties": {
+                                  "code": {
+                                    "title": "Code",
+                                    "type": "string"
+                                  },
+                                  "label": {
+                                    "title": "Label",
+                                    "type": "string"
+                                  },
+                                  "style": {
+                                    "title": "Style",
+                                    "type": "string"
+                                  },
+                                  "requires_confirmation": {
+                                    "title": "Requires Confirmation",
+                                    "type": "boolean"
+                                  }
+                                },
+                                "required": [
+                                  "code",
+                                  "label",
+                                  "style",
+                                  "requires_confirmation"
+                                ],
+                                "title": "TrackingAvailableActionDTO",
+                                "type": "object"
+                              },
+                              "title": "Available Actions",
+                              "type": "array"
+                            },
+                            "valid_resource_count": {
+                              "default": 0,
+                              "title": "Valid Resource Count",
+                              "type": "integer"
+                            },
+                            "updated_episode": {
+                              "default": null,
+                              "title": "Updated Episode",
+                              "type": "null"
+                            },
+                            "updated_episode_status": {
+                              "const": "NOT_IMPLEMENTED",
+                              "default": "NOT_IMPLEMENTED",
+                              "title": "Updated Episode Status",
+                              "type": "string"
+                            },
+                            "total_episodes": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Total Episodes"
+                            },
+                            "revision": {
+                              "title": "Revision",
+                              "type": "integer"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Updated At"
+                            }
+                          },
+                          "required": [
+                            "tracking_id",
+                            "status",
+                            "status_label",
+                            "status_group",
+                            "revision"
+                          ],
+                          "title": "TrackingItemDTO",
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "tracking_id",
+                        "outcome",
+                        "checked_revision",
+                        "next_revision",
+                        "checked_at",
+                        "tracking"
+                      ],
+                      "title": "TrackingSubmitResultDTO",
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true,
+                  "result": {
+                    "tracking_id": "示例",
+                    "outcome": "示例",
+                    "checked_revision": 1,
+                    "next_revision": 1,
+                    "checked_at": "示例",
+                    "operation_id": null,
+                    "issues": [
+                      {
+                        "code": "示例",
+                        "field": null,
+                        "message": "示例",
+                        "recovery_action": "示例"
+                      }
+                    ],
+                    "tracking": {
+                      "tracking_id": "示例",
+                      "request_id": null,
+                      "title": null,
+                      "season": null,
+                      "subtitle_group": null,
+                      "poster_path": null,
+                      "status": "示例",
+                      "status_label": "示例",
+                      "status_group": "示例",
+                      "available_actions": [
+                        {
+                          "code": "示例",
+                          "label": "示例",
+                          "style": "示例",
+                          "requires_confirmation": true
+                        }
+                      ],
+                      "valid_resource_count": 0,
+                      "updated_episode": null,
+                      "updated_episode_status": "NOT_IMPLEMENTED",
+                      "total_episodes": null,
+                      "revision": 1,
+                      "updated_at": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_tracking_id: tracking_id 包含不合法字符或路径片段 / tracking_confirmation_required: 提交 Auto Bangumi 必须显式确认最新方案",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "data_validation_errors",
+                  "error_message": "请求参数校验失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "tracking_not_found: 未找到该追番记录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "tracking_not_found",
+                  "error_message": "未找到该追番记录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许提交 / tracking_idempotency_conflict: 同一幂等键已绑定不同的提交内容，不能复用 / tracking_operation_in_progress: 存在尚未完成的提交操作，请先恢复后再提交",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "tracking_revision_conflict",
+                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "storage_error: 写入/读取追番记录失败 / storage_json_error: 追番记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 / tracking_migration_error: 历史数据迁移失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "storage_error",
+                  "error_message": "写入/读取追番记录失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "expected_revision",
+                  "idempotency_key",
+                  "confirm",
+                  "ab_config"
+                ],
+                "properties": {
+                  "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision（revision-aware 提交）。"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "description": "opaque 客户端提交操作 id；同键网络重放收敛到同一次外部调用。只进请求体与页面内存。"
+                  },
+                  "confirm": {
+                    "type": "boolean",
+                    "enum": [
+                      true
+                    ],
+                    "description": "必须为 true：用户显式确认提交最新方案。"
+                  },
+                  "ab_config": {
+                    "type": "object",
+                    "x-request-scoped": true,
+                    "properties": {
+                      "auth_mode": {
+                        "type": "string",
+                        "enum": [
+                          "password",
+                          "api_token"
+                        ]
+                      },
+                      "base_url": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "username": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "password": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "token": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "fallback_enabled": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "auth_mode",
+                      "fallback_enabled"
+                    ]
+                  },
+                  "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  }
+                }
+              },
+              "example": {
+                "expected_revision": 1,
+                "idempotency_key": "示例",
+                "confirm": true
+              }
+            }
+          },
+          "description": "提交统一追番方案到 Auto Bangumi（可靠顺序）"
+        }
+      }
     }
   },
   "components": {

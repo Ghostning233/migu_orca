@@ -62,6 +62,9 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     # US-215: a single batch parse accepts 1..36 non-empty lines; 37+ is a
     # client-input error rejected before any title parse/MiKan/persist seam.
     "batch_limit_exceeded",
+    # US-225: submit/retry must be explicitly confirmed (confirm=true); a
+    # false/missing confirmation is a client-input error (Stage 29 PRD §14).
+    "tracking_confirmation_required",
 }
 # 404 — the addressed resource does not exist.
 _HTTP_NOT_FOUND_ERROR_TYPES = {
@@ -97,6 +100,10 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     # the current server state (Stage 29 PRD §14).
     "tracking_revision_conflict",
     "tracking_state_conflict",
+    # US-225: a same key bound to different content, or an in-flight submit
+    # operation that only recovery may resolve (Stage 29 PRD §14).
+    "tracking_idempotency_conflict",
+    "tracking_operation_in_progress",
 }
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {

@@ -83,6 +83,7 @@
 | GET | `/api/v1/tracking/items` | `migu_orca_web_api.TrackingItemListView` | TrackingItemListView |
 | GET | `/api/v1/tracking/items/<path:tracking_id>` | `migu_orca_web_api.TrackingItemDetailView` | TrackingItemDetailView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/revalidate` | `migu_orca_web_api.TrackingItemRevalidateView` | TrackingItemRevalidateView |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/submit` | `migu_orca_web_api.TrackingItemSubmitView` | TrackingItemSubmitView |
 
 页面路由（非 JSON API，供对照）：`GET /` → 302 `/app/workbench`；`GET /index` →
 302 `/app/workbench`（保留 `request_id`/`batch_id` query）；`GET /Settings` →
@@ -184,18 +185,21 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 
 两类连接测试的请求凭据都保持 request-scoped：不写入 storage、URL、浏览器 storage、日志或测试 trace。
 
-### 3.6 Tracking（`/api/v1/tracking/items`，US-223 + US-224）
+### 3.6 Tracking（`/api/v1/tracking/items`，US-223 + US-224 + US-225）
 
-Tracking 端点全部是纯本地操作：执行前先运行历史回填协调器（manifest `COMPLETE` 后不再全量扫描），
+Tracking 读端点全部是纯本地操作：执行前先运行历史回填协调器（manifest `COMPLETE` 后不再全量扫描），
 绝不访问外部系统。列表/详情/复核只返回 TrackingRecord 与 Request 的安全白名单投影；单条 tracking
 JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warning，绝不暴露文件信息。revalidate
-不接收 `ab_config`/连接/capability 配置，只接受 `expected_revision`（revision-aware）。
+不接收 `ab_config`/连接/capability 配置，只接受 `expected_revision`（revision-aware）。submit
+（US-225）是唯一会访问 Auto Bangumi 的端点：`confirm` 必须严格为 true，`ab_config` 只在单次请求
+内存中存在，外部调用前先持久化 `SUBMITTING` + operation `IN_PROGRESS` 作为持久化边界。
 
 | 端点 | 请求字段 | 成功 `result`（白名单） | 业务失败示例 |
 | --- | --- | --- | --- |
 | GET `/api/v1/tracking/items` | `storage_dir?`、`q?`、`status_group?`（`PENDING`/`PROCESSING`/`ACTIVE`/`ATTENTION`/`INACTIVE`）、`sort?`（`updated_at`/`title`/`status`） | `{"items": [<TrackingItemDTO>], "summary": {total, pending, processing, active, needs_attention, unreadable}, "warnings": []}` | 非法枚举 → `data_validation_errors`；`invalid_storage_dir` |
 | GET `/api/v1/tracking/items/<tracking_id>` | `tracking_id`（路径）、`storage_dir?` | `{...summary 字段, origin, batch_id?, created_at, updated_at?, last_synced_at?, safe_info?, current_operation?, revalidation_issues: [], external_mapping?, audit_events[]（最近 20 条）, warnings}` | 缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id`；损坏 → `storage_json_error` |
 | POST `/api/v1/tracking/items/<tracking_id>/revalidate`（US-224） | `tracking_id`（路径）、`expected_revision`（必填）、`storage_dir?` | `{tracking_id, ready, checked_revision, next_revision, checked_at, next_status, issues[], tracking}`（业务复核失败仍 HTTP 200：`ready=false`、`next_status=NEEDS_RECONFIRM` + 固定 §11.5 issue code） | 缺 `expected_revision`/多余字段（如 `ab_config`）→ `data_validation_errors`；`expected_revision` 过期 → `tracking_revision_conflict`（409）；非可复核状态 → `tracking_state_conflict`（409）；缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id` |
+| POST `/api/v1/tracking/items/<tracking_id>/submit`（US-225） | `tracking_id`（路径）、`expected_revision`（必填）、`idempotency_key`（必填）、`confirm`（必须严格 `true`）、`ab_config`（request-scoped，必填）、`storage_dir?` | `{tracking_id, outcome, checked_revision, next_revision, checked_at, operation_id?, issues[], tracking}`（已落盘业务结果 HTTP 200，`outcome` ∈ `ACTIVE`/`SUBMIT_FAILED`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`/`NEEDS_RECONFIRM`） | `confirm=false` → `tracking_confirmation_required`（400）；`expected_revision` 过期 → `tracking_revision_conflict`（409）；非可提交状态 → `tracking_state_conflict`（409）；同键不同绑定 → `tracking_idempotency_conflict`（409）；进行中提交 → `tracking_operation_in_progress`（409）；缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id`；非法 `idempotency_key` → `data_validation_errors` |
 
 `revalidate` 的 `issues[]`（`TrackingRevalidationIssueDTO`，固定 §11.5 枚举）字段：
 `code`、`field?`、`message`、`recovery_action`。code 只允许
@@ -291,6 +295,23 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   成功项不因失败项回滚；同一 `item_id` 重复 → `skipped`。同一 item + `idempotency_key`
   幂等重试重放同一 CONFIRMED 结果，不创建第二个 Request。请求级 shape/batch_id/storage
   profile 错误仍走普通失败 envelope。
+- US-225：新增 `POST /api/v1/tracking/items/{tracking_id}/submit`
+  （`TrackingItemSubmitView`，operationId `submitTrackingItem`）。统一可靠提交流程由
+  `apps/migu_orca_web/tracking_submission_service.run_tracking_submit` 编排：先跑
+  migration coordinator → load TrackingRecord → `confirm` 必须严格 true（否则 400
+  `tracking_confirmation_required`）→ 服务端重新读取最新 Request 并跑纯本地复核
+  （`classify_revalidation`，不信任浏览器 fingerprint）。仅 fingerprint 变化（其余通过）时
+  `confirm=true` 采纳最新方案并在同一次 SUBMITTING 写入中更新 fingerprint/revision/审计；
+  其他阻断 issue 不访问 Auto Bangumi，落盘为 HTTP 200 的 `NEEDS_RECONFIRM`。外部调用前
+  先 bind operation=PREPARED → 写 TrackingRecord=SUBMITTING → operation CAS
+  PREPARED→IN_PROGRESS（持久化边界，只有胜出者访问 Auto Bangumi）；结果经
+  `tracking_engine/controllers/submit.classify_external_submit_result` 分类为
+  `ACTIVE`/`SUBMIT_FAILED`/`VERIFYING_EXTERNAL`，先持久化 AB 安全结果再写 TrackingRecord
+  终态与 operation 终态；AB 结果落盘失败 → `RECOVERY_REQUIRED`。同 `idempotency_key`
+  终态重放复用原 operation 返回同一 outcome（不再外部调用），PREPARED 同键重放安全恢复，
+  IN_PROGRESS 同键并发只允许一次外部调用、落败者 409 `tracking_operation_in_progress`；
+  同键不同绑定 → 409 `tracking_idempotency_conflict`。ab_config 只在单次请求内存，
+  绝不持久化/记录/回显。
 - US-224：新增 `POST /api/v1/tracking/items/{tracking_id}/revalidate`
   （`TrackingItemRevalidateView`，operationId `revalidateTrackingItem`）。复核是
   revision-aware 纯本地操作：请求只接受 `expected_revision` 与可选 `storage_dir`

@@ -14,11 +14,13 @@ converges migrated records onto the same deterministic tracking list.  Only
 local storage is read — no external system is ever contacted.
 """
 
+from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
     TrackingDetailQuery,
     TrackingListQuery,
     TrackingRevalidatePayload,
+    TrackingSubmitPayload,
 )
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_read_service import (
@@ -26,6 +28,7 @@ from apps.migu_orca_web.tracking_read_service import (
     list_tracking_items,
 )
 from apps.migu_orca_web.tracking_revalidate_service import run_tracking_revalidate
+from apps.migu_orca_web.tracking_submission_service import run_tracking_submit
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from storage_engine.controllers.storage_config import load_storage_config
@@ -94,8 +97,43 @@ class TrackingItemRevalidateView(PostView):
         )
 
 
+@class_route(
+    api_blueprint,
+    "/api/v1/tracking/items/<path:tracking_id>/submit",
+    methods=["POST"],
+)
+class TrackingItemSubmitView(PostView):
+    """Run the unified reliable submit for one tracking item (US-225).
+
+    ``confirm`` must be strictly true and ``ab_config`` lives only in this
+    request's memory.  The service re-reads the latest local Request and runs
+    the complete local revalidation before any Auto Bangumi call; a persisted
+    business outcome (``NEEDS_RECONFIRM``/``SUBMIT_FAILED``/
+    ``VERIFYING_EXTERNAL``/``RECOVERY_REQUIRED``/``ACTIVE``) is HTTP 200.  Only
+    preconditions (missing record, stale revision, non-submittable state,
+    idempotency conflict, in-flight operation) raise.
+    """
+
+    request_validator_model = TrackingSubmitPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingSubmitPayload)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
+        return run_tracking_submit(
+            config,
+            tracking_id=payload.tracking_id,
+            expected_revision=payload.expected_revision,
+            idempotency_key=payload.idempotency_key,
+            confirm=payload.confirm,
+            ab_config=ab_config,
+        )
+
+
 __all__ = [
     "TrackingItemDetailView",
     "TrackingItemListView",
     "TrackingItemRevalidateView",
+    "TrackingItemSubmitView",
 ]

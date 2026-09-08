@@ -343,6 +343,40 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `tracking_state_conflict` 已进 `extensions/flask_api/api.py` 分类集，必须在
   `_ENDPOINTS` 对应端点声明。
 
+## 统一追番提交（US-225）
+
+- `POST /api/v1/tracking/items/{tracking_id}/submit`（`TrackingItemSubmitView`，
+  operationId `submitTrackingItem`）编排在
+  `apps/migu_orca_web/tracking_submission_service.py::run_tracking_submit`：先跑
+  migration coordinator → load TrackingRecord → `confirm` 严格 true（否则 400
+  `tracking_confirmation_required`）→ 重新读取最新 Request 跑
+  `classify_revalidation`（纯本地，不信任浏览器 fingerprint）。复核阻塞时
+  `NEEDS_RECONFIRM` 是已落盘业务结果（HTTP 200 + 固定 issue），绝不访问 Auto Bangumi；
+  只有「仅 fingerprint 变化」且 `confirm=true` 才在 SUBMITTING 写入中采纳新方案并继续。
+- 可靠顺序（§13.2/§13.3）：bind operation=PREPARED → TrackingRecord CAS=SUBMITTING
+  （同一原子写更新 request_fingerprint/current_operation_id/审计）→ operation CAS
+  PREPARED→IN_PROGRESS（外部可能发生的持久化边界，只有胜出者可调用外部）→ 外部调用 →
+  先持久化 AB 安全结果（`_sanitize_ab_submit_result` + request snapshot +
+  `save_ab_submit_result`）→ TrackingRecord 终态 → operation 终态。AB 结果落盘失败 →
+  TrackingRecord/operation 都到 RECOVERY_REQUIRED（绝不写成可直接重试的 FAILED）。
+- 结果分类在纯模块 `tracking_engine/controllers/submit.py`
+  （`classify_external_submit_result`，无 storage import）：`success=true` → SUCCEEDED；
+  `ab_timeout`/`ab_connection_failed`/5xx `ab_submit_failed`/`invalid_ab_*`/未知 error_type
+  → OUTCOME_UNKNOWN；4xx `ab_submit_failed`/`ab_auth_failed`/config 类 → FAILED。分类为
+  `ACTIVE`/`SUBMIT_FAILED`/`VERIFYING_EXTERNAL` 是已落盘业务结果 → HTTP 200。
+- 幂等/并发：`bind_tracking_operation` 同键同绑定重放（终态返回原 outcome、PREPARED 安全
+  恢复、IN_PROGRESS → 409 `tracking_operation_in_progress`）；同键不同绑定 → 409
+  `tracking_idempotency_conflict`；进行中 operation（任意键）阻断新提交。新增两类 409
+  错误类型必须进 `api.py` 的 409 集合并声明到 `_ENDPOINTS`。
+- 复用 `batch_engine.controllers.batch_submit_controller.compose_ab_submit_one` 作为默认
+  AB create seam（不复制 payload/client 逻辑）；service 测试注入 fake `submit_one`/
+  `persist_ab_result`，route/contract 测试 monkeypatch
+  `ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client`。`ab_config`
+  只存在于单次请求内存，绝不持久化/记录/回显。
+- migration manifest 写入必须持进程级锁（`migration_repository._MANIFEST_LOCK`）——并发
+  tracking API 首次访问会同时跑 migration coordinator，固定 `.tmp` 无锁会互相
+  replace/unlink（storage_error）。改 manifest 写路径后跑 migration repo/service 回归。
+
 ## 静态检查与就绪探针（US-195）
 
 - 静态检查是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：

@@ -60,6 +60,18 @@
   confirm=true submit 的决定）。新增 409 tracking 错误类型必须同步
   `extensions/flask_api/api.py` 分类集 + `_ENDPOINTS` 声明，否则
   `test_every_classified_error_type_is_documented` 失败。
+- US-225 纯分类在 `tracking_engine/controllers/submit.py`（无 storage import）：
+  `classify_external_submit_result` 把规范化 ab_submit_result 分为 operation 终态
+  SUCCEEDED/FAILED/OUTCOME_UNKNOWN（timeout/connection/5xx/unknown code 保守 UNKNOWN，
+  4xx/auth/config 明确 FAILED）；`SUBMIT_FROM_STATUSES` = PENDING_SUBMIT/NEEDS_RECONFIRM/
+  SUBMIT_FAILED。`OPERATION_OUTCOME_TRACKING_STATUS` 映射 operation 终态 → tracking 终态。
+- US-225 统一提交服务 = web 编排 + 复用 `compose_ab_submit_one`（batch_engine）作为默认 AB
+  create seam，不复制 payload/client 逻辑；结果分类不放在 route。先 bind PREPARED →
+  TrackingRecord SUBMITTING（同一原子写更新 fingerprint/current_operation_id）→ op CAS
+  PREPARED→IN_PROGRESS（外部边界）→ 外部调用 → 先 AB 结果落盘 → record 终态 → op 终态。
+- migration manifest 写盘是唯一单文件写入点，必须持进程级锁
+  （`migration_repository._MANIFEST_LOCK`）；并发 tracking API 首次访问同时跑 migration
+  coordinator，固定 `.tmp` 无锁会互相 replace/unlink 报 storage_error。
 
 ## [2026-09-08] - US-219
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -417,3 +429,76 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - 无 storage_dir 请求落到服务端 web root 本身（US-196），不是 `storage` profile——测试无默认值
       路径时要把记录 seed 到 web root config 下。
 ---
+
+## [2026-09-08] - US-225
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增纯分类 `src/tracking_engine/controllers/submit.py`：`classify_external_submit_result`
+    把规范化 ab_submit_result 分为 operation 终态 SUCCEEDED/FAILED/OUTCOME_UNKNOWN
+    （timeout/connection_failed/5xx/invalid_ab_*/unknown code 保守 OUTCOME_UNKNOWN，
+    4xx/auth/config 明确 FAILED）；`SUBMIT_FROM_STATUSES`（=REVALIDATABLE_STATUSES）、
+    `OPERATION_OUTCOME_TRACKING_STATUS`（op 终态 → tracking 终态）、
+    `external_submit_error_type/result_id` 与固定脱敏中文审计文案。不 import storage/web。
+  - 新增统一提交服务 `apps/migu_orca_web/tracking_submission_service.py`：
+    `run_tracking_submit`（config + tracking_id/expected_revision/idempotency_key/confirm/
+    ab_config + 可注入 submit_one/persist_ab_result + now）。流程：先 migration coordinator →
+    load record → confirm 严格 true（400 tracking_confirmation_required）→ tolerant 读最新
+    Request 计算 fingerprint → 同键已有 op（终态重放原 outcome；PREPARED 恢复；IN_PROGRESS →
+    409 tracking_operation_in_progress；同键不同绑定 409 tracking_idempotency_conflict）→
+    新键先 `_guard_no_inflight_operation`/状态/expected_revision 守卫 → 纯本地
+    classify_revalidation；阻断 issue（非仅 REQUEST_CHANGED）落盘 NEEDS_RECONFIRM 且不访问
+    AB；仅 fingerprint 变化 confirm=true 在 SUBMITTING 原子写中采纳 → bind PREPARED →
+    CAS record SUBMITTING → op CAS PREPARED→IN_PROGRESS（单外部调用门）→
+    compose_ab_submit_one 默认 seam（可注入）→ 先 `_sanitize_ab_submit_result` + request
+    snapshot + save_ab_submit_result 落盘（失败 → RECOVERY_REQUIRED）→ 分类终态
+    ACTIVE/SUBMIT_FAILED/VERIFYING_EXTERNAL → record 终态 CAS → op 终态 CAS。HTTP 200
+    业务结果含 tracking_id/outcome/checked_revision/next_revision/checked_at/operation_id/
+    issues[]/tracking summary。
+  - 新端点 `POST /api/v1/tracking/items/{tracking_id}/submit`（TrackingItemSubmitView，
+    operationId `submitTrackingItem`），schema `TrackingSubmitPayload`
+    （confirm/idempotency_key/ab_config/expected_revision/storage_dir，extra=forbid），DTO
+    `TrackingSubmitResultDTO`（strict）。
+  - 错误分类：`api.py` 400 增 `tracking_confirmation_required`，409 增
+    `tracking_idempotency_conflict`/`tracking_operation_in_progress`，并在 `_ENDPOINTS`
+    submit 条目声明。
+  - 修复并发 migration manifest 写盘竞态：`migration_repository.save_migration_manifest`
+    增加进程级 `_MANIFEST_LOCK`（并发 tracking API 首次访问同时跑 coordinator 会互相
+    replace/unlink 固定 .tmp → storage_error）。
+  - 同步生成物与文档：openapi_gen._ENDPOINTS 新增 submit 条目并重生成
+    docs/api/openapi.json；`npm run api:generate` 重生成 frontend/src/api/generated/api.ts；
+    api.test.ts 增加 submitTrackingItem + path /api/v1/tracking/items/{tracking_id}/submit +
+    计数 30→31；endpoint_inventory.md §2 总表 + §3.6 Tracking（US-225）+ US-225 里程碑；
+    AGENTS.md「统一追番提交（US-225）」段；progress Codebase Patterns 增补 submit 分层模式。
+- Files changed
+  - 新增：`src/tracking_engine/controllers/submit.py`、`submit_test.py`（14 单测）、
+    `src/apps/migu_orca_web/tracking_submission_service.py`、
+    `tracking_submission_service_test.py`（13 单测：成功/前置阻断/明确失败/未知/结果落盘失败/
+    幂等重放/并发单调用/PREPARED 恢复）、`tests/api_contract/test_tracking_submit_api.py`
+    （13 路由/契约测试）
+  - 修改：`schemas.py`（TrackingSubmitPayload）、`api_contract.py`（TrackingSubmitResultDTO）、
+    `routes_tracking.py`（TrackingItemSubmitView）、`extensions/flask_api/api.py`（400/409 分类）、
+    `openapi_gen.py`（submit 条目）、`docs/api/openapi.json`、`docs/api/endpoint_inventory.md`、
+    `frontend/src/api/generated/api.ts`、`frontend/src/api/generated/api.test.ts`、
+    `src/apps/migu_orca_web/AGENTS.md`、`src/storage_engine/controllers/migration_repository.py`
+    （_MANIFEST_LOCK）、`scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - submit 的分层：纯分类（engine，无 storage）→ web 编排 service（route 只解析 payload）→
+      repository。US-226 retry/recover 应复用 `run_tracking_submit` 的 op 状态机与结果分类，
+      不要在 route 复制。
+    - 「同键同绑定」终态重放必须在 expected_revision/状态守卫之前做：终态 replay 的
+      expected_revision 是 op 绑定时客户端观察值，不一定等于当前 record revision。
+    - 默认 AB create seam 复用 `batch_engine...compose_ab_submit_one()`（构建 payload/client/
+      submit_ab_subscription），service 测试注入 fake submit_one 断言单次调用；route/contract
+      测试 monkeypatch `ab_engine.controllers.ab_http_client.create_auto_bangumi_http_client`
+      （api_token 模式经 create_auto_bangumi_submit_client 走到该符号）。
+    - 外部边界用 operation CAS（PREPARED→IN_PROGRESS）做门：并发同键只有一个 CAS 胜出者可
+      调用外部，败者 409；record CAS 冲突也映射 tracking_operation_in_progress。
+  - Gotchas encountered
+    - AB 结果落盘是「外部可能已发生」后的关键本地证据：落盘失败必须进 RECOVERY_REQUIRED
+      （不能写成可盲重试的 FAILED），与 batch RESULT_PERSIST_FAILED 语义一致。
+    - `classify_revalidation` 在 Request 缺失/损坏时返回 REQUEST_MISSING——submit 新键先分类再
+      bind，因此阻断路径不产生孤儿 op；但 PREPARED op 恢复路径若 Request 已删除需单独处理
+      （_resume_missing_request：op PREPARED→FAILED + record →NEEDS_RECONFIRM）。
+    - migration manifest 单文件并发写需要进程级锁（其他 repository 的 per-key 锁模式在此不适用，
+      因为 manifest 是固定文件名）；并发测试会稳定复现，已加 `_MANIFEST_LOCK`。

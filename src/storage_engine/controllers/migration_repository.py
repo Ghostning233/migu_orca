@@ -17,6 +17,7 @@ import contextlib
 import json
 import os
 from pathlib import Path
+from threading import RLock
 
 from shared.errors import Stage1Error
 from storage_engine.controllers.storage_config import (
@@ -33,6 +34,13 @@ from tracking_engine.models.migration import (
 #: contract: a future schema bump introduces a new ``schema-vN.json`` rather
 #: than silently reinterpreting this file.
 MIGRATION_MANIFEST_FILENAME = "schema-v1.json"
+
+#: Process-level lock serializing manifest writes.  The manifest is a single
+#: fixed file with a fixed ``.tmp`` temp path, so concurrent in-process writers
+#: (e.g. two tracking API requests racing the migration coordinator) must not
+#: replace/unlink each other's temp file (the same pattern as the per-key locks
+#: in the tracking/operation repositories).
+_MANIFEST_LOCK: RLock = RLock()
 
 
 def load_migration_manifest(config: StorageConfig) -> MigrationManifest | None:
@@ -80,30 +88,31 @@ def save_migration_manifest(
 ) -> MigrationManifest:
     """Atomically persist ``manifest`` and return the normalized copy."""
     ensure_storage_layout(config)
-    manifest_path = _manifest_path(config, "save_migration_manifest")
-    payload = (
-        json.dumps(
-            manifest_to_storage_dict(manifest),
-            ensure_ascii=False,
-            indent=2,
+    with _MANIFEST_LOCK:
+        manifest_path = _manifest_path(config, "save_migration_manifest")
+        payload = (
+            json.dumps(
+                manifest_to_storage_dict(manifest),
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n"
         )
-        + "\n"
-    )
-    temp_path = manifest_path.with_name(manifest_path.name + ".tmp")
-    try:
-        temp_path.write_text(payload, encoding="utf-8")
-        os.replace(temp_path, manifest_path)
-    except OSError as exc:
-        raise Stage1Error(
-            "storage_error",
-            "写入迁移清单失败",
-            "save_migration_manifest",
-            {"directory": config.tracking_migrations_dir.name},
-        ) from exc
-    finally:
-        if temp_path.exists():
-            with contextlib.suppress(OSError):
-                temp_path.unlink()
+        temp_path = manifest_path.with_name(manifest_path.name + ".tmp")
+        try:
+            temp_path.write_text(payload, encoding="utf-8")
+            os.replace(temp_path, manifest_path)
+        except OSError as exc:
+            raise Stage1Error(
+                "storage_error",
+                "写入迁移清单失败",
+                "save_migration_manifest",
+                {"directory": config.tracking_migrations_dir.name},
+            ) from exc
+        finally:
+            if temp_path.exists():
+                with contextlib.suppress(OSError):
+                    temp_path.unlink()
     try:
         return manifest_from_storage_dict(manifest_to_storage_dict(manifest))
     except ValueError as exc:  # pragma: no cover - model guards construction

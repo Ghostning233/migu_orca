@@ -119,7 +119,7 @@
         "测试覆盖成功、调用前失败、明确外部失败、结果未知、结果/record 落盘失败、幂等重放、并发单调用；Typecheck/Tests pass"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

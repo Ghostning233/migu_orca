@@ -903,6 +903,30 @@ class TrackingRevalidateResultDTO(_StrictBase):
     tracking: TrackingItemDTO
 
 
+class TrackingSubmitResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/submit`` (US-225).
+
+    A persisted business result is HTTP 200: ``outcome`` is the record's final
+    status (``ACTIVE``/``SUBMIT_FAILED``/``VERIFYING_EXTERNAL``/
+    ``RECOVERY_REQUIRED``/``NEEDS_RECONFIRM``).  ``checked_revision`` is the
+    revision the client confirmed; ``next_revision`` is the record's revision
+    after the outcome persisted.  ``operation_id`` is set when a submit
+    operation was created/reused; ``issues`` carry the fixed §11.5 codes when
+    the submit was blocked before any external call.  ``tracking`` is the safe
+    summary of the persisted record so the client can update the list item
+    without a second read.
+    """
+
+    tracking_id: str
+    outcome: str
+    checked_revision: int
+    next_revision: int
+    checked_at: str
+    operation_id: str | None = None
+    issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
+    tracking: TrackingItemDTO
+
+
 # ---------------------------------------------------------------------------
 # Connection tests family
 # ---------------------------------------------------------------------------
