@@ -228,7 +228,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 
 推荐依赖顺序为 `F-A → F-B → (F-C, F-D, F-E) → F-F → F-G`。F-C、F-D、F-E 在共享核心
 稳定后可由不同执行会话并行，但共享 store/API 类型变更必须先合入基线，不能在三个 PR 中分别
-实现同名组件。F-F 必须等 B-C 管理契约冻结，不能使用 mock-only 页面先冒充功能完成。
+实现同名组件。F-F 必须等 B-C2/B-D 管理契约冻结；Stage 30 B-C1 只读同步完成不代表写管理能力已就绪，不能使用 mock-only 页面先冒充功能完成。
 
 > 状态注记（2026-09-08）：B-A 已作为 Stage 28 完成（revision、可靠保存、单番/批量 save-confirm、
 > 36 部边界与 safe-info 均已交付，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；
@@ -236,7 +236,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 > 列表/详情/revalidate/submit/retry/recover 与旧入口收敛，执行 PRD 见
 > `docs/MiGuOrca_stage29_unified_tracking_PRD.md`，B-C handoff 见 future_stages）。
 > 上表 F-B～F-E 依赖的「B-A 部分能力」与「B-B tracking」现已可用，F-C/F-D 的
-> 「保存确认后跳转追番管理」可以开始接入本地 tracking 列表；F-F 仍需等待 B-C/B-D 的
+> 「保存确认后跳转追番管理」可以开始接入本地 tracking 列表；F-F 仍需等待 B-C2/B-D 的
 > Auto Bangumi 管理契约冻结，不能使用 mock-only 页面先冒充功能完成。
 
 ## 10. PR 与回退边界
