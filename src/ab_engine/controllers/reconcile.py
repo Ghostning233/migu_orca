@@ -33,6 +33,7 @@ class LocalTrackingEvidence:
 
     tracking_id: str
     status: str
+    origin: str | None = None
     plan_summary: dict[str, Any] = field(default_factory=dict)
     external_mapping: dict[str, Any] | None = None
     # This is deliberately excluded from repr and every output decision.
@@ -79,11 +80,14 @@ def reconcile_subscription(
     locals: tuple[LocalTrackingEvidence, ...] | list[LocalTrackingEvidence],
 ) -> ReconcileDecision:
     """Classify one external subscription using deterministic strict evidence."""
-    candidates = tuple(locals)
+    # External-only records are projections of this same snapshot, not local
+    # evidence.  Including them would turn a stable EXTERNAL_ONLY result into
+    # an EXACT_FIELDS self-match on the next sync.
+    candidates = tuple(local for local in locals if local.origin != "EXTERNAL_SYNC")
     external_id_matches = tuple(
         local
         for local in candidates
-        if _mapped_subscription_id(local) == external.external_id
+        if local.origin != "EXTERNAL_SYNC" and _mapped_subscription_id(local) == external.external_id
     )
     if len(external_id_matches) == 1:
         local = external_id_matches[0]

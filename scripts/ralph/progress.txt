@@ -31,6 +31,7 @@
 - US-228～US-235 只跑受影响定向测试、相关 ruff/compileall 和必要 drift check；US-236 才运行
   一次完整非浏览器、前端与 Chromium 门禁。禁止无修改重复跑全套。
 - ExternalMapping v1 在 `tracking.py` 内严格校验；无 `schema_version` 的 Stage 29 legacy mapping 只做安全保留读取，不猜测迁移。
+- 同步协调器构造本地对账 evidence 时必须排除 `EXTERNAL_SYNC` 投影记录，否则重复快照会把外部孤立记录自匹配并产生 revision/audit 漂移。
 
 ## [2026-09-09 01:58:43 +0800] - US-228
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -129,4 +130,22 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - 纯对账输入应使用 request-scoped evidence，输出只携带 tracking ID、opaque mapping 字段和固定 warning，不携带 RSS URL。
   - 外部对象的唯一 ID 命中优先于字段匹配；严格字段多匹配必须保持未关联，不能选择第一项。
   - 验证命令：`uv run pytest -q src/ab_engine src/tracking_engine`（234 passed）、compileall 与 Ruff 全绿。
+---
+
+## [2026-09-09 03:20:00 +0800] - US-232
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 request-scoped tracking sync coordinator，按 capability/read snapshot/reconcile/逐条 ensure 或 CAS 顺序执行。
+  - 支持完整/失败/部分结果安全计数、损坏记录与 CAS 冲突隔离、外部孤立记录幂等收敛，以及唯一关联后的 `merged_into_tracking_id` 安全别名指针。
+  - 防止 `EXTERNAL_SYNC` 记录参与自身对账，重复完整 fixture 不新增记录、不重复审计、不 bump revision。
+- Files changed
+  - `src/apps/migu_orca_web/tracking_sync_service.py`
+  - `src/apps/migu_orca_web/tracking_sync_service_test.py`
+  - `src/ab_engine/controllers/reconcile.py`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - 同步状态变化、mapping、audit 和 revision 必须作为一个 CAS payload 写入；无语义变化时完全跳过写盘。
+  - 外部读取异常不能降级为空列表，否则会错误标记本地映射为 `EXTERNAL_DELETED`。
+  - 验证：相关后端套件 743 passed，compileall 与 Ruff 全绿。
 ---
