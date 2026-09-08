@@ -65,3 +65,27 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 纯模型/controller story 不生成 OpenAPI/前端客户端；API story 只跑对应 contract 和 drift 子集。
 - 最终 story 之前不执行全量 pytest 或完整 Chromium。
 - 测试失败时记录最小失败命令；无代码变化不重复运行同一全量命令。
+
+## [2026-09-09 02:10:00 +0800] - US-229
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 request-scoped capability probe 与 `POST /api/v1/autobangumi/capabilities`。
+  - password + 3.1.18 精确标记已验证只读能力；未知版本、API Token 管理读取和探测失败均 fail closed。
+  - 新增 strict request/response DTO，并同步 endpoint inventory、OpenAPI registry、OpenAPI JSON 和生成 TypeScript client。
+- Files changed
+  - `src/ab_engine/controllers/ab_capability_service.py`
+  - `src/ab_engine/controllers/ab_management_client.py`
+  - `src/ab_engine/models/management.py`
+  - `src/apps/migu_orca_web/schemas.py`
+  - `src/apps/migu_orca_web/api_contract.py`
+  - `src/apps/migu_orca_web/routes_connections.py`
+  - `src/apps/migu_orca_web/openapi_gen.py`
+  - `docs/api/endpoint_inventory.md`
+  - `docs/api/openapi.json`
+  - `frontend/src/api/generated/api.ts`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - capability endpoint 的失败应返回全 UNKNOWN 的安全 DTO；只有配置校验错误走 API error envelope。
+  - 新增 OpenAPI endpoint 后，当前仓库的 runtime drift guard 会要求同步生成 TypeScript client。
+  - capability 请求使用独立 `extra=forbid` 嵌套 DTO，避免沿用历史宽松配置模型而吞掉未知敏感字段。
+---

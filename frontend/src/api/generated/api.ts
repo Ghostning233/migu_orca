@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/autobangumi/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 探测 Auto Bangumi 只读能力
+         * @description ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。
+         */
+        post: operations["probeAutoBangumiCapabilities"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/autobangumi/test-connection": {
         parameters: {
             query?: never;
@@ -617,6 +637,187 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    probeAutoBangumiCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 探测 Auto Bangumi 只读能力 */
+        requestBody: {
+            content: {
+                /** @example {} */
+                "application/json": {
+                    ab_config: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url?: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "probe_status": "示例",
+                     *         "version": "示例",
+                     *         "adapter": "示例",
+                     *         "subscription_list": "示例",
+                     *         "subscription_detail": "示例",
+                     *         "subscription_modify": "示例",
+                     *         "subscription_enable": "示例",
+                     *         "subscription_disable": "示例",
+                     *         "subscription_delete": "示例",
+                     *         "rss_list": "示例",
+                     *         "rss_modify": "示例",
+                     *         "rss_enable": "示例",
+                     *         "rss_disable": "示例",
+                     *         "rss_delete": "示例",
+                     *         "rss_refresh": "示例",
+                     *         "external_verify": "示例",
+                     *         "checked_at": "示例",
+                     *         "safe_message": "示例"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /** AutoBangumiCapabilitiesDTO */
+                        result: {
+                            /**
+                             * Probe Status
+                             * @enum {string}
+                             */
+                            probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                            /** Version */
+                            version: string | null;
+                            /** Adapter */
+                            adapter: ("legacy_3_1" | "api_token") | null;
+                            /**
+                             * Subscription List
+                             * @enum {string}
+                             */
+                            subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Detail
+                             * @enum {string}
+                             */
+                            subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Modify
+                             * @enum {string}
+                             */
+                            subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Enable
+                             * @enum {string}
+                             */
+                            subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Disable
+                             * @enum {string}
+                             */
+                            subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Delete
+                             * @enum {string}
+                             */
+                            subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss List
+                             * @enum {string}
+                             */
+                            rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Modify
+                             * @enum {string}
+                             */
+                            rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Enable
+                             * @enum {string}
+                             */
+                            rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Disable
+                             * @enum {string}
+                             */
+                            rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Delete
+                             * @enum {string}
+                             */
+                            rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Refresh
+                             * @enum {string}
+                             */
+                            rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * External Verify
+                             * @enum {string}
+                             */
+                            external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** Safe Message */
+                            safe_message: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description config_error: Auto Bangumi 配置无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "config_error",
+                     *       "error_message": "Auto Bangumi 配置无效",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
     testAutoBangumiConnection: {
         parameters: {
             query?: never;

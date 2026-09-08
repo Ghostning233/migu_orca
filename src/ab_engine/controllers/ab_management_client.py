@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from urllib.parse import quote, urlsplit
 
@@ -54,6 +55,20 @@ class Legacy31ManagementClient:
         finally:
             self._token = None
 
+    def probe_capabilities(self) -> AutoBangumiCapabilities:
+        """Authenticate and inspect only status for the public capability probe."""
+        try:
+            self._authenticate()
+            status = self._request("GET", "/api/v1/status", {
+                "Accept": "application/json", "Cookie": self._cookie()
+            })
+            version = _version(status)
+            if version != "3.1.18":
+                return _unknown_capabilities("legacy_3_1", version)
+            return _verified_legacy_capabilities(version)
+        finally:
+            self._token = None
+
     def get_subscription(self, external_id: str) -> ExternalSubscription:
         """Read one detail using a fresh request-scoped session."""
         if self._config.auth_mode != "password":
@@ -93,6 +108,40 @@ class Legacy31ManagementClient:
 
 def create_legacy_31_management_client(config: AutoBangumiConfig, *, transport: AutoBangumiLegacyTransport) -> Legacy31ManagementClient:
     return Legacy31ManagementClient(config, transport=transport)
+
+
+def _unknown_capabilities(adapter: Literal["legacy_3_1", "api_token"], version: str | None) -> AutoBangumiCapabilities:
+    return AutoBangumiCapabilities(
+        probe_status="VERIFIED", version=version, adapter=adapter,
+        subscription_list="UNKNOWN", subscription_detail="UNKNOWN",
+        rss_list="UNKNOWN", external_verify="UNKNOWN",
+        safe_message="已完成连接探测，但未验证可用的管理能力",
+    )
+
+
+def _verified_legacy_capabilities(version: str) -> AutoBangumiCapabilities:
+    return AutoBangumiCapabilities(
+        probe_status="VERIFIED", version=version, adapter="legacy_3_1",
+        subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
+        rss_list="SUPPORTED", external_verify="SUPPORTED",
+        safe_message="已验证 Auto Bangumi 只读能力",
+    )
+
+
+def failed_capabilities(*, adapter: Literal["legacy_3_1", "api_token"] | None = None) -> AutoBangumiCapabilities:
+    """Build the fail-closed result used when probing cannot be completed."""
+    return AutoBangumiCapabilities(
+        probe_status="FAILED", version=None, adapter=adapter,
+        subscription_list="UNKNOWN", subscription_detail="UNKNOWN",
+        rss_list="UNKNOWN", external_verify="UNKNOWN",
+        safe_message="Auto Bangumi 能力探测失败，已安全关闭未验证能力",
+    )
+
+
+def checked_capabilities(capabilities: AutoBangumiCapabilities) -> AutoBangumiCapabilities:
+    return AutoBangumiCapabilities(
+        **{**capabilities.__dict__, "checked_at": datetime.now(UTC).isoformat()}
+    )
 
 
 def _unwrap(response: Mapping[str, Any], step: str) -> Any:

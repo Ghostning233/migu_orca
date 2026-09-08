@@ -82,6 +82,7 @@
 | POST | `/api/v1/batches/<batch_id>/recover` | `migu_orca_web_api.BatchRecoverView` | BatchRecoverView |
 | POST | `/api/v1/qbittorrent/test-connection` | `migu_orca_web_api.QbittorrentTestConnectionView` | QbittorrentTestConnectionView |
 | POST | `/api/v1/autobangumi/test-connection` | `migu_orca_web_api.AutoBangumiTestConnectionView` | AutoBangumiTestConnectionView |
+| POST | `/api/v1/autobangumi/capabilities` | `migu_orca_web_api.AutoBangumiCapabilitiesView` | AutoBangumiCapabilitiesView |
 | GET | `/api/v1/tracking/items` | `migu_orca_web_api.TrackingItemListView` | TrackingItemListView |
 | GET | `/api/v1/tracking/items/<path:tracking_id>` | `migu_orca_web_api.TrackingItemDetailView` | TrackingItemDetailView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/revalidate` | `migu_orca_web_api.TrackingItemRevalidateView` | TrackingItemRevalidateView |

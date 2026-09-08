@@ -978,6 +978,27 @@ class AutoBangumiConnectionResultDTO(_StrictBase):
     submit_supported: bool
 
 
+class AutoBangumiCapabilitiesDTO(_StrictBase):
+    probe_status: Literal["VERIFIED", "PARTIAL", "FAILED"]
+    version: str | None
+    adapter: Literal["legacy_3_1", "api_token"] | None
+    subscription_list: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_detail: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_modify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_enable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_disable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_delete: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_list: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_modify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_enable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_disable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_delete: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_refresh: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    external_verify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    checked_at: str | None
+    safe_message: str | None
+
+
 # ---------------------------------------------------------------------------
 # Serialization entry points (envelope-level validation)
 # ---------------------------------------------------------------------------

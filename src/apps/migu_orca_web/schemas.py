@@ -427,6 +427,25 @@ class AutoBangumiTestConnectionPayload(BaseModel):
     ab_config: RequestAbConfigPayload
 
 
+class AutoBangumiCapabilitiesConfigPayload(BaseModel):
+    """Strict nested config for the capability endpoint only."""
+
+    model_config = ConfigDict(extra="forbid")
+    auth_mode: Literal["password", "api_token"] = "password"
+    base_url: str | None = None
+    username: str | None = None
+    password: str | None = None
+    token: str | None = None
+    fallback_enabled: bool
+
+
+class AutoBangumiCapabilitiesPayload(BaseModel):
+    """Request-scoped credentials for the read-only capability probe."""
+
+    model_config = ConfigDict(extra="forbid")
+    ab_config: AutoBangumiCapabilitiesConfigPayload
+
+
 class QbittorrentConfigPayload(BaseModel):
     endpoint: str
     username: str

@@ -33,6 +33,29 @@ class AutoBangumiCapabilities:
     checked_at: str | None = None
     safe_message: str | None = None
 
+    def to_public_dict(self) -> dict[str, object]:
+        """Return the stable capability contract; never expose adapter internals."""
+        return {
+            "probe_status": self.probe_status,
+            "version": self.version,
+            "adapter": self.adapter,
+            "subscription_list": self.subscription_list,
+            "subscription_detail": self.subscription_detail,
+            "subscription_modify": self.subscription_modify,
+            "subscription_enable": self.subscription_enable,
+            "subscription_disable": self.subscription_disable,
+            "subscription_delete": self.subscription_delete,
+            "rss_list": self.rss_list,
+            "rss_modify": self.rss_modify,
+            "rss_enable": self.rss_enable,
+            "rss_disable": self.rss_disable,
+            "rss_delete": self.rss_delete,
+            "rss_refresh": self.rss_refresh,
+            "external_verify": self.external_verify,
+            "checked_at": self.checked_at,
+            "safe_message": self.safe_message,
+        }
+
 
 @dataclass(frozen=True, repr=False)
 class ExternalSubscription:

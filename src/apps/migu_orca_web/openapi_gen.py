@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from apps.base import create_app
 from apps.migu_orca_web.api_contract import (
     ApiErrorEnvelope,
+    AutoBangumiCapabilitiesDTO,
     AutoBangumiConnectionResultDTO,
     BatchAcceptResultDTO,
     BatchParseResultDTO,
@@ -1456,6 +1457,34 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
             "504": {"ab_timeout": "请求超时"},
         },
+    },
+    "POST /api/v1/autobangumi/capabilities": {
+        "operationId": "probeAutoBangumiCapabilities",
+        "summary": "探测 Auto Bangumi 只读能力",
+        "description": "ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。",
+        "requestBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["ab_config"],
+            "properties": {
+                "ab_config": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "x-request-scoped": True,
+                    "properties": {
+                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
+                        "base_url": {"type": "string", "x-request-scoped": True},
+                        "username": {"type": "string", "x-request-scoped": True},
+                        "password": {"type": "string", "x-request-scoped": True},
+                        "token": {"type": "string", "x-request-scoped": True},
+                        "fallback_enabled": {"type": "boolean"},
+                    },
+                    "required": ["auth_mode", "fallback_enabled"],
+                }
+            },
+        },
+        "success": AutoBangumiCapabilitiesDTO,
+        "errors": {"400": {"config_error": "Auto Bangumi 配置无效"}},
     },
 }
 

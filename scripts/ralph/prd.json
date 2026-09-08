@@ -34,8 +34,8 @@
         "Tests pass"
       ],
       "priority": 2,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已实现 request-scoped capability probe、严格 DTO、fail-closed unknown/failed 状态、POST API，并同步 endpoint inventory/OpenAPI/生成客户端。"
     },
     {
       "id": "US-230",
