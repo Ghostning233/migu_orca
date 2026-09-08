@@ -32,7 +32,7 @@
   B-C1 已规划为[Stage 30：Auto Bangumi 只读能力与外部同步基础](MiGuOrca_stage30_ab_read_sync_PRD.md)，
   其余工作包仍未分配 Stage。
 
-截至 2026-09-08，最近完成阶段为 Stage 29「统一追番记录与可靠提交恢复」（US-219～US-227 全部完成：TrackingRecord/TrackingOperation 严格 schema 与确定性 ID、纯本地幂等历史迁移、accept/save-confirm tracking handoff、统一追番列表/安全详情/revalidate/submit/retry/recover API，旧单番/批量入口共享统一 submission service，旧 queue 为兼容投影；B-B 不实现 Auto Bangumi 全量管理与外部同步，B-C handoff 见 future_stages）。
+截至 2026-09-09，最近完成阶段为 Stage 30「Auto Bangumi 只读能力与外部同步基础」（US-228～US-235 已完成：3.1.18 password 只读 adapter、capability、external mapping、严格对账、tracking sync、`VERIFY_EXTERNAL`、OpenAPI/生成客户端与 B-C2 handoff；US-236 保留最终回归与归档）。B-C1 不实现 Auto Bangumi 外部管理写操作或正式追番管理页面。
 
 ## Stage PRD
 
@@ -46,7 +46,7 @@
 - Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（US-197～US-209 全部完成，旧前端已删除）
 - Stage 28：草案一致性与原子保存确认（US-210～US-218 全部完成，已归档；只返回 ACCEPTED handoff，不创建 tracking record）
 - Stage 29：统一追番记录与可靠提交恢复（B-B，US-219～US-227 全部完成，已归档；不实现 Auto Bangumi 管理/外部同步，B-C handoff 见 future_stages）
-- Stage 30：Auto Bangumi 只读能力与外部同步基础（B-C1，US-228～US-236，已规划待开发；禁止外部管理写动作）
+- Stage 30：Auto Bangumi 只读能力与外部同步基础（B-C1，US-228～US-235 已完成；US-236 为最终回归与归档；禁止外部管理写动作）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

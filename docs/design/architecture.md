@@ -101,6 +101,13 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
   next_action=OPEN_TRACKING`，并新增 `tracking_id/tracking_status/tracking_ready/safe_message`
   （US-222）；tracking 写失败不回滚已确认 Request，也不伪造 tracking 状态。
 
+- Stage 30（B-C1，US-228～US-235）把 Auto Bangumi 3.1.18 的只读 capability、番剧/RSS adapter、
+  external mapping、对账和 `VERIFY_EXTERNAL` 放在 `ab_engine`/`tracking_engine` 与 Web sync service
+  中；`POST /api/v1/autobangumi/capabilities`、`POST /api/v1/tracking/sync` 的 DTO、OpenAPI、
+  inventory 与生成客户端必须保持同步。原始上游对象和 URL 只在 request-scoped adapter/service 内存中
+  存在，未知版本/API Token 管理读取 fail closed。B-C2 才能增加外部写 adapter，且必须复用 tracking
+  operation CAS/idempotency/recovery 边界。
+
 因此前端工程化已先固化 API 契约和服务端安全边界，再渐进替换页面；Stage 26 已完成该固化
 （清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 完成迁移与旧前端删除，handoff
 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。Stage 28 在 DraftStore 上

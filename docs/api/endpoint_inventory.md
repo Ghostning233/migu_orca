@@ -7,7 +7,9 @@
 > 与 safe-info 端点/错误并入同一基线并保持无漂移。Stage 29（US-222～US-226）把
 > `/api/v1/tracking/items` 六条端点与 tracking handoff 扩展并入同一基线（§3.6 与 §4
 > US 里程碑），全部为严格 DTO + 可读 operationId，保持无漂移。
-> 它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
+> Stage 30（B-C1）新增的 capability 与 tracking sync 端点也在本清单、OpenAPI registry、
+> `docs/api/openapi.json`、生成 TypeScript client 和 operation fixture 中保持同步；B-C1 不注册任何
+> Auto Bangumi 管理写端点。它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
 > 见 `docs/api/README.md`），也不替代 README 的示例用法。
 >
 > 自动核对：`tests/api_contract/test_inventory_consistency.py` 会把本清单与 Flask

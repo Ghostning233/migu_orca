@@ -152,3 +152,12 @@ Stage 29（US-225/226）把“外部调用”收敛到一个可靠提交服务�
    以安全白名单（success/公开 external id/固定 error_type）落盘。
 4. Stage 29 **不实现** AB 订阅/RSS 的列表、详情、修改、启停、删除、刷新或 capability 探测
    （B-C）；旧 `submit-ab`/批量 submit/retry/recover 继续保留一个发布周期，删除由独立 PRD 决定。
+
+## 11. Stage 30 B-C1 只读同步边界（已完成）
+
+Stage 30 新增独立的 request-scoped management read adapter：password 模式一次登录并复用同源
+Cookie，只读访问 status、bangumi list/detail 和 RSS list；3.1.18 以外版本与 API Token 管理读取
+均 fail closed。capability 与 sync API 只返回严格安全投影，原始对象、URL、Cookie、凭据和响应体
+不得落盘或进入错误/日志。`EXTERNAL_ONLY`、ExternalMapping v1、唯一对账和 `VERIFY_EXTERNAL`
+不改变 Stage 29 的提交/恢复语义。B-C2 才能新增 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、
+`REFRESH_RSS`，并必须具备 confirm、幂等键、revision CAS、结果未知恢复和 `file=false` 媒体保护。

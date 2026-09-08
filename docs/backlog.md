@@ -471,7 +471,7 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-025: 前端体验重构的后端支撑与 Auto Bangumi 管理契约
 
-- 状态：B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C1 已规划（Stage 30）；B-C2～B-D 仍待评审
+- 状态：B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C1 已完成（Stage 30，US-228～US-235）；US-236 最终回归与归档待执行；B-C2～B-D 仍待评审
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：20，P0
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_backend_support_PRD.md`
@@ -521,6 +521,10 @@ B-A 已按 US-210～US-218 独立完成 Stage 28，B-B 已按 US-219～US-227 �
 全量同步、外部管理或新前端页面。B-C1 已拆为 Stage 30，只处理 3.1.18 capability、只读同步、
 映射对账、EXTERNAL_ONLY 与 VERIFY_EXTERNAL；B-C2～B-D 继续分别评审，不能把外部写管理动作
 追加回 Stage 29 或 Stage 30。
+
+Stage 30 B-C2 handoff 已冻结：后续仅允许 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`REFRESH_RSS`
+四类 operation kind，并须具备 confirm、幂等键、expected revision、可靠状态机、只读回查和
+`RECOVERY_REQUIRED` 结果未知恢复；删除外部对象强制 `file=false`，绝不删除本地媒体。
 
 ### BL-026: 桌面端前端体验分片重构
 

@@ -133,6 +133,14 @@ Stage 18 补充：
 5. 迁移扫描复用 damage-aware list：Request/queue/AB result 各自的 tolerant list 返回健康项 +
    损坏 opaque id 计数，损坏文件不回显文件名/路径/原文，PARTIAL 后续访问持续重试直到修复。
 
+## 9.3 Stage 30 外部同步投影（已完成）
+
+`TrackingRecord.external_mapping` 只允许 ExternalMapping v1 白名单；external ID/RSS ID 为有界
+opaque token，RSS ID 有序去重，绝不保存 endpoint、RSS URL、标题、凭据或原始响应。外部孤立记录
+使用 `origin=EXTERNAL_SYNC`、`request_id=null` 和确定性 ID；重复 ensure 不新增记录、不 bump
+revision、不重复审计。同步的状态、mapping、审计和 revision 变化必须走一次 CAS；完整快照无变化
+时不写盘。合并后的旧外部记录保留安全 `merged_into_tracking_id` 指针，不删除历史文件或媒体。
+
 ## 8. 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |

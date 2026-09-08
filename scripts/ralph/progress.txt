@@ -211,3 +211,30 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - 外部核验成功只写安全状态和审计；未验证证据绝不能推断为外部未创建并转成可重试失败。
   - 验证：定向后端/OpenAPI 49 passed，ruff、compileall、OpenAPI drift、前端 typecheck/lint/unit(261)/build 全部通过。
 ---
+
+## [2026-09-09 04:10:00 +0800] - US-235
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 完成 Stage 30 B-C1 文档收尾：同步 README、docs 索引、主 PRD、架构、M10/M11/M12/M13、backlog、future stages、前端工作目标与 endpoint inventory。
+  - 明确 3.1.18 官方源码契约、Stage 30 只读范围、未知版本/API Token 管理读取 fail closed、安全外部投影边界和 B-C2 的 `MODIFY`/`SET_ENABLED`/`DELETE_EXTERNAL`/`REFRESH_RSS` handoff。
+  - 确认 capability/sync endpoint 已在 OpenAPI registry/JSON、生成 TypeScript client 与 operation fixture 中同步，且没有新增正式页面或外部管理写 endpoint。
+- Files changed
+  - `README.md`
+  - `docs/README.md`
+  - `docs/MiGuOrca_main_PRD.md`
+  - `docs/MiGuOrca_stage30_ab_read_sync_PRD.md`
+  - `docs/MiGuOrca_future_stages.md`
+  - `docs/backlog.md`
+  - `docs/design/architecture.md`
+  - `docs/frontend-ux-refactor-work-goals.md`
+  - `docs/modules/M10-auto-bangumi-integration-PRD.md`
+  - `docs/modules/M11-storage-state-PRD.md`
+  - `docs/modules/M12-log-error-PRD.md`
+  - `docs/modules/M13-web-ui-PRD.md`
+  - `docs/api/endpoint_inventory.md`
+  - `scripts/ralph/prd.json`
+  - `scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - OpenAPI 生成文件本轮已由 US-228～US-234 同步；US-235 的文档收尾应优先做 `migu-orca-openapi --check`、inventory consistency 和 OpenAPI generation tests，避免无意义重生成。
+  - B-C2 写操作必须沿用 TrackingOperation 的 confirm、幂等键、expected revision、CAS 与结果未知恢复边界，并强制 `DELETE_EXTERNAL` 的 `file=false`。
+---

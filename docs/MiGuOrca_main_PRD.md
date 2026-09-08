@@ -294,7 +294,7 @@ Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立�
 
 1. BL-023 已完成为 Stage 26 Web API 契约固化与服务端边界治理；执行范围见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。Stage 26 不重构页面视觉，不引入新前端框架。
 2. BL-024 已完成 Stage 27 前端工程化迁移与页面重构；执行范围见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。前端只通过生成类型/client 使用后端，不导入 Python 模型或复制旧 `app.js` 内部状态（旧 `app.js` 已随 US-209 删除）。
-3. BL-025 的 B-A 已完成 Stage 28，B-B 已完成 Stage 29；B-C1 已规划为 Stage 30（执行 PRD `docs/MiGuOrca_stage30_ab_read_sync_PRD.md`），只交付 Auto Bangumi 3.1.18 capability、只读同步、映射对账、EXTERNAL_ONLY 与 VERIFY_EXTERNAL。B-C2 的外部管理写动作和 B-D 仍待独立 Gate 4 评审。
+3. BL-025 的 B-A 已完成 Stage 28，B-B 已完成 Stage 29，B-C1 已完成 Stage 30 的 US-228～US-235（执行 PRD `docs/MiGuOrca_stage30_ab_read_sync_PRD.md`）：交付 Auto Bangumi 3.1.18 capability、只读同步、映射对账、EXTERNAL_ONLY、VERIFY_EXTERNAL、OpenAPI/生成客户端和 B-C2 handoff；US-236 负责最终回归与归档。B-C2 的外部管理写动作和 B-D 仍待独立评审。
 4. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
 5. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 6. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。

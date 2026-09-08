@@ -220,12 +220,22 @@ Stage 29 交付后，B-C 只能基于已冻结的 TrackingRecord 与 external ma
 - B-B 已交付的 tracking 列表/详情/revalidate/submit/retry/recover 端点可作为 B-C 管理动作的前端
   数据源；旧 queue 兼容投影保留一个发布周期，删除旧接口须由独立 PRD 决定。
 
-### Stage 30 已规划：B-C1 Auto Bangumi 只读能力与外部同步
+### Stage 30 已完成 B-C1：Auto Bangumi 只读能力与外部同步
 
-Stage 30 执行 PRD 为 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md`，Ralph stories US-228～US-236。
-它只交付 Auto Bangumi 3.1.18 capability、番剧/RSS 只读 adapter、安全投影、external mapping、
-严格对账、`EXTERNAL_ONLY` 记录、`POST /api/v1/tracking/sync` 与 `VERIFY_EXTERNAL` 只读恢复。
-Stage 30 不实现 modify、启停、删除、RSS 刷新或正式追番管理页面；这些写操作属于后续 B-C2。
+Stage 30 执行 PRD 为 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md`，US-228～US-235 已完成，US-236
+负责最终回归与归档。它交付 Auto Bangumi 3.1.18 capability、番剧/RSS 只读 adapter、安全投影、
+external mapping、严格对账、`EXTERNAL_ONLY` 记录、`POST /api/v1/tracking/sync` 与
+`VERIFY_EXTERNAL` 只读恢复；OpenAPI、endpoint inventory 和生成客户端已无漂移。未知版本与 API
+Token 管理读取 fail closed。Stage 30 不实现 modify、启停、删除、RSS 刷新或正式追番管理页面；
+这些写操作属于后续 B-C2。
+
+### Stage 30 handoff：B-C2 外部管理写操作
+
+B-C2 的 operation kind 固定为 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`REFRESH_RSS`。写操作
+必须显式 `confirm=true`，携带幂等键与 `expected_revision`，经 `PREPARED → IN_PROGRESS → 终态`
+和结果未知恢复；写后必须只读回查并 CAS 更新安全投影。`DELETE_EXTERNAL` 强制 `file=false`，
+API 不接受 `file`，不得删除本地 Request、TrackingRecord、审计、下载任务或媒体。完成 B-C2/B-D
+契约收尾后才允许启动正式追番管理页面。
 
 ## 10. Gate 1～3 之后的前端体验重构方向
 

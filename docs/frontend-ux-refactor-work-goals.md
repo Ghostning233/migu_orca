@@ -381,14 +381,14 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 | 视觉设计 | 已完成 | 选定方向、修正版、关键异常状态、设计 Token | 已通过 Gate 3 |
 | B-A 草案一致性 | Stage 28 已完成 (2026-09-08) | revision、可靠保存、组合确认、36 部上限、安全信息 | US-210～US-218 全部 passes，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md` |
 | B-B 统一追番记录 | Stage 29 已完成 (2026-09-08) | tracking repository、迁移、复核、幂等提交与恢复 | US-219～US-227 全部 passes；执行 PRD 见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md` |
-| B-C1 只读同步 | Stage 30 已规划 | Auto Bangumi capability、只读同步、映射对账与外部核验 | US-228～US-236；执行 PRD 见 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md` |
+| B-C1 只读同步 | Stage 30 已完成（US-228～US-235） | Auto Bangumi capability、只读同步、映射对账与外部核验、OpenAPI/生成客户端 handoff | US-228～US-235 已通过；US-236 做最终回归与归档，执行 PRD 见 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md` |
 | B-C2～B-D 后端支撑 | PRD 待评审 | Auto Bangumi 写管理与契约收尾 | Stage 30 完成后确认写动作、DTO 和 PR 边界 |
 | F-A～F-G 前端分片 | PRD 待评审 | 壳层、共享审核、单番、批量、方案、管理、设置/收尾 | 对应后端能力已冻结或合入 |
 | 独立发布验收 | 待规划 | 跨流程 Chromium、无障碍/多视口/安全报告、文档切换 | 全部实现切片验收通过 |
 
 正式拆分原则：
 
-- B-A/B-B 已完成；Stage 30 B-C1 与后续 B-C2 外部管理不得由前端 PR 临时顺带实现。
+- B-A/B-B 已完成，Stage 30 B-C1 已完成；后续 B-C2 外部管理不得由前端 PR 临时顺带实现。
 - F-A 壳层与设计系统不依赖新业务 API，可以先行；F-B 共享审核核心必须先于单番/批量页面。
 - F-C 单番、F-D 批量、F-E 追番方案可以在共享核心稳定后并行，F-F 追番管理等待 B-C2/B-D（B-B 已交付 Stage 29，B-C1 已规划为 Stage 30）。
 - 一个 Stage 可以包含一个小工作包，也可以把高风险工作包继续拆开；不能为了连续编号制造超大 PR。

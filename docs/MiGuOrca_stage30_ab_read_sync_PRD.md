@@ -6,7 +6,7 @@
 | --- | --- |
 | 文档名称 | Stage 30 PRD：Auto Bangumi 只读能力与外部同步基础 |
 | 文档类型 | 执行 PRD / 前端体验重构 B-C1 |
-| 当前状态 | 已规划，待开发 |
+| 当前状态 | B-C1 实现完成，US-236 最终回归与归档待执行 |
 | 创建日期 | 2026-09-09 |
 | Backlog | BL-025（B-C1） |
 | 优先级 | P0 |
@@ -400,9 +400,9 @@ read adapter 按 ID/唯一证据核验。命中则安全收敛，缺失/歧义�
 
 ### US-235：同步 OpenAPI、生成客户端与后端 handoff
 
-同步 endpoint inventory、OpenAPI registry/JSON、TypeScript generated client、api drift tests、
+已同步 endpoint inventory、OpenAPI registry/JSON、TypeScript generated client、api drift tests、
 README/架构/模块 PRD/backlog/future stages，并输出 B-C2 管理写动作 handoff。不得实现正式页面或
-任何写管理 endpoint。
+任何写管理 endpoint。`uv run migu-orca-openapi --check` 是本阶段契约漂移门禁。
 
 ### US-236：完成 Stage 30 回归、同步演练与归档
 
@@ -461,3 +461,9 @@ Stage 30 完成后，后续 B-C2 才能在已证明 capability、external mappin
 - `delete-external` 永远强制 `file=false`，API schema 不接收 `file`，不提供删除媒体能力。
 - 外部写后立即只读回查并更新安全投影；无法确认时进入 RECOVERY_REQUIRED。
 - B-C2 完成并经 B-D 契约收尾后，才启动依赖这些动作的正式追番管理页面。
+
+B-C2 的 operation kind 白名单为 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`REFRESH_RSS`；每个动作
+必须使用 `confirm=true`、客户端幂等键和 `expected_revision`，先写入 `PREPARED → IN_PROGRESS`，
+再调用固定 adapter，随后只读回查并以 CAS 写入结果。结果未知进入 `RECOVERY_REQUIRED`，不得盲目
+重试；`DELETE_EXTERNAL` 强制 `file=false`，API schema 不接受 `file`，任何写动作都不得删除本地
+Request、TrackingRecord、审计、下载任务或媒体。
