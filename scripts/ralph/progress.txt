@@ -149,3 +149,8 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - 外部读取异常不能降级为空列表，否则会错误标记本地映射为 `EXTERNAL_DELETED`。
   - 验证：相关后端套件 743 passed，compileall 与 Ruff 全绿。
 ---
+
+## [2026-09-09 03:31:00 +0800] - US-232 审核修复
+- 审核发现同步协调器把每次检查时间直接写入 mapping/record，导致相同快照在不同时刻重复同步仍触发 CAS、revision 和审计。
+- 现仅在状态或外部投影证据实际变化时更新时间；补充跨时间重复同步的幂等回归断言，定向测试与 Ruff 通过。
+---

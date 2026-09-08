@@ -37,7 +37,7 @@ def test_external_sync_is_idempotent(tmp_path: Path) -> None:
     client = FakeManagementClient([ExternalSubscription("sub-1", "Show", 1, "Group")])
 
     first = run_tracking_sync(config=config, management_client=client, now="2026-01-01T00:00:00+00:00")
-    second = run_tracking_sync(config=config, management_client=client, now="2026-01-01T00:00:00+00:00")
+    second = run_tracking_sync(config=config, management_client=client, now="2026-01-02T00:00:00+00:00")
 
     assert first.sync_status == "COMPLETE"
     assert first.summary.created == 1

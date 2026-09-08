@@ -188,10 +188,17 @@ def run_tracking_sync(
 
 
 def _apply_decision(config, record: TrackingRecord, decision, timestamp: str) -> tuple[bool, bool]:
-    mapping = {**decision.safe_mapping(), "last_verified_at": timestamp}
     desired_status = decision.status
+    mapping = decision.safe_mapping()
+    current_mapping = record.external_mapping or {}
+    mapping_changed = _mapping_without_verified_at(current_mapping) != _mapping_without_verified_at(mapping)
+    status_changed = desired_status != record.status
+    if not mapping_changed and not status_changed:
+        return False, False
+
+    mapping["last_verified_at"] = timestamp
     desired = replace(record, external_mapping=mapping, last_synced_at=timestamp)
-    if desired_status != record.status:
+    if status_changed:
         desired = transition_record(
             desired, status=desired_status,
             audit_action=TRACKING_AUDIT_PLAN_CHANGE_DETECTED,
@@ -208,8 +215,6 @@ def _apply_decision(config, record: TrackingRecord, decision, timestamp: str) ->
                 safe_message="外部同步已更新追番映射", created_at=timestamp,
             )],
         )
-    if _semantic_record(record) == _semantic_record(desired):
-        return False, False
     try:
         compare_and_swap_tracking_record(config, record.tracking_id, record.revision, desired)
         return True, False
@@ -222,18 +227,20 @@ def _apply_missing(config, record, decision, timestamp):
     missing_count = int(previous_mapping.get("missing_sync_count", 0))
     if record.status != decision.status:
         missing_count += 1
-    mapping = {**previous_mapping, **decision.safe_mapping(),
-               "missing_sync_count": missing_count,
-               "last_verified_at": timestamp}
+    mapping = {**previous_mapping, **decision.safe_mapping(), "missing_sync_count": missing_count}
+    status_changed = decision.status != record.status
+    mapping_changed = _mapping_without_verified_at(previous_mapping) != _mapping_without_verified_at(mapping)
+    if not mapping_changed and not status_changed:
+        return False, False
+
+    mapping["last_verified_at"] = timestamp
     desired = replace(record, external_mapping=mapping, last_synced_at=timestamp)
-    if decision.status != record.status:
+    if status_changed:
         desired = transition_record(desired, status=decision.status,
             audit_action=TRACKING_AUDIT_PLAN_CHANGE_DETECTED,
             reason_code="EXTERNAL_SUBSCRIPTION_MISSING", safe_message="外部追番暂未找到", now=timestamp)
     elif _semantic_record(record) != _semantic_record(desired):
         desired = replace(desired, revision=record.revision + 1, updated_at=timestamp)
-    if _semantic_record(record) == _semantic_record(desired):
-        return False, False
     try:
         compare_and_swap_tracking_record(config, record.tracking_id, record.revision, desired)
         return True, False
@@ -288,6 +295,11 @@ def _semantic_record(record: TrackingRecord) -> dict:
     value.pop("revision", None)
     value.pop("updated_at", None)
     return value
+
+
+def _mapping_without_verified_at(mapping: dict | None) -> dict:
+    """Compare only external projection evidence, not check timestamps."""
+    return {key: value for key, value in (mapping or {}).items() if key != "last_verified_at"}
 
 
 def _mapping_subscription_id(record):
