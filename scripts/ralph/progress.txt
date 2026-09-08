@@ -112,5 +112,21 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - External mapping v1 必须只在存在 `schema_version` 时严格解析；无版本的 Stage 29 opaque mapping 需要保留但不能推断字段含义。
   - 外部孤立 record 的 `request_id` 必须为 null，repository ensure 以 deterministic external tracking ID 作为唯一键且重复 ensure 不 bump revision。
-  - 验证命令：tracking/model/API/migration 定向套件 204 passed，compileall 与 Ruff 全绿。
+- 验证命令：tracking/model/API/migration 定向套件 204 passed，compileall 与 Ruff 全绿。
+---
+
+## [2026-09-09 02:45:00 +0800] - US-231
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增无 storage/web 依赖的纯对账 controller，按已保存 external subscription ID、严格标题/季度/字幕组及可选 RSS URL 等值证据顺序匹配。
+  - 唯一候选才自动关联；零候选或歧义安全落为 EXTERNAL_ONLY，并返回固定 AMBIGUOUS_EXTERNAL_MATCH warning；RSS URL 不进入决策 repr 或安全 mapping。
+  - 增加外部 deleted、完整列表缺失和 SUBMITTING/REVALIDATING 进行中状态保护的状态映射。
+- Files changed
+  - `src/ab_engine/controllers/reconcile.py`
+  - `src/ab_engine/controllers/reconcile_test.py`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - 纯对账输入应使用 request-scoped evidence，输出只携带 tracking ID、opaque mapping 字段和固定 warning，不携带 RSS URL。
+  - 外部对象的唯一 ID 命中优先于字段匹配；严格字段多匹配必须保持未关联，不能选择第一项。
+  - 验证命令：`uv run pytest -q src/ab_engine src/tracking_engine`（234 passed）、compileall 与 Ruff 全绿。
 ---
