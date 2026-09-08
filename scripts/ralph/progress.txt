@@ -89,3 +89,8 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - 新增 OpenAPI endpoint 后，当前仓库的 runtime drift guard 会要求同步生成 TypeScript client。
   - capability 请求使用独立 `extra=forbid` 嵌套 DTO，避免沿用历史宽松配置模型而吞掉未知敏感字段。
 ---
+
+## [2026-09-09 02:06:00 +0800] - US-229 审核修复
+- 审核发现新增 capability OpenAPI operation 后，`frontend/src/api/generated/api.test.ts` 的 operationId/path/数量断言未同步，导致前端 typecheck 失败。
+- 已同步 generated contract fixture，并验证 `npm run typecheck`、`npm run test:unit -- --run`、`npm run lint` 与 `npm run build` 全部通过。
+---

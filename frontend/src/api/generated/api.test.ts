@@ -43,6 +43,7 @@ const EXPECTED_OPERATION_IDS = [
   'recoverBatchQueueItem',
   'testQbittorrentConnection',
   'testAutoBangumiConnection',
+  'probeAutoBangumiCapabilities',
   'listTrackingItems',
   'getTrackingItemDetail',
   'revalidateTrackingItem',
@@ -83,6 +84,7 @@ describe('generated API client (US-198)', () => {
       | 'recoverBatchQueueItem'
       | 'testQbittorrentConnection'
       | 'testAutoBangumiConnection'
+      | 'probeAutoBangumiCapabilities'
       | 'listTrackingItems'
       | 'getTrackingItemDetail'
       | 'revalidateTrackingItem'
@@ -95,6 +97,7 @@ describe('generated API client (US-198)', () => {
   it('generates paths entries for all API families', () => {
     type PathKeys = keyof paths
     expectTypeOf<PathKeys>().toEqualTypeOf<
+      | '/api/v1/autobangumi/capabilities'
       | '/api/v1/autobangumi/test-connection'
       | '/api/v1/batches/parse'
       | '/api/v1/batches/{batch_id}/accept'
@@ -155,6 +158,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(33)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(34)
   })
 })
