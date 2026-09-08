@@ -33,6 +33,11 @@
   damaged opaque ids，损坏文件不阻塞不删除）。写用 temp + `os.replace` 原子替换；进程内按 tracking_id RLock
   串行并发 ensure/CAS（多 worker 共享 storage 仍不支持）。schema 校验在模型层抛 `ValueError`，repository
   映射为稳定 `storage_json_error`/`invalid_tracking_record`/`invalid_tracking_id`，绝不泄露路径/原始字节。
+- TrackingOperation repository（US-220）模式：`operation_id` = `op_` + 版本命名空间
+  `migu-orca/tracking-operation/v1\x00` + idempotency_key 的 sha256 前 32 hex（key 永不成为文件名）。
+  `bind_tracking_operation` 同键同绑定重放、异绑定抛 `tracking_idempotency_conflict`；CAS 用 on-disk
+  state == expected_state 做乐观并发，禁止改写 immutable 绑定字段。模型提供
+  `transition_tracking_operation` 构造 next op，服务层不得在 route 复制状态机。
 
 ## [2026-09-08] - US-219
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -84,5 +89,54 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       提交前以 `ruff check src tests` + 定向 pytest 为准。
     - `_LAST_ERROR_FIELDS` 用 tuple（不是 frozenset）保证 last_error JSON 键序确定；frozenset 迭代顺序跨
       进程不稳定。
+---
+
+## [2026-09-08] - US-220
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `tracking_engine/models/operation.py`：`TrackingOperation` 冻结数据类 + 提交幂等状态机。
+    schema v1 严格白名单（14 个字段），`operation` 只允许 `SUBMIT`（B-B）；state 固定
+    PREPARED/IN_PROGRESS/SUCCEEDED/FAILED/OUTCOME_UNKNOWN/RECOVERY_REQUIRED，终态无出边；
+    PREPARED→IN_PROGRESS|FAILED，IN_PROGRESS→四个终态。`operation_id` 用版本化命名空间
+    `migu-orca/tracking-operation/v1\x00` + idempotency_key 的 sha256 前 32 hex，生成 `op_` 前缀
+    opaque ID，并用 `EXPECTED_OPERATION_ID` 字面量固定算法（同键同 op，重试用新键则新 op）。
+  - 提供 `create_tracking_operation`（PREPARED）、`transition_tracking_operation`（校验状态迁移 +
+    终态写 completed_at）、`operation_to/from_storage_dict`（写侧白名单归一化；读侧未知顶层字段/
+    schema/kind/state/类型/idempotency_key 字符全部 fail closed，op_id 必须等于 key 派生 ID）。
+  - `storage_engine/controllers/operation_repository.py`：`bind_tracking_operation`
+    （create-if-absent 派生 op_id；同键同绑定重放返回 stored op created=False；任一绑定
+    tracking_id/operation/expected_revision/request_fingerprint 不同抛
+    `tracking_idempotency_conflict`，绝不覆盖）、`load_tracking_operation`、
+    `compare_and_swap_tracking_operation`（按 on-disk state == expected_state 原子替换 +
+    合法状态迁移 + 不可变绑定字段不变，冲突抛 `tracking_operation_state_conflict`）。
+    写用 temp + `os.replace`；进程内按 op_id RLock。存储目录复用 US-219 已加的
+    `tracking_operations_dir`，无 storage_config/pyproject 变更。
+  - 独立于 Stage 28 的 SAVE_CONFIRM 幂等 repository（D29-04）；错误类型
+    `tracking_idempotency_conflict`/`tracking_operation_state_conflict`/`tracking_operation_not_found`/
+    `invalid_operation_id`/`invalid_idempotency_key`/`invalid_tracking_operation` 暂无 API 路由，
+    不进 `_error_http_status`/OpenAPI，后续 US-225 再映射 HTTP。
+- Files changed
+  - 新增：`src/tracking_engine/models/operation.py`、`src/tracking_engine/models/operation_test.py`
+  - 新增：`src/storage_engine/controllers/operation_repository.py`、
+    `src/storage_engine/controllers/operation_repository_test.py`
+  - 修改：`src/tracking_engine/models/__init__.py`（再导出 operation 公共名）、
+    `scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - TrackingOperation 模型 = 内容契约 + 幂等状态机；repository 按仓库惯例放
+      `storage_engine/controllers/operation_repository.py`（与 tracking_repository/queue_repository 同构）。
+    - op 文件按 op_id 存放（PRD §7.3）；因「同键重放」需按 idempotency_key 找回 op，让 op_id
+      = 版本命名空间 + key 摘要，key 本身永不成为文件名 → 天然防路径穿越 + 无需索引文件。
+    - operation 无 revision 字段：乐观并发用「on-disk state == expected_state」CAS；绑定的不可变字段
+      （tracking_id/operation/idempotency_key/expected_revision/request_fingerprint/attempt/created_at）
+      在 CAS 内比较，禁止改写绑定。服务层必须用 `transition_tracking_operation` 构造 next op 再 CAS，
+      不要在 route 层复制状态机逻辑。
+  - Gotchas encountered
+    - `bind` 的并发语义 ≠ tracking `ensure`：ensure 忽略内容差异收敛到首条；bind 对「同键不同绑定」必须
+      抛 409，所以并发测试必须让所有 worker 传相同绑定（否则多数 worker 冲突），这是正确行为而非死锁。
+    - idempotency_key 同时出现在模型与 repository（各一份 `_IDEMPOTENCY_KEY_RE`）；改字符策略要两处同步，
+      测试用字面量 `EXPECTED_OPERATION_ID` 固定 op_id 算法防漂移。
+    - `transition_tracking_operation` 直接从 PREPARED 跳 SUCCEEDED 会抛 ValueError；终态必须先到
+      IN_PROGRESS 再转移——模型测试里直接对 PREPARED 调 SUCCEEDED 是无效迁移。
 ---
 
