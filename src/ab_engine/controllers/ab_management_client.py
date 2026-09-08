@@ -1,0 +1,194 @@
+"""Read-only Auto Bangumi 3.1.18 management adapter."""
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any, Literal, Protocol
+from urllib.parse import quote, urlsplit
+
+from ab_engine.controllers.ab_config import AutoBangumiConfig
+from ab_engine.controllers.ab_http_client import AutoBangumiLegacyTransport, _api_endpoint
+from ab_engine.models.management import (
+    AutoBangumiCapabilities,
+    ExternalRss,
+    ExternalSubscription,
+)
+from shared.errors import Stage1Error
+
+_MAX_TEXT = 512
+_MAX_ITEMS = 2000
+_MAX_RSS_PER_SUBSCRIPTION = 100
+
+
+class AutoBangumiManagementClient(Protocol):
+    def read_snapshot(self) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]: ...
+
+
+class Legacy31ManagementClient:
+    """One-request session adapter; no credential is retained after read_snapshot."""
+
+    def __init__(self, config: AutoBangumiConfig, *, transport: AutoBangumiLegacyTransport, timeout: float = 30) -> None:
+        self._config = config
+        self._transport = transport
+        self._timeout = timeout
+        self._token: str | None = None
+
+    def read_snapshot(self) -> tuple[AutoBangumiCapabilities, list[ExternalSubscription], list[ExternalRss]]:
+        if self._config.auth_mode != "password":
+            raise Stage1Error("ab_management_unsupported", "当前 Auto Bangumi 认证模式不支持管理读取", "ab_management")
+        try:
+            self._authenticate()
+            headers = {"Accept": "application/json", "Cookie": self._cookie()}
+            status = self._request("GET", "/api/v1/status", headers)
+            version = _version(status)
+            if version != "3.1.18":
+                raise Stage1Error("ab_unsupported_version", "当前 Auto Bangumi 版本暂不受支持", "ab_management")
+            subscriptions = _subscriptions(self._request("GET", "/api/v1/bangumi/get/all", headers))
+            rss = _rss_items(self._request("GET", "/api/v1/rss", headers))
+            capabilities = AutoBangumiCapabilities(
+                probe_status="VERIFIED", version=version, adapter="legacy_3_1",
+                subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
+                rss_list="SUPPORTED", external_verify="SUPPORTED",
+                safe_message="已验证 Auto Bangumi 只读能力",
+            )
+            return capabilities, subscriptions, rss
+        finally:
+            self._token = None
+
+    def get_subscription(self, external_id: str) -> ExternalSubscription:
+        """Read one detail using a fresh request-scoped session."""
+        if self._config.auth_mode != "password":
+            raise Stage1Error("ab_management_unsupported", "当前 Auto Bangumi 认证模式不支持管理读取", "ab_management")
+        try:
+            self._authenticate()
+            safe_external_id = quote(_opaque(external_id, "external_id"), safe="-._~")
+            response = self._request("GET", f"/api/v1/bangumi/get/{safe_external_id}", {
+                "Accept": "application/json", "Cookie": self._cookie()
+            })
+            return _subscription(_unwrap(response, "subscription"))
+        finally:
+            self._token = None
+
+    def _authenticate(self) -> None:
+        response = self._request("POST", "/api/v1/auth/login", {
+            "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"
+        }, {"username": self._config.username or "", "password": self._config.password or ""})
+        token = response.get("access_token")
+        if not isinstance(token, str) or not token.strip() or len(token) > _MAX_TEXT:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 登录响应无有效令牌", "ab_management")
+        self._token = token.strip()
+
+    def _cookie(self) -> str:
+        if self._token is None:
+            raise Stage1Error("ab_auth_failed", "Auto Bangumi 认证失败", "ab_management")
+        return f"token={self._token}"
+
+    def _request(self, method: Literal["GET", "POST"], path: str, headers: Mapping[str, str], payload: Mapping[str, str] | None = None) -> dict[str, Any]:
+        try:
+            return self._transport.request_json(method, _api_endpoint(self._config.base_url, path), headers, payload, timeout=self._timeout)
+        except Stage1Error:
+            raise
+        except Exception as exc:
+            raise Stage1Error("ab_management_failed", "Auto Bangumi 只读请求失败", "ab_management", {"reason": exc.__class__.__name__}) from exc
+
+
+def create_legacy_31_management_client(config: AutoBangumiConfig, *, transport: AutoBangumiLegacyTransport) -> Legacy31ManagementClient:
+    return Legacy31ManagementClient(config, transport=transport)
+
+
+def _unwrap(response: Mapping[str, Any], step: str) -> Any:
+    value = response.get("data", response)
+    if isinstance(value, Mapping) and "data" in value:
+        value = value["data"]
+    return value
+
+
+def _items(response: Mapping[str, Any], step: str) -> list[Any]:
+    value = _unwrap(response, step)
+    if not isinstance(value, list) or len(value) > _MAX_ITEMS:
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 列表响应无效", "ab_management", {"field": step})
+    return value
+
+
+def _subscriptions(response: Mapping[str, Any]) -> list[ExternalSubscription]:
+    return [_subscription(item) for item in _items(response, "subscriptions")]
+
+
+def _subscription(value: Any) -> ExternalSubscription:
+    if not isinstance(value, Mapping):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应无效", "ab_management")
+    external_id = _opaque(value.get("id"), "subscription_id")
+    title = _text(value.get("official_title") or value.get("title_raw") or value.get("title"), "title", required=True)
+    season_value = value.get("season")
+    season = season_value if isinstance(season_value, int) and not isinstance(season_value, bool) and 0 <= season_value <= 100 else None
+    if season_value is not None and season is None:
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "season"})
+    group = _text(value.get("group_name"), "group_name") if value.get("group_name") is not None else None
+    rss_link = value.get("rss_link")
+    if rss_link is not None and (not isinstance(rss_link, str) or len(rss_link) > _MAX_TEXT):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "rss_link"})
+    rss_ids = value.get("rss_ids", ())
+    if not isinstance(rss_ids, (list, tuple)) or len(rss_ids) > _MAX_RSS_PER_SUBSCRIPTION:
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "rss_ids"})
+    ids = tuple(dict.fromkeys(_opaque(item, "rss_id") for item in rss_ids))
+    deleted = value.get("deleted", False)
+    if not isinstance(deleted, bool):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "deleted"})
+    return ExternalSubscription(external_id, title, season, group, ((rss_link,) if isinstance(rss_link, str) else ()), ids, deleted)
+
+
+def _rss_items(response: Mapping[str, Any]) -> list[ExternalRss]:
+    result: list[ExternalRss] = []
+    for value in _items(response, "rss"):
+        if not isinstance(value, Mapping):
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi RSS 响应无效", "ab_management")
+        result.append(ExternalRss(
+            _opaque(value.get("id"), "rss_id"),
+            _text(value.get("name"), "name") if value.get("name") is not None else None,
+            _url(value.get("url")),
+            _bool(value.get("aggregate", False), "aggregate"),
+            _text(value.get("parser"), "parser") if value.get("parser") is not None else None,
+            _bool(value.get("enabled", True), "enabled"),
+        ))
+    return result
+
+
+def _opaque(value: Any, field: str) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应字段无效", "ab_management", {"field": field})
+    result = str(value).strip()
+    if not result or len(result) > 128 or any(ord(char) < 32 for char in result):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应字段无效", "ab_management", {"field": field})
+    return result
+
+
+def _text(value: Any, field: str, *, required: bool = False) -> str:
+    if not isinstance(value, str) or len(value.strip()) > _MAX_TEXT or (required and not value.strip()):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应字段无效", "ab_management", {"field": field})
+    return value.strip()
+
+
+def _url(value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) > _MAX_TEXT
+        or any(ord(char) < 32 for char in value)
+        or urlsplit(value).scheme not in {"http", "https"}
+        or not urlsplit(value).netloc
+    ):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应字段无效", "ab_management", {"field": "url"})
+    return value
+
+
+def _bool(value: Any, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应字段无效", "ab_management", {"field": field})
+    return value
+
+
+def _version(response: Mapping[str, Any]) -> str:
+    value = response.get("version")
+    if value is None and isinstance(response.get("data"), Mapping):
+        value = response["data"].get("version")
+    if not isinstance(value, str) or not value.strip() or len(value) > 64:
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 状态响应缺少版本", "ab_management")
+    return value.strip()

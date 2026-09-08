@@ -31,6 +31,23 @@
 - US-228～US-235 只跑受影响定向测试、相关 ruff/compileall 和必要 drift check；US-236 才运行
   一次完整非浏览器、前端与 Chromium 门禁。禁止无修改重复跑全套。
 
+## [2026-09-09 01:58:43 +0800] - US-228
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 冻结 3.1.18 request-scoped capability、ExternalSubscription/ExternalRss 及安全投影模型。
+  - 新增 password management adapter：一次登录、同源 token Cookie 复用，读取 status、番剧列表、番剧详情和 RSS；未知版本/API Token 管理读取 fail closed。
+  - 增加脱敏字段边界、URL/opaque ID 校验和 recording fake transport 测试，确认不触发外部管理写请求。
+- Files changed
+  - `src/ab_engine/models/management.py`
+  - `src/ab_engine/controllers/ab_management_client.py`
+  - `src/ab_engine/controllers/ab_management_client_test.py`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - Management adapter 的上游原始 URL 只能留在 request-scoped 内部对象，`repr` 和 safe projection 必须显式排除 URL。
+  - 3.1.18 只读列表请求必须沿用登录产生的同源 Cookie；每个 adapter 操作结束都清除 token。
+  - 验证 adapter 时用固定响应序列的 fake transport，可同时断言 method/path/header 顺序与没有写请求。
+---
+
 ## Stage 29 Handoff
 
 - `TrackingRecord`、`TrackingOperation`、确定性 request-backed tracking_id、revision CAS、内嵌
