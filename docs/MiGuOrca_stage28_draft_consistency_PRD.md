@@ -394,6 +394,14 @@ typecheck/lint/api:check/build/compileall/ruff/OpenAPI drift/git diff --check �
 - `_SAFE_UNIX_ABS_RE` 改为通用 POSIX 绝对路径（任意根目录，`/` 前为字符串开头或空白），
   不再依赖固定根目录白名单，同时不误杀 `Fate/stay night`、`A/B 测试` 等词内斜杠。
 
+2026-09-08 追加「Stage 28 边界修复补充」（通用 POSIX 路径任意边界）：
+- `_SAFE_UNIX_ABS_RE` 边界从 `(?:^|\s)` 改为负向后行 `(?<![A-Za-z0-9_])`，使
+  `path=/mnt/secret`、`路径为/data/secret`、`（/Users/name/secret）`、`"/opt"`、
+  `dest:/var/lib/data` 等任意位置嵌入的绝对路径均被脱敏，同时 `Fate/stay night`、
+  `A/B 测试`、`v1/1080p` 等词内斜杠不误杀。本轮实际验证：非浏览器 1140 passed、
+  真实 Chromium 133 passed、前端 Vitest 261 passed，typecheck/lint/api:check/build/
+  compileall/ruff/OpenAPI drift/git diff --check 全绿。
+
 实现偏差：均为契约内最小扩展，无范围外 feature（未实现 tracking/AB 管理/新页面视觉）。
 剩余风险：draft 仍为单进程内存权威（多 worker 部署需外部化）；批量上限只约束 parse 入口，
 不限制后续 accept/save-confirm 条数；`safe-info` 的 `total_episodes` 暂无数据源恒为 null。

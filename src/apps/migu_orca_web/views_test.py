@@ -6774,6 +6774,15 @@ def test_safe_label_redacts_all_sensitive_markers() -> None:
         "macOS 路径 /Users/name/secret",
         "/custom-root/sub/dir",
         "任意根目录 /custom-root/sub/dir",
+        # Boundaries: =, CJK text/punctuation, quotes, parentheses, colon.
+        "path=/mnt/secret",
+        "路径为/data/secret",
+        "路径是/private/config",
+        "配置（/Users/name/secret）",
+        "\"/opt/config\"",
+        "dest:/var/lib/data",
+        "(/srv/backup)",
+        "结果:/custom-root/x",
     ):
         assert _safe_label(sensitive) == redacted, f"failed to redact {sensitive!r}"
 
@@ -6792,3 +6801,4 @@ def test_safe_label_redacts_all_sensitive_markers() -> None:
     assert _safe_label("Fate/stay night") == "Fate/stay night"
     assert _safe_label("A/B 测试") == "A/B 测试"
     assert _safe_label("[喵萌] 番剧名称 - 01.mkv") == "[喵萌] 番剧名称 - 01.mkv"
+    assert _safe_label("v1/1080p 发布") == "v1/1080p 发布"

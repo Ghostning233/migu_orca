@@ -659,3 +659,33 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context
     - 本轮为 Stage 28 边界修复，不改 Stage 29/tracking/AB 管理范围。
 ---
+
+## [2026-09-08 13:15 CST] - Stage 28 边界修复补充（通用 POSIX 路径任意边界脱敏）
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 将 `_SAFE_UNIX_ABS_RE` 从 `(?:^|\s)/`（仅开头或空白后）改为负向后行
+    `(?<![A-Za-z0-9_])/`：`/` 前不是 ASCII 单词字符即视为绝对路径起点，覆盖等号
+    （`path=/mnt/secret`）、中文文本/标点（`路径为/data/secret`）、引号、括号、冒号
+    （`dest:/var/lib/data`）等任意边界；词内斜杠（`Fate/stay night`、`A/B 测试`、
+    `v1/1080p`）因左侧是单词字符仍不误杀。
+  - 补充测试覆盖等号/中文文本/中文括号/引号/冒号/括号边界 + `v1/1080p 发布` 不误杀。
+- Files changed
+  - src/apps/migu_orca_web/serializers.py（_SAFE_UNIX_ABS_RE 负向后行边界）
+  - src/apps/migu_orca_web/views_test.py（safe_label 边界与防误判用例）
+- Verification（本轮实际执行）
+  - `uv run python -m compileall -q src tests` → passed
+  - `uv run ruff check src tests` → All checks passed
+  - `uv run pytest -q -m "not browser"` → 1140 passed, 133 deselected
+  - `uv run python -m apps.migu_orca_web.openapi_gen --check` → OpenAPI up to date
+  - 前端 `npm run api:check`/`typecheck`/`lint`/`test:unit`(261)/`build` 全绿
+  - `uv run pytest tests/browser/ -q` → 133 passed（真实 Chromium）
+  - `git diff --check` 通过；仓库根 `.migu_orca/storage` 不存在
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 绝对路径脱敏的边界判定用「负向后行：`/` 前不是 `[A-Za-z0-9_]`」比「正向前看开头/空白」
+      更通用，天然覆盖 `=`、`:`、引号、括号、CJK 标点/文字等嵌入边界，同时保住词内斜杠。
+  - Gotchas encountered
+    - 只用 `(?:^|\s)` 会漏掉 `path=/mnt`、`为/data`、`（/Users/...）`、`"/opt"` 等非空白边界。
+  - Useful context
+    - 本轮为 Stage 28 边界修复补充，不改 Stage 29/tracking/AB 管理范围。
+---

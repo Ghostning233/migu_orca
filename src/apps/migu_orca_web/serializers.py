@@ -320,13 +320,16 @@ _SAFE_URL_SCHEME_RE = re.compile(
 )
 _SAFE_MAGNET_RE = re.compile(r"magnet:\?", re.IGNORECASE)
 #: Generic POSIX absolute path detected *anywhere* in a string. The ``/`` must
-#: sit at the start of the string or right after whitespace (a clear boundary),
-#: followed by one or more non-whitespace/non-slash path segments. This avoids a
-#: fixed root whitelist (``/usr``, ``/etc``, …) so ``/data``, ``/mnt``,
-#: ``/private``, ``/Users`` or any custom root are all redacted, while legal
+#: NOT be immediately preceded by an ASCII word character (letter/digit/
+#: underscore) — a negative-lookbehind boundary that covers the string start,
+#: whitespace, ``=``, ``:``, quotes, parentheses and CJK punctuation/characters
+#: alike. It is followed by one or more non-whitespace/non-slash path segments.
+#: This avoids a fixed root whitelist (``/usr``, ``/etc``, …) so ``/data``,
+#: ``/mnt``, ``/private``, ``/Users`` or any custom root are all redacted even
+#: when embedded (``path=/mnt/secret``, ``"路径为/data/secret"``), while legal
 #: slash-bearing titles like ``Fate/stay night`` or ``A/B 测试`` (where ``/`` is
 #: preceded by a word character) are NOT misclassified as absolute paths.
-_SAFE_UNIX_ABS_RE = re.compile(r"(?:^|\s)/([^\s/]+(?:/[^\s/]+)*)")
+_SAFE_UNIX_ABS_RE = re.compile(r"(?<![A-Za-z0-9_])/([^\s/]+(?:/[^\s/]+)*)")
 _SAFE_WINDOWS_ABS_RE = re.compile(r"\b[a-zA-Z]:[\\/]")
 _SAFE_UNC_RE = re.compile(r"(?:^|[^\w])(?:\\\\|//)[^\s\\/]+[\\/]")
 #: key=value / key:value / "Key value" markers for secrets and endpoints.
