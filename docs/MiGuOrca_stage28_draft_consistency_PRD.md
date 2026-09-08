@@ -7,8 +7,9 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 28 PRD：草案一致性与原子保存确认 |
 | 文档类型 | 执行 PRD / 前端体验重构 B-A |
-| 当前状态 | 已确认范围，待独立开发会话执行 |
+| 当前状态 | 已完成（US-210～US-218 全部 passes: true，2026-09-08） |
 | 创建日期 | 2026-09-07 |
+| 完成日期 | 2026-09-08 |
 | Backlog | BL-025（B-A） |
 | 优先级 | P0 |
 | 前置条件 | Stage 26、Stage 27 已完成；前端体验 Gate 1～3 已通过 |
@@ -336,3 +337,82 @@ storage 和 fake transport，不访问真实外部服务。完整门禁后确认
 6. `safe-info` 是“全部信息”的唯一允许数据源，并通过递归敏感值泄漏测试。
 7. 现有端点与 Stage 27 页面回归通过；生产视觉和导航未被提前修改。
 8. B-B 可以只基于持久化 ACCEPTED Request 和 handoff 幂等建立 tracking record。
+
+## 12. 完成记录（2026-09-08）
+
+Stage 28 已完成并合入 `ralph/stage28-draft-consistency`，US-210～US-218 全部 `passes: true`，
+每个 story 有独立提交与验证记录：
+
+- US-210 DraftStore revision 原语（issue→revision=1、get 返回当前 revision、
+  `compare_and_swap` + `REASON_REVISION_CONFLICT`，RLock 临界区 + 深拷贝隔离；16 例单测）。
+- US-211 revision 接入 preview API 与生成契约（create 未保存返回 draft_id+draft_revision；
+  `preview-modify` 必填 `base_revision`，stale → 409 `draft_revision_conflict`，只报
+  field/current_revision；Vue 只在组件内存维护 revision，不写 URL/browser storage）。
+- US-212 修复先消费后持久化（`reserve_for_save`/`commit_save`/`release_save` 生命周期，
+  预留期间拒绝 get/CAS/consume/逐出/过期；写盘失败 release 保留原 revision 可重试；
+  注入持久化失败证明同 draft 只产生一个 Request）。
+- US-213 建立 save-confirm 幂等记录（`<storage>/idempotency/<opaque-key>.json` 原子读写，
+  白名单字段 + 不可逆 `request_fingerprint`；IN_PROGRESS/SAVED_CONFIRM_FAILED/CONFIRMED
+  状态机 + `resolve_in_progress_retry` 磁盘核对；同键异 payload → 409 `idempotency_conflict`）。
+- US-214 单番 save-confirm 组合端点（`POST /api/v1/requests/save-confirm`：校验/预留/持久化/
+  确认/幂等提交一次完成，成功返回 CONFIRMED + ACCEPTED handoff；确认失败 → 409
+  `save_confirm_failed`，只报 outcome/request_id/retry_action=ACCEPT_SAVED_REQUEST）。
+- US-215 批量 1～36 部服务端边界（`MAX_BATCH_ITEMS=36` + `split_batch_raw_input` 共用计数，
+  37 部在任何解析/MiKan seam 前返回 400 `batch_limit_exceeded`，只报 field/limit/actual）。
+- US-216 批量 save-confirm 部分成功端点（`POST /api/v1/batches/{batch_id}/save-confirm`
+  逐条复用单番用例；重复 item→skipped、同键复用→逐条 idempotency_conflict、summary
+  {requested,confirmed,failed}；成功项不因失败项回滚）。
+- US-217 Request safe-info 严格白名单（`GET /api/v1/requests/{request_id}/safe-info`，
+  `extra="forbid"` DTO + 默认拒绝 serializer；updated_episode 恒 null/
+  NOT_IMPLEMENTED；递归泄漏测试覆盖顶层/嵌套/列表/404/非法 id/storage 错误）。
+- US-218 契约回归与文档 handoff（本文档 + README/架构/M01/M09/M11/M13/backlog/future stages/
+  api 文档同步；新旧 preview/save/accept/batch 兼容 + 全部非浏览器 + 真实 Chromium 回归通过；
+  输出 B-B tracking handoff；归档 prd/progress）。
+
+实际测试数量（初版交付）：非浏览器 1127 passed、真实 Chromium 133 passed、前端 Vitest 261 passed，
+外加 typecheck/lint/api:check/build/compileall/ruff/OpenAPI drift/git diff --check 全绿。
+
+2026-09-08 追加一轮「Stage 28 静态审查修复」（不改变产品范围）：
+- 终态幂等键重放前经无副作用 `DraftStore.peek` 核对仍存在草案的 fingerprint，同键异草案 →
+  409 `idempotency_conflict`（草案保持可用，不被预留/消费）；draft 缺失/预留时仍安全重放。
+- `run_save_confirm` 用显式 `persisted` 阶段标志，保证 reserve 后到持久化成功前的任一异常
+  都 `release_draft`，落盘后不再释放。
+- save-confirm 请求模型改 `extra="forbid"`，OpenAPI 三个 requestBody 同步
+  `additionalProperties: false`。
+- `_safe_label` 对非字符串返回 None、对任意位置的 URL/magnet/绝对路径/key=value 敏感文本
+  稳定脱敏；bool/整数类型显式归一化。
+- `_KEY_LOCKS` 改引用计数按键锁；批量 summary 的 skipped 计入 failed 保持
+  `requested == confirmed + failed` 闭合。
+
+修复后门禁：非浏览器 1137 passed、真实 Chromium 133 passed、前端 Vitest 261 passed，
+typecheck/lint/api:check/build/compileall/ruff/OpenAPI drift/git diff --check 全绿。
+
+2026-09-08 追加一轮「Stage 28 边界修复」（不改变产品范围）：
+- 终态幂等重放区分 `reserved` 与真正不存在：`peek_draft` 对 `REASON_RESERVED` 直接抛 409
+  `draft_reserved`（绝不重放旧终态），仅 `replayed`/`expired`/`evicted`/`unknown`（真正缺失，
+  含进程重启）折叠为 None 允许安全重放；单番与批量共用同一 `_run_draft_save_confirm` 语义。
+- `_SAFE_UNIX_ABS_RE` 改为通用 POSIX 绝对路径（任意根目录，`/` 前为字符串开头或空白），
+  不再依赖固定根目录白名单，同时不误杀 `Fate/stay night`、`A/B 测试` 等词内斜杠。
+
+2026-09-08 追加「Stage 28 边界修复补充」（通用 POSIX 路径任意边界）：
+- `_SAFE_UNIX_ABS_RE` 边界从 `(?:^|\s)` 改为负向后行 `(?<![A-Za-z0-9_])`，使
+  `path=/mnt/secret`、`路径为/data/secret`、`（/Users/name/secret）`、`"/opt"`、
+  `dest:/var/lib/data` 等任意位置嵌入的绝对路径均被脱敏，同时 `Fate/stay night`、
+  `A/B 测试`、`v1/1080p` 等词内斜杠不误杀。本轮实际验证：非浏览器 1140 passed、
+  真实 Chromium 133 passed、前端 Vitest 261 passed，typecheck/lint/api:check/build/
+  compileall/ruff/OpenAPI drift/git diff --check 全绿。
+
+2026-09-08 追加「Stage 28 边界修复（Unicode-aware 路径边界）」：
+- `_SAFE_UNIX_ABS_RE` 边界改为 Unicode-aware `(?<![\w/])`，`\w` 覆盖 CJK 与 ASCII 单词字符，
+  使 `简/繁字幕`、`中文/日文`、`命运/冠位指定`、`字幕组/压制组`、`新增/修改` 等中文/日文
+  词内斜杠不再被误判为绝对路径；等号/冒号/引号/括号/CJK 标点/字符串开头/空白等非词边界
+  仍识别为路径。
+- 新增 `_SAFE_CN_PATH_CONTEXT_RE` 识别无分隔符中文路径引导词（`路径为/data`、
+  `路径是/private`、`路径/data`、`路径：/data`）。本轮实际验证：非浏览器 1140 passed、
+  真实 Chromium 133 passed、前端 Vitest 261 passed，typecheck/lint/api:check/build/
+  compileall/ruff/OpenAPI drift/git diff --check 全绿。
+
+实现偏差：均为契约内最小扩展，无范围外 feature（未实现 tracking/AB 管理/新页面视觉）。
+剩余风险：draft 仍为单进程内存权威（多 worker 部署需外部化）；批量上限只约束 parse 入口，
+不限制后续 accept/save-confirm 条数；`safe-info` 的 `total_episodes` 暂无数据源恒为 null。
+Stage 28 prd/progress 已归档到 `scripts/ralph/archive/2026-09-08-stage28-draft-consistency/`。

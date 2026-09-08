@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.27 |
-| 文档状态 | Stage 26、Stage 27 均已完成；Web UI 已迁移到独立前端工程并删除旧前端 |
+| 当前版本 | v0.28 |
+| 文档状态 | Stage 26、Stage 27、Stage 28 均已完成；Web UI 已迁移到独立前端工程并删除旧前端；草案一致性、保存确认与安全信息白名单已交付 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -87,6 +87,8 @@ Stage 25 已完成。单个与批量 MiKan 搜索共享确定性正式番名/季
 
 Stage 26 已完成。Web API 契约固化与服务端边界治理：冻结全部 `/api/v1` 端点清单与 golden contract（`docs/api/endpoint_inventory.md` + `tests/api_contract/`），建立公开响应 DTO（`extra="forbid"`）与确定性 OpenAPI（`docs/api/openapi.json`），把 `views.py` 按职责拆分为 schemas/serializers/services/contexts/routes_*，为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500，envelope 保持兼容），把 Web storage 限制为服务端根目录下的相对 profile（空值回落服务端根，CLI 显式路径不变），用服务端权威 DraftStore（TTL/容量/一次性保存/重放保护）替代客户端完整 Request 持久化，并建立 CI、ruff 静态检查、OpenAPI 漂移与真实 Chromium 门禁及 local-only 部署基线。执行 PRD 见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；Stage 27 前端迁移 handoff 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
+Stage 28 已完成。草案一致性与原子保存确认（BL-025 的 B-A，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）：为每个服务端权威草案建立单调 revision（签发为 1，成功 CAS 修改 +1），`preview-modify` 必填 `base_revision` 做 compare-and-swap（过期 base → 409 `draft_revision_conflict`，只报 field/current_revision），`preview-save` 改为「预留 → 持久化 → 提交/释放」（写盘失败保留原 revision 可重试，正在保存 → 409 `draft_reserved`）；storage engine 新增持久化 save-confirm 幂等记录（`<storage>/idempotency/`，只含非敏感白名单字段，终态同键重放），新增单番 `POST /api/v1/requests/save-confirm`（一次完成校验/预留/持久化/确认/幂等提交并返回 `CONFIRMED` + `ACCEPTED` handoff）与批量 `POST /api/v1/batches/{batch_id}/save-confirm`（逐条复用单番用例、部分成功、成功项不因失败项回滚），批量 parse 按规范化非空行强制 1～36 部服务端边界（超限在任何标题解析/MiKan 调用前返回 400 `batch_limit_exceeded`），并新增 `GET /api/v1/requests/{request_id}/safe-info` 严格白名单 DTO 作为“全部信息”唯一安全数据源。Stage 28 只返回 ACCEPTED Request handoff，不创建或伪造 tracking record；B-B 阶段可从持久化 ACCEPTED Request 与 handoff 幂等建立 tracking record。
+
 ## 4. 第一阶段范围
 
 第一阶段目标是：**输入单个番剧名后，基于静态 MiKan/RSS 数据生成一条结构完整、状态为待确认的 Request。**
@@ -162,7 +164,7 @@ Stage 26 已完成。Web API 契约固化与服务端边界治理：冻结全部
 | 模块编号 | 模块名称 | 当前状态 | 优先级 | 模块 PRD |
 | --- | --- | --- | --- | --- |
 | M00 | 入口与流程编排模块 | Stage 18～25 已实现真实候选、批量草案/队列、偏好/搜索增强、候选选择、结构化季数与统一草案详情链路 | P0 | docs/modules/M00-entry-orchestration-PRD.md |
-| M01 | 用户输入与 Request 管理模块 | Stage 15 已实现 CLI/Web 确认、取消、受限修改；`ACCEPTED` Request 支持受限修改 | P0 | docs/modules/M01-request-management-PRD.md |
+| M01 | 用户输入与 Request 管理模块 | Stage 15 已实现 CLI/Web 确认、取消、受限修改；`ACCEPTED` Request 支持受限修改；Stage 28 已为未保存草案加入 revision 与可靠保存生命周期（预留/提交/释放） | P0 | docs/modules/M01-request-management-PRD.md |
 | M02 | 番剧搜索与匹配模块 | Stage 25 已实现确定性标题/季数解析与有界查询计划；解析成功不等于真实 MiKan 候选搜索成功 | P0 | docs/modules/M02-bangumi-search-match-PRD.md |
 | M03 | MiKan 数据源模块 | Stage 17～25 已实现详情、候选、缓存、共享查询计划、同源安全封面、提前停止和可选总集数契约 | P0 | docs/modules/M03-mikan-source-PRD.md |
 | M04 | RSS 解析模块 | Stage 1 已确认 | P0 | docs/modules/M04-rss-parser-PRD.md |
@@ -170,11 +172,11 @@ Stage 26 已完成。Web API 契约固化与服务端边界治理：冻结全部
 | M06 | 种子筛选规则模块 | Stage 15 已实现默认字面匹配、大小写不敏感与可选 `use_regex` / `case_sensitive` | P0 | docs/modules/M06-torrent-filter-rule-PRD.md |
 | M07 | 文件夹命名模块 | Stage 1 已确认 | P1 | docs/modules/M07-folder-naming-PRD.md |
 | M08 | 用户偏好与规则配置模块 | Stage 21 已实现非敏感偏好契约与存储（字幕组/筛选/命名/搜索修正）、偏好 Web API、偏好 Web UI 和批量草案偏好应用；偏好与修正存储只保存非敏感字段 | P1 | docs/modules/M08-user-preference-rule-PRD.md |
-| M09 | Request 确认交互模块 | Stage 2 已实现 | P2 | docs/modules/M09-request-confirmation-PRD.md |
+| M09 | Request 确认交互模块 | Stage 2 已实现；Stage 28 已实现单番/批量 save-confirm 组合确认与幂等记录（返回 ACCEPTED handoff） | P2 | docs/modules/M09-request-confirmation-PRD.md |
 | M10 | Auto Bangumi 集成模块 | Stage 24 已按 3.1.18 契约实现账号密码/Cookie、真实 subscribe payload/response，并保留 fail-closed Bearer 兼容模式 | P2 | docs/modules/M10-auto-bangumi-integration-PRD.md |
-| M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 已实现 path-safe 封面缓存、滑动 TTL 与机会式清理 | P2 | docs/modules/M11-storage-state-PRD.md |
+| M11 | 存储与状态管理模块 | Stage 15/20 已实现 Request、历史、AB 结果和队列存储；Stage 23 已实现 path-safe 封面缓存、滑动 TTL 与机会式清理；Stage 28 已新增 save-confirm 幂等记录 repository（原子读写 + 非敏感白名单字段） | P2 | docs/modules/M11-storage-state-PRD.md |
 | M12 | 日志与错误处理模块 | Stage 24 已覆盖 AB 认证、连接、协议兼容与规则转换的脱敏分类 | P1 | docs/modules/M12-log-error-PRD.md |
-| M13 | Web UI / 管理界面模块 | Stage 25 已完成 AB 界面、解析来源、结构化季数和实际搜索词展示；Stage 26 已冻结 `/api/v1` 契约并建立 OpenAPI/DTO、HTTP 状态、Web storage 根目录与 DraftStore；Stage 27 已完成前端工程化迁移（Vue 3 + TS + Vite）并删除旧前端 | P2 | docs/modules/M13-web-ui-PRD.md |
+| M13 | Web UI / 管理界面模块 | Stage 25 已完成 AB 界面、解析来源、结构化季数和实际搜索词展示；Stage 26 已冻结 `/api/v1` 契约并建立 OpenAPI/DTO、HTTP 状态、Web storage 根目录与 DraftStore；Stage 27 已完成前端工程化迁移（Vue 3 + TS + Vite）并删除旧前端；Stage 28 已接入草案 revision、保存确认与 safe-info 安全数据源（只在组件内存维护 revision/幂等键，不进入 URL/浏览器 storage） | P2 | docs/modules/M13-web-ui-PRD.md |
 | M14 | 系统配置模块 | Stage 24 已定义 request-scoped AB 双认证配置；Stage 26 已约束 Web storage 为服务端根目录下的相对 profile | P1 | docs/modules/M14-system-config-PRD.md |
 
 ## 8. 第一阶段开发顺序
@@ -236,9 +238,9 @@ M00 CLI 与流程编排
 | 第二十五阶段 | 正式番名与季数解析（已完成） | M00、M02、M03、M07、M10、M12、M13、测试基础设施 |
 | 第二十六阶段 | Web API 契约固化与服务端边界治理（已完成） | M00、M01、M11、M12、M13、M14、测试与 CI 基础设施 |
 | 第二十七阶段 | 前端工程化迁移与页面重构（已完成） | M13、API 契约、前端与测试基础设施 |
-| 第二十八阶段 | 草案一致性与原子保存确认（已规划） | M01、M09、M11、M13、API 契约与测试基础设施 |
+| 第二十八阶段 | 草案一致性与原子保存确认（已完成） | M01、M09、M11、M13、API 契约与测试基础设施 |
 
-Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立响应 DTO 与确定性 OpenAPI、拆分 Web schema/serializer/service/context/route 职责、建立稳定 HTTP 状态语义、收紧 Web storage 根目录（空值回落服务端根）、建立服务端权威 draft 生命周期、增加 CI 与 local-only 部署基线，并完成兼容回归与文档收尾。Stage 27 已完成 BL-024：建立 Vue 3 + TypeScript + Vite 独立前端工程（Flask 在 `/app/` 同源托管），渐进迁移全部 Web 旅程（Settings/Request 列表与详情/单个与批量搜索/草案/提交队列），完成 parity、默认入口切换与回退演练，US-209 删除旧 `app.js`、旧 Jinja 主模板与无用 CSS/测试 helper。Stage 28 已规划为 BL-025 的 B-A，只处理 draft revision、可靠保存、单番/批量原子保存确认、36 部上限与安全信息 DTO，不提前实现 tracking、Auto Bangumi 管理或新页面视觉。
+Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立响应 DTO 与确定性 OpenAPI、拆分 Web schema/serializer/service/context/route 职责、建立稳定 HTTP 状态语义、收紧 Web storage 根目录（空值回落服务端根）、建立服务端权威 draft 生命周期、增加 CI 与 local-only 部署基线，并完成兼容回归与文档收尾。Stage 27 已完成 BL-024：建立 Vue 3 + TypeScript + Vite 独立前端工程（Flask 在 `/app/` 同源托管），渐进迁移全部 Web 旅程（Settings/Request 列表与详情/单个与批量搜索/草案/提交队列），完成 parity、默认入口切换与回退演练，US-209 删除旧 `app.js`、旧 Jinja 主模板与无用 CSS/测试 helper。Stage 28 已完成 BL-025 的 B-A：只处理 draft revision、可靠保存、单番/批量原子保存确认、36 部上限与安全信息 DTO，不提前实现 tracking、Auto Bangumi 管理或新页面视觉；成功 handoff 只返回 `request_id` + `ACCEPTED`，B-B tracking 阶段据此幂等建立 tracking record。
 
 ## 10. 主 PRD 已确认事项
 
@@ -255,7 +257,7 @@ Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立�
 | D-MAIN-07 | Stage 19 后产品定位 | 全部 | MiGuOrca 是 Auto Bangumi 前置订阅编排工作台，不是 Auto Bangumi 或 qBittorrent 替代品 |
 | D-MAIN-08 | 批量输入方向 | M00、M13、M03 | 下一阶段以批量番剧简称解析、订阅草案卡片和用户审核为主，不再把单番剧自动提交作为核心卖点 |
 | D-MAIN-09 | AI 能力边界 | M03、M08、M13 | AI 只生成候选标题和搜索词，不自动决定最终合集；低置信度结果必须可审核 |
-| D-MAIN-10 | 前端体验重构边界 | M01、M09、M10、M13 | Gate 1～3 已冻结四项导航与混合布局；先以 Stage 28 补齐草案一致性，再分别评审 tracking、Auto Bangumi 管理和前端切片 |
+| D-MAIN-10 | 前端体验重构边界 | M01、M09、M10、M13 | Gate 1～3 已冻结四项导航与混合布局；Stage 28 已补齐草案一致性（B-A），tracking（B-B）、Auto Bangumi 管理（B-C）与前端切片（BL-026）仍待 Gate 4 评审 |
 
 ## 11. 文档职责边界
 
@@ -288,7 +290,7 @@ Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立�
 
 1. BL-023 已完成为 Stage 26 Web API 契约固化与服务端边界治理；执行范围见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。Stage 26 不重构页面视觉，不引入新前端框架。
 2. BL-024 已完成 Stage 27 前端工程化迁移与页面重构；执行范围见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。前端只通过生成类型/client 使用后端，不导入 Python 模型或复制旧 `app.js` 内部状态（旧 `app.js` 已随 US-209 删除）。
-3. BL-025 的 B-A 已确认为 Stage 28；执行范围见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`。B-B～B-D 和 BL-026 仍待 Gate 4 分包评审，不得追加回 Stage 28。
+3. BL-025 的 B-A 已完成 Stage 28；执行范围与完成记录见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`，归档快照在 `scripts/ralph/archive/2026-09-08-stage28-draft-consistency/`。B-A 只返回 ACCEPTED Request handoff，不创建 tracking record；B-B（统一 tracking record）、B-C（Auto Bangumi 管理）和 B-D 仍待 Gate 4 分包评审，不得追加回 Stage 28。
 4. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
 5. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 6. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。

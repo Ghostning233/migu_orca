@@ -1270,6 +1270,18 @@
                                 "default": null,
                                 "title": "Draft Id"
                               },
+                              "draft_revision": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Draft Revision"
+                              },
                               "error": {
                                 "anyOf": [
                                   {
@@ -1328,6 +1340,7 @@
                         "enhanced_search_queries": [],
                         "preview_request": null,
                         "draft_id": null,
+                        "draft_revision": null,
                         "error": null
                       }
                     ]
@@ -1337,7 +1350,7 @@
             }
           },
           "400": {
-            "description": "validation_error: 请至少输入一个番剧名称 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "description": "validation_error: 请至少输入一个番剧名称 / batch_limit_exceeded: 单批最多支持 36 部（US-215，标题解析/MiKan 前拒绝） / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
             "content": {
               "application/json": {
                 "schema": {
@@ -3263,7 +3276,7 @@
       },
       "post": {
         "summary": "生成订阅方案（可保存）",
-        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id（US-194：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
+        "description": "按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id 与 draft_revision（US-194/211：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request；US-211 起响应同时携带单调 draft_revision 供下次修改作为 base_revision）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。",
         "operationId": "createRequest",
         "responses": {
           "200": {
@@ -4355,6 +4368,18 @@
                           ],
                           "default": null,
                           "title": "Draft Id"
+                        },
+                        "draft_revision": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Revision"
                         }
                       },
                       "required": [
@@ -4393,7 +4418,8 @@
                       "warnings": []
                     },
                     "saved_request": null,
-                    "draft_id": null
+                    "draft_id": null,
+                    "draft_revision": null
                   }
                 }
               }
@@ -4689,7 +4715,7 @@
     "/api/v1/requests/preview-modify": {
       "post": {
         "summary": "内存中修改未保存草案",
-        "description": "US-194：只接受服务端签发的 draft_id 与允许 patch，返回更新后的内存草案与摘要（不落盘）。客户端不得提交完整 Request 作为权威快照。",
+        "description": "US-194/211：只接受服务端签发的 draft_id、base_revision 与允许 patch，返回更新后的内存草案、同一 draft_id 与新 draft_revision（不落盘）。base_revision 不匹配时返回 409 draft_revision_conflict（error_data 只含 field=base_revision 与 current_revision）。客户端不得提交完整 Request 作为权威快照。",
         "operationId": "previewModifyRequest",
         "responses": {
           "200": {
@@ -5293,6 +5319,18 @@
                           ],
                           "default": null,
                           "title": "Draft Id"
+                        },
+                        "draft_revision": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Revision"
                         }
                       },
                       "required": [
@@ -5330,7 +5368,8 @@
                       "expected_folder_name": "示例",
                       "warnings": []
                     },
-                    "draft_id": null
+                    "draft_id": null,
+                    "draft_revision": null
                   }
                 }
               }
@@ -5391,7 +5430,7 @@
             }
           },
           "409": {
-            "description": "draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存",
+            "description": "draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 / draft_revision_conflict: 草案已被更新，请基于最新版本重试",
             "content": {
               "application/json": {
                 "schema": {
@@ -5453,6 +5492,7 @@
                 "type": "object",
                 "required": [
                   "draft_id",
+                  "base_revision",
                   "patch"
                 ],
                 "properties": {
@@ -5460,6 +5500,11 @@
                     "type": "string",
                     "description": "生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。",
                     "x-request-scoped": true
+                  },
+                  "base_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的草案 revision（US-211，compare-and-swap）。"
                   },
                   "patch": {
                     "type": "object",
@@ -5472,6 +5517,7 @@
                 }
               },
               "example": {
+                "base_revision": 1,
                 "patch": {}
               }
             }
@@ -5483,7 +5529,7 @@
     "/api/v1/requests/preview-save": {
       "post": {
         "summary": "保存未修改的预览草案",
-        "description": "US-194：消费服务端权威 draft_id（一次性，重放保护），仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
+        "description": "US-194/US-212：以 draft_id + base_revision 预留服务端权威草案，持久化成功后才提交重放 tombstone；持久化失败会释放预留，同一 draft/revision 可安全重试，不再因写盘失败丢失草案。仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。",
         "operationId": "previewSaveRequest",
         "responses": {
           "200": {
@@ -6662,7 +6708,7 @@
             }
           },
           "409": {
-            "description": "invalid_request_status: 只有待确认的订阅草案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存",
+            "description": "invalid_request_status: 只有待确认的订阅草案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 / draft_revision_conflict: 草案已被更新，请基于最新版本重试 / draft_reserved: 订阅草案正在保存中，请稍后重试",
             "content": {
               "application/json": {
                 "schema": {
@@ -6723,12 +6769,845 @@
               "schema": {
                 "type": "object",
                 "required": [
-                  "draft_id"
+                  "draft_id",
+                  "base_revision"
                 ],
                 "properties": {
                   "draft_id": {
                     "type": "string",
-                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存后失效）。",
+                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，保存成功后失效）。",
+                    "x-request-scoped": true
+                  },
+                  "base_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的草案 revision（US-212，预留校验；不匹配返回 409 draft_revision_conflict）。"
+                  },
+                  "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  }
+                }
+              },
+              "example": {
+                "base_revision": 1
+              }
+            }
+          },
+          "description": "保存未修改的预览草案"
+        }
+      }
+    },
+    "/api/v1/requests/save-confirm": {
+      "post": {
+        "summary": "保存并确认单个订阅方案草案",
+        "description": "US-214：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与 handoff（Stage 28 不创建 tracking record，D28-09）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。",
+        "operationId": "confirmRequestSave",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "result"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "description": "Save-confirm success result (US-214).\n\n``outcome`` is always ``CONFIRMED`` here (the SAVED_CONFIRM_FAILED branch\nis returned through the failure envelope's ``error_data``, whose shape is\nfrozen by ``test_dto_contracts``). ``request``/``summary`` carry the saved\nACCEPTED Request; ``handoff`` hands the durable public identity onward.",
+                      "properties": {
+                        "outcome": {
+                          "title": "Outcome",
+                          "type": "string"
+                        },
+                        "request": {
+                          "additionalProperties": true,
+                          "description": "Typed view of the saved Request snapshot the detail panel renders.\n\nOnly the display fields are typed; the engine may add fields without\nbreaking the boundary (``extra=\"allow\"``). ``mikan_url``/``rss_url``/\n``poster_url`` are declared for schema accuracy but the frontend must\nnever render them (URLs are redacted at display time).",
+                          "properties": {
+                            "request_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Request Id"
+                            },
+                            "status": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Status"
+                            },
+                            "input": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": true,
+                                  "properties": {
+                                    "raw_title": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Raw Title"
+                                    }
+                                  },
+                                  "title": "RequestInputDTO",
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null
+                            },
+                            "source_info": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": true,
+                                  "properties": {
+                                    "matched_bangumi": {
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": true,
+                                          "properties": {
+                                            "title": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ],
+                                              "default": null,
+                                              "title": "Title"
+                                            },
+                                            "aliases": {
+                                              "default": [],
+                                              "items": {
+                                                "type": "string"
+                                              },
+                                              "title": "Aliases",
+                                              "type": "array"
+                                            },
+                                            "mikan_url": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ],
+                                              "default": null,
+                                              "title": "Mikan Url"
+                                            },
+                                            "match_score": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "number"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ],
+                                              "default": null,
+                                              "title": "Match Score"
+                                            },
+                                            "poster_url": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ],
+                                              "default": null,
+                                              "title": "Poster Url"
+                                            }
+                                          },
+                                          "title": "MatchedBangumiDTO",
+                                          "type": "object"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null
+                                    },
+                                    "rss_sources": {
+                                      "default": [],
+                                      "items": {
+                                        "additionalProperties": true,
+                                        "properties": {
+                                          "subtitle_group": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Subtitle Group"
+                                          },
+                                          "rss_url": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Rss Url"
+                                          },
+                                          "source_type": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Source Type"
+                                          },
+                                          "total_seed_count": {
+                                            "anyOf": [
+                                              {
+                                                "type": "integer"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Total Seed Count"
+                                          },
+                                          "seed_names": {
+                                            "default": [],
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "title": "Seed Names",
+                                            "type": "array"
+                                          },
+                                          "valid_seed_count": {
+                                            "anyOf": [
+                                              {
+                                                "type": "integer"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Valid Seed Count"
+                                          },
+                                          "invalid_seed_count": {
+                                            "anyOf": [
+                                              {
+                                                "type": "integer"
+                                              },
+                                              {
+                                                "type": "null"
+                                              }
+                                            ],
+                                            "default": null,
+                                            "title": "Invalid Seed Count"
+                                          },
+                                          "valid_seed_names": {
+                                            "default": [],
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "title": "Valid Seed Names",
+                                            "type": "array"
+                                          },
+                                          "excluded_seed_names": {
+                                            "default": [],
+                                            "items": {
+                                              "additionalProperties": true,
+                                              "type": "object"
+                                            },
+                                            "title": "Excluded Seed Names",
+                                            "type": "array"
+                                          },
+                                          "warnings": {
+                                            "default": [],
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "title": "Warnings",
+                                            "type": "array"
+                                          }
+                                        },
+                                        "title": "RssSourceDTO",
+                                        "type": "object"
+                                      },
+                                      "title": "Rss Sources",
+                                      "type": "array"
+                                    }
+                                  },
+                                  "title": "SourceInfoDTO",
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null
+                            },
+                            "confirmable_config": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": true,
+                                  "properties": {
+                                    "selected_subtitle_group": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Selected Subtitle Group"
+                                    },
+                                    "selected_rss_url": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Selected Rss Url"
+                                    },
+                                    "filter_rule": {
+                                      "anyOf": [
+                                        {
+                                          "additionalProperties": true,
+                                          "properties": {
+                                            "must_contain": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ],
+                                              "default": null,
+                                              "title": "Must Contain"
+                                            },
+                                            "must_not_contain": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ],
+                                              "default": null,
+                                              "title": "Must Not Contain"
+                                            },
+                                            "use_regex": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "boolean"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ],
+                                              "default": null,
+                                              "title": "Use Regex"
+                                            },
+                                            "case_sensitive": {
+                                              "anyOf": [
+                                                {
+                                                  "type": "boolean"
+                                                },
+                                                {
+                                                  "type": "null"
+                                                }
+                                              ],
+                                              "default": null,
+                                              "title": "Case Sensitive"
+                                            }
+                                          },
+                                          "title": "FilterRuleDTO",
+                                          "type": "object"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null
+                                    },
+                                    "effective_seed_names": {
+                                      "default": [],
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "title": "Effective Seed Names",
+                                      "type": "array"
+                                    },
+                                    "expected_folder_name": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Expected Folder Name"
+                                    },
+                                    "warnings": {
+                                      "default": [],
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "title": "Warnings",
+                                      "type": "array"
+                                    }
+                                  },
+                                  "title": "ConfirmableConfigDTO",
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null
+                            },
+                            "ab_submit_result": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": true,
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Ab Submit Result"
+                            },
+                            "created_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Created At"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Updated At"
+                            },
+                            "user_action": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": true,
+                                  "properties": {
+                                    "action": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Action"
+                                    },
+                                    "reason": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Reason"
+                                    },
+                                    "decided_at": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Decided At"
+                                    }
+                                  },
+                                  "title": "UserActionDTO",
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null
+                            }
+                          },
+                          "title": "RequestSnapshotDTO",
+                          "type": "object"
+                        },
+                        "summary": {
+                          "additionalProperties": false,
+                          "description": "Public ``summary`` shape produced by ``summarize_request``.",
+                          "properties": {
+                            "request_id": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Request Id"
+                            },
+                            "status": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Status"
+                            },
+                            "bangumi_title": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Bangumi Title"
+                            },
+                            "candidate_subtitle_groups": {
+                              "items": {
+                                "additionalProperties": true,
+                                "type": "object"
+                              },
+                              "title": "Candidate Subtitle Groups",
+                              "type": "array"
+                            },
+                            "selected_subtitle_group": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Selected Subtitle Group"
+                            },
+                            "effective_seed_count": {
+                              "title": "Effective Seed Count",
+                              "type": "integer"
+                            },
+                            "expected_folder_name": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Expected Folder Name"
+                            },
+                            "warnings": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "title": "Warnings",
+                              "type": "array"
+                            }
+                          },
+                          "required": [
+                            "request_id",
+                            "status",
+                            "bangumi_title",
+                            "candidate_subtitle_groups",
+                            "selected_subtitle_group",
+                            "effective_seed_count",
+                            "expected_folder_name",
+                            "warnings"
+                          ],
+                          "title": "RequestSummaryDTO",
+                          "type": "object"
+                        },
+                        "handoff": {
+                          "additionalProperties": false,
+                          "description": "Public ``handoff`` of a confirmed save (US-214).\n\nStage 28 deliberately does **not** create a tracking record (D28-09); the\nhandoff hands the frontend the durable ACCEPTED Request identity so the\ntracking phase can later build a record idempotently. ``next_action`` is\nthe stable B-B hook.",
+                          "properties": {
+                            "request_id": {
+                              "title": "Request Id",
+                              "type": "string"
+                            },
+                            "status": {
+                              "title": "Status",
+                              "type": "string"
+                            },
+                            "next_action": {
+                              "title": "Next Action",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "request_id",
+                            "status",
+                            "next_action"
+                          ],
+                          "title": "RequestSaveConfirmHandoffDTO",
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "outcome",
+                        "request",
+                        "summary",
+                        "handoff"
+                      ],
+                      "title": "RequestSaveConfirmResultDTO",
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true,
+                  "result": {
+                    "outcome": "示例",
+                    "request": {
+                      "request_id": null,
+                      "status": null,
+                      "input": null,
+                      "source_info": null,
+                      "confirmable_config": null,
+                      "ab_submit_result": null,
+                      "created_at": null,
+                      "updated_at": null,
+                      "user_action": null
+                    },
+                    "summary": {
+                      "request_id": "示例",
+                      "status": "示例",
+                      "bangumi_title": "示例",
+                      "candidate_subtitle_groups": [
+                        {}
+                      ],
+                      "selected_subtitle_group": "示例",
+                      "effective_seed_count": 1,
+                      "expected_folder_name": "示例",
+                      "warnings": []
+                    },
+                    "handoff": {
+                      "request_id": "示例",
+                      "status": "示例",
+                      "next_action": "示例"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "invalid_request_status: 只有待确认的订阅方案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 / draft_revision_conflict: 草案已被更新，请基于最新版本重试 / draft_reserved: 订阅草案正在保存中，请稍后重试 / idempotency_conflict: 相同的幂等键不能用于不同的保存确认操作 / save_confirm_failed: 订阅方案已保存但确认失败，请对已保存的方案重试确认",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_request_status",
+                  "error_message": "只有待确认的订阅方案可以保存",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "draft_id",
+                  "base_revision",
+                  "idempotency_key"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "draft_id": {
+                    "type": "string",
+                    "description": "生成/修改时服务端签发的 opaque draft_id（一次性，成功后失效）。",
+                    "x-request-scoped": true
+                  },
+                  "base_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的草案 revision（US-214，预留校验；不匹配返回 409 draft_revision_conflict）。"
+                  },
+                  "idempotency_key": {
+                    "type": "string",
+                    "description": "一次明确客户端操作生成的 opaque 幂等键（US-213/214，request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。",
                     "x-request-scoped": true
                   },
                   "storage_dir": {
@@ -6737,10 +7616,12 @@
                   }
                 }
               },
-              "example": {}
+              "example": {
+                "base_revision": 1
+              }
             }
           },
-          "description": "保存未修改的预览草案"
+          "description": "保存并确认单个订阅方案草案"
         }
       }
     },
@@ -8886,6 +9767,274 @@
             }
           },
           "description": "重试队列中单个失败项目"
+        }
+      }
+    },
+    "/api/v1/batches/{batch_id}/save-confirm": {
+      "post": {
+        "summary": "批量保存并确认选中草案（逐条部分成功）",
+        "description": "US-216：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。Stage 28 不创建 tracking record（D28-09）。",
+        "operationId": "saveConfirmBatchItems",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "result"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "description": "Partial-success batch save-confirm result (US-216).\n\n``results`` preserves the input/``item_ids`` order and only carries public\nper-item metadata; ``summary`` counts ``requested`` (processed items),\n``confirmed`` and ``failed``. The queue is intentionally not part of this\ncontract — Stage 28 hands off ACCEPTED Request identities; the tracking\nphase builds the pre-submit view from them.",
+                      "properties": {
+                        "batch_id": {
+                          "title": "Batch Id",
+                          "type": "string"
+                        },
+                        "results": {
+                          "items": {
+                            "additionalProperties": false,
+                            "description": "One batch save-confirm per-item result (US-216).\n\nPer-item failures are *partial-success* results (``outcome=CONFIRMED`` for\nsuccessful items, a stable sanitized failure otherwise) and never escalate\nthe whole request to an HTTP failure. ``request_id``/``status`` are only\npresent on the CONFIRMED branch; failed items carry the sanitized\n``error_type`` + a fixed Chinese ``error_message`` and stay retryable by\nthe client (the draft is not consumed on an expected failure).",
+                            "properties": {
+                              "item_id": {
+                                "title": "Item Id",
+                                "type": "string"
+                              },
+                              "outcome": {
+                                "title": "Outcome",
+                                "type": "string"
+                              },
+                              "request_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Request Id"
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Status"
+                              },
+                              "error_type": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Error Type"
+                              },
+                              "error_message": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Error Message"
+                              }
+                            },
+                            "required": [
+                              "item_id",
+                              "outcome"
+                            ],
+                            "title": "BatchSaveConfirmItemResultDTO",
+                            "type": "object"
+                          },
+                          "title": "Results",
+                          "type": "array"
+                        },
+                        "summary": {
+                          "additionalProperties": {
+                            "type": "integer"
+                          },
+                          "title": "Summary",
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "batch_id",
+                        "results",
+                        "summary"
+                      ],
+                      "title": "BatchSaveConfirmResultDTO",
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true,
+                  "result": {
+                    "batch_id": "示例",
+                    "results": [
+                      {
+                        "item_id": "示例",
+                        "outcome": "示例",
+                        "request_id": null,
+                        "status": null,
+                        "error_type": null,
+                        "error_message": null
+                      }
+                    ],
+                    "summary": {}
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "data_validation_errors: 请求参数校验失败（缺失/非法 item 字段或 idempotency_key） / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "data_validation_errors",
+                  "error_message": "请求参数校验失败（缺失/非法 item 字段或 idempotency_key）",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "items"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "description": "批量卡片保存确认描述符（公开 item_id + 服务端签发 draft_id/base_revision + opaque 幂等键）。",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "item_id",
+                        "draft_id",
+                        "base_revision",
+                        "idempotency_key"
+                      ],
+                      "additionalProperties": false,
+                      "properties": {
+                        "item_id": {
+                          "type": "string",
+                          "description": "批量卡片的公开 item_id（保持输入顺序）。"
+                        },
+                        "draft_id": {
+                          "type": "string",
+                          "description": "服务端签发的 opaque draft_id（一次性，成功后失效；request-scoped，不落盘）。",
+                          "x-request-scoped": true
+                        },
+                        "base_revision": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "description": "客户端最后观察到的草案 revision（US-216，预留校验；不匹配返回逐条 failed draft_revision_conflict）。"
+                        },
+                        "idempotency_key": {
+                          "type": "string",
+                          "description": "一次明确客户端操作生成的 opaque 幂等键（request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。",
+                          "x-request-scoped": true
+                        }
+                      }
+                    }
+                  },
+                  "item_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "description": "可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。"
+                  },
+                  "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  }
+                }
+              },
+              "example": {
+                "items": [
+                  {
+                    "item_id": "示例",
+                    "base_revision": 1
+                  }
+                ],
+                "item_ids": []
+              }
+            }
+          },
+          "description": "批量保存并确认选中草案（逐条部分成功）"
         }
       }
     },
@@ -11922,6 +13071,18 @@
                           ],
                           "default": null,
                           "title": "Draft Id"
+                        },
+                        "draft_revision": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Revision"
                         }
                       },
                       "required": [
@@ -11960,7 +13121,8 @@
                       "warnings": []
                     },
                     "saved_request": null,
-                    "draft_id": null
+                    "draft_id": null,
+                    "draft_revision": null
                   }
                 }
               }
@@ -13245,6 +14407,18 @@
                           ],
                           "default": null,
                           "title": "Draft Id"
+                        },
+                        "draft_revision": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Revision"
                         }
                       },
                       "required": [
@@ -13283,7 +14457,8 @@
                       "warnings": []
                     },
                     "saved_request": null,
-                    "draft_id": null
+                    "draft_id": null,
+                    "draft_revision": null
                   }
                 }
               }
@@ -14772,6 +15947,18 @@
                           ],
                           "default": null,
                           "title": "Draft Id"
+                        },
+                        "draft_revision": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Revision"
                         }
                       },
                       "required": [
@@ -14810,7 +15997,8 @@
                       "warnings": []
                     },
                     "saved_request": null,
-                    "draft_id": null
+                    "draft_id": null,
+                    "draft_revision": null
                   }
                 }
               }
@@ -14952,6 +16140,728 @@
           },
           "description": "修改已保存订阅方案"
         }
+      }
+    },
+    "/api/v1/requests/{request_id}/safe-info": {
+      "get": {
+        "summary": "查看订阅方案安全信息白名单",
+        "description": "US-217：返回“全部信息”只读弹窗专用的严格安全白名单（RequestSafeInfoDTO，extra=forbid）。serializer 默认拒绝，逐字段显式构造：request_id、标题/别名/季度/公开季数证据摘要、选定 MiKan 合集标题与公开编号（不含完整合集/RSS URL）、字幕组/过滤规则用户可读摘要/相对 storage profile/安全文件夹名、有效/完整/排除资源数量与脱敏文件名摘要、总集数与 updated_episode=null/updated_episode_status=NOT_IMPLEMENTED、Request 状态、脱敏历史与安全 Auto Bangumi 状态摘要。完整 URL、RSS、magnet、endpoint、token、cookie、password、Authorization、原始响应与绝对路径绝不出现在成功响应、错误或 OpenAPI 示例。",
+        "operationId": "getRequestSafeInfo",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "result"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "description": "Envelope for the safe-info endpoint: only the whitelist object.\n\nThe endpoint result is ``{\"safe_info\": {...}}`` — no raw request snapshot,\nhistory section or AB section is ever attached.",
+                      "properties": {
+                        "safe_info": {
+                          "additionalProperties": false,
+                          "description": "The strict safe-info whitelist for one saved Request (US-217).\n\n``extra=\"forbid\"``: unknown nested fields, endpoints, URLs, credentials,\nraw responses and absolute paths are rejected instead of passing through.\n``updated_episode`` is always ``None`` and ``updated_episode_status`` is\nalways ``NOT_IMPLEMENTED`` — Stage 28 never guesses current-episode\nprogress from seeds/RSS/download state (BL-020 is out of scope).",
+                          "properties": {
+                            "request_id": {
+                              "title": "Request Id",
+                              "type": "string"
+                            },
+                            "status": {
+                              "title": "Status",
+                              "type": "string"
+                            },
+                            "raw_title": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Raw Title"
+                            },
+                            "title": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Title"
+                            },
+                            "aliases": {
+                              "items": {
+                                "type": "string"
+                              },
+                              "title": "Aliases",
+                              "type": "array"
+                            },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Season"
+                            },
+                            "season_raw": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Season Raw"
+                            },
+                            "season_evidence": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Season Evidence"
+                            },
+                            "mikan_collection": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "description": "Selected MiKan collection public identity (never the full URL).",
+                                  "properties": {
+                                    "title": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Title"
+                                    },
+                                    "bangumi_id": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Bangumi Id"
+                                    }
+                                  },
+                                  "title": "RequestSafeInfoCollectionDTO",
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null
+                            },
+                            "subtitle_groups": {
+                              "items": {
+                                "additionalProperties": false,
+                                "description": "One subtitle-group resource summary (no RSS URL, seeds or raw feed).",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "default": null,
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "default": 0,
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "default": 0,
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "default": 0,
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "warnings": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "title": "Warnings",
+                                    "type": "array"
+                                  }
+                                },
+                                "title": "RequestSafeInfoSubtitleGroupDTO",
+                                "type": "object"
+                              },
+                              "title": "Subtitle Groups",
+                              "type": "array"
+                            },
+                            "selected_subtitle_group": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Selected Subtitle Group"
+                            },
+                            "filter_rule": {
+                              "additionalProperties": false,
+                              "description": "User-readable filter rule summary (safe, user-controlled text).",
+                              "properties": {
+                                "must_contain": {
+                                  "default": "",
+                                  "title": "Must Contain",
+                                  "type": "string"
+                                },
+                                "must_not_contain": {
+                                  "default": "",
+                                  "title": "Must Not Contain",
+                                  "type": "string"
+                                },
+                                "use_regex": {
+                                  "default": false,
+                                  "title": "Use Regex",
+                                  "type": "boolean"
+                                },
+                                "case_sensitive": {
+                                  "default": false,
+                                  "title": "Case Sensitive",
+                                  "type": "boolean"
+                                }
+                              },
+                              "title": "RequestSafeInfoFilterRuleDTO",
+                              "type": "object"
+                            },
+                            "resources": {
+                              "additionalProperties": false,
+                              "description": "Resource counts and sanitized file-name summaries.\n\nOnly torrent *names* (file titles) are exposed — never magnet links,\ndownload URLs or raw RSS. ``valid`` is the currently selected subtitle\ngroup's effective seeds; ``excluded`` its excluded seeds; ``complete`` is\nthe combined unique seeds across every candidate group.",
+                              "properties": {
+                                "selected_subtitle_group": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Selected Subtitle Group"
+                                },
+                                "valid_resource_count": {
+                                  "default": 0,
+                                  "title": "Valid Resource Count",
+                                  "type": "integer"
+                                },
+                                "invalid_resource_count": {
+                                  "default": 0,
+                                  "title": "Invalid Resource Count",
+                                  "type": "integer"
+                                },
+                                "complete_resource_count": {
+                                  "default": 0,
+                                  "title": "Complete Resource Count",
+                                  "type": "integer"
+                                },
+                                "valid_file_names": {
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "title": "Valid File Names",
+                                  "type": "array"
+                                },
+                                "excluded_file_names": {
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "description": "One excluded torrent-file name plus its readable filter reason.",
+                                    "properties": {
+                                      "name": {
+                                        "default": "",
+                                        "title": "Name",
+                                        "type": "string"
+                                      },
+                                      "reason": {
+                                        "default": "",
+                                        "title": "Reason",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "title": "RequestSafeInfoExcludedFileDTO",
+                                    "type": "object"
+                                  },
+                                  "title": "Excluded File Names",
+                                  "type": "array"
+                                }
+                              },
+                              "title": "RequestSafeInfoResourcesDTO",
+                              "type": "object"
+                            },
+                            "folder_name": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Folder Name"
+                            },
+                            "storage_profile": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Storage Profile"
+                            },
+                            "total_episodes": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null,
+                              "title": "Total Episodes"
+                            },
+                            "updated_episode": {
+                              "default": null,
+                              "title": "Updated Episode",
+                              "type": "null"
+                            },
+                            "updated_episode_status": {
+                              "const": "NOT_IMPLEMENTED",
+                              "default": "NOT_IMPLEMENTED",
+                              "title": "Updated Episode Status",
+                              "type": "string"
+                            },
+                            "history_summary": {
+                              "items": {
+                                "additionalProperties": false,
+                                "description": "One sanitized status-history event (details/diagnostics dropped).",
+                                "properties": {
+                                  "action": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "default": null,
+                                    "title": "Action"
+                                  },
+                                  "previous_status": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "default": null,
+                                    "title": "Previous Status"
+                                  },
+                                  "next_status": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "default": null,
+                                    "title": "Next Status"
+                                  },
+                                  "timestamp": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "default": null,
+                                    "title": "Timestamp"
+                                  }
+                                },
+                                "title": "RequestSafeInfoHistoryEventDTO",
+                                "type": "object"
+                              },
+                              "title": "History Summary",
+                              "type": "array"
+                            },
+                            "ab_status": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "description": "Safe Auto Bangumi submission summary (no endpoint/raw response).\n\n``submitted`` reports whether a submission result exists; ``success`` and\n``ab_subscription_id`` are the public outcome; ``error_type`` is a stable\nclassified failure marker when the submission did not succeed.",
+                                  "properties": {
+                                    "submitted": {
+                                      "default": false,
+                                      "title": "Submitted",
+                                      "type": "boolean"
+                                    },
+                                    "success": {
+                                      "anyOf": [
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Success"
+                                    },
+                                    "ab_subscription_id": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Ab Subscription Id"
+                                    },
+                                    "error_type": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "default": null,
+                                      "title": "Error Type"
+                                    }
+                                  },
+                                  "title": "RequestSafeInfoAbStatusDTO",
+                                  "type": "object"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "default": null
+                            }
+                          },
+                          "required": [
+                            "request_id",
+                            "status"
+                          ],
+                          "title": "RequestSafeInfoDTO",
+                          "type": "object"
+                        }
+                      },
+                      "required": [
+                        "safe_info"
+                      ],
+                      "title": "RequestSafeInfoResultDTO",
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true,
+                  "result": {
+                    "safe_info": {
+                      "request_id": "示例",
+                      "status": "示例",
+                      "raw_title": null,
+                      "title": null,
+                      "aliases": [],
+                      "season": null,
+                      "season_raw": null,
+                      "season_evidence": null,
+                      "mikan_collection": null,
+                      "subtitle_groups": [
+                        {
+                          "subtitle_group": null,
+                          "total_resource_count": 0,
+                          "valid_resource_count": 0,
+                          "invalid_resource_count": 0,
+                          "warnings": []
+                        }
+                      ],
+                      "selected_subtitle_group": null,
+                      "filter_rule": {
+                        "must_contain": "",
+                        "must_not_contain": "",
+                        "use_regex": false,
+                        "case_sensitive": false
+                      },
+                      "resources": {
+                        "selected_subtitle_group": null,
+                        "valid_resource_count": 0,
+                        "invalid_resource_count": 0,
+                        "complete_resource_count": 0,
+                        "valid_file_names": [],
+                        "excluded_file_names": [
+                          {
+                            "name": "",
+                            "reason": ""
+                          }
+                        ]
+                      },
+                      "folder_name": null,
+                      "storage_profile": null,
+                      "total_episodes": null,
+                      "updated_episode": null,
+                      "updated_episode_status": "NOT_IMPLEMENTED",
+                      "history_summary": [
+                        {
+                          "action": null,
+                          "previous_status": null,
+                          "next_status": null,
+                          "timestamp": null
+                        }
+                      ],
+                      "ab_status": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_request_id: request_id 不能包含路径片段",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "invalid_storage_dir",
+                  "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "request_not_found: 订阅方案不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "request_not_found",
+                  "error_message": "订阅方案不存在",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "storage_error: 读取订阅方案失败 / storage_json_error: 订阅方案 JSON 损坏",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "storage_error",
+                  "error_message": "读取订阅方案失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "description": "已保存订阅方案的 request_id。",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "storage_dir",
+            "in": "query",
+            "required": false,
+            "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       }
     },
     "/api/v1/requests/{request_id}/submit-ab": {
@@ -16050,6 +17960,18 @@
                           "default": null,
                           "title": "Draft Id"
                         },
+                        "draft_revision": {
+                          "anyOf": [
+                            {
+                              "type": "integer"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "default": null,
+                          "title": "Draft Revision"
+                        },
                         "ab_submit_result": {
                           "additionalProperties": false,
                           "description": "Public Auto Bangumi submit-result whitelist.\n\n``ab_response`` is sanitized by ``_sanitize_ab_submit_result`` (never\ncarries tokens/cookies/URLs); ``fallback_config`` is an opaque\nnon-sensitive fallback payload when enabled.",
@@ -16161,6 +18083,7 @@
                     },
                     "saved_request": null,
                     "draft_id": null,
+                    "draft_revision": null,
                     "ab_submit_result": {
                       "success": true,
                       "ab_subscription_id": "示例",

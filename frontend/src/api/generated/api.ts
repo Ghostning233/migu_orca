@@ -132,7 +132,7 @@ export interface paths {
         put?: never;
         /**
          * 生成订阅方案（可保存）
-         * @description 按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id（US-194：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。
+         * @description 按标题生成 Request。save_request=false 时仅返回内存预览，并签发服务端权威 draft_id 与 draft_revision（US-194/211：preview-modify/preview-save 只接受 draft_id，不接受客户端完整 Request；US-211 起响应同时携带单调 draft_revision 供下次修改作为 base_revision）；save_request=true 时持久化为 PENDING_CONFIRM 草案。mikan_config/mikan_bangumi/candidate_context 均为 request-scoped，绝不落盘。
          */
         post: operations["createRequest"];
         delete?: never;
@@ -152,7 +152,7 @@ export interface paths {
         put?: never;
         /**
          * 内存中修改未保存草案
-         * @description US-194：只接受服务端签发的 draft_id 与允许 patch，返回更新后的内存草案与摘要（不落盘）。客户端不得提交完整 Request 作为权威快照。
+         * @description US-194/211：只接受服务端签发的 draft_id、base_revision 与允许 patch，返回更新后的内存草案、同一 draft_id 与新 draft_revision（不落盘）。base_revision 不匹配时返回 409 draft_revision_conflict（error_data 只含 field=base_revision 与 current_revision）。客户端不得提交完整 Request 作为权威快照。
          */
         post: operations["previewModifyRequest"];
         delete?: never;
@@ -172,9 +172,29 @@ export interface paths {
         put?: never;
         /**
          * 保存未修改的预览草案
-         * @description US-194：消费服务端权威 draft_id（一次性，重放保护），仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。
+         * @description US-194/US-212：以 draft_id + base_revision 预留服务端权威草案，持久化成功后才提交重放 tombstone；持久化失败会释放预留，同一 draft/revision 可安全重试，不再因写盘失败丢失草案。仅允许 PENDING_CONFIRM 草案落盘并返回保存结果。
          */
         post: operations["previewSaveRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/requests/save-confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 保存并确认单个订阅方案草案
+         * @description US-214：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与 handoff（Stage 28 不创建 tracking record，D28-09）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。
+         */
+        post: operations["confirmRequestSave"];
         delete?: never;
         options?: never;
         head?: never;
@@ -243,6 +263,26 @@ export interface paths {
         put?: never;
         /** 重试队列中单个失败项目 */
         post: operations["retryBatchQueueItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/batches/{batch_id}/save-confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 批量保存并确认选中草案（逐条部分成功）
+         * @description US-216：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。Stage 28 不创建 tracking record（D28-09）。
+         */
+        post: operations["saveConfirmBatchItems"];
         delete?: never;
         options?: never;
         head?: never;
@@ -368,6 +408,26 @@ export interface paths {
         put?: never;
         /** 修改已保存订阅方案 */
         post: operations["modifyRequest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/requests/{request_id}/safe-info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查看订阅方案安全信息白名单
+         * @description US-217：返回“全部信息”只读弹窗专用的严格安全白名单（RequestSafeInfoDTO，extra=forbid）。serializer 默认拒绝，逐字段显式构造：request_id、标题/别名/季度/公开季数证据摘要、选定 MiKan 合集标题与公开编号（不含完整合集/RSS URL）、字幕组/过滤规则用户可读摘要/相对 storage profile/安全文件夹名、有效/完整/排除资源数量与脱敏文件名摘要、总集数与 updated_episode=null/updated_episode_status=NOT_IMPLEMENTED、Request 状态、脱敏历史与安全 Auto Bangumi 状态摘要。完整 URL、RSS、magnet、endpoint、token、cookie、password、Authorization、原始响应与绝对路径绝不出现在成功响应、错误或 OpenAPI 示例。
+         */
+        get: operations["getRequestSafeInfo"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -751,6 +811,7 @@ export interface operations {
                      *             "enhanced_search_queries": [],
                      *             "preview_request": null,
                      *             "draft_id": null,
+                     *             "draft_revision": null,
                      *             "error": null
                      *           }
                      *         ]
@@ -1140,6 +1201,11 @@ export interface operations {
                                  */
                                 draft_id: string | null;
                                 /**
+                                 * Draft Revision
+                                 * @default null
+                                 */
+                                draft_revision: number | null;
+                                /**
                                  * Error
                                  * @default null
                                  */
@@ -1153,7 +1219,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description validation_error: 请至少输入一个番剧名称 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            /** @description validation_error: 请至少输入一个番剧名称 / batch_limit_exceeded: 单批最多支持 36 部（US-215，标题解析/MiKan 前拒绝） / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -2380,7 +2446,8 @@ export interface operations {
                      *           "warnings": []
                      *         },
                      *         "saved_request": null,
-                     *         "draft_id": null
+                     *         "draft_id": null,
+                     *         "draft_revision": null
                      *       }
                      *     }
                      */
@@ -2850,6 +2917,11 @@ export interface operations {
                              * @default null
                              */
                             draft_id: string | null;
+                            /**
+                             * Draft Revision
+                             * @default null
+                             */
+                            draft_revision: number | null;
                         };
                     };
                 };
@@ -3012,12 +3084,15 @@ export interface operations {
             content: {
                 /**
                  * @example {
+                 *       "base_revision": 1,
                  *       "patch": {}
                  *     }
                  */
                 "application/json": {
                     /** @description 生成/上次修改时服务端签发的 opaque draft_id（request-scoped，不落盘）。 */
                     draft_id: string;
+                    /** @description 客户端最后观察到的草案 revision（US-211，compare-and-swap）。 */
+                    base_revision: number;
                     /** @description 允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。 */
                     patch: Record<string, never>;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
@@ -3059,7 +3134,8 @@ export interface operations {
                      *           "expected_folder_name": "示例",
                      *           "warnings": []
                      *         },
-                     *         "draft_id": null
+                     *         "draft_id": null,
+                     *         "draft_revision": null
                      *       }
                      *     }
                      */
@@ -3317,6 +3393,11 @@ export interface operations {
                              * @default null
                              */
                             draft_id: string | null;
+                            /**
+                             * Draft Revision
+                             * @default null
+                             */
+                            draft_revision: number | null;
                         };
                     };
                 };
@@ -3357,7 +3438,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 */
+            /** @description draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 / draft_revision_conflict: 草案已被更新，请基于最新版本重试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3405,10 +3486,16 @@ export interface operations {
         /** @description 保存未修改的预览草案 */
         requestBody: {
             content: {
-                /** @example {} */
+                /**
+                 * @example {
+                 *       "base_revision": 1
+                 *     }
+                 */
                 "application/json": {
-                    /** @description 生成/修改时服务端签发的 opaque draft_id（一次性，保存后失效）。 */
+                    /** @description 生成/修改时服务端签发的 opaque draft_id（一次性，保存成功后失效）。 */
                     draft_id: string;
+                    /** @description 客户端最后观察到的草案 revision（US-212，预留校验；不匹配返回 409 draft_revision_conflict）。 */
+                    base_revision: number;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string;
                 };
@@ -3956,7 +4043,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description invalid_request_status: 只有待确认的订阅草案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 */
+            /** @description invalid_request_status: 只有待确认的订阅草案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 / draft_revision_conflict: 草案已被更新，请基于最新版本重试 / draft_reserved: 订阅草案正在保存中，请稍后重试 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -3967,6 +4054,430 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "invalid_request_status",
                      *       "error_message": "只有待确认的订阅草案可以保存",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    confirmRequestSave: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 保存并确认单个订阅方案草案 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "base_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /** @description 生成/修改时服务端签发的 opaque draft_id（一次性，成功后失效）。 */
+                    draft_id: string;
+                    /** @description 客户端最后观察到的草案 revision（US-214，预留校验；不匹配返回 409 draft_revision_conflict）。 */
+                    base_revision: number;
+                    /** @description 一次明确客户端操作生成的 opaque 幂等键（US-213/214，request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。 */
+                    idempotency_key: string;
+                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "outcome": "示例",
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
+                     *         "summary": {
+                     *           "request_id": "示例",
+                     *           "status": "示例",
+                     *           "bangumi_title": "示例",
+                     *           "candidate_subtitle_groups": [
+                     *             {}
+                     *           ],
+                     *           "selected_subtitle_group": "示例",
+                     *           "effective_seed_count": 1,
+                     *           "expected_folder_name": "示例",
+                     *           "warnings": []
+                     *         },
+                     *         "handoff": {
+                     *           "request_id": "示例",
+                     *           "status": "示例",
+                     *           "next_action": "示例"
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * RequestSaveConfirmResultDTO
+                         * @description Save-confirm success result (US-214).
+                         *
+                         *     ``outcome`` is always ``CONFIRMED`` here (the SAVED_CONFIRM_FAILED branch
+                         *     is returned through the failure envelope's ``error_data``, whose shape is
+                         *     frozen by ``test_dto_contracts``). ``request``/``summary`` carry the saved
+                         *     ACCEPTED Request; ``handoff`` hands the durable public identity onward.
+                         */
+                        result: {
+                            /** Outcome */
+                            outcome: string;
+                            /**
+                             * RequestSnapshotDTO
+                             * @description Typed view of the saved Request snapshot the detail panel renders.
+                             *
+                             *     Only the display fields are typed; the engine may add fields without
+                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
+                             *     ``poster_url`` are declared for schema accuracy but the frontend must
+                             *     never render them (URLs are redacted at display time).
+                             */
+                            request: {
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /** @default null */
+                                input: ({
+                                    /**
+                                     * Raw Title
+                                     * @default null
+                                     */
+                                    raw_title: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                source_info: ({
+                                    /** @default null */
+                                    matched_bangumi: ({
+                                        /**
+                                         * Title
+                                         * @default null
+                                         */
+                                        title: string | null;
+                                        /**
+                                         * Aliases
+                                         * @default []
+                                         */
+                                        aliases: string[];
+                                        /**
+                                         * Mikan Url
+                                         * @default null
+                                         */
+                                        mikan_url: string | null;
+                                        /**
+                                         * Match Score
+                                         * @default null
+                                         */
+                                        match_score: number | null;
+                                        /**
+                                         * Poster Url
+                                         * @default null
+                                         */
+                                        poster_url: string | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Rss Sources
+                                     * @default []
+                                     */
+                                    rss_sources: ({
+                                        /**
+                                         * Subtitle Group
+                                         * @default null
+                                         */
+                                        subtitle_group: string | null;
+                                        /**
+                                         * Rss Url
+                                         * @default null
+                                         */
+                                        rss_url: string | null;
+                                        /**
+                                         * Source Type
+                                         * @default null
+                                         */
+                                        source_type: string | null;
+                                        /**
+                                         * Total Seed Count
+                                         * @default null
+                                         */
+                                        total_seed_count: number | null;
+                                        /**
+                                         * Seed Names
+                                         * @default []
+                                         */
+                                        seed_names: string[];
+                                        /**
+                                         * Valid Seed Count
+                                         * @default null
+                                         */
+                                        valid_seed_count: number | null;
+                                        /**
+                                         * Invalid Seed Count
+                                         * @default null
+                                         */
+                                        invalid_seed_count: number | null;
+                                        /**
+                                         * Valid Seed Names
+                                         * @default []
+                                         */
+                                        valid_seed_names: string[];
+                                        /**
+                                         * Excluded Seed Names
+                                         * @default []
+                                         */
+                                        excluded_seed_names: {
+                                            [key: string]: unknown;
+                                        }[];
+                                        /**
+                                         * Warnings
+                                         * @default []
+                                         */
+                                        warnings: string[];
+                                    } & {
+                                        [key: string]: unknown;
+                                    })[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /** @default null */
+                                confirmable_config: ({
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Selected Rss Url
+                                     * @default null
+                                     */
+                                    selected_rss_url: string | null;
+                                    /** @default null */
+                                    filter_rule: ({
+                                        /**
+                                         * Must Contain
+                                         * @default null
+                                         */
+                                        must_contain: string | null;
+                                        /**
+                                         * Must Not Contain
+                                         * @default null
+                                         */
+                                        must_not_contain: string | null;
+                                        /**
+                                         * Use Regex
+                                         * @default null
+                                         */
+                                        use_regex: boolean | null;
+                                        /**
+                                         * Case Sensitive
+                                         * @default null
+                                         */
+                                        case_sensitive: boolean | null;
+                                    } & {
+                                        [key: string]: unknown;
+                                    }) | null;
+                                    /**
+                                     * Effective Seed Names
+                                     * @default []
+                                     */
+                                    effective_seed_names: string[];
+                                    /**
+                                     * Expected Folder Name
+                                     * @default null
+                                     */
+                                    expected_folder_name: string | null;
+                                    /**
+                                     * Warnings
+                                     * @default []
+                                     */
+                                    warnings: string[];
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                                /**
+                                 * Ab Submit Result
+                                 * @default null
+                                 */
+                                ab_submit_result: {
+                                    [key: string]: unknown;
+                                } | null;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                                /** @default null */
+                                user_action: ({
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Reason
+                                     * @default null
+                                     */
+                                    reason: string | null;
+                                    /**
+                                     * Decided At
+                                     * @default null
+                                     */
+                                    decided_at: string | null;
+                                } & {
+                                    [key: string]: unknown;
+                                }) | null;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                            /**
+                             * RequestSummaryDTO
+                             * @description Public ``summary`` shape produced by ``summarize_request``.
+                             */
+                            summary: {
+                                /** Request Id */
+                                request_id: string | null;
+                                /** Status */
+                                status: string | null;
+                                /** Bangumi Title */
+                                bangumi_title: string | null;
+                                /** Candidate Subtitle Groups */
+                                candidate_subtitle_groups: {
+                                    [key: string]: unknown;
+                                }[];
+                                /** Selected Subtitle Group */
+                                selected_subtitle_group: string | null;
+                                /** Effective Seed Count */
+                                effective_seed_count: number;
+                                /** Expected Folder Name */
+                                expected_folder_name: string | null;
+                                /** Warnings */
+                                warnings: string[];
+                            };
+                            /**
+                             * RequestSaveConfirmHandoffDTO
+                             * @description Public ``handoff`` of a confirmed save (US-214).
+                             *
+                             *     Stage 28 deliberately does **not** create a tracking record (D28-09); the
+                             *     handoff hands the frontend the durable ACCEPTED Request identity so the
+                             *     tracking phase can later build a record idempotently. ``next_action`` is
+                             *     the stable B-B hook.
+                             */
+                            handoff: {
+                                /** Request Id */
+                                request_id: string;
+                                /** Status */
+                                status: string;
+                                /** Next Action */
+                                next_action: string;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "invalid_storage_dir",
+                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description invalid_request_status: 只有待确认的订阅方案可以保存 / draft_expired: 订阅草案已过期或不存在，请重新生成 / draft_evicted: 订阅草案已失效（服务器容量已满），请重新生成 / draft_replayed: 订阅草案已被保存，请勿重复保存 / draft_revision_conflict: 草案已被更新，请基于最新版本重试 / draft_reserved: 订阅草案正在保存中，请稍后重试 / idempotency_conflict: 相同的幂等键不能用于不同的保存确认操作 / save_confirm_failed: 订阅方案已保存但确认失败，请对已保存的方案重试确认 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "invalid_request_status",
+                     *       "error_message": "只有待确认的订阅方案可以保存",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -5133,6 +5644,161 @@ export interface operations {
             };
         };
     };
+    saveConfirmBatchItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 批量保存并确认选中草案（逐条部分成功） */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "items": [
+                 *         {
+                 *           "item_id": "示例",
+                 *           "base_revision": 1
+                 *         }
+                 *       ],
+                 *       "item_ids": []
+                 *     }
+                 */
+                "application/json": {
+                    /** @description 批量卡片保存确认描述符（公开 item_id + 服务端签发 draft_id/base_revision + opaque 幂等键）。 */
+                    items: {
+                        /** @description 批量卡片的公开 item_id（保持输入顺序）。 */
+                        item_id: string;
+                        /** @description 服务端签发的 opaque draft_id（一次性，成功后失效；request-scoped，不落盘）。 */
+                        draft_id: string;
+                        /** @description 客户端最后观察到的草案 revision（US-216，预留校验；不匹配返回逐条 failed draft_revision_conflict）。 */
+                        base_revision: number;
+                        /** @description 一次明确客户端操作生成的 opaque 幂等键（request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。 */
+                        idempotency_key: string;
+                    }[];
+                    /** @description 可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。 */
+                    item_ids?: string[];
+                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "batch_id": "示例",
+                     *         "results": [
+                     *           {
+                     *             "item_id": "示例",
+                     *             "outcome": "示例",
+                     *             "request_id": null,
+                     *             "status": null,
+                     *             "error_type": null,
+                     *             "error_message": null
+                     *           }
+                     *         ],
+                     *         "summary": {}
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * BatchSaveConfirmResultDTO
+                         * @description Partial-success batch save-confirm result (US-216).
+                         *
+                         *     ``results`` preserves the input/``item_ids`` order and only carries public
+                         *     per-item metadata; ``summary`` counts ``requested`` (processed items),
+                         *     ``confirmed`` and ``failed``. The queue is intentionally not part of this
+                         *     contract — Stage 28 hands off ACCEPTED Request identities; the tracking
+                         *     phase builds the pre-submit view from them.
+                         */
+                        result: {
+                            /** Batch Id */
+                            batch_id: string;
+                            /** Results */
+                            results: {
+                                /** Item Id */
+                                item_id: string;
+                                /** Outcome */
+                                outcome: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Status
+                                 * @default null
+                                 */
+                                status: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /**
+                                 * Error Message
+                                 * @default null
+                                 */
+                                error_message: string | null;
+                            }[];
+                            /** Summary */
+                            summary: {
+                                [key: string]: number;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败（缺失/非法 item 字段或 idempotency_key） / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败（缺失/非法 item 字段或 idempotency_key）",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
     submitBatchQueue: {
         parameters: {
             query?: never;
@@ -6243,7 +6909,8 @@ export interface operations {
                      *           "warnings": []
                      *         },
                      *         "saved_request": null,
-                     *         "draft_id": null
+                     *         "draft_id": null,
+                     *         "draft_revision": null
                      *       }
                      *     }
                      */
@@ -6716,6 +7383,11 @@ export interface operations {
                              * @default null
                              */
                             draft_id: string | null;
+                            /**
+                             * Draft Revision
+                             * @default null
+                             */
+                            draft_revision: number | null;
                         };
                     };
                 };
@@ -6887,7 +7559,8 @@ export interface operations {
                      *           "warnings": []
                      *         },
                      *         "saved_request": null,
-                     *         "draft_id": null
+                     *         "draft_id": null,
+                     *         "draft_revision": null
                      *       }
                      *     }
                      */
@@ -7360,6 +8033,11 @@ export interface operations {
                              * @default null
                              */
                             draft_id: string | null;
+                            /**
+                             * Draft Revision
+                             * @default null
+                             */
+                            draft_revision: number | null;
                         };
                     };
                 };
@@ -7661,7 +8339,8 @@ export interface operations {
                      *           "warnings": []
                      *         },
                      *         "saved_request": null,
-                     *         "draft_id": null
+                     *         "draft_id": null,
+                     *         "draft_revision": null
                      *       }
                      *     }
                      */
@@ -8134,6 +8813,11 @@ export interface operations {
                              * @default null
                              */
                             draft_id: string | null;
+                            /**
+                             * Draft Revision
+                             * @default null
+                             */
+                            draft_revision: number | null;
                         };
                     };
                 };
@@ -8185,6 +8869,443 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "request_not_found",
                      *       "error_message": "订阅方案不存在",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    getRequestSafeInfo: {
+        parameters: {
+            query?: {
+                /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                storage_dir?: string;
+            };
+            header?: never;
+            path: {
+                /** @description 已保存订阅方案的 request_id。 */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "safe_info": {
+                     *           "request_id": "示例",
+                     *           "status": "示例",
+                     *           "raw_title": null,
+                     *           "title": null,
+                     *           "aliases": [],
+                     *           "season": null,
+                     *           "season_raw": null,
+                     *           "season_evidence": null,
+                     *           "mikan_collection": null,
+                     *           "subtitle_groups": [
+                     *             {
+                     *               "subtitle_group": null,
+                     *               "total_resource_count": 0,
+                     *               "valid_resource_count": 0,
+                     *               "invalid_resource_count": 0,
+                     *               "warnings": []
+                     *             }
+                     *           ],
+                     *           "selected_subtitle_group": null,
+                     *           "filter_rule": {
+                     *             "must_contain": "",
+                     *             "must_not_contain": "",
+                     *             "use_regex": false,
+                     *             "case_sensitive": false
+                     *           },
+                     *           "resources": {
+                     *             "selected_subtitle_group": null,
+                     *             "valid_resource_count": 0,
+                     *             "invalid_resource_count": 0,
+                     *             "complete_resource_count": 0,
+                     *             "valid_file_names": [],
+                     *             "excluded_file_names": [
+                     *               {
+                     *                 "name": "",
+                     *                 "reason": ""
+                     *               }
+                     *             ]
+                     *           },
+                     *           "folder_name": null,
+                     *           "storage_profile": null,
+                     *           "total_episodes": null,
+                     *           "updated_episode": null,
+                     *           "updated_episode_status": "NOT_IMPLEMENTED",
+                     *           "history_summary": [
+                     *             {
+                     *               "action": null,
+                     *               "previous_status": null,
+                     *               "next_status": null,
+                     *               "timestamp": null
+                     *             }
+                     *           ],
+                     *           "ab_status": null
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * RequestSafeInfoResultDTO
+                         * @description Envelope for the safe-info endpoint: only the whitelist object.
+                         *
+                         *     The endpoint result is ``{"safe_info": {...}}`` — no raw request snapshot,
+                         *     history section or AB section is ever attached.
+                         */
+                        result: {
+                            /**
+                             * RequestSafeInfoDTO
+                             * @description The strict safe-info whitelist for one saved Request (US-217).
+                             *
+                             *     ``extra="forbid"``: unknown nested fields, endpoints, URLs, credentials,
+                             *     raw responses and absolute paths are rejected instead of passing through.
+                             *     ``updated_episode`` is always ``None`` and ``updated_episode_status`` is
+                             *     always ``NOT_IMPLEMENTED`` — Stage 28 never guesses current-episode
+                             *     progress from seeds/RSS/download state (BL-020 is out of scope).
+                             */
+                            safe_info: {
+                                /** Request Id */
+                                request_id: string;
+                                /** Status */
+                                status: string;
+                                /**
+                                 * Raw Title
+                                 * @default null
+                                 */
+                                raw_title: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /** Aliases */
+                                aliases?: string[];
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Season Raw
+                                 * @default null
+                                 */
+                                season_raw: string | null;
+                                /**
+                                 * Season Evidence
+                                 * @default null
+                                 */
+                                season_evidence: string | null;
+                                /** @default null */
+                                mikan_collection: {
+                                    /**
+                                     * Title
+                                     * @default null
+                                     */
+                                    title: string | null;
+                                    /**
+                                     * Bangumi Id
+                                     * @default null
+                                     */
+                                    bangumi_id: string | null;
+                                } | null;
+                                /** Subtitle Groups */
+                                subtitle_groups?: {
+                                    /**
+                                     * Subtitle Group
+                                     * @default null
+                                     */
+                                    subtitle_group: string | null;
+                                    /**
+                                     * Total Resource Count
+                                     * @default 0
+                                     */
+                                    total_resource_count: number;
+                                    /**
+                                     * Valid Resource Count
+                                     * @default 0
+                                     */
+                                    valid_resource_count: number;
+                                    /**
+                                     * Invalid Resource Count
+                                     * @default 0
+                                     */
+                                    invalid_resource_count: number;
+                                    /** Warnings */
+                                    warnings?: string[];
+                                }[];
+                                /**
+                                 * Selected Subtitle Group
+                                 * @default null
+                                 */
+                                selected_subtitle_group: string | null;
+                                /**
+                                 * RequestSafeInfoFilterRuleDTO
+                                 * @description User-readable filter rule summary (safe, user-controlled text).
+                                 */
+                                filter_rule?: {
+                                    /**
+                                     * Must Contain
+                                     * @default
+                                     */
+                                    must_contain: string;
+                                    /**
+                                     * Must Not Contain
+                                     * @default
+                                     */
+                                    must_not_contain: string;
+                                    /**
+                                     * Use Regex
+                                     * @default false
+                                     */
+                                    use_regex: boolean;
+                                    /**
+                                     * Case Sensitive
+                                     * @default false
+                                     */
+                                    case_sensitive: boolean;
+                                };
+                                /**
+                                 * RequestSafeInfoResourcesDTO
+                                 * @description Resource counts and sanitized file-name summaries.
+                                 *
+                                 *     Only torrent *names* (file titles) are exposed — never magnet links,
+                                 *     download URLs or raw RSS. ``valid`` is the currently selected subtitle
+                                 *     group's effective seeds; ``excluded`` its excluded seeds; ``complete`` is
+                                 *     the combined unique seeds across every candidate group.
+                                 */
+                                resources?: {
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Valid Resource Count
+                                     * @default 0
+                                     */
+                                    valid_resource_count: number;
+                                    /**
+                                     * Invalid Resource Count
+                                     * @default 0
+                                     */
+                                    invalid_resource_count: number;
+                                    /**
+                                     * Complete Resource Count
+                                     * @default 0
+                                     */
+                                    complete_resource_count: number;
+                                    /** Valid File Names */
+                                    valid_file_names?: string[];
+                                    /** Excluded File Names */
+                                    excluded_file_names?: {
+                                        /**
+                                         * Name
+                                         * @default
+                                         */
+                                        name: string;
+                                        /**
+                                         * Reason
+                                         * @default
+                                         */
+                                        reason: string;
+                                    }[];
+                                };
+                                /**
+                                 * Folder Name
+                                 * @default null
+                                 */
+                                folder_name: string | null;
+                                /**
+                                 * Storage Profile
+                                 * @default null
+                                 */
+                                storage_profile: string | null;
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /** History Summary */
+                                history_summary?: {
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Previous Status
+                                     * @default null
+                                     */
+                                    previous_status: string | null;
+                                    /**
+                                     * Next Status
+                                     * @default null
+                                     */
+                                    next_status: string | null;
+                                    /**
+                                     * Timestamp
+                                     * @default null
+                                     */
+                                    timestamp: string | null;
+                                }[];
+                                /** @default null */
+                                ab_status: {
+                                    /**
+                                     * Submitted
+                                     * @default false
+                                     */
+                                    submitted: boolean;
+                                    /**
+                                     * Success
+                                     * @default null
+                                     */
+                                    success: boolean | null;
+                                    /**
+                                     * Ab Subscription Id
+                                     * @default null
+                                     */
+                                    ab_subscription_id: string | null;
+                                    /**
+                                     * Error Type
+                                     * @default null
+                                     */
+                                    error_type: string | null;
+                                } | null;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_request_id: request_id 不能包含路径片段 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "invalid_storage_dir",
+                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description request_not_found: 订阅方案不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "request_not_found",
+                     *       "error_message": "订阅方案不存在",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 读取订阅方案失败 / storage_json_error: 订阅方案 JSON 损坏 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "读取订阅方案失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -8274,6 +9395,7 @@ export interface operations {
                      *         },
                      *         "saved_request": null,
                      *         "draft_id": null,
+                     *         "draft_revision": null,
                      *         "ab_submit_result": {
                      *           "success": true,
                      *           "ab_subscription_id": "示例",
@@ -8751,6 +9873,11 @@ export interface operations {
                              * @default null
                              */
                             draft_id: string | null;
+                            /**
+                             * Draft Revision
+                             * @default null
+                             */
+                            draft_revision: number | null;
                             /**
                              * AbSubmitResultDTO
                              * @description Public Auto Bangumi submit-result whitelist.

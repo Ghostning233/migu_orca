@@ -320,13 +320,14 @@ def preview_result_json(
     from request_engine.controllers.request_controller import summarize_request
 
     if draft_id is None:
-        draft_id = draft_store.issue(request)
+        draft_id = draft_store.issue(request).draft_id
     body = {
         "ok": True,
         "result": {
             "request": request,
             "summary": summary if summary is not None else summarize_request(request),
             "draft_id": draft_id,
+            "draft_revision": 1,
         }
     }
     return json.dumps(body, ensure_ascii=False)
@@ -340,18 +341,19 @@ def issue_draft_id(request: dict[str, Any]) -> str:
     """
     from apps.migu_orca_web.drafts import draft_store
 
-    return draft_store.issue(request)
+    return draft_store.issue(request).draft_id
 
 
 def save_preview_handler(calls: list[dict[str, Any]] | None = None):
     """Build a ``POST /api/v1/requests/preview-save`` route handler.
 
-    Mirrors the real US-194 backend contract for browser tests: consumes the
-    ``draft_id`` from the in-process draft store (the card's draft was issued
-    when the mocked batch parse response was built) and returns the saved
-    request. Never persists to disk (the original mocks did not either) and
-    never returns sensitive draft content. ``calls`` (optional) records every
-    preview-save payload for assertions.
+    Mirrors the real US-194/US-212 backend contract for browser tests:
+    reserves the ``draft_id`` from the in-process draft store against the
+    ``base_revision`` in the payload, returns the saved request, and consumes
+    the draft (a second save of the same id is a 409). Never persists to disk
+    (the original mocks did not either) and never returns sensitive draft
+    content. ``calls`` (optional) records every preview-save payload for
+    assertions.
     """
     from apps.migu_orca_web.drafts import draft_store
     from request_engine.controllers.request_controller import summarize_request
@@ -361,8 +363,33 @@ def save_preview_handler(calls: list[dict[str, Any]] | None = None):
         if calls is not None:
             calls.append(payload)
         draft_id = payload.get("draft_id")
-        draft, _ = draft_store.consume_for_save(draft_id)
+        base_revision = payload.get("base_revision")
+        if not isinstance(base_revision, int) or base_revision < 1:
+            route.fulfill(
+                status=400,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": False,
+                        "error_type": "data_validation_errors",
+                        "error_message": "Data has validation errors",
+                        "error_data": {
+                            "errors": [
+                                {
+                                    "error_type": "validation_error",
+                                    "field": "base_revision",
+                                    "message": "Field required",
+                                }
+                            ]
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            return
+        draft, reason = draft_store.reserve_for_save(draft_id, base_revision)
         if draft is None:
+            draft_store.release_save(draft_id)
             route.fulfill(
                 status=409,
                 content_type="application/json",
@@ -371,12 +398,13 @@ def save_preview_handler(calls: list[dict[str, Any]] | None = None):
                         "ok": False,
                         "error_type": "draft_expired",
                         "error_message": "订阅草案已过期或不存在，请重新生成",
-                        "error_data": {"failed_step": "consume_preview_draft", "details": {"field": "draft_id"}},
+                        "error_data": {"failed_step": "reserve_preview_draft", "details": {"field": "draft_id"}},
                     },
                     ensure_ascii=False,
                 ),
             )
             return
+        draft_store.commit_save(draft_id)
         route.fulfill(
             status=200,
             content_type="application/json",

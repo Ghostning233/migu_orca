@@ -34,6 +34,10 @@ MAX_ANIME_TITLE_QUERY_LENGTH = 256
 MAX_ANIME_TITLE_REVIEW_HINT_COUNT = 8
 MAX_ANIME_TITLE_REVIEW_HINT_LENGTH = 160
 
+# US-215: a single batch parse accepts 1..MAX_BATCH_ITEMS non-empty lines.
+# The server rejects line 37 before title parsing, MiKan search or persistence.
+MAX_BATCH_ITEMS = 36
+
 
 class AnimeTitleParseSource(StrEnum):
     """Whitelisted origins that may be exposed by title parsing APIs."""
@@ -278,5 +282,6 @@ __all__ = [
     "MAX_ANIME_TITLE_LENGTH",
     "MAX_ANIME_TITLE_QUERY_COUNT",
     "MAX_ANIME_TITLE_QUERY_LENGTH",
+    "MAX_BATCH_ITEMS",
     "coerce_anime_title_parse_source",
 ]

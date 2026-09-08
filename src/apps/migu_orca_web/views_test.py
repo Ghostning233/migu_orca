@@ -60,6 +60,9 @@ from storage_engine.controllers.history_repository import (
     append_status_history,
     load_status_history,
 )
+from storage_engine.controllers.idempotency_repository import (
+    load_idempotency_record,
+)
 from storage_engine.controllers.preference_repository import save_user_preferences
 from storage_engine.controllers.queue_repository import (
     load_submission_queue,
@@ -636,6 +639,273 @@ def test_delete_request_returns_unified_error_for_missing_request(
             "details": {"request_id": "missing-request"},
         },
     }
+    assert str(tmp_path) not in str(payload)
+
+
+# ---------------------------------------------------------------------------
+# Request safe-info (US-217)
+# ---------------------------------------------------------------------------
+
+
+def _walk_json(value: Any) -> Any:
+    """Yield every scalar leaf (and every key) recursively through JSON data."""
+    if isinstance(value, dict):
+        yield from value.keys()
+        for child in value.values():
+            yield from _walk_json(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _walk_json(child)
+    else:
+        yield value
+
+
+def test_safe_info_returns_strict_whitelist_for_saved_request(
+    tmp_path: Path,
+) -> None:
+    request = _saved_accepted_request(tmp_path, "芙莉莲", "request-1")
+    config = load_storage_config(tmp_path / "storage")
+    event = {
+        "request_id": "request-1",
+        "previous_status": "PENDING_CONFIRM",
+        "next_status": "ACCEPTED",
+        "action": "ACCEPT",
+        "timestamp": "2026-09-08T12:00:00+00:00",
+    }
+    append_status_history(config, event)
+    request["ab_submit_result"] = {
+        "success": True,
+        "ab_subscription_id": "ab-sub-1",
+        "ab_response": {"id": "ab-sub-1"},
+        "fallback_config": None,
+        "error": None,
+    }
+    save_ab_submit_result(config, request)
+
+    response = _client().get(
+        "/api/v1/requests/request-1/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert set(payload["result"]) == {"safe_info"}
+    safe = payload["result"]["safe_info"]
+    assert safe["request_id"] == "request-1"
+    assert safe["status"] == "ACCEPTED"
+    assert safe["title"] == "葬送的芙莉莲"
+    assert safe["raw_title"] == "芙莉莲"
+    assert safe["selected_subtitle_group"] == "喵萌"
+    assert safe["updated_episode"] is None
+    assert safe["updated_episode_status"] == "NOT_IMPLEMENTED"
+    assert safe["storage_profile"] == "storage"
+    assert safe["folder_name"] == "葬送的芙莉莲"
+    # Resource counts and sanitized names only.
+    assert safe["resources"]["valid_resource_count"] == 1
+    assert safe["resources"]["valid_file_names"] == [
+        "[喵萌] 葬送的芙莉莲 - 01 [1080p][CHS].mkv"
+    ]
+    # AB status summary only — no endpoint/raw response/fallback body.
+    assert safe["ab_status"] == {
+        "submitted": True,
+        "success": True,
+        "ab_subscription_id": "ab-sub-1",
+        "error_type": None,
+    }
+    assert safe["history_summary"] == [
+        {
+            "action": "ACCEPT",
+            "previous_status": "PENDING_CONFIRM",
+            "next_status": "ACCEPTED",
+            "timestamp": "2026-09-08T12:00:00+00:00",
+        }
+    ]
+    # The safe-info body never carries a URL, magnet, credential, or path.
+    body_text = response.get_data(as_text=True)
+    assert "https://" not in body_text
+    assert "http://" not in body_text
+    assert "magnet:" not in body_text.lower()
+    assert "rss" not in body_text.lower()
+    assert str(tmp_path) not in body_text
+
+
+def test_safe_info_omits_sensitive_snapshot_fields_recursively(
+    tmp_path: Path,
+) -> None:
+    """US-217: recursive leak check over the whole safe-info JSON tree.
+
+    Even when the stored snapshot carries raw URLs, magnets, credentials and
+    absolute paths, none of them may survive into the safe-info response —
+    including nested keys and scalar string values (magnet/file names).
+    """
+    request = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-1",
+        "source_info": {
+            "matched_bangumi": {
+                "title": "葬送的芙莉莲",
+                "aliases": ["芙莉莲", "Frieren"],
+                "mikan_url": "https://private.example/Home/Bangumi/99",
+                "match_score": 1.0,
+                "poster_url": "https://private.example/poster.jpg",
+            },
+            "rss_sources": [
+                {
+                    "subtitle_group": "喵萌",
+                    "rss_url": "https://private.example/RSS/Bangumi?bangumiId=99",
+                    "source_type": "mikan_http",
+                    "total_seed_count": 2,
+                    "seed_names": [
+                        "[喵萌] 葬送的芙莉莲 - 01.mkv",
+                        "magnet:?xt=urn:btih:deadbeef",
+                    ],
+                    "valid_seed_count": 2,
+                    "invalid_seed_count": 1,
+                    "valid_seed_names": [
+                        "[喵萌] 葬送的芙莉莲 - 01.mkv",
+                        "magnet:?xt=urn:btih:deadbeef",
+                    ],
+                    "excluded_seed_names": [
+                        {
+                            "name": "[喵萌] 葬送的芙莉莲 - 02.mkv",
+                            "reason": "未命中包含规则：1080p",
+                            "rule": "must_contain",
+                        }
+                    ],
+                    "warnings": [],
+                }
+            ],
+        },
+        "confirmable_config": {
+            "selected_subtitle_group": "喵萌",
+            "selected_rss_url": "https://private.example/RSS/Bangumi?bangumiId=99",
+            "filter_rule": {
+                "must_contain": "1080p",
+                "must_not_contain": "",
+                "use_regex": False,
+                "case_sensitive": False,
+            },
+            "effective_seed_names": [
+                "[喵萌] 葬送的芙莉莲 - 01.mkv",
+                "magnet:?xt=urn:btih:deadbeef",
+            ],
+            "expected_folder_name": "葬送的芙莉莲",
+            "warnings": [],
+        },
+        "ab_submit_result": {
+            "success": False,
+            "ab_subscription_id": None,
+            "ab_response": {"raw": "<html>secret</html>"},
+            "fallback_config": {
+                "title": "葬送的芙莉莲",
+                "rss_url": "https://private.example/rss.xml",
+                "save_path": "/private/absolute/path",
+            },
+            "error": {
+                "error_type": "ab_connection_failed",
+                "error_message": "连不上 https://private.example:8080",
+                "failed_step": "submit_ab_subscription",
+                "details": {"base_url": "https://private.example"},
+            },
+        },
+    }
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+    save_ab_submit_result(load_storage_config(tmp_path / "storage"), request)
+
+    response = _client().get(
+        "/api/v1/requests/request-1/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    body_text = response.get_data(as_text=True)
+    # Nothing sensitive survives in the serialized tree, including substrings.
+    for marker in (
+        "https://",
+        "http://",
+        "magnet:",
+        "private.example",
+        "/private/absolute",
+        "token",
+        "cookie",
+        "password",
+        "Authorization",
+        "raw_response",
+        "rss_url",
+        "mikan_url",
+        "poster_url",
+        "selected_rss_url",
+        "fallback_config",
+        "ab_response",
+        "<html",
+    ):
+        assert marker not in body_text.lower(), f"leaked {marker!r} in {body_text}"
+    # The magnet seed name must be redacted, not surfaced as a file name.
+    safe = payload["result"]["safe_info"]
+    for leaf in _walk_json(safe):
+        if isinstance(leaf, str):
+            assert "magnet:?" not in leaf.lower()
+            assert "http://" not in leaf.lower()
+            assert "https://" not in leaf.lower()
+            assert "/private/" not in leaf
+    assert safe["title"] == "葬送的芙莉莲"
+    assert safe["ab_status"]["error_type"] == "ab_connection_failed"
+    # The raw_title and whitelisted filter labels stay intact.
+    assert safe["raw_title"] == "芙莉莲"
+    assert safe["filter_rule"]["must_contain"] == "1080p"
+
+
+def test_safe_info_reuses_detail_error_classification(tmp_path: Path) -> None:
+    """404/illegal request_id/storage-profile errors match the detail endpoint."""
+    missing = _client().get(
+        "/api/v1/requests/missing-request/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+    missing_payload = missing.get_json()
+    assert missing.status_code == 404
+    assert missing_payload["error_type"] == "request_not_found"
+    assert missing_payload["error_data"]["failed_step"] == "load_request_snapshot"
+    assert str(tmp_path) not in str(missing_payload)
+
+    invalid = _client().get(
+        "/api/v1/requests/nested%2Frequest/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+    invalid_payload = invalid.get_json()
+    assert invalid.status_code == 400
+    assert invalid_payload["error_type"] == "invalid_request_id"
+    assert invalid_payload["error_data"]["details"] == {"field": "request_id"}
+
+    bad_profile = _client().get(
+        "/api/v1/requests/request-1/safe-info",
+        query_string={"storage_dir": "/etc/secret"},
+    )
+    bad_profile_payload = bad_profile.get_json()
+    assert bad_profile.status_code == 400
+    assert bad_profile_payload["error_type"] == "invalid_storage_dir"
+    assert "/etc/secret" not in str(bad_profile_payload)
+
+
+def test_safe_info_without_storage_dir_uses_server_root_and_null_profile(
+    tmp_path: Path,
+) -> None:
+    """US-217: omitting storage_dir resolves to the server root and reports
+    storage_profile=null (the root itself), never a CLI default path."""
+    request = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-1",
+    }
+    save_request_snapshot(load_storage_config(tmp_path), request)
+
+    response = _client().get("/api/v1/requests/request-1/safe-info")
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    safe = payload["result"]["safe_info"]
+    assert safe["request_id"] == "request-1"
+    assert safe["storage_profile"] is None
     assert str(tmp_path) not in str(payload)
 
 
@@ -1903,6 +2173,87 @@ def test_batch_parse_api_rejects_empty_input_with_chinese_validation_error() -> 
     assert "/home/" not in body
 
 
+def _batch_raw_input(line_count: int) -> str:
+    """Build a batch raw_input with ``line_count`` distinct non-empty lines."""
+    return "\n".join(f"批量番剧{index:02d}" for index in range(1, line_count + 1))
+
+
+@pytest.mark.parametrize("line_count", [1, 12, 36])
+def test_batch_parse_api_accepts_boundary_batch_sizes(
+    monkeypatch: pytest.MonkeyPatch,
+    line_count: int,
+) -> None:
+    """US-215: 1/12/36 non-empty lines are all accepted and parsed."""
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        lambda search_queries, mikan_config: [],
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": _batch_raw_input(line_count)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    items = payload["result"]["items"]
+    assert len(items) == line_count
+    assert all(item["raw_title"].startswith("批量番剧") for item in items)
+    assert len({item["item_id"] for item in items}) == line_count
+
+
+def test_batch_parse_api_rejects_over_limit_before_any_seam(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-215: the 37th line is rejected before title parse/MiKan/persist."""
+    called: list[str] = []
+
+    def _mark(name: str):
+        def _tracked(*args: object, **kwargs: object) -> object:
+            called.append(name)
+            raise AssertionError(f"{name} must not run for an over-limit batch")
+
+        return _tracked
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches.create_batch_draft", _mark("create_batch_draft")
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        _mark("_batch_title_parsing_provider"),
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        _mark("_search_batch_item_candidates"),
+    )
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches.load_storage_config", _mark("load_storage_config")
+    )
+
+    response = _client().post(
+        "/api/v1/batches/parse",
+        json={"raw_input": _batch_raw_input(37)},
+    )
+
+    payload = response.get_json()
+    body = response.get_data(as_text=True)
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "batch_limit_exceeded"
+    assert payload["error_message"] == "单批最多支持 36 部，当前输入 37 部"
+    assert payload["error_data"]["failed_step"] == "batch_parse"
+    assert payload["error_data"]["details"] == {
+        "field": "raw_input",
+        "limit": 36,
+        "actual": 37,
+    }
+    assert called == []
+    # The raw batch input is never echoed in the response.
+    assert "批量番剧01" not in body
+    assert "批量番剧37" not in body
+
+
 def test_batch_parse_api_marks_single_provider_failure_without_blocking_others(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3082,25 +3433,30 @@ def test_create_request_saves_when_explicitly_requested(tmp_path: Path) -> None:
     assert saved_path.exists()
 
 
-def _issue_draft(client: FlaskClient, title: str = "咒术回战") -> str:
-    """Generate an unsaved preview draft and return its opaque draft_id."""
+def _issue_draft(
+    client: FlaskClient, title: str = "咒术回战"
+) -> tuple[str, int]:
+    """Generate an unsaved preview draft; return (draft_id, draft_revision)."""
     response = client.post(
         "/api/v1/requests",
         json={"title": title, "save_request": False},
     )
     payload = response.get_json()
     assert response.status_code == 200
-    assert isinstance(payload["result"]["draft_id"], str)
-    return payload["result"]["draft_id"]
+    result = payload["result"]
+    assert isinstance(result["draft_id"], str)
+    assert result["draft_revision"] == 1
+    return result["draft_id"], result["draft_revision"]
 
 
 def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
-    draft_id = _issue_draft(_client(), "咒术回战")
+    draft_id, draft_revision = _issue_draft(_client(), "咒术回战")
 
     response = _client().post(
         "/api/v1/requests/preview-modify",
         json={
             "draft_id": draft_id,
+            "base_revision": draft_revision,
             "patch": {
                 "filter_rule": {
                     "must_not_contain": "V2",
@@ -3116,8 +3472,10 @@ def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
     assert payload["ok"] is True
     modified = payload["result"]["request"]
     assert modified["confirmable_config"]["filter_rule"]["must_not_contain"] == "V2"
-    # US-194: the modify result keeps the same draft_id so the client can save.
+    # US-194/211: the modify result keeps the same draft_id and returns the
+    # bumped draft_revision so the client can save with the latest base.
     assert payload["result"]["draft_id"] == draft_id
+    assert payload["result"]["draft_revision"] == 2
     # The preview is recomputed in memory and never written to storage.
     assert not (tmp_path / "storage").exists()
 
@@ -3138,7 +3496,7 @@ def test_preview_modify_recomputes_seeds_without_saving(tmp_path: Path) -> None:
 
 def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None:
     client = _client()
-    draft_id = _issue_draft(client, "咒术回战")
+    draft_id, draft_revision = _issue_draft(client, "咒术回战")
     # The stored draft's groups mirror the fixture; read them via the response.
     issued = client.post(
         "/api/v1/requests",
@@ -3153,12 +3511,14 @@ def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None
         "/api/v1/requests/preview-modify",
         json={
             "draft_id": draft_id,
+            "base_revision": draft_revision,
             "patch": {"selected_subtitle_group": other},
         },
     )
 
     payload = response.get_json()
     assert payload["ok"] is True
+    assert payload["result"]["draft_revision"] == 2
     modified = payload["result"]["request"]
     confirmable = modified["confirmable_config"]
     assert confirmable["selected_subtitle_group"] == other
@@ -3172,11 +3532,15 @@ def test_preview_modify_switches_selected_subtitle_group(tmp_path: Path) -> None
 
 
 def test_preview_modify_rejects_invalid_patch_field() -> None:
-    draft_id = _issue_draft(_client(), "芙莉莲")
+    draft_id, draft_revision = _issue_draft(_client(), "芙莉莲")
 
     response = _client().post(
         "/api/v1/requests/preview-modify",
-        json={"draft_id": draft_id, "patch": {"illegal_field": "x"}},
+        json={
+            "draft_id": draft_id,
+            "base_revision": draft_revision,
+            "patch": {"illegal_field": "x"},
+        },
     )
 
     payload = response.get_json()
@@ -3185,10 +3549,51 @@ def test_preview_modify_rejects_invalid_patch_field() -> None:
     assert payload["error_type"] == "invalid_modify_patch_field"
 
 
+def test_preview_modify_stale_base_revision_conflicts() -> None:
+    """US-211: a stale base_revision leaves the server-side draft untouched."""
+    client = _client()
+    draft_id, draft_revision = _issue_draft(client, "芙莉莲")
+    assert draft_revision == 1
+
+    first = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"filter_rule": {"must_not_contain": "V2", "use_regex": False, "case_sensitive": False}},
+        },
+    )
+    assert first.status_code == 200
+    assert first.get_json()["result"]["draft_revision"] == 2
+
+    stale = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "stale-write"},
+        },
+    )
+    payload = stale.get_json()
+    assert stale.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_revision_conflict"
+    assert payload["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    assert draft_id not in str(payload)
+    assert "stale-write" not in str(payload)
+
+
 def test_preview_modify_rejects_unknown_draft() -> None:
     response = _client().post(
         "/api/v1/requests/preview-modify",
-        json={"draft_id": "not-issued", "patch": {"expected_folder_name": "x"}},
+        json={
+            "draft_id": "not-issued",
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "x"},
+        },
     )
 
     payload = response.get_json()
@@ -3210,7 +3615,7 @@ def test_preview_save_persists_draft_and_enters_confirmation_flow(tmp_path: Path
 
     response = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
 
     payload = response.get_json()
@@ -3233,22 +3638,283 @@ def test_preview_save_rejects_replayed_draft(tmp_path: Path) -> None:
     """A saved draft is consumed; a second save of the same id is a 409."""
     storage_dir = tmp_path / "storage"
     client = _client()
-    draft_id = _issue_draft(client, "芙莉莲")
+    draft_id, _ = _issue_draft(client, "芙莉莲")
 
     first = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
     assert first.status_code == 200
 
     second = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id, "storage_dir": _profile(tmp_path, storage_dir.name)},
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
     )
     payload = second.get_json()
     assert second.status_code == 409
     assert payload["ok"] is False
     assert payload["error_type"] == "draft_replayed"
+
+
+def test_preview_save_stale_base_revision_conflicts(tmp_path: Path) -> None:
+    """US-212: a save with a stale base_revision reserves nothing and is a 409."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+    # Bump the draft revision 1 → 2 through a dry-run modify.
+    modified = client.post(
+        "/api/v1/requests/preview-modify",
+        json={"draft_id": draft_id, "base_revision": 1, "patch": {"expected_folder_name": "并发修改"}},
+    )
+    assert modified.status_code == 200
+
+    stale = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    payload = stale.get_json()
+    assert stale.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_revision_conflict"
+    assert payload["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    # Nothing was persisted by the stale save.
+    assert not (storage_dir / "requests").exists()
+
+
+def test_preview_save_persistence_failure_keeps_draft_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-212: a failed disk write releases the draft; retry persists once.
+
+    The old consume-before-persist flow destroyed the draft on write failure,
+    forcing the user to re-search. The reservation lifecycle keeps the same
+    draft_id/revision usable so a retry succeeds and only one Request is ever
+    written.
+    """
+    from apps.migu_orca_entry.controllers.entry_controller import apply_request_save_action as original_save
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+
+    failures = {"count": 0}
+
+    def flaky_save(result: dict[str, Any], save_request: bool, **kwargs: object) -> dict[str, Any]:
+        if failures["count"] == 0:
+            failures["count"] += 1
+            return {
+                "success": False,
+                "request": None,
+                "error": {
+                    "error_type": "storage_error",
+                    "error_message": f"模拟写盘失败 {tmp_path}",
+                    "failed_step": "save_request_snapshot",
+                    "details": {"reason": "disk full"},
+                },
+            }
+        return original_save(result, save_request, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_requests.apply_request_save_action", flaky_save
+    )
+
+    # First save fails at the persistence seam.
+    first = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    payload = first.get_json()
+    assert first.status_code == 500
+    assert payload["ok"] is False
+    assert payload["error_type"] == "storage_error"
+    serialized = str(payload)
+    assert str(tmp_path) not in serialized
+
+    # The draft survived the failure at its original revision; retry the exact
+    # save (reservation must still accept base_revision=1).
+    second = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    spayload = second.get_json()
+    assert second.status_code == 200
+    assert spayload["ok"] is True
+    saved_request_id = spayload["result"]["request"]["request_id"]
+    # Exactly one Request file exists for the saved id.
+    saved_files = list((storage_dir / "requests").glob(f"{saved_request_id}.json"))
+    assert len(saved_files) == 1
+
+    # A third save is a replay (draft consumed by the successful retry).
+    third = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1, "storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    assert third.status_code == 409
+    assert third.get_json()["error_type"] == "draft_replayed"
+
+
+def _save_confirm(
+    client: FlaskClient,
+    draft_id: str,
+    base_revision: int,
+    key: str,
+    storage_dir: str | None = "storage",
+):
+    return client.post(
+        "/api/v1/requests/save-confirm",
+        json={
+            "draft_id": draft_id,
+            "base_revision": base_revision,
+            "idempotency_key": key,
+            **({"storage_dir": storage_dir} if storage_dir is not None else {}),
+        },
+    )
+
+
+def test_save_confirm_persists_confirms_and_returns_handoff(tmp_path: Path) -> None:
+    """US-214: one save-confirm call persists, accepts and hands off ACCEPTED."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    issued = client.post(
+        "/api/v1/requests", json={"title": "芙莉莲", "save_request": False}
+    ).get_json()["result"]
+    draft_id = issued["draft_id"]
+    request_id = issued["request"]["request_id"]
+
+    response = _save_confirm(client, draft_id, 1, "view-key-1", _profile(tmp_path, storage_dir.name))
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert result["outcome"] == "CONFIRMED"
+    assert result["request"]["status"] == "ACCEPTED"
+    assert result["request"]["request_id"] == request_id
+    assert result["handoff"]["request_id"] == request_id
+    assert result["handoff"]["status"] == "ACCEPTED"
+    assert result["handoff"]["next_action"] == "OPEN_TRACKING"
+    # On-disk state: one ACCEPTED request + one CONFIRMED idempotency record.
+    saved = load_request_snapshot(load_storage_config(storage_dir), request_id)
+    assert saved["status"] == "ACCEPTED"
+    assert sorted(path.name for path in (storage_dir / "requests").glob("*.json")) == [
+        f"{request_id}.json"
+    ]
+    record = load_idempotency_record(load_storage_config(storage_dir), "view-key-1")
+    assert record is not None
+    assert record["state"] == "CONFIRMED"
+    assert record["request_id"] == request_id
+
+
+def test_save_confirm_same_key_retry_returns_same_request(tmp_path: Path) -> None:
+    """US-214: a same-key retry replays the terminal CONFIRMED outcome."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+    profile = _profile(tmp_path, storage_dir.name)
+
+    first = _save_confirm(client, draft_id, 1, "view-retry-key", profile)
+    assert first.status_code == 200
+    first_handoff = first.get_json()["result"]["handoff"]
+
+    second = _save_confirm(client, draft_id, 1, "view-retry-key", profile)
+    assert second.status_code == 200
+    second_handoff = second.get_json()["result"]["handoff"]
+    assert second_handoff == first_handoff
+    assert sorted(path.name for path in (storage_dir / "requests").glob("*.json")) == [
+        f"{first_handoff['request_id']}.json"
+    ]
+
+
+def test_save_confirm_confirm_failure_returns_saved_confirm_failed_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-214: saved-but-unconfirmed returns the frozen SAVED_CONFIRM_FAILED details."""
+    from apps.migu_orca_web import routes_requests
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    issued = client.post(
+        "/api/v1/requests", json={"title": "芙莉莲", "save_request": False}
+    ).get_json()["result"]
+    draft_id = issued["draft_id"]
+    request_id = issued["request"]["request_id"]
+
+    def failing_confirm(storage_dir_arg: Any) -> Any:
+        def confirm_saved(_request_id: str) -> dict[str, Any]:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认订阅方案可以执行确认操作",
+                "confirm_request",
+                {"status": "PENDING_CONFIRM"},
+            )
+
+        return confirm_saved
+
+    monkeypatch.setattr(routes_requests, "_build_save_confirm_confirm_saved", failing_confirm)
+
+    response = _save_confirm(client, draft_id, 1, "view-confirm-fail", _profile(tmp_path, storage_dir.name))
+    payload = response.get_json()
+    assert response.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "save_confirm_failed"
+    assert payload["error_data"]["details"] == {
+        "outcome": "SAVED_CONFIRM_FAILED",
+        "request_id": request_id,
+        "retry_action": "ACCEPT_SAVED_REQUEST",
+    }
+    serialized = str(payload)
+    assert draft_id not in serialized
+    assert str(tmp_path) not in serialized
+    # The saved request stays PENDING_CONFIRM (accept never ran) and is on disk.
+    assert load_request_snapshot(load_storage_config(storage_dir), request_id)["status"] == "PENDING_CONFIRM"
+
+
+def test_save_confirm_persist_failure_releases_draft_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-214: a persistence failure keeps the draft; a same-id/key retry succeeds."""
+    from apps.migu_orca_entry.controllers.entry_controller import apply_request_save_action as original_save
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+    profile = _profile(tmp_path, storage_dir.name)
+    failures = {"count": 0}
+
+    def flaky_save(result: dict[str, Any], save_request: bool, **kwargs: object) -> dict[str, Any]:
+        if failures["count"] == 0:
+            failures["count"] += 1
+            return {
+                "success": False,
+                "request": None,
+                "error": Stage1Error(
+                    "storage_error",
+                    "模拟写盘失败",
+                    "save_request_snapshot",
+                    {"reason": "disk full"},
+                ).as_dict(),
+            }
+        return original_save(result, save_request, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.services.apply_request_save_action", flaky_save
+    )
+
+    first = _save_confirm(client, draft_id, 1, "view-persist-fail", profile)
+    assert first.status_code == 500
+    assert first.get_json()["error_type"] == "storage_error"
+
+    second = _save_confirm(client, draft_id, 1, "view-persist-fail", profile)
+    assert second.status_code == 200
+    result = second.get_json()["result"]
+    assert result["outcome"] == "CONFIRMED"
+    # Exactly one Request exists.
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 1
 
 
 def test_create_request_returns_validation_error_for_missing_title() -> None:
@@ -5558,3 +6224,590 @@ def test_preference_api_save_storage_failure_returns_chinese_envelope(
     assert str(tmp_path) not in str(payload)
     assert "https://example.test/api" not in str(payload)
     assert "token" not in str(payload).lower()
+
+
+# ---------------------------------------------------------------------------
+# Batch save-confirm (US-216)
+# ---------------------------------------------------------------------------
+
+
+def _issue_batch_draft_items(
+    client: FlaskClient,
+    titles: list[str],
+) -> list[dict[str, object]]:
+    """Issue one preview draft per title; return batch item descriptors."""
+    items: list[dict[str, object]] = []
+    for index, title in enumerate(titles):
+        issued = client.post(
+            "/api/v1/requests", json={"title": title, "save_request": False}
+        ).get_json()["result"]
+        items.append(
+            {
+                "item_id": f"item-{index}",
+                "draft_id": issued["draft_id"],
+                "base_revision": issued["draft_revision"],
+                "idempotency_key": f"view-batch-key-{index}",
+            }
+        )
+    return items
+
+
+def _batch_save_confirm(
+    client: FlaskClient,
+    items: list[dict[str, object]],
+    *,
+    batch_id: str = "batch-1",
+    item_ids: list[str] | None = None,
+    storage_dir: str = "storage",
+) -> Any:
+    payload: dict[str, object] = {
+        "batch_id": batch_id,
+        "items": items,
+        "storage_dir": storage_dir,
+    }
+    if item_ids is not None:
+        payload["item_ids"] = item_ids
+    return client.post(
+        f"/api/v1/batches/{batch_id}/save-confirm", json=payload
+    )
+
+
+def test_batch_save_confirm_api_returns_partial_success_result(
+    tmp_path: Path,
+) -> None:
+    """US-216: a selected batch confirms per item with a sanitized result."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert set(result) == {"batch_id", "results", "summary"}
+    assert result["batch_id"] == "batch-1"
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+    assert [row["item_id"] for row in result["results"]] == ["item-0", "item-1"]
+    for row in result["results"]:
+        assert row["outcome"] == "CONFIRMED"
+        assert row["status"] == "ACCEPTED"
+        assert row["request_id"]
+        assert row["error_type"] is None
+        assert row["error_message"] is None
+        assert load_request_snapshot(
+            load_storage_config(storage_dir), row["request_id"]
+        )["status"] == "ACCEPTED"
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 2
+
+
+def test_batch_save_confirm_api_stale_item_fails_without_rolling_back_sibling(
+    tmp_path: Path,
+) -> None:
+    """US-216: a stale revision item fails; the confirmed sibling stays."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+    stale = items[1]
+    bump = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": stale["draft_id"],
+            "base_revision": stale["base_revision"],
+            "patch": {"expected_folder_name": "并发修改"},
+        },
+    )
+    assert bump.status_code == 200
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 1, "failed": 1}
+    ok_row = result["results"][0]
+    assert ok_row["outcome"] == "CONFIRMED"
+    assert ok_row["status"] == "ACCEPTED"
+    bad_row = result["results"][1]
+    assert bad_row["outcome"] == "failed"
+    assert bad_row["error_type"] == "draft_revision_conflict"
+    assert bad_row["error_message"] == "草案已被更新，请基于最新版本重试"
+    assert bad_row["request_id"] is None
+    serialized = str(payload)
+    assert stale["draft_id"] not in serialized
+    assert str(tmp_path) not in serialized
+    # One Request file exists; the failed draft survives for a retry at r2.
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 1
+
+
+def test_batch_save_confirm_api_same_key_retry_replays_same_request(
+    tmp_path: Path,
+) -> None:
+    """US-216: a same-key retry of a confirmed item never duplicates it."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    (item,) = _issue_batch_draft_items(client, ["芙莉莲"])
+
+    first = _batch_save_confirm(client, [item])
+    assert first.status_code == 200
+    request_id = first.get_json()["result"]["results"][0]["request_id"]
+
+    second = _batch_save_confirm(client, [item])
+    payload = second.get_json()
+    assert second.status_code == 200
+    row = payload["result"]["results"][0]
+    assert row["outcome"] == "CONFIRMED"
+    assert row["request_id"] == request_id
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 1
+
+
+def test_batch_save_confirm_api_item_ids_selects_preserving_order(
+    tmp_path: Path,
+) -> None:
+    """US-216: item_ids selects a subset while preserving the input order."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战", "芙莉莲"])
+
+    response = _batch_save_confirm(
+        client, items, item_ids=["item-2", "item-0"]
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert [row["item_id"] for row in result["results"]] == ["item-0", "item-2"]
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 2
+
+
+def test_batch_save_confirm_api_confirm_failure_is_per_item_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-216: a saved-but-unconfirmed item is per-item failed, not HTTP 409."""
+    from apps.migu_orca_web import routes_requests
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+
+    def failing_confirm(storage_dir_arg: Any) -> Any:
+        def confirm_saved(_request_id: str) -> dict[str, Any]:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认订阅方案可以执行确认操作",
+                "confirm_request",
+                {"status": "PENDING_CONFIRM"},
+            )
+
+        return confirm_saved
+
+    monkeypatch.setattr(
+        routes_requests, "_build_save_confirm_confirm_saved", failing_confirm
+    )
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 0, "failed": 2}
+    for row in result["results"]:
+        assert row["outcome"] == "failed"
+        assert row["error_type"] == "save_confirm_failed"
+        assert row["error_message"] == "订阅方案已保存但确认失败，请对已保存的方案重试确认"
+        assert isinstance(row["request_id"], str)
+        assert load_request_snapshot(
+            load_storage_config(storage_dir), row["request_id"]
+        )["status"] == "PENDING_CONFIRM"
+    serialized = str(payload)
+    for item in items:
+        assert item["draft_id"] not in serialized
+    assert str(tmp_path) not in serialized
+
+
+def test_batch_save_confirm_api_persist_failure_fails_item_only(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-216: a persistence failure is a per-item failure, never a 500."""
+    from apps.migu_orca_entry.controllers.entry_controller import (
+        apply_request_save_action as original_save,
+    )
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+    failures = {"count": 0}
+
+    def flaky_save(result: dict[str, Any], save_request: bool, **kwargs: object) -> dict[str, Any]:
+        if failures["count"] == 0:
+            failures["count"] += 1
+            return {
+                "success": False,
+                "request": None,
+                "error": {
+                    "error_type": "storage_error",
+                    "error_message": f"模拟写盘失败 {tmp_path}",
+                    "failed_step": "save_request_snapshot",
+                    "details": {"reason": "disk full"},
+                },
+            }
+        return original_save(result, save_request, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.services.apply_request_save_action", flaky_save
+    )
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 1, "failed": 1}
+    rows = result["results"]
+    failed_row = rows[0]
+    assert failed_row["outcome"] == "failed"
+    assert failed_row["error_type"] == "storage_error"
+    assert failed_row["request_id"] is None
+    serialized = str(payload)
+    assert str(tmp_path) not in serialized
+    # The failed item's draft was released, so the same payload can be retried.
+    retry = _batch_save_confirm(
+        client, [{"item_id": "item-0", **items[0]}]
+    )
+    retry_payload = retry.get_json()
+    assert retry.status_code == 200
+    assert retry_payload["result"]["summary"] == {
+        "requested": 1,
+        "confirmed": 1,
+        "failed": 0,
+    }
+    assert len(list((storage_dir / "requests").glob("*.json"))) == 2
+
+
+def test_batch_save_confirm_api_rejects_request_level_bad_storage(
+    tmp_path: Path,
+) -> None:
+    """US-216: a request-level storage error stays an ordinary failure envelope."""
+    client = _client()
+    (item,) = _issue_batch_draft_items(client, ["芙莉莲"])
+    response = _batch_save_confirm(
+        client, [item], storage_dir="/etc/private"
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_storage_dir"
+    serialized = str(payload)
+    assert item["draft_id"] not in serialized
+    assert "/etc/private" not in serialized
+
+
+def test_save_confirm_terminal_replay_rejects_reserved_draft(
+    tmp_path: Path,
+) -> None:
+    """Stage 28 boundary fix (real DraftStore wiring): a reserved draft must not
+    replay an unrelated terminal record as its own success.
+
+    - draft-A confirms under ``key-old`` (CONFIRMED terminal record).
+    - draft-B (different plan) is reserved by another save-in-progress.
+    - reusing ``key-old`` against draft-B must return 409 draft_reserved, never
+      the old Request of draft-A.
+    """
+    from apps.migu_orca_web.drafts import draft_store
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    profile = _profile(tmp_path, storage_dir.name)
+
+    # draft-A: fully confirmed under key-old.
+    draft_a_id, _ = _issue_draft(client, "芙莉莲")
+    first = _save_confirm(client, draft_a_id, 1, "key-old", profile)
+    assert first.status_code == 200
+    old_request_id = first.get_json()["result"]["handoff"]["request_id"]
+
+    # draft-B: a different plan, reserved by a save-in-progress.
+    draft_b_id, _ = _issue_draft(client, "咒术回战")
+    reserved_request, reason = draft_store.reserve_for_save(draft_b_id, 1)
+    assert reserved_request is not None
+    assert reason == "ok"
+    try:
+        response = _save_confirm(client, draft_b_id, 1, "key-old", profile)
+    finally:
+        draft_store.release_save(draft_b_id)
+
+    payload = response.get_json()
+    assert response.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_reserved"
+    # The old Request of draft-A is never returned.
+    assert old_request_id not in str(payload)
+    assert draft_b_id not in str(payload)
+
+
+def test_batch_save_confirm_terminal_replay_reserved_draft_is_per_item_failed(
+    tmp_path: Path,
+) -> None:
+    """Stage 28 boundary fix (batch): a reserved draft under a stale key is a
+    sanitized per-item failure, never the old request_id as this item's success."""
+    from apps.migu_orca_web.drafts import draft_store
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    profile = _profile(tmp_path, storage_dir.name)
+
+    # Confirm one draft under key-batch-old.
+    confirmed_draft_id, _ = _issue_draft(client, "芙莉莲")
+    first = _save_confirm(client, confirmed_draft_id, 1, "key-batch-old", profile)
+    assert first.status_code == 200
+    old_request_id = first.get_json()["result"]["handoff"]["request_id"]
+
+    # A different draft, reserved, reused with the same key-batch-old.
+    reserved_draft_id, _ = _issue_draft(client, "咒术回战")
+    reserved_request, reason = draft_store.reserve_for_save(reserved_draft_id, 1)
+    assert reserved_request is not None
+    assert reason == "ok"
+    item = {
+        "item_id": "item-0",
+        "draft_id": reserved_draft_id,
+        "base_revision": 1,
+        "idempotency_key": "key-batch-old",
+    }
+    try:
+        response = _batch_save_confirm(client, [item], batch_id="batch-reserved")
+    finally:
+        draft_store.release_save(reserved_draft_id)
+
+    payload = response.get_json()
+    assert response.status_code == 200  # partial-success envelope
+    result = payload["result"]
+    row = result["results"][0]
+    assert row["outcome"] == "failed"
+    assert row["error_type"] == "draft_reserved"
+    assert row["request_id"] is None  # NOT the old request_id
+    assert old_request_id not in str(payload)
+    assert reserved_draft_id not in str(payload)
+
+
+# ---------------------------------------------------------------------------
+# Stage 28 static-review fixes: strict save-confirm DTOs (US-213/214/216)
+# ---------------------------------------------------------------------------
+
+
+def test_save_confirm_rejects_unknown_sensitive_fields(tmp_path: Path) -> None:
+    """US-213 fix: single save-confirm rejects unknown fields instead of ignoring.
+
+    A leaked ``request``/``draft``/``token`` key must fail with 400
+    ``data_validation_errors`` and must never echo the sensitive value.
+    """
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    draft_id, _ = _issue_draft(client, "芙莉莲")
+
+    response = client.post(
+        "/api/v1/requests/save-confirm",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "idempotency_key": "strict-key-1",
+            "storage_dir": _profile(tmp_path, storage_dir.name),
+            "token": "super-secret-token",
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert "super-secret-token" not in str(payload)
+    # A full Request payload is rejected too.
+    response2 = client.post(
+        "/api/v1/requests/save-confirm",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "idempotency_key": "strict-key-2",
+            "storage_dir": _profile(tmp_path, storage_dir.name),
+            "request": {"status": "ACCEPTED", "title": "芙莉莲"},
+        },
+    )
+    assert response2.status_code == 400
+    assert response2.get_json()["error_type"] == "data_validation_errors"
+
+
+def test_batch_save_confirm_rejects_unknown_top_level_and_item_fields(
+    tmp_path: Path,
+) -> None:
+    """US-213 fix: batch save-confirm rejects unknown top-level and item fields."""
+    client = _client()
+    (item,) = _issue_batch_draft_items(client, ["芙莉莲"])
+
+    # Top-level unknown field.
+    top = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [item],
+            "storage_dir": "storage",
+            "token": "leaked-token",
+        },
+    )
+    assert top.status_code == 400
+    assert top.get_json()["error_type"] == "data_validation_errors"
+    assert "leaked-token" not in str(top.get_json())
+
+    # Item-level unknown field (a full Request leak).
+    item_with_request = {**item, "request": {"status": "ACCEPTED"}}
+    nested = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [item_with_request],
+            "storage_dir": "storage",
+        },
+    )
+    assert nested.status_code == 400
+    assert nested.get_json()["error_type"] == "data_validation_errors"
+
+
+# ---------------------------------------------------------------------------
+# Stage 28 static-review fixes: safe-info value-level redaction (US-217)
+# ---------------------------------------------------------------------------
+
+
+def test_safe_info_redacts_embedded_sensitive_text_and_non_string_values(
+    tmp_path: Path,
+) -> None:
+    """US-217 fix: sensitive text embedded inside a label is redacted and a
+    non-string value never surfaces via str(dict)/str(list)."""
+    request = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-redact",
+        "source_info": {
+            "matched_bangumi": {
+                "title": "葬送的芙莉莲",
+                # A URL embedded in otherwise-legal text.
+                "aliases": ["芙莉莲 via https://evil.example/x", "Frieren"],
+                "mikan_url": "https://private.example/Home/Bangumi/99",
+            },
+            "rss_sources": [
+                {
+                    "subtitle_group": "喵萌",
+                    "rss_url": "https://private.example/rss",
+                    "total_seed_count": 1,
+                    "valid_seed_count": 1,
+                    "invalid_seed_count": 0,
+                    "valid_seed_names": ["file://etc/passwd-in-name"],
+                    "excluded_seed_names": [],
+                    "warnings": ["token=abc123 泄漏"],
+                }
+            ],
+        },
+        "confirmable_config": {
+            "selected_subtitle_group": "喵萌",
+            "filter_rule": {
+                "must_contain": "1080p",
+                "must_not_contain": "password=hunter2",
+                "use_regex": False,
+                "case_sensitive": False,
+            },
+            "effective_seed_names": ["file://etc/passwd-in-name"],
+            "expected_folder_name": {"nested": "secret"},
+            "warnings": [],
+        },
+    }
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+
+    response = _client().get(
+        "/api/v1/requests/request-redact/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    safe = payload["result"]["safe_info"]
+    body_text = response.get_data(as_text=True)
+
+    # Embedded URL in an alias → the whole alias is redacted.
+    assert safe["aliases"] == ["[redacted]", "Frieren"]
+    # file:// embedded in a seed name → redacted.
+    assert safe["resources"]["valid_file_names"] == ["[redacted]"]
+    # key=value secret in a warning → redacted.
+    assert safe["subtitle_groups"][0]["warnings"] == ["[redacted]"]
+    # key=value secret in a filter rule → redacted.
+    assert safe["filter_rule"]["must_not_contain"] == "[redacted]"
+    # Non-string folder_name (a nested dict) → None, never str(dict).
+    assert safe["folder_name"] is None
+    # Nothing sensitive survives in the body.
+    for marker in ("evil.example", "file://", "hunter2", "abc123", "token="):
+        assert marker not in body_text
+    # Legal labels are untouched.
+    assert safe["title"] == "葬送的芙莉莲"
+    assert safe["raw_title"] == "芙莉莲"
+    assert safe["filter_rule"]["must_contain"] == "1080p"
+
+
+def test_safe_label_redacts_all_sensitive_markers() -> None:
+    """US-217 fix: ``_safe_label`` redacts URL/magnet/path/credential markers
+    anywhere in a string, returns None for non-strings, and keeps legal text."""
+    from apps.migu_orca_web.serializers import _safe_label
+
+    redacted = "[redacted]"
+    for sensitive in (
+        "前 http://example.com 后",       # embedded http://
+        "前 https://example.com 后",      # embedded https://
+        "magnet:?xt=urn:btih:deadbeef",   # magnet
+        "前 file://etc/passwd 后",        # file://
+        "/usr/local/bin",                 # Unix absolute path
+        "C:\\Users\\secret",              # Windows drive path
+        "\\\\server\\share",              # UNC path
+        "token=abc123",                   # key=value secret
+        "Authorization: Bearer xyz",      # key:value secret
+        "password=hunter2",               # password key=value
+        "cookie=session-id",              # cookie key=value
+        "rss_url=https://x/y",            # rss_url key=value
+        "/tmp/abs",                       # leading slash
+        # Generic POSIX absolute paths — any root, anywhere in the string.
+        "/data/private/token",
+        "写入失败 /data/private/token",
+        "/mnt/storage/secret",
+        "目录是 /mnt/storage/secret",
+        "/private/config.json",
+        "配置位于 /private/config.json",
+        "/Users/name/secret",
+        "macOS 路径 /Users/name/secret",
+        "/custom-root/sub/dir",
+        "任意根目录 /custom-root/sub/dir",
+        # Boundaries: =, CJK text/punctuation, quotes, parentheses, colon.
+        "path=/mnt/secret",
+        "路径为/data/secret",
+        "路径是/private/config",
+        "配置（/Users/name/secret）",
+        "\"/opt/config\"",
+        "dest:/var/lib/data",
+        "(/srv/backup)",
+        "结果:/custom-root/x",
+        # Chinese path-context without a separator.
+        "路径/data",
+        "路径：/data",
+    ):
+        assert _safe_label(sensitive) == redacted, f"failed to redact {sensitive!r}"
+
+    # Non-string values never become str(dict)/str(list).
+    assert _safe_label({"a": 1}) is None
+    assert _safe_label([1, 2]) is None
+    assert _safe_label(42) is None
+    assert _safe_label(True) is None
+    assert _safe_label(None) is None
+
+    # Legal Chinese labels, slash-bearing titles and file names stay intact.
+    assert _safe_label("葬送的芙莉莲") == "葬送的芙莉莲"
+    assert _safe_label("[喵萌] 葬送的芙莉莲 - 01.mkv") == "[喵萌] 葬送的芙莉莲 - 01.mkv"
+    assert _safe_label("1080p") == "1080p"
+    assert _safe_label("喵萌") == "喵萌"
+    assert _safe_label("Fate/stay night") == "Fate/stay night"
+    assert _safe_label("A/B 测试") == "A/B 测试"
+    assert _safe_label("[喵萌] 番剧名称 - 01.mkv") == "[喵萌] 番剧名称 - 01.mkv"
+    assert _safe_label("v1/1080p 发布") == "v1/1080p 发布"
+    # CJK word-internal slashes are NOT absolute paths (Unicode-aware boundary).
+    assert _safe_label("简/繁字幕") == "简/繁字幕"
+    assert _safe_label("中文/日文") == "中文/日文"
+    assert _safe_label("命运/冠位指定") == "命运/冠位指定"
+    assert _safe_label("字幕组/压制组") == "字幕组/压制组"
+    assert _safe_label("新增/修改") == "新增/修改"

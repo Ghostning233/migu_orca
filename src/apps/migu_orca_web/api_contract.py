@@ -26,7 +26,7 @@ Scope notes
   (e.g. the connection-test whitelist and the request ``summary``).
 """
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -230,12 +230,14 @@ class RequestCreateResultDTO(_StrictBase):
     summary: RequestSummaryDTO
     saved_request: RequestSnapshotDTO | None = None
     draft_id: str | None = None
+    draft_revision: int | None = None
 
 
 class RequestPreviewModifyResultDTO(_StrictBase):
     request: RequestSnapshotDTO
     summary: RequestSummaryDTO
     draft_id: str | None = None
+    draft_revision: int | None = None
 
 
 class RequestPreviewSaveResultDTO(_StrictBase):
@@ -244,6 +246,51 @@ class RequestPreviewSaveResultDTO(_StrictBase):
     request: RequestSnapshotDTO
     summary: RequestSummaryDTO
     saved_request: RequestSnapshotDTO | None = None
+
+
+class RequestSaveConfirmHandoffDTO(_StrictBase):
+    """Public ``handoff`` of a confirmed save (US-214).
+
+    Stage 28 deliberately does **not** create a tracking record (D28-09); the
+    handoff hands the frontend the durable ACCEPTED Request identity so the
+    tracking phase can later build a record idempotently. ``next_action`` is
+    the stable B-B hook.
+    """
+
+    request_id: str
+    status: str
+    next_action: str
+
+
+class RequestSaveConfirmResultDTO(_StrictBase):
+    """Save-confirm success result (US-214).
+
+    ``outcome`` is always ``CONFIRMED`` here (the SAVED_CONFIRM_FAILED branch
+    is returned through the failure envelope's ``error_data``, whose shape is
+    frozen by ``test_dto_contracts``). ``request``/``summary`` carry the saved
+    ACCEPTED Request; ``handoff`` hands the durable public identity onward.
+    """
+
+    outcome: str
+    request: RequestSnapshotDTO
+    summary: RequestSummaryDTO
+    handoff: RequestSaveConfirmHandoffDTO
+
+
+class SaveConfirmFailedErrorDataDTO(_StrictBase):
+    """Failure-envelope ``error_data.details`` whitelist for a saved-but-
+    unconfirmed attempt (US-214).
+
+    Mirrors the Stage 28 PRD §6.3 SAVED_CONFIRM_FAILED contract: the saved
+    Request exists on disk and only the acceptance/confirmation step failed, so
+    the client must retry with the existing Request accept contract. Only the
+    public request_id, the outcome marker and the retry action are allowed;
+    the consumed draft_id and the draft content never appear.
+    """
+
+    outcome: str
+    request_id: str
+    retry_action: str
 
 
 class RequestActionResultDTO(RequestCreateResultDTO):
@@ -418,6 +465,7 @@ class BatchParseItemDTO(_SnapshotBase):
     enhanced_search_queries: list[dict[str, Any]] = []
     preview_request: RequestSnapshotDTO | None = None
     draft_id: str | None = None
+    draft_revision: int | None = None
     error: dict[str, Any] | None = None
 
 
@@ -486,6 +534,177 @@ class BatchAcceptResultDTO(_StrictBase):
 
 class BatchSubmitResultDTO(BatchAcceptResultDTO):
     """submit/retry/recover results equal the accept result shape."""
+
+
+class BatchSaveConfirmItemResultDTO(_StrictBase):
+    """One batch save-confirm per-item result (US-216).
+
+    Per-item failures are *partial-success* results (``outcome=CONFIRMED`` for
+    successful items, a stable sanitized failure otherwise) and never escalate
+    the whole request to an HTTP failure. ``request_id``/``status`` are only
+    present on the CONFIRMED branch; failed items carry the sanitized
+    ``error_type`` + a fixed Chinese ``error_message`` and stay retryable by
+    the client (the draft is not consumed on an expected failure).
+    """
+
+    item_id: str
+    outcome: str
+    request_id: str | None = None
+    status: str | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+
+class BatchSaveConfirmResultDTO(_StrictBase):
+    """Partial-success batch save-confirm result (US-216).
+
+    ``results`` preserves the input/``item_ids`` order and only carries public
+    per-item metadata; ``summary`` counts ``requested`` (processed items),
+    ``confirmed`` and ``failed``. The queue is intentionally not part of this
+    contract — Stage 28 hands off ACCEPTED Request identities; the tracking
+    phase builds the pre-submit view from them.
+    """
+
+    batch_id: str
+    results: list[BatchSaveConfirmItemResultDTO]
+    summary: dict[str, int]
+
+
+# ---------------------------------------------------------------------------
+# Request safe-info (US-217)
+# ---------------------------------------------------------------------------
+# The ``GET /api/v1/requests/{request_id}/safe-info`` result is the single
+# safe data source for the "全部信息" read-only dialog. It is built by an
+# explicit default-deny serializer (never by copying the snapshot and hiding
+# fields in the frontend), and every nested shape is ``extra="forbid"`` so an
+# unknown/engine/URL/credential field is rejected at the boundary. The raw
+# snapshot's ``mikan_url``/``rss_url``/``poster_url``/``selected_rss_url`` and
+# any endpoint/token/cookie/response-body/absolute-path values never appear.
+
+
+class RequestSafeInfoCollectionDTO(_StrictBase):
+    """Selected MiKan collection public identity (never the full URL)."""
+
+    title: str | None = None
+    bangumi_id: str | None = None
+
+
+class RequestSafeInfoSubtitleGroupDTO(_StrictBase):
+    """One subtitle-group resource summary (no RSS URL, seeds or raw feed)."""
+
+    subtitle_group: str | None = None
+    total_resource_count: int = 0
+    valid_resource_count: int = 0
+    invalid_resource_count: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
+class RequestSafeInfoFilterRuleDTO(_StrictBase):
+    """User-readable filter rule summary (safe, user-controlled text)."""
+
+    must_contain: str = ""
+    must_not_contain: str = ""
+    use_regex: bool = False
+    case_sensitive: bool = False
+
+
+class RequestSafeInfoExcludedFileDTO(_StrictBase):
+    """One excluded torrent-file name plus its readable filter reason."""
+
+    name: str = ""
+    reason: str = ""
+
+
+class RequestSafeInfoResourcesDTO(_StrictBase):
+    """Resource counts and sanitized file-name summaries.
+
+    Only torrent *names* (file titles) are exposed — never magnet links,
+    download URLs or raw RSS. ``valid`` is the currently selected subtitle
+    group's effective seeds; ``excluded`` its excluded seeds; ``complete`` is
+    the combined unique seeds across every candidate group.
+    """
+
+    selected_subtitle_group: str | None = None
+    valid_resource_count: int = 0
+    invalid_resource_count: int = 0
+    complete_resource_count: int = 0
+    valid_file_names: list[str] = Field(default_factory=list)
+    excluded_file_names: list[RequestSafeInfoExcludedFileDTO] = Field(
+        default_factory=list
+    )
+
+
+class RequestSafeInfoHistoryEventDTO(_StrictBase):
+    """One sanitized status-history event (details/diagnostics dropped)."""
+
+    action: str | None = None
+    previous_status: str | None = None
+    next_status: str | None = None
+    timestamp: str | None = None
+
+
+class RequestSafeInfoAbStatusDTO(_StrictBase):
+    """Safe Auto Bangumi submission summary (no endpoint/raw response).
+
+    ``submitted`` reports whether a submission result exists; ``success`` and
+    ``ab_subscription_id`` are the public outcome; ``error_type`` is a stable
+    classified failure marker when the submission did not succeed.
+    """
+
+    submitted: bool = False
+    success: bool | None = None
+    ab_subscription_id: str | None = None
+    error_type: str | None = None
+
+
+class RequestSafeInfoDTO(_StrictBase):
+    """The strict safe-info whitelist for one saved Request (US-217).
+
+    ``extra="forbid"``: unknown nested fields, endpoints, URLs, credentials,
+    raw responses and absolute paths are rejected instead of passing through.
+    ``updated_episode`` is always ``None`` and ``updated_episode_status`` is
+    always ``NOT_IMPLEMENTED`` — Stage 28 never guesses current-episode
+    progress from seeds/RSS/download state (BL-020 is out of scope).
+    """
+
+    request_id: str
+    status: str
+    raw_title: str | None = None
+    title: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    season: int | None = None
+    season_raw: str | None = None
+    season_evidence: str | None = None
+    mikan_collection: RequestSafeInfoCollectionDTO | None = None
+    subtitle_groups: list[RequestSafeInfoSubtitleGroupDTO] = Field(
+        default_factory=list
+    )
+    selected_subtitle_group: str | None = None
+    filter_rule: RequestSafeInfoFilterRuleDTO = Field(
+        default_factory=RequestSafeInfoFilterRuleDTO
+    )
+    resources: RequestSafeInfoResourcesDTO = Field(
+        default_factory=RequestSafeInfoResourcesDTO
+    )
+    folder_name: str | None = None
+    storage_profile: str | None = None
+    total_episodes: int | None = None
+    updated_episode: None = None
+    updated_episode_status: Literal["NOT_IMPLEMENTED"] = "NOT_IMPLEMENTED"
+    history_summary: list[RequestSafeInfoHistoryEventDTO] = Field(
+        default_factory=list
+    )
+    ab_status: RequestSafeInfoAbStatusDTO | None = None
+
+
+class RequestSafeInfoResultDTO(_StrictBase):
+    """Envelope for the safe-info endpoint: only the whitelist object.
+
+    The endpoint result is ``{"safe_info": {...}}`` — no raw request snapshot,
+    history section or AB section is ever attached.
+    """
+
+    safe_info: RequestSafeInfoDTO
 
 
 # ---------------------------------------------------------------------------

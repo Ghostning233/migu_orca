@@ -2,6 +2,8 @@
 
 MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台，目标是在 MiKanProject 与 Auto Bangumi 之间提供 MiKan 订阅源发现、筛选预览、批量草案审核与提交辅助能力。
 
+Stage 28「草案一致性与原子保存确认」已完成：为服务端权威草案建立单调 revision 与 compare-and-swap（乱序旧写不再覆盖最新重算），把保存改为「预留 → 持久化 → 提交/释放」（写盘失败同一草案可重试），建立持久化 save-confirm 幂等记录（跨进程重试/响应丢失不重复创建 Request），新增单番 `POST /api/v1/requests/save-confirm` 与批量 `POST /api/v1/batches/{batch_id}/save-confirm` 组合端点（批量 1～36 部服务端边界 + 逐条部分成功），并新增 Request `safe-info` 严格白名单 DTO 作为“全部信息”唯一安全数据源。实现与验收见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`。
+
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI、静态检查、OpenAPI 漂移检查、真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。
@@ -32,6 +34,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - Stage 18 已把真实 MiKan 候选搜索设为普通 Web 主流程；fixture 仍保留为 CLI、API seam、离线开发和测试路径。Web UI 的 fixture 入口放在 `/index` 底部「开发 / 离线测试」面板中并默认收起，普通用户路径不会触发 fixture 生成。系统内置默认 MiKan 搜索 endpoint（`https://mikanani.me/Home/Search`）与 timeout（15 秒），普通 UI 不再要求用户填写 `search_endpoint` / `timeout_seconds` / `query`。
 - Stage 24 AutoBangumi 真实认证与订阅兼容闭环与 Stage 25 BL-018 均已完成。部署/配置向导及其他条件触发事项继续记录在 `docs/backlog.md`，流式封面代理记录在 `docs/optional_features.md`；后续阶段按 backlog 动态规划。
 - Stage 27「前端工程化迁移与页面重构」已完成：Vue 3 + TypeScript(strict) + Vite 工程、OpenAPI 类型化客户端、统一 API transport、4 条 SPA 路由以及全部 Web 用户旅程均已迁移；US-209 已删除旧 Jinja 主页面、`app.js`、旧 CSS 与迁移期测试脚手架，默认入口固定重定向到 `/app/*`。
+- Stage 28「草案一致性与原子保存确认」已完成：服务端草案带单调 revision（签发为 1、成功 CAS 修改 +1），`preview-modify` 必填 `base_revision` 做 compare-and-swap（过期 base → 409 `draft_revision_conflict`，只报 field/current_revision），`preview-save` 改为「预留 → 持久化 → 提交/释放」（写盘失败保留原 revision 可重试，正在保存 → 409 `draft_reserved`）；storage engine 新增持久化 save-confirm 幂等记录（`<storage>/idempotency/`，只含非敏感白名单字段），单番/批量 save-confirm 组合端点一次完成校验、保存、确认与幂等提交并返回 ACCEPTED handoff，批量逐条部分成功且强制 1～36 部服务端边界；`safe-info` 以 `extra="forbid"` DTO + 默认拒绝 serializer 提供“全部信息”唯一安全数据源。
 - Stage 26「Web API 契约固化与服务端边界治理」已完成：`/api/v1` 端点清单与 golden contract 冻结、响应 DTO（`extra="forbid"`）与确定性 OpenAPI、Web 适配层按职责拆分（schemas/serializers/services/contexts/routes_*）、稳定 HTTP 状态语义、Web storage 根目录限制（空值回落服务端根）与服务端权威 draft 生命周期、CI 与 local-only 部署基线；本阶段未更换页面框架，页面主要视觉与用户流程保持不变。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
@@ -110,7 +113,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 
 ## Web UI 与 API
 
-当前 Web UI 是 Stage 27 迁移的独立前端工程（Vue 3 + TypeScript + Vite），已累积接入 Settings、真实 MiKan 候选、可编辑预览、批量草案、提交前队列、偏好、媒体缓存、AutoBangumi 3.1.18 兼容和 Stage 25 标题季数解析。业务操作统一通过 `/api/v1/*` JSON API 编排，CLI 默认行为保持不变。
+当前 Web UI 是 Stage 27 迁移的独立前端工程（Vue 3 + TypeScript + Vite），已累积接入 Settings、真实 MiKan 候选、可编辑预览、批量草案、提交前队列、偏好、媒体缓存、AutoBangumi 3.1.18 兼容、Stage 25 标题季数解析与 Stage 28 草案一致性和保存确认。业务操作统一通过 `/api/v1/*` JSON API 编排，CLI 默认行为保持不变。
 
 Stage 27 已把 Web UI 迁移到独立前端工程并完成入口切换：`frontend/` 是 Vue 3 + TypeScript(strict) + Vite 工程（npm 管理，`package-lock.json` 已入库）。生产构建输出到 `frontend/dist/`（不入库），由 Flask 在 `/app/` 同源托管（`routes_app.py` 的 `app_blueprint`）；Vite `base` 固定为 `/app/`，SPA fallback 只接管 `/app/*` 路径，绝不截获 `/api/v1/*`、海报、`/healthz`、`/readiness` 或入口路由。开发时可 `cd frontend && npm run dev`（Vite dev server 代理 `/api/v1` 到本地 Flask）。US-197 建立了工程基线（typecheck/lint/unit/build 全绿 + CI 门禁）；US-199 建立了统一 API transport（`frontend/src/api/client.ts`，处理 envelope/非 2xx/非 JSON/网络失败/取消/超时，feature 不得自行拼接 `/api/v1` URL）、4 条 SPA 路由（工作台/订阅方案/提交队列/Settings）与全局 loading/空状态/错误边界/aria-live 通知。US-201 已迁移 Settings（storage 偏好/非敏感偏好/qB/AB 连接测试与提交上下文）；US-202 已迁移 Request 列表（`/app/requests`：加载、搜索、状态筛选、排序、计数、空状态、`request_id` 刷新恢复与复制）；US-203 已迁移 Request 详情与管理动作（`/app/requests` 详情面板：Overview/Source/Filter/Seeds/Audit、确认/取消/修改/删除、AB 提交入口）；US-204 已迁移单个搜索与服务端草案（`/app/workbench`：真实 MiKan 候选搜索、直连 fallback、季数确认/冲突禁用、可编辑订阅草案 preview-modify/preview-save，`candidate_context`/`draft_id` 只在内存）；US-205 已迁移批量工作台（`/app/workbench` 批量工作台区：批量输入、独立 FOUND/EMPTY/FAILED 卡片、候选浮层、共享草案详情与删除、选择/单个接受/批量接受/全接受，统一走 `POST /api/v1/batches/{batch_id}/accept`，`batch_id` 进 URL 供提交队列刷新恢复）；US-206 已迁移提交队列（`/app/queue`：从 URL `batch_id` 恢复队列、逐项提交/失败重试/恢复（自动 + 人工核验）、防重复提交，AB 凭据只在内存与单次 POST body）。US-207 完成跨功能收敛：键盘 skip link、批量候选浮层焦点管理（打开聚焦/Escape 关闭/焦点恢复）、360/768/1280 无横向溢出、状态不只靠颜色、reduced-motion 反馈、vendor chunk 分包、`/app/assets/*` immutable 缓存 + shell no-cache、build 无 sourcemap（详见 `tests/browser/test_app_responsive_a11y.py`）。US-208 完成 parity 与默认入口切换（旧 269 个 Chromium 旅程到新路由的 parity 矩阵，`/index`、`/settings` 及 `request_id`/`batch_id` 兼容入口默认重定向到新前端，并演练了不修改业务数据的入口回退）。US-209 完成收尾：删除旧 `app.js`、旧 Jinja 主模板与无用 CSS/测试 helper，入口路由固定重定向到 SPA，parity 矩阵与回退演练归档为 Stage 27 完成证据，README/架构/模块/backlog 全部同步。
 
@@ -175,7 +178,8 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 
 - `GET /api/v1/requests`：列出已保存 Request 摘要。未传 `storage_dir` 时使用服务端 storage 根目录（默认 `.migu_orca/storage`，可用 `MIGU_ORCA_WEB_STORAGE_ROOT` 覆盖）。
 - `GET /api/v1/requests/<request_id>`：读取完整 Request snapshot，并附带可用的 `history` 与 `ab_result` 只读数据。
-- `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source`、可选 `mikan_config` 和 request-scoped `mikan_bangumi`。`source` 默认为 `static-fixture`；显式传入 `source: "mikan"` 时会构造真实 MiKan client，未传 `mikan_config` 时使用系统默认 MiKan 配置。存在 `mikan_bangumi` 时会直接解析指定 MiKan `Home/Bangumi/<id>` URL 或 ID 并跳过搜索；该字段不写入浏览器 storage、URL 或持久配置。API 层仍以显式 `save_request: true` 写入本地 storage；Web UI 候选选择与直连 fallback 默认发送 `save_request: false` 生成可编辑预览草案——服务端在 `DraftStore` 持有权威 `PENDING_CONFIRM` 草案并签发 opaque `draft_id`（US-194），`POST /api/v1/requests/preview-modify` 只接受 `draft_id` + 允许 patch 做 dry-run 修改并重算种子，`POST /api/v1/requests/preview-save` 一次性消费 `draft_id` 将草案写入本地 storage 进入待确认流程；draft 失效/重放返回 409 `draft_expired`/`draft_replayed`，客户端只持有 id，完整 Request 与草案内容绝不进入 URL 或浏览器 storage。
+- `GET /api/v1/requests/<request_id>/safe-info`（US-217）：返回“全部信息”弹窗专用的严格安全白名单 `{safe_info: <RequestSafeInfoDTO>}`。serializer 默认拒绝，只显式构造标题/别名/季度/公开季数证据摘要、选定 MiKan 合集标题与公开编号（不含完整合集/RSS URL）、字幕组/过滤规则用户可读摘要/相对 storage profile/安全文件夹名、有效/完整/排除资源数量与脱敏文件名摘要、`total_episodes`（暂无公开数据恒为 `null`）、`updated_episode=null`/`updated_episode_status=NOT_IMPLEMENTED`（不猜测当前集数）、Request 状态、脱敏历史与安全 Auto Bangumi 状态摘要。完整 URL、RSS、magnet、endpoint、token/cookie/password/Authorization、原始响应与本地绝对路径不出现在成功/错误/OpenAPI 示例。
+- `POST /api/v1/requests`：生成 Request。请求 JSON 支持 `title`、`storage_dir`、`save_request`、`source`、可选 `mikan_config` 和 request-scoped `mikan_bangumi`。`source` 默认为 `static-fixture`；显式传入 `source: "mikan"` 时会构造真实 MiKan client，未传 `mikan_config` 时使用系统默认 MiKan 配置。存在 `mikan_bangumi` 时会直接解析指定 MiKan `Home/Bangumi/<id>` URL 或 ID 并跳过搜索；该字段不写入浏览器 storage、URL 或持久配置。API 层仍以显式 `save_request: true` 写入本地 storage；Web UI 候选选择与直连 fallback 默认发送 `save_request: false` 生成可编辑预览草案——服务端在 `DraftStore` 持有权威 `PENDING_CONFIRM` 草案并签发 opaque `draft_id` 与单调 `draft_revision`（US-194/211），`POST /api/v1/requests/preview-modify` 只接受 `draft_id` + `base_revision` + 允许 patch 做 CAS dry-run 修改并重算种子（成功返回新 `draft_revision`；base 过期返回 409 `draft_revision_conflict`），`POST /api/v1/requests/preview-save` 以 `draft_id` + `base_revision` 预留草案，**持久化成功后才消费**（US-212：写盘失败会释放预留，同一草案可重试，不再因先 pop 后落盘丢失用户编辑），进入待确认流程；draft 失效/重放返回 409 `draft_expired`/`draft_replayed`/`draft_reserved`，客户端只持有 id 与 revision，完整 Request 与草案内容绝不进入 URL 或浏览器 storage。
 
 `POST /api/v1/requests` 示例：
 
@@ -216,6 +220,18 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
   "save_request": true
 }
 ```
+
+Stage 28 新增单番「保存并确认」端点（US-214）：
+
+- `POST /api/v1/requests/save-confirm`：一次完成草案校验（`draft_id` + `base_revision`）、预留、持久化、确认和幂等提交。请求只接受 `draft_id`、`base_revision`、`idempotency_key` 与可选 `storage_dir`，绝不接受完整 Request。成功返回 `CONFIRMED`、已保存的 `ACCEPTED` Request 与 `handoff`（`request_id`/`status=ACCEPTED`/`next_action=OPEN_TRACKING`；Stage 28 不创建 tracking record）。同一 `idempotency_key` 重试返回同一最终结果（终态重放，不触碰草案）；不同键重放已保存草案返回 409 `draft_replayed`；持久化成功但确认失败返回 409 `save_confirm_failed`，`error_data.details` 只含 `outcome=SAVED_CONFIRM_FAILED`、公开 `request_id` 与 `retry_action=ACCEPT_SAVED_REQUEST`，客户端用既有 Request accept 契约重试确认。
+
+Stage 28 新增批量 36 部服务端边界（US-215）：
+
+- `POST /api/v1/batches/parse` 现在按规范化非空行计数并强制单批 1～36 部：0 部沿用 `validation_error`「请至少输入一个番剧名称」；超过 36 部在任何标题解析、MiKan 搜索或持久化 seam 之前返回 HTTP 400 `batch_limit_exceeded`，`error_data.details` 只含 `field=raw_input`、`limit=36` 与 `actual`，绝不回显原始批量输入行。`MAX_BATCH_ITEMS = 36` 定义在 `batch_engine/models`，与前端 UX PRD 的批量上限一致。
+
+Stage 28 新增批量 save-confirm 逐条部分成功端点（US-216）：
+
+- `POST /api/v1/batches/<batch_id>/save-confirm`：一次确认所选批量卡片，每条复用单番 save-confirm 用例（revision 校验、预留、持久化、确认与幂等结果提交）。请求每条只接受公开 `item_id`、服务端签发 `draft_id`/`base_revision` 与 opaque `idempotency_key`——绝不接受完整 Request；`item_ids` 可选，只处理选中项并保持输入顺序，省略时按 `items` 顺序处理全部。成功响应是 HTTP 200 逐条部分成功：`{batch_id, results: [{item_id, outcome, request_id?, status?, error_type?, error_message?}], summary: {requested, confirmed, failed}}`。可预期的单条业务失败（`draft_expired`/`draft_revision_conflict`/`draft_reserved`/`idempotency_conflict`/`save_confirm_failed` 等）返回逐条脱敏 `failed` 结果（固定中文 `error_message`，绝不回显 draft_id/标题/URL/路径），成功项不因失败项回滚；同一请求内重复 `item_id` 返回 `skipped`。同一 item + `idempotency_key` 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。请求级 shape/batch_id/storage profile 错误仍走普通失败 envelope。Stage 28 不创建 tracking record；待提交视图由后续 tracking 阶段从 handoff 建立。
 
 Stage 10 新增 Request 操作端点（确认/取消仅 PENDING_CONFIRM 状态可操作；修改同时接受 PENDING_CONFIRM 与 ACCEPTED）：
 
@@ -324,7 +340,7 @@ Stage 17 新增真实 MiKan 候选搜索端点：
 
 Stage 19 新增批量解析端点：
 
-- `POST /api/v1/batches/parse`：接收 `raw_input` 多行文本，忽略空行并为每个非空行生成独立 item。端点先通过 AI 名称解析 provider seam 生成候选标题、季数提示、搜索词、置信度和审核标记，再对每个 search query 复用 MiKan candidate search。单个 provider 或 MiKan 搜索失败只标记当前 item 为 `FAILED`，不阻塞同批次其他 item。响应只包含 batch/item 状态、解析元数据、公开候选字段和卡片展示所需的订阅草案摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径不会进入响应、浏览器 storage、URL 或 Request snapshot。
+- `POST /api/v1/batches/parse`：接收 `raw_input` 多行文本，忽略空行并为每个非空行生成独立 item（服务端强制单批 1～36 部，US-215：0 部返回 `validation_error`，超过 36 部在任何标题解析/MiKan/持久化调用前返回 400 `batch_limit_exceeded`，只报告 `field=raw_input`/`limit=36`/`actual`，不回显原始输入）。端点先通过 AI 名称解析 provider seam 生成候选标题、季数提示、搜索词、置信度和审核标记，再对每个 search query 复用 MiKan candidate search。单个 provider 或 MiKan 搜索失败只标记当前 item 为 `FAILED`，不阻塞同批次其他 item。响应只包含 batch/item 状态、解析元数据、公开候选字段和卡片展示所需的订阅草案摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径不会进入响应、浏览器 storage、URL 或 Request snapshot。
 
 Stage 20 新增批量接受、队列、提交与重试端点（`batch_id` 来自 URL 路径，payload 模型仍声明 `batch_id`）：
 
@@ -457,8 +473,9 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 > 当前 `ralph.sh` 只支持 `amp`、`claude`、`codex` 三种执行工具，不包含 DSH 或 provider 配置。项目保留的轻量定制是可通过 `--model`、`--claude-model` 或 `RALPH_MODEL` 指定模型；模型参数会传给 Claude 和 Codex，Amp 分支不使用该参数。
 
-- 当前 Ralph 状态快照：Stage 27 已完成并归档；`scripts/ralph/prd.json` 与 `progress.txt` 暂时保留该阶段的最终完成快照，下一 Stage 启动时再替换
-- 最近完成阶段：Stage 27，前端工程化迁移与页面重构
+- 当前 Ralph 状态快照：Stage 28 已完成并归档；`scripts/ralph/prd.json` 与 `progress.txt` 保留 Stage 28 最终完成快照，下一 Stage 启动时再替换
+- 最近完成阶段：Stage 28，草案一致性与原子保存确认
+- 前一完成阶段：Stage 27，前端工程化迁移与页面重构
 - 前一完成阶段：Stage 26，Web API 契约固化与服务端边界治理
 - 前一完成阶段：Stage 25，正式番名与季数解析
 - 前一完成阶段：Stage 24，AutoBangumi 真实认证与订阅兼容闭环
@@ -479,6 +496,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - 前一完成阶段：Stage 7，Flask Web UI / 管理界面 MVP PRD
 - Stage 26 执行：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196（已全部完成）
 - Stage 27 执行：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`；执行分支 `agent/stage27-frontend-engineering-migration`，Ralph stories 为 US-197～US-209（已全部完成并归档）
+- Stage 28 执行：`docs/MiGuOrca_stage28_draft_consistency_PRD.md`；执行分支 `ralph/stage28-draft-consistency`，Ralph stories 为 US-210～US-218（已全部完成并归档）
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude，可指定模型）：`./scripts/ralph/ralph.sh --tool claude --model claude-model-id 7`

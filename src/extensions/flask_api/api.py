@@ -59,6 +59,9 @@ _HTTP_BAD_REQUEST_ERROR_TYPES = {
     "invalid_storage_dir",
     "queue_not_found",
     "config_error",
+    # US-215: a single batch parse accepts 1..36 non-empty lines; 37+ is a
+    # client-input error rejected before any title parse/MiKan/persist seam.
+    "batch_limit_exceeded",
 }
 # 404 — the addressed resource does not exist.
 _HTTP_NOT_FOUND_ERROR_TYPES = {
@@ -68,7 +71,8 @@ _HTTP_NOT_FOUND_ERROR_TYPES = {
 }
 # 409 — the request conflicts with the current server state (replay/expired/
 #       stale/status conflict). US-194 draft-store failures (draft_expired,
-#       draft_evicted, draft_replayed, draft_mismatch) land here too.
+#       draft_evicted, draft_replayed, draft_mismatch) land here too; US-212
+#       adds draft_reserved (a save-in-progress owns the draft).
 _HTTP_CONFLICT_ERROR_TYPES = {
     "invalid_request_status",
     "request_cancelled",
@@ -79,6 +83,14 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     "draft_evicted",
     "draft_replayed",
     "draft_mismatch",
+    "draft_revision_conflict",
+    "draft_reserved",
+    "idempotency_conflict",
+    # US-214: the Request was persisted but the confirmation step failed. The
+    # outcome is durable and terminal for the key (SAVED_CONFIRM_FAILED); a
+    # retry with the accept action converges on the same saved Request, so the
+    # conflict-with-server-state semantics (409) fit better than a 500.
+    "save_confirm_failed",
 }
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {

@@ -106,22 +106,137 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   `_web_storage_root` fixture 指向 tmp 父目录；不要往 localStorage/URL/payload 里放绝对路径。
 - 修改 `_error_http_status` 或 `_ENDPOINTS` 的 errors 后必须重生成 `docs/api/openapi.json`。
 
-## 服务端权威草案（US-194）
+## 服务端权威草案（US-194 / US-210 / US-211 / US-212）
 
 - 未保存预览草案由服务端 `drafts.py:DraftStore` 持有（进程内单例 `draft_store`，TTL 30 分钟、
   容量 128、自动清理、一次性保存 + 重放保护）。`POST /api/v1/requests`（`save_request=false`）
-  在响应里签发 opaque `draft_id`；`preview-modify` 只收 `draft_id` + 允许 patch 并回写同一
-  draft_id；`preview-save` 一次性消费 `draft_id` 后落盘。
-- 客户端**绝不**把完整 Request 作为权威快照提交；前端只在内存持有 `draft_id`
-  （新前端 DraftPreviewPanel 的局部 ref / 批量卡片的 `draft_id`），不写 URL/browser storage。
+  在响应里签发 opaque `draft_id` **和单调 `draft_revision`（=1）**；`preview-modify` 只收
+  `draft_id` + `base_revision` + 允许 patch，做 compare-and-swap（成功 revision+1，返回新
+  `draft_revision`）；`preview-save` 只收 `draft_id` + `base_revision`。
+- **保存生命周期（US-212）**：`preview-save` 用 `draft_store.reserve_for_save(draft_id,
+  base_revision)` 预留草案并取回权威 Request → `apply_request_save_action` 持久化 → 成功才
+  `draft_store.commit_save(draft_id)`（写重放 tombstone）；持久化/校验抛异常必须在 except 里
+  `draft_store.release_save(draft_id)` 释放，草案保留原 revision 可重试。**不要**再在持久化前
+  `consume_for_save`（旧语义会让写盘失败丢草案）。预留期间并发 get/CAS/consume/update/逐出/
+  过期都返回 `REASON_RESERVED`（路由映射 409 `draft_reserved`）。
+- 客户端**绝不**把完整 Request 作为权威快照提交；前端只在内存持有 `draft_id`/`draft_revision`
+  （新前端 DraftPreviewPanel 的局部 ref / 批量卡片的字段），不写 URL/browser storage。
 - 失败语义统一 409：`draft_expired`（过期/未知）、`draft_evicted`（容量满）、
-  `draft_replayed`（重复保存）；错误 details 不回显 draft_id 或草案内容。
+  `draft_replayed`（重复保存）、`draft_revision_conflict`（base_revision 过期，US-211）、
+  `draft_reserved`（保存中，US-212）；错误 details 不回显 draft_id、revision 以外的值或草案
+  内容（conflict 只含 `field=base_revision` + `current_revision`）。新 error_type 必须加入
+  `extensions/flask_api/api.py` 的 409 集合并声明到 `openapi_gen._ENDPOINTS`。
+- `preview-modify` 的 `base_revision` 校验走 `draft_store.compare_and_swap`，不要用旧的
+  `draft_store.update`（无 CAS，属 US-210 前语义）。
 - 测试：`DraftStore` 是进程级单例，必须在 `views_test`/`api_contract`/`browser` 的
   autouse fixture 里 `draft_store.clear()`；浏览器 mock 用 conftest 的
-  `preview_result_json(request)`（签发真实 draft 并返回 draft_id）与
+  `preview_result_json(request)`（签发真实 draft 并返回 draft_id + draft_revision）与
   `save_preview_handler(calls?)`（消费 draft 并返回保存结果），批量卡片 mock 用
   `issue_draft_id(preview_request)` 给每个 `preview_request` 补 draft_id。
-- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§5.3 与 OpenAPI 注册表。
+- 新增/修改 preview 端点后同步 `docs/api/endpoint_inventory.md` §3.1/§4.2/§5.3 与 OpenAPI 注册表。
+
+## 保存确认幂等协议（US-213，US-214 将接线）
+
+- 持久化幂等记录在 storage profile 的 `<storage>/idempotency/<opaque-key>.json`（
+  `storage_engine.controllers.idempotency_repository`）。记录字段白名单：
+  `idempotency_key/operation/request_fingerprint/request_id/state/created_at/updated_at`；
+  原子写 = temp 文件 + `os.replace`，绝不保存 draft/标题/URL/凭据/绝对路径。
+- 指纹：`apps/migu_orca_web/save_confirm_service.compute_request_fingerprint(request)`
+  只对允许业务字段（status/raw_title/bangumi_title/selected_subtitle_group/filter_rule/
+  expected_folder_name）做规范化 sha256；排除 `request_id`（重新生成的草案是同一用户操作）与
+  一切敏感字段。
+- `run_save_confirm(...)` 是可复用组合协调器，US-214 用注入 seam（reserve_draft /
+  persist_pending / confirm_saved / commit_draft / release_draft）接真实
+  DraftStore/entry-controller 流。状态机要点：
+  - 终态（`CONFIRMED`/`SAVED_CONFIRM_FAILED`）同键重放前经无副作用 `peek_draft`
+    （`DraftStore.peek`）核对仍存在草案的 fingerprint：指纹不一致 → 409
+    `idempotency_conflict`（草案保持可用，不被预留/消费）；`reserved` → 409
+    `draft_reserved`（绝不重放旧终态）；`replayed`/`expired`/`evicted`/`unknown`（真正缺失，
+    含进程重启）或未提供 seam → 安全重放；
+  - `IN_PROGRESS` 重试先用 `resolve_in_progress_retry` 核对已落盘 Request（在 → 继续确认；
+    不在 → 只在仍持有效 reservation 时重试保存），不无条件新建 Request；
+  - 首次写盘成功后记录保持 `IN_PROGRESS` 并绑定 `request_id`，崩溃后重试靠 rule 3 收敛；
+    确认失败才转 `SAVED_CONFIRM_FAILED`（消费 draft 防重复）并让客户端用
+    `ACCEPT_SAVED_REQUEST` 动作重试。
+  - 同键不同 operation/payload → Stage1Error `idempotency_conflict`（409，details 只含
+    `field`/`reason`），错误经 `_error_http_status`/`sanitize_error_data` 不回显 payload。
+- `POST /api/v1/requests/save-confirm`（US-214）接线：route 用 `services._build_save_confirm_persist_pending`
+  /`_build_save_confirm_confirm_saved` + DraftStore `reserve_for_save`/`commit_save`/`release_save`
+  闭包注入 `run_save_confirm`。成功 = `{outcome: CONFIRMED, request, summary, handoff:{request_id,
+  status: ACCEPTED, next_action: OPEN_TRACKING}}`（DTO `RequestSaveConfirmResultDTO` strict）；
+  确认失败（Request 已落盘）→ Stage1Error `save_confirm_failed`（409，details 白名单只含
+  `outcome=SAVED_CONFIRM_FAILED`/`request_id`/`retry_action=ACCEPT_SAVED_REQUEST`，
+  `build_saved_confirm_failed_error` 构造）。monkeypatch 持久化失败要 patch
+  `apps.migu_orca_web.services.apply_request_save_action`（seam 在 services 命名空间调用），
+  确认失败 patch `apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved`。
+- 新增会触发该错误的端点时，把 `idempotency_conflict` 从
+  `tests/api_contract/test_openapi_runtime_consistency.py::_UNDOCUMENTED_ERROR_TYPES`
+  移到对应 `_ENDPOINTS` 声明。
+
+## 批量 36 部服务端边界（US-215）
+
+- `POST /api/v1/batches/parse` 在 route 里先按规范化非空行计数（
+  `batch_draft_controller.split_batch_raw_input`——`create_batch_draft` 也用同一 splitter，
+  计数与 engine 拆分的 item 数永远一致），**早于** 标题解析 / MiKan / 持久化 seam。
+  0 行 → `validation_error`「请至少输入一个番剧名称」；超过 `MAX_BATCH_ITEMS = 36`（
+  `batch_engine/models` 导出）→ Stage1Error `batch_limit_exceeded`（HTTP 400，属
+  `_error_http_status` 的 `_HTTP_BAD_REQUEST_ERROR_TYPES`），`error_data.details` 只含
+  `field=raw_input`/`limit=36`/`actual`，绝不回显原始批量输入行。
+- 新增/修改会返回该错误的端点时，把 `batch_limit_exceeded` 声明到对应 `_ENDPOINTS` 的 400
+  errors（runtime-consistency 测试要求每个被分类 error_type 都有文档声明）。
+
+## 批量 save-confirm 逐条部分成功（US-216）
+
+- `POST /api/v1/batches/{batch_id}/save-confirm`（`routes_batches.BatchSaveConfirmView`，
+  operationId `saveConfirmBatchItems`）每条复用单番 save-confirm 用例：route 用
+  `_run_draft_save_confirm`（`routes_requests.py`，DraftStore reserve/commit/release +
+  `services._build_save_confirm_*` seam 注入 US-213 `run_save_confirm`）处理一条
+  `(item_id, draft_id, base_revision, idempotency_key)`，再经
+  `save_confirm_service.build_batch_process_one` / `run_batch_save_confirm` /
+  `serialize_batch_save_confirm_result` 返回 HTTP 200 逐条部分成功
+  `{batch_id, results[], summary:{requested, confirmed, failed}}`。
+- 请求 schema `BatchSaveConfirmPayload`（schemas.py）每条 `item_id/draft_id/base_revision/
+  idempotency_key` + 可选 `item_ids`（保持输入顺序）；响应 DTO
+  `BatchSaveConfirmResultDTO` + `BatchSaveConfirmItemResultDTO`（strict `extra="forbid"`）。
+- 可预期单条失败（`draft_*`/`idempotency_conflict`/`save_confirm_failed`/`storage_*`）映射为
+  逐条脱敏 `failed` 结果（HTTP 仍 200），成功项不因失败项回滚；同一请求内重复 `item_id`
+  → `skipped`（不二次触碰 draft）。请求级 shape/batch_id/storage profile 错误仍走普通失败
+  envelope。同一 item + 同 `idempotency_key` 重试重放同一 CONFIRMED；不同键重放已保存草案
+  → 逐条 `draft_replayed` failed。
+- monkeypatch 确认失败要 patch `apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved`
+  （`_run_draft_save_confirm` 在 routes_requests 命名空间调用该工厂）；持久化失败 patch
+  `apps.migu_orca_web.services.apply_request_save_action`。
+- 改批量 save-confirm 后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`，
+  并同步 endpoint inventory §2/§3.4/§4 与 `api.test.ts` 期望集。
+
+## Request safe-info 严格白名单（US-217）
+
+- `GET /api/v1/requests/{request_id}/safe-info`（`routes_requests.RequestSafeInfoView`，
+  operationId `getRequestSafeInfo`）返回 `{safe_info: <RequestSafeInfoDTO>}`。route 只读
+  `RequestDetailQuery`（request_id 路径 + 可选 storage_dir），失败（404/非法 request_id/
+  storage profile 错误）沿用详情端点同一 envelope 分类。
+- DTO（`api_contract.py`）全 strict `extra="forbid"`：`RequestSafeInfoDTO` +
+  `RequestSafeInfoCollectionDTO`/`RequestSafeInfoSubtitleGroupDTO`/
+  `RequestSafeInfoFilterRuleDTO`/`RequestSafeInfoExcludedFileDTO`/
+  `RequestSafeInfoResourcesDTO`/`RequestSafeInfoHistoryEventDTO`/
+  `RequestSafeInfoAbStatusDTO` + 外层 `RequestSafeInfoResultDTO`。未知嵌套字段、
+  endpoint、URL、token/cookie/password/Authorization、magnet、原始响应与绝对路径在边界
+  被拒绝或完全省略。
+- **默认拒绝**：`serializers.serialize_request_safe_info` 逐字段显式构造白名单，绝不返回
+  完整 snapshot 再让前端隐藏。`updated_episode` 恒为 `null`、
+  `updated_episode_status` 恒为 `NOT_IMPLEMENTED`（BL-020 不实现，绝不从种子/RSS/下载
+  数量猜测当前集数）。
+- 免费文本 label 经 `_safe_label` 二次脱敏（Stage 28 静态审查修复后收紧）：非字符串值
+  一律返回 `None`（绝不 `str(dict/list)`）；字符串中**任意位置**出现的 `http(s)/ftp/file/ws`
+  等 scheme、`magnet:?`、Unix 绝对路径、Windows 盘符、UNC 路径与
+  `token/password/cookie/authorization/endpoint/rss_url` 等 `key=value`/`key:value` 敏感文本
+  都稳定替换为 `[redacted]`；普通中文标题/字幕组/文件名/过滤规则不被误删。`total_episodes`
+  目前无数据源，serializer 恒置 `null`（不要从 `MikanCandidate.total_episodes` 推断）。
+- `storage_profile` 用 `services._storage_profile(storage_dir)`（解析后相对服务端
+  Web storage root 的首段 profile 名，根目录/越界 → `None`）。不要回传原始 snapshot。
+- 改 safe-info DTO/serializer 后必须重生成 `docs/api/openapi.json` 与
+  `frontend/src/api/generated/api.ts`，并同步 endpoint inventory §2/§3.1/§4 与
+  `api.test.ts` 期望集（operationId 数 26 → 27）。
 
 ## MiKan 候选公开 DTO（US-204）
 

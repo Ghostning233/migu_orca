@@ -91,9 +91,11 @@ def _batch_item(
         "error": error,
     }
     if preview_request is not None:
-        # US-194: a card with a preview_request needs a server-authoritative
-        # draft_id so the real preview-modify/preview-save backend accepts it.
+        # US-194/211: a card with a preview_request needs a server-authoritative
+        # draft_id + draft_revision so the real preview-modify/preview-save
+        # backend accepts it (issue returns revision=1).
         item["draft_id"] = issue_draft_id(preview_request)
+        item["draft_revision"] = 1
     return item
 
 
@@ -370,6 +372,7 @@ class TestAppBatchCandidateAndDraft:
                             "request": preview,
                             "summary": {},
                             "draft_id": issue_draft_id(preview),
+                            "draft_revision": 1,
                         },
                     },
                     ensure_ascii=False,

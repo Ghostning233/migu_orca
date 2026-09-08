@@ -39,7 +39,7 @@ CLI                     Vue SPA (frontend/, Flask 同源 /app/)
 | `request_engine` | Request 契约、确认、取消、受限修改和摘要 |
 | `ab_engine` | AutoBangumi 配置、认证 adapter、payload 与提交结果 |
 | `qbittorrent_engine` | qBittorrent 配置和显式只读连接测试 |
-| `storage_engine` | Request、history、AB result、queue、preference、correction 的本地 JSON 存储 |
+| `storage_engine` | Request、history、AB result、queue、preference、correction、save-confirm idempotency 的本地 JSON 存储 |
 | `shared` | 跨模块模型、错误、安全日志、标题季数与候选季数证据 |
 
 ## 4. 依赖规则
@@ -78,15 +78,29 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
   与 `tests/api_contract/`，否则契约测试失败。
 - 未保存草案由 `drafts.py:DraftStore`（进程内单例）权威持有：TTL 30 分钟、容量 128、
   一次性保存与重放保护；客户端只持 opaque `draft_id`，不提交完整 Request 作为权威快照。
+  Stage 28 起每个草案带单调 revision（签发为 1，成功 CAS 修改 +1）：`preview-modify` 用
+  `base_revision` 做 compare-and-swap，`preview-save`/save-confirm 用「预留 → 持久化 →
+  提交/释放」生命周期（写盘失败保留原 revision 可重试，重放返回 409 `draft_replayed`）。
+- save-confirm 幂等记录（Stage 28，US-213）位于 `<storage>/idempotency/<opaque-key>.json`，
+  由 `storage_engine/controllers/idempotency_repository.py` 原子读写，只含非敏感白名单字段
+  `idempotency_key/operation/request_fingerprint/request_id/state/created_at/updated_at`；
+  `apps/migu_orca_web/save_confirm_service.py` 的 `run_save_confirm` 协调器把
+  IN_PROGRESS/SAVED_CONFIRM_FAILED/CONFIRMED 状态机接到单番/批量路由（US-214/216）。
+- Stage 28 的 save-confirm 成功只返回 `CONFIRMED` + `ACCEPTED` handoff
+  （`next_action=OPEN_TRACKING`）；**不创建或伪造 tracking record**。B-B tracking 阶段从
+  持久化 ACCEPTED Request 与 handoff 幂等建立统一 tracking record。
 
 因此前端工程化已先固化 API 契约和服务端安全边界，再渐进替换页面；Stage 26 已完成该固化
 （清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 完成迁移与旧前端删除，handoff
-见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
+见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。Stage 28 在 DraftStore 上
+补齐 revision/保存生命周期与 save-confirm 幂等记录，并冻结 `/api/v1` 的 save-confirm/
+safe-info 新契约，handoff 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`。
 
 ## 6. 状态与持久化
 
 - 默认运行数据位于 `.migu_orca/storage`，不应提交 Git。
-- Request、history、AB result、queue、preference 和 correction 分目录保存为 JSON。
+- Request、history、AB result、queue、preference、correction 和 save-confirm idempotency
+  分目录保存为 JSON（Stage 28 幂等记录只写非敏感白名单字段，见 `idempotency_repository.py`）。
 - 候选缓存、候选选择 context 等短期状态当前位于单进程内存，不能假定天然支持多 worker。
 - AutoBangumi 与 qBittorrent 凭据保持 request-scoped，不进入持久化、URL、浏览器 storage、日志或测试产物。
 - Web 与 CLI 使用不同 storage 信任边界（US-193）：CLI 继续接受显式 `--storage-dir`；

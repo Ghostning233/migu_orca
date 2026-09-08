@@ -18,9 +18,11 @@ import type {
 const EXPECTED_OPERATION_IDS = [
   'listRequests',
   'getRequestDetail',
+  'getRequestSafeInfo',
   'createRequest',
   'previewModifyRequest',
   'previewSaveRequest',
+  'confirmRequestSave',
   'acceptRequest',
   'cancelRequest',
   'modifyRequest',
@@ -33,6 +35,7 @@ const EXPECTED_OPERATION_IDS = [
   'listCorrections',
   'saveCorrection',
   'parseBatchTitles',
+  'saveConfirmBatchItems',
   'acceptBatchItems',
   'getBatchQueue',
   'submitBatchQueue',
@@ -49,9 +52,11 @@ describe('generated API client (US-198)', () => {
     expectTypeOf<OperationKeys>().toEqualTypeOf<
       | 'listRequests'
       | 'getRequestDetail'
+      | 'getRequestSafeInfo'
       | 'createRequest'
       | 'previewModifyRequest'
       | 'previewSaveRequest'
+      | 'confirmRequestSave'
       | 'acceptRequest'
       | 'cancelRequest'
       | 'modifyRequest'
@@ -64,6 +69,7 @@ describe('generated API client (US-198)', () => {
       | 'listCorrections'
       | 'saveCorrection'
       | 'parseBatchTitles'
+      | 'saveConfirmBatchItems'
       | 'acceptBatchItems'
       | 'getBatchQueue'
       | 'submitBatchQueue'
@@ -83,6 +89,7 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/batches/{batch_id}/queue'
       | '/api/v1/batches/{batch_id}/recover'
       | '/api/v1/batches/{batch_id}/retry'
+      | '/api/v1/batches/{batch_id}/save-confirm'
       | '/api/v1/batches/{batch_id}/submit'
       | '/api/v1/corrections'
       | '/api/v1/mikan/candidates'
@@ -92,11 +99,13 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/requests'
       | '/api/v1/requests/preview-modify'
       | '/api/v1/requests/preview-save'
+      | '/api/v1/requests/save-confirm'
       | '/api/v1/requests/{request_id}'
       | '/api/v1/requests/{request_id}/accept'
       | '/api/v1/requests/{request_id}/cancel'
       | '/api/v1/requests/{request_id}/delete'
       | '/api/v1/requests/{request_id}/modify'
+      | '/api/v1/requests/{request_id}/safe-info'
       | '/api/v1/requests/{request_id}/submit-ab'
     >()
   })
@@ -128,6 +137,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(24)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(27)
   })
 })

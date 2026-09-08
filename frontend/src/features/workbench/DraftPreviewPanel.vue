@@ -9,8 +9,9 @@
 //   - the always-visible 编辑订阅草案 form (字幕组/包含/排除/正则/大小写/
 //     folder_name) calls the dry-run `preview-modify` endpoint, which
 //     recomputes seed display without persisting;
-//   - 保存草案 consumes the draft through `preview-save` (one-shot, replay
-//     protected) and emits `saved` so the workbench can hand the user to the
+//   - 保存草案 reserves the draft through `preview-save` (US-212: persist
+//     first, replay-tombstone after; a failed disk write keeps the draft for
+//     retry) and emits `saved` so the workbench can hand the user to the
 //     saved-Request list/detail.
 //
 // Security boundary (US-194): the client holds only the opaque `draft_id`
@@ -58,20 +59,27 @@ type PreviewSaveResult = NonNullable<
 const props = defineProps<{
   request: RequestSnapshot
   draftId: string
+  draftRevision?: number
 }>()
 
 const emit = defineEmits<{
   (e: 'saved', requestId: string): void
   (e: 'expired'): void
   (e: 'failed'): void
+  // US-211: the server-authoritative draft revision changed after a modify.
+  // Parents track draft_id/draft_revision in component memory only so a
+  // remount (e.g. re-opening a batch card) keeps the true base_revision.
+  (e: 'changed', state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void
 }>()
 
 const notification = useNotificationStore()
 
 // Component-local draft state: the display snapshot is refreshed after every
-// preview-modify, and the opaque draft_id is kept in memory only.
+// preview-modify, and the opaque draft_id / draft_revision are kept in memory
+// only (never URL/browser storage/logs).
 const request = ref<RequestSnapshot>(props.request)
 const draftId = ref<string>(props.draftId)
+const draftRevision = ref<number>(props.draftRevision ?? 1)
 
 const applying = ref(false)
 const saving = ref(false)
@@ -138,7 +146,12 @@ function originalEditState(): PreviewEditState {
 /** True when the error type is one of the 409 draft_* regeneration conflicts. */
 function isDraftError(error: unknown): boolean {
   const type = (error as { type?: string } | null)?.type ?? ''
-  return type === 'draft_expired' || type === 'draft_evicted' || type === 'draft_replayed'
+  return (
+    type === 'draft_expired' ||
+    type === 'draft_evicted' ||
+    type === 'draft_replayed' ||
+    type === 'draft_revision_conflict'
+  )
 }
 
 function notifyDraftExpired(): void {
@@ -156,15 +169,29 @@ async function applyModify(): Promise<PreviewModifyResult | null> {
   applying.value = true
   try {
     const result = await api.post<PreviewModifyResult>('/api/v1/requests/preview-modify', {
-      body: { draft_id: draftId.value, patch, storage_dir: storageQuery().storage_dir ?? null },
+      body: {
+        draft_id: draftId.value,
+        base_revision: draftRevision.value,
+        patch,
+        storage_dir: storageQuery().storage_dir ?? null,
+      },
     })
-    // The server returns the same draft_id; keep the in-memory capability.
+    // US-211: the server returns the same draft_id and the bumped revision;
+    // keep both in component memory only.
     if (result?.draft_id) {
       draftId.value = result.draft_id
+    }
+    if (typeof result?.draft_revision === 'number') {
+      draftRevision.value = result.draft_revision
     }
     if (result?.request) {
       request.value = result.request
     }
+    emit('changed', {
+      request: request.value,
+      draftId: draftId.value,
+      draftRevision: draftRevision.value,
+    })
     resetEditForm()
     notification.success('已应用修改', '订阅草案种子展示已重新计算。')
     return result
@@ -189,22 +216,24 @@ async function saveDraft(): Promise<void> {
   try {
     // US-194: if the user has pending edits, apply them first (preview-modify
     // keeps the server-side draft in sync) so preview-save persists exactly
-    // what the user reviewed — mirroring the legacy save button.
+    // what the user reviewed — mirroring the legacy save button. US-211: the
+    // modify carries the current base_revision and refreshes the in-memory
+    // draft_revision for the save.
     const patch = collectPreviewEditPatch(originalEditState(), currentEditState())
-    let saveDraftId = draftId.value
     if (Object.keys(patch).length) {
-      const modified = await api.post<PreviewModifyResult>('/api/v1/requests/preview-modify', {
-        body: { draft_id: saveDraftId, patch, storage_dir: storageQuery().storage_dir ?? null },
-      })
-      if (modified?.draft_id) {
-        saveDraftId = modified.draft_id
-      }
-      if (modified?.request) {
-        request.value = modified.request
-      }
+      const modified = await modifyWithRevision()
+      if (!modified) return
     }
     const saved = await api.post<PreviewSaveResult>('/api/v1/requests/preview-save', {
-      body: { draft_id: saveDraftId, storage_dir: storageQuery().storage_dir ?? null },
+      body: {
+        draft_id: draftId.value,
+        // US-212: the save reserves the draft against the base_revision the
+        // server last issued, so a concurrent modify cannot move the revision
+        // out from under the persist; on a failed disk write the server keeps
+        // this draft/revision alive for a retry.
+        base_revision: draftRevision.value,
+        storage_dir: storageQuery().storage_dir ?? null,
+      },
     })
     // The draft was consumed by the save; clear the in-memory capability so a
     // replay can never reference a stale draft.
@@ -228,6 +257,53 @@ async function saveDraft(): Promise<void> {
   }
 }
 
+/**
+ * Apply the pending edit form through preview-modify with the current
+ * base_revision and refresh the in-memory draft_id/draft_revision/snapshot.
+ * Returns false when the modify failed (the shared error/expired handling has
+ * already fired); true when the server draft is now in sync with the form.
+ */
+async function modifyWithRevision(): Promise<boolean> {
+  const patch = collectPreviewEditPatch(originalEditState(), currentEditState())
+  if (!Object.keys(patch).length) return true
+  try {
+    const modified = await api.post<PreviewModifyResult>('/api/v1/requests/preview-modify', {
+      body: {
+        draft_id: draftId.value,
+        base_revision: draftRevision.value,
+        patch,
+        storage_dir: storageQuery().storage_dir ?? null,
+      },
+    })
+    if (modified?.draft_id) {
+      draftId.value = modified.draft_id
+    }
+    if (typeof modified?.draft_revision === 'number') {
+      draftRevision.value = modified.draft_revision
+    }
+    if (modified?.request) {
+      request.value = modified.request
+    }
+    emit('changed', {
+      request: request.value,
+      draftId: draftId.value,
+      draftRevision: draftRevision.value,
+    })
+    resetEditForm()
+    return true
+  } catch (error) {
+    void error
+    if (isDraftError(error)) {
+      notifyDraftExpired()
+      return false
+    }
+    formError.value = '订阅草案修改失败，请稍后重试。'
+    notification.error('修改失败', '订阅草案修改失败，请稍后重试。')
+    emit('failed')
+    return false
+  }
+}
+
 /** Batch helper (US-205): save the draft and return the persisted snapshot.
  *
  * Mirrors ``saveDraft`` but returns the saved Request so the batch accept flow
@@ -240,20 +316,20 @@ async function saveDraftAndReturn(): Promise<RequestSnapshot | null> {
   formError.value = ''
   try {
     const patch = collectPreviewEditPatch(originalEditState(), currentEditState())
-    let saveDraftId = draftId.value
     if (Object.keys(patch).length) {
-      const modified = await api.post<PreviewModifyResult>('/api/v1/requests/preview-modify', {
-        body: { draft_id: saveDraftId, patch, storage_dir: storageQuery().storage_dir ?? null },
-      })
-      if (modified?.draft_id) {
-        saveDraftId = modified.draft_id
-      }
-      if (modified?.request) {
-        request.value = modified.request
-      }
+      const modified = await modifyWithRevision()
+      if (!modified) return null
     }
     const saved = await api.post<PreviewSaveResult>('/api/v1/requests/preview-save', {
-      body: { draft_id: saveDraftId, storage_dir: storageQuery().storage_dir ?? null },
+      body: {
+        draft_id: draftId.value,
+        // US-212: the save reserves the draft against the base_revision the
+        // server last issued, so a concurrent modify cannot move the revision
+        // out from under the persist; on a failed disk write the server keeps
+        // this draft/revision alive for a retry.
+        base_revision: draftRevision.value,
+        storage_dir: storageQuery().storage_dir ?? null,
+      },
     })
     draftId.value = ''
     const savedRequest = saved?.request as RequestSnapshot | undefined
@@ -277,7 +353,7 @@ async function saveDraftAndReturn(): Promise<RequestSnapshot | null> {
   }
 }
 
-defineExpose({ request, draftId, saveDraftAndReturn })
+defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
 </script>
 
 <template>

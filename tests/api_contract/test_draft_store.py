@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-"""US-194: server-authoritative draft store unit tests.
+"""US-194 + US-210: server-authoritative draft store unit tests.
 
 The DraftStore is the bounded, expiring, one-time-save store that holds unsaved
-preview requests. These tests pin its lifecycle (issue/get/consume/update),
-capacity eviction, TTL expiry, replay protection and the reason codes routes
-map to stable 409 ``draft_*`` errors.
+preview requests. These tests pin its lifecycle (issue/get/consume/CAS),
+capacity eviction, TTL expiry, replay protection, the monotonic revision /
+compare-and-swap primitive and the reason codes routes map to stable 409
+``draft_*`` errors.
 """
 
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
+from time import sleep
 from typing import Any
 
 from apps.migu_orca_web.drafts import (
@@ -15,7 +19,11 @@ from apps.migu_orca_web.drafts import (
     REASON_EXPIRED,
     REASON_OK,
     REASON_REPLAYED,
+    REASON_RESERVED,
+    REASON_REVISION_CONFLICT,
     REASON_UNKNOWN,
+    DraftHandle,
+    DraftRead,
     DraftStore,
 )
 
@@ -28,52 +36,181 @@ def _request(request_id: str = "req-1") -> dict[str, Any]:
     }
 
 
-def test_issue_returns_opaque_id_and_get_reads_it_back() -> None:
+class _SlowClock:
+    """Yield inside CAS so an implementation without a lock loses an update."""
+
+    def __init__(self) -> None:
+        self._armed = Event()
+
+    def arm(self) -> None:
+        self._armed.set()
+
+    def __call__(self) -> float:
+        if self._armed.is_set():
+            sleep(0.02)
+        return 1_000.0
+
+
+def test_issue_returns_opaque_handle_with_revision_1() -> None:
     store = DraftStore()
-    draft_id = store.issue(_request("req-a"))
+    handle = store.issue(_request("req-a"))
 
-    # The id is opaque (URL-safe token, no request data).
-    assert isinstance(draft_id, str)
-    assert len(draft_id) >= 16
-    assert draft_id.isalnum() or "-" in draft_id or "_" in draft_id
+    # The handle is opaque (URL-safe token, no request data) with revision 1.
+    assert isinstance(handle, DraftHandle)
+    assert isinstance(handle.draft_id, str)
+    assert len(handle.draft_id) >= 16
+    assert handle.draft_id.isalnum() or "-" in handle.draft_id or "_" in handle.draft_id
+    assert handle.revision == 1
 
-    request, reason = store.get(draft_id)
+
+def test_issue_reads_back_payload_and_revision() -> None:
+    store = DraftStore()
+    handle = store.issue(_request("req-a"))
+
+    draft_read, reason = store.get(handle.draft_id)
     assert reason == REASON_OK
-    assert request is not None
-    assert request["request_id"] == "req-a"
+    assert isinstance(draft_read, DraftRead)
+    assert draft_read is not None
+    assert draft_read.request["request_id"] == "req-a"
+    assert draft_read.revision == 1
 
 
-def test_get_does_not_consume() -> None:
+def test_get_does_not_consume_or_bump_revision() -> None:
     store = DraftStore()
-    draft_id = store.issue(_request())
+    draft_id = store.issue(_request()).draft_id
 
     for _ in range(3):
-        request, reason = store.get(draft_id)
+        draft_read, reason = store.get(draft_id)
         assert reason == REASON_OK
-        assert request is not None
+        assert draft_read is not None
+        assert draft_read.revision == 1
 
     request, reason = store.consume_for_save(draft_id)
     assert reason == REASON_OK
     assert request is not None
 
 
-def test_consume_is_one_shot_and_replay_is_detected() -> None:
+def test_get_returns_an_isolated_snapshot() -> None:
     store = DraftStore()
-    draft_id = store.issue(_request())
+    original = _request()
+    draft_id = store.issue(original).draft_id
 
-    request, reason = store.consume_for_save(draft_id)
+    original["input"]["raw_title"] = "调用方后来修改"
+    draft_read, reason = store.get(draft_id)
     assert reason == REASON_OK
-    assert request is not None
+    assert draft_read is not None
+    assert draft_read.request["input"]["raw_title"] == "示例"
 
-    # The same id is now a replay (tombstone), not "unknown".
-    missing, reason = store.consume_for_save(draft_id)
-    assert missing is None
+    draft_read.request["input"]["raw_title"] = "读取方绕过 CAS 修改"
+    second_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert second_read is not None
+    assert second_read.request["input"]["raw_title"] == "示例"
+
+
+def test_compare_and_swap_bumps_revision_on_success() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request("req-original")).draft_id
+
+    modified = {**_request("req-original"), "status": "PENDING_CONFIRM"}
+    modified["confirmable_config"] = {"expected_folder_name": "自定义"}
+    revision, reason = store.compare_and_swap(draft_id, 1, modified)
+
+    assert reason == REASON_OK
+    assert revision == 2
+
+    draft_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert draft_read is not None
+    assert draft_read.revision == 2
+    assert draft_read.request["confirmable_config"]["expected_folder_name"] == "自定义"
+
+
+def test_compare_and_swap_supports_consecutive_updates() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request("req-original")).draft_id
+
+    current = 1
+    for step in range(3):
+        updated = {**_request("req-original"), "step": step}
+        revision, reason = store.compare_and_swap(draft_id, current, updated)
+        assert reason == REASON_OK
+        assert revision == current + 1
+        current = revision
+
+    draft_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert draft_read is not None
+    assert draft_read.revision == 4
+    assert draft_read.request["step"] == 2
+
+
+def test_compare_and_swap_stale_base_is_a_revision_conflict() -> None:
+    """A stale base_revision leaves both payload and revision untouched."""
+    store = DraftStore()
+    draft_id = store.issue(_request("req-original")).draft_id
+
+    # Two concurrent editors both read revision 1.
+    _, reason = store.compare_and_swap(draft_id, 1, {**_request("req-a")})
+    assert reason == REASON_OK
+
+    # The stale writer still sends base_revision=1: it must not overwrite.
+    revision, reason = store.compare_and_swap(draft_id, 1, {**_request("req-stale")})
+    assert reason == REASON_REVISION_CONFLICT
+    assert revision is None
+
+    draft_read, _ = store.get(draft_id)
+    assert draft_read is not None
+    assert draft_read.request["request_id"] == "req-a"
+    assert draft_read.revision == 2
+
+
+def test_compare_and_swap_is_atomic_for_concurrent_writers() -> None:
+    """Only one writer may commit when both start from the same revision."""
+    slow_clock = _SlowClock()
+    store = DraftStore(now=slow_clock)
+    draft_id = store.issue(_request("req-original")).draft_id
+    slow_clock.arm()
+    start = Barrier(2)
+
+    def write(request_id: str) -> tuple[int | None, str]:
+        start.wait(timeout=2)
+        return store.compare_and_swap(draft_id, 1, _request(request_id))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(write, ("req-a", "req-b")))
+
+    assert sorted(results, key=lambda result: result[1]) == [
+        (2, REASON_OK),
+        (None, REASON_REVISION_CONFLICT),
+    ]
+    draft_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert draft_read is not None
+    assert draft_read.revision == 2
+    assert draft_read.request["request_id"] in {"req-a", "req-b"}
+
+
+def test_compare_and_swap_unknown_draft_returns_unknown() -> None:
+    store = DraftStore()
+    revision, reason = store.compare_and_swap("never-issued", 1, _request())
+    assert revision is None
+    assert reason == REASON_UNKNOWN
+
+
+def test_compare_and_swap_consumed_draft_returns_replayed() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request()).draft_id
+    store.consume_for_save(draft_id)
+
+    revision, reason = store.compare_and_swap(draft_id, 1, _request())
+    assert revision is None
     assert reason == REASON_REPLAYED
 
 
-def test_update_replaces_payload_for_next_save() -> None:
+def test_update_replaces_payload_and_bumps_revision_for_next_save() -> None:
     store = DraftStore()
-    draft_id = store.issue(_request("req-original"))
+    draft_id = store.issue(_request("req-original")).draft_id
 
     modified = {**_request("req-original"), "status": "PENDING_CONFIRM"}
     modified["confirmable_config"] = {"expected_folder_name": "自定义"}
@@ -93,13 +230,13 @@ def test_update_unknown_draft_returns_false() -> None:
 def test_ttl_expiry_reports_expired() -> None:
     now = [1_000.0]
     store = DraftStore(ttl_seconds=60.0, now=lambda: now[0])
-    draft_id = store.issue(_request())
+    draft_id = store.issue(_request()).draft_id
     assert len(store) == 1
 
     # 61s later the draft is expired.
     now[0] += 61.0
-    request, reason = store.get(draft_id)
-    assert request is None
+    draft_read, reason = store.get(draft_id)
+    assert draft_read is None
     assert reason == REASON_EXPIRED
     assert len(store) == 0
 
@@ -107,28 +244,28 @@ def test_ttl_expiry_reports_expired() -> None:
 def test_capacity_eviction_reports_evicted_for_oldest() -> None:
     now = [1_000.0]
     store = DraftStore(max_entries=2, now=lambda: now[0])
-    first = store.issue(_request("req-first"))
-    second = store.issue(_request("req-second"))
+    first = store.issue(_request("req-first")).draft_id
+    second = store.issue(_request("req-second")).draft_id
     # Touch the second so it is newer than the first.
     store.get(second)
 
     # Issuing a third evicts the oldest (first).
-    third = store.issue(_request("req-third"))
+    third = store.issue(_request("req-third")).draft_id
     assert len(store) == 2
 
-    request, reason = store.get(first)
-    assert request is None
+    draft_read, reason = store.get(first)
+    assert draft_read is None
     assert reason == REASON_EVICTED
 
     for draft_id in (second, third):
-        request, reason = store.get(draft_id)
+        draft_read, reason = store.get(draft_id)
         assert reason == REASON_OK
-        assert request is not None
+        assert draft_read is not None
 
 
 def test_clear_empties_store_and_tombstones() -> None:
     store = DraftStore()
-    draft_id = store.issue(_request())
+    draft_id = store.issue(_request()).draft_id
     store.consume_for_save(draft_id)
     store.clear()
 
@@ -144,3 +281,179 @@ def test_unknown_id_reports_unknown() -> None:
     missing, reason = store.get("never-issued")
     assert missing is None
     assert reason == REASON_UNKNOWN  # routes map unknown -> draft_expired
+
+
+# ---------------------------------------------------------------------------
+# US-212: reserve / commit / release save lifecycle
+# ---------------------------------------------------------------------------
+
+
+def test_reserve_for_save_returns_payload_and_pins_draft() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request("req-original")).draft_id
+
+    request, reason = store.reserve_for_save(draft_id, 1)
+    assert reason == REASON_OK
+    assert request is not None
+    assert request["request_id"] == "req-original"
+
+    # The reserved draft is not readable/consumable/modifiable until release.
+    read, read_reason = store.get(draft_id)
+    assert read is None
+    assert read_reason == REASON_RESERVED
+
+    revision, cas_reason = store.compare_and_swap(draft_id, 1, _request("req-stale"))
+    assert revision is None
+    assert cas_reason == REASON_RESERVED
+
+    assert store.update(draft_id, _request("req-stale")) is False
+
+    consumed, consume_reason = store.consume_for_save(draft_id)
+    assert consumed is None
+    assert consume_reason == REASON_RESERVED
+
+    # A second reservation of the same draft is also rejected.
+    again, second_reason = store.reserve_for_save(draft_id, 1)
+    assert again is None
+    assert second_reason == REASON_RESERVED
+
+
+def test_reserve_for_save_stale_revision_conflicts_without_pinning() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request("req-original")).draft_id
+    # Bump to revision 2.
+    _, reason = store.compare_and_swap(draft_id, 1, _request("req-next"))
+    assert reason == REASON_OK
+
+    request, reason = store.reserve_for_save(draft_id, 1)
+    assert request is None
+    assert reason == REASON_REVISION_CONFLICT
+    # The draft was not pinned by the failed reservation: it can still be read.
+    draft_read, read_reason = store.get(draft_id)
+    assert read_reason == REASON_OK
+    assert draft_read is not None
+    assert draft_read.revision == 2
+
+
+def test_commit_save_consumes_draft_and_establishes_replay_tombstone() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request()).draft_id
+
+    _, reason = store.reserve_for_save(draft_id, 1)
+    assert reason == REASON_OK
+    store.commit_save(draft_id)
+
+    # The reserved draft is gone; a later save is a replay.
+    request, reason = store.consume_for_save(draft_id)
+    assert request is None
+    assert reason == REASON_REPLAYED
+
+
+def test_release_save_keeps_draft_payload_and_revision_for_retry() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request("req-original")).draft_id
+
+    reserved, reason = store.reserve_for_save(draft_id, 1)
+    assert reason == REASON_OK
+    assert reserved is not None
+    store.release_save(draft_id)
+
+    # The draft is usable again at the same revision (nothing was consumed).
+    draft_read, read_reason = store.get(draft_id)
+    assert read_reason == REASON_OK
+    assert draft_read is not None
+    assert draft_read.revision == 1
+    assert draft_read.request["request_id"] == "req-original"
+
+    # A retry reserve/save succeeds with the original base_revision.
+    retry, retry_reason = store.reserve_for_save(draft_id, 1)
+    assert retry_reason == REASON_OK
+    assert retry is not None
+    store.commit_save(draft_id)
+    assert store.consume_for_save(draft_id)[1] == REASON_REPLAYED
+
+
+def test_commit_or_release_of_unknown_draft_is_a_noop() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request()).draft_id
+
+    # Releasing without reserving is a no-op.
+    store.release_save(draft_id)
+    draft_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert draft_read is not None
+
+    # Committing without reserving does not consume the draft.
+    store.commit_save(draft_id)
+    draft_read, reason = store.get(draft_id)
+    assert reason == REASON_OK
+    assert draft_read is not None
+
+    # Unknown ids are no-ops too.
+    store.commit_save("never-issued")
+    store.release_save("never-issued")
+
+
+def test_reserved_draft_survives_ttl_purge_until_release() -> None:
+    now = [1_000.0]
+    store = DraftStore(ttl_seconds=60.0, now=lambda: now[0])
+    draft_id = store.issue(_request()).draft_id
+    _, reason = store.reserve_for_save(draft_id, 1)
+    assert reason == REASON_OK
+
+    # 61s later a purge runs on access but must not evict the reserved draft.
+    now[0] += 61.0
+    assert len(store) == 1
+    # Accessing the id still reports reserved (it was not purged).
+    draft_read, read_reason = store.get(draft_id)
+    assert draft_read is None
+    assert read_reason == REASON_RESERVED
+
+    # Releasing re-enables TTL: the next purge expires the draft.
+    store.release_save(draft_id)
+    now[0] += 61.0
+    draft_read, reason = store.get(draft_id)
+    assert draft_read is None
+    assert reason == REASON_EXPIRED
+
+
+def test_reserved_draft_is_never_evicted_by_capacity() -> None:
+    now = [1_000.0]
+    store = DraftStore(max_entries=2, now=lambda: now[0])
+    first_id = store.issue(_request("req-first")).draft_id
+    # Reserve the first (oldest) draft and pin it mid-save.
+    _, reason = store.reserve_for_save(first_id, 1)
+    assert reason == REASON_OK
+    second_id = store.issue(_request("req-second")).draft_id
+
+    # Issuing a third entry evicts the oldest *unreserved* draft (second),
+    # never the reserved first draft.
+    third_id = store.issue(_request("req-third")).draft_id
+
+    draft_read, reason = store.get(first_id)
+    assert reason == REASON_RESERVED  # still pinned, not evicted
+
+    draft_read, reason = store.get(second_id)
+    assert draft_read is None
+    assert reason == REASON_EVICTED
+
+    draft_read, reason = store.get(third_id)
+    assert reason == REASON_OK
+    assert draft_read is not None
+
+
+def test_clear_releases_all_reservations() -> None:
+    store = DraftStore()
+    draft_id = store.issue(_request()).draft_id
+    _, reason = store.reserve_for_save(draft_id, 1)
+    assert reason == REASON_OK
+
+    store.clear()
+
+    assert len(store) == 0
+    # A later commit/release is a no-op; the id is simply unknown again.
+    store.commit_save(draft_id)
+    store.release_save(draft_id)
+    request, reason = store.consume_for_save(draft_id)
+    assert request is None
+    assert reason != REASON_REPLAYED

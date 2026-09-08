@@ -119,6 +119,7 @@ function createDraftResult(overrides: Partial<Record<string, unknown>> = {}): Cr
     summary: { request_id: 'req-draft-1', status: 'PENDING_CONFIRM', bangumi_title: '葬送的芙莉莲', candidate_subtitle_groups: [], selected_subtitle_group: '喵萌奶茶屋', effective_seed_count: 1, expected_folder_name: '葬送的芙莉莲', warnings: [] } as never,
     saved_request: null,
     draft_id: 'opaque-draft-token',
+    draft_revision: 1,
     ...overrides,
   } as never
 }
@@ -343,6 +344,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
         }),
         summary: {},
         draft_id: 'opaque-draft-token',
+        draft_revision: 2,
       })
     const { wrapper } = await mountWorkbench()
 
@@ -359,11 +361,85 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/preview-modify', {
       body: {
         draft_id: 'opaque-draft-token',
+        base_revision: 1,
         patch: { filter_rule: { must_not_contain: 'V2', use_regex: false, case_sensitive: false } },
         storage_dir: null,
       },
     })
     expect(wrapper.find('#detail-preview-edit-form').text()).toContain('编辑订阅草案')
+  })
+
+  it('carries the bumped base_revision on the next preview-modify', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      // First modify returns revision 2.
+      .mockResolvedValueOnce({
+        request: previewSnapshot(),
+        summary: {},
+        draft_id: 'opaque-draft-token',
+        draft_revision: 2,
+      })
+      // Second modify returns revision 3.
+      .mockResolvedValueOnce({
+        request: previewSnapshot(),
+        summary: {},
+        draft_id: 'opaque-draft-token',
+        draft_revision: 3,
+      })
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#preview-must-not-contain').setValue('V2')
+    await wrapper.find('#preview-apply-button').trigger('click')
+    await flushPromises()
+    // Panel still open; change folder and apply again.
+    await wrapper.find('#preview-folder-name').setValue('自定义目录')
+    await wrapper.find('#preview-apply-button').trigger('click')
+    await flushPromises()
+
+    const modifyCalls = apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/preview-modify')
+    expect(modifyCalls).toHaveLength(2)
+    const [firstBody, secondBody] = modifyCalls.map(([, options]) => options?.body)
+    expect(firstBody).toMatchObject({ base_revision: 1, draft_id: 'opaque-draft-token' })
+    // The second modify uses the revision returned by the first modify.
+    expect(secondBody).toMatchObject({ base_revision: 2, draft_id: 'opaque-draft-token' })
+  })
+
+  it('treats draft_revision_conflict as a regeneration hint', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockRejectedValueOnce({
+        type: 'draft_revision_conflict',
+        message: '草案已被更新，请基于最新版本重试',
+        status: 409,
+        details: { failed_step: 'compare_and_swap_draft', details: { field: 'base_revision', current_revision: 2 } },
+      })
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#preview-must-not-contain').setValue('V2')
+    await wrapper.find('#preview-apply-button').trigger('click')
+    await flushPromises()
+
+    const { useNotificationStore } = await import('@/app/stores/notification')
+    const notification = useNotificationStore()
+    expect(notification.current?.title).toBe('订阅草案已失效')
+    // The draft panel was dismissed (regeneration hint) and the raw conflict
+    // message never reaches the DOM.
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('draft_revision_conflict')
   })
 
   it('saves the draft through preview-save and routes to the saved request', async () => {
@@ -386,10 +462,44 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await flushPromises()
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/preview-save', {
-      body: { draft_id: 'opaque-draft-token', storage_dir: null },
+      // US-212: the save reserves the draft against the last-observed revision.
+      body: { draft_id: 'opaque-draft-token', base_revision: 1, storage_dir: null },
     })
     expect(router.currentRoute.value.path).toBe('/requests')
     expect(router.currentRoute.value.query.request_id).toBe('req-draft-1')
+  })
+
+  it('keeps the draft panel open when a save fails (US-212 retryable)', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      // A disk-write failure (storage_error 500): the server releases the
+      // reservation, so the panel must stay open for a retry — never force a
+      // re-search.
+      .mockRejectedValueOnce({
+        type: 'storage_error',
+        message: '保存订阅方案 JSON 失败',
+        status: 500,
+        details: { failed_step: 'save_request_snapshot', details: { request_id: 'req-draft-1' } },
+      })
+    const { wrapper, router } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#draft-save-button').trigger('click')
+    await flushPromises()
+
+    const { useNotificationStore } = await import('@/app/stores/notification')
+    const notification = useNotificationStore()
+    expect(notification.current?.title).toBe('保存失败')
+    // The draft panel (and its draft_id/revision) is preserved for retry.
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+    expect(wrapper.find('#draft-save-button').exists()).toBe(true)
+    expect(router.currentRoute.value.path).toBe('/workbench')
   })
 
   it('shows a safe error and keeps the search state when generation fails', async () => {

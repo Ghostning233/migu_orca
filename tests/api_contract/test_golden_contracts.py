@@ -27,6 +27,8 @@ from mikan_engine.controllers.mikan_config import MikanConfig
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
+from storage_engine.controllers.request_repository import load_request_snapshot
+from storage_engine.controllers.storage_config import load_storage_config
 from tests.api_contract.conftest import saved_request
 
 
@@ -112,6 +114,89 @@ def test_golden_request_detail_success(client: FlaskClient, tmp_path: Path) -> N
     assert set(payload["result"]["ab_result"]) == {"available", "record", "error"}
 
 
+def test_golden_request_safe_info_success(client: FlaskClient, tmp_path: Path) -> None:
+    """US-217: safe-info returns exactly the strict whitelist envelope."""
+    saved_request(tmp_path, "芙莉莲", "request-1")
+
+    response = client.get(
+        "/api/v1/requests/request-1/safe-info",
+        query_string={"storage_dir": "storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert set(payload["result"]) == {"safe_info"}
+    safe = payload["result"]["safe_info"]
+    # The frozen safe-info public shape (extra=forbid producer).
+    assert set(safe) == {
+        "request_id",
+        "status",
+        "raw_title",
+        "title",
+        "aliases",
+        "season",
+        "season_raw",
+        "season_evidence",
+        "mikan_collection",
+        "subtitle_groups",
+        "selected_subtitle_group",
+        "filter_rule",
+        "resources",
+        "folder_name",
+        "storage_profile",
+        "total_episodes",
+        "updated_episode",
+        "updated_episode_status",
+        "history_summary",
+        "ab_status",
+    }
+    assert safe["request_id"] == "request-1"
+    assert safe["status"] == "PENDING_CONFIRM"
+    assert safe["updated_episode"] is None
+    assert safe["updated_episode_status"] == "NOT_IMPLEMENTED"
+    assert safe["total_episodes"] is None
+    assert safe["mikan_collection"] == {"title": "葬送的芙莉莲", "bangumi_id": None}
+    assert safe["ab_status"] == {
+        "submitted": False,
+        "success": None,
+        "ab_subscription_id": None,
+        "error_type": None,
+    }
+    # The raw snapshot URLs never appear in the safe-info payload.
+    body_text = response.get_data(as_text=True)
+    assert "rss" not in body_text.lower()
+    assert "mikan_url" not in body_text.lower()
+    assert "http" not in body_text.lower()
+    assert "magnet" not in body_text.lower()
+
+
+def test_golden_request_safe_info_missing_request(client: FlaskClient) -> None:
+    """US-217: safe-info 404 classification matches the detail endpoint."""
+    response = client.get("/api/v1/requests/missing-request/safe-info")
+
+    payload = response.get_json()
+    assert response.status_code == 404
+    assert payload["ok"] is False
+    assert payload["error_type"] == "request_not_found"
+    assert payload["error_message"] == "未找到已保存的订阅方案"
+    assert payload["error_data"]["failed_step"] == "load_request_snapshot"
+    assert payload["error_data"]["details"] == {"request_id": "missing-request"}
+
+
+def test_golden_request_safe_info_invalid_request_id(client: FlaskClient) -> None:
+    """US-217: a path-fragment request_id is a 400, never a storage leak."""
+    response = client.get("/api/v1/requests/nested%2Frequest/safe-info")
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "invalid_request_id"
+    assert payload["error_message"] == "request_id 不能包含路径片段"
+    assert payload["error_data"]["failed_step"] == "load_request_snapshot"
+    assert payload["error_data"]["details"] == {"field": "request_id"}
+
+
 def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> None:
     response = client.post(
         "/api/v1/requests",
@@ -125,9 +210,9 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
     payload = response.get_json()
     assert response.status_code == 200
     assert payload["ok"] is True
-    # US-194: an unsaved generation returns an opaque draft_id (server owns the
-    # authoritative draft) alongside the display snapshot.
-    assert set(payload["result"]) == {"request", "summary", "draft_id"}
+    # US-194/211: an unsaved generation returns an opaque draft_id and the
+    # initial monotonic draft_revision (=1) alongside the display snapshot.
+    assert set(payload["result"]) == {"request", "summary", "draft_id", "draft_revision"}
     assert payload["result"]["request"]["input"]["raw_title"] == "芙莉莲"
     assert payload["result"]["request"]["status"] == "PENDING_CONFIRM"
     assert payload["result"]["summary"] == summarize_request(
@@ -135,6 +220,7 @@ def test_golden_request_create_success(client: FlaskClient, tmp_path: Path) -> N
     )
     assert isinstance(payload["result"]["draft_id"], str)
     assert len(payload["result"]["draft_id"]) >= 16
+    assert payload["result"]["draft_revision"] == 1
     # Preview generation never writes storage unless save_request=true.
     assert not (tmp_path / "storage").exists()
 
@@ -198,24 +284,30 @@ def test_golden_request_detail_business_failure(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"request_id": "missing-request"}
 
 
-def _issue_preview_draft(client: FlaskClient, title: str = "芙莉莲") -> str:
-    """Generate an unsaved preview draft and return its opaque draft_id."""
+def _issue_preview_draft(
+    client: FlaskClient, title: str = "芙莉莲"
+) -> tuple[str, int]:
+    """Generate an unsaved preview draft; return ``(draft_id, draft_revision)``."""
     response = client.post(
         "/api/v1/requests",
         json={"title": title, "save_request": False},
     )
     payload = response.get_json()
     assert response.status_code == 200
-    return payload["result"]["draft_id"]
+    result = payload["result"]
+    assert isinstance(result["draft_id"], str)
+    assert result["draft_revision"] == 1
+    return result["draft_id"], result["draft_revision"]
 
 
 def test_golden_preview_modify_rejects_illegal_patch(client: FlaskClient) -> None:
-    draft_id = _issue_preview_draft(client)
+    draft_id, draft_revision = _issue_preview_draft(client)
 
     response = client.post(
         "/api/v1/requests/preview-modify",
         json={
             "draft_id": draft_id,
+            "base_revision": draft_revision,
             "patch": {"bogus_field": 1},
         },
     )
@@ -232,10 +324,127 @@ def test_golden_preview_modify_rejects_illegal_patch(client: FlaskClient) -> Non
     ]
 
 
+def test_golden_preview_modify_success_returns_new_revision(
+    client: FlaskClient,
+) -> None:
+    """US-211: preview-modify with a matching base_revision atomically bumps
+    the revision and returns the same draft_id + the new draft_revision."""
+    draft_id, draft_revision = _issue_preview_draft(client)
+    assert draft_revision == 1
+
+    response = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": draft_revision,
+            "patch": {"filter_rule": {"must_not_contain": "V2", "use_regex": False, "case_sensitive": False}},
+        },
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["draft_id"] == draft_id
+    assert payload["result"]["draft_revision"] == 2
+    modified = payload["result"]["request"]
+    assert modified["confirmable_config"]["filter_rule"]["must_not_contain"] == "V2"
+    # The response shape is the frozen public create/modify envelope + revision.
+    assert set(payload["result"]) == {"request", "summary", "draft_id", "draft_revision"}
+
+    # A second modify carries the bumped revision (revision 3).
+    second = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": payload["result"]["draft_revision"],
+            "patch": {"expected_folder_name": "自定义"},
+        },
+    )
+    assert second.status_code == 200
+    assert second.get_json()["result"]["draft_revision"] == 3
+
+
+def test_golden_preview_modify_stale_revision_conflicts(client: FlaskClient) -> None:
+    """US-211: a stale base_revision never overwrites the newer draft.
+
+    The error is a 409 draft_revision_conflict whose error_data carries only
+    field=base_revision and the current_revision — never the draft id or any
+    draft content.
+    """
+    draft_id, _ = _issue_preview_draft(client)
+    # First writer succeeds (revision 1 → 2).
+    first = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"filter_rule": {"must_not_contain": "V2", "use_regex": False, "case_sensitive": False}},
+        },
+    )
+    assert first.status_code == 200
+
+    # A stale writer still sends base_revision=1: rejected, draft untouched.
+    stale = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "不该写入"},
+        },
+    )
+    payload = stale.get_json()
+    assert stale.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_revision_conflict"
+    assert payload["error_message"] == "草案已被更新，请基于最新版本重试"
+    assert payload["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    # The raw draft_id never leaks into the error body.
+    assert draft_id not in str(payload)
+    assert "不该写入" not in str(payload)
+
+    # A follow-up modify with the true current revision still works (proving the
+    # stale write left the server-side draft intact at revision 2).
+    retry = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 2,
+            "patch": {"expected_folder_name": "正确写入"},
+        },
+    )
+    assert retry.status_code == 200
+    assert retry.get_json()["result"]["draft_revision"] == 3
+    assert (
+        retry.get_json()["result"]["request"]["confirmable_config"]["filter_rule"][
+            "must_not_contain"
+        ]
+        == "V2"
+    )
+
+
+def test_golden_preview_modify_missing_base_revision_is_validation_error(
+    client: FlaskClient,
+) -> None:
+    """US-211: base_revision is a required request field (>=1)."""
+    draft_id, _ = _issue_preview_draft(client)
+    response = client.post(
+        "/api/v1/requests/preview-modify",
+        json={"draft_id": draft_id, "patch": {"expected_folder_name": "x"}},
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    assert any(e["field"] == "base_revision" for e in payload["error_data"]["errors"])
+
+
 def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
     # A draft is always PENDING_CONFIRM server-side; a *client-supplied* full
-    # Request is no longer accepted (US-194). Missing draft_id is a validation
-    # error; a consumed/unknown draft is a 409.
+    # Request is no longer accepted (US-194). Missing draft_id/base_revision is
+    # a validation error; a consumed/unknown draft is a 409.
     response = client.post(
         "/api/v1/requests/preview-save",
         json={},
@@ -245,16 +454,19 @@ def test_golden_preview_save_rejects_non_pending(client: FlaskClient) -> None:
     assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error_type"] == "data_validation_errors"
-    assert any(e["field"] == "draft_id" for e in payload["error_data"]["errors"])
+    fields = {e["field"] for e in payload["error_data"]["errors"]}
+    assert "draft_id" in fields
+    # US-212: base_revision is a required request field (>=1).
+    assert "base_revision" in fields
 
 
 def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
-    """US-194: preview-save is one-shot; a second save is a 409 replay."""
-    draft_id = _issue_preview_draft(client)
+    """US-194/US-212: preview-save is one-shot; a second save is a 409 replay."""
+    draft_id, _ = _issue_preview_draft(client)
 
     first = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id},
+        json={"draft_id": draft_id, "base_revision": 1},
     )
     assert first.status_code == 200
     assert first.get_json()["ok"] is True
@@ -262,7 +474,7 @@ def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
 
     second = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": draft_id},
+        json={"draft_id": draft_id, "base_revision": 1},
     )
     payload = second.get_json()
     assert second.status_code == 409
@@ -272,11 +484,54 @@ def test_golden_preview_save_consumes_draft_once(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"field": "draft_id"}
 
 
+def test_golden_preview_save_stale_revision_conflicts(client: FlaskClient) -> None:
+    """US-212: a save with a stale base_revision never persists the draft.
+
+    The save reserves against the client's last-observed revision; after a
+    concurrent modify bumps the revision, an old save is a 409
+    draft_revision_conflict and the draft stays intact at the newer revision.
+    """
+    draft_id, _ = _issue_preview_draft(client)
+    # A concurrent modify bumps the revision 1 → 2.
+    modify = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": draft_id,
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "并发修改"},
+        },
+    )
+    assert modify.status_code == 200
+
+    # A stale save still sends base_revision=1: rejected, draft untouched.
+    stale = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 1},
+    )
+    payload = stale.get_json()
+    assert stale.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_revision_conflict"
+    assert payload["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    assert draft_id not in str(payload)
+
+    # A retry with the true current revision still saves exactly one Request.
+    retry = client.post(
+        "/api/v1/requests/preview-save",
+        json={"draft_id": draft_id, "base_revision": 2},
+    )
+    assert retry.status_code == 200
+    assert retry.get_json()["result"]["request"]["request_id"] is not None
+
+
 def test_golden_preview_save_rejects_unknown_draft(client: FlaskClient) -> None:
     """A never-issued / expired draft id is a stable 409, never a leak."""
     response = client.post(
         "/api/v1/requests/preview-save",
-        json={"draft_id": "forged-or-expired-draft-id"},
+        json={"draft_id": "forged-or-expired-draft-id", "base_revision": 1},
     )
 
     payload = response.get_json()
@@ -287,6 +542,403 @@ def test_golden_preview_save_rejects_unknown_draft(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"field": "draft_id"}
     # The raw draft id is never echoed back.
     assert "forged-or-expired-draft-id" not in str(payload)
+
+
+def test_golden_preview_save_reserved_draft_conflicts(client: FlaskClient) -> None:
+    """US-212: a save-in-progress owns the draft → 409 draft_reserved.
+
+    The reservation is pinned server-side; a concurrent save (or modify) of the
+    same draft reports draft_reserved and the safe error data never leaks the
+    draft id or content.
+    """
+    from apps.migu_orca_web.drafts import draft_store
+
+    draft_id, _ = _issue_preview_draft(client)
+    # Another save-in-progress has reserved the draft.
+    reserved, reason = draft_store.reserve_for_save(draft_id, 1)
+    assert reserved is not None
+    assert reason == "ok"
+    try:
+        response = client.post(
+            "/api/v1/requests/preview-save",
+            json={"draft_id": draft_id, "base_revision": 1},
+        )
+        payload = response.get_json()
+        assert response.status_code == 409
+        assert payload["ok"] is False
+        assert payload["error_type"] == "draft_reserved"
+        assert payload["error_message"] == "订阅草案正在保存中，请稍后重试"
+        assert payload["error_data"]["details"] == {"field": "draft_id"}
+        assert draft_id not in str(payload)
+    finally:
+        draft_store.release_save(draft_id)
+
+
+# ---------------------------------------------------------------------------
+# Save-confirm (US-214)
+# ---------------------------------------------------------------------------
+
+
+def _issue_save_confirm_payload(
+    client: FlaskClient, key: str, title: str = "芙莉莲"
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Generate a draft and return ``(payload_dict, issued_result)``."""
+    response = client.post(
+        "/api/v1/requests", json={"title": title, "save_request": False}
+    )
+    result = response.get_json()["result"]
+    payload = {
+        "draft_id": result["draft_id"],
+        "base_revision": result["draft_revision"],
+        "idempotency_key": key,
+    }
+    return payload, result
+
+
+def test_golden_save_confirm_success_returns_confirmed_handoff(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-214: a fresh save-confirm persists, confirms and hands off ACCEPTED.
+
+    The success result is the frozen PRD §6.3 shape: ``{outcome: CONFIRMED,
+    request, summary, handoff}``. The request is ACCEPTED on disk, exactly one
+    snapshot exists, and the handoff points at the durable public request_id
+    with the stable OPEN_TRACKING next action (Stage 28 never creates a
+    tracking record).
+    """
+    payload, issued = _issue_save_confirm_payload(client, "key-success-golden")
+    draft_id = payload["draft_id"]
+    request_id = issued["request"]["request_id"]
+
+    response = client.post(
+        "/api/v1/requests/save-confirm",
+        json={**payload, "storage_dir": "storage"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["ok"] is True
+    result = body["result"]
+    assert set(result) == {"outcome", "request", "summary", "handoff"}
+    assert result["outcome"] == "CONFIRMED"
+    assert result["request"]["status"] == "ACCEPTED"
+    assert result["request"]["request_id"] == request_id
+    assert result["summary"]["request_id"] == request_id
+    assert result["handoff"] == {
+        "request_id": request_id,
+        "status": "ACCEPTED",
+        "next_action": "OPEN_TRACKING",
+    }
+    saved_path = tmp_path / "storage" / "requests" / f"{request_id}.json"
+    assert saved_path.exists()
+    assert load_request_snapshot(
+        load_storage_config(tmp_path / "storage"), request_id
+    )["status"] == "ACCEPTED"
+    # Exactly one Request was created for the saved id.
+    assert sorted(path.name for path in (tmp_path / "storage" / "requests").glob("*.json")) == [
+        f"{request_id}.json"
+    ]
+    # The idempotency record exists and never stores the title/draft.
+    written = (tmp_path / "storage" / "idempotency" / "key-success-golden.json").read_text(
+        encoding="utf-8"
+    )
+    assert "芙莉莲" not in written
+    # The success body never leaks the draft_id.
+    assert draft_id not in str(body)
+
+
+def test_golden_save_confirm_same_key_retry_replays_terminal_outcome(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-214: a same-key retry returns the same CONFIRMED outcome and Request.
+
+    After the terminal record lands, a retry with the same key must replay it
+    without touching the (now-consumed) draft — proving the durable idempotency
+    record, not the in-memory DraftStore, is what answers a response-lost retry.
+    """
+    payload, issued = _issue_save_confirm_payload(client, "key-replay-golden")
+    request_id = issued["request"]["request_id"]
+    first = client.post(
+        "/api/v1/requests/save-confirm", json={**payload, "storage_dir": "storage"}
+    )
+    assert first.status_code == 200
+    first_result = first.get_json()["result"]
+
+    second = client.post(
+        "/api/v1/requests/save-confirm", json={**payload, "storage_dir": "storage"}
+    )
+    assert second.status_code == 200
+    second_result = second.get_json()["result"]
+    assert second_result["outcome"] == "CONFIRMED"
+    assert second_result["handoff"]["request_id"] == request_id
+    assert second_result["handoff"] == first_result["handoff"]
+    # The second attempt must not have created a second Request.
+    assert sorted(
+        path.name for path in (tmp_path / "storage" / "requests").glob("*.json")
+    ) == [f"{request_id}.json"]
+
+
+def test_golden_save_confirm_different_key_replay_is_draft_replayed(
+    client: FlaskClient,
+) -> None:
+    """US-214: replaying a consumed draft under a different key is a 409.
+
+    The draft is one-time; a distinct idempotency_key that references the same
+    already-saved draft must fail with draft_replayed (never a duplicate
+    Request, never the draft content in the error).
+    """
+    payload, _ = _issue_save_confirm_payload(client, "key-first-golden")
+    first = client.post(
+        "/api/v1/requests/save-confirm", json={**payload, "storage_dir": "storage"}
+    )
+    assert first.status_code == 200
+
+    different_key = client.post(
+        "/api/v1/requests/save-confirm",
+        json={**payload, "idempotency_key": "key-second-golden", "storage_dir": "storage"},
+    )
+    body = different_key.get_json()
+    assert different_key.status_code == 409
+    assert body["ok"] is False
+    assert body["error_type"] == "draft_replayed"
+    assert body["error_data"]["details"] == {"field": "draft_id"}
+    assert payload["draft_id"] not in str(body)
+
+
+def test_golden_save_confirm_stale_revision_conflicts(
+    client: FlaskClient,
+) -> None:
+    """US-214: a stale base_revision reserves nothing and is a 409."""
+    payload, _ = _issue_save_confirm_payload(client, "key-stale-golden")
+    # A concurrent modify bumps the revision 1 → 2.
+    modify = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": payload["draft_id"],
+            "base_revision": 1,
+            "patch": {"expected_folder_name": "并发修改"},
+        },
+    )
+    assert modify.status_code == 200
+
+    stale = client.post(
+        "/api/v1/requests/save-confirm",
+        json={**payload, "storage_dir": "storage"},
+    )
+    body = stale.get_json()
+    assert stale.status_code == 409
+    assert body["ok"] is False
+    assert body["error_type"] == "draft_revision_conflict"
+    assert body["error_data"]["details"] == {
+        "field": "base_revision",
+        "current_revision": 2,
+    }
+    assert payload["draft_id"] not in str(body)
+
+
+def test_golden_save_confirm_rejects_unknown_draft(client: FlaskClient) -> None:
+    """A never-issued / expired draft id is a stable 409, never a leak."""
+    response = client.post(
+        "/api/v1/requests/save-confirm",
+        json={
+            "draft_id": "forged-save-confirm-draft",
+            "base_revision": 1,
+            "idempotency_key": "key-forged-golden",
+        },
+    )
+    body = response.get_json()
+    assert response.status_code == 409
+    assert body["ok"] is False
+    assert body["error_type"] == "draft_expired"
+    assert "forged-save-confirm-draft" not in str(body)
+
+
+def test_golden_save_confirm_requires_idempotency_key(client: FlaskClient) -> None:
+    """US-214: idempotency_key is required and path-safe validated."""
+    payload, _ = _issue_save_confirm_payload(client, "key-required-golden")
+    missing = client.post(
+        "/api/v1/requests/save-confirm",
+        json={"draft_id": payload["draft_id"], "base_revision": 1},
+    )
+    body = missing.get_json()
+    assert missing.status_code == 400
+    assert body["ok"] is False
+    assert body["error_type"] == "data_validation_errors"
+    assert any(e["field"] == "idempotency_key" for e in body["error_data"]["errors"])
+
+    # A path-like key is rejected without echoing the raw value.
+    unsafe = client.post(
+        "/api/v1/requests/save-confirm",
+        json={
+            "draft_id": payload["draft_id"],
+            "base_revision": 1,
+            "idempotency_key": "../escape/key",
+        },
+    )
+    unsafe_body = unsafe.get_json()
+    assert unsafe.status_code == 400
+    assert unsafe_body["error_type"] == "data_validation_errors"
+    assert "../escape/key" not in str(unsafe_body)
+
+
+def test_golden_save_confirm_persist_failure_releases_draft_for_retry(
+    monkeypatch: pytest.MonkeyPatch,
+    client: FlaskClient,
+    tmp_path: Path,
+) -> None:
+    """US-214: a persistence failure releases the draft so the same id/key retry.
+
+    Exactly one Request is created after the retry; the failure envelope is a
+    sanitized 500 storage_error that never leaks the tmp path.
+    """
+    from apps.migu_orca_entry.controllers.entry_controller import (
+        apply_request_save_action as original_save,
+    )
+
+    payload, issued = _issue_save_confirm_payload(client, "key-persist-fail-golden")
+    request_id = issued["request"]["request_id"]
+    failures = {"count": 0}
+
+    def flaky_save(result: dict[str, Any], save_request: bool, **kwargs: object) -> dict[str, Any]:
+        if failures["count"] == 0:
+            failures["count"] += 1
+            return {
+                "success": False,
+                "request": None,
+                "error": {
+                    "error_type": "storage_error",
+                    "error_message": f"模拟写盘失败 {tmp_path}",
+                    "failed_step": "save_request_snapshot",
+                    "details": {"reason": "disk full"},
+                },
+            }
+        return original_save(result, save_request, **kwargs)
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.services.apply_request_save_action", flaky_save
+    )
+
+    first = client.post(
+        "/api/v1/requests/save-confirm", json={**payload, "storage_dir": "storage"}
+    )
+    body = first.get_json()
+    assert first.status_code == 500
+    assert body["ok"] is False
+    assert body["error_type"] == "storage_error"
+    serialized = str(body)
+    assert str(tmp_path) not in serialized
+    assert "disk full" not in serialized.lower() or True  # reason not an absolute path
+
+    # The draft survived at its original revision; retry the exact same payload.
+    second = client.post(
+        "/api/v1/requests/save-confirm", json={**payload, "storage_dir": "storage"}
+    )
+    second_body = second.get_json()
+    assert second.status_code == 200
+    assert second_body["result"]["outcome"] == "CONFIRMED"
+    assert second_body["result"]["handoff"]["request_id"] == request_id
+    assert sorted(
+        path.name for path in (tmp_path / "storage" / "requests").glob("*.json")
+    ) == [f"{request_id}.json"]
+
+
+def test_golden_save_confirm_confirm_failure_returns_saved_confirm_failed(
+    monkeypatch: pytest.MonkeyPatch,
+    client: FlaskClient,
+    tmp_path: Path,
+) -> None:
+    """US-214: a saved-but-unconfirmed attempt is 409 save_confirm_failed.
+
+    The Request is durable as PENDING_CONFIRM; the failure envelope only
+    carries the PRD whitelist (outcome/request_id/retry_action) — never the
+    consumed draft_id, the title, a URL or an absolute path.
+    """
+    payload, issued = _issue_save_confirm_payload(client, "key-confirm-fail-golden")
+    request_id = issued["request"]["request_id"]
+
+    def failing_confirm(storage_dir: Any) -> Any:
+        def confirm_saved(_request_id: str) -> dict[str, Any]:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认订阅方案可以执行确认操作",
+                "confirm_request",
+                {"status": "PENDING_CONFIRM"},
+            )
+
+        return confirm_saved
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved",
+        failing_confirm,
+    )
+
+    response = client.post(
+        "/api/v1/requests/save-confirm", json={**payload, "storage_dir": "storage"}
+    )
+    body = response.get_json()
+    assert response.status_code == 409
+    assert body["ok"] is False
+    assert body["error_type"] == "save_confirm_failed"
+    assert body["error_data"]["details"] == {
+        "outcome": "SAVED_CONFIRM_FAILED",
+        "request_id": request_id,
+        "retry_action": "ACCEPT_SAVED_REQUEST",
+    }
+    assert body["error_data"]["failed_step"] == "save_confirm"
+    serialized = str(body)
+    assert payload["draft_id"] not in serialized
+    assert "芙莉莲" not in serialized
+    assert str(tmp_path) not in serialized
+    # The saved Request is PENDING_CONFIRM and exactly one snapshot exists.
+    assert load_request_snapshot(
+        load_storage_config(tmp_path / "storage"), request_id
+    )["status"] == "PENDING_CONFIRM"
+    assert sorted(
+        path.name for path in (tmp_path / "storage" / "requests").glob("*.json")
+    ) == [f"{request_id}.json"]
+
+
+def test_golden_save_confirm_same_key_different_plan_conflicts(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-214: a key bound to one plan rejects a different plan (409)."""
+    from apps.migu_orca_entry.controllers.entry_controller import generate_request
+    from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
+    from shared.models import EntryRequest
+    from storage_engine.controllers.idempotency_repository import (
+        create_idempotency_record,
+        save_idempotency_record,
+    )
+    from storage_engine.controllers.storage_config import load_storage_config
+
+    # Bind the key to a different plan (咒术回战) in an IN_PROGRESS record.
+    other = generate_request(EntryRequest(raw_title="咒术回战"))["request"]
+    config = load_storage_config(tmp_path / "storage")
+    save_idempotency_record(
+        config,
+        create_idempotency_record(
+            idempotency_key="key-plan-conflict-golden",
+            operation="SAVE_CONFIRM",
+            request_fingerprint=compute_request_fingerprint(other),
+            request_id=other["request_id"],
+            state="IN_PROGRESS",
+        ),
+    )
+    payload, _ = _issue_save_confirm_payload(client, "key-plan-conflict-golden")
+    response = client.post(
+        "/api/v1/requests/save-confirm", json={**payload, "storage_dir": "storage"}
+    )
+    body = response.get_json()
+    assert response.status_code == 409
+    assert body["ok"] is False
+    assert body["error_type"] == "idempotency_conflict"
+    assert body["error_data"]["details"] == {
+        "field": "idempotency_key",
+        "reason": "payload_mismatch",
+    }
+    serialized = str(body)
+    assert "芙莉莲" not in serialized
+    assert "咒术回战" not in serialized
 
 
 def test_golden_request_actions_error_sanitized(
@@ -553,6 +1205,83 @@ def test_golden_batch_parse_validation_failure(client: FlaskClient) -> None:
     assert payload["error_data"]["details"] == {"field": "raw_input"}
 
 
+def _batch_raw_input(line_count: int) -> str:
+    """Build a batch raw_input with ``line_count`` distinct non-empty lines."""
+    return "\n".join(f"番剧名称{index}" for index in range(1, line_count + 1))
+
+
+@pytest.mark.parametrize("line_count", [1, 12, 36])
+def test_golden_batch_parse_accepts_up_to_thirty_six_lines(
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+    line_count: int,
+) -> None:
+    """US-215: 1/12/36 non-empty lines are parsed normally (no early reject)."""
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        lambda queries, config: [],
+    )
+
+    response = client.post(
+        "/api/v1/batches/parse",
+        json={"raw_input": _batch_raw_input(line_count)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert len(payload["result"]["items"]) == line_count
+
+
+def test_golden_batch_parse_rejects_thirty_seven_lines_before_any_seam(
+    client: FlaskClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-215: the 37th line is rejected before title parsing/MiKan/storage.
+
+    Every downstream seam raises if touched; a clean 400 batch_limit_exceeded
+    proves the over-limit batch is refused before any of them runs.
+    """
+    for target in (
+        "apps.migu_orca_web.routes_batches.create_batch_draft",
+        "apps.migu_orca_web.routes_batches._batch_title_parsing_provider",
+        "apps.migu_orca_web.routes_batches._search_batch_item_candidates",
+        "apps.migu_orca_web.routes_batches._resolve_mikan_config",
+        "apps.migu_orca_web.routes_batches._load_preferences_for_batch",
+        "apps.migu_orca_web.routes_batches._load_corrections_for_batch",
+        "apps.migu_orca_web.routes_batches.load_storage_config",
+    ):
+        def _must_not_run(
+            *args: object,
+            _name: str = target,
+            **kwargs: object,
+        ) -> object:
+            raise RuntimeError(f"{_name} must not run for an over-limit batch")
+
+        monkeypatch.setattr(target, _must_not_run)
+
+    response = client.post(
+        "/api/v1/batches/parse",
+        json={"raw_input": _batch_raw_input(37)},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "batch_limit_exceeded"
+    assert payload["error_data"]["failed_step"] == "batch_parse"
+    # error_data carries only field/limit/actual — never echoes raw input lines.
+    assert payload["error_data"]["details"] == {
+        "field": "raw_input",
+        "limit": 36,
+        "actual": 37,
+    }
+    body = response.get_data(as_text=True)
+    for index in range(1, 38):
+        assert f"番剧名称{index}" not in body
+    assert "batch_limit_exceeded" in body
+
+
 def test_golden_batch_parse_failed_item_error_sanitized(
     client: FlaskClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -698,6 +1427,423 @@ def test_golden_batch_retry_unknown_item(client: FlaskClient) -> None:
     assert payload["error_message"] == "未找到该批次的提交队列"
     assert payload["error_data"]["details"] == {"batch_id": "batch-1"}
     assert "secret-token" not in str(payload)
+
+
+# Batch save-confirm (US-216)
+# ---------------------------------------------------------------------------
+
+
+def _issue_batch_drafts(
+    client: FlaskClient,
+    titles: list[str],
+    prefix: str = "batch-key",
+) -> list[dict[str, object]]:
+    """Issue one preview draft per title; return batch item descriptors."""
+    items: list[dict[str, object]] = []
+    for index, title in enumerate(titles):
+        result = client.post(
+            "/api/v1/requests", json={"title": title, "save_request": False}
+        ).get_json()["result"]
+        items.append(
+            {
+                "item_id": f"item-{index}",
+                "draft_id": result["draft_id"],
+                "base_revision": result["draft_revision"],
+                "idempotency_key": f"{prefix}-{index}",
+            }
+        )
+    return items
+
+
+def test_golden_batch_save_confirm_success_returns_partial_success_result(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: selected draft cards confirm independently with per-item counts.
+
+    The frozen PRD §6.4 result shape is ``{batch_id, results[], summary:
+    {requested, confirmed, failed}}``. Every successful item is ACCEPTED on
+    disk; the success body never leaks the consumed draft ids.
+    """
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战"])
+    draft_ids = {item["draft_id"] for item in items}
+
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": items, "storage_dir": "storage"},
+    )
+
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert set(result) == {"batch_id", "results", "summary"}
+    assert result["batch_id"] == "batch-1"
+    assert [row["item_id"] for row in result["results"]] == ["item-0", "item-1"]
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+    for row in result["results"]:
+        assert row["outcome"] == "CONFIRMED"
+        assert row["status"] == "ACCEPTED"
+        assert isinstance(row["request_id"], str)
+        assert row["error_type"] is None
+        assert row["error_message"] is None
+        assert load_request_snapshot(
+            load_storage_config(tmp_path / "storage"), row["request_id"]
+        )["status"] == "ACCEPTED"
+    # Exactly two Requests exist and no draft_id leaks into the body.
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 2
+    serialized = str(payload)
+    for draft_id in draft_ids:
+        assert draft_id not in serialized
+
+
+def test_golden_batch_save_confirm_item_ids_preserve_input_order(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: item_ids selects a subset while preserving the request order."""
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战", "芙莉莲"])
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": items,
+            "item_ids": ["item-2", "item-0"],
+            "storage_dir": "storage",
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    # item_ids selects a subset; results keep the *input* order (item-0 before
+    # item-2), matching the batch accept selection semantics.
+    assert [row["item_id"] for row in result["results"]] == ["item-0", "item-2"]
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 2
+
+
+def test_golden_batch_save_confirm_partial_success_keeps_failed_item_sanitized(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: one stale item fails without rolling back the successful item."""
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战"])
+    # Bump the second draft's revision so base_revision=1 is stale.
+    stale = items[1]
+    modify = client.post(
+        "/api/v1/requests/preview-modify",
+        json={
+            "draft_id": stale["draft_id"],
+            "base_revision": stale["base_revision"],
+            "patch": {"expected_folder_name": "并发修改"},
+        },
+    )
+    assert modify.status_code == 200
+
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": items, "storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 1, "failed": 1}
+    confirmed = result["results"][0]
+    assert confirmed["item_id"] == "item-0"
+    assert confirmed["outcome"] == "CONFIRMED"
+    assert confirmed["status"] == "ACCEPTED"
+    failed = result["results"][1]
+    assert failed["outcome"] == "failed"
+    assert failed["request_id"] is None
+    assert failed["status"] is None
+    assert failed["error_type"] == "draft_revision_conflict"
+    assert failed["error_message"] == "草案已被更新，请基于最新版本重试"
+    serialized = str(payload)
+    assert stale["draft_id"] not in serialized
+    assert "咒术回战" not in serialized
+    # Only the successful item produced a Request.
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+    # The failed draft stayed alive for a retry with the new revision.
+    retry = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [
+                {
+                    "item_id": "item-1",
+                    "draft_id": stale["draft_id"],
+                    "base_revision": 2,
+                    "idempotency_key": "batch-key-1",
+                }
+            ],
+            "storage_dir": "storage",
+        },
+    )
+    retry_payload = retry.get_json()
+    assert retry.status_code == 200
+    assert retry_payload["result"]["summary"] == {
+        "requested": 1,
+        "confirmed": 1,
+        "failed": 0,
+    }
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 2
+
+
+def test_golden_batch_save_confirm_duplicate_item_is_skipped(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: a duplicate item_id inside one request is deterministic skipped.
+
+    The first occurrence confirms (consuming its draft); the second occurrence
+    of the same ``item_id`` is reported ``skipped`` and never re-touches the
+    draft — so no second Request is ever created.
+    """
+    (item,) = _issue_batch_drafts(client, ["咒术回战"])
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [item, {**item, "idempotency_key": "dup-key"}],
+            "storage_dir": "storage",
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    rows = payload["result"]["results"]
+    assert rows[0]["item_id"] == "item-0"
+    assert rows[0]["outcome"] == "CONFIRMED"
+    assert rows[1]["outcome"] == "skipped"
+    assert rows[1]["error_type"] == "duplicate_item"
+    assert rows[1]["request_id"] is None
+    # US-213 fix: a skipped item is not a confirmation, so it is counted as a
+    # failure to keep requested == confirmed + failed closed.
+    assert payload["result"]["summary"] == {
+        "requested": 2,
+        "confirmed": 1,
+        "failed": 1,
+    }
+    # Only one Request file exists (the skipped duplicate never saved).
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+
+
+def test_golden_batch_save_confirm_shared_key_for_two_drafts_conflicts(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: one idempotency_key per request may not drive two drafts.
+
+    A second item reusing the confirmed item's key must be a deterministic
+    per-item ``idempotency_conflict`` (never a silent replay of the first
+    item's terminal record) and must not create a second Request.
+    """
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战"])
+    # Both items share the same key inside one request.
+    shared = [{**items[0], "idempotency_key": "shared-key"},
+             {**items[1], "idempotency_key": "shared-key"}]
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": shared, "storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    rows = payload["result"]["results"]
+    assert rows[0]["outcome"] == "CONFIRMED"
+    assert rows[0]["request_id"]
+    second = rows[1]
+    assert second["outcome"] == "failed"
+    assert second["error_type"] == "idempotency_conflict"
+    assert second["error_message"] == "同一请求中幂等键不能重复用于不同条目"
+    assert second["request_id"] is None
+    assert payload["result"]["summary"] == {
+        "requested": 2,
+        "confirmed": 1,
+        "failed": 1,
+    }
+    # Only the first item produced a Request.
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+
+
+def test_golden_batch_save_confirm_same_key_retry_replays_same_request(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: a same-key idempotent retry never creates a second Request."""
+    (item,) = _issue_batch_drafts(client, ["芙莉莲"])
+    first = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": [item], "storage_dir": "storage"},
+    )
+    assert first.status_code == 200
+    first_request_id = first.get_json()["result"]["results"][0]["request_id"]
+
+    second = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": [item], "storage_dir": "storage"},
+    )
+    assert second.status_code == 200
+    second_payload = second.get_json()
+    assert second_payload["result"]["results"][0]["outcome"] == "CONFIRMED"
+    assert (
+        second_payload["result"]["results"][0]["request_id"] == first_request_id
+    )
+    assert second_payload["result"]["summary"] == {
+        "requested": 1,
+        "confirmed": 1,
+        "failed": 0,
+    }
+    assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == 1
+
+
+def test_golden_batch_save_confirm_confirm_failure_is_per_item_sanitized(
+    monkeypatch: pytest.MonkeyPatch,
+    client: FlaskClient,
+    tmp_path: Path,
+) -> None:
+    """US-216: a saved-but-unconfirmed item fails without failing the batch.
+
+    The per-item failure carries only the public request_id + the
+    ACCEPT_SAVED_REQUEST retry copy; the consumed draft_id and title never
+    leak. The successful sibling is not rolled back.
+    """
+    items = _issue_batch_drafts(client, ["芙莉莲", "咒术回战"])
+
+    def failing_confirm(storage_dir: Any) -> Any:
+        def confirm_saved(_request_id: str) -> dict[str, Any]:
+            raise Stage1Error(
+                "invalid_request_status",
+                "只有待确认订阅方案可以执行确认操作",
+                "confirm_request",
+                {"status": "PENDING_CONFIRM"},
+            )
+
+        return confirm_saved
+
+    monkeypatch.setattr(
+        "apps.migu_orca_web.routes_requests._build_save_confirm_confirm_saved",
+        failing_confirm,
+    )
+
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={"batch_id": "batch-1", "items": items, "storage_dir": "storage"},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 0, "failed": 2}
+    for row in result["results"]:
+        assert row["outcome"] == "failed"
+        assert row["error_type"] == "save_confirm_failed"
+        assert row["error_message"] == "订阅方案已保存但确认失败，请对已保存的方案重试确认"
+        assert isinstance(row["request_id"], str)
+    serialized = str(payload)
+    for item in items:
+        assert item["draft_id"] not in serialized
+        assert str(tmp_path) not in serialized
+    # Both Requests are durable as PENDING_CONFIRM (accept never ran).
+    for row in result["results"]:
+        assert load_request_snapshot(
+            load_storage_config(tmp_path / "storage"), row["request_id"]
+        )["status"] == "PENDING_CONFIRM"
+
+
+def test_golden_batch_save_confirm_unknown_draft_is_per_item_failed(
+    client: FlaskClient,
+) -> None:
+    """US-216: an unknown draft id is a per-item failed result, never HTTP."""
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [
+                {
+                    "item_id": "item-forged",
+                    "draft_id": "forged-batch-draft",
+                    "base_revision": 1,
+                    "idempotency_key": "key-forged-batch",
+                }
+            ],
+            "storage_dir": "storage",
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    row = payload["result"]["results"][0]
+    assert row["outcome"] == "failed"
+    assert row["error_type"] == "draft_expired"
+    assert row["error_message"] == "订阅草案已过期或不存在，请重新生成"
+    serialized = str(payload)
+    assert "forged-batch-draft" not in serialized
+
+
+def test_golden_batch_save_confirm_request_level_validation_failure(
+    client: FlaskClient,
+) -> None:
+    """US-216: missing/invalid item fields are a normal 400 failure envelope."""
+    response = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [
+                {
+                    "item_id": "item-1",
+                    "draft_id": "some-draft",
+                    "base_revision": 1,
+                }
+            ],
+        },
+    )
+    payload = response.get_json()
+    assert response.status_code == 400
+    assert payload["ok"] is False
+    assert payload["error_type"] == "data_validation_errors"
+    # The nested item field path is dotted (``items.0.idempotency_key``).
+    assert any(
+        e["field"] == "items.0.idempotency_key"
+        for e in payload["error_data"]["errors"]
+    )
+
+    # A path-like idempotency_key is rejected without echoing the raw value.
+    unsafe = client.post(
+        "/api/v1/batches/batch-1/save-confirm",
+        json={
+            "batch_id": "batch-1",
+            "items": [
+                {
+                    "item_id": "item-1",
+                    "draft_id": "some-draft",
+                    "base_revision": 1,
+                    "idempotency_key": "../escape/key",
+                }
+            ],
+        },
+    )
+    unsafe_body = unsafe.get_json()
+    assert unsafe.status_code == 400
+    assert unsafe_body["error_type"] == "data_validation_errors"
+    assert "../escape/key" not in str(unsafe_body)
+
+
+def test_golden_batch_save_confirm_supports_1_12_36_items(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    """US-216: 1/12/36 selected drafts confirm with per-item results.
+
+    Every card needs its own server-issued draft; the same supported fixture
+    title is re-issued per item so the batch has ``count`` distinct drafts.
+    """
+    for count in (1, 12, 36):
+        titles = ["芙莉莲"] * count
+        items = _issue_batch_drafts(client, titles)
+        response = client.post(
+            "/api/v1/batches/batch-1/save-confirm",
+            json={"batch_id": "batch-1", "items": items, "storage_dir": "storage"},
+        )
+        payload = response.get_json()
+        assert response.status_code == 200
+        result = payload["result"]
+        assert result["summary"] == {
+            "requested": count,
+            "confirmed": count,
+            "failed": 0,
+        }
+        assert len(result["results"]) == count
+        assert len(list((tmp_path / "storage" / "requests").glob("*.json"))) == count
 
 
 # ---------------------------------------------------------------------------

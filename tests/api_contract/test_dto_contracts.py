@@ -20,6 +20,7 @@ from apps.migu_orca_web.api_contract import (
     BatchAcceptResultDTO,
     BatchParseResultDTO,
     BatchQueueResultDTO,
+    BatchSaveConfirmResultDTO,
     BatchSubmitResultDTO,
     CorrectionsResultDTO,
     MikanCandidateResultDTO,
@@ -33,12 +34,20 @@ from apps.migu_orca_web.api_contract import (
     RequestListResultDTO,
     RequestPreviewModifyResultDTO,
     RequestPreviewSaveResultDTO,
+    RequestSafeInfoDTO,
+    RequestSafeInfoResultDTO,
+    RequestSaveConfirmResultDTO,
     RequestSummaryDTO,
+    SaveConfirmFailedErrorDataDTO,
 )
+from apps.migu_orca_web.serializers import serialize_request_safe_info
 from batch_engine.controllers.batch_draft_controller import create_batch_draft
 from batch_engine.controllers.batch_queue_controller import serialize_queue
 from batch_engine.models import BatchSubmissionQueue
-from request_engine.controllers.request_controller import summarize_request
+from request_engine.controllers.request_controller import (
+    accept_request,
+    summarize_request,
+)
 from shared.models import EntryRequest
 
 
@@ -134,37 +143,49 @@ def test_request_preview_modify_save_accept_cancel_share_shape() -> None:
 
 
 def test_request_create_dto_accepts_draft_id_for_unsaved_preview() -> None:
-    """US-194: an unsaved generation returns an opaque draft_id."""
+    """US-194/211: an unsaved generation returns draft_id and draft_revision."""
     request = _generated_request()
     payload = {
         "request": request,
         "summary": _summary(request),
         "draft_id": "opaque-draft-token",
+        "draft_revision": 1,
     }
     validated = RequestCreateResultDTO.model_validate(payload)
     assert validated.draft_id == "opaque-draft-token"
+    assert validated.draft_revision == 1
 
 
-def test_request_preview_modify_dto_accepts_draft_id() -> None:
-    """US-194: preview-modify returns the same draft_id for the next call."""
+def test_request_preview_modify_dto_accepts_draft_id_and_revision() -> None:
+    """US-211: preview-modify returns draft_id + the new draft_revision."""
     request = _generated_request()
     payload = {
         "request": request,
         "summary": _summary(request),
         "draft_id": "opaque-draft-token",
+        "draft_revision": 2,
     }
     validated = RequestPreviewModifyResultDTO.model_validate(payload)
     assert validated.draft_id == "opaque-draft-token"
+    assert validated.draft_revision == 2
 
 
 def test_request_preview_save_dto_rejects_draft_id() -> None:
-    """US-194: preview-save consumes the draft; the response has no draft_id."""
+    """US-194: preview-save consumes the draft; the response has no draft_id.
+
+    US-211: the save response equally has no draft_revision (the draft is gone
+    after a successful save).
+    """
     request = _generated_request()
     base = {"request": request, "summary": _summary(request)}
     assert RequestPreviewSaveResultDTO.model_validate(base) is not None
     with pytest.raises(ValidationError):
         RequestPreviewSaveResultDTO.model_validate(
             {**base, "draft_id": "opaque-draft-token"}
+        )
+    with pytest.raises(ValidationError):
+        RequestPreviewSaveResultDTO.model_validate(
+            {**base, "draft_revision": 1}
         )
 
 
@@ -196,6 +217,100 @@ def test_request_ab_submit_dto_requires_top_level_ab_result() -> None:
         },
     }
     assert RequestAbSubmitResultDTO.model_validate(payload) is not None
+
+
+def test_request_save_confirm_result_dto_accepts_accepted_payload() -> None:
+    """US-214: the save-confirm success result whitelists the CONFIRMED handoff."""
+    request = accept_request(_generated_request())
+    payload = {
+        "outcome": "CONFIRMED",
+        "request": request,
+        "summary": _summary(request),
+        "handoff": {
+            "request_id": request["request_id"],
+            "status": "ACCEPTED",
+            "next_action": "OPEN_TRACKING",
+        },
+    }
+    validated = RequestSaveConfirmResultDTO.model_validate(payload)
+    assert validated.outcome == "CONFIRMED"
+    assert validated.handoff.request_id == request["request_id"]
+    assert validated.handoff.status == "ACCEPTED"
+    assert validated.handoff.next_action == "OPEN_TRACKING"
+
+
+def test_request_save_confirm_result_dto_rejects_unknown_or_sensitive_fields() -> None:
+    """US-214: the save-confirm success envelope is strict and leak-free.
+
+    The frozen PRD §6.3 success result is ``{outcome, request, summary,
+    handoff}``. A draft_id, a tracking id, credentials or any unknown field
+    must be rejected at the boundary; the handoff itself only carries the
+    public request_id + ACCEPTED status + the stable OPEN_TRACKING next_action.
+    """
+    request = accept_request(_generated_request())
+    base = {
+        "outcome": "CONFIRMED",
+        "request": request,
+        "summary": _summary(request),
+        "handoff": {
+            "request_id": request["request_id"],
+            "status": "ACCEPTED",
+            "next_action": "OPEN_TRACKING",
+        },
+    }
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate({**base, "draft_id": "opaque"})
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate(
+            {**base, "tracking_id": "tracking-1"}
+        )
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate(
+            {**base, "handoff": {**base["handoff"], "ab_url": "https://example.invalid"}}
+        )
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmResultDTO.model_validate(
+            {**base, "handoff": {**base["handoff"], "request_id": request["request_id"], "secret_token": "x"}}
+        )
+
+
+def test_save_confirm_failed_error_data_dto_whitelists_details() -> None:
+    """US-214: the confirm-failed failure details are exactly the PRD whitelist.
+
+    Only outcome + public request_id + retry_action may appear; a draft_id,
+    title, URL or path must be rejected so the boundary never carries draft
+    content or credentials into the failure envelope.
+    """
+    base = {
+        "outcome": "SAVED_CONFIRM_FAILED",
+        "request_id": "public-request-1",
+        "retry_action": "ACCEPT_SAVED_REQUEST",
+    }
+    assert SaveConfirmFailedErrorDataDTO.model_validate(base) is not None
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "draft_id": "consumed-draft"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "title": "芙莉莲"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "rss_url": "https://mikan.example/secret"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "token": "secret-token"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "storage_dir": "/home/user/private"}
+        )
+    with pytest.raises(ValidationError):
+        SaveConfirmFailedErrorDataDTO.model_validate(
+            {**base, "tracking_id": "tracking-1"}
+        )
 
 
 def test_request_detail_dto_shape() -> None:
@@ -312,6 +427,170 @@ def test_request_delete_dto_shape() -> None:
     assert RequestDeleteResultDTO.model_validate(payload) is not None
     with pytest.raises(ValidationError):
         RequestDeleteResultDTO.model_validate({**payload, "absolute_path": "/etc"})
+
+
+def _safe_info_payload() -> dict[str, Any]:
+    """Build the real serializer output for a generated Request."""
+    request = {
+        **generate_request(EntryRequest(raw_title="芙莉莲"))["request"],
+        "request_id": "request-1",
+    }
+    return serialize_request_safe_info(
+        request,
+        history_events=[],
+        ab_submit_result=None,
+        storage_profile="storage",
+    )
+
+
+def test_request_safe_info_dto_accepts_real_serializer_output() -> None:
+    """US-217: the strict safe-info DTO validates real serializer output."""
+    payload = _safe_info_payload()
+    validated = RequestSafeInfoResultDTO.model_validate({"safe_info": payload})
+    assert validated.safe_info.request_id == "request-1"
+    assert validated.safe_info.title == "葬送的芙莉莲"
+    assert validated.safe_info.updated_episode is None
+    assert validated.safe_info.updated_episode_status == "NOT_IMPLEMENTED"
+    assert validated.safe_info.resources.valid_file_names
+    assert validated.safe_info.mikan_collection.title == "葬送的芙莉莲"
+    # extra="forbid" holds on the envelope too.
+    with pytest.raises(ValidationError):
+        RequestSafeInfoResultDTO.model_validate(
+            {"safe_info": payload, "leaked_secret": "x"}
+        )
+
+
+def test_request_safe_info_dto_whitelists_top_level_fields() -> None:
+    """US-217: only the frozen PRD whitelist may appear on the safe-info result."""
+    base = {
+        "request_id": "request-1",
+        "status": "ACCEPTED",
+        "raw_title": "芙莉莲",
+        "title": "葬送的芙莉莲",
+        "aliases": ["芙莉莲", "Frieren"],
+        "season": 1,
+        "season_raw": None,
+        "season_evidence": None,
+        "mikan_collection": {"title": "葬送的芙莉莲", "bangumi_id": "2353"},
+        "subtitle_groups": [],
+        "selected_subtitle_group": "喵萌",
+        "filter_rule": {
+            "must_contain": "",
+            "must_not_contain": "",
+            "use_regex": False,
+            "case_sensitive": False,
+        },
+        "resources": {
+            "selected_subtitle_group": "喵萌",
+            "valid_resource_count": 1,
+            "invalid_resource_count": 0,
+            "complete_resource_count": 1,
+            "valid_file_names": ["[喵萌] 葬送的芙莉莲 - 01.mkv"],
+            "excluded_file_names": [],
+        },
+        "folder_name": "葬送的芙莉莲",
+        "storage_profile": "storage",
+        "total_episodes": None,
+        "updated_episode": None,
+        "updated_episode_status": "NOT_IMPLEMENTED",
+        "history_summary": [],
+        "ab_status": None,
+    }
+    assert RequestSafeInfoDTO.model_validate(base) is not None
+    # A URL-looking extra key, a raw snapshot key, or a credential field must
+    # be rejected at the boundary, not silently passed through.
+    for leaked in (
+        "rss_url",
+        "mikan_url",
+        "poster_url",
+        "selected_rss_url",
+        "token",
+        "password",
+        "raw_response",
+        "absolute_path",
+        "request",
+        "source_info",
+        "confirmable_config",
+    ):
+        with pytest.raises(ValidationError):
+            RequestSafeInfoDTO.model_validate({**base, leaked: "secret-value"})
+
+
+def test_request_safe_info_dto_rejects_nested_sensitive_fields() -> None:
+    """US-217: nested whitelists (collection/resources/groups/history/ab) are strict."""
+    base = _safe_info_payload()
+    # The collection may never carry a full URL, magnet or alias-of-URL.
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "mikan_collection": {**base["mikan_collection"], "mikan_url": "https://mikan.example/x"}}
+        )
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "mikan_collection": {**base["mikan_collection"], "rss_url": "https://mikan.example/x"}}
+        )
+    # A subtitle group entry may not carry the raw RSS URL or seed list.
+    leaked_group = {
+        **base["subtitle_groups"][0],
+        "rss_url": "https://mikan.example/RSS/Bangumi?bangumiId=1",
+        "seed_names": ["secret-seed"],
+    }
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "subtitle_groups": [leaked_group]}
+        )
+    # Resource entries may not carry an extra raw-snapshot/credential key.
+    leaked_file = {
+        **base["resources"],
+        "magnet": "magnet:?xt=urn:btih:deadbeef",
+    }
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "resources": leaked_file})
+    leaked_file_list = {
+        **base["resources"],
+        "valid_file_names": ["magnet:?xt=urn:btih:deadbeef"],
+        "download_url": "https://mikan.example/dl/1",
+    }
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "resources": leaked_file_list})
+    leaked_history = [
+        {
+            "action": "ACCEPT",
+            "previous_status": "PENDING_CONFIRM",
+            "next_status": "ACCEPTED",
+            "timestamp": "2026-09-08T00:00:00+00:00",
+            "details": {"rss_url": "https://mikan.example/x"},
+        }
+    ]
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "history_summary": leaked_history}
+        )
+    # AB status never carries the endpoint or raw upstream response.
+    leaked_ab = {
+        "submitted": True,
+        "success": False,
+        "ab_subscription_id": None,
+        "error_type": "ab_connection_failed",
+        "base_url": "https://ab.example",
+        "ab_response": {"id": 1},
+    }
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "ab_status": leaked_ab})
+
+
+def test_request_safe_info_dto_requires_updated_episode_not_implemented() -> None:
+    """US-217: updated_episode is pinned null and status is the literal marker."""
+    base = _safe_info_payload()
+    # A real "current episode" value is never allowed (BL-020 not implemented).
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "updated_episode": 3})
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate(
+            {**base, "updated_episode_status": "IMPLEMENTED"}
+        )
+    # Unknown top-level fields are rejected.
+    with pytest.raises(ValidationError):
+        RequestSafeInfoDTO.model_validate({**base, "tracking_id": "tracking-1"})
 
 
 # ---------------------------------------------------------------------------
@@ -590,6 +869,69 @@ def test_batch_submit_dto_shares_accept_shape() -> None:
     assert BatchSubmitResultDTO.model_validate(result) is not None
 
 
+def test_batch_save_confirm_dto_validates_partial_success_result() -> None:
+    """US-216: the batch save-confirm result is strict and public-only."""
+    payload = {
+        "batch_id": "batch-1",
+        "results": [
+            {
+                "item_id": "item-1",
+                "outcome": "CONFIRMED",
+                "request_id": "request-1",
+                "status": "ACCEPTED",
+                "error_type": None,
+                "error_message": None,
+            },
+            {
+                "item_id": "item-2",
+                "outcome": "failed",
+                "request_id": None,
+                "status": None,
+                "error_type": "draft_revision_conflict",
+                "error_message": "草案已被更新，请基于最新版本重试",
+            },
+        ],
+        "summary": {"requested": 2, "confirmed": 1, "failed": 1},
+    }
+    assert BatchSaveConfirmResultDTO.model_validate(payload) is not None
+    with pytest.raises(ValidationError):
+        BatchSaveConfirmResultDTO.model_validate({**payload, "leak": 1})
+
+
+def test_batch_save_confirm_dto_rejects_sensitive_item_fields() -> None:
+    """US-216: per-item results never carry draft content, keys or URLs."""
+    base = {
+        "batch_id": "batch-1",
+        "results": [
+            {
+                "item_id": "item-1",
+                "outcome": "CONFIRMED",
+                "request_id": "request-1",
+                "status": "ACCEPTED",
+            }
+        ],
+        "summary": {"requested": 1, "confirmed": 1, "failed": 0},
+    }
+    assert BatchSaveConfirmResultDTO.model_validate(base) is not None
+    for leaked in (
+        "draft_id",
+        "idempotency_key",
+        "rss_url",
+        "magnet",
+        "token",
+        "password",
+        "storage_dir",
+        "tracking_id",
+    ):
+        with pytest.raises(ValidationError):
+            BatchSaveConfirmResultDTO.model_validate(
+                {
+                    **base,
+                    "results": [{**base["results"][0], leaked: "secret-value"}],
+                }
+            )
+
+
 # ---------------------------------------------------------------------------
 # Connection tests (strict whitelists)
 # ---------------------------------------------------------------------------
@@ -618,3 +960,108 @@ def test_ab_connection_dto_rejects_credentials() -> None:
         AutoBangumiConnectionResultDTO.model_validate(
             {**payload, "token": "secret-token"}
         )
+
+
+# ---------------------------------------------------------------------------
+# Stage 28 static-review fixes: strict save-confirm request schemas
+# ---------------------------------------------------------------------------
+
+
+def test_save_confirm_request_schemas_reject_unknown_fields() -> None:
+    """US-213 fix: the save-confirm request models are ``extra="forbid"``."""
+    from apps.migu_orca_web.schemas import (
+        BatchItemSaveConfirmPayload,
+        BatchSaveConfirmPayload,
+        RequestSaveConfirmPayload,
+    )
+
+    # Single save-confirm: a leaked token/request key is rejected.
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmPayload.model_validate(
+            {
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "storage_dir": "storage",
+                "token": "secret",
+            }
+        )
+    with pytest.raises(ValidationError):
+        RequestSaveConfirmPayload.model_validate(
+            {
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "request": {"status": "ACCEPTED"},
+            }
+        )
+    # A valid single request still validates.
+    assert (
+        RequestSaveConfirmPayload.model_validate(
+            {
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "storage_dir": "storage",
+            }
+        )
+        is not None
+    )
+
+    # Batch item: a leaked full Request or unknown field is rejected.
+    with pytest.raises(ValidationError):
+        BatchItemSaveConfirmPayload.model_validate(
+            {
+                "item_id": "item-1",
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "request": {"status": "ACCEPTED"},
+            }
+        )
+    with pytest.raises(ValidationError):
+        BatchItemSaveConfirmPayload.model_validate(
+            {
+                "item_id": "item-1",
+                "draft_id": "draft-1",
+                "base_revision": 1,
+                "idempotency_key": "key-1",
+                "draft": {"title": "secret"},
+            }
+        )
+
+    # Batch top-level: unknown field is rejected.
+    with pytest.raises(ValidationError):
+        BatchSaveConfirmPayload.model_validate(
+            {
+                "batch_id": "batch-1",
+                "items": [
+                    {
+                        "item_id": "item-1",
+                        "draft_id": "draft-1",
+                        "base_revision": 1,
+                        "idempotency_key": "key-1",
+                    }
+                ],
+                "storage_dir": "storage",
+                "token": "secret",
+            }
+        )
+    # A valid batch request still validates.
+    assert (
+        BatchSaveConfirmPayload.model_validate(
+            {
+                "batch_id": "batch-1",
+                "items": [
+                    {
+                        "item_id": "item-1",
+                        "draft_id": "draft-1",
+                        "base_revision": 1,
+                        "idempotency_key": "key-1",
+                    }
+                ],
+                "storage_dir": "storage",
+            }
+        )
+        is not None
+    )

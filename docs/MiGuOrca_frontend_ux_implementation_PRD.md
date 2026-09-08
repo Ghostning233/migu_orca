@@ -230,6 +230,11 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 稳定后可由不同执行会话并行，但共享 store/API 类型变更必须先合入基线，不能在三个 PR 中分别
 实现同名组件。F-F 必须等 B-C 管理契约冻结，不能使用 mock-only 页面先冒充功能完成。
 
+> 状态注记（2026-09-08）：B-A 已作为 Stage 28 完成（revision、可靠保存、单番/批量 save-confirm、
+> 36 部边界与 safe-info 均已交付，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；
+> 上表 F-B～F-E 依赖的「B-A 部分能力」现已可用。B-B tracking 记录仍未建立，F-C/F-D 的
+> 「保存确认后跳转追番管理」与 F-E/F-F 仍需等待 B-B/B-C。
+
 ## 10. PR 与回退边界
 
 1. 每个实施包至少一个独立 PR；若超过约 8 个业务 story 或同时触碰 3 个以上 feature，可继续拆。

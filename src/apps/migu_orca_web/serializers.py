@@ -8,6 +8,7 @@ They are also the seams the API contract tests monkeypatch to simulate
 failures without touching real external services.
 """
 
+import re
 from typing import Any
 
 from flask import url_for
@@ -296,6 +297,292 @@ def _sanitize_ab_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
     )
     assert isinstance(sanitized, dict)
     return sanitized
+
+
+# ---------------------------------------------------------------------------
+# Request safe-info serializer (US-217)
+# ---------------------------------------------------------------------------
+# ``serialize_request_safe_info`` is the *only* producer for the
+# ``GET /api/v1/requests/{request_id}/safe-info`` result. It follows the
+# default-deny rule (D28-10): it reads only the whitelisted public fields
+# below and never returns the snapshot unchanged. Full collection/RSS URLs,
+# magnet links, endpoints, credentials, raw upstream responses and local
+# absolute paths are omitted at the field level; free-text labels are still
+# scrubbed so a poisoned value that *looks* like a URL/magnet/path cannot pass.
+
+#: Embedded URL / magnet / absolute-path / credential markers detected anywhere
+#: in a free-text label (US-217 fix). These are matched case-insensitively on a
+#: substring basis (not just at the start), so a URL or secret buried inside an
+#: otherwise-legal Chinese title is still redacted.
+_SAFE_URL_SCHEME_RE = re.compile(
+    r"(?:https?|ftp|file|ws|wss)://",
+    re.IGNORECASE,
+)
+_SAFE_MAGNET_RE = re.compile(r"magnet:\?", re.IGNORECASE)
+#: Generic POSIX absolute path detected *anywhere* in a string. The ``/`` must
+#: NOT be immediately preceded by a word character (Unicode-aware ``\w``,
+#: covering CJK as well as ASCII) or another ``/`` — a negative-lookbehind
+#: boundary that still fires at the string start, whitespace, ``=``, ``:``,
+#: quotes, parentheses and CJK punctuation. It is followed by one or more
+#: non-whitespace/non-slash path segments. This avoids a fixed root whitelist
+#: (``/usr``, ``/etc``, …) so ``/data``, ``/mnt``, ``/private``, ``/Users`` or
+#: any custom root are all redacted even when embedded (``path=/mnt/secret``,
+#: ``"/opt"``, ``（/Users/name）``), while legal slash-bearing titles like
+#: ``Fate/stay night``, ``A/B 测试``, ``简/繁字幕`` or ``中文/日文`` are NOT
+#: misclassified as absolute paths.
+_SAFE_UNIX_ABS_RE = re.compile(r"(?<![\w/])/([^\s/]+(?:/[^\s/]+)*)")
+#: Chinese path-context marker: ``路径为/data`` / ``路径是/private`` / ``路径/data``
+#: where a CJK path-introducing word abuts ``/`` directly (no punctuation
+#: boundary). The generic rule above cannot see these (the preceding CJK char is
+#: a word char), so a dedicated context rule recognises the leading word.
+_SAFE_CN_PATH_CONTEXT_RE = re.compile(r"路径\s*(?:为|是|在|位于|至|于|到)?\s*(?::|：)?/")
+_SAFE_WINDOWS_ABS_RE = re.compile(r"\b[a-zA-Z]:[\\/]")
+_SAFE_UNC_RE = re.compile(r"(?:^|[^\w])(?:\\\\|//)[^\s\\/]+[\\/]")
+#: key=value / key:value / "Key value" markers for secrets and endpoints.
+_SAFE_SECRET_KEY_RE = re.compile(
+    r"(?:^|[\s;&|,])("
+    r"token|password|passwd|pass|secret|cookie|authorization|auth|bearer|"
+    r"endpoint|api[_-]?key|access[_-]?key|rss[_-]?url|magnet"
+    r")\s*[:=]\s*\S+",
+    re.IGNORECASE,
+)
+
+
+def _safe_label(value: Any) -> str | None:
+    """Return a public display label, or ``[redacted]`` for sensitive text.
+
+    US-217 fix — the previous version only blocked values *starting* with
+    ``http(s)://`` and coerced any non-string to ``str``. Now:
+
+    - non-string values (dict/list/bool/int/float) return ``None`` — never
+      ``str(dict)``/``str(list)`` which could leak nested secrets;
+    - a URL/magnet scheme, absolute path (Unix / Windows / UNC) or a sensitive
+      ``key=value``/``key:value`` marker anywhere in the string is replaced with
+      the stable ``[redacted]`` marker;
+    - ordinary Chinese titles, subtitle-group names, file names and filter
+      rules are returned unchanged (trimmed).
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if (
+        _SAFE_URL_SCHEME_RE.search(text)
+        or _SAFE_MAGNET_RE.search(text)
+        or _SAFE_UNIX_ABS_RE.search(text)
+        or _SAFE_CN_PATH_CONTEXT_RE.search(text)
+        or _SAFE_WINDOWS_ABS_RE.search(text)
+        or _SAFE_UNC_RE.search(text)
+        or _SAFE_SECRET_KEY_RE.search(text)
+        or text.startswith("/")
+    ):
+        return "[redacted]"
+    return text
+
+
+def _safe_count(value: Any) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else 0
+
+
+def _safe_bool(value: Any) -> bool:
+    return value if isinstance(value, bool) else False
+
+
+def _extract_public_bangumi_id(mikan_url: Any) -> str | None:
+    """Extract the public MiKan collection id from a ``/Home/Bangumi/<id>`` URL.
+
+    Only the numeric/public id is returned — the full collection URL never
+    leaves the serializer.
+    """
+    if not isinstance(mikan_url, str):
+        return None
+    marker = "/Home/Bangumi/"
+    if marker not in mikan_url:
+        return None
+    remainder = mikan_url.split(marker, 1)[1].split("?", 1)[0].split("#", 1)[0]
+    candidate = remainder.strip("/")
+    if not candidate or any(ch in candidate for ch in "/\\"):
+        return None
+    return candidate
+
+
+def _rss_source_dicts(source_info: Any) -> list[dict[str, Any]]:
+    if not isinstance(source_info, dict):
+        return []
+    sources = source_info.get("rss_sources")
+    return [s for s in sources if isinstance(s, dict)] if isinstance(sources, list) else []
+
+
+def _combined_source_seed_count(source: dict[str, Any]) -> int:
+    names: list[str] = []
+    for name in source.get("valid_seed_names", []):
+        if isinstance(name, str) and name not in names:
+            names.append(name)
+    for entry in source.get("excluded_seed_names", []):
+        name = entry.get("name") if isinstance(entry, dict) else None
+        if isinstance(name, str) and name not in names:
+            names.append(name)
+    return len(names)
+
+
+def serialize_request_safe_info(
+    request: dict[str, Any],
+    *,
+    history_events: list[dict[str, Any]] | None = None,
+    ab_submit_result: dict[str, Any] | None = None,
+    storage_profile: str | None = None,
+) -> dict[str, Any]:
+    """Build the strict safe-info whitelist for one saved Request (US-217).
+
+    Every value is explicitly read from the snapshot's public display fields;
+    the raw snapshot's ``mikan_url``/``rss_url``/``poster_url``/
+    ``selected_rss_url`` and any credential/upstream-response/absolute-path
+    field never appear. The result is meant to feed ``RequestSafeInfoDTO``
+    (``extra="forbid"``), so an unknown/leaked key fails the boundary tests.
+    """
+    matched: dict[str, Any] = {}
+    raw_input: dict[str, Any] = {}
+    confirmable: dict[str, Any] = {}
+    source_info = request.get("source_info")
+    if isinstance(source_info, dict):
+        matched = source_info.get("matched_bangumi")
+        matched = matched if isinstance(matched, dict) else {}
+    request_input = request.get("input")
+    if isinstance(request_input, dict):
+        raw_input = request_input
+    request_config = request.get("confirmable_config")
+    if isinstance(request_config, dict):
+        confirmable = request_config
+
+    rss_sources = _rss_source_dicts(source_info)
+    selected_group = confirmable.get("selected_subtitle_group")
+    selected_group_label = _safe_label(selected_group)
+    selected_source = next(
+        (source for source in rss_sources if source.get("subtitle_group") == selected_group),
+        None,
+    )
+
+    # Resources (sanitized file names only — never magnet/download URLs/RSS).
+    valid_names = _safe_string_list(
+        (selected_source or {}).get("valid_seed_names")
+        or confirmable.get("effective_seed_names")
+    )
+    excluded_entries = (selected_source or {}).get("excluded_seed_names", [])
+    excluded_files: list[dict[str, Any]] = []
+    for entry in excluded_entries if isinstance(excluded_entries, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        excluded_files.append(
+            {
+                "name": _safe_label(entry.get("name")) or "",
+                "reason": _safe_label(entry.get("reason")) or "",
+            }
+        )
+    complete_count = sum(
+        _combined_source_seed_count(source) for source in rss_sources
+    )
+    resources: dict[str, Any] = {
+        "selected_subtitle_group": selected_group_label,
+        "valid_resource_count": len(valid_names),
+        "invalid_resource_count": len(excluded_files),
+        "complete_resource_count": complete_count,
+        "valid_file_names": valid_names,
+        "excluded_file_names": excluded_files,
+    }
+
+    filter_rule = confirmable.get("filter_rule")
+    filter_rule = filter_rule if isinstance(filter_rule, dict) else {}
+
+    subtitle_groups = [
+        {
+            "subtitle_group": _safe_label(source.get("subtitle_group")),
+            "total_resource_count": _safe_count(source.get("total_seed_count")),
+            "valid_resource_count": _safe_count(source.get("valid_seed_count")),
+            "invalid_resource_count": _safe_count(source.get("invalid_seed_count")),
+            "warnings": [
+                _safe_label(warning) or ""
+                for warning in source.get("warnings", [])
+                if isinstance(warning, str)
+            ],
+        }
+        for source in rss_sources
+    ]
+
+    title = _safe_label(matched.get("title"))
+    mikan_collection: dict[str, Any] = {
+        "title": title,
+        "bangumi_id": _extract_public_bangumi_id(matched.get("mikan_url")),
+    }
+
+    history_summary: list[dict[str, Any]] = []
+    for event in history_events or []:
+        if not isinstance(event, dict):
+            continue
+        history_summary.append(
+            {
+                "action": _safe_label(event.get("action")),
+                "previous_status": _safe_label(event.get("previous_status")),
+                "next_status": _safe_label(event.get("next_status")),
+                "timestamp": _safe_label(event.get("timestamp")),
+            }
+        )
+
+    ab_status: dict[str, Any] = {
+        "submitted": False,
+        "success": None,
+        "ab_subscription_id": None,
+        "error_type": None,
+    }
+    if isinstance(ab_submit_result, dict):
+        ab_status["submitted"] = True
+        success = ab_submit_result.get("success")
+        ab_status["success"] = success if isinstance(success, bool) else None
+        ab_subscription_id = ab_submit_result.get("ab_subscription_id")
+        ab_status["ab_subscription_id"] = _safe_label(ab_subscription_id)
+        if ab_status["success"] is False:
+            error = ab_submit_result.get("error")
+            if isinstance(error, dict):
+                ab_status["error_type"] = _safe_label(error.get("error_type"))
+
+    return {
+        "request_id": _safe_label(request.get("request_id")),
+        "status": _safe_label(request.get("status")),
+        "raw_title": _safe_label(raw_input.get("raw_title")),
+        "title": title,
+        "aliases": _safe_string_list(matched.get("aliases")),
+        "season": matched.get("season") if isinstance(matched.get("season"), int) else None,
+        "season_raw": _safe_label(matched.get("season_raw")),
+        "season_evidence": _safe_label(matched.get("season_evidence")),
+        "mikan_collection": mikan_collection,
+        "subtitle_groups": subtitle_groups,
+        "selected_subtitle_group": selected_group_label,
+        "filter_rule": {
+            "must_contain": _safe_label(filter_rule.get("must_contain")) or "",
+            "must_not_contain": _safe_label(filter_rule.get("must_not_contain")) or "",
+            "use_regex": _safe_bool(filter_rule.get("use_regex")),
+            "case_sensitive": _safe_bool(filter_rule.get("case_sensitive")),
+        },
+        "resources": resources,
+        "folder_name": _safe_label(confirmable.get("expected_folder_name")),
+        "storage_profile": storage_profile,
+        "total_episodes": None,
+        "updated_episode": None,
+        "updated_episode_status": "NOT_IMPLEMENTED",
+        "history_summary": history_summary,
+        "ab_status": ab_status,
+    }
+
+
+def _safe_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    cleaned: list[str] = []
+    for item in value:
+        label = _safe_label(item)
+        if label is not None:
+            cleaned.append(label)
+    return cleaned
 
 
 def _strip_sensitive_result_fields(value: Any) -> Any:

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 Migrated from ``views.py`` without behavior change. URL, methods and endpoint
 names are identical; the golden contract tests protect this compatibility.
+US-217 adds ``GET /api/v1/requests/<request_id>/safe-info`` — the strict
+safe-info whitelist for the read-only "全部信息" dialog.
 """
+
+from pathlib import Path
+from typing import Any
 
 from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_entry.controllers.entry_controller import (
@@ -22,7 +27,19 @@ from apps.migu_orca_web.drafts import (
     REASON_EVICTED,
     REASON_OK,
     REASON_REPLAYED,
+    REASON_RESERVED,
+    REASON_REVISION_CONFLICT,
+    DraftRead,
     draft_store,
+)
+from apps.migu_orca_web.save_confirm_service import (
+    HANDOFF_NEXT_ACTION_OPEN_TRACKING,
+    HANDOFF_STATUS_ACCEPTED,
+    STATE_CONFIRMED,
+    STATE_SAVED_CONFIRM_FAILED,
+    SaveConfirmOutcome,
+    build_saved_confirm_failed_error,
+    run_save_confirm,
 )
 from apps.migu_orca_web.schemas import (
     RequestAbSubmitPayload,
@@ -34,16 +51,21 @@ from apps.migu_orca_web.schemas import (
     RequestModifyPayload,
     RequestPreviewModifyPayload,
     RequestPreviewSavePayload,
+    RequestSaveConfirmPayload,
 )
 from apps.migu_orca_web.serializers import (
     _raise_result_error,
     _sanitize_ab_submit_result,
+    serialize_request_safe_info,
 )
 from apps.migu_orca_web.services import (
+    _build_save_confirm_confirm_saved,
+    _build_save_confirm_persist_pending,
     _load_ab_result_section,
     _load_history_section,
     _resolve_mikan_config,
     _storage_dir,
+    _storage_profile,
 )
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
@@ -62,18 +84,40 @@ from storage_engine.controllers.request_repository import (
 from storage_engine.controllers.storage_config import load_storage_config
 
 
-def _draft_store_error(reason: str) -> Stage1Error:
+def _draft_store_error(reason: str, current_revision: int | None = None) -> Stage1Error:
     """Map a DraftStore lookup reason to a stable 409 draft_* error.
 
     US-194: expired/evicted/replayed/mismatched drafts are state conflicts
     (409) with a Chinese message telling the user to regenerate, never a leak
-    of draft content or an absolute path.
+    of draft content or an absolute path. US-210: a stale ``base_revision`` is
+    its own ``draft_revision_conflict`` (the payload/revision are untouched),
+    still 409 but with only the current revision in the safe error data
+    (US-211: never the draft id or any draft content). US-212: a reserved
+    draft (another save-in-progress owns it) is ``draft_reserved``, a 409
+    telling the user another save is already running.
     """
+    if reason == REASON_RESERVED:
+        return Stage1Error(
+            "draft_reserved",
+            "订阅草案正在保存中，请稍后重试",
+            "reserve_preview_draft",
+            {"field": "draft_id"},
+        )
+    if reason == REASON_REVISION_CONFLICT:
+        details: dict[str, object] = {"field": "base_revision"}
+        if current_revision is not None:
+            details["current_revision"] = current_revision
+        return Stage1Error(
+            "draft_revision_conflict",
+            "草案已被更新，请基于最新版本重试",
+            "compare_and_swap_draft",
+            details,
+        )
     if reason == REASON_REPLAYED:
         return Stage1Error(
             "draft_replayed",
             "订阅草案已被保存，请勿重复保存",
-            "consume_preview_draft",
+            "reserve_preview_draft",
             {"field": "draft_id"},
         )
     if reason == REASON_EVICTED:
@@ -90,6 +134,51 @@ def _draft_store_error(reason: str) -> Stage1Error:
         "load_preview_draft",
         {"field": "draft_id"},
     )
+
+
+@class_route(api_blueprint, "/api/v1/requests/<path:request_id>/safe-info", methods=["GET"])
+class RequestSafeInfoView(GetView):
+    """Return the strict safe-info whitelist for one saved Request (US-217).
+
+    This is the single safe data source for the "全部信息" read-only dialog. The
+    explicit ``serialize_request_safe_info`` serializer builds the whitelist
+    field-by-field (default-deny, D28-10) and never returns the snapshot
+    unchanged, so full collection/RSS URLs, endpoints, credentials, raw
+    upstream responses and absolute paths cannot reach the page or the DOM.
+    ``updated_episode`` is always null and ``updated_episode_status`` is always
+    NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+    """
+
+    request_validator_model = RequestDetailQuery
+
+    def get_object(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestDetailQuery)
+        storage_dir = _storage_dir(self.request_validator_model.storage_dir)
+        config = load_storage_config(storage_dir)
+        request_id = self.request_validator_model.request_id
+        request = load_request_snapshot(config, request_id)
+        history_events: list[dict[str, object]] = []
+        ab_submit_result: dict[str, object] | None = None
+        history_section = _load_history_section(config, request_id)
+        if history_section.get("available") is True:
+            loaded_events = history_section.get("events")
+            if isinstance(loaded_events, list):
+                history_events = loaded_events
+        ab_section = _load_ab_result_section(config, request_id)
+        if ab_section.get("available") is True:
+            record = ab_section.get("record")
+            if isinstance(record, dict):
+                loaded_ab = record.get("ab_submit_result")
+                if isinstance(loaded_ab, dict):
+                    ab_submit_result = loaded_ab
+        return {
+            "safe_info": serialize_request_safe_info(
+                request,
+                history_events=history_events,
+                ab_submit_result=ab_submit_result,
+                storage_profile=_storage_profile(storage_dir),
+            )
+        }
 
 
 @class_route(api_blueprint, "/api/v1/requests", methods=["GET"])
@@ -178,8 +267,12 @@ class RequestCreateView(PostView):
             # bounded draft store and hand the client only an opaque draft_id;
             # preview-modify/preview-save reference this id instead of a
             # client-supplied full Request. The draft itself never enters URL,
-            # browser storage, history, logs or screenshots.
-            response["draft_id"] = draft_store.issue(request)
+            # browser storage, history, logs or screenshots. US-211: the
+            # monotonic draft_revision is returned alongside the id so the
+            # next modify/save can send it back as base_revision.
+            handle = draft_store.issue(request)
+            response["draft_id"] = handle.draft_id
+            response["draft_revision"] = handle.revision
         return response
 
 
@@ -196,20 +289,44 @@ class RequestPreviewModifyView(PostView):
         # trusted from the client. modify_request recomputes per-source seed
         # filters and the selected group's effective seeds without saving, so
         # the UI can show live seed updates before the user saves the draft.
-        draft, draft_reason = draft_store.get(payload.draft_id)
-        if draft is None or draft_reason != REASON_OK:
+        # US-210/US-211: ``get`` returns the current revision alongside the
+        # payload so the modify is a compare-and-swap against the client's
+        # ``base_revision``; a stale base is a 409 draft_revision_conflict and
+        # never overwrites the newer draft.
+        draft_read: DraftRead | None
+        draft_read, draft_reason = draft_store.get(payload.draft_id)
+        if draft_read is None or draft_reason != REASON_OK:
             raise _draft_store_error(draft_reason)
         result = apply_modify_action(
-            {"success": True, "request": draft, "error": None},
+            {"success": True, "request": draft_read.request, "error": None},
             payload.patch,
         )
         if not result["success"]:
             _raise_result_error(result)
         req = result["request"]
-        # Keep the server-side draft in sync so preview-save persists the
-        # modified state the user just reviewed.
-        draft_store.update(payload.draft_id, req)
-        return {"request": req, "summary": summarize_request(req), "draft_id": payload.draft_id}
+        # CAS against the revision the client observed. On success the
+        # server-side draft is replaced atomically and the revision bumps by 1
+        # so preview-save persists the exact state the user just reviewed.
+        new_revision, swap_reason = draft_store.compare_and_swap(
+            payload.draft_id,
+            payload.base_revision,
+            req,
+        )
+        if new_revision is None or swap_reason != REASON_OK:
+            # Re-read so the safe error data carries the true current revision
+            # (a concurrent modify may have bumped it after the first read).
+            current_revision = None
+            if swap_reason == REASON_REVISION_CONFLICT:
+                latest_read, latest_reason = draft_store.get(payload.draft_id)
+                if latest_read is not None and latest_reason == REASON_OK:
+                    current_revision = latest_read.revision
+            raise _draft_store_error(swap_reason, current_revision=current_revision)
+        return {
+            "request": req,
+            "summary": summarize_request(req),
+            "draft_id": payload.draft_id,
+            "draft_revision": new_revision,
+        }
 
 
 @class_route(api_blueprint, "/api/v1/requests/preview-save", methods=["POST"])
@@ -219,36 +336,176 @@ class RequestPreviewSaveView(PostView):
     def save(self) -> dict[str, object]:
         assert isinstance(self.request_validator_model, RequestPreviewSavePayload)
         payload = self.request_validator_model
-        # US-194: preview-save consumes a valid draft_id once (replay
-        # protection). The authoritative draft content never comes from the
-        # client; a stale/expired/already-saved id returns a stable 409.
-        request, save_reason = draft_store.consume_for_save(payload.draft_id)
+        # US-194/US-212: preview-save *reserves* the draft against the
+        # base_revision the client observed, persists the authoritative
+        # snapshot, and only then commits the replay tombstone. A persistence
+        # failure releases the reservation so the same draft_id/revision can be
+        # retried — the user never loses their edit and is never forced to
+        # re-search (the old consume-before-persist destroyed the draft on a
+        # failed disk write). The authoritative draft content never comes from
+        # the client; a stale/expired/already-saved/reserved id returns a
+        # stable 409.
+        request, save_reason = draft_store.reserve_for_save(
+            payload.draft_id, payload.base_revision
+        )
         if request is None or save_reason != REASON_OK:
-            raise _draft_store_error(save_reason)
-        # Only a PENDING_CONFIRM draft may be saved; this keeps the saved object
-        # entering the existing confirmation flow (accept/cancel/modify/delete).
-        if request.get("status") != PENDING_CONFIRM:
-            raise Stage1Error(
-                "invalid_request_status",
-                "只有待确认的订阅草案可以保存",
-                "save_preview_request",
-                {"status": request.get("status")},
+            # US-211 parity: a revision conflict re-reads so the safe error
+            # data carries the true current revision for the retry.
+            current_revision = None
+            if save_reason == REASON_REVISION_CONFLICT:
+                latest_read, latest_reason = draft_store.get(payload.draft_id)
+                if latest_read is not None and latest_reason == REASON_OK:
+                    current_revision = latest_read.revision
+            raise _draft_store_error(save_reason, current_revision=current_revision)
+        try:
+            # Only a PENDING_CONFIRM draft may be saved; this keeps the saved
+            # object entering the existing confirmation flow
+            # (accept/cancel/modify/delete).
+            if request.get("status") != PENDING_CONFIRM:
+                raise Stage1Error(
+                    "invalid_request_status",
+                    "只有待确认的订阅草案可以保存",
+                    "save_preview_request",
+                    {"status": request.get("status")},
+                )
+            result = apply_request_save_action(
+                {"success": True, "request": request, "error": None},
+                True,
+                storage_dir=_storage_dir(payload.storage_dir),
             )
-        result = apply_request_save_action(
-            {"success": True, "request": request, "error": None},
-            True,
+            if not result["success"]:
+                _raise_result_error(result)
+            # The Request is durable; only now consume the draft (replay
+            # protection) so a later save of the same id is ``draft_replayed``.
+            draft_store.commit_save(payload.draft_id)
+            req = result["request"]
+            response: dict[str, object] = {
+                "request": req,
+                "summary": summarize_request(req),
+            }
+            if "saved_request" in result:
+                response["saved_request"] = result["saved_request"]
+            return response
+        except Exception:
+            # Persistence (or a validation guard) failed before commit: keep the
+            # draft alive at its current revision so the client can retry the
+            # exact same save.
+            draft_store.release_save(payload.draft_id)
+            raise
+
+
+def _run_draft_save_confirm(
+    *,
+    draft_id: str,
+    base_revision: int,
+    idempotency_key: str,
+    storage_dir: Path | None,
+) -> SaveConfirmOutcome:
+    """Run the durable single save-confirm use case for one preview draft.
+
+    Shared by the single ``RequestSaveConfirmView`` (US-214) and the batch
+    save-confirm route (US-216): reserves the draft against the revision,
+    persists the PENDING_CONFIRM snapshot, confirms it to ACCEPTED, and
+    records the terminal idempotency outcome. Expected failures raise the
+    ``Stage1Error`` a single-request caller surfaces through the envelope
+    (draft_* 409s, idempotency_conflict); a persisted-but-unconfirmed outcome
+    is returned (not raised) so the single view can build the
+    ``save_confirm_failed`` envelope while the batch view maps it to a stable
+    per-item failed result.
+    """
+
+    def reserve_draft() -> dict[str, Any]:
+        request, reason = draft_store.reserve_for_save(draft_id, base_revision)
+        if request is None or reason != REASON_OK:
+            current_revision = None
+            if reason == REASON_REVISION_CONFLICT:
+                latest_read, latest_reason = draft_store.get(draft_id)
+                if latest_read is not None and latest_reason == REASON_OK:
+                    current_revision = latest_read.revision
+            raise _draft_store_error(reason, current_revision=current_revision)
+        return request
+
+    def commit_draft() -> None:
+        draft_store.commit_save(draft_id)
+
+    def release_draft() -> None:
+        draft_store.release_save(draft_id)
+
+    def peek_draft() -> dict[str, Any] | None:
+        # Non-mutating observation for terminal-replay fingerprint verification
+        # (US-213 fix). ``peek`` never reserves/consumes/refreshes the draft.
+        # Only truly-gone states (replayed/expired/evicted/unknown — a restart
+        # or an already-consumed save) fold into ``None`` so the terminal record
+        # can still replay safely. A *reserved* draft means another
+        # save-in-progress owns it, so it must never be mistaken for "gone" —
+        # it raises the 409 ``draft_reserved`` error instead of replaying an
+        # unrelated terminal outcome.
+        request, reason = draft_store.peek(draft_id)
+        if reason == REASON_RESERVED:
+            raise _draft_store_error(REASON_RESERVED)
+        if request is None or reason != REASON_OK:
+            return None
+        return request
+
+    return run_save_confirm(
+        config=load_storage_config(storage_dir),
+        idempotency_key=idempotency_key,
+        reserve_draft=reserve_draft,
+        persist_pending=_build_save_confirm_persist_pending(storage_dir),
+        confirm_saved=_build_save_confirm_confirm_saved(storage_dir),
+        commit_draft=commit_draft,
+        release_draft=release_draft,
+        peek_draft=peek_draft,
+    )
+
+
+@class_route(api_blueprint, "/api/v1/requests/save-confirm", methods=["POST"])
+class RequestSaveConfirmView(PostView):
+    """One save-and-confirm operation over a preview draft (US-214).
+
+    The client sends only the server-issued ``draft_id``, the ``base_revision``
+    it last observed, and an opaque ``idempotency_key`` — never a full Request.
+    The durable coordinator (``run_save_confirm``, US-213) reserves the draft
+    against the revision, persists the PENDING_CONFIRM snapshot, confirms it to
+    ACCEPTED, and records the terminal idempotency outcome. A retry with the
+    same key converges on the same saved Request; a different key replaying an
+    already-consumed draft is a 409 ``draft_replayed``; a confirmation failure
+    after the save landed returns the SAVED_CONFIRM_FAILED failure envelope
+    with only the public request_id and the ACCEPT_SAVED_REQUEST retry action.
+    """
+
+    request_validator_model = RequestSaveConfirmPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, RequestSaveConfirmPayload)
+        payload = self.request_validator_model
+        outcome = _run_draft_save_confirm(
+            draft_id=payload.draft_id,
+            base_revision=payload.base_revision,
+            idempotency_key=payload.idempotency_key,
             storage_dir=_storage_dir(payload.storage_dir),
         )
-        if not result["success"]:
-            _raise_result_error(result)
-        req = result["request"]
-        response: dict[str, object] = {
-            "request": req,
-            "summary": summarize_request(req),
+        if outcome.outcome == STATE_SAVED_CONFIRM_FAILED:
+            # The Request is durable but acceptance failed. This is a terminal
+            # outcome for the key and returns through the failure envelope
+            # (409 save_confirm_failed) with only the public request_id + retry
+            # action. The client accepts the already-saved Request directly.
+            request_id = outcome.request_id or ""
+            raise build_saved_confirm_failed_error(request_id)
+        assert outcome.outcome == STATE_CONFIRMED
+        assert outcome.request_id is not None
+        assert outcome.request is not None
+        assert outcome.summary is not None
+        return {
+            "outcome": STATE_CONFIRMED,
+            "request": outcome.request,
+            "summary": outcome.summary,
+            "handoff": {
+                "request_id": outcome.request_id,
+                "status": HANDOFF_STATUS_ACCEPTED,
+                "next_action": HANDOFF_NEXT_ACTION_OPEN_TRACKING,
+            },
         }
-        if "saved_request" in result:
-            response["saved_request"] = result["saved_request"]
-        return response
 
 
 @class_route(api_blueprint, "/api/v1/requests/<path:request_id>/accept", methods=["POST"])

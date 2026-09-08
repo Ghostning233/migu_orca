@@ -1,0 +1,166 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage28-draft-consistency",
+  "description": "Stage 28：为服务端权威草案增加 revision 和可靠保存生命周期，提供单番/批量原子保存确认、36 部上限与 Request 安全信息契约，不提前实现 tracking 或 Auto Bangumi 管理。",
+  "userStories": [
+    {
+      "id": "US-210",
+      "title": "建立带 revision 的 DraftStore 原语",
+      "description": "作为后端开发者，我需要让每个服务端权威草案拥有单调 revision，以便服务端拒绝乱序旧写。",
+      "acceptanceCriteria": [
+        "DraftStore issue 建立 revision=1 的草案 handle，读取同时返回权威草案和当前 revision",
+        "新增 compare-and-swap 更新：base_revision 匹配时原子替换草案并将 revision 加 1",
+        "base_revision 不匹配时 payload 和 revision 均不变化，并返回可区分的 revision conflict 结果",
+        "TTL、LRU、容量、expired、evicted、replayed tombstone 和 clear 行为保持兼容",
+        "单元测试覆盖初始 revision、连续更新、乱序冲突、过期、逐出、重放和清理",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": "已实现 DraftHandle(revision=1)/DraftRead/compare_and_swap + REASON_REVISION_CONFLICT；get 返回当前 revision；全部生命周期操作由 RLock 串行化，真实并发同 revision 双写仅一项成功；读写边界深拷贝防止绕过 CAS 修改；TTL/LRU/evict/replay/clear 兼容；单元测试 16 例通过。"
+    },
+    {
+      "id": "US-211",
+      "title": "把 revision 接入 preview API 与生成契约",
+      "description": "作为前端客户端，我需要从生成接口取得 revision，并在每次草案重算时携带它，使乱序请求不能覆盖最新结果。",
+      "acceptanceCriteria": [
+        "POST /api/v1/requests 在 save_request=false 时返回 draft_id 和 draft_revision",
+        "POST /api/v1/requests/preview-modify 要求 base_revision，成功返回同一 draft_id、新 draft_revision 和原子重算结果",
+        "revision 不匹配返回 HTTP 409 draft_revision_conflict，error_data 只含 field=base_revision 和 current_revision",
+        "现有 Vue 草案调用只在组件内存维护 revision，不把 revision 或 draft_id 写入 URL 或 browser storage",
+        "同步请求/响应 DTO、OpenAPI、endpoint inventory、生成 TypeScript client、golden/API/fixture 测试且无漂移",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "已完成：create 在 save_request=false 返回 draft_id+draft_revision(=1)；preview-modify 必填 base_revision(>=1) 走 compare_and_swap，成功返回同 draft_id+新 draft_revision；stale base 返回 409 draft_revision_conflict，error_data 只含 field=base_revision 与 current_revision（已修 _error_http_status 分类从 400→409）；Vue 草案调用只在组件内存维护 draft_id/draft_revision（DraftPreviewPanel 局部 ref + changed 事件回传父组件/批量卡片），不写 URL/browser storage。同步 DTO、OpenAPI、endpoint inventory、生成 TS client 无漂移；golden/views/DTO/browser/fixture 测试覆盖。1028 非浏览器 + 133 浏览器 + 前端 260 单测 + typecheck/lint/api:check/build 全绿。"
+    },
+    {
+      "id": "US-212",
+      "title": "修复草案先消费后持久化的问题",
+      "description": "作为用户，我希望保存写盘失败后仍能重试同一草案，而不必重新搜索和编辑。",
+      "acceptanceCriteria": [
+        "DraftStore 提供 reserve_for_save、commit_save 和 release_save 生命周期，保存不再先 pop 草案",
+        "reservation 校验 draft_id 和 base_revision，并在预留期间拒绝修改及不同保存操作",
+        "preview-save 只有在 Request 持久化成功后 commit，持久化异常时 release 且保留原 revision",
+        "成功保存继续保留 replay 防护，失败和冲突不泄漏草案、storage 绝对路径或原始异常",
+        "单元/API 测试注入持久化失败，证明同一 draft/revision 可再次保存且只产生一个 Request",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "已实现：DraftStore 新增 reserve_for_save(draft_id, base_revision)/commit_save/release_save（RLock 临界区），预留期间 get/CAS/update/consume/逐出/过期均拒绝并返回 REASON_RESERVED；preview-save 必填 base_revision(>=1)，持久化成功才 commit 写重放 tombstone，异常时 release 保留原 revision；新增 409 draft_reserved（_error_http_status + OpenAPI 声明）；前端 DraftPreviewPanel 发送 base_revision，WorkbenchView 保存失败不再清除草案（可重试）。单元测试 24 例 + golden/views 注入写盘失败证明同 draft 重试只产生一个 Request；OpenAPI/inventory/TS client/README/AGENTS 同步。非浏览器 1042 + 浏览器 133 + 前端 261 全绿，typecheck/lint/api:check/build/compileall/ruff 通过。"
+    },
+    {
+      "id": "US-213",
+      "title": "建立保存确认幂等记录",
+      "description": "作为客户端，我希望保存确认在响应丢失或进程重启后可以安全重试，不会创建重复 Request。",
+      "acceptanceCriteria": [
+        "storage engine 新增原子读写的 save-confirm idempotency repository，记录只含 key、operation、不可逆 request_fingerprint、request_id、state 和时间",
+        "状态支持 IN_PROGRESS、SAVED_CONFIRM_FAILED、CONFIRMED，并能对同一 key 返回同一公开最终结果",
+        "同一 key 绑定不同操作或 payload 返回 HTTP 409 idempotency_conflict，错误不得回显原始 payload",
+        "IN_PROGRESS 重试先核对已保存 Request，再决定继续确认或安全重试保存，不无条件创建新 Request",
+        "测试覆盖进程内 DraftStore 清空后的重试、损坏/缺失记录、重复成功、并发冲突和敏感字段缺失",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "已实现：storage engine 新增 `<storage>/idempotency/<opaque-key>.json` 原子读写 repository（temp+os.replace，白名单字段 idempotency_key/operation/request_fingerprint/request_id/state/created_at/updated_at，永不落盘 draft/标题/URL/凭据/路径）；`apps/migu_orca_web/save_confirm_service.py` 提供 compute_request_fingerprint（业务字段规范化 sha256，排除 request_id 与敏感字段）、run_save_confirm 组合协调器（终态重放/IN_PROGRESS rule-3 磁盘核对/确认失败 SAVED_CONFIRM_FAILED）、resolve_in_progress_retry；同键不同 operation/payload → Stage1Error idempotency_conflict 归 409（_error_http_status）。单测覆盖终态重放不触 draft、DraftStore 清空后重试不重复建 Request、IN_PROGRESS 磁盘核对、崩溃窗口、持久化失败可重试、确认失败 commit 防重复、并发同键仅一 Request、operation/payload 冲突不回显 payload、敏感字段缺失。非浏览器 1067 passed；ruff/compileall/openapi --check/git diff 全绿；US-214 将接线为 POST /api/v1/requests/save-confirm。 【Stage 28 静态审查修复】终态幂等键重放前经无副作用 DraftStore.peek 核对仍存在草案的 fingerprint，同键异草案→409 idempotency_conflict（草案保持可用）；reserve 后到 persist 成功前的任一异常均 release_draft（显式 persisted 阶段标志）；请求模型改 extra=forbid（OpenAPI additionalProperties:false）；_KEY_LOCKS 改引用计数锁。 【Stage 28 边界修复】peek_draft 区分 reserved 与真正缺失：reserved → 409 draft_reserved 绝不重放旧终态，仅 replayed/expired/evicted/unknown 折叠为 None 允许安全重放；单番与批量共用同一语义。"
+    },
+    {
+      "id": "US-214",
+      "title": "实现单番 save-confirm 组合端点",
+      "description": "作为添加一部番剧的用户，我希望一次保存并确认操作完成服务端校验、持久化和接受。",
+      "acceptanceCriteria": [
+        "新增 POST /api/v1/requests/save-confirm 的严格请求/响应 DTO、application service、route 和可读 operationId",
+        "请求只接受 draft_id、base_revision、idempotency_key 和安全相对 storage_dir，不接受完整 Request",
+        "成功一次完成 revision 校验、reservation、持久化、确认和幂等提交，并返回 CONFIRMED、Request summary 与 ACCEPTED handoff",
+        "持久化成功但确认失败时返回 SAVED_CONFIRM_FAILED、公开 request_id 和 ACCEPT_SAVED_REQUEST，不要求重新生成",
+        "测试覆盖全成功、保存失败可重试、确认失败、同键重试、异键重放、状态冲突和递归错误脱敏",
+        "同步 OpenAPI、endpoint inventory 和生成 TypeScript client 且无漂移",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "已实现：新增严格请求/响应 DTO（RequestSaveConfirmPayload 校验 idempotency_key 为不含路径的安全 opaque 值；RequestSaveConfirmResultDTO + RequestSaveConfirmHandoffDTO strict；SaveConfirmFailedErrorDataDTO 冻结 error_data.details 白名单）。routes_requests.RequestSaveConfirmView（POST /api/v1/requests/save-confirm, operationId confirmRequestSave）用 services._build_save_confirm_persist_pending/_build_save_confirm_confirm_saved + DraftStore reserve/commit/release 闭包接入 US-213 run_save_confirm：成功返回 CONFIRMED + 已保存 ACCEPTED Request + handoff(request_id/status=ACCEPTED/next_action=OPEN_TRACKING)；同一 idempotency_key 重试终态重放返回同一 Request；不同键重放已保存 draft → 409 draft_replayed；持久化失败 release 可重试；持久化成功但确认失败 → 409 save_confirm_failed（details 只含 outcome=SAVED_CONFIRM_FAILED/request_id/retry_action=ACCEPT_SAVED_REQUEST，build_saved_confirm_failed_error 构造）；同键不同 payload/操作 → 409 idempotency_conflict 不回显 payload。save_confirm_failed 加入 _error_http_status 409 集合；idempotency_conflict 从 runtime-consistency 豁免集移入 _ENDPOINTS 声明。同步 OpenAPI/inventory/生成 TS client/api.test.ts/README/AGENTS。golden(9 例)+DTO(3 例)+view(4 例)+分类/一致性覆盖：全成功、保存失败可重试、确认失败、同键重试、异键重放、revision 冲突、未知 draft、缺/非法 idempotency_key、plan 冲突、递归脱敏与敏感字段缺失。非浏览器 1083 + 浏览器 133 + 前端 261 单测 + typecheck/lint/api:check/build/compileall/ruff 全绿。 【Stage 28 静态审查修复】终态幂等键重放前经无副作用 DraftStore.peek 核对仍存在草案的 fingerprint，同键异草案→409 idempotency_conflict（草案保持可用）；reserve 后到 persist 成功前的任一异常均 release_draft（显式 persisted 阶段标志）；请求模型改 extra=forbid（OpenAPI additionalProperties:false）；_KEY_LOCKS 改引用计数锁。"
+    },
+    {
+      "id": "US-215",
+      "title": "建立批量 1 至 36 部服务端边界",
+      "description": "作为批量用户，我希望服务端明确支持最多 36 部，并在处理前说明超限，而不是静默截断。",
+      "acceptanceCriteria": [
+        "BatchParsePayload 和服务端用例按规范化非空行计数，1、12、36 部通过，0 部沿用 validation_error",
+        "37 部及以上在标题解析或 MiKan 调用前返回 HTTP 400 batch_limit_exceeded",
+        "超限 error_data 只含 field=raw_input、limit=36 和 actual，不回显原始批量输入",
+        "测试 seam 证明超限请求没有调用标题解析器、MiKan 搜索或持久化",
+        "同步 OpenAPI、endpoint inventory、生成 TypeScript client 和当前批量 fixture",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "已实现：batch_engine.models 新增 MAX_BATCH_ITEMS=36；batch_draft_controller.split_batch_raw_input 成为 create_batch_draft 与路由共用的非空行计数来源（计数与 engine 拆分永不分叉）；POST /api/v1/batches/parse 在 create_batch_draft/标题解析/MiKan/持久化之前先计数——0 行沿用 validation_error，超过 36 行返回 HTTP 400 batch_limit_exceeded（_error_http_status 400 集合 + _ENDPOINTS 声明 + error_data.details 只含 field=raw_input/limit=36/actual，error_message 用固定中文不回显原始输入）。测试 seam monkeypatch create_batch_draft/_batch_title_parsing_provider/_search_batch_item_candidates/load_storage_config/_resolve_mikan_config/_load_preferences_for_batch/_load_corrections_for_batch，证明超限请求一个 seam 都没调用。同步 OpenAPI docs/api/openapi.json、endpoint inventory §1/§3.4/§4、生成 TS client api.ts、README、AGENTS.md。非浏览器 1092 + 浏览器 133 + 前端 typecheck/lint/261 单测/api:check/build 全绿；ruff/compileall/git diff --check 通过。"
+    },
+    {
+      "id": "US-216",
+      "title": "实现批量 save-confirm 部分成功端点",
+      "description": "作为批量审核用户，我希望一次确认所选条目，并让成功项保留、失败项可定位重试。",
+      "acceptanceCriteria": [
+        "新增 POST /api/v1/batches/{batch_id}/save-confirm 的严格请求 DTO、逐条结果 DTO、service、route 和可读 operationId",
+        "每条只接受 item_id、draft_id、base_revision 和 idempotency_key，支持 item_ids 选择并保持输入顺序",
+        "每条复用单番保存确认 service，成功项不因其他条目失败回滚，失败项返回稳定脱敏原因",
+        "同一成功项幂等重试不创建第二个 Request；重复 item、重复/冲突 key 有确定性结果",
+        "测试覆盖 1、12、36 部、部分成功、revision 冲突、请求级错误、逐条计数与成功项重放",
+        "同步 OpenAPI、endpoint inventory 和生成 TypeScript client 且无漂移",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "已实现：schemas.py 新增 BatchItemSaveConfirmPayload/BatchSaveConfirmPayload（每条 item_id/draft_id/base_revision/idempotency_key，item_ids 可选保持输入顺序）；api_contract.py 新增 strict BatchSaveConfirmItemResultDTO/BatchSaveConfirmResultDTO；save_confirm_service.py 新增 run_batch_save_confirm（逐条部分成功协调器：重复 item_id→skipped，同请求复用同一 idempotency_key→逐条 idempotency_conflict 绝不重放/误报，unexpected→脱敏 failed，summary={requested,confirmed,failed}）+ build_batch_process_one + serialize_batch_save_confirm_result；routes_requests.py 抽出 _run_draft_save_confirm 供单番/批量共用（US-214 seam 不重复）；routes_batches.py 新增 BatchSaveConfirmView（POST /api/v1/batches/{batch_id}/save-confirm，operationId saveConfirmBatchItems）用 _batch_item_save_confirm_error 把 draft_expired/draft_revision_conflict/draft_reserved/idempotency_conflict/save_confirm_failed 映射为固定中文脱敏逐条 failed。成功=HTTP 200 {batch_id,results[],summary}；同 item+同 key 幂等重试重放同一 CONFIRMED 不建第二个 Request；请求级 shape/storage 错误仍走普通失败 envelope。同步 DTO/OpenAPI/_ENDPOINTS/endpoint inventory §2/§3.4/§4/README/AGENTS/生成 TS client/api.test.ts。golden 10 例（部分成功/stale/revision/duplicate/shared-key/save_confirm_failed/unknown draft/validation/1-12-36/same-key replay）+ DTO 2 例 + view 7 例 + coordinator 单测 4 例。非浏览器 1116 + 浏览器 133 + 前端 261 单测 + typecheck/lint/api:check/build/compileall/ruff/openapi --check 全绿。 【Stage 28 静态审查修复】终态幂等键重放前经无副作用 DraftStore.peek 核对仍存在草案的 fingerprint，同键异草案→409 idempotency_conflict（草案保持可用）；reserve 后到 persist 成功前的任一异常均 release_draft（显式 persisted 阶段标志）；请求模型改 extra=forbid（OpenAPI additionalProperties:false）；_KEY_LOCKS 改引用计数锁。"
+    },
+    {
+      "id": "US-217",
+      "title": "提供 Request safe-info 严格白名单",
+      "description": "作为查看方案的用户，我希望看到完整但安全的信息摘要，而不会把 RSS、magnet、凭据或本地路径暴露给页面。",
+      "acceptanceCriteria": [
+        "新增 GET /api/v1/requests/{request_id}/safe-info、RequestSafeInfoDTO、显式 serializer 和可读 operationId",
+        "DTO 使用 extra=forbid，只返回 PRD 规定的标题、季度、合集、字幕组、规则、资源计数、状态和脱敏历史摘要",
+        "updated_episode 固定为 null 且 updated_episode_status=NOT_IMPLEMENTED，不根据种子/RSS/下载状态猜测",
+        "完整 URL、RSS、magnet、endpoint、token、cookie、password、Authorization、原始响应和绝对路径不出现在成功/错误/OpenAPI 示例",
+        "递归 DTO/泄漏测试覆盖顶层、嵌套、列表、404、非法 request_id 和 storage profile 错误",
+        "同步 OpenAPI、endpoint inventory 和生成 TypeScript client 且无漂移",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "已实现：新增 GET /api/v1/requests/{request_id}/safe-info（RequestSafeInfoView，operationId getRequestSafeInfo）。serializers.serialize_request_safe_info 按 D28-10 默认拒绝逐字段构造白名单，返回 {safe_info: <RequestSafeInfoDTO>}；DTO 全 strict extra=forbid（RequestSafeInfoDTO + Collection/SubtitleGroup/FilterRule/ExcludedFile/Resources/HistoryEvent/AbStatus 嵌套 + RequestSafeInfoResultDTO）。字段含 request_id/status/raw_title/title/aliases/season/season_raw/season_evidence/mikan_collection{title,bangumi_id}（不含完整合集/RSS URL）/subtitle_groups[]（计数+脱敏 warnings，无 RSS/种子原文）/selected_subtitle_group/filter_rule/resources（valid/invalid/complete 计数 + 脱敏文件名列表，不含 magnet/下载 URL）/folder_name/storage_profile（services._storage_profile 相对 profile 或 null）/total_episodes=null/updated_episode=null/updated_episode_status=NOT_IMPLEMENTED/history_summary[]（action/状态/时间，丢弃 details）/ab_status{submitted,success,ab_subscription_id,error_type}。免费文本 label 经 _safe_label 二次脱敏（http(s)://、magnet:?、/ 开头与 Windows 盘符 → [redacted]）；请求只读 RequestDetailQuery（404/非法 request_id/storage profile 沿用详情端点分类）；未传 storage_dir 回落服务端根且 storage_profile=null。完整 URL/RSS/magnet/endpoint/token/cookie/password/Authorization/原始响应/绝对路径不出现在成功/错误/OpenAPI 示例；递归 DTO/泄漏测试覆盖顶层/嵌套/列表/404/非法 request_id/storage 错误/ab+history 泄漏。同步 OpenAPI/endpoint inventory §2/§3.1/§4/AGENTS.md/README/生成 TS client（api.test.ts 26→27）。非浏览器 1127 + 浏览器 133 + 前端 261 单测 + typecheck/lint/api:check/build/compileall/ruff/openapi --check 全绿；仓库根 .migu_orca/storage 不存在，无未提交 build/trace/截图。 【Stage 28 静态审查修复】_safe_label 对非字符串返回 None（不再 str(dict/list)）、对任意位置的 URL/magnet/file/绝对路径(Unix/Windows/UNC)/key=value 敏感文本稳定脱敏；filter_rule bool 与 ab_status success 显式类型归一化；批量 skipped 计入 failed 保证 requested==confirmed+failed。 【Stage 28 边界修复】_SAFE_UNIX_ABS_RE 改通用 POSIX 绝对路径（任意根目录，/ 前为开头或空白），不误杀 Fate/stay night、A/B 测试 等词内斜杠。 【Stage 28 边界修复补充】_SAFE_UNIX_ABS_RE 改负向后行 (?<![A-Za-z0-9_])/ 边界，覆盖等号/中文标点/引号/括号/冒号等任意位置嵌入的绝对路径，且不误杀词内斜杠。 【Stage 28 边界修复】_SAFE_UNIX_ABS_RE 改 Unicode-aware (?<![\\w/]) 边界避免中文/日文词内斜杠误杀；新增 _SAFE_CN_PATH_CONTEXT_RE 识别 路径为/data、路径是/private 等无分隔符中文路径引导词。"
+    },
+    {
+      "id": "US-218",
+      "title": "完成 Stage 28 契约回归与文档 handoff",
+      "description": "作为项目维护者，我希望 Stage 28 有完整回归和 B-B handoff，使后续 tracking 开发不需要猜测草案契约。",
+      "acceptanceCriteria": [
+        "同步 README、架构、M01、M09、M13、backlog、future stages、Stage 28 PRD 与 API 文档",
+        "新旧 preview/save/accept/batch 端点兼容测试、全部非浏览器测试和真实 Chromium 回归通过",
+        "输出 B-B tracking handoff，明确 Stage 28 只返回 ACCEPTED Request handoff，不创建或伪造 tracking record",
+        "记录实际测试数量、实现偏差、剩余风险和每个 story 的独立提交",
+        "确认仓库根 .migu_orca/storage 不存在，且无未提交 build、trace、截图或敏感临时产物",
+        "Stage 28 prd.json 的 US-210 至 US-218 全部 passes=true 后再归档 prd/progress",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "已实现 Stage 28 契约回归与文档 handoff：同步 README/docs-README/主 PRD(M01/M09/M11/M13 行+路线图+D-MAIN-10+下一步)/architecture（DraftStore revision+预留生命周期+idempotency repository+save-confirm 边界）/M01（Stage 28 草案一致性扩展）/M09（save-confirm 组合确认小节）/M11（9.1 幂等记录）/M13（Stage 28 行+UI 调整+敏感边界）/backlog（BL-025 B-A 已完成）/future stages（Stage 28 handoff：B-B 统一追番记录）/docs/api（README+endpoint_inventory header）/frontend-ux 两份候选 PRD/work-goals。输出 B-B tracking handoff：Stage 28 只返回 ACCEPTED Request handoff（request_id+status=ACCEPTED+next_action=OPEN_TRACKING），不创建或伪造 tracking record；B-B 从持久化 ACCEPTED Request 与 handoff 幂等建立统一 tracking record（记录于 future_stages/stage28 PRD/主 PRD/M09/endpoint_inventory）。新旧 preview/save/accept/batch 端点兼容 + 全部非浏览器（1127 passed）+ 真实 Chromium（133 passed）回归通过；前端 typecheck/lint/unit(261)/api:check/build 全绿；compileall/ruff/OpenAPI drift/git diff --check 通过。实现偏差：契约内最小扩展，无范围外 feature（未实现 tracking/AB 管理/新页面视觉）。剩余风险：draft 单进程内存权威（多 worker 需外部化）、批量上限只约束 parse 入口、safe-info total_episodes 无数据源恒 null。仓库根 .migu_orca/storage 不存在，无未提交 build/trace/截图。Stage 28 prd/progress 已归档至 scripts/ralph/archive/2026-09-08-stage28-draft-consistency/，US-210～US-218 全部 passes=true。"
+    }
+  ]
+}
