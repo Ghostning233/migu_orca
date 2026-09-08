@@ -494,6 +494,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracking/items/{tracking_id}/revalidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 复核统一追番方案（纯本地）
+         * @description US-224：对单条统一追番记录执行 revision-aware 纯本地复核。请求只接受 expected_revision 与可选 storage profile，绝不接收 ab_config/连接/capability 配置。服务端重新读取最新本地 Request 并复核（存在且 ACCEPTED、fingerprint、标题/季度、MiKan 合集、字幕组、有效资源、外部映射、未完成 operation 与当前 tracking 状态），业务复核失败仍返回 HTTP 200：ready=false、next_status=NEEDS_RECONFIRM 与固定 §11.5 issue code 列表；通过时 ready=true。expected_revision 过期 → 409 tracking_revision_conflict；非可复核状态 → 409 tracking_state_conflict。
+         */
+        post: operations["revalidateTrackingItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -10999,6 +11019,359 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "tracking_not_found",
                      *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 读取追番记录失败 / storage_json_error: 追番记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 / tracking_migration_error: 历史数据迁移失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "读取追番记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    revalidateTrackingItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 复核统一追番方案（纯本地） */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "expected_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /** @description 客户端最后观察到的追番记录 revision（revision-aware 复核）。 */
+                    expected_revision: number;
+                    /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                    storage_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "tracking_id": "示例",
+                     *         "ready": true,
+                     *         "checked_revision": 1,
+                     *         "next_revision": 1,
+                     *         "checked_at": "示例",
+                     *         "next_status": "示例",
+                     *         "issues": [
+                     *           {
+                     *             "code": "示例",
+                     *             "field": null,
+                     *             "message": "示例",
+                     *             "recovery_action": "示例"
+                     *           }
+                     *         ],
+                     *         "tracking": {
+                     *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
+                     *           "status": "示例",
+                     *           "status_label": "示例",
+                     *           "status_group": "示例",
+                     *           "available_actions": [
+                     *             {
+                     *               "code": "示例",
+                     *               "label": "示例",
+                     *               "style": "示例",
+                     *               "requires_confirmation": true
+                     *             }
+                     *           ],
+                     *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
+                     *           "updated_episode_status": "NOT_IMPLEMENTED",
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
+                     *         }
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingRevalidateResultDTO
+                         * @description Result of ``POST /api/v1/tracking/items/{tracking_id}/revalidate`` (§11.5).
+                         *
+                         *     A business revalidation failure is still HTTP 200: ``ready=false``,
+                         *     ``next_status=NEEDS_RECONFIRM`` and the fixed §11.5 issue codes.  A passing
+                         *     check returns ``ready=true`` with ``next_status=PENDING_SUBMIT`` (or keeps
+                         *     ``SUBMIT_FAILED`` when the record is a failed submission whose plan is still
+                         *     valid).  ``checked_revision`` is the revision the client expected;
+                         *     ``next_revision`` is the record's revision after the outcome persisted (they
+                         *     differ only when the outcome changed the record's status).  ``tracking`` is
+                         *     the safe summary of the persisted record so the client can update the list
+                         *     item without a second read; ``issues`` reuse the fixed §11.5 shape and never
+                         *     leak file names/paths/raw content.
+                         */
+                        result: {
+                            /** Tracking Id */
+                            tracking_id: string;
+                            /** Ready */
+                            ready: boolean;
+                            /** Checked Revision */
+                            checked_revision: number;
+                            /** Next Revision */
+                            next_revision: number;
+                            /** Checked At */
+                            checked_at: string;
+                            /** Next Status */
+                            next_status: string;
+                            /** Issues */
+                            issues?: {
+                                /** Code */
+                                code: string;
+                                /**
+                                 * Field
+                                 * @default null
+                                 */
+                                field: string | null;
+                                /** Message */
+                                message: string;
+                                /** Recovery Action */
+                                recovery_action: string;
+                            }[];
+                            /**
+                             * TrackingItemDTO
+                             * @description One unified tracking list item (Stage 29 PRD §11.2).
+                             *
+                             *     ``updated_episode`` is always null and ``updated_episode_status`` is always
+                             *     NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+                             *     ``poster_path`` may only be a same-origin opaque poster proxy route.
+                             */
+                            tracking: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Subtitle Group
+                                 * @default null
+                                 */
+                                subtitle_group: string | null;
+                                /**
+                                 * Poster Path
+                                 * @default null
+                                 */
+                                poster_path: string | null;
+                                /** Status */
+                                status: string;
+                                /** Status Label */
+                                status_label: string;
+                                /** Status Group */
+                                status_group: string;
+                                /** Available Actions */
+                                available_actions?: {
+                                    /** Code */
+                                    code: string;
+                                    /** Label */
+                                    label: string;
+                                    /** Style */
+                                    style: string;
+                                    /** Requires Confirmation */
+                                    requires_confirmation: boolean;
+                                }[];
+                                /**
+                                 * Valid Resource Count
+                                 * @default 0
+                                 */
+                                valid_resource_count: number;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** Revision */
+                                revision: number;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                            };
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_tracking_id: tracking_id 包含不合法字符或路径片段 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该追番记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_state_conflict: 当前追番记录状态不允许复核 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_revision_conflict",
+                     *       "error_message": "追番记录版本已变化，请刷新后重试",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

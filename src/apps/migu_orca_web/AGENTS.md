@@ -312,6 +312,37 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   新增 tracking 错误类型（如 `tracking_not_found`/`tracking_storage_error`/
   `tracking_migration_error`）要同时进 `extensions/flask_api/api.py` 的 HTTP 分类与 `_ENDPOINTS`。
 
+## 统一追番复核（US-224）
+
+- `POST /api/v1/tracking/items/{tracking_id}/revalidate`（`TrackingItemRevalidateView`，
+  operationId `revalidateTrackingItem`）是 revision-aware 纯本地复核：请求只接受
+  `expected_revision`（必填正整数）与可选 `storage_dir`，`TrackingRevalidatePayload`
+  用 `extra="forbid"` 拒绝 `ab_config`/未知字段。业务复核失败仍 HTTP 200
+  （`ready=false` + `next_status=NEEDS_RECONFIRM` + 固定 §11.5 issue 列表）；只有
+  revision/state 冲突才抛 409。
+- 编排在 `apps/migu_orca_web/tracking_revalidate_service.py::run_tracking_revalidate`：
+  先 `run_tracking_migration` → `load_tracking_record` → 校验
+  `expected_revision == record.revision`（否则 409 `tracking_revision_conflict`）→ 状态必须在
+  `REVALIDATABLE_STATUSES`（PENDING_SUBMIT/NEEDS_RECONFIRM/SUBMIT_FAILED，否则 409
+  `tracking_state_conflict`）→ 容错加载最新 Request（损坏/缺失 → `REQUEST_MISSING` 业务 issue，
+  绝不泄露路径）→ 计算当前 fingerprint → 纯分类。纯分类在
+  `tracking_engine/controllers/revalidate.py`（无 storage import，`classify_revalidation`），
+  校验结果通过 `RevalidationIssue` dataclass 表达，**web 服务不得在 route 复制 checklist**。
+- 状态迁移（由服务层用 `transition_record` + 一次 CAS 原子落盘，绝不在 route 层复制 revision
+  逻辑）：失败把 `PENDING_SUBMIT`/`SUBMIT_FAILED` → `NEEDS_RECONFIRM`（+1 revision +
+  审计 `PLAN_CHANGE_DETECTED`（REQ_CHANGED）或 `REVALIDATION_FAILED`）；通过把
+  `NEEDS_RECONFIRM` → `PENDING_SUBMIT`（+1 + `REVALIDATION_PASSED`）；
+  `PENDING_SUBMIT`/`SUBMIT_FAILED` 通过与 `NEEDS_RECONFIRM` 重复失败都是「无变化复核」：
+  不 bump revision、不重复审计（§9）。`request_fingerprint` **不**在复核中更新——采纳新方案是
+  US-225 的 `confirm=true` submit 决定，所以 REQUEST_CHANGED 会持续到确认后消失。
+- 审计 actor 用 SYSTEM（服务端自动本地复核）；错误 details 只含
+  `field`/`current_status`/`available_actions`/`current_revision`，经
+  `sanitize_error_data` 落在 `error_data.details`（测试断言取 `details`）。
+- 改 revalidate 响应/路由后同步 `docs/api/openapi.json`、`endpoint_inventory.md` §2/§3.6、
+  `api.ts` 与 `api.test.ts`；新增 409 错误类型 `tracking_revision_conflict`/
+  `tracking_state_conflict` 已进 `extensions/flask_api/api.py` 分类集，必须在
+  `_ENDPOINTS` 对应端点声明。
+
 ## 静态检查与就绪探针（US-195）
 
 - 静态检查是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：

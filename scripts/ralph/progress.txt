@@ -52,6 +52,14 @@
 - 新增 /api/v1 端点后除 OpenAPI/endpoint inventory/TS client 外，还必须同步
   `frontend/src/api/generated/api.test.ts` 的 operationId/path 联合字面量与总数断言，否则前端 vitest
   类型测试失败。
+- US-224 revalidate：纯 checklist 放 `tracking_engine/controllers/revalidate.py`
+  （`classify_revalidation`，无 storage import；issue code 固定 §11.5 枚举），Web 编排放
+  `apps/migu_orca_web/tracking_revalidate_service.py`（先 migration → 校验
+  expected_revision/status → 容错读 Request → 计算 fingerprint → 纯分类 → `transition_record`
+  + 一次 CAS）。状态迁移只在服务层；`request_fingerprint` 不在复核中更新（采纳新方案是 US-225
+  confirm=true submit 的决定）。新增 409 tracking 错误类型必须同步
+  `extensions/flask_api/api.py` 分类集 + `_ENDPOINTS` 声明，否则
+  `test_every_classified_error_type_is_documented` 失败。
 
 ## [2026-09-08] - US-219
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -337,4 +345,75 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       对比可确认既有 path 块未变；先跑 `openapi_gen --check` 再提交。
     - 前端 `api.test.ts` 有 operationId/path 联合字面量与总数断言；新增 endpoint 必须同步
       `EXPECTED_OPERATION_IDS`、`keyof operations`、`keyof paths` 与计数，否则 vitest 类型测试失败。
+---
+
+## [2026-09-08] - US-224
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增纯分类 `src/tracking_engine/controllers/revalidate.py`：`RevalidationIssue` /
+    `RevalidationEvidence` / `classify_revalidation` 实现 §11.5 纯本地 checklist，返回固定
+    11 个 issue code（REQUEST_MISSING/REQUEST_NOT_ACCEPTED/REQUEST_CHANGED/TITLE_MISSING/
+    SEASON_REVIEW_REQUIRED/MIKAN_SELECTION_MISSING/SUBTITLE_GROUP_MISSING/NO_VALID_RESOURCES/
+    EXTERNAL_ALREADY_LINKED/OPERATION_IN_PROGRESS/TRACKING_STATE_INVALID），每条带固定脱敏中文
+    message、可选 field 与 recovery_action（REQUEST_CHANGED → SUBMIT，其余空串）；固定枚举序输出。
+    `REVALIDATABLE_STATUSES` = PENDING_SUBMIT/NEEDS_RECONFIRM/SUBMIT_FAILED。不 import web/storage。
+  - 新增 Web 服务 `apps/migu_orca_web/tracking_revalidate_service.py`：
+    `run_tracking_revalidate(config, tracking_id, expected_revision, now)` —— 先跑
+    run_tracking_migration，load 记录，校验 expected_revision（409 tracking_revision_conflict，
+    details 含 field/current_revision）、状态在 REVALIDATABLE_STATUSES（否则 409
+    tracking_state_conflict，details 含 current_status/available_actions），容错读最新 Request
+    （缺失/损坏 → REQUEST_MISSING 业务 issue，绝不泄露路径），compute_request_fingerprint 计算
+    当前指纹，operation 非终态/不可读 → OPERATION_IN_PROGRESS，跑纯分类。状态迁移：
+    失败把 PENDING_SUBMIT/SUBMIT_FAILED → NEEDS_RECONFIRM（+1 + 审计
+    PLAN_CHANGE_DETECTED（REQUEST_CHANGED）/REVALIDATION_FAILED）；通过把 NEEDS_RECONFIRM →
+    PENDING_SUBMIT（+1 + REVALIDATION_PASSED）；PENDING_SUBMIT/SUBMIT_FAILED 通过与 NEEDS_RECONFIRM
+    重复失败都是无变化复核（不 bump/不重复审计，§9）。通过 `transition_record` + 一次 CAS 原子落盘。
+    request_fingerprint 故意不更新（US-225 confirm=true submit 采纳新方案）。响应含 tracking_id/
+    ready/checked_revision/next_revision/checked_at/next_status/issues[]/tracking（tracking 用
+    tracking_summary_fields 安全摘要）。
+  - 路由 `routes_tracking.py` 新增 `TrackingItemRevalidateView`
+    （POST /api/v1/tracking/items/<path:tracking_id>/revalidate，operationId
+    revalidateTrackingItem）；schemas.py 新增 strict `TrackingRevalidatePayload`
+    （tracking_id/expected_revision(ge=1)/storage_dir，extra=forbid 拒绝 ab_config/未知字段）；
+    api_contract.py 新增 `TrackingRevalidateResultDTO`（issues 复用
+    TrackingRevalidationIssueDTO，tracking 用 TrackingItemDTO）；api.py 把
+    tracking_revision_conflict/tracking_state_conflict 加入 409 分类。
+  - 同步生成物与文档：openapi_gen._ENDPOINTS 新增条目并重生成 docs/api/openapi.json；
+    `npm run api:generate` 重生成 frontend/src/api/generated/api.ts；api.test.ts 增加
+    operationId revalidateTrackingItem + path /api/v1/tracking/items/{tracking_id}/revalidate +
+    计数 29→30；endpoint_inventory.md §2 总表 + §3.6 Tracking（US-223+US-224）+ US-224 里程碑；
+    AGENTS.md「统一追番复核（US-224）」段；progress Codebase Patterns 增补 revalidate 分层模式。
+- Files changed
+  - 新增：`src/tracking_engine/controllers/revalidate.py`、
+    `src/tracking_engine/controllers/revalidate_test.py`（15 单测）、
+    `src/apps/migu_orca_web/tracking_revalidate_service.py`、
+    `src/apps/migu_orca_web/tracking_revalidate_service_test.py`（12 单测）、
+    `tests/api_contract/test_tracking_revalidate_api.py`（10 路由/契约测试）
+  - 修改：`schemas.py`、`api_contract.py`、`routes_tracking.py`、
+    `extensions/flask_api/api.py`、`openapi_gen.py`、`docs/api/openapi.json`、
+    `docs/api/endpoint_inventory.md`、`frontend/src/api/generated/api.ts`、
+    `frontend/src/api/generated/api.test.ts`、`src/apps/migu_orca_web/AGENTS.md`、
+    `scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - revalidate 分层：纯 checklist 必须在 tracking_engine/controllers（无 storage/无 web import），
+      Web 服务层负责 migration、revision/state 硬校验、容错读 Request 与状态落盘——US-225 的
+      submit 可复用同一 classifier/服务编排（submit 前也要本地复核），不要在 route 复制 checklist。
+    - 状态语义：失败 PENDING_SUBMIT/SUBMIT_FAILED → NEEDS_RECONFIRM，通过 NEEDS_RECONFIRM →
+      PENDING_SUBMIT，PENDING_SUBMIT/SUBMIT_FAILED 通过与 NEEDS_RECONFIRM 重复失败 = 无变化复核
+      （§9 不记录无变化复核）。fingerprint 只在 confirm=true submit（US-225）更新，因此 REQUEST_CHANGED
+      在确认前持续报告。
+    - 业务复核失败不是 HTTP 失败：HTTP 200 + ready=false + 固定 issue 列表；只有 revision/state
+      冲突才 409。错误 details 经 sanitize_error_data 落在 error_data.details（测试断言取 details）。
+    - 新增 409 tracking 错误类型要同时进 extensions/flask_api/api.py 分类集与 _ENDPOINTS 对应端点，
+      否则 test_every_classified_error_type_is_documented / declared_status_matches_runtime 失败。
+  - Gotchas encountered
+    - cancel_request 只接受 PENDING_CONFIRM（非 ACCEPTED），造非 ACCEPTED 请求要直接改写存储
+      snapshot 的 status 再 save_request_snapshot，不要走 controller。
+    - 健康 fixture 请求必须至少 1 个 valid seed（rss_sources[].valid_seed_names /
+      confirmable.effective_seed_names 有一个非空），否则 revalidate 会误报 NO_VALID_RESOURCES。
+    - POST 端点 openapi 的 path 参数不进 `parameters`（与 accept/retry 一致），只靠路径模板；
+      requestBody 只列实际 body 字段（expected_revision/storage_dir），tracking_id 不列。
+    - 无 storage_dir 请求落到服务端 web root 本身（US-196），不是 `storage` profile——测试无默认值
+      路径时要把记录 seed 到 web root config 下。
 ---

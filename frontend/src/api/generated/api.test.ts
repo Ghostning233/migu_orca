@@ -45,6 +45,7 @@ const EXPECTED_OPERATION_IDS = [
   'testAutoBangumiConnection',
   'listTrackingItems',
   'getTrackingItemDetail',
+  'revalidateTrackingItem',
 ] as const
 
 describe('generated API client (US-198)', () => {
@@ -81,6 +82,7 @@ describe('generated API client (US-198)', () => {
       | 'testAutoBangumiConnection'
       | 'listTrackingItems'
       | 'getTrackingItemDetail'
+      | 'revalidateTrackingItem'
     >()
   })
 
@@ -113,6 +115,7 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/requests/{request_id}/submit-ab'
       | '/api/v1/tracking/items'
       | '/api/v1/tracking/items/{tracking_id}'
+      | '/api/v1/tracking/items/{tracking_id}/revalidate'
     >()
   })
 
@@ -143,6 +146,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(29)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(30)
   })
 })

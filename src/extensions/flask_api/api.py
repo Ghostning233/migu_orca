@@ -92,6 +92,11 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     # retry with the accept action converges on the same saved Request, so the
     # conflict-with-server-state semantics (409) fit better than a 500.
     "save_confirm_failed",
+    # US-224: revalidate/submit are revision-aware and state-aware. A stale
+    # expected_revision or a non-revalidatable tracking status conflicts with
+    # the current server state (Stage 29 PRD §14).
+    "tracking_revision_conflict",
+    "tracking_state_conflict",
 }
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {

@@ -531,3 +531,36 @@ class TrackingDetailQuery(BaseModel):
 
     tracking_id: str
     storage_dir: str | None = None
+
+
+class TrackingRevalidatePayload(BaseModel):
+    """Body for ``POST /api/v1/tracking/items/{tracking_id}/revalidate`` (US-224).
+
+    The request carries only the server-observed ``expected_revision`` (a
+    revision-aware compare, so a stale client never silently re-checks an
+    outdated record) and an optional storage profile.  ``extra="forbid"``
+    rejects ``ab_config``/credentials/other leaked fields: revalidation is a
+    pure-local check that never accepts connection or capability config.
+    ``tracking_id`` comes from the URL path.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    expected_revision: int = Field(ge=1)
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_tracking_id(cls, value: str) -> str:
+        tracking_id = value.strip()
+        if not tracking_id:
+            raise ValueError("tracking_id cannot be empty")
+        return tracking_id
+
+    @field_validator("expected_revision")
+    @classmethod
+    def _reject_bool_revision(cls, value: int) -> int:
+        if isinstance(value, bool):
+            raise ValueError("expected_revision 必须为正整数")
+        return value

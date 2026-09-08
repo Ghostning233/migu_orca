@@ -82,6 +82,7 @@
 | POST | `/api/v1/autobangumi/test-connection` | `migu_orca_web_api.AutoBangumiTestConnectionView` | AutoBangumiTestConnectionView |
 | GET | `/api/v1/tracking/items` | `migu_orca_web_api.TrackingItemListView` | TrackingItemListView |
 | GET | `/api/v1/tracking/items/<path:tracking_id>` | `migu_orca_web_api.TrackingItemDetailView` | TrackingItemDetailView |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/revalidate` | `migu_orca_web_api.TrackingItemRevalidateView` | TrackingItemRevalidateView |
 
 页面路由（非 JSON API，供对照）：`GET /` → 302 `/app/workbench`；`GET /index` →
 302 `/app/workbench`（保留 `request_id`/`batch_id` query）；`GET /Settings` →
@@ -183,16 +184,25 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 
 两类连接测试的请求凭据都保持 request-scoped：不写入 storage、URL、浏览器 storage、日志或测试 trace。
 
-### 3.6 Tracking（`/api/v1/tracking/items`，US-223）
+### 3.6 Tracking（`/api/v1/tracking/items`，US-223 + US-224）
 
-两个端点都是纯本地读取：执行前先运行历史回填协调器（manifest `COMPLETE` 后不再全量扫描），
-绝不访问外部系统。列表/详情只返回 TrackingRecord 与 Request 的安全白名单投影；单条 tracking
-JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warning，绝不暴露文件信息。
+Tracking 端点全部是纯本地操作：执行前先运行历史回填协调器（manifest `COMPLETE` 后不再全量扫描），
+绝不访问外部系统。列表/详情/复核只返回 TrackingRecord 与 Request 的安全白名单投影；单条 tracking
+JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warning，绝不暴露文件信息。revalidate
+不接收 `ab_config`/连接/capability 配置，只接受 `expected_revision`（revision-aware）。
 
 | 端点 | 请求字段 | 成功 `result`（白名单） | 业务失败示例 |
 | --- | --- | --- | --- |
 | GET `/api/v1/tracking/items` | `storage_dir?`、`q?`、`status_group?`（`PENDING`/`PROCESSING`/`ACTIVE`/`ATTENTION`/`INACTIVE`）、`sort?`（`updated_at`/`title`/`status`） | `{"items": [<TrackingItemDTO>], "summary": {total, pending, processing, active, needs_attention, unreadable}, "warnings": []}` | 非法枚举 → `data_validation_errors`；`invalid_storage_dir` |
 | GET `/api/v1/tracking/items/<tracking_id>` | `tracking_id`（路径）、`storage_dir?` | `{...summary 字段, origin, batch_id?, created_at, updated_at?, last_synced_at?, safe_info?, current_operation?, revalidation_issues: [], external_mapping?, audit_events[]（最近 20 条）, warnings}` | 缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id`；损坏 → `storage_json_error` |
+| POST `/api/v1/tracking/items/<tracking_id>/revalidate`（US-224） | `tracking_id`（路径）、`expected_revision`（必填）、`storage_dir?` | `{tracking_id, ready, checked_revision, next_revision, checked_at, next_status, issues[], tracking}`（业务复核失败仍 HTTP 200：`ready=false`、`next_status=NEEDS_RECONFIRM` + 固定 §11.5 issue code） | 缺 `expected_revision`/多余字段（如 `ab_config`）→ `data_validation_errors`；`expected_revision` 过期 → `tracking_revision_conflict`（409）；非可复核状态 → `tracking_state_conflict`（409）；缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id` |
+
+`revalidate` 的 `issues[]`（`TrackingRevalidationIssueDTO`，固定 §11.5 枚举）字段：
+`code`、`field?`、`message`、`recovery_action`。code 只允许
+`REQUEST_MISSING`/`REQUEST_NOT_ACCEPTED`/`REQUEST_CHANGED`/`TITLE_MISSING`/
+`SEASON_REVIEW_REQUIRED`/`MIKAN_SELECTION_MISSING`/`SUBTITLE_GROUP_MISSING`/
+`NO_VALID_RESOURCES`/`EXTERNAL_ALREADY_LINKED`/`OPERATION_IN_PROGRESS`/
+`TRACKING_STATE_INVALID`，文案为脱敏中文，绝不包含上游响应/路径/原始 JSON。
 
 `TrackingItemDTO`（US-223 strict `extra="forbid"`）字段：`tracking_id`、`request_id?`、`title?`、
 `season?`、`subtitle_group?`、`poster_path?`（只允许同源 `/api/v1/mikan/posters/<opaque-key>`）、
@@ -281,6 +291,21 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   成功项不因失败项回滚；同一 `item_id` 重复 → `skipped`。同一 item + `idempotency_key`
   幂等重试重放同一 CONFIRMED 结果，不创建第二个 Request。请求级 shape/batch_id/storage
   profile 错误仍走普通失败 envelope。
+- US-224：新增 `POST /api/v1/tracking/items/{tracking_id}/revalidate`
+  （`TrackingItemRevalidateView`，operationId `revalidateTrackingItem`）。复核是
+  revision-aware 纯本地操作：请求只接受 `expected_revision` 与可选 `storage_dir`
+  （`extra="forbid"` 拒绝 `ab_config`/未知字段），服务端重新读取最新 Request 后跑
+  `tracking_engine/controllers/revalidate.classify_revalidation`（存在且 ACCEPTED、
+  fingerprint、标题/季度、MiKan 合集、字幕组、有效资源、外部映射、未完成 operation）。
+  业务失败仍 HTTP 200：`ready=false`、`next_status=NEEDS_RECONFIRM`、固定 §11.5
+  issue 列表；失败时 `PENDING_SUBMIT`/`SUBMIT_FAILED` → `NEEDS_RECONFIRM`（+1
+  revision + 审计 `PLAN_CHANGE_DETECTED`/`REVALIDATION_FAILED`），已处于
+  `NEEDS_RECONFIRM` 的重复失败是无变化复核（不 bump/不重复审计）。通过时
+  `NEEDS_RECONFIRM` → `PENDING_SUBMIT`（+1 + 审计 `REVALIDATION_PASSED`），
+  `PENDING_SUBMIT`/`SUBMIT_FAILED` 通过时保持原状态。`expected_revision` 过期 → 409
+  `tracking_revision_conflict`；非可复核状态 → 409 `tracking_state_conflict`（两类进
+  `extensions/flask_api/api.py` 的 409 分类）。存储 `request_fingerprint` 故意不在
+  复核中更新——采纳新方案由 US-225 的 `confirm=true` submit 决定。
 - US-223：新增 `GET /api/v1/tracking/items`（`TrackingItemListView`，operationId
   `listTrackingItems`）与 `GET /api/v1/tracking/items/{tracking_id}`
   （`TrackingItemDetailView`，operationId `getTrackingItemDetail`）。读模型

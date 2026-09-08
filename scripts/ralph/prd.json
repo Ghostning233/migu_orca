@@ -103,7 +103,7 @@
         "同步 OpenAPI/endpoint inventory/生成 TS client 且无漂移；Typecheck/Tests pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": ""
     },
     {

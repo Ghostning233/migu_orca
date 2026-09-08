@@ -59,6 +59,7 @@ from apps.migu_orca_web.api_contract import (
     RequestSaveConfirmResultDTO,
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
+    TrackingRevalidateResultDTO,
 )
 
 OPENAPI_VERSION = "3.1.0"
@@ -723,6 +724,45 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
             },
             "404": {"tracking_not_found": "未找到该追番记录"},
+            "500": {
+                "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "POST /api/v1/tracking/items/<path:tracking_id>/revalidate": {
+        "operationId": "revalidateTrackingItem",
+        "summary": "复核统一追番方案（纯本地）",
+        "description": "US-224：对单条统一追番记录执行 revision-aware 纯本地复核。请求只接受 expected_revision 与可选 storage profile，绝不接收 ab_config/连接/capability 配置。服务端重新读取最新本地 Request 并复核（存在且 ACCEPTED、fingerprint、标题/季度、MiKan 合集、字幕组、有效资源、外部映射、未完成 operation 与当前 tracking 状态），业务复核失败仍返回 HTTP 200：ready=false、next_status=NEEDS_RECONFIRM 与固定 §11.5 issue code 列表；通过时 ready=true。expected_revision 过期 → 409 tracking_revision_conflict；非可复核状态 → 409 tracking_state_conflict。",
+        "requestBody": {
+            "type": "object",
+            "required": ["expected_revision"],
+            "properties": {
+                "expected_revision": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "客户端最后观察到的追番记录 revision（revision-aware 复核）。",
+                },
+                "storage_dir": {
+                    "type": "string",
+                    "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+            },
+        },
+        "success": TrackingRevalidateResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "409": {
+                "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+                "tracking_state_conflict": "当前追番记录状态不允许复核",
+            },
             "500": {
                 "storage_error": "读取追番记录失败",
                 "storage_json_error": "追番记录 JSON 损坏",

@@ -878,6 +878,31 @@ class TrackingDetailResultDTO(_StrictBase):
     warnings: list[str] = Field(default_factory=list)
 
 
+class TrackingRevalidateResultDTO(_StrictBase):
+    """Result of ``POST /api/v1/tracking/items/{tracking_id}/revalidate`` (§11.5).
+
+    A business revalidation failure is still HTTP 200: ``ready=false``,
+    ``next_status=NEEDS_RECONFIRM`` and the fixed §11.5 issue codes.  A passing
+    check returns ``ready=true`` with ``next_status=PENDING_SUBMIT`` (or keeps
+    ``SUBMIT_FAILED`` when the record is a failed submission whose plan is still
+    valid).  ``checked_revision`` is the revision the client expected;
+    ``next_revision`` is the record's revision after the outcome persisted (they
+    differ only when the outcome changed the record's status).  ``tracking`` is
+    the safe summary of the persisted record so the client can update the list
+    item without a second read; ``issues`` reuse the fixed §11.5 shape and never
+    leak file names/paths/raw content.
+    """
+
+    tracking_id: str
+    ready: bool
+    checked_revision: int
+    next_revision: int
+    checked_at: str
+    next_status: str
+    issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
+    tracking: TrackingItemDTO
+
+
 # ---------------------------------------------------------------------------
 # Connection tests family
 # ---------------------------------------------------------------------------
