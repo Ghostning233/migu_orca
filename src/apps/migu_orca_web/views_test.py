@@ -74,6 +74,16 @@ from storage_engine.controllers.request_repository import (
     save_request_snapshot,
 )
 from storage_engine.controllers.storage_config import load_storage_config
+from storage_engine.controllers.tracking_repository import (
+    list_tracking_records,
+    load_tracking_record,
+)
+from tracking_engine.models.tracking import (
+    TRACKING_ORIGIN_LEGACY_ACCEPT,
+    TRACKING_ORIGIN_SAVE_CONFIRM,
+    TRACKING_STATUS_PENDING_SUBMIT,
+    tracking_id_for_request,
+)
 
 
 def _client() -> FlaskClient:
@@ -4601,6 +4611,10 @@ def test_batch_accept_api_accepts_selected_items_and_returns_queue(
     assert saved["status"] == "ACCEPTED"
     history = load_status_history(config, "request-a")
     assert history[-1]["action"] == "ACCEPT"
+    # US-222: the batch accept entry also converges into the tracking list.
+    tracking = load_tracking_record(config, tracking_id_for_request("request-a"))
+    assert tracking.origin == TRACKING_ORIGIN_LEGACY_ACCEPT
+    assert tracking.status == TRACKING_STATUS_PENDING_SUBMIT
 
 
 def test_batch_accept_api_accepts_all_when_item_ids_omitted(tmp_path: Path) -> None:
@@ -6811,3 +6825,198 @@ def test_safe_label_redacts_all_sensitive_markers() -> None:
     assert _safe_label("命运/冠位指定") == "命运/冠位指定"
     assert _safe_label("字幕组/压制组") == "字幕组/压制组"
     assert _safe_label("新增/修改") == "新增/修改"
+
+
+# ---------------------------------------------------------------------------
+# US-222 accept/save-confirm -> unified tracking handoff
+# ---------------------------------------------------------------------------
+
+
+def test_request_accept_view_creates_tracking_record(tmp_path: Path) -> None:
+    """US-222: the single-plan accept entry converges into the tracking list."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    request = _saved_request(tmp_path, "芙莉莲", "request-accept-tracked")
+    assert request["status"] == "PENDING_CONFIRM"
+
+    response = client.post(
+        f"/api/v1/requests/{request['request_id']}/accept",
+        json={"storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["status"] == "ACCEPTED"
+
+    config = load_storage_config(storage_dir)
+    tracking = load_tracking_record(
+        config, tracking_id_for_request(request["request_id"])
+    )
+    assert tracking.origin == TRACKING_ORIGIN_LEGACY_ACCEPT
+    assert tracking.status == TRACKING_STATUS_PENDING_SUBMIT
+    assert tracking.revision == 1
+    assert len(tracking.audit_events) == 1
+
+
+def test_request_accept_view_tracking_failure_keeps_request_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-222: a tracking write failure never rolls a confirmed accept back."""
+    import apps.migu_orca_web.tracking_handoff as tracking_handoff
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    request = _saved_request(tmp_path, "芙莉莲", "request-accept-track-fail")
+
+    def failing_ensure(_config: Any, _record: Any) -> Any:
+        raise Stage1Error(
+            "storage_error", "模拟追番记录写入失败", "ensure_tracking_record", {}
+        )
+
+    monkeypatch.setattr(tracking_handoff, "ensure_tracking_record", failing_ensure)
+
+    response = client.post(
+        f"/api/v1/requests/{request['request_id']}/accept",
+        json={"storage_dir": _profile(tmp_path, storage_dir.name)},
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["result"]["request"]["status"] == "ACCEPTED"
+    assert load_request_snapshot(
+        load_storage_config(storage_dir), request["request_id"]
+    )["status"] == "ACCEPTED"
+    assert list_tracking_records(load_storage_config(storage_dir)).records == []
+
+
+def test_save_confirm_tracking_write_failure_returns_not_ready_handoff(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-222: a tracking write failure keeps CONFIRMED and reports not-ready."""
+    from apps.migu_orca_web import tracking_handoff
+    from apps.migu_orca_web.tracking_handoff import TRACKING_HANDOFF_RETRY_MESSAGE
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    issued = client.post(
+        "/api/v1/requests", json={"title": "芙莉莲", "save_request": False}
+    ).get_json()["result"]
+    draft_id = issued["draft_id"]
+    request_id = issued["request"]["request_id"]
+
+    def failing_ensure(_config: Any, _record: Any) -> Any:
+        raise Stage1Error(
+            "storage_error", "模拟追番记录写入失败", "ensure_tracking_record", {}
+        )
+
+    monkeypatch.setattr(tracking_handoff, "ensure_tracking_record", failing_ensure)
+
+    response = _save_confirm(
+        client, draft_id, 1, "view-tracking-fail-key",
+        _profile(tmp_path, storage_dir.name),
+    )
+    payload = response.get_json()
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    result = payload["result"]
+    assert result["outcome"] == "CONFIRMED"
+    handoff = result["handoff"]
+    assert handoff["request_id"] == request_id
+    assert handoff["status"] == "ACCEPTED"
+    assert handoff["next_action"] == "OPEN_TRACKING"
+    assert handoff["tracking_id"] == tracking_id_for_request(request_id)
+    assert handoff["tracking_status"] is None
+    assert handoff["tracking_ready"] is False
+    assert handoff["safe_message"] == TRACKING_HANDOFF_RETRY_MESSAGE
+    # The confirmed Request stays ACCEPTED and no tracking record was written.
+    assert load_request_snapshot(
+        load_storage_config(storage_dir), request_id
+    )["status"] == "ACCEPTED"
+    assert list_tracking_records(load_storage_config(storage_dir)).records == []
+
+
+def test_batch_save_confirm_confirmed_items_enter_tracking_list(
+    tmp_path: Path,
+) -> None:
+    """US-222: every CONFIRMED batch item returns a tracking_id/ready pair."""
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    items = _issue_batch_draft_items(client, ["芙莉莲", "咒术回战"])
+
+    response = _batch_save_confirm(client, items)
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    assert result["summary"] == {"requested": 2, "confirmed": 2, "failed": 0}
+
+    config = load_storage_config(storage_dir)
+    for row in result["results"]:
+        assert row["outcome"] == "CONFIRMED"
+        assert row["tracking_ready"] is True
+        assert row["tracking_id"] == tracking_id_for_request(row["request_id"])
+    assert len(list_tracking_records(config).records) == 2
+    for row in result["results"]:
+        tracking = load_tracking_record(config, row["tracking_id"])
+        assert tracking.origin == TRACKING_ORIGIN_SAVE_CONFIRM
+        assert tracking.status == TRACKING_STATUS_PENDING_SUBMIT
+        assert tracking.revision == 1
+
+
+def test_batch_save_confirm_one_tracking_failure_keeps_siblings_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """US-222: one item's tracking failure never rolls back other items."""
+    import apps.migu_orca_web.tracking_handoff as tracking_handoff
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+
+    def issue(title: str, key: str) -> tuple[str, dict[str, object]]:
+        issued = client.post(
+            "/api/v1/requests", json={"title": title, "save_request": False}
+        ).get_json()["result"]
+        descriptor = {
+            "item_id": key,
+            "draft_id": issued["draft_id"],
+            "base_revision": issued["draft_revision"],
+            "idempotency_key": f"view-batch-{key}",
+        }
+        return issued["request"]["request_id"], descriptor
+
+    first_request_id, first = issue("芙莉莲", "item-a")
+    second_request_id, second = issue("咒术回战", "item-b")
+
+    def failing_for_second(_config: Any, record: Any) -> Any:
+        if record.request_id == second_request_id:
+            raise Stage1Error(
+                "storage_error", "模拟追番记录写入失败", "ensure_tracking_record", {}
+            )
+        # Fall back to the real ensure for the healthy sibling.
+        import storage_engine.controllers.tracking_repository as tracking_repository
+
+        return tracking_repository.ensure_tracking_record(_config, record)
+
+    monkeypatch.setattr(tracking_handoff, "ensure_tracking_record", failing_for_second)
+
+    response = _batch_save_confirm(client, [first, second])
+    payload = response.get_json()
+    assert response.status_code == 200
+    result = payload["result"]
+    rows_by_item = {row["item_id"]: row for row in result["results"]}
+    assert rows_by_item["item-a"]["outcome"] == "CONFIRMED"
+    assert rows_by_item["item-a"]["tracking_ready"] is True
+    assert rows_by_item["item-a"]["tracking_id"] == tracking_id_for_request(
+        first_request_id
+    )
+    # The failing item stays CONFIRMED with a not-ready tracking handoff.
+    assert rows_by_item["item-b"]["outcome"] == "CONFIRMED"
+    assert rows_by_item["item-b"]["tracking_ready"] is False
+    assert rows_by_item["item-b"]["tracking_id"] == tracking_id_for_request(
+        second_request_id
+    )
+    # Only the healthy sibling's record was persisted.
+    records = list_tracking_records(load_storage_config(storage_dir)).records
+    assert [record.request_id for record in records] == [first_request_id]

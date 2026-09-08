@@ -249,17 +249,25 @@ class RequestPreviewSaveResultDTO(_StrictBase):
 
 
 class RequestSaveConfirmHandoffDTO(_StrictBase):
-    """Public ``handoff`` of a confirmed save (US-214).
+    """Public ``handoff`` of a confirmed save (US-214 + US-222).
 
-    Stage 28 deliberately does **not** create a tracking record (D28-09); the
-    handoff hands the frontend the durable ACCEPTED Request identity so the
-    tracking phase can later build a record idempotently. ``next_action`` is
-    the stable B-B hook.
+    The handoff hands the frontend the durable ACCEPTED Request identity plus
+    its unified tracking identity. ``tracking_id`` is always the deterministic
+    id derived from the Request id; ``tracking_ready`` is True when a usable
+    TrackingRecord exists, False when the tracking write failed (the confirmed
+    Request is never rolled back and the record is recovered on the next
+    tracking access — ``tracking_status`` stays null so a state is never
+    faked). ``safe_message`` carries a fixed recovery copy only in that case.
+    ``next_action`` remains the stable B-B hook.
     """
 
     request_id: str
     status: str
     next_action: str
+    tracking_id: str
+    tracking_status: str | None
+    tracking_ready: bool
+    safe_message: str | None
 
 
 class RequestSaveConfirmResultDTO(_StrictBase):
@@ -545,6 +553,9 @@ class BatchSaveConfirmItemResultDTO(_StrictBase):
     present on the CONFIRMED branch; failed items carry the sanitized
     ``error_type`` + a fixed Chinese ``error_message`` and stay retryable by
     the client (the draft is not consumed on an expected failure).
+    ``tracking_id``/``tracking_ready`` are present on the CONFIRMED branch
+    (US-222): the item also entered the unified tracking list, and a tracking
+    write failure still keeps the item confirmed with ``tracking_ready=False``.
     """
 
     item_id: str
@@ -553,6 +564,8 @@ class BatchSaveConfirmItemResultDTO(_StrictBase):
     status: str | None = None
     error_type: str | None = None
     error_message: str | None = None
+    tracking_id: str | None = None
+    tracking_ready: bool | None = None
 
 
 class BatchSaveConfirmResultDTO(_StrictBase):

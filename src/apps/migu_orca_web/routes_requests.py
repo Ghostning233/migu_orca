@@ -67,6 +67,7 @@ from apps.migu_orca_web.services import (
     _storage_dir,
     _storage_profile,
 )
+from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from request_engine.controllers.request_controller import (
@@ -82,6 +83,10 @@ from storage_engine.controllers.request_repository import (
     load_request_snapshot,
 )
 from storage_engine.controllers.storage_config import load_storage_config
+from tracking_engine.models.tracking import (
+    TRACKING_ORIGIN_LEGACY_ACCEPT,
+    TRACKING_ORIGIN_SAVE_CONFIRM,
+)
 
 
 def _draft_store_error(reason: str, current_revision: int | None = None) -> Stage1Error:
@@ -496,6 +501,16 @@ class RequestSaveConfirmView(PostView):
         assert outcome.request_id is not None
         assert outcome.request is not None
         assert outcome.summary is not None
+        # US-222: the confirmed Request enters the unified tracking list. The
+        # ensure is create-if-absent and converges on the same deterministic
+        # tracking_id for fresh confirms and terminal replays; a tracking write
+        # failure never rolls the confirmed Request back (tracking_ready=false
+        # + a fixed safe_message, recovered on the next tracking access).
+        tracking = ensure_confirmed_request_tracking(
+            config=load_storage_config(_storage_dir(payload.storage_dir)),
+            request=outcome.request,
+            origin=TRACKING_ORIGIN_SAVE_CONFIRM,
+        )
         return {
             "outcome": STATE_CONFIRMED,
             "request": outcome.request,
@@ -504,6 +519,10 @@ class RequestSaveConfirmView(PostView):
                 "request_id": outcome.request_id,
                 "status": HANDOFF_STATUS_ACCEPTED,
                 "next_action": HANDOFF_NEXT_ACTION_OPEN_TRACKING,
+                "tracking_id": tracking.tracking_id,
+                "tracking_status": tracking.tracking_status,
+                "tracking_ready": tracking.tracking_ready,
+                "safe_message": tracking.safe_message,
             },
         }
 
@@ -544,6 +563,15 @@ class RequestAcceptView(PostView):
         }
         if "saved_request" in result:
             response["saved_request"] = result["saved_request"]
+        # US-222: the legacy single-plan accept entry also converges the
+        # accepted Request into the unified tracking list.  A tracking write
+        # failure is never allowed to roll the confirmed Request back; the next
+        # tracking access re-runs ensure and heals the record.
+        ensure_confirmed_request_tracking(
+            config=config,
+            request=req,
+            origin=TRACKING_ORIGIN_LEGACY_ACCEPT,
+        )
         return response
 
 

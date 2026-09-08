@@ -29,7 +29,13 @@ from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.request_repository import load_request_snapshot
 from storage_engine.controllers.storage_config import load_storage_config
+from storage_engine.controllers.tracking_repository import list_tracking_records
 from tests.api_contract.conftest import saved_request
+from tracking_engine.models.tracking import (
+    TRACKING_ORIGIN_SAVE_CONFIRM,
+    TRACKING_STATUS_PENDING_SUBMIT,
+    tracking_id_for_request,
+)
 
 
 def _generated_request(title: str) -> dict[str, Any]:
@@ -598,13 +604,13 @@ def _issue_save_confirm_payload(
 def test_golden_save_confirm_success_returns_confirmed_handoff(
     client: FlaskClient, tmp_path: Path
 ) -> None:
-    """US-214: a fresh save-confirm persists, confirms and hands off ACCEPTED.
+    """US-214/US-222: a fresh save-confirm persists, confirms and hands off.
 
-    The success result is the frozen PRD §6.3 shape: ``{outcome: CONFIRMED,
-    request, summary, handoff}``. The request is ACCEPTED on disk, exactly one
-    snapshot exists, and the handoff points at the durable public request_id
-    with the stable OPEN_TRACKING next action (Stage 28 never creates a
-    tracking record).
+    The success result is the frozen shape ``{outcome: CONFIRMED, request,
+    summary, handoff}``. The request is ACCEPTED on disk, exactly one snapshot
+    exists, and the handoff points at the durable public request_id with the
+    stable OPEN_TRACKING next action plus the US-222 tracking identity (one
+    deterministic TrackingRecord in PENDING_SUBMIT).
     """
     payload, issued = _issue_save_confirm_payload(client, "key-success-golden")
     draft_id = payload["draft_id"]
@@ -628,6 +634,10 @@ def test_golden_save_confirm_success_returns_confirmed_handoff(
         "request_id": request_id,
         "status": "ACCEPTED",
         "next_action": "OPEN_TRACKING",
+        "tracking_id": tracking_id_for_request(request_id),
+        "tracking_status": TRACKING_STATUS_PENDING_SUBMIT,
+        "tracking_ready": True,
+        "safe_message": None,
     }
     saved_path = tmp_path / "storage" / "requests" / f"{request_id}.json"
     assert saved_path.exists()
@@ -638,6 +648,16 @@ def test_golden_save_confirm_success_returns_confirmed_handoff(
     assert sorted(path.name for path in (tmp_path / "storage" / "requests").glob("*.json")) == [
         f"{request_id}.json"
     ]
+    # US-222: the unified tracking record exists exactly once with the derived id.
+    config = load_storage_config(tmp_path / "storage")
+    tracking_records = list_tracking_records(config).records
+    assert len(tracking_records) == 1
+    tracking = tracking_records[0]
+    assert tracking.tracking_id == tracking_id_for_request(request_id)
+    assert tracking.request_id == request_id
+    assert tracking.status == TRACKING_STATUS_PENDING_SUBMIT
+    assert tracking.origin == TRACKING_ORIGIN_SAVE_CONFIRM
+    assert tracking.revision == 1
     # The idempotency record exists and never stores the title/draft.
     written = (tmp_path / "storage" / "idempotency" / "key-success-golden.json").read_text(
         encoding="utf-8"
@@ -676,6 +696,15 @@ def test_golden_save_confirm_same_key_retry_replays_terminal_outcome(
     assert sorted(
         path.name for path in (tmp_path / "storage" / "requests").glob("*.json")
     ) == [f"{request_id}.json"]
+    # US-222: a terminal replay converges on the same single TrackingRecord
+    # (same tracking_id, revision unchanged, no duplicate audit events).
+    config = load_storage_config(tmp_path / "storage")
+    records = list_tracking_records(config).records
+    assert len(records) == 1
+    tracking = records[0]
+    assert tracking.tracking_id == first_result["handoff"]["tracking_id"]
+    assert tracking.revision == 1
+    assert len(tracking.audit_events) == 1
 
 
 def test_golden_save_confirm_different_key_replay_is_draft_replayed(

@@ -192,7 +192,7 @@ export interface paths {
         put?: never;
         /**
          * 保存并确认单个订阅方案草案
-         * @description US-214：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与 handoff（Stage 28 不创建 tracking record，D28-09）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。
+         * @description US-214/US-222：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与扩展 handoff（US-222 起 handoff 额外携带 tracking_id/tracking_status/tracking_ready/safe_message，确认的 Request 同步进入统一追番列表；tracking 写失败不回滚已确认 Request，tracking_ready=false + 固定 safe_message 后续访问补偿）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案且再次 ensure 收敛同一 tracking_id）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。
          */
         post: operations["confirmRequestSave"];
         delete?: never;
@@ -280,7 +280,7 @@ export interface paths {
         put?: never;
         /**
          * 批量保存并确认选中草案（逐条部分成功）
-         * @description US-216：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。Stage 28 不创建 tracking record（D28-09）。
+         * @description US-216/US-222：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。US-222 起每条 CONFIRMED 项同步进入统一追番列表并返回 tracking_id/tracking_ready，单条 tracking 写失败不回滚该已确认项或其他条目。
          */
         post: operations["saveConfirmBatchItems"];
         delete?: never;
@@ -4146,7 +4146,11 @@ export interface operations {
                      *         "handoff": {
                      *           "request_id": "示例",
                      *           "status": "示例",
-                     *           "next_action": "示例"
+                     *           "next_action": "示例",
+                     *           "tracking_id": "示例",
+                     *           "tracking_status": "示例",
+                     *           "tracking_ready": true,
+                     *           "safe_message": "示例"
                      *         }
                      *       }
                      *     }
@@ -4412,12 +4416,16 @@ export interface operations {
                             };
                             /**
                              * RequestSaveConfirmHandoffDTO
-                             * @description Public ``handoff`` of a confirmed save (US-214).
+                             * @description Public ``handoff`` of a confirmed save (US-214 + US-222).
                              *
-                             *     Stage 28 deliberately does **not** create a tracking record (D28-09); the
-                             *     handoff hands the frontend the durable ACCEPTED Request identity so the
-                             *     tracking phase can later build a record idempotently. ``next_action`` is
-                             *     the stable B-B hook.
+                             *     The handoff hands the frontend the durable ACCEPTED Request identity plus
+                             *     its unified tracking identity. ``tracking_id`` is always the deterministic
+                             *     id derived from the Request id; ``tracking_ready`` is True when a usable
+                             *     TrackingRecord exists, False when the tracking write failed (the confirmed
+                             *     Request is never rolled back and the record is recovered on the next
+                             *     tracking access — ``tracking_status`` stays null so a state is never
+                             *     faked). ``safe_message`` carries a fixed recovery copy only in that case.
+                             *     ``next_action`` remains the stable B-B hook.
                              */
                             handoff: {
                                 /** Request Id */
@@ -4426,6 +4434,14 @@ export interface operations {
                                 status: string;
                                 /** Next Action */
                                 next_action: string;
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /** Tracking Status */
+                                tracking_status: string | null;
+                                /** Tracking Ready */
+                                tracking_ready: boolean;
+                                /** Safe Message */
+                                safe_message: string | null;
                             };
                         };
                     };
@@ -5703,7 +5719,9 @@ export interface operations {
                      *             "request_id": null,
                      *             "status": null,
                      *             "error_type": null,
-                     *             "error_message": null
+                     *             "error_message": null,
+                     *             "tracking_id": null,
+                     *             "tracking_ready": null
                      *           }
                      *         ],
                      *         "summary": {}
@@ -5752,6 +5770,16 @@ export interface operations {
                                  * @default null
                                  */
                                 error_message: string | null;
+                                /**
+                                 * Tracking Id
+                                 * @default null
+                                 */
+                                tracking_id: string | null;
+                                /**
+                                 * Tracking Ready
+                                 * @default null
+                                 */
+                                tracking_ready: boolean | null;
                             }[];
                             /** Summary */
                             summary: {

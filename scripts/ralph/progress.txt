@@ -205,3 +205,61 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
       对 ACCEPTED+queue 非提交中/成功，或已损坏文件无其他证据的 Request 保守映射 RECOVERY_REQUIRED。
 ---
 
+
+## [2026-09-08] - US-222
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 Web 服务 `apps/migu_orca_web/tracking_handoff.py`：`ensure_confirmed_request_tracking`
+    是「已确认 ACCEPTED Request → 统一追番记录」的公共入口。它构造 revision=1 的
+    `TrackingRecord`（plan_summary 复用 `migration.plan_summary_from_request`，指纹复用
+    `save_confirm_service.compute_request_fingerprint`，确定性 `tracking_id_for_request`）并调
+    `ensure_tracking_record`（create-if-absent，同 Request 并发/重放/迁移收敛同一条记录，绝不覆盖已有）。
+    repository `Stage1Error` 被捕获为 not-ready handoff（`tracking_ready=False` +
+    `tracking_status=None` 不伪造 + 固定中文 safe_message「方案已保存，追番列表将在打开时自动恢复」），
+    绝不回滚已确认 Request；`unavailable_tracking_handoff` 供无法取到 Request 时使用。
+  - 接入 4 个入口：单番 accept（`RequestAcceptView`，origin `LEGACY_ACCEPT`）、单番 save-confirm
+    （`RequestSaveConfirmView` 成功分支，origin `SAVE_CONFIRM`，覆盖 fresh + 终态重放，因为重放也走
+    同一 save()）、批量 save-confirm（`routes_batches._ensure_batch_tracking` 对 CONFIRMED 项逐条
+    best-effort enrich，单条 tracking 失败不失败 HTTP/不回滚 sibling）；另把 batch accept 的
+    PENDING_CONFIRM→ACCEPTED 转换共用 seam（`services._build_batch_accept_one.accept_one`）也接入
+    ensure（§12「所有 accept 入口」）。
+  - 响应契约扩展：`RequestSaveConfirmHandoffDTO` 增加 tracking_id/tracking_status/tracking_ready/
+    safe_message（保留 status=ACCEPTED 与 next_action=OPEN_TRACKING）；`BatchSaveConfirmItemResult`
+    + `BatchSaveConfirmItemResultDTO` + `serialize_batch_save_confirm_result` 增加
+    tracking_id/tracking_ready（CONFIRMED 项）。DTO 全部 strict `extra="forbid"`。
+  - 同步文档与生成物：`openapi_gen._ENDPOINTS` 两条 save-confirm 描述更新（移除 Stage 28 不创建
+    tracking 文案）、重生成 `docs/api/openapi.json`、重生成 `frontend/src/api/generated/api.ts`、
+    `docs/api/endpoint_inventory.md` §3.1/§3.4/US 里程碑与 US-222 说明；`AGENTS.md` 增补统一
+    追番 handoff 模块与「tracking 写失败不回滚」模式。
+- Files changed
+  - 新增：`src/apps/migu_orca_web/tracking_handoff.py`、`src/apps/migu_orca_web/tracking_handoff_test.py`
+  - 修改：`routes_requests.py`（accept/save-confirm ensure + handoff 扩展）、`routes_batches.py`
+    （_ensure_batch_tracking + per-item enrich）、`services.py`（_build_batch_accept_one ensure）、
+    `save_confirm_service.py`（BatchSaveConfirmItemResult 字段 + serializer）、`api_contract.py`
+    （两个 DTO 扩展）、`openapi_gen.py`（描述）、`docs/api/openapi.json`、
+    `docs/api/endpoint_inventory.md`、`frontend/src/api/generated/api.ts`、
+    `src/apps/migu_orca_web/AGENTS.md`
+  - 测试：`tracking_handoff_test.py`（7 单测）、`views_test.py`（新增 5 条路由级 US-222 测试 +
+    batch accept 断言）、`tests/api_contract/test_dto_contracts.py`、`test_golden_contracts.py`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - 统一追番 handoff 的服务模块模式：`ensure_confirmed_request_tracking` 以 ACCEPTED Request 为
+      输入（校验 `request_id` 非空 + status == ACCEPTED，否则 ValueError 暴露编程错误），内部构造
+      记录 + ensure；把「tracking 写失败」折叠成 not-ready handoff 是 Web 服务层责任，engine 仍抛
+      Stage1Error。后续 US-224+ revalidate/submit/retry/recover 直接复用本模块（它们也需要先 ensure）。
+    - 批量 save-confirm 的 tracking side-effect 应放在 route 层对 `BatchSaveConfirmResult` 逐条
+      enrich（CONFIRMED 项），不要放进 `run_batch_save_confirm`/`build_batch_process_one` 业务组合器。
+    - batch accept 的 PENDING_CONFIRM→ACCEPTED 转换在 `services._build_batch_accept_one.accept_one`
+      seam 内做 ensure（与 RequestAcceptView 行为一致）；改 seam 后 views_test 中所有 batch accept
+      测试都会开始写 tracking 记录——断言只数 requests 目录的测试不受影响。
+  - Gotchas encountered
+    - save-confirm 的终态重放与 fresh confirm 走同一条 view `save()` 分支，所以在 view 内 ensure 一次
+      即同时覆盖「重放必须再次 ensure」；不要在 `run_save_confirm` 内 ensure（它已被 US-222 之外的
+      服务复用，且不知道 tracking origin）。
+    - 契约测试的「reject leaked field」列表必须同步：`tracking_id` 从
+      `test_batch_save_confirm_dto_rejects_sensitive_item_fields` 的拒绝集合移除，改为断言新增字段
+      合法；single save-confirm handoff 的 strict 测试需提供全部新必填字段。
+    - 改 API contract（DTO/OpenAPI 描述/新响应字段）后必须重生成 openapi.json + TS client，否则
+      `test_openapi_generation` / `test_openapi_runtime_consistency` 的 drift check 失败；无需新
+      endpoint 时 operationId/endpoint inventory 总表不变。
+---

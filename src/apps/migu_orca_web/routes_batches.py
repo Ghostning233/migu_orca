@@ -9,13 +9,17 @@ seams built in ``services.py``. US-216 adds the batch save-confirm partial-
 success endpoint on top of the single save-confirm service.
 """
 
+from dataclasses import replace
+
 from ab_engine.controllers.ab_config import build_ab_config
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.routes_requests import _run_draft_save_confirm
 from apps.migu_orca_web.save_confirm_service import (
+    BATCH_OUTCOME_CONFIRMED,
     BATCH_OUTCOME_FAILED,
     ERROR_TYPE_SAVE_CONFIRM_FAILED,
     BatchSaveConfirmItemResult,
+    BatchSaveConfirmResult,
     SaveConfirmOutcome,
     build_batch_process_one,
     run_batch_save_confirm,
@@ -53,6 +57,11 @@ from apps.migu_orca_web.services import (
     _search_candidates_from_parse_result,
     _storage_dir,
 )
+from apps.migu_orca_web.tracking_handoff import (
+    TrackingHandoff,
+    ensure_confirmed_request_tracking,
+    unavailable_tracking_handoff,
+)
 from batch_engine.controllers.anime_title_parser import (
     RuleAnimeTitleParsingProvider,
     parse_anime_title,
@@ -89,7 +98,12 @@ from storage_engine.controllers.queue_repository import (
     load_submission_queue,
     save_submission_queue,
 )
-from storage_engine.controllers.storage_config import load_storage_config
+from storage_engine.controllers.request_repository import load_request_snapshot
+from storage_engine.controllers.storage_config import (
+    StorageConfig,
+    load_storage_config,
+)
+from tracking_engine.models.tracking import TRACKING_ORIGIN_SAVE_CONFIRM
 
 
 @class_route(api_blueprint, "/api/v1/batches/parse", methods=["POST"])
@@ -342,6 +356,59 @@ def _sanitize_save_confirm_error_message(exc: Stage1Error) -> str:
     }.get(exc.error_type, "保存确认失败，请稍后重试")
 
 
+def _ensure_batch_tracking(
+    result: BatchSaveConfirmResult,
+    config: StorageConfig,
+) -> BatchSaveConfirmResult:
+    """Enrich every CONFIRMED batch item with a unified tracking handoff (US-222).
+
+    Each confirmed item enters the tracking list through the same
+    create-if-absent ensure the single save-confirm endpoint uses, so retries
+    and terminal replays converge on the deterministic tracking_id.  Tracking
+    is best-effort per item: a failure never rolls back the confirmed item or a
+    sibling, and only sets ``tracking_ready=False`` (recovered on a later
+    tracking access).
+    """
+    updated_items: list[BatchSaveConfirmItemResult] = []
+    for item in result.results:
+        if item.outcome != BATCH_OUTCOME_CONFIRMED or not item.request_id:
+            updated_items.append(item)
+            continue
+        handoff = _tracking_handoff_for_confirmed_item(config, item.request_id)
+        updated_items.append(
+            replace(
+                item,
+                tracking_id=handoff.tracking_id,
+                tracking_ready=handoff.tracking_ready,
+            )
+        )
+    return replace(result, results=updated_items)
+
+
+def _tracking_handoff_for_confirmed_item(
+    config: StorageConfig,
+    request_id: str,
+) -> TrackingHandoff:
+    """Return the tracking handoff for one confirmed item, never raising.
+
+    The item is already durably confirmed; the tracking ensure is a best-effort
+    side effect that must not turn the batch partial-success result into an
+    HTTP failure, so any tracking/load failure maps to a not-ready handoff.
+    """
+    try:
+        request = load_request_snapshot(config, request_id)
+    except Exception:  # pragma: no cover - safety boundary
+        return unavailable_tracking_handoff(request_id)
+    try:
+        return ensure_confirmed_request_tracking(
+            config=config,
+            request=request,
+            origin=TRACKING_ORIGIN_SAVE_CONFIRM,
+        )
+    except Exception:  # pragma: no cover - safety boundary
+        return unavailable_tracking_handoff(request_id)
+
+
 @class_route(api_blueprint, "/api/v1/batches/<batch_id>/save-confirm", methods=["POST"])
 class BatchSaveConfirmView(PostView):
     """Save + confirm selected batch draft cards in one partial-success call.
@@ -362,6 +429,7 @@ class BatchSaveConfirmView(PostView):
         assert isinstance(self.request_validator_model, BatchSaveConfirmPayload)
         payload = self.request_validator_model
         storage_dir = _storage_dir(payload.storage_dir)
+        config = load_storage_config(storage_dir)
 
         def process_one_item(
             item_id: str,
@@ -390,6 +458,11 @@ class BatchSaveConfirmView(PostView):
             item_ids=payload.item_ids,
             process_one=process_one,
         )
+        # US-222: every confirmed item also enters the unified tracking list
+        # (create-if-absent, so idempotent retries and terminal replays converge
+        # on the same deterministic tracking_id).  One item's tracking failure
+        # never rolls back its own confirmation or any sibling's.
+        result = _ensure_batch_tracking(result, config)
         return serialize_batch_save_confirm_result(result)
 
 

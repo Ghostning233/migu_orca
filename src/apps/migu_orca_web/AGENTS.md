@@ -270,6 +270,29 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - 改批量 DTO 后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`
   （drift check 双守护）；`test_dto_contracts.py` 用真实 serializer 输出断言嵌套白名单。
 
+## 统一追番记录 handoff（US-222）
+
+- `apps/migu_orca_web/tracking_handoff.py` 是所有「已确认 Request → 统一追番列表」的公共入口：
+  `ensure_confirmed_request_tracking(config, request, origin=...)` 构造 revision=1 的
+  `TrackingRecord`（plan_summary 复用 `tracking_engine.controllers.migration.plan_summary_from_request`，
+  确定性 `tracking_id_for_request`）并调 `ensure_tracking_record`（create-if-absent，绝不覆盖已有；
+  同 Request 并发/重放/迁移收敛同一条记录，重复 ensure 不 bump revision/不重复审计）。
+- **必须接入的入口**：单番 accept（origin `LEGACY_ACCEPT`）、单番 save-confirm 与批量
+  save-confirm（origin `SAVE_CONFIRM`）、save-confirm 终态重放；US-226 起的统一 submit 服务也复用
+  本模块做 ensure/revalidate/operation 编排。
+- **tracking 写失败绝不允许回滚已确认 Request**：`ensure_confirmed_request_tracking` 捕获
+  repository `Stage1Error` 并返回 not-ready handoff（`tracking_ready=False` + `tracking_status=None`
+  不伪造状态 + 固定中文 `safe_message` =「方案已保存，追番列表将在打开时自动恢复」），后续任一
+  tracking 访问再次 ensure 补偿。不要在 route 层 try/except 吞掉非 tracking 错误。
+- 单番 save-confirm 的 `handoff` DTO（`RequestSaveConfirmHandoffDTO`）与批量 save-confirm 的
+  CONFIRMED 逐条结果（`BatchSaveConfirmItemResult`）都携带
+  `tracking_id`/`tracking_status`/`tracking_ready`/`safe_message`（批量只加
+  `tracking_id`/`tracking_ready`）。批量路径在 `routes_batches._ensure_batch_tracking` 对 CONFIRMED
+  项**逐条 best-effort** enrich（一个 tracking 写失败不失败整个 HTTP 响应），不要放进
+  `run_batch_save_confirm`/`build_batch_process_one` 业务层。
+- 改这两类响应 DTO/字段后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`，
+  并同步 `docs/api/endpoint_inventory.md` §3.1/§3.4/§4 与 `api.test.ts`/DTO/golden 契约测试。
+
 ## 静态检查与就绪探针（US-195）
 
 - 静态检查是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：

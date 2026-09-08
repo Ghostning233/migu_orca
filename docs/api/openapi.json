@@ -6801,7 +6801,7 @@
     "/api/v1/requests/save-confirm": {
       "post": {
         "summary": "保存并确认单个订阅方案草案",
-        "description": "US-214：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与 handoff（Stage 28 不创建 tracking record，D28-09）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。",
+        "description": "US-214/US-222：一次请求完成 revision 校验、草案预留、持久化、确认与幂等结果提交。请求只接受服务端签发的 draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。成功返回 CONFIRMED、已保存的 ACCEPTED Request 与扩展 handoff（US-222 起 handoff 额外携带 tracking_id/tracking_status/tracking_ready/safe_message，确认的 Request 同步进入统一追番列表；tracking 写失败不回滚已确认 Request，tracking_ready=false + 固定 safe_message 后续访问补偿）。同一 idempotency_key 重试返回同一最终结果（终态重放不触碰草案且再次 ensure 收敛同一 tracking_id）；不同键重放已保存草案返回 409 draft_replayed；持久化成功但确认失败返回 409 save_confirm_failed，error_data.details 只含 outcome=SAVED_CONFIRM_FAILED、request_id 与 retry_action=ACCEPT_SAVED_REQUEST。idempotency_key 是 request-scoped opaque 值，只进请求体与页面内存，绝不进入 storage/URL/浏览器 storage/日志/trace。",
         "operationId": "confirmRequestSave",
         "responses": {
           "200": {
@@ -7401,7 +7401,7 @@
                         },
                         "handoff": {
                           "additionalProperties": false,
-                          "description": "Public ``handoff`` of a confirmed save (US-214).\n\nStage 28 deliberately does **not** create a tracking record (D28-09); the\nhandoff hands the frontend the durable ACCEPTED Request identity so the\ntracking phase can later build a record idempotently. ``next_action`` is\nthe stable B-B hook.",
+                          "description": "Public ``handoff`` of a confirmed save (US-214 + US-222).\n\nThe handoff hands the frontend the durable ACCEPTED Request identity plus\nits unified tracking identity. ``tracking_id`` is always the deterministic\nid derived from the Request id; ``tracking_ready`` is True when a usable\nTrackingRecord exists, False when the tracking write failed (the confirmed\nRequest is never rolled back and the record is recovered on the next\ntracking access — ``tracking_status`` stays null so a state is never\nfaked). ``safe_message`` carries a fixed recovery copy only in that case.\n``next_action`` remains the stable B-B hook.",
                           "properties": {
                             "request_id": {
                               "title": "Request Id",
@@ -7414,12 +7414,46 @@
                             "next_action": {
                               "title": "Next Action",
                               "type": "string"
+                            },
+                            "tracking_id": {
+                              "title": "Tracking Id",
+                              "type": "string"
+                            },
+                            "tracking_status": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Tracking Status"
+                            },
+                            "tracking_ready": {
+                              "title": "Tracking Ready",
+                              "type": "boolean"
+                            },
+                            "safe_message": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Safe Message"
                             }
                           },
                           "required": [
                             "request_id",
                             "status",
-                            "next_action"
+                            "next_action",
+                            "tracking_id",
+                            "tracking_status",
+                            "tracking_ready",
+                            "safe_message"
                           ],
                           "title": "RequestSaveConfirmHandoffDTO",
                           "type": "object"
@@ -7466,7 +7500,11 @@
                     "handoff": {
                       "request_id": "示例",
                       "status": "示例",
-                      "next_action": "示例"
+                      "next_action": "示例",
+                      "tracking_id": "示例",
+                      "tracking_status": "示例",
+                      "tracking_ready": true,
+                      "safe_message": "示例"
                     }
                   }
                 }
@@ -9773,7 +9811,7 @@
     "/api/v1/batches/{batch_id}/save-confirm": {
       "post": {
         "summary": "批量保存并确认选中草案（逐条部分成功）",
-        "description": "US-216：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。Stage 28 不创建 tracking record（D28-09）。",
+        "description": "US-216/US-222：按条执行与单番 POST /api/v1/requests/save-confirm 完全相同的用例（revision 校验、草案预留、持久化、确认与幂等结果提交）。请求每条只接受 item_id、draft_id、base_revision 与 opaque idempotency_key，不接受完整 Request。item_ids 可选：只处理选中项并保持输入顺序，省略时按 items 顺序处理全部。成功项不因其他条目失败回滚；可预期的单条业务失败（draft_expired/draft_revision_conflict/idempotency_conflict/save_confirm_failed 等）返回 HTTP 200 的逐条脱敏 failed 结果，请求级 shape/storage profile 错误仍走普通失败 envelope。同一 item + idempotency_key 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。US-222 起每条 CONFIRMED 项同步进入统一追番列表并返回 tracking_id/tracking_ready，单条 tracking 写失败不回滚该已确认项或其他条目。",
         "operationId": "saveConfirmBatchItems",
         "responses": {
           "200": {
@@ -9802,7 +9840,7 @@
                         "results": {
                           "items": {
                             "additionalProperties": false,
-                            "description": "One batch save-confirm per-item result (US-216).\n\nPer-item failures are *partial-success* results (``outcome=CONFIRMED`` for\nsuccessful items, a stable sanitized failure otherwise) and never escalate\nthe whole request to an HTTP failure. ``request_id``/``status`` are only\npresent on the CONFIRMED branch; failed items carry the sanitized\n``error_type`` + a fixed Chinese ``error_message`` and stay retryable by\nthe client (the draft is not consumed on an expected failure).",
+                            "description": "One batch save-confirm per-item result (US-216).\n\nPer-item failures are *partial-success* results (``outcome=CONFIRMED`` for\nsuccessful items, a stable sanitized failure otherwise) and never escalate\nthe whole request to an HTTP failure. ``request_id``/``status`` are only\npresent on the CONFIRMED branch; failed items carry the sanitized\n``error_type`` + a fixed Chinese ``error_message`` and stay retryable by\nthe client (the draft is not consumed on an expected failure).\n``tracking_id``/``tracking_ready`` are present on the CONFIRMED branch\n(US-222): the item also entered the unified tracking list, and a tracking\nwrite failure still keeps the item confirmed with ``tracking_ready=False``.",
                             "properties": {
                               "item_id": {
                                 "title": "Item Id",
@@ -9859,6 +9897,30 @@
                                 ],
                                 "default": null,
                                 "title": "Error Message"
+                              },
+                              "tracking_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Tracking Id"
+                              },
+                              "tracking_ready": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Tracking Ready"
                               }
                             },
                             "required": [
@@ -9900,7 +9962,9 @@
                         "request_id": null,
                         "status": null,
                         "error_type": null,
-                        "error_message": null
+                        "error_message": null,
+                        "tracking_id": null,
+                        "tracking_ready": null
                       }
                     ],
                     "summary": {}
