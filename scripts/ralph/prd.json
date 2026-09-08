@@ -153,8 +153,8 @@
         "Tests pass"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "已同步 README/docs-README/主 PRD/架构/backlog/future stages/M01/M09/M10/M11/M12/M13/api 文档与 TS client 无漂移；新增脱敏 fixture 迁移演练测试 7 例（全量/部分迁移、崩溃窗口 AUTO 恢复、旧入口兼容与回退、同键终态重放）；完整回归 1496 非浏览器 + 133 Chromium + 261 前端 Vitest + typecheck/lint/api:check/build/OpenAPI drift/compileall/ruff/git diff --check 全绿；B-C handoff 写入 stage29 PRD §21 与 future_stages「Stage 29 handoff」；prd/progress 已归档。"
     }
   ]
 }

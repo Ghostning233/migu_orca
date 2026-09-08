@@ -14,8 +14,8 @@
 ## 当前工作目标
 
 - 前端体验全面重构的 Gate 1～3 已完成，产品方向、低保真骨架、交互规格、视觉方向和设计
-  Token 均已冻结；后端 B-A 已完成，B-B 已通过 Gate 4 范围评审并形成 Stage 29 执行 PRD，
-  B-C～B-D 与前端分片仍待 Gate 4，不授权大规模页面编码。
+  Token 均已冻结；后端 B-A 已完成，B-B 已完成并交付为 Stage 29，B-C～B-D 与前端分片
+  仍待 Gate 4，不授权大规模页面编码。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
@@ -28,10 +28,10 @@
 - 候选开发边界见[前端体验重构：后端支撑 PRD](MiGuOrca_frontend_ux_backend_support_PRD.md)与
   [前端体验重构：前端分片实施 PRD](MiGuOrca_frontend_ux_implementation_PRD.md)。两份文档仍按
   工作包继续分包评审；其中 B-A 已完成并交付为[Stage 28：草案一致性与原子保存确认](MiGuOrca_stage28_draft_consistency_PRD.md)，
-  B-B 已落盘为[Stage 29：统一追番记录与可靠提交恢复](MiGuOrca_stage29_unified_tracking_PRD.md)，
+  B-B 已完成并交付为[Stage 29：统一追番记录与可靠提交恢复](MiGuOrca_stage29_unified_tracking_PRD.md)，
   其余工作包仍未分配 Stage。
 
-截至 2026-09-08，最近完成阶段为 Stage 28「草案一致性与原子保存确认」（US-210～US-218 全部完成：服务端草案 revision 与 CAS、保存预留生命周期、持久化 save-confirm 幂等记录、单番/批量 save-confirm、36 部服务端边界与 Request safe-info 白名单；Stage 28 只返回 ACCEPTED handoff，不创建 tracking record）。
+截至 2026-09-08，最近完成阶段为 Stage 29「统一追番记录与可靠提交恢复」（US-219～US-227 全部完成：TrackingRecord/TrackingOperation 严格 schema 与确定性 ID、纯本地幂等历史迁移、accept/save-confirm tracking handoff、统一追番列表/安全详情/revalidate/submit/retry/recover API，旧单番/批量入口共享统一 submission service，旧 queue 为兼容投影；B-B 不实现 Auto Bangumi 全量管理与外部同步，B-C handoff 见 future_stages）。
 
 ## Stage PRD
 
@@ -44,7 +44,7 @@
 - Stage 26：Web API 契约、服务端安全边界与前端迁移基线（已完成）
 - Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（US-197～US-209 全部完成，旧前端已删除）
 - Stage 28：草案一致性与原子保存确认（US-210～US-218 全部完成，已归档；只返回 ACCEPTED handoff，不创建 tracking record）
-- Stage 29：统一追番记录与可靠提交恢复（B-B，US-219～US-227 已规划；尚未生成 Ralph PRD 或开始开发）
+- Stage 29：统一追番记录与可靠提交恢复（B-B，US-219～US-227 全部完成，已归档；不实现 Auto Bangumi 管理/外部同步，B-C handoff 见 future_stages）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

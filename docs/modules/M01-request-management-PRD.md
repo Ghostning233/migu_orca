@@ -155,6 +155,18 @@ Stage 28 草案一致性扩展：
   其他修改或保存返回稳定 409（`draft_reserved`/`draft_revision_conflict`/`draft_replayed`）。
 - `draft_id`、revision 与幂等键只在请求体和组件内存中流转，绝不进入 URL 或浏览器 storage。
 
+Stage 29 统一追番扩展（已完成）：
+
+- Request 仍是“方案内容”权威，TrackingRecord 是“新提交流程与用户可见运行状态”权威（D29-01）。
+  任意 tracking API 首次访问前，历史 ACCEPTED Request/旧 queue/已保存 AB result 会纯本地幂等
+  回填为 tracking record；新建 accept/save-confirm 通过 `ensure_confirmed_request_tracking`
+  实时 ensure——同一 request_id 的 ensure/重放/迁移永远收敛到同一确定性 `tracking_id`。
+- Request 缺失、不是 ACCEPTED、或 fingerprint 相对 submit 绑定时已变化，都会让该 tracking
+  进入 `NEEDS_RECONFIRM`；只有用户显式确认最新方案（submit `confirm=true`）才更新
+  fingerprint/revision 并继续同一次提交，浏览器不得提交自己计算的 fingerprint。
+- 删除/取消 Request 不自动删除 tracking；恢复 `MARK_FAILED`/外部删除只处理外部对象，本地
+  Request、TrackingRecord、审计与媒体全部保留（B-C 再实现）。
+
 ## 7. 异常场景
 
 | 场景 | 处理方式 |

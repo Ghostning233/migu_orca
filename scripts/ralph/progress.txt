@@ -593,3 +593,72 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - 新增端点同步链路：openapi_gen._ENDPOINTS + 重生成 openapi.json + api:generate +
       api.test.ts 计数/operationId/path + endpoint_inventory §2/§3.6 + DTO/golden 契约测试；
       `test_inventory_covers_every_api_rule` 立即抓缺失端点。
+
+---
+
+## [2026-09-08] - US-227
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 US-227 迁移/恢复演练测试 `tests/api_contract/test_stage29_migration_rehearsal.py`
+    （7 例，全部在 tmp storage 上用脱敏 fixture，绝不触碰 `.migu_orca/storage` 或外部系统）：
+    (1) 全量迁移：混合 ACCEPTED Request / legacy queue（READY/FAILED/SUCCEEDED 无 AB）/AB
+    success 证据 → COMPLETE + 精确计数（created=5、recovery_required=1）+ 确定性 tracking_id
+    + 重跑 replayed 不再全量扫描；(2) 部分迁移：一个损坏 Request 源文件 → PARTIAL +
+    unreadable=1 + 固定 warning + manifest 不含损坏文件名/原文，修复后重试 → COMPLETE 且
+    健康记录不重复、不 bump；(3) 崩溃窗口：残留 VERIFYING_EXTERNAL + IN_PROGRESS operation +
+    本地 AB success → recover AUTO 纯本地解析为 ACTIVE（不访问外部），无证据的
+    RECOVERY_REQUIRED 无法被 retry（409 tracking_state_conflict）；(4) 旧入口兼容与回退：
+    旧 queue/单番 AB outcome 投影到 tracking、ACTIVE 不被 stale FAILED queue 降级且不追加审计、
+    同键终态重放返回同一 operation_id 且不二次调用外部。
+  - 文档 handoff（已同步为 Stage 29 已完成/归档）：README.md（顶部完成段/目前状态 bullet/
+    Web API tracking 端点族/Ralph 快照与执行行）、docs/README.md、docs/api/README.md、
+    docs/MiGuOrca_main_PRD.md、docs/MiGuOrca_future_stages.md（Stage 29 已完成 + Stage 29
+    handoff：B-C capability/外部同步/管理 adapter）、docs/backlog.md（BL-025 状态与完成记录）、
+    docs/design/architecture.md、docs/MiGuOrca_frontend_ux_backend_support_PRD.md /
+    frontend_ux_implementation_PRD.md / frontend-ux-refactor-work-goals.md、模块
+    M01/M09/M10/M11/M12/M13、docs/api/endpoint_inventory.md、stage29 PRD 文档自身
+    （§1 状态 + §21 完成记录）。
+  - B-C handoff 输出：stage29 PRD §20 保持 + §21 完成记录 + future_stages「Stage 29 handoff」
+    显式列出 B-C 只能基于已冻结 TrackingRecord/mapping 扩展（capability 探测、外部
+    subscription/RSS 列表/详情/修改/启停/删除/刷新、`POST /api/v1/tracking/sync`、
+    EXTERNAL_ONLY、按已保存 external ID 对账、recover 独立外部核验、外部删除只删外部对象）；
+    Stage 29 不提前实现 B-C。
+  - `scripts/ralph/prd.json`：US-227 passes=true（US-219～US-227 全部完成）。
+  - 归档：新建 `scripts/ralph/archive/2026-09-08-stage29-unified-tracking/`，拷贝 prd.json +
+    progress.txt。
+- Verification
+  - `uv run python -m compileall -q src tests` → passed
+  - `uv run ruff check src tests` → passed
+  - `uv run pytest -m "not browser" -q` → 1496 passed, 133 deselected（含 7 例新增演练）
+  - `uv run pytest tests/browser/ -q` → 133 passed（真实 Chromium）
+  - `uv run python -m apps.migu_orca_web.openapi_gen --check` → OpenAPI up to date
+  - 前端 `npm run typecheck`/`lint`/`test:unit`(261)/`api:check`/`build` 全绿
+  - `git diff --check` 通过；仓库根 `.migu_orca/storage` 不存在；无未提交 build/trace/截图
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - US-227 这类收尾 story 的「迁移演练」应写成可复现的脱敏 fixture 集成测试：直接驱动
+      service/repository（不依赖 Flask client），每例用独立 tmp storage 子目录，四类场景
+      （全量/部分+修复/崩溃窗口/旧入口兼容+回退）各自成为独立 test function，结果进入
+      progress 的 Verification 数字。
+    - crash-window 演练的正确造数顺序：先 ensure（PENDING_SUBMIT）→ bind op PREPARED →
+      op CAS IN_PROGRESS → `transition_record` 到 VERIFYING_EXTERNAL 并写
+      current_operation_id；「外部已发生」的本地证据要写进 Request snapshot 的
+      `ab_submit_result`（recover 的证据源），而不是 ab_results repository（migration 的证据源）。
+    - 文档 handoff 需同步的主干集合与 Stage 28 相同：README/docs-README/main PRD/architecture/
+      backlog/future_stages + 受影响模块 PRD + 候选 PRD 状态表 + 阶段 PRD 自身（状态行 + 完成
+      记录节）；B-C 这类跨阶段 handoff 放 future_stages「Stage N handoff」小节。
+  - Gotchas encountered
+    - 仓库根 `.migu_orca/mikan_posters_v1` 是浏览器 poster 缓存（gitignored、历史遗留），不是
+      `.migu_orca/storage`；US-227 的「storage 不存在」判定以 `.migu_orca/storage` 目录是否
+      存在为准，不应误删本地 poster 缓存。
+    - 断言「stale projection 不追加审计」不能依赖 actor（ensure 的 TRACKING_CREATED actor 可能
+      非 SYSTEM）；改为比较 reflect 前后 audit_events 数量不变。
+    - 同键终态重放演练传 `expected_revision` 必须用 op 绑定时的原始 record.revision，不是当前
+      revision（`_guard_replay_binding` 用 op 绑定比较）。
+  - Useful context
+    - Stage 29 完成：非浏览器 1496 + 真实 Chromium 133 + 前端 Vitest 261；实现偏差=契约内最小
+      扩展；剩余风险=多 worker 共享 storage 不支持（进程内锁）、PREPARED op 恢复依赖同键
+      submit/recover、损坏文件只报 unreadable 持续重试、旧 queue 兼容投影保留一个发布周期。
+    - B-C 输入：本地 TrackingRecord（含 external_mapping）、已冻结 §10.2 mapping 与
+      `/api/v1/tracking/*` 端点；不得把 AB 全量管理/外部同步追加回 Stage 29。
+---

@@ -86,21 +86,37 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
   `idempotency_key/operation/request_fingerprint/request_id/state/created_at/updated_at`；
   `apps/migu_orca_web/save_confirm_service.py` 的 `run_save_confirm` 协调器把
   IN_PROGRESS/SAVED_CONFIRM_FAILED/CONFIRMED 状态机接到单番/批量路由（US-214/216）。
-- Stage 28 的 save-confirm 成功只返回 `CONFIRMED` + `ACCEPTED` handoff
-  （`next_action=OPEN_TRACKING`）；**不创建或伪造 tracking record**。B-B tracking 阶段从
-  持久化 ACCEPTED Request 与 handoff 幂等建立统一 tracking record。
+- Stage 29（US-219～US-227）把“已确认方案的生命周期”统一到本地 `TrackingRecord`：
+  `tracking_engine/models` 定义 schema v1 严格白名单内容契约与确定性 ID/状态机，
+  `tracking_engine/controllers` 提供无 storage 依赖的纯分类（migration/revalidate/submit/
+  recover）；`storage_engine/controllers/{tracking_repository,operation_repository,
+  migration_repository}.py` 把 `<storage>/tracking/`、`<storage>/tracking_operations/`、
+  `<storage>/tracking_migrations/` 原子读写为 JSON（确定性 `tracking_id` = 版本命名空间 +
+  request_id 摘要、`operation_id` = 版本命名空间 + idempotency_key 摘要，revision/state CAS）。
+  `apps/migu_orca_web/tracking_{handoff,migration_service,read_service,revalidate_service,
+  submission_service,recovery_service,queue_compat,serializers}.py` 编排 ensure/迁移/复核/提交/
+  恢复/旧 queue 兼容投影；新 `/api/v1/tracking/items*` 端点与旧单番 submit-ab、批量
+  submit/retry/recover 共享同一 submission service，route 层不复制业务规则。
+- Stage 28 的 save-confirm/accept handoff 保留 `request_id + status=ACCEPTED +
+  next_action=OPEN_TRACKING`，并新增 `tracking_id/tracking_status/tracking_ready/safe_message`
+  （US-222）；tracking 写失败不回滚已确认 Request，也不伪造 tracking 状态。
 
 因此前端工程化已先固化 API 契约和服务端安全边界，再渐进替换页面；Stage 26 已完成该固化
 （清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 完成迁移与旧前端删除，handoff
 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。Stage 28 在 DraftStore 上
 补齐 revision/保存生命周期与 save-confirm 幂等记录，并冻结 `/api/v1` 的 save-confirm/
-safe-info 新契约，handoff 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`。
+safe-info 新契约，handoff 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`。Stage 29 在
+同一契约基线上补齐统一追番记录/提交恢复（tracking 目录族 + 六条 `/api/v1/tracking/*` 端点 +
+旧入口收敛），handoff 与 B-C 边界见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`。
 
 ## 6. 状态与持久化
 
 - 默认运行数据位于 `.migu_orca/storage`，不应提交 Git。
-- Request、history、AB result、queue、preference、correction 和 save-confirm idempotency
-  分目录保存为 JSON（Stage 28 幂等记录只写非敏感白名单字段，见 `idempotency_repository.py`）。
+- Request、history、AB result、queue、preference、correction、save-confirm idempotency 与
+  Stage 29 的 tracking/tracking_operations/tracking_migrations 分目录保存为 JSON
+  （Stage 28 幂等记录与 Stage 29 tracking 记录/operation/manifest 都只写非敏感白名单字段，
+  见 `idempotency_repository.py`/`tracking_repository.py`/`operation_repository.py`/
+  `migration_repository.py`）。
 - 候选缓存、候选选择 context 等短期状态当前位于单进程内存，不能假定天然支持多 worker。
 - AutoBangumi 与 qBittorrent 凭据保持 request-scoped，不进入持久化、URL、浏览器 storage、日志或测试产物。
 - Web 与 CLI 使用不同 storage 信任边界（US-193）：CLI 继续接受显式 `--storage-dir`；

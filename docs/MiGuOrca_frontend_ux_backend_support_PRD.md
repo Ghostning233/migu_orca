@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | B-A 已完成；B-B 已通过 Gate 4 范围评审并规划为 Stage 29；B-C～B-D 待评审 |
+| 当前状态 | B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C～B-D 待评审 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-025 |
 | 优先级 | P0，阻塞依赖目标能力的前端切片 |
@@ -20,9 +20,9 @@
 Stage 26 已建立 Flask `/api/v1`、严格响应 DTO、确定性 OpenAPI、服务端权威 draft 和默认
 local-only 安全边界；Stage 27 已建立 Vue 3、TypeScript、Vite、生成客户端与真实 Chromium
 基线；Stage 28 已完成 revision、可靠保存、单番/批量 save-confirm、36 部边界和 safe-info。
-剩余目标行为集中在：统一单番/批量提交状态与恢复、建立 tracking 投影，以及提供 Auto Bangumi
-列表、详情、修改、启停、删除和 RSS 管理。B-B 的统一 tracking 已完成四轮范围评审，执行细节以
-`docs/MiGuOrca_stage29_unified_tracking_PRD.md` 为准；B-C～B-D 继续由本文承载候选边界。
+Stage 29 已完成统一单番/批量提交状态与恢复（tracking 投影、纯本地复核、可靠提交与人工恢复），
+执行细节以 `docs/MiGuOrca_stage29_unified_tracking_PRD.md` 为准；B-C～B-D（Auto Bangumi
+列表、详情、修改、启停、删除和 RSS 管理）继续由本文承载候选边界。
 
 ## 3. 目标
 
@@ -319,11 +319,11 @@ serializer 必须按默认拒绝原则显式构造字段。不能先输出 Reque
 | 实施包 | 内容 | 可独立验收结果 | 依赖 |
 | --- | --- | --- | --- |
 | B-A 草案一致性（Stage 28） | revision、可靠保存、单番/批量保存确认、36 部上限、安全信息 DTO | 新添加与批量审核不再串联保存/接受；确认结果可由 B-B 幂等迁移 | 已完成 (Stage 28, 2026-09-08)，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md` |
-| B-B 统一追番记录 | Stage 29：tracking repository、回填、状态映射、纯本地复核、幂等提交/恢复 | 单番与批量进入同一待提交列表 | B-A（已满足；执行 PRD 已确认） |
+| B-B 统一追番记录 | Stage 29：tracking repository、回填、状态映射、纯本地复核、幂等提交/恢复 | 单番与批量进入同一待提交列表 | 已完成 (Stage 29, 2026-09-08)，执行 PRD 见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`；B-C 由此扩展 |
 | B-C AB 管理 adapter | 3.1.18 capability、列表/详情/修改/启停/删除/RSS 刷新、映射对账 | 3.1.18 完整管理闭环可由 API 验收 | B-B |
 | B-D 契约收尾 | OpenAPI、TS client、泄漏回归、兼容与迁移演练 | 后端 handoff 冻结，可启动全部依赖前端切片 | B-A～B-C |
 
-B-A 已完成，B-B 已冻结为 Stage 29；B-B 与 B-C 不应塞进前端实现 PR。B-C 风险最高，建议使用独立分支和独立 PR，
+B-A 已完成（Stage 28），B-B 已完成（Stage 29）；B-B 与 B-C 不应塞进前端实现 PR。B-C 风险最高，建议使用独立分支和独立 PR，
 避免一次提交同时改草案事务、存储迁移和多个外部写动作。
 
 ## 12. 验收

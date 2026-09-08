@@ -7,7 +7,7 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | Stage 29 PRD：统一追番记录与可靠提交恢复 |
 | 文档类型 | 执行 PRD / 前端体验重构 B-B |
-| 当前状态 | Gate 4 的 B-B 范围已确认，待生成 Ralph PRD 与开发 |
+| 当前状态 | B-B 已完成（US-219～US-227 全部 passes，2026-09-08 归档；B-C handoff 见 §20 与 future_stages「Stage 29 handoff」） |
 | 创建日期 | 2026-09-08 |
 | Backlog | BL-025（B-B） |
 | 优先级 | P0 |
@@ -734,3 +734,43 @@ Stage 29 交付后，B-C 只能基于 TrackingRecord 和已冻结 mapping 扩展
 - 外部删除只删除外部对象，本地 Request、TrackingRecord、审计和媒体全部保留。
 
 在 B-C PRD 与 OpenAPI 冻结前，不启动依赖外部管理能力的“追番管理”正式页面实现。
+
+## 21. 完成记录（2026-09-08）
+
+Stage 29 已完成并合入 `ralph/stage29-unified-tracking`，US-219～US-227 全部 `passes: true`，
+每个 story 有独立提交与验证记录：
+
+- US-219 建立 TrackingRecord 模型、确定性 ID 与 repository（`tracking_engine/models/tracking.py`
+  schema v1 严格白名单 + `trk_` 确定性 opaque ID + 内嵌审计；`tracking_repository` 原子
+  ensure/load/CAS/list；storage layout 增加 tracking/tracking_operations/tracking_migrations）。
+- US-220 建立 TrackingOperation 与提交幂等状态机（独立 operation repository；同键同绑定重放、
+  异绑定 409 `tracking_idempotency_conflict`；PREPARED/IN_PROGRESS 终态；永不保存业务 payload）。
+- US-221 实现历史数据幂等迁移（manifest COMPLETE/PARTIAL + 逐 Request 分类；纯本地、重复运行
+  无副作用、单条损坏不阻塞健康记录且不回显原文）。
+- US-222 接入 accept/save-confirm handoff（ensure 收敛同一 tracking_id；handoff 兼容扩展
+  tracking_id/status/ready/safe_message；tracking 写失败不回滚已确认 Request）。
+- US-223 提供 tracking 列表、详情与严格安全 DTO（两条 GET；summary 计数 + 服务端
+  available_actions；详情复用 Request safe-info 唯一 producer + 最近 20 条审计）。
+- US-224 实现纯本地 revalidate 与方案变化确认（固定 §11.5 issue code；业务失败 HTTP 200 +
+  ready=false；仅 fingerprint 变化且 confirm=true 时采纳新方案继续同一次提交）。
+- US-225 实现统一 submit 与结果分类（外部调用前持久化 SUBMITTING/IN_PROGRESS；结果分类
+  ACTIVE/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/NEEDS_RECONFIRM；同键终态重放）。
+- US-226 实现 retry/recover 与旧入口兼容（retry 只允许 SUBMIT_FAILED；AUTO 纯本地恢复；
+  人工动作 confirm=true + USER 审计；旧单番/批量入口共享统一 submission/recovery service；
+  queue 双写 best-effort 且不覆盖已落盘成功）。
+- US-227 完成契约回归、迁移演练与 B-C handoff（同步 README/主 PRD/架构/backlog/future stages/
+  M01/M09/M10/M11/M12/M13/api 文档；脱敏 fixture 演练全量/部分迁移、崩溃窗口、旧入口兼容与
+  回退；完整非浏览器 + 前端 + OpenAPI drift + 真实 Chromium 回归；输出 B-C handoff；
+  归档 prd/progress）。
+
+实际测试数量（最终交付）：非浏览器 1496 passed（含新增 7 例 US-227 迁移演练）、真实 Chromium
+133 passed、前端 Vitest 261 passed，外加 typecheck/lint/api:check/build/compileall/ruff/OpenAPI
+drift/git diff --check 全绿。
+
+实现偏差：均为契约内最小扩展，无范围外 feature（未实现 Auto Bangumi 管理、外部同步、
+EXTERNAL_ONLY、正式追番管理前端页面；B-C 全部留给后续）。
+剩余风险：多 worker 共享同一 storage 仍不支持（进程内按键锁）；operation 的 PREPARED 恢复依赖
+同键 submit 或 recover 人工介入；历史迁移对“损坏文件”只报告 unreadable 计数，后续访问会持续
+重试直到修复；旧 batch queue 兼容投影保留一个发布周期，删除旧接口需独立 PRD。
+Stage 29 prd/progress 已归档到
+`scripts/ralph/archive/2026-09-08-stage29-unified-tracking/`。

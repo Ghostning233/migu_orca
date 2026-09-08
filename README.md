@@ -4,7 +4,7 @@ MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台
 
 Stage 28「草案一致性与原子保存确认」已完成：为服务端权威草案建立单调 revision 与 compare-and-swap（乱序旧写不再覆盖最新重算），把保存改为「预留 → 持久化 → 提交/释放」（写盘失败同一草案可重试），建立持久化 save-confirm 幂等记录（跨进程重试/响应丢失不重复创建 Request），新增单番 `POST /api/v1/requests/save-confirm` 与批量 `POST /api/v1/batches/{batch_id}/save-confirm` 组合端点（批量 1～36 部服务端边界 + 逐条部分成功），并新增 Request `safe-info` 严格白名单 DTO 作为“全部信息”唯一安全数据源。实现与验收见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`。
 
-Stage 29「统一追番记录与可靠提交恢复」已完成 B-B 范围评审并形成执行 PRD，计划以确定性 TrackingRecord、独立 TrackingOperation 和纯本地历史迁移统一单番/批量待提交状态，提供列表、安全详情、复核、幂等提交、重试和人工恢复契约；结果未知时禁止盲目重复创建外部订阅，旧 batch queue 暂保留为兼容投影。Stage 29 尚未生成 Ralph PRD 或开始开发，范围见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`。
+Stage 29「统一追番记录与可靠提交恢复」已完成：建立本地 `TrackingRecord`（确定性 opaque `tracking_id`、revision compare-and-swap、内嵌审计）与独立 `TrackingOperation`（跨重启提交幂等与恢复证据）；任意 tracking API 首次访问前以纯本地、可重入方式把历史 Request/旧 batch queue/已保存 AB result 幂等回填为统一追番记录；accept/save-confirm handoff 向后兼容扩展 `tracking_id/tracking_status/tracking_ready/safe_message`；新增统一追番列表/安全详情/纯本地复核/可靠提交/重试/人工恢复 API（`/api/v1/tracking/items*`），旧单番 submit-ab 与批量 submit/retry/recover 共享同一 submission service，旧 batch queue 作为兼容投影双向同步且绝不降级已落盘成功；结果未知必须先恢复，禁止盲目重复创建外部订阅。实现与验收见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`。
 
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
@@ -37,6 +37,7 @@ MiGuOrca 不定位为 Auto Bangumi 或 qBittorrent 的替代品。下载执行�
 - Stage 24 AutoBangumi 真实认证与订阅兼容闭环与 Stage 25 BL-018 均已完成。部署/配置向导及其他条件触发事项继续记录在 `docs/backlog.md`，流式封面代理记录在 `docs/optional_features.md`；后续阶段按 backlog 动态规划。
 - Stage 27「前端工程化迁移与页面重构」已完成：Vue 3 + TypeScript(strict) + Vite 工程、OpenAPI 类型化客户端、统一 API transport、4 条 SPA 路由以及全部 Web 用户旅程均已迁移；US-209 已删除旧 Jinja 主页面、`app.js`、旧 CSS 与迁移期测试脚手架，默认入口固定重定向到 `/app/*`。
 - Stage 28「草案一致性与原子保存确认」已完成：服务端草案带单调 revision（签发为 1、成功 CAS 修改 +1），`preview-modify` 必填 `base_revision` 做 compare-and-swap（过期 base → 409 `draft_revision_conflict`，只报 field/current_revision），`preview-save` 改为「预留 → 持久化 → 提交/释放」（写盘失败保留原 revision 可重试，正在保存 → 409 `draft_reserved`）；storage engine 新增持久化 save-confirm 幂等记录（`<storage>/idempotency/`，只含非敏感白名单字段），单番/批量 save-confirm 组合端点一次完成校验、保存、确认与幂等提交并返回 ACCEPTED handoff，批量逐条部分成功且强制 1～36 部服务端边界；`safe-info` 以 `extra="forbid"` DTO + 默认拒绝 serializer 提供“全部信息”唯一安全数据源。
+- Stage 29「统一追番记录与可靠提交恢复」已完成：TrackingRecord/TrackingOperation 以严格 schema v1 白名单 + 原子写落地到 `<storage>/tracking|tracking_operations|tracking_migrations`，同一 Request 的 ensure/重放/迁移始终收敛到同一确定性 `tracking_id`；单番/批量 save-confirm 与 accept handoff 返回 tracking 状态，tracking 写失败不回滚已确认 Request；`/api/v1/tracking/items` 列表/详情提供稳定状态、状态组、服务端 `available_actions` 与安全审计摘要；revalidate 纯本地复核（不接收 AB 凭据）、submit/retry 严格幂等且外部调用前先持久化 SUBMITTING/IN_PROGRESS，结果未知必须先 recover（AUTO 只看本地证据）；旧单番 submit-ab 与批量 submit/retry/recover 复用统一 submission service，旧 queue 为兼容投影，双写失败不覆盖已落盘成功。
 - Stage 26「Web API 契约固化与服务端边界治理」已完成：`/api/v1` 端点清单与 golden contract 冻结、响应 DTO（`extra="forbid"`）与确定性 OpenAPI、Web 适配层按职责拆分（schemas/serializers/services/contexts/routes_*）、稳定 HTTP 状态语义、Web storage 根目录限制（空值回落服务端根）与服务端权威 draft 生命周期、CI 与 local-only 部署基线；本阶段未更换页面框架，页面主要视觉与用户流程保持不变。
 - 已支持标题匹配、RSS 解析、字面/正则筛选、字幕组选择、目录命名和 JSON 输出。
 - 已支持 Request 确认、取消和受限修改；确认后的 `ACCEPTED` Request 仍可执行相同受限字段的修改，并可显式删除；修改/删除后保持原有安全边界。
@@ -225,7 +226,7 @@ Web API 的应用结构参考 `/home/ghostning/github/user_level_flask`，但只
 
 Stage 28 新增单番「保存并确认」端点（US-214）：
 
-- `POST /api/v1/requests/save-confirm`：一次完成草案校验（`draft_id` + `base_revision`）、预留、持久化、确认和幂等提交。请求只接受 `draft_id`、`base_revision`、`idempotency_key` 与可选 `storage_dir`，绝不接受完整 Request。成功返回 `CONFIRMED`、已保存的 `ACCEPTED` Request 与 `handoff`（`request_id`/`status=ACCEPTED`/`next_action=OPEN_TRACKING`；Stage 28 不创建 tracking record）。同一 `idempotency_key` 重试返回同一最终结果（终态重放，不触碰草案）；不同键重放已保存草案返回 409 `draft_replayed`；持久化成功但确认失败返回 409 `save_confirm_failed`，`error_data.details` 只含 `outcome=SAVED_CONFIRM_FAILED`、公开 `request_id` 与 `retry_action=ACCEPT_SAVED_REQUEST`，客户端用既有 Request accept 契约重试确认。
+- `POST /api/v1/requests/save-confirm`：一次完成草案校验（`draft_id` + `base_revision`）、预留、持久化、确认和幂等提交。请求只接受 `draft_id`、`base_revision`、`idempotency_key` 与可选 `storage_dir`，绝不接受完整 Request。成功返回 `CONFIRMED`、已保存的 `ACCEPTED` Request 与 `handoff`（`request_id`/`status=ACCEPTED`/`next_action=OPEN_TRACKING`；Stage 29 起同时返回 `tracking_id`/`tracking_status`/`tracking_ready`/`safe_message`，同一 Request 的终态重放与后续访问都 ensure 到同一确定性 tracking_id）。同一 `idempotency_key` 重试返回同一最终结果（终态重放，不触碰草案）；不同键重放已保存草案返回 409 `draft_replayed`；持久化成功但确认失败返回 409 `save_confirm_failed`，`error_data.details` 只含 `outcome=SAVED_CONFIRM_FAILED`、公开 `request_id` 与 `retry_action=ACCEPT_SAVED_REQUEST`，客户端用既有 Request accept 契约重试确认。tracking 写入失败不回滚已确认 Request，也不伪造 tracking 状态（返回 `tracking_ready=false` 与固定安全文案，后续访问可补偿）。
 
 Stage 28 新增批量 36 部服务端边界（US-215）：
 
@@ -233,7 +234,17 @@ Stage 28 新增批量 36 部服务端边界（US-215）：
 
 Stage 28 新增批量 save-confirm 逐条部分成功端点（US-216）：
 
-- `POST /api/v1/batches/<batch_id>/save-confirm`：一次确认所选批量卡片，每条复用单番 save-confirm 用例（revision 校验、预留、持久化、确认与幂等结果提交）。请求每条只接受公开 `item_id`、服务端签发 `draft_id`/`base_revision` 与 opaque `idempotency_key`——绝不接受完整 Request；`item_ids` 可选，只处理选中项并保持输入顺序，省略时按 `items` 顺序处理全部。成功响应是 HTTP 200 逐条部分成功：`{batch_id, results: [{item_id, outcome, request_id?, status?, error_type?, error_message?}], summary: {requested, confirmed, failed}}`。可预期的单条业务失败（`draft_expired`/`draft_revision_conflict`/`draft_reserved`/`idempotency_conflict`/`save_confirm_failed` 等）返回逐条脱敏 `failed` 结果（固定中文 `error_message`，绝不回显 draft_id/标题/URL/路径），成功项不因失败项回滚；同一请求内重复 `item_id` 返回 `skipped`。同一 item + `idempotency_key` 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。请求级 shape/batch_id/storage profile 错误仍走普通失败 envelope。Stage 28 不创建 tracking record；待提交视图由后续 tracking 阶段从 handoff 建立。
+- `POST /api/v1/batches/<batch_id>/save-confirm`：一次确认所选批量卡片，每条复用单番 save-confirm 用例（revision 校验、预留、持久化、确认与幂等结果提交）。请求每条只接受公开 `item_id`、服务端签发 `draft_id`/`base_revision` 与 opaque `idempotency_key`——绝不接受完整 Request；`item_ids` 可选，只处理选中项并保持输入顺序，省略时按 `items` 顺序处理全部。成功响应是 HTTP 200 逐条部分成功：`{batch_id, results: [{item_id, outcome, request_id?, status?, error_type?, error_message?}], summary: {requested, confirmed, failed}}`。可预期的单条业务失败（`draft_expired`/`draft_revision_conflict`/`draft_reserved`/`idempotency_conflict`/`save_confirm_failed` 等）返回逐条脱敏 `failed` 结果（固定中文 `error_message`，绝不回显 draft_id/标题/URL/路径），成功项不因失败项回滚；同一请求内重复 `item_id` 返回 `skipped`。同一 item + `idempotency_key` 幂等重试重放同一 CONFIRMED 结果，绝不创建第二个 Request。请求级 shape/batch_id/storage profile 错误仍走普通失败 envelope。
+
+Stage 29 新增统一追番记录端点（US-223～US-226）：
+
+- `GET /api/v1/tracking/items`：统一追番列表，任意 tracking API 首次访问前自动运行纯本地历史迁移。查询只接受安全 `storage_dir`、可选 `q`/`status_group`/`sort`（固定枚举）；返回 `items`（稳定 `status`、中文 `status_label`、`status_group`、服务端计算的 `available_actions`、`valid_resource_count` 等）、按全部健康记录计算的 `summary` 计数与固定 `warnings`。单条损坏只增加 `unreadable` 计数与固定 warning，不阻塞健康列表，也不自动删除或回显损坏文件。
+- `GET /api/v1/tracking/items/{tracking_id}`：安全方案详情。summary 之外只返回 Request safe-info（唯一 producer）、当前 operation 安全摘要、revalidation issues、外部安全映射摘要和最近 20 条审计事件；完整 Request、外部原始 JSON、完整 URL、凭据、magnet 与绝对路径一律不回显。
+- `POST /api/v1/tracking/items/{tracking_id}/revalidate`：纯本地复核。请求只含 `expected_revision` 与可选 `storage_dir`（不接收 `ab_config`、不探测外部）；业务复核失败仍返回 HTTP 200，`ready=false` + 固定 issue code（REQUEST_CHANGED/NO_VALID_RESOURCES 等）；只有 revision/状态冲突才 409。
+- `POST /api/v1/tracking/items/{tracking_id}/submit`：可靠提交。`confirm` 必须严格 true，`ab_config` 只在单次请求内存；服务端重新读取 Request 并完整本地复核，不通过时不访问 Auto Bangumi；外部调用前先持久化 TrackingRecord `SUBMITTING` 与 operation `IN_PROGRESS`。已落盘业务结果（`ACTIVE`/`SUBMIT_FAILED`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`/`NEEDS_RECONFIRM`）返回 HTTP 200；同一 `idempotency_key` 终态重放复用原 operation 结果，绝不二次调用外部。
+- `POST /api/v1/tracking/items/{tracking_id}/retry`：只允许 `SUBMIT_FAILED`；新幂等键创建新 operation 并重新读取 Request/复核。
+- `POST /api/v1/tracking/items/{tracking_id}/recover`：`action=AUTO|MARK_SUCCEEDED|MARK_FAILED`。AUTO 只读本地 operation/AB result/queue 证据，绝不访问外部；无证据保持/进入 `RECOVERY_REQUIRED` 并 `needs_manual=true`，人工动作必须 `confirm=true` 且写 USER 审计，MARK_SUCCEEDED 不接收外部 ID/URL/原始结果。
+- 旧单番 `submit-ab` 与批量 `submit`/`retry`/`recover` 路由已收敛到同一 tracking submission/recovery service；旧 batch queue 作为兼容投影双向 best-effort 同步（queue→tracking 反映 §10.2 结果，tracking→queue 写回 SUBMITTING/终态），已 `SUCCEEDED` queue 项与已 `ACTIVE` tracking 记录绝不降级。
 
 Stage 10 新增 Request 操作端点（确认/取消仅 PENDING_CONFIRM 状态可操作；修改同时接受 PENDING_CONFIRM 与 ACCEPTED）：
 
@@ -475,8 +486,9 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 > 当前 `ralph.sh` 只支持 `amp`、`claude`、`codex` 三种执行工具，不包含 DSH 或 provider 配置。项目保留的轻量定制是可通过 `--model`、`--claude-model` 或 `RALPH_MODEL` 指定模型；模型参数会传给 Claude 和 Codex，Amp 分支不使用该参数。
 
-- 当前 Ralph 状态快照：Stage 28 已完成并归档；`scripts/ralph/prd.json` 与 `progress.txt` 保留 Stage 28 最终完成快照，下一 Stage 启动时再替换
-- 最近完成阶段：Stage 28，草案一致性与原子保存确认
+- 当前 Ralph 状态快照：Stage 29 已完成并归档；`scripts/ralph/prd.json` 与 `progress.txt` 保留 Stage 29 最终完成快照，下一 Stage 启动时再替换
+- 最近完成阶段：Stage 29，统一追番记录与可靠提交恢复
+- 前一完成阶段：Stage 28，草案一致性与原子保存确认
 - 前一完成阶段：Stage 27，前端工程化迁移与页面重构
 - 前一完成阶段：Stage 26，Web API 契约固化与服务端边界治理
 - 前一完成阶段：Stage 25，正式番名与季数解析
@@ -499,6 +511,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - Stage 26 执行：`docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`；执行分支 `agent/stage26-web-api-contract-hardening`，Ralph stories 为 US-189～US-196（已全部完成）
 - Stage 27 执行：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`；执行分支 `agent/stage27-frontend-engineering-migration`，Ralph stories 为 US-197～US-209（已全部完成并归档）
 - Stage 28 执行：`docs/MiGuOrca_stage28_draft_consistency_PRD.md`；执行分支 `ralph/stage28-draft-consistency`，Ralph stories 为 US-210～US-218（已全部完成并归档）
+- Stage 29 执行：`docs/MiGuOrca_stage29_unified_tracking_PRD.md`；执行分支 `ralph/stage29-unified-tracking`，Ralph stories 为 US-219～US-227（已全部完成并归档；B-C handoff 见 future_stages「Stage 29 handoff」）
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude，可指定模型）：`./scripts/ralph/ralph.sh --tool claude --model claude-model-id 7`

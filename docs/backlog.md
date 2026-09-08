@@ -29,7 +29,7 @@
 | 17 | BL-018 | 正式番名与季数解析 | 已完成 (Stage 25, 2026-08-27) |
 | 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
 | 19 | BL-024 | 前端工程化迁移与页面重构 | 已完成 (Stage 27, 2026-08-31) |
-| 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | 部分已完成：B-A 为 Stage 28；B-B 已规划为 Stage 29；B-C～B-D 待评审 |
+| 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | 部分已完成：B-A 为 Stage 28；B-B 为 Stage 29（已归档）；B-C～B-D 待评审 |
 | 21 | BL-026 | 桌面端前端体验分片重构 | 候选，PRD 待 Gate 4 评审 |
 | 22 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
@@ -471,14 +471,14 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-025: 前端体验重构的后端支撑与 Auto Bangumi 管理契约
 
-- 状态：B-A 已完成；B-B 已通过 Gate 4 范围评审并规划为 Stage 29；B-C～B-D 仍待评审
+- 状态：B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C～B-D 仍待评审
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：20，P0
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_backend_support_PRD.md`
 - Stage 28 执行 PRD：`docs/MiGuOrca_stage28_draft_consistency_PRD.md`
 - Stage 29 执行 PRD：`docs/MiGuOrca_stage29_unified_tracking_PRD.md`
-- Stage 28 执行分支：`ralph/stage28-draft-consistency`；Ralph stories 为 US-210～US-218
-- Stage 29 候选分支：`ralph/stage29-unified-tracking`；候选 stories 为 US-219～US-227，尚未生成 Ralph PRD
+- Stage 28 执行分支：`ralph/stage28-draft-consistency`；Ralph stories 为 US-210～US-218（已归档）
+- Stage 29 执行分支：`ralph/stage29-unified-tracking`；Ralph stories 为 US-219～US-227（已归档）
 
 完成情况（Stage 28）：
 
@@ -495,11 +495,31 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
   “全部信息”唯一安全数据源。成功 handoff 只返回 `request_id` + `ACCEPTED`，**不创建或伪造
   tracking record**。
 
+完成情况（Stage 29）：
+
+- 建立确定性 `TrackingRecord`（`trk_` opaque ID = 版本命名空间 + request_id 摘要；schema v1
+  严格白名单 + revision compare-and-swap + 内嵌审计，落地 `<storage>/tracking/`）与独立
+  `TrackingOperation`（同键幂等绑定、PREPARED/IN_PROGRESS 终态、跨重启恢复证据，
+  落地 `<storage>/tracking_operations/`）。
+- 纯本地历史迁移 manifest（`<storage>/tracking_migrations/schema-v1.json`）：任意 tracking API
+  首次访问前运行，COMPLETE 后不再全量扫描、PARTIAL 安全重试；历史 Request/旧 batch queue/
+  已保存 AB result 按 §10.2 证据优先级幂等回填为唯一 tracking record。
+- accept/save-confirm/批量 handoff 兼容扩展 `tracking_id/tracking_status/tracking_ready/
+  safe_message`；tracking 写失败不回滚已确认 Request。
+- 新增 `GET /api/v1/tracking/items`、`GET /api/v1/tracking/items/{tracking_id}`、
+  `POST .../revalidate`、`POST .../submit`、`POST .../retry`、`POST .../recover`：
+  稳定状态/状态组/服务端 `available_actions`、纯本地复核、可靠幂等提交（外部调用前先持久化
+  SUBMITTING/IN_PROGRESS）与本地证据恢复。
+- 旧单番 `submit-ab` 与批量 submit/retry/recover 路由收敛到统一 tracking submission/recovery
+  service；旧 queue 双向 best-effort 兼容投影，已 `SUCCEEDED` queue 项与已 `ACTIVE` tracking
+  记录绝不降级。
+
 不包含数据库、后台 worker、未保存批量会话恢复、当前已更新集数、移动端或媒体文件删除。
-B-A 已按 US-210～US-218 独立完成 Stage 28。B-B 已完成四轮范围评审，按 US-219～US-227
-规划为 Stage 29：从持久化 ACCEPTED Request 与 handoff 幂等建立 tracking record，迁移旧 queue/
-AB result，统一复核、提交、重试和恢复；尚未生成 Ralph PRD 或开发。B-C～B-D 继续分别评审，
-不能把外部全量同步和管理动作追加回 Stage 29。
+B-A 已按 US-210～US-218 独立完成 Stage 28，B-B 已按 US-219～US-227 独立完成 Stage 29
+（归档于 `scripts/ralph/archive/2026-09-08-stage29-unified-tracking/`）。B-B 不实现 Auto Bangumi
+全量同步、外部管理或新前端页面，B-C 只能基于已冻结 TrackingRecord/mapping 扩展（handoff 见
+future_stages「Stage 29 handoff」）；B-C～B-D 继续分别评审，不能把外部全量同步和管理动作追加回
+Stage 29。
 
 ### BL-026: 桌面端前端体验分片重构
 
