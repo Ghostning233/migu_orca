@@ -80,6 +80,8 @@
 | POST | `/api/v1/batches/<batch_id>/recover` | `migu_orca_web_api.BatchRecoverView` | BatchRecoverView |
 | POST | `/api/v1/qbittorrent/test-connection` | `migu_orca_web_api.QbittorrentTestConnectionView` | QbittorrentTestConnectionView |
 | POST | `/api/v1/autobangumi/test-connection` | `migu_orca_web_api.AutoBangumiTestConnectionView` | AutoBangumiTestConnectionView |
+| GET | `/api/v1/tracking/items` | `migu_orca_web_api.TrackingItemListView` | TrackingItemListView |
+| GET | `/api/v1/tracking/items/<path:tracking_id>` | `migu_orca_web_api.TrackingItemDetailView` | TrackingItemDetailView |
 
 页面路由（非 JSON API，供对照）：`GET /` → 302 `/app/workbench`；`GET /index` →
 302 `/app/workbench`（保留 `request_id`/`batch_id` query）；`GET /Settings` →
@@ -181,6 +183,28 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
 
 两类连接测试的请求凭据都保持 request-scoped：不写入 storage、URL、浏览器 storage、日志或测试 trace。
 
+### 3.6 Tracking（`/api/v1/tracking/items`，US-223）
+
+两个端点都是纯本地读取：执行前先运行历史回填协调器（manifest `COMPLETE` 后不再全量扫描），
+绝不访问外部系统。列表/详情只返回 TrackingRecord 与 Request 的安全白名单投影；单条 tracking
+JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warning，绝不暴露文件信息。
+
+| 端点 | 请求字段 | 成功 `result`（白名单） | 业务失败示例 |
+| --- | --- | --- | --- |
+| GET `/api/v1/tracking/items` | `storage_dir?`、`q?`、`status_group?`（`PENDING`/`PROCESSING`/`ACTIVE`/`ATTENTION`/`INACTIVE`）、`sort?`（`updated_at`/`title`/`status`） | `{"items": [<TrackingItemDTO>], "summary": {total, pending, processing, active, needs_attention, unreadable}, "warnings": []}` | 非法枚举 → `data_validation_errors`；`invalid_storage_dir` |
+| GET `/api/v1/tracking/items/<tracking_id>` | `tracking_id`（路径）、`storage_dir?` | `{...summary 字段, origin, batch_id?, created_at, updated_at?, last_synced_at?, safe_info?, current_operation?, revalidation_issues: [], external_mapping?, audit_events[]（最近 20 条）, warnings}` | 缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id`；损坏 → `storage_json_error` |
+
+`TrackingItemDTO`（US-223 strict `extra="forbid"`）字段：`tracking_id`、`request_id?`、`title?`、
+`season?`、`subtitle_group?`、`poster_path?`（只允许同源 `/api/v1/mikan/posters/<opaque-key>`）、
+`status`、`status_label`（中文）、`status_group`、`available_actions[]`（服务端计算，只含当前可执行
+动作，`code`/`label`/`style`/`requires_confirmation`）、`valid_resource_count`、
+`updated_episode: null`、`updated_episode_status: "NOT_IMPLEMENTED"`、`total_episodes: null`、
+`revision`、`updated_at`。
+
+详情在 summary 之外只复用 Request `safe-info` 白名单与当前 operation 安全摘要、revalidation
+issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、
+凭据、magnet 或绝对路径。
+
 ## 4. 敏感值边界（已冻结）
 
 ### 4.1 永不进入 API 展示/响应
@@ -257,6 +281,19 @@ torrent 文件名，不含 magnet/下载 URL/原始 RSS）、`folder_name`（安
   成功项不因失败项回滚；同一 `item_id` 重复 → `skipped`。同一 item + `idempotency_key`
   幂等重试重放同一 CONFIRMED 结果，不创建第二个 Request。请求级 shape/batch_id/storage
   profile 错误仍走普通失败 envelope。
+- US-223：新增 `GET /api/v1/tracking/items`（`TrackingItemListView`，operationId
+  `listTrackingItems`）与 `GET /api/v1/tracking/items/{tracking_id}`
+  （`TrackingItemDetailView`，operationId `getTrackingItemDetail`）。读模型
+  `apps/migu_orca_web/tracking_read_service.py` 先运行历史回填协调器再读
+  `list_tracking_records`/`load_tracking_record`；列表支持 `q`/`status_group`/`sort`（固定枚举）
+  与 `summary` 计数（`total/pending/processing/active/needs_attention/unreadable`），单条损坏
+  JSON 只增 `unreadable` 计数 + 固定 warning，不阻塞健康列表。`tracking_serializers.py` 负责
+  白名单：free-text 标题/字幕组复用 `_safe_label`，`poster_path` 只允许同源 opaque 代理路径，
+  `available_actions` 由服务端按 tracking status 计算（只返回当前可执行动作，无 disabled 假动作），
+  operation 安全摘要不暴露幂等绑定/fingerprint，审计事件只序列化最近 20 条。详情复用 Request
+  `safe-info` 白名单，Request/operation 缺失时降级返回摘要 + 固定 warning。新增
+  `tracking_not_found`（404）与 `tracking_storage_error`/`tracking_migration_error`（500）
+  分类。DTO/OpenAPI/inventory/TS client 同步无漂移。
 - US-222：单番 accept、单番 save-confirm、批量 save-confirm 与 save-confirm 终态重放都在
   Request 进入 ACCEPTED 后调用 `ensure_confirmed_request_tracking`
   （`apps/migu_orca_web/tracking_handoff.py`），经 `ensure_tracking_record`

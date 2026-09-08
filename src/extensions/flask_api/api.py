@@ -68,6 +68,7 @@ _HTTP_NOT_FOUND_ERROR_TYPES = {
     "request_not_found",
     "poster_not_found",
     "queue_item_not_found",
+    "tracking_not_found",
 }
 # 409 — the request conflicts with the current server state (replay/expired/
 #       stale/status conflict). US-194 draft-store failures (draft_expired,
@@ -124,6 +125,14 @@ _HTTP_GATEWAY_TIMEOUT_ERROR_TYPES = {
     "ab_timeout",
     "qbittorrent_timeout",
 }
+# 500 — internal/local-storage failures that are never the client's fault.
+_HTTP_INTERNAL_SERVER_ERROR_TYPES = {
+    "internal_server_error",
+    "storage_error",
+    "storage_json_error",
+    "tracking_storage_error",
+    "tracking_migration_error",
+}
 
 
 def _error_http_status(error_type: str) -> int:
@@ -147,11 +156,7 @@ def _error_http_status(error_type: str) -> int:
         return 400
     # Unknown error types default to 400 so a new Stage1Error still gets a
     # client-visible 4xx rather than an unexpected 500.
-    if lowered in {
-        "storage_error",
-        "storage_json_error",
-        "internal_server_error",
-    }:
+    if lowered in _HTTP_INTERNAL_SERVER_ERROR_TYPES:
         return 500
     return 400
 

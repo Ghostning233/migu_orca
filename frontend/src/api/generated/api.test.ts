@@ -43,6 +43,8 @@ const EXPECTED_OPERATION_IDS = [
   'recoverBatchQueueItem',
   'testQbittorrentConnection',
   'testAutoBangumiConnection',
+  'listTrackingItems',
+  'getTrackingItemDetail',
 ] as const
 
 describe('generated API client (US-198)', () => {
@@ -77,6 +79,8 @@ describe('generated API client (US-198)', () => {
       | 'recoverBatchQueueItem'
       | 'testQbittorrentConnection'
       | 'testAutoBangumiConnection'
+      | 'listTrackingItems'
+      | 'getTrackingItemDetail'
     >()
   })
 
@@ -107,6 +111,8 @@ describe('generated API client (US-198)', () => {
       | '/api/v1/requests/{request_id}/modify'
       | '/api/v1/requests/{request_id}/safe-info'
       | '/api/v1/requests/{request_id}/submit-ab'
+      | '/api/v1/tracking/items'
+      | '/api/v1/tracking/items/{tracking_id}'
     >()
   })
 
@@ -137,6 +143,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(27)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(29)
   })
 })

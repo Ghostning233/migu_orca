@@ -57,6 +57,8 @@ from apps.migu_orca_web.api_contract import (
     RequestPreviewSaveResultDTO,
     RequestSafeInfoResultDTO,
     RequestSaveConfirmResultDTO,
+    TrackingDetailResultDTO,
+    TrackingItemListResultDTO,
 )
 
 OPENAPI_VERSION = "3.1.0"
@@ -638,6 +640,95 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
             "503": {"ab_submit_unsupported": "当前 Auto Bangumi 版本或认证模式暂不支持提交"},
             "504": {"ab_timeout": "Auto Bangumi HTTP 请求超时"},
+        },
+    },
+    "GET /api/v1/tracking/items": {
+        "operationId": "listTrackingItems",
+        "summary": "列出统一追番记录安全摘要",
+        "description": "US-223：读取本地统一追番记录安全投影，支持可选 q（标题/字幕组）、status_group 与 sort（固定枚举）筛选排序，返回 summary 计数与固定 warnings。执行前先运行历史回填协调器（manifest COMPLETE 后不重复全量扫描）；只读取本地存储，绝不访问外部系统。单条 tracking JSON 损坏不阻塞健康列表，只增加 unreadable 计数与固定 warning。",
+        "parameters": [
+            {
+                "name": "storage_dir",
+                "in": "query",
+                "required": False,
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "q",
+                "in": "query",
+                "required": False,
+                "description": "按标题或字幕组过滤的可选搜索词。",
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "status_group",
+                "in": "query",
+                "required": False,
+                "description": "按用户状态组过滤（PENDING/PROCESSING/ACTIVE/ATTENTION/INACTIVE）。",
+                "schema": {
+                    "type": "string",
+                    "enum": ["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"],
+                },
+            },
+            {
+                "name": "sort",
+                "in": "query",
+                "required": False,
+                "description": "固定排序枚举（updated_at 倒序/title/status）。",
+                "schema": {
+                    "type": "string",
+                    "enum": ["updated_at", "title", "status"],
+                },
+            },
+        ],
+        "success": TrackingItemListResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+            },
+            "500": {
+                "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
+        },
+    },
+    "GET /api/v1/tracking/items/<path:tracking_id>": {
+        "operationId": "getTrackingItemDetail",
+        "summary": "查看统一追番记录安全详情",
+        "description": "US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。",
+        "parameters": [
+            {
+                "name": "tracking_id",
+                "in": "path",
+                "required": True,
+                "description": "统一追番记录的 tracking_id。",
+                "schema": {"type": "string"},
+            },
+            {
+                "name": "storage_dir",
+                "in": "query",
+                "required": False,
+                "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                "schema": {"type": "string"},
+            },
+        ],
+        "success": TrackingDetailResultDTO,
+        "errors": {
+            "400": {
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "invalid_tracking_id": "tracking_id 包含不合法字符或路径片段",
+            },
+            "404": {"tracking_not_found": "未找到该追番记录"},
+            "500": {
+                "storage_error": "读取追番记录失败",
+                "storage_json_error": "追番记录 JSON 损坏",
+                "tracking_storage_error": "追番记录存储失败",
+                "tracking_migration_error": "历史数据迁移失败",
+            },
         },
     },
     "POST /api/v1/mikan/candidates": {

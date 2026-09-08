@@ -45,6 +45,13 @@
   damage-aware list（健康项 + 损坏 opaque id），单条损坏不阻塞健康清单，绝不暴露文件名/路径/原始 JSON。
 - 迁移审计 = `TRACKING_BACKFILLED` + actor `MIGRATION`；record 保持 revision=1，一致多来源追加审计不 bump
   revision；ensure 收敛同一确定性 tracking_id，重复运行不新增记录/不重复审计。
+- tracking 读 API（US-223）：route 只解析 query → `tracking_read_service` 先跑 migration coordinator 再
+  tolerant 读 → `tracking_serializers` 出公开白名单；summary 计数按全部健康记录（不随过滤变化），列表/
+  详情复用 `serialize_request_safe_info` 唯一 producer；`available_actions` 是展示层映射（服务端按 status
+  计算），不在前端推断。
+- 新增 /api/v1 端点后除 OpenAPI/endpoint inventory/TS client 外，还必须同步
+  `frontend/src/api/generated/api.test.ts` 的 operationId/path 联合字面量与总数断言，否则前端 vitest
+  类型测试失败。
 
 ## [2026-09-08] - US-219
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -262,4 +269,72 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
     - 改 API contract（DTO/OpenAPI 描述/新响应字段）后必须重生成 openapi.json + TS client，否则
       `test_openapi_generation` / `test_openapi_runtime_consistency` 的 drift check 失败；无需新
       endpoint 时 operationId/endpoint inventory 总表不变。
+---
+
+## [2026-09-08] - US-223
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `apps/migu_orca_web/tracking_serializers.py`：tracking 读侧公开白名单。`tracking_summary_fields`
+    供列表/详情共用 summary 字段（tracking_id/request_id/title/season/subtitle_group/poster_path/status/
+    status_label/status_group/available_actions/valid_resource_count/updated_episode=null/
+    updated_episode_status=NOT_IMPLEMENTED/total_episodes=null/revision/updated_at）；free-text 标题与
+    字幕组复用 `serializers._safe_label`，poster_path 只放行严格同源
+    `/api/v1/mikan/posters/<opaque-key>`（其余字符串一律 null）。`tracking_available_actions` 按
+    tracking status 服务端计算：PENDING_SUBMIT/NEEDS_RECONFIRM → [REVALIDATE, SUBMIT]；
+    SUBMIT_FAILED → [REVALIDATE, RETRY]；VERIFYING_EXTERNAL/RECOVERY_REQUIRED/UNKNOWN →
+    [RECOVER_AUTO, MARK_SUCCEEDED, MARK_FAILED]；REVALIDATING/SUBMITTING/ACTIVE/B-C 停用态 → []
+    （绝不返回 disabled 假动作）。`serialize_tracking_operation_summary` 不暴露幂等键/
+    expected_revision/fingerprint；`serialize_tracking_audit_events` 只序列化最近 20 条。
+  - 新增 `apps/migu_orca_web/tracking_read_service.py`：`list_tracking_items`（先 `run_tracking_migration`
+    → `list_tracking_records` → 可选 q/status_group/sort → summary 计数（total/pending/processing/
+    active/needs_attention/unreadable，unfiltered 稳定）→ 每项 valid_resource_count 复用
+    `serialize_request_safe_info` 唯一 producer）；`build_tracking_detail`（复用 Request safe-info +
+    current operation 摘要 + revalidation_issues=[] + external_mapping + 最近 20 审计；Request/operation
+    缺失降级摘要 + 固定 warning，绝不失败详情）。
+  - 新增 `routes_tracking.py`：`GET /api/v1/tracking/items`（TrackingItemListView，operationId
+    listTrackingItems）与 `GET /api/v1/tracking/items/<path:tracking_id>`（TrackingItemDetailView，
+    operationId getTrackingItemDetail）；views.py 注册。
+  - schemas.py 新增 `TrackingListQuery`（storage_dir/q/status_group/sort，后两者固定枚举校验）与
+    `TrackingDetailQuery`；api_contract.py 新增 strict DTO（TrackingAvailableActionDTO/
+    TrackingAuditEventDTO/TrackingRevalidationIssueDTO/TrackingOperationSummaryDTO/TrackingItemDTO/
+    TrackingItemListSummaryDTO/TrackingItemListResultDTO/TrackingDetailResultDTO）。
+  - 错误分类：`extensions/flask_api/api.py` 把 `tracking_not_found` 加入 404、新增
+    `_HTTP_INTERNAL_SERVER_ERROR_TYPES`（storage_error/storage_json_error/internal_server_error/
+    tracking_storage_error/tracking_migration_error → 500）。
+  - 同步文档与生成物：`_ENDPOINTS` 两个 GET 条目、`docs/api/openapi.json`、endpoint inventory
+    §2 总表 + §3.6 Tracking 族 + US-223 里程碑、`frontend/src/api/generated/api.ts`、
+    `frontend/src/api/generated/api.test.ts`（operationId/path 联合 + 29 计数）、`AGENTS.md`
+    「统一追番列表/详情读模型（US-223）」段。
+- Files changed
+  - 新增：`src/apps/migu_orca_web/tracking_serializers.py`、
+    `src/apps/migu_orca_web/tracking_read_service.py`、`src/apps/migu_orca_web/routes_tracking.py`、
+    `src/apps/migu_orca_web/tracking_read_service_test.py`（10 单测）、
+    `tests/api_contract/test_tracking_items_api.py`（13 路由/契约测试）
+  - 修改：`schemas.py`、`api_contract.py`、`openapi_gen.py`、`views.py`、`AGENTS.md`、
+    `extensions/flask_api/api.py`、`docs/api/openapi.json`、`docs/api/endpoint_inventory.md`、
+    `frontend/src/api/generated/api.ts`、`frontend/src/api/generated/api.test.ts`、
+    `scripts/ralph/prd.json`、`scripts/ralph/progress.txt`
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - tracking 读 API 模块划分：route（只解析 query）→ `tracking_read_service`（编排：先 migration
+      coordinator → tolerant 读）→ `tracking_serializers`（public 白名单/available_actions）。US-224+
+      的 revalidate/submit/retry/recover 服务层可直接复用 ensure/migration 与这些 summary 字段。
+    - `available_actions` 是纯展示层映射（web serializer），状态迁移合法性由后续 submit/retry/recover
+      服务在 route/service 层自检；available_actions 只用于 DTO，不做权限判定。
+    - 详情 Request safe-info 必须经 `serialize_request_safe_info`（唯一 producer）；history/ab 通过
+      `services._load_history_section/_load_ab_result_section` 传入，与 `GET /requests/{id}/safe-info`
+      行为一致。缺失 Request 时降级 safe_info=None + 固定 warning，不能失败整个详情。
+    - summary 计数按「全部健康记录」计算（不随 q/status_group 过滤变化），组 tab 稳定；sort 默认
+      updated_at 倒序，title/status 升序，全部以 tracking_id 稳定 tie-break。
+  - Gotchas encountered
+    - 新增 engine 状态常量/审计 action 不用重复 import；ruff --fix 会自动删未用 import，提交前以
+      `ruff check src tests` 为准。
+    - 新增 500 类 tracking 错误（`tracking_storage_error`/`tracking_migration_error`）进 classifier
+      set 后，`test_every_classified_error_type_is_documented` 会要求它们在 `_ENDPOINTS` 出现；
+      声明进对应端点即通过。`_UNDOCUMENTED_ERROR_TYPES` 只豁免 storage_error/storage_json_error 等
+      CLI/非 API 类型。
+    - regenerating openapi.json 会因插入大块新 path schema 造成 git diff 大幅移位，但用 JSON 对象
+      对比可确认既有 path 块未变；先跑 `openapi_gen --check` 再提交。
+    - 前端 `api.test.ts` 有 operationId/path 联合字面量与总数断言；新增 endpoint 必须同步
+      `EXPECTED_OPERATION_IDS`、`keyof operations`、`keyof paths` 与计数，否则 vitest 类型测试失败。
 ---

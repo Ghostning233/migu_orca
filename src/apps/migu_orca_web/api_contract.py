@@ -721,6 +721,164 @@ class RequestSafeInfoResultDTO(_StrictBase):
 
 
 # ---------------------------------------------------------------------------
+# Tracking items family (US-223)
+# ---------------------------------------------------------------------------
+# The unified tracking list/detail read contract.  Every shape is
+# ``extra="forbid"`` (unknown/engine/URL/credential fields fail at the
+# boundary).  The list item only exposes the non-sensitive record summary plus
+# the server-computed ``available_actions``; the detail additionally reuses the
+# Request safe-info whitelist and returns the current operation's safe summary,
+# revalidation issues, external mapping summary and the most recent audit
+# events — never the full Request, upstream raw JSON, URLs, credentials,
+# magnets or absolute paths.
+
+
+class TrackingAvailableActionDTO(_StrictBase):
+    """One server-computed action (Stage 29 PRD §11.4).
+
+    ``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the
+    fixed §11.4 candidates.  Only currently-executable actions are returned —
+    never a disabled fake action.
+    """
+
+    code: str
+    label: str
+    style: str
+    requires_confirmation: bool
+
+
+class TrackingAuditEventDTO(_StrictBase):
+    """One safe embedded audit event (Stage 29 PRD §9)."""
+
+    event_id: str
+    action: str
+    actor: str
+    from_status: str | None = None
+    to_status: str | None = None
+    tracking_revision: int
+    operation_id: str | None = None
+    reason_code: str | None = None
+    safe_message: str | None = None
+    created_at: str
+
+
+class TrackingRevalidationIssueDTO(_StrictBase):
+    """One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).
+
+    ``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.
+    """
+
+    code: str
+    field: str | None = None
+    message: str
+    recovery_action: str
+
+
+class TrackingOperationSummaryDTO(_StrictBase):
+    """Safe summary of the current TrackingOperation (US-223 detail).
+
+    Only the non-sensitive operation identity/state/outcome markers are
+    exposed — never the idempotency binding, fingerprint, request body, AB
+    config, upstream response or credentials.
+    """
+
+    operation_id: str
+    operation: str
+    state: str
+    attempt: int
+    external_result_id: str | None = None
+    error_type: str | None = None
+    created_at: str
+    updated_at: str
+    completed_at: str | None = None
+
+
+class TrackingItemDTO(_StrictBase):
+    """One unified tracking list item (Stage 29 PRD §11.2).
+
+    ``updated_episode`` is always null and ``updated_episode_status`` is always
+    NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+    ``poster_path`` may only be a same-origin opaque poster proxy route.
+    """
+
+    tracking_id: str
+    request_id: str | None = None
+    title: str | None = None
+    season: int | None = None
+    subtitle_group: str | None = None
+    poster_path: str | None = None
+    status: str
+    status_label: str
+    status_group: str
+    available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
+    valid_resource_count: int = 0
+    updated_episode: None = None
+    updated_episode_status: Literal["NOT_IMPLEMENTED"] = "NOT_IMPLEMENTED"
+    total_episodes: int | None = None
+    revision: int
+    updated_at: str | None = None
+
+
+class TrackingItemListSummaryDTO(_StrictBase):
+    """Safe summary counts for the tracking list (§11.2)."""
+
+    total: int
+    pending: int
+    processing: int
+    active: int
+    needs_attention: int
+    unreadable: int
+
+
+class TrackingItemListResultDTO(_StrictBase):
+    """Result of ``GET /api/v1/tracking/items``."""
+
+    items: list[TrackingItemDTO]
+    summary: TrackingItemListSummaryDTO
+    warnings: list[str] = Field(default_factory=list)
+
+
+class TrackingDetailResultDTO(_StrictBase):
+    """Result of ``GET /api/v1/tracking/items/{tracking_id}`` (§11.3).
+
+    Reuses the strict Request ``safe_info`` whitelist and additionally returns
+    only the current operation's safe summary, revalidation issues, external
+    mapping summary and the most recent 20 audit events.  ``safe_info`` is null
+    only when the backing Request cannot be read (damaged/deleted); a fixed
+    warning is added instead of failing the whole detail.
+    """
+
+    tracking_id: str
+    request_id: str | None = None
+    title: str | None = None
+    season: int | None = None
+    subtitle_group: str | None = None
+    poster_path: str | None = None
+    status: str
+    status_label: str
+    status_group: str
+    available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
+    valid_resource_count: int = 0
+    updated_episode: None = None
+    updated_episode_status: Literal["NOT_IMPLEMENTED"] = "NOT_IMPLEMENTED"
+    total_episodes: int | None = None
+    revision: int
+    origin: str
+    batch_id: str | None = None
+    created_at: str
+    updated_at: str | None = None
+    last_synced_at: str | None = None
+    safe_info: RequestSafeInfoDTO | None = None
+    current_operation: TrackingOperationSummaryDTO | None = None
+    revalidation_issues: list[TrackingRevalidationIssueDTO] = Field(
+        default_factory=list
+    )
+    external_mapping: dict[str, Any] | None = None
+    audit_events: list[TrackingAuditEventDTO] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
 # Connection tests family
 # ---------------------------------------------------------------------------
 

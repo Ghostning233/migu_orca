@@ -201,6 +201,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracking/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 列出统一追番记录安全摘要
+         * @description US-223：读取本地统一追番记录安全投影，支持可选 q（标题/字幕组）、status_group 与 sort（固定枚举）筛选排序，返回 summary 计数与固定 warnings。执行前先运行历史回填协调器（manifest COMPLETE 后不重复全量扫描）；只读取本地存储，绝不访问外部系统。单条 tracking JSON 损坏不阻塞健康列表，只增加 unreadable 计数与固定 warning。
+         */
+        get: operations["listTrackingItems"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/batches/{batch_id}/accept": {
         parameters: {
             query?: never;
@@ -448,6 +468,26 @@ export interface paths {
          * @description ab_config 为 request-scoped 凭据，绝不进入 storage、URL、浏览器 storage、日志或 trace。
          */
         post: operations["submitRequestToAutoBangumi"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracking/items/{tracking_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * 查看统一追番记录安全详情
+         * @description US-223：读取单条统一追番记录，复用 Request safe-info 白名单，额外只返回当前 operation 安全摘要、revalidation issues、外部安全映射摘要与最近 20 条审计事件；绝不回显完整 Request、外部原始 JSON、完整 URL、凭据、magnet 或绝对路径。缺失 → tracking_not_found；路径片段 → invalid_tracking_id。
+         */
+        get: operations["getTrackingItemDetail"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4494,6 +4534,254 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "invalid_request_status",
                      *       "error_message": "只有待确认的订阅方案可以保存",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    listTrackingItems: {
+        parameters: {
+            query?: {
+                /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                storage_dir?: string;
+                /** @description 按标题或字幕组过滤的可选搜索词。 */
+                q?: string;
+                /** @description 按用户状态组过滤（PENDING/PROCESSING/ACTIVE/ATTENTION/INACTIVE）。 */
+                status_group?: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
+                /** @description 固定排序枚举（updated_at 倒序/title/status）。 */
+                sort?: "updated_at" | "title" | "status";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "items": [
+                     *           {
+                     *             "tracking_id": "示例",
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "season": null,
+                     *             "subtitle_group": null,
+                     *             "poster_path": null,
+                     *             "status": "示例",
+                     *             "status_label": "示例",
+                     *             "status_group": "示例",
+                     *             "available_actions": [
+                     *               {
+                     *                 "code": "示例",
+                     *                 "label": "示例",
+                     *                 "style": "示例",
+                     *                 "requires_confirmation": true
+                     *               }
+                     *             ],
+                     *             "valid_resource_count": 0,
+                     *             "updated_episode": null,
+                     *             "updated_episode_status": "NOT_IMPLEMENTED",
+                     *             "total_episodes": null,
+                     *             "revision": 1,
+                     *             "updated_at": null
+                     *           }
+                     *         ],
+                     *         "summary": {
+                     *           "total": 1,
+                     *           "pending": 1,
+                     *           "processing": 1,
+                     *           "active": 1,
+                     *           "needs_attention": 1,
+                     *           "unreadable": 1
+                     *         },
+                     *         "warnings": []
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingItemListResultDTO
+                         * @description Result of ``GET /api/v1/tracking/items``.
+                         */
+                        result: {
+                            /** Items */
+                            items: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Subtitle Group
+                                 * @default null
+                                 */
+                                subtitle_group: string | null;
+                                /**
+                                 * Poster Path
+                                 * @default null
+                                 */
+                                poster_path: string | null;
+                                /** Status */
+                                status: string;
+                                /** Status Label */
+                                status_label: string;
+                                /** Status Group */
+                                status_group: string;
+                                /** Available Actions */
+                                available_actions?: {
+                                    /** Code */
+                                    code: string;
+                                    /** Label */
+                                    label: string;
+                                    /** Style */
+                                    style: string;
+                                    /** Requires Confirmation */
+                                    requires_confirmation: boolean;
+                                }[];
+                                /**
+                                 * Valid Resource Count
+                                 * @default 0
+                                 */
+                                valid_resource_count: number;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** Revision */
+                                revision: number;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                            }[];
+                            /**
+                             * TrackingItemListSummaryDTO
+                             * @description Safe summary counts for the tracking list (§11.2).
+                             */
+                            summary: {
+                                /** Total */
+                                total: number;
+                                /** Pending */
+                                pending: number;
+                                /** Processing */
+                                processing: number;
+                                /** Active */
+                                active: number;
+                                /** Needs Attention */
+                                needs_attention: number;
+                                /** Unreadable */
+                                unreadable: number;
+                            };
+                            /** Warnings */
+                            warnings?: string[];
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 读取追番记录失败 / storage_json_error: 追番记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 / tracking_migration_error: 历史数据迁移失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "读取追番记录失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -10140,6 +10428,613 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "ab_timeout",
                      *       "error_message": "Auto Bangumi HTTP 请求超时",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    getTrackingItemDetail: {
+        parameters: {
+            query?: {
+                /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
+                storage_dir?: string;
+            };
+            header?: never;
+            path: {
+                /** @description 统一追番记录的 tracking_id。 */
+                tracking_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "tracking_id": "示例",
+                     *         "request_id": null,
+                     *         "title": null,
+                     *         "season": null,
+                     *         "subtitle_group": null,
+                     *         "poster_path": null,
+                     *         "status": "示例",
+                     *         "status_label": "示例",
+                     *         "status_group": "示例",
+                     *         "available_actions": [
+                     *           {
+                     *             "code": "示例",
+                     *             "label": "示例",
+                     *             "style": "示例",
+                     *             "requires_confirmation": true
+                     *           }
+                     *         ],
+                     *         "valid_resource_count": 0,
+                     *         "updated_episode": null,
+                     *         "updated_episode_status": "NOT_IMPLEMENTED",
+                     *         "total_episodes": null,
+                     *         "revision": 1,
+                     *         "origin": "示例",
+                     *         "batch_id": null,
+                     *         "created_at": "示例",
+                     *         "updated_at": null,
+                     *         "last_synced_at": null,
+                     *         "safe_info": null,
+                     *         "current_operation": null,
+                     *         "revalidation_issues": [
+                     *           {
+                     *             "code": "示例",
+                     *             "field": null,
+                     *             "message": "示例",
+                     *             "recovery_action": "示例"
+                     *           }
+                     *         ],
+                     *         "external_mapping": null,
+                     *         "audit_events": [
+                     *           {
+                     *             "event_id": "示例",
+                     *             "action": "示例",
+                     *             "actor": "示例",
+                     *             "from_status": null,
+                     *             "to_status": null,
+                     *             "tracking_revision": 1,
+                     *             "operation_id": null,
+                     *             "reason_code": null,
+                     *             "safe_message": null,
+                     *             "created_at": "示例"
+                     *           }
+                     *         ],
+                     *         "warnings": []
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingDetailResultDTO
+                         * @description Result of ``GET /api/v1/tracking/items/{tracking_id}`` (§11.3).
+                         *
+                         *     Reuses the strict Request ``safe_info`` whitelist and additionally returns
+                         *     only the current operation's safe summary, revalidation issues, external
+                         *     mapping summary and the most recent 20 audit events.  ``safe_info`` is null
+                         *     only when the backing Request cannot be read (damaged/deleted); a fixed
+                         *     warning is added instead of failing the whole detail.
+                         */
+                        result: {
+                            /** Tracking Id */
+                            tracking_id: string;
+                            /**
+                             * Request Id
+                             * @default null
+                             */
+                            request_id: string | null;
+                            /**
+                             * Title
+                             * @default null
+                             */
+                            title: string | null;
+                            /**
+                             * Season
+                             * @default null
+                             */
+                            season: number | null;
+                            /**
+                             * Subtitle Group
+                             * @default null
+                             */
+                            subtitle_group: string | null;
+                            /**
+                             * Poster Path
+                             * @default null
+                             */
+                            poster_path: string | null;
+                            /** Status */
+                            status: string;
+                            /** Status Label */
+                            status_label: string;
+                            /** Status Group */
+                            status_group: string;
+                            /** Available Actions */
+                            available_actions?: {
+                                /** Code */
+                                code: string;
+                                /** Label */
+                                label: string;
+                                /** Style */
+                                style: string;
+                                /** Requires Confirmation */
+                                requires_confirmation: boolean;
+                            }[];
+                            /**
+                             * Valid Resource Count
+                             * @default 0
+                             */
+                            valid_resource_count: number;
+                            /**
+                             * Updated Episode
+                             * @default null
+                             */
+                            updated_episode: null;
+                            /**
+                             * Updated Episode Status
+                             * @default NOT_IMPLEMENTED
+                             * @constant
+                             */
+                            updated_episode_status: "NOT_IMPLEMENTED";
+                            /**
+                             * Total Episodes
+                             * @default null
+                             */
+                            total_episodes: number | null;
+                            /** Revision */
+                            revision: number;
+                            /** Origin */
+                            origin: string;
+                            /**
+                             * Batch Id
+                             * @default null
+                             */
+                            batch_id: string | null;
+                            /** Created At */
+                            created_at: string;
+                            /**
+                             * Updated At
+                             * @default null
+                             */
+                            updated_at: string | null;
+                            /**
+                             * Last Synced At
+                             * @default null
+                             */
+                            last_synced_at: string | null;
+                            /** @default null */
+                            safe_info: {
+                                /** Request Id */
+                                request_id: string;
+                                /** Status */
+                                status: string;
+                                /**
+                                 * Raw Title
+                                 * @default null
+                                 */
+                                raw_title: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /** Aliases */
+                                aliases?: string[];
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Season Raw
+                                 * @default null
+                                 */
+                                season_raw: string | null;
+                                /**
+                                 * Season Evidence
+                                 * @default null
+                                 */
+                                season_evidence: string | null;
+                                /** @default null */
+                                mikan_collection: {
+                                    /**
+                                     * Title
+                                     * @default null
+                                     */
+                                    title: string | null;
+                                    /**
+                                     * Bangumi Id
+                                     * @default null
+                                     */
+                                    bangumi_id: string | null;
+                                } | null;
+                                /** Subtitle Groups */
+                                subtitle_groups?: {
+                                    /**
+                                     * Subtitle Group
+                                     * @default null
+                                     */
+                                    subtitle_group: string | null;
+                                    /**
+                                     * Total Resource Count
+                                     * @default 0
+                                     */
+                                    total_resource_count: number;
+                                    /**
+                                     * Valid Resource Count
+                                     * @default 0
+                                     */
+                                    valid_resource_count: number;
+                                    /**
+                                     * Invalid Resource Count
+                                     * @default 0
+                                     */
+                                    invalid_resource_count: number;
+                                    /** Warnings */
+                                    warnings?: string[];
+                                }[];
+                                /**
+                                 * Selected Subtitle Group
+                                 * @default null
+                                 */
+                                selected_subtitle_group: string | null;
+                                /**
+                                 * RequestSafeInfoFilterRuleDTO
+                                 * @description User-readable filter rule summary (safe, user-controlled text).
+                                 */
+                                filter_rule?: {
+                                    /**
+                                     * Must Contain
+                                     * @default
+                                     */
+                                    must_contain: string;
+                                    /**
+                                     * Must Not Contain
+                                     * @default
+                                     */
+                                    must_not_contain: string;
+                                    /**
+                                     * Use Regex
+                                     * @default false
+                                     */
+                                    use_regex: boolean;
+                                    /**
+                                     * Case Sensitive
+                                     * @default false
+                                     */
+                                    case_sensitive: boolean;
+                                };
+                                /**
+                                 * RequestSafeInfoResourcesDTO
+                                 * @description Resource counts and sanitized file-name summaries.
+                                 *
+                                 *     Only torrent *names* (file titles) are exposed — never magnet links,
+                                 *     download URLs or raw RSS. ``valid`` is the currently selected subtitle
+                                 *     group's effective seeds; ``excluded`` its excluded seeds; ``complete`` is
+                                 *     the combined unique seeds across every candidate group.
+                                 */
+                                resources?: {
+                                    /**
+                                     * Selected Subtitle Group
+                                     * @default null
+                                     */
+                                    selected_subtitle_group: string | null;
+                                    /**
+                                     * Valid Resource Count
+                                     * @default 0
+                                     */
+                                    valid_resource_count: number;
+                                    /**
+                                     * Invalid Resource Count
+                                     * @default 0
+                                     */
+                                    invalid_resource_count: number;
+                                    /**
+                                     * Complete Resource Count
+                                     * @default 0
+                                     */
+                                    complete_resource_count: number;
+                                    /** Valid File Names */
+                                    valid_file_names?: string[];
+                                    /** Excluded File Names */
+                                    excluded_file_names?: {
+                                        /**
+                                         * Name
+                                         * @default
+                                         */
+                                        name: string;
+                                        /**
+                                         * Reason
+                                         * @default
+                                         */
+                                        reason: string;
+                                    }[];
+                                };
+                                /**
+                                 * Folder Name
+                                 * @default null
+                                 */
+                                folder_name: string | null;
+                                /**
+                                 * Storage Profile
+                                 * @default null
+                                 */
+                                storage_profile: string | null;
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /** History Summary */
+                                history_summary?: {
+                                    /**
+                                     * Action
+                                     * @default null
+                                     */
+                                    action: string | null;
+                                    /**
+                                     * Previous Status
+                                     * @default null
+                                     */
+                                    previous_status: string | null;
+                                    /**
+                                     * Next Status
+                                     * @default null
+                                     */
+                                    next_status: string | null;
+                                    /**
+                                     * Timestamp
+                                     * @default null
+                                     */
+                                    timestamp: string | null;
+                                }[];
+                                /** @default null */
+                                ab_status: {
+                                    /**
+                                     * Submitted
+                                     * @default false
+                                     */
+                                    submitted: boolean;
+                                    /**
+                                     * Success
+                                     * @default null
+                                     */
+                                    success: boolean | null;
+                                    /**
+                                     * Ab Subscription Id
+                                     * @default null
+                                     */
+                                    ab_subscription_id: string | null;
+                                    /**
+                                     * Error Type
+                                     * @default null
+                                     */
+                                    error_type: string | null;
+                                } | null;
+                            } | null;
+                            /** @default null */
+                            current_operation: {
+                                /** Operation Id */
+                                operation_id: string;
+                                /** Operation */
+                                operation: string;
+                                /** State */
+                                state: string;
+                                /** Attempt */
+                                attempt: number;
+                                /**
+                                 * External Result Id
+                                 * @default null
+                                 */
+                                external_result_id: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
+                                /**
+                                 * Completed At
+                                 * @default null
+                                 */
+                                completed_at: string | null;
+                            } | null;
+                            /** Revalidation Issues */
+                            revalidation_issues?: {
+                                /** Code */
+                                code: string;
+                                /**
+                                 * Field
+                                 * @default null
+                                 */
+                                field: string | null;
+                                /** Message */
+                                message: string;
+                                /** Recovery Action */
+                                recovery_action: string;
+                            }[];
+                            /**
+                             * External Mapping
+                             * @default null
+                             */
+                            external_mapping: {
+                                [key: string]: unknown;
+                            } | null;
+                            /** Audit Events */
+                            audit_events?: {
+                                /** Event Id */
+                                event_id: string;
+                                /** Action */
+                                action: string;
+                                /** Actor */
+                                actor: string;
+                                /**
+                                 * From Status
+                                 * @default null
+                                 */
+                                from_status: string | null;
+                                /**
+                                 * To Status
+                                 * @default null
+                                 */
+                                to_status: string | null;
+                                /** Tracking Revision */
+                                tracking_revision: number;
+                                /**
+                                 * Operation Id
+                                 * @default null
+                                 */
+                                operation_id: string | null;
+                                /**
+                                 * Reason Code
+                                 * @default null
+                                 */
+                                reason_code: string | null;
+                                /**
+                                 * Safe Message
+                                 * @default null
+                                 */
+                                safe_message: string | null;
+                                /** Created At */
+                                created_at: string;
+                            }[];
+                            /** Warnings */
+                            warnings?: string[];
+                        };
+                    };
+                };
+            };
+            /** @description invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / invalid_tracking_id: tracking_id 包含不合法字符或路径片段 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "invalid_storage_dir",
+                     *       "error_message": "storage_dir 必须是服务器允许根目录下的相对目录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该追番记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: 读取追番记录失败 / storage_json_error: 追番记录 JSON 损坏 / tracking_storage_error: 追番记录存储失败 / tracking_migration_error: 历史数据迁移失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "读取追番记录失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

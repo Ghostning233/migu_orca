@@ -293,6 +293,25 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 - 改这两类响应 DTO/字段后必须重生成 `docs/api/openapi.json` 与 `frontend/src/api/generated/api.ts`，
   并同步 `docs/api/endpoint_inventory.md` §3.1/§3.4/§4 与 `api.test.ts`/DTO/golden 契约测试。
 
+## 统一追番列表/详情读模型（US-223）
+
+- `routes_tracking.py` 只注册两个 GET 视图；编排在 `tracking_read_service.py`
+  （`list_tracking_items` / `build_tracking_detail`），公开白名单在
+  `tracking_serializers.py`。任一 tracking 读 API 都先调 `run_tracking_migration(config)`
+  （manifest COMPLETE 后只是重放，不重复全量扫描）。
+- `tracking_serializers.tracking_summary_fields` 是列表/详情共用的 summary 白名单：free-text
+  标题/字幕组必须经 `serializers._safe_label` 二次脱敏；`poster_path` 只允许严格同源
+  `/api/v1/mikan/posters/<opaque-key>`（模型只保证「应」为同源路径，读侧必须强校验）；
+  `available_actions` 由服务端按 tracking status 计算，只返回当前可执行动作，禁止在前端推断。
+- 列表 `valid_resource_count` 复用 `serialize_request_safe_info`（唯一 producer）；缺/损坏 Request
+  时该项降级为 0，detail 的 `safe_info` 降级为 `None` + 固定 warning，绝不失败整个响应。
+- 单条损坏 tracking JSON 不阻塞健康列表：`list_tracking_records` 返回
+  `(records, damaged_tracking_ids)`，API 层只暴露 `unreadable` 计数与固定 warning。
+- 改 tracking 读 DTO/路由后必须同步 `docs/api/openapi.json`、`docs/api/endpoint_inventory.md`
+  §2/§3.6、`frontend/src/api/generated/api.ts` 与 `api.test.ts`（operationId/path 联合 + 计数）。
+  新增 tracking 错误类型（如 `tracking_not_found`/`tracking_storage_error`/
+  `tracking_migration_error`）要同时进 `extensions/flask_api/api.py` 的 HTTP 分类与 `_ENDPOINTS`。
+
 ## 静态检查与就绪探针（US-195）
 
 - 静态检查是 `uv run ruff check src tests`（`pyproject.toml` `[tool.ruff.lint]`：

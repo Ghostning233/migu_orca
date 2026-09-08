@@ -11,6 +11,14 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from tracking_engine.models.tracking import (
+    TRACKING_STATUS_GROUP_ACTIVE,
+    TRACKING_STATUS_GROUP_ATTENTION,
+    TRACKING_STATUS_GROUP_INACTIVE,
+    TRACKING_STATUS_GROUP_PENDING,
+    TRACKING_STATUS_GROUP_PROCESSING,
+)
+
 
 class RequestListQuery(BaseModel):
     storage_dir: str | None = None
@@ -452,3 +460,74 @@ class QbittorrentConfigPayload(BaseModel):
 
 class QbittorrentTestConnectionPayload(BaseModel):
     qbittorrent_config: QbittorrentConfigPayload
+
+
+# ---------------------------------------------------------------------------
+# Tracking list/detail queries (US-223)
+# ---------------------------------------------------------------------------
+
+#: Fixed user status-group enum accepted by ``GET /api/v1/tracking/items``
+#: (Stage 29 PRD §11.2).  ``INACTIVE`` groups B-C reserved statuses.
+_TRACKING_LIST_STATUS_GROUPS = frozenset(
+    {
+        TRACKING_STATUS_GROUP_PENDING,
+        TRACKING_STATUS_GROUP_PROCESSING,
+        TRACKING_STATUS_GROUP_ACTIVE,
+        TRACKING_STATUS_GROUP_ATTENTION,
+        TRACKING_STATUS_GROUP_INACTIVE,
+    }
+)
+
+#: Fixed sort enum for the tracking list (§11.2): updated time / title / status.
+_TRACKING_LIST_SORTS = frozenset({"updated_at", "title", "status"})
+
+#: Bound on the free-text ``q`` filter (the list is local and small; the bound
+#: only stops an absurd query string, never truncates a real title match).
+_TRACKING_Q_MAX_LENGTH = 200
+
+
+class TrackingListQuery(BaseModel):
+    """Query args for ``GET /api/v1/tracking/items`` (URL query only)."""
+
+    storage_dir: str | None = None
+    q: str | None = None
+    status_group: str | None = None
+    sort: str | None = None
+
+    @field_validator("q")
+    @classmethod
+    def _clean_q(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        query = value.strip()
+        return query[:_TRACKING_Q_MAX_LENGTH] or None
+
+    @field_validator("status_group")
+    @classmethod
+    def _validate_status_group(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        token = value.strip().upper()
+        if token not in _TRACKING_LIST_STATUS_GROUPS:
+            raise ValueError("status_group 必须为 PENDING/PROCESSING/ACTIVE/ATTENTION/INACTIVE")
+        return token
+
+    @field_validator("sort")
+    @classmethod
+    def _validate_sort(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        token = value.strip().lower()
+        if token not in _TRACKING_LIST_SORTS:
+            raise ValueError("sort 必须为 updated_at/title/status")
+        return token
+
+
+class TrackingDetailQuery(BaseModel):
+    """Query args for ``GET /api/v1/tracking/items/{tracking_id}``.
+
+    ``tracking_id`` comes from the URL path; ``storage_dir`` from the query.
+    """
+
+    tracking_id: str
+    storage_dir: str | None = None
