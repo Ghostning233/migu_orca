@@ -22,6 +22,7 @@ from apps.migu_orca_web.schemas import (
     TrackingRecoverPayload,
     TrackingRevalidatePayload,
     TrackingSubmitPayload,
+    TrackingSyncPayload,
 )
 from apps.migu_orca_web.services import _storage_dir
 from apps.migu_orca_web.tracking_read_service import (
@@ -34,6 +35,7 @@ from apps.migu_orca_web.tracking_submission_service import (
     run_tracking_retry,
     run_tracking_submit,
 )
+from apps.migu_orca_web.tracking_sync_service import run_tracking_sync
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from storage_engine.controllers.storage_config import load_storage_config
@@ -55,6 +57,33 @@ class TrackingItemListView(GetView):
             status_group=query.status_group,
             sort=query.sort,
         )
+
+
+@class_route(api_blueprint, "/api/v1/tracking/sync", methods=["POST"])
+class TrackingSyncView(PostView):
+    """Run one request-scoped, read-only Auto Bangumi tracking sync."""
+
+    request_validator_model = TrackingSyncPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingSyncPayload)
+        payload = self.request_validator_model
+        config = load_storage_config(_storage_dir(payload.storage_dir))
+        ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
+        result = run_tracking_sync(config=config, ab_config=ab_config)
+        listing = list_tracking_items(config)
+        warnings = list(result.warnings)
+        for warning in listing["warnings"]:
+            if warning not in warnings:
+                warnings.append(warning)
+        return {
+            "sync_status": result.sync_status,
+            "checked_at": result.checked_at,
+            "capabilities": result.capabilities.to_public_dict(),
+            "summary": result.summary.__dict__,
+            "warnings": warnings,
+            "items": listing["items"],
+        }
 
 
 @class_route(
@@ -210,4 +239,5 @@ __all__ = [
     "TrackingItemRetryView",
     "TrackingItemRevalidateView",
     "TrackingItemSubmitView",
+    "TrackingSyncView",
 ]

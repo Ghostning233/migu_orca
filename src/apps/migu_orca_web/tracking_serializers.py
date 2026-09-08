@@ -116,6 +116,20 @@ def tracking_summary_fields(
     }
 
 
+def serialize_tracking_external_summary(mapping: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Project ExternalMapping v1 without exposing opaque external IDs."""
+    if not isinstance(mapping, dict):
+        return None
+    missing = mapping.get("missing_sync_count", 0)
+    return {
+        "match_reason": mapping.get("match_reason") if isinstance(mapping.get("match_reason"), str) else None,
+        "external_deleted": mapping.get("external_deleted") is True,
+        "enabled": mapping.get("enabled") is True,
+        "missing_sync_count": missing if isinstance(missing, int) and not isinstance(missing, bool) and missing >= 0 else 0,
+        "last_verified_at": mapping.get("last_verified_at") if isinstance(mapping.get("last_verified_at"), str) else None,
+    }
+
+
 def serialize_tracking_operation_summary(
     operation: TrackingOperation,
 ) -> dict[str, Any]:
@@ -209,6 +223,7 @@ def _non_negative_count(value: Any) -> int:
 
 __all__ = [
     "serialize_tracking_audit_events",
+    "serialize_tracking_external_summary",
     "serialize_tracking_operation_summary",
     "tracking_available_actions",
     "tracking_summary_fields",

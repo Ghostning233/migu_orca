@@ -32,6 +32,7 @@
   一次完整非浏览器、前端与 Chromium 门禁。禁止无修改重复跑全套。
 - ExternalMapping v1 在 `tracking.py` 内严格校验；无 `schema_version` 的 Stage 29 legacy mapping 只做安全保留读取，不猜测迁移。
 - 同步协调器构造本地对账 evidence 时必须排除 `EXTERNAL_SYNC` 投影记录，否则重复快照会把外部孤立记录自匹配并产生 revision/audit 漂移。
+- tracking 默认列表必须过滤 `recovery.merged_into_tracking_id` 别名；详情的 external mapping 只能经安全 serializer 投影状态字段，不能回显 external/rss ID。
 
 ## [2026-09-09 01:58:43 +0800] - US-228
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -153,4 +154,29 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 ## [2026-09-09 03:31:00 +0800] - US-232 审核修复
 - 审核发现同步协调器把每次检查时间直接写入 mapping/record，导致相同快照在不同时刻重复同步仍触发 CAS、revision 和审计。
 - 现仅在状态或外部投影证据实际变化时更新时间；补充跨时间重复同步的幂等回归断言，定向测试与 Ruff 通过。
+---
+
+## [2026-09-09 02:26:00 +0800] - US-233
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented
+  - 新增 `POST /api/v1/tracking/sync`，严格接收 request-scoped `ab_config`、`confirm=true` 和可选相对 `storage_dir`，复用现有只读同步协调器。
+  - 新增严格同步响应 DTO，返回安全 capabilities、counts、warnings 与复用 tracking summary serializer 的安全列表项；合并别名不再出现在默认列表。
+  - tracking 详情 external mapping 改为仅返回 match/status/verification 安全摘要，隐藏 subscription_id 与 rss_ids。
+  - 同步 endpoint inventory、OpenAPI、生成 TypeScript client 及 operation/path fixture。
+- Files changed
+  - `src/apps/migu_orca_web/routes_tracking.py`
+  - `src/apps/migu_orca_web/schemas.py`
+  - `src/apps/migu_orca_web/api_contract.py`
+  - `src/apps/migu_orca_web/tracking_read_service.py`
+  - `src/apps/migu_orca_web/tracking_serializers.py`
+  - `src/apps/migu_orca_web/openapi_gen.py`
+  - `docs/api/endpoint_inventory.md`
+  - `docs/api/openapi.json`
+  - `frontend/src/api/generated/api.ts`
+  - `frontend/src/api/generated/api.test.ts`
+  - `scripts/ralph/prd.json`
+- **Learnings for future iterations:**
+  - OpenAPI endpoint additions require updating both generated client output and `api.test.ts` operation/path/count fixture.
+  - API sync responses can safely combine the coordinator result with a post-sync local list read; all external data remains behind the existing serializer boundary.
+  - 验证：tracking/API 定向测试、DTO/OpenAPI/inventory drift、Ruff 与前端 typecheck/lint/unit/build 全部通过；未运行最终 story 的全量 Chromium 门禁。
 ---

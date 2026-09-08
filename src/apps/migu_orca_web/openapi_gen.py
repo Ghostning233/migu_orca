@@ -63,6 +63,7 @@ from apps.migu_orca_web.api_contract import (
     TrackingRecoverResultDTO,
     TrackingRevalidateResultDTO,
     TrackingSubmitResultDTO,
+    TrackingSyncResultDTO,
 )
 
 OPENAPI_VERSION = "3.1.0"
@@ -698,6 +699,41 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "tracking_storage_error": "追番记录存储失败",
                 "tracking_migration_error": "历史数据迁移失败",
             },
+        },
+    },
+    "POST /api/v1/tracking/sync": {
+        "operationId": "syncTrackingItems",
+        "summary": "同步外部追番安全投影",
+        "description": "US-233：使用 request-scoped Auto Bangumi 配置执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。",
+        "requestBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["ab_config", "confirm"],
+            "properties": {
+                "ab_config": {
+                    "type": "object", "additionalProperties": False, "x-request-scoped": True,
+                    "properties": {
+                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
+                        "base_url": {"type": "string", "x-request-scoped": True},
+                        "username": {"type": "string", "x-request-scoped": True},
+                        "password": {"type": "string", "x-request-scoped": True},
+                        "token": {"type": "string", "x-request-scoped": True},
+                        "fallback_enabled": {"type": "boolean"},
+                    },
+                    "required": ["auth_mode", "fallback_enabled"],
+                },
+                "storage_dir": {"type": "string"},
+                "confirm": {"const": True},
+            },
+        },
+        "success": TrackingSyncResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "config_error": "Auto Bangumi 配置无效",
+            },
+            "500": {"tracking_storage_error": "追番同步存储失败"},
         },
     },
     "GET /api/v1/tracking/items/<path:tracking_id>": {

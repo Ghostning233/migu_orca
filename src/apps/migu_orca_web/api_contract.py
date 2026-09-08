@@ -793,6 +793,16 @@ class TrackingOperationSummaryDTO(_StrictBase):
     completed_at: str | None = None
 
 
+class TrackingExternalSummaryDTO(_StrictBase):
+    """Safe external state summary; opaque external identifiers stay server-side."""
+
+    match_reason: str | None = None
+    external_deleted: bool = False
+    enabled: bool = False
+    missing_sync_count: int = 0
+    last_verified_at: str | None = None
+
+
 class TrackingItemDTO(_StrictBase):
     """One unified tracking list item (Stage 29 PRD §11.2).
 
@@ -873,7 +883,7 @@ class TrackingDetailResultDTO(_StrictBase):
     revalidation_issues: list[TrackingRevalidationIssueDTO] = Field(
         default_factory=list
     )
-    external_mapping: dict[str, Any] | None = None
+    external_mapping: TrackingExternalSummaryDTO | None = None
     audit_events: list[TrackingAuditEventDTO] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -997,6 +1007,25 @@ class AutoBangumiCapabilitiesDTO(_StrictBase):
     external_verify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
     checked_at: str | None
     safe_message: str | None
+
+
+class TrackingSyncSummaryDTO(_StrictBase):
+    checked: int
+    created: int
+    updated: int
+    unchanged: int
+    external_only: int
+    failed: int
+    unreadable: int
+
+
+class TrackingSyncResultDTO(_StrictBase):
+    sync_status: Literal["COMPLETE", "PARTIAL", "FAILED"]
+    checked_at: str
+    capabilities: AutoBangumiCapabilitiesDTO
+    summary: TrackingSyncSummaryDTO
+    warnings: list[str] = Field(default_factory=list)
+    items: list[TrackingItemDTO] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

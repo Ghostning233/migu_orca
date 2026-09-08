@@ -446,6 +446,15 @@ class AutoBangumiCapabilitiesPayload(BaseModel):
     ab_config: AutoBangumiCapabilitiesConfigPayload
 
 
+class TrackingSyncPayload(BaseModel):
+    """Request-scoped read-only external tracking synchronization."""
+
+    model_config = ConfigDict(extra="forbid")
+    ab_config: AutoBangumiCapabilitiesConfigPayload
+    storage_dir: str | None = None
+    confirm: Literal[True]
+
+
 class QbittorrentConfigPayload(BaseModel):
     endpoint: str
     username: str

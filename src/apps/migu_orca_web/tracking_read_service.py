@@ -32,6 +32,7 @@ from apps.migu_orca_web.services import (
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_serializers import (
     serialize_tracking_audit_events,
+    serialize_tracking_external_summary,
     serialize_tracking_operation_summary,
     tracking_summary_fields,
 )
@@ -92,7 +93,7 @@ def list_tracking_items(
         warnings.append(migration_warning)
 
     listing = list_tracking_records(config)
-    healthy_records = listing.records
+    healthy_records = [record for record in listing.records if not _is_merged_alias(record)]
     unreadable = listing.unreadable_count
     if unreadable:
         warnings.append(TRACKING_LIST_UNREADABLE_WARNING)
@@ -170,7 +171,7 @@ def build_tracking_detail(
         "safe_info": safe_info,
         "current_operation": current_operation,
         "revalidation_issues": [],
-        "external_mapping": record.external_mapping,
+        "external_mapping": serialize_tracking_external_summary(record.external_mapping),
         "audit_events": serialize_tracking_audit_events(record.audit_events),
         "warnings": warnings,
     }
@@ -190,6 +191,11 @@ def _requests_by_id(result: Any) -> dict[str, dict[str, Any]]:
         if isinstance(request_id, str) and request_id:
             by_id[request_id] = request
     return by_id
+
+
+def _is_merged_alias(record: TrackingRecord) -> bool:
+    recovery = record.recovery if isinstance(record.recovery, dict) else {}
+    return isinstance(recovery.get("merged_into_tracking_id"), str)
 
 
 def _summary_counts(records: list[TrackingRecord], unreadable: int) -> dict[str, int]:
