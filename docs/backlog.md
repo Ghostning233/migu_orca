@@ -29,7 +29,7 @@
 | 17 | BL-018 | 正式番名与季数解析 | 已完成 (Stage 25, 2026-08-27) |
 | 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
 | 19 | BL-024 | 前端工程化迁移与页面重构 | 已完成 (Stage 27, 2026-08-31) |
-| 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | 部分已完成：B-A 为 Stage 28（已完成，2026-09-08）；B-B～B-D 待评审 |
+| 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | 部分已完成：B-A 为 Stage 28；B-B 已规划为 Stage 29；B-C～B-D 待评审 |
 | 21 | BL-026 | 桌面端前端体验分片重构 | 候选，PRD 待 Gate 4 评审 |
 | 22 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
@@ -471,12 +471,14 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-025: 前端体验重构的后端支撑与 Auto Bangumi 管理契约
 
-- 状态：B-A 已完成 (Stage 28, 2026-09-08)；B-B～B-D 仍待 Gate 4 评审
+- 状态：B-A 已完成；B-B 已通过 Gate 4 范围评审并规划为 Stage 29；B-C～B-D 仍待评审
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：20，P0
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_backend_support_PRD.md`
 - Stage 28 执行 PRD：`docs/MiGuOrca_stage28_draft_consistency_PRD.md`
-- 执行分支：`ralph/stage28-draft-consistency`；Ralph stories 为 US-210～US-218
+- Stage 29 执行 PRD：`docs/MiGuOrca_stage29_unified_tracking_PRD.md`
+- Stage 28 执行分支：`ralph/stage28-draft-consistency`；Ralph stories 为 US-210～US-218
+- Stage 29 候选分支：`ralph/stage29-unified-tracking`；候选 stories 为 US-219～US-227，尚未生成 Ralph PRD
 
 完成情况（Stage 28）：
 
@@ -494,9 +496,10 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
   tracking record**。
 
 不包含数据库、后台 worker、未保存批量会话恢复、当前已更新集数、移动端或媒体文件删除。
-B-A 已按 US-210～US-218 独立完成 Stage 28；B-B～B-D 继续分别评审，不能把 tracking 迁移和
-全部外部写动作追加回 Stage 28。B-B tracking 阶段可从持久化 ACCEPTED Request 与 handoff
-幂等建立统一 tracking record。
+B-A 已按 US-210～US-218 独立完成 Stage 28。B-B 已完成四轮范围评审，按 US-219～US-227
+规划为 Stage 29：从持久化 ACCEPTED Request 与 handoff 幂等建立 tracking record，迁移旧 queue/
+AB result，统一复核、提交、重试和恢复；尚未生成 Ralph PRD 或开发。B-C～B-D 继续分别评审，
+不能把外部全量同步和管理动作追加回 Stage 29。
 
 ### BL-026: 桌面端前端体验分片重构
 

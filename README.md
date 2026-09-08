@@ -4,6 +4,8 @@ MiGuOrca 是一个面向季度新番的 Auto Bangumi 前置订阅编排工作台
 
 Stage 28「草案一致性与原子保存确认」已完成：为服务端权威草案建立单调 revision 与 compare-and-swap（乱序旧写不再覆盖最新重算），把保存改为「预留 → 持久化 → 提交/释放」（写盘失败同一草案可重试），建立持久化 save-confirm 幂等记录（跨进程重试/响应丢失不重复创建 Request），新增单番 `POST /api/v1/requests/save-confirm` 与批量 `POST /api/v1/batches/{batch_id}/save-confirm` 组合端点（批量 1～36 部服务端边界 + 逐条部分成功），并新增 Request `safe-info` 严格白名单 DTO 作为“全部信息”唯一安全数据源。实现与验收见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`。
 
+Stage 29「统一追番记录与可靠提交恢复」已完成 B-B 范围评审并形成执行 PRD，计划以确定性 TrackingRecord、独立 TrackingOperation 和纯本地历史迁移统一单番/批量待提交状态，提供列表、安全详情、复核、幂等提交、重试和人工恢复契约；结果未知时禁止盲目重复创建外部订阅，旧 batch queue 暂保留为兼容投影。Stage 29 尚未生成 Ralph PRD 或开始开发，范围见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`。
+
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI、静态检查、OpenAPI 漂移检查、真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。
