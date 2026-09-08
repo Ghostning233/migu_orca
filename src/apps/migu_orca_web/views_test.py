@@ -6501,6 +6501,92 @@ def test_batch_save_confirm_api_rejects_request_level_bad_storage(
     assert "/etc/private" not in serialized
 
 
+def test_save_confirm_terminal_replay_rejects_reserved_draft(
+    tmp_path: Path,
+) -> None:
+    """Stage 28 boundary fix (real DraftStore wiring): a reserved draft must not
+    replay an unrelated terminal record as its own success.
+
+    - draft-A confirms under ``key-old`` (CONFIRMED terminal record).
+    - draft-B (different plan) is reserved by another save-in-progress.
+    - reusing ``key-old`` against draft-B must return 409 draft_reserved, never
+      the old Request of draft-A.
+    """
+    from apps.migu_orca_web.drafts import draft_store
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    profile = _profile(tmp_path, storage_dir.name)
+
+    # draft-A: fully confirmed under key-old.
+    draft_a_id, _ = _issue_draft(client, "芙莉莲")
+    first = _save_confirm(client, draft_a_id, 1, "key-old", profile)
+    assert first.status_code == 200
+    old_request_id = first.get_json()["result"]["handoff"]["request_id"]
+
+    # draft-B: a different plan, reserved by a save-in-progress.
+    draft_b_id, _ = _issue_draft(client, "咒术回战")
+    reserved_request, reason = draft_store.reserve_for_save(draft_b_id, 1)
+    assert reserved_request is not None
+    assert reason == "ok"
+    try:
+        response = _save_confirm(client, draft_b_id, 1, "key-old", profile)
+    finally:
+        draft_store.release_save(draft_b_id)
+
+    payload = response.get_json()
+    assert response.status_code == 409
+    assert payload["ok"] is False
+    assert payload["error_type"] == "draft_reserved"
+    # The old Request of draft-A is never returned.
+    assert old_request_id not in str(payload)
+    assert draft_b_id not in str(payload)
+
+
+def test_batch_save_confirm_terminal_replay_reserved_draft_is_per_item_failed(
+    tmp_path: Path,
+) -> None:
+    """Stage 28 boundary fix (batch): a reserved draft under a stale key is a
+    sanitized per-item failure, never the old request_id as this item's success."""
+    from apps.migu_orca_web.drafts import draft_store
+
+    storage_dir = tmp_path / "storage"
+    client = _client()
+    profile = _profile(tmp_path, storage_dir.name)
+
+    # Confirm one draft under key-batch-old.
+    confirmed_draft_id, _ = _issue_draft(client, "芙莉莲")
+    first = _save_confirm(client, confirmed_draft_id, 1, "key-batch-old", profile)
+    assert first.status_code == 200
+    old_request_id = first.get_json()["result"]["handoff"]["request_id"]
+
+    # A different draft, reserved, reused with the same key-batch-old.
+    reserved_draft_id, _ = _issue_draft(client, "咒术回战")
+    reserved_request, reason = draft_store.reserve_for_save(reserved_draft_id, 1)
+    assert reserved_request is not None
+    assert reason == "ok"
+    item = {
+        "item_id": "item-0",
+        "draft_id": reserved_draft_id,
+        "base_revision": 1,
+        "idempotency_key": "key-batch-old",
+    }
+    try:
+        response = _batch_save_confirm(client, [item], batch_id="batch-reserved")
+    finally:
+        draft_store.release_save(reserved_draft_id)
+
+    payload = response.get_json()
+    assert response.status_code == 200  # partial-success envelope
+    result = payload["result"]
+    row = result["results"][0]
+    assert row["outcome"] == "failed"
+    assert row["error_type"] == "draft_reserved"
+    assert row["request_id"] is None  # NOT the old request_id
+    assert old_request_id not in str(payload)
+    assert reserved_draft_id not in str(payload)
+
+
 # ---------------------------------------------------------------------------
 # Stage 28 static-review fixes: strict save-confirm DTOs (US-213/214/216)
 # ---------------------------------------------------------------------------
@@ -6677,6 +6763,17 @@ def test_safe_label_redacts_all_sensitive_markers() -> None:
         "cookie=session-id",              # cookie key=value
         "rss_url=https://x/y",            # rss_url key=value
         "/tmp/abs",                       # leading slash
+        # Generic POSIX absolute paths — any root, anywhere in the string.
+        "/data/private/token",
+        "写入失败 /data/private/token",
+        "/mnt/storage/secret",
+        "目录是 /mnt/storage/secret",
+        "/private/config.json",
+        "配置位于 /private/config.json",
+        "/Users/name/secret",
+        "macOS 路径 /Users/name/secret",
+        "/custom-root/sub/dir",
+        "任意根目录 /custom-root/sub/dir",
     ):
         assert _safe_label(sensitive) == redacted, f"failed to redact {sensitive!r}"
 
@@ -6687,8 +6784,11 @@ def test_safe_label_redacts_all_sensitive_markers() -> None:
     assert _safe_label(True) is None
     assert _safe_label(None) is None
 
-    # Legal Chinese labels and file names stay intact.
+    # Legal Chinese labels, slash-bearing titles and file names stay intact.
     assert _safe_label("葬送的芙莉莲") == "葬送的芙莉莲"
     assert _safe_label("[喵萌] 葬送的芙莉莲 - 01.mkv") == "[喵萌] 葬送的芙莉莲 - 01.mkv"
     assert _safe_label("1080p") == "1080p"
     assert _safe_label("喵萌") == "喵萌"
+    assert _safe_label("Fate/stay night") == "Fate/stay night"
+    assert _safe_label("A/B 测试") == "A/B 测试"
+    assert _safe_label("[喵萌] 番剧名称 - 01.mkv") == "[喵萌] 番剧名称 - 01.mkv"

@@ -150,7 +150,9 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   DraftStore/entry-controller 流。状态机要点：
   - 终态（`CONFIRMED`/`SAVED_CONFIRM_FAILED`）同键重放前经无副作用 `peek_draft`
     （`DraftStore.peek`）核对仍存在草案的 fingerprint：指纹不一致 → 409
-    `idempotency_conflict`（草案保持可用，不被预留/消费）；草案缺失/预留/无 seam → 安全重放；
+    `idempotency_conflict`（草案保持可用，不被预留/消费）；`reserved` → 409
+    `draft_reserved`（绝不重放旧终态）；`replayed`/`expired`/`evicted`/`unknown`（真正缺失，
+    含进程重启）或未提供 seam → 安全重放；
   - `IN_PROGRESS` 重试先用 `resolve_in_progress_retry` 核对已落盘 Request（在 → 继续确认；
     不在 → 只在仍持有效 reservation 时重试保存），不无条件新建 Request；
   - 首次写盘成功后记录保持 `IN_PROGRESS` 并绑定 `request_id`，崩溃后重试靠 rule 3 收敛；

@@ -589,6 +589,61 @@ def test_terminal_record_with_missing_draft_replays(tmp_path: Path) -> None:
     assert harness.reservations == []
 
 
+def test_terminal_record_with_reserved_draft_raises_draft_reserved(
+    tmp_path: Path,
+) -> None:
+    """Stage 28 boundary fix: a reserved draft must never replay a terminal record.
+
+    ``peek_draft`` raising the 409 ``draft_reserved`` (as the route layer does
+    for a reserved DraftStore entry) must propagate — never be folded into
+    "gone" and replayed as an unrelated Request.
+    """
+    config = _config(tmp_path)
+    first = _draft_request("芙莉莲")
+    first_id = first["request_id"]
+    save_request_snapshot(config, accept_request(first))
+    record = create_idempotency_record(
+        idempotency_key="key-reserved",
+        operation="SAVE_CONFIRM",
+        request_fingerprint=compute_request_fingerprint(first),
+        request_id=first_id,
+        state=STATE_CONFIRMED,
+        now=NOW,
+    )
+    save_idempotency_record(config, record)
+
+    def peek_reserved() -> dict[str, Any]:
+        raise Stage1Error(
+            "draft_reserved",
+            "订阅草案正在保存中，请稍后重试",
+            "reserve_preview_draft",
+            {"field": "draft_id"},
+        )
+
+    harness = _SaveConfirmHarness(config, first)
+
+    with pytest.raises(Stage1Error) as error:
+        run_save_confirm(
+            config=config,
+            idempotency_key="key-reserved",
+            reserve_draft=harness.reserve_draft,
+            persist_pending=harness.persist_pending,
+            confirm_saved=harness.confirm_saved,
+            commit_draft=harness.commit_draft,
+            release_draft=harness.release_draft,
+            peek_draft=peek_reserved,
+            now=NOW,
+        )
+
+    # The reserved error propagates; the old Request is NOT returned.
+    assert error.value.error_type == "draft_reserved"
+    assert error.value.details == {"field": "draft_id"}
+    # The second draft's harness was never reserved/committed/released.
+    assert harness.reservations == []
+    assert harness.commits == 0
+    assert harness.releases == 0
+
+
 def test_record_creation_failure_releases_draft(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -387,6 +387,13 @@ Stage 28 已完成并合入 `ralph/stage28-draft-consistency`，US-210～US-218 
 修复后门禁：非浏览器 1137 passed、真实 Chromium 133 passed、前端 Vitest 261 passed，
 typecheck/lint/api:check/build/compileall/ruff/OpenAPI drift/git diff --check 全绿。
 
+2026-09-08 追加一轮「Stage 28 边界修复」（不改变产品范围）：
+- 终态幂等重放区分 `reserved` 与真正不存在：`peek_draft` 对 `REASON_RESERVED` 直接抛 409
+  `draft_reserved`（绝不重放旧终态），仅 `replayed`/`expired`/`evicted`/`unknown`（真正缺失，
+  含进程重启）折叠为 None 允许安全重放；单番与批量共用同一 `_run_draft_save_confirm` 语义。
+- `_SAFE_UNIX_ABS_RE` 改为通用 POSIX 绝对路径（任意根目录，`/` 前为字符串开头或空白），
+  不再依赖固定根目录白名单，同时不误杀 `Fate/stay night`、`A/B 测试` 等词内斜杠。
+
 实现偏差：均为契约内最小扩展，无范围外 feature（未实现 tracking/AB 管理/新页面视觉）。
 剩余风险：draft 仍为单进程内存权威（多 worker 部署需外部化）；批量上限只约束 parse 入口，
 不限制后续 accept/save-confirm 条数；`safe-info` 的 `total_episodes` 暂无数据源恒为 null。

@@ -629,3 +629,33 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Useful context
     - 本次为 Stage 28 的静态审查修复提交，不改动 Stage 29/tracking/AB 管理范围。
 ---
+
+## [2026-09-08 12:35 CST] - Stage 28 边界修复（终态重放 reserved + 通用 POSIX 路径脱敏）
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented
+  - 终态幂等重放区分 reserved 与真正不存在：`routes_requests._run_draft_save_confirm` 的
+    `peek_draft` 不再把非 OK 全部折叠为 None——`REASON_RESERVED` 直接抛 409
+    `draft_reserved`（经 `_draft_store_error`），仅 replayed/expired/evicted/unknown（真正
+    缺失，含进程重启）折叠为 None 允许安全重放；`_guard_terminal_replay_against_live_draft`
+    保持「live 且 fingerprint 不同 → 409 idempotency_conflict，live 且相同 → 重放，
+    None → 重放」。单番与批量共用 `_run_draft_save_confirm`，语义一致。
+  - safe-info 通用 POSIX 绝对路径：`_SAFE_UNIX_ABS_RE` 从固定根目录白名单改为
+    `(?:^|\s)/([^\s/]+(?:/[^\s/]+)*)`，识别任意根目录（/data /mnt /private /Users 及
+    自定义）且不误杀 `Fate/stay night`、`A/B 测试` 等词内 `/`。
+- Files changed
+  - src/apps/migu_orca_web/routes_requests.py（peek_draft 区分 RESERVED）
+  - src/apps/migu_orca_web/serializers.py（_SAFE_UNIX_ABS_RE 通用化）
+  - src/apps/migu_orca_web/views_test.py（reserved 真实接线 + 批量逐条 + safe_label 通用路径）
+  - tests/api_contract/test_save_confirm_service.py（reserved peek 抛错传播测试）
+- **Learnings for future iterations:**
+  - Patterns discovered
+    - peek 回调必须区分「不存在」与「reserved」两种语义：真正缺失才能安全重放终态，
+      reserved 必须抛 409 且绝不重放，否则另一部保存中的草案会被错误返回旧成功结果。
+    - 通用 POSIX 绝对路径用「`/` 前是字符串开头或空白」做边界判定，能避免固定根白名单的
+      遗漏，也不误杀词内斜杠（`Fate/stay night`）。
+  - Gotchas encountered
+    - 上一轮把 reserved 折叠为 None 是为了简化，但这正是终态重放安全漏洞的根因；边界语义
+      不能用 None 表示。
+  - Useful context
+    - 本轮为 Stage 28 边界修复，不改 Stage 29/tracking/AB 管理范围。
+---

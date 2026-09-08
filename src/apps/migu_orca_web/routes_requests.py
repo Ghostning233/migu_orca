@@ -433,10 +433,16 @@ def _run_draft_save_confirm(
 
     def peek_draft() -> dict[str, Any] | None:
         # Non-mutating observation for terminal-replay fingerprint verification
-        # (US-213 fix). ``peek`` never reserves/consumes/refreshes the draft; a
-        # reserved/expired/replayed/unknown draft simply reports "no live draft"
-        # so the terminal record can still replay safely after a restart.
+        # (US-213 fix). ``peek`` never reserves/consumes/refreshes the draft.
+        # Only truly-gone states (replayed/expired/evicted/unknown — a restart
+        # or an already-consumed save) fold into ``None`` so the terminal record
+        # can still replay safely. A *reserved* draft means another
+        # save-in-progress owns it, so it must never be mistaken for "gone" —
+        # it raises the 409 ``draft_reserved`` error instead of replaying an
+        # unrelated terminal outcome.
         request, reason = draft_store.peek(draft_id)
+        if reason == REASON_RESERVED:
+            raise _draft_store_error(REASON_RESERVED)
         if request is None or reason != REASON_OK:
             return None
         return request
