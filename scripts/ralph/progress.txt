@@ -1,43 +1,18 @@
-# MiGuOrca Ralph Progress - Stage 32
+# Ralph Progress Log
+Started: Thu Sep 10 00:50:47 CST 2026
+---
 
 ## Codebase Patterns
+- Flask `/api/v1` routes use `<path:param>` while OpenAPI uses `{param}`; normalize both forms when checking contract drift.
+- `docs/api/openapi.json` is deterministic output from `apps.migu_orca_web.openapi_gen`; regenerate it after changing contract metadata.
+- `TrackingRecord` is the external submission authority; legacy queue and AB result data are compatibility projections or migration evidence.
 
-- 正式执行 PRD：`docs/MiGuOrca_stage32_contract_hardening_PRD.md`；分支：
-  `ralph/stage32-contract-hardening`；stories：US-247～US-256。
-- Stage 31 已合入远端 main；TrackingRecord 是外部提交流程权威，旧 queue 与 AB result 只作兼容
-  投影或迁移证据，任何路径不得降级已持久化成功。
-- 本阶段只完成 B-D 契约收尾：生命周期、严格 DTO/OpenAPI/生成类型、兼容/迁移、安全矩阵、发布
-  回退和前端 handoff；不得新增管理动作、删除旧端点或开发正式页面。
-- 旧 preview-save、单番 submit-ab、batch accept/queue/submit/retry/recover 仍有真实前端调用方；本阶段
-  保持兼容并证明共用 tracking 服务，不以“未发现调用”作为删除依据。
-- `available_actions` 只表示不带凭据的本地可执行性；真正外部动作必须在同次 POST 中重新探测
-  request-scoped capability，并执行 confirm/idempotency/revision/read-before-write/recovery guard。
-- 管理写只允许 password + 精确 Auto Bangumi 3.1.18；API Token、其他/未知版本和探测失败均 fail
-  closed。操作仍只有 MODIFY、SET_ENABLED、DELETE_EXTERNAL、REFRESH_RSS。
-- 番剧停用/删除固定 `file=false`；不接受 file 输入，不删除本地 Request、TrackingRecord、operation、
-  审计、queue、下载任务、目录或媒体。
-- TrackingRecord v1、ExternalMapping v1、manifest v1、operation v1/v2 按当前规则兼容读取；纯读取不
-  改写，未知未来 schema 保留原文件并安全拒绝，迁移纯本地、可重入、逐条隔离。
-- OpenAPI、endpoint inventory 和 generated TypeScript client 必须同步；前端只使用生成类型，不手写
-  DTO，不读取 Python 常量或 Auto Bangumi 原始响应。
-- `updated_episode` 继续为 null/NOT_IMPLEMENTED；禁止用种子、RSS 或下载数量推断。
-- US-247～US-255 只跑定向检查；US-256 才运行一次完整非浏览器、前端与 Chromium 门禁。无代码
-  变化禁止重复跑全套。
-- 预计 10 个实现迭代，最多 2 个修复迭代；超过 12 轮停止并报告，不得无界循环。
-
-## Stage 32 Handoff
-
-- Stage 28 已冻结 draft revision、save-confirm、1/12/36 和 safe-info；Stage 29 已冻结 tracking、
-  submit/retry/recover 与历史迁移；Stage 30/31 已交付 3.1.18 只读同步和可靠写管理。
-- 前端 Stage 33 在独立 clone 并行开发，使用 US-257～US-265；本分支只使用预留的 US-247～US-256，
-  不触碰 Stage 33 工作区。
-- Stage 32 完成并合入后才允许正式规划 F-F 追番管理；F-B～F-E 仍按前端依赖和实际合并状态评审。
-- 保存并确认只产生待提交 tracking，外部提交必须再次显式确认；用户必须选择真实 MiKan 合集，
-  MiGuOrca 不绕过 Auto Bangumi 创建 qBittorrent 下载。
-
-## Cost Control
-
-- 每轮只完成一个最高优先级未通过 story，并提交后再更新 passes/progress。
-- 先运行最小相关单元、API contract、migration 或 generated type 测试；失败后只复跑最小失败用例。
-- 安全、兼容和回退使用脱敏临时 fixture/recording fake，绝不连接真实外部服务。
-- 只有 US-256 运行完整 pytest、前端门禁和完整 Chromium；不得因文档或无变化重复全量。
+## 2026-09-10 01:05:00 CST - US-247
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the machine-readable B-A~B-C2 endpoint lifecycle registry with PRIMARY, RECOVERY, and COMPATIBILITY classifications, replacement/retention rationale, and authority metadata. Projected it into OpenAPI `x-lifecycle` metadata and the endpoint inventory, with drift tests covering live routes, inventory, OpenAPI, legacy compatibility entries, and TrackingRecord authority.
+- Files changed: `src/apps/migu_orca_web/endpoint_lifecycle.py`, `src/apps/migu_orca_web/openapi_gen.py`, `tests/api_contract/test_endpoint_lifecycle.py`, `docs/api/endpoint_inventory.md`, `docs/api/openapi.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Flask route placeholders and OpenAPI placeholders use different syntax; contract tests must normalize both forms.
+  - OpenAPI is generated deterministically and must be regenerated when operation metadata changes.
+  - Legacy queue/AB result paths remain compatibility projections; TrackingRecord is the external submission authority.
+---

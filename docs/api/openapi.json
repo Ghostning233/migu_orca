@@ -311,6 +311,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "只读能力探测；管理写入时重新探测",
+          "authority": "Capability probe"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -715,6 +720,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "连接诊断，不替代管理写入校验",
+          "authority": "Request-scoped probe"
         },
         "requestBody": {
           "required": true,
@@ -1766,6 +1776,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "批量草案解析",
+          "authority": "Batch draft"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -1916,6 +1931,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "纠正规则读取",
+          "authority": "Correction store"
+        },
         "parameters": [
           {
             "name": "storage_dir",
@@ -2033,6 +2053,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "纠正规则保存",
+          "authority": "Correction store"
         },
         "requestBody": {
           "required": true,
@@ -2468,6 +2493,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "候选搜索；保存前真实 MiKan 选择",
+          "authority": "Request draft"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -2780,6 +2810,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "偏好读取",
+          "authority": "Preference store"
+        },
         "parameters": [
           {
             "name": "storage_dir",
@@ -3009,6 +3044,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "偏好保存",
+          "authority": "Preference store"
         },
         "requestBody": {
           "required": true,
@@ -3314,6 +3354,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "连接诊断",
+          "authority": "Request-scoped probe"
         },
         "requestBody": {
           "required": true,
@@ -3623,6 +3668,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "订阅方案安全列表",
+          "authority": "Request store"
         },
         "parameters": [
           {
@@ -5004,6 +5054,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "创建订阅草案",
+          "authority": "Request draft"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -5845,6 +5900,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "服务端权威草案修改",
+          "authority": "DraftStore"
         },
         "requestBody": {
           "required": true,
@@ -7124,6 +7184,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧预览保存；由 save-confirm 替代，保持可用",
+          "authority": "DraftStore + TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -7982,6 +8047,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "单番保存确认并 handoff tracking",
+          "authority": "TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -8432,6 +8502,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "统一追番安全列表",
+          "authority": "TrackingRecord"
         },
         "parameters": [
           {
@@ -9135,6 +9210,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "只读外部同步安全投影",
+          "authority": "TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -9653,6 +9733,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧批量接受；由批量 save-confirm 替代，保持可用",
+          "authority": "TrackingRecord + queue projection"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -10035,6 +10120,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧队列读取；保留为兼容投影",
+          "authority": "TrackingRecord; queue projection"
         },
         "parameters": [
           {
@@ -10563,6 +10653,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧批量恢复；收敛到统一恢复保护",
+          "authority": "TrackingRecord + operation"
         },
         "requestBody": {
           "required": true,
@@ -11276,6 +11371,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧批量重试；收敛到统一恢复保护",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -11565,6 +11665,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "批量保存确认并 handoff tracking",
+          "authority": "TrackingRecord"
         },
         "requestBody": {
           "required": true,
@@ -12255,6 +12360,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧批量提交；收敛到统一提交服务",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -12581,6 +12691,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "候选海报安全代理",
+          "authority": "In-memory poster registry"
         },
         "parameters": [
           {
@@ -13554,6 +13669,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "订阅方案安全详情",
+          "authority": "Request store"
         },
         "parameters": [
           {
@@ -14893,6 +15013,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "保存后确认失败的 Request 恢复入口",
+          "authority": "Request + TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -16229,6 +16354,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "待确认 Request 的显式取消",
+          "authority": "Request store"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -16432,6 +16562,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "本地 Request 显式删除入口",
+          "authority": "Request store"
         },
         "requestBody": {
           "required": true,
@@ -17715,6 +17850,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "已保存 Request 的兼容修改入口",
+          "authority": "Request store"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -18443,6 +18583,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "订阅方案安全详情投影",
+          "authority": "Request store"
         },
         "parameters": [
           {
@@ -20024,6 +20169,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧单番提交；改由统一 TrackingRecord/operation 收敛",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -21268,6 +21418,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "统一追番安全详情",
+          "authority": "TrackingRecord"
+        },
         "parameters": [
           {
             "name": "tracking_id",
@@ -21816,6 +21971,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "外部删除并保留本地数据",
+          "authority": "TrackingRecord + operation"
         },
         "parameters": [
           {
@@ -22440,6 +22600,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "外部方案修改",
+          "authority": "TrackingRecord + operation"
+        },
         "parameters": [
           {
             "name": "tracking_id",
@@ -23049,6 +23214,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "未知结果保守恢复；不得盲目重放",
+          "authority": "TrackingRecord + operation"
         },
         "requestBody": {
           "required": true,
@@ -23661,6 +23831,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "关联 RSS 刷新",
+          "authority": "TrackingRecord + operation"
         },
         "parameters": [
           {
@@ -24302,6 +24477,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "明确失败的可靠重试",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -24922,6 +25102,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "提交前本地复核",
+          "authority": "TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -25478,6 +25663,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "外部方案启停",
+          "authority": "TrackingRecord + operation"
         },
         "parameters": [
           {
@@ -26124,6 +26314,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "可靠外部提交",
+          "authority": "TrackingRecord + operation"
         },
         "requestBody": {
           "required": true,

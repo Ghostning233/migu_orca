@@ -66,6 +66,7 @@ from apps.migu_orca_web.api_contract import (
     TrackingSubmitResultDTO,
     TrackingSyncResultDTO,
 )
+from apps.migu_orca_web.endpoint_lifecycle import lifecycle_for
 
 OPENAPI_VERSION = "3.1.0"
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[3] / "docs" / "api" / "openapi.json"
@@ -1699,6 +1700,7 @@ def _operation(entry: dict[str, Any], method: str, path: str) -> dict[str, Any]:
             }
         },
     }
+    op["x-lifecycle"] = lifecycle_for(method, path.replace("{", "<").replace("}", ">"))
     if entry.get("binary"):
         op["responses"] = entry["responses"]
     parameters = list(entry.get("parameters", []))
