@@ -287,7 +287,15 @@ def _subscription(value: Any) -> ExternalSubscription:
     enabled = value.get("enabled", True)
     if not isinstance(enabled, bool):
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "enabled"})
-    return ExternalSubscription(external_id, title, season, group, ((rss_link,) if isinstance(rss_link, str) else ()), ids, deleted, enabled)
+    # Keep the complete request-scoped upstream model so PATCH can satisfy
+    # BangumiUpdate without dropping fields unknown to the public DTO.
+    fields = {key: value[key] for key in (
+        "official_title", "year", "title_raw", "season", "season_raw",
+        "group_name", "dpi", "source", "subtitle", "eps_collect", "offset",
+        "filter", "rss_link", "poster_link", "added", "rule_name", "save_path",
+        "deleted",
+    ) if key in value}
+    return ExternalSubscription(external_id, title, season, group, ((rss_link,) if isinstance(rss_link, str) else ()), ids, deleted, enabled, fields)
 
 
 def _rss_items(response: Mapping[str, Any]) -> list[ExternalRss]:
@@ -295,13 +303,14 @@ def _rss_items(response: Mapping[str, Any]) -> list[ExternalRss]:
     for value in _items(response, "rss"):
         if not isinstance(value, Mapping):
             raise Stage1Error("invalid_ab_response", "Auto Bangumi RSS 响应无效", "ab_management")
+        fields = {key: value[key] for key in ("name", "url", "aggregate", "parser", "enabled") if key in value}
         result.append(ExternalRss(
             _opaque(value.get("id"), "rss_id"),
             _text(value.get("name"), "name") if value.get("name") is not None else None,
             _url(value.get("url")),
             _bool(value.get("aggregate", False), "aggregate"),
             _text(value.get("parser"), "parser") if value.get("parser") is not None else None,
-            _bool(value.get("enabled", True), "enabled"),
+            _bool(value.get("enabled", True), "enabled"), fields,
         ))
     return result
 
@@ -358,6 +367,15 @@ def _action_response(response: Mapping[str, Any]) -> dict[str, Any]:
             continue
         if isinstance(value, (str, int, float, bool)) or value is None:
             result[key] = value
+    # The coordinator consumes a bounded transport classification, never the
+    # upstream body.  Auto Bangumi 3.1.18 signals accepted actions with
+    # ``status: true`` rather than an HTTP status field.
+    if response.get("status") is True:
+        result["status_code"] = 200
+    elif response.get("status") is False:
+        result["status_code"] = 400
+    else:
+        result["status_code"] = 502
     return result
 
 

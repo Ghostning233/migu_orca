@@ -130,28 +130,44 @@ def run_tracking_management(
         raise Stage1Error("tracking_management_confirmation_required", "请确认后再执行管理操作", "tracking_management")
     resolved_config = config or load_storage_config()
     record = load_tracking_record(resolved_config, tracking_id)
-    if expected_revision != record.revision:
-        raise Stage1Error("tracking_revision_conflict", "追番记录版本已变化，请刷新后重试", "tracking_management", {"expected_revision": expected_revision, "current_revision": record.revision})
     if operation not in {TRACKING_OPERATION_KIND_MODIFY, TRACKING_OPERATION_KIND_SET_ENABLED, TRACKING_OPERATION_KIND_DELETE_EXTERNAL, TRACKING_OPERATION_KIND_REFRESH_RSS}:
         raise Stage1Error("tracking_management_patch_invalid", "管理操作类型无效", "tracking_management")
     if operation == TRACKING_OPERATION_KIND_REFRESH_RSS and target_scope != "ASSOCIATED_RSS":
         raise Stage1Error("tracking_management_patch_invalid", "刷新操作目标无效", "tracking_management")
 
-    _guard_current_operation(resolved_config, record)
     safe_patch = _safe_patch(operation, target_scope, patch, enabled)
     binding = build_management_binding(action=operation, scope=target_scope, patch=safe_patch if operation == "MODIFY" else None, enabled=enabled if operation == "SET_ENABLED" else None)
     existing = _load_operation_if_present(resolved_config, idempotency_key)
     if existing is not None:
-        if (existing.tracking_id, existing.operation, existing.expected_revision,
-                existing.target_scope, existing.request_fingerprint,
-                ) != (
-                    record.tracking_id, operation, expected_revision, target_scope,
-                    binding.action_fingerprint,
-                ):
+        same_binding = (existing.tracking_id, existing.operation, existing.target_scope,
+                        existing.request_fingerprint) == (
+                            record.tracking_id, operation, target_scope,
+                            binding.action_fingerprint)
+        # A terminal operation is replayable after its first call advanced the
+        # tracking revision.  The original expected revision remains durable
+        # binding evidence; requiring the caller to resend it makes replay
+        # impossible in the normal API flow.
+        if not same_binding or (existing.state not in TRACKING_OPERATION_TERMINAL_STATES
+                                and existing.expected_revision != expected_revision):
             raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         if existing.state in TRACKING_OPERATION_TERMINAL_STATES:
-            return {"operation_id": existing.operation_id, "management_status": existing.state, "created": False}
+            outcome = {
+                TRACKING_OPERATION_STATE_SUCCEEDED: MANAGEMENT_OUTCOME_SUCCESS,
+                "FAILED": MANAGEMENT_OUTCOME_DEFINITE_FAILURE,
+                MANAGEMENT_OUTCOME_UNKNOWN: MANAGEMENT_OUTCOME_UNKNOWN,
+                "RECOVERY_REQUIRED": MANAGEMENT_OUTCOME_UNKNOWN,
+            }.get(existing.state, MANAGEMENT_OUTCOME_UNKNOWN)
+            return {
+                "operation_id": existing.operation_id,
+                "management_status": existing.state,
+                "outcome": outcome,
+                "needs_manual": existing.state in {MANAGEMENT_OUTCOME_UNKNOWN, "RECOVERY_REQUIRED"},
+                "created": False,
+            }
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
+    if expected_revision != record.revision:
+        raise Stage1Error("tracking_revision_conflict", "追番记录版本已变化，请刷新后重试", "tracking_management", {"expected_revision": expected_revision, "current_revision": record.revision})
+    _guard_current_operation(resolved_config, record)
     if management_client is None:
         raise Stage1Error("tracking_management_capability_unknown", "管理能力尚未验证", "tracking_management")
     caps, subscriptions, rss_items = management_client.read_snapshot()
@@ -439,7 +455,10 @@ def _run_management_write(
         return None
     if not responses:
         return {"status_code": 200}
-    statuses = [item.get("status_code") for item in responses]
+    statuses = [
+        (200 if item.get("status") is True else 400 if item.get("status") is False else item.get("status_code"))
+        for item in responses
+    ]
     if all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
         return {"status_code": 200}
     if any(not isinstance(status, int) or status < 200 or status >= 300 for status in statuses):
@@ -493,7 +512,10 @@ def _classify_target_readback(operation: str, scope: str, target: ResolvedManage
         if item is None:
             return MANAGEMENT_OUTCOME_UNKNOWN
         if operation == "MODIFY":
-            projection = {"title": item.title, "season": item.season, "subtitle_group": item.subtitle_group}
+            if item.upstream_fields:
+                projection = dict(item.upstream_fields)
+            else:
+                projection = {"title": item.title, "season": item.season, "subtitle_group": item.subtitle_group}
         else:
             projection = {"enabled": item.enabled}
         digest = _projection_digest(projection, operation, scope)
@@ -502,7 +524,9 @@ def _classify_target_readback(operation: str, scope: str, target: ResolvedManage
         if not items:
             return MANAGEMENT_OUTCOME_UNKNOWN
         if operation == "MODIFY":
-            projection = [{"name": item.name, "aggregate": item.aggregate, "parser": item.parser} for item in items]
+            projection = [dict(item.upstream_fields) if item.upstream_fields else {
+                "name": item.name, "aggregate": item.aggregate, "parser": item.parser
+            } for item in items]
         else:
             projection = [{"enabled": item.enabled} for item in items]
         digest = _projection_digest(projection, operation, scope)
@@ -555,21 +579,32 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
                 for item in (actual.rss if isinstance(actual, ResolvedManagementTarget) else ())
             ]
     next_record = replace(next_record, external_mapping=mapping)
+    persistence_failed = False
     try:
         final = compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
         compare_and_swap_tracking_operation(config, operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
             transition_tracking_operation(operation, state=target_state, error_type=None if outcome == MANAGEMENT_OUTCOME_SUCCESS else reason, now=timestamp))
     except Exception:
+        persistence_failed = True
         final = transition_record(record, status=TRACKING_STATUS_RECOVERY_REQUIRED,
             audit_action=TRACKING_AUDIT_MANAGEMENT_UNKNOWN, operation_id=operation_id,
             reason_code="management_result_persist_failed", safe_message="管理结果未能安全保存，请人工恢复", now=timestamp)
         with contextlib.suppress(Exception):
-            compare_and_swap_tracking_record(config, record.tracking_id, record.revision, final)
+            current = load_tracking_record(config, record.tracking_id)
+            compare_and_swap_tracking_record(
+                config, record.tracking_id, current.revision,
+                replace(final, revision=current.revision + 1),
+            )
         with contextlib.suppress(Exception):
             compare_and_swap_tracking_operation(config, operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
                 transition_tracking_operation(operation, state="RECOVERY_REQUIRED", error_type="management_result_persist_failed", now=timestamp))
-    return {"operation_id": operation_id, "management_status": target_state, "outcome": outcome,
-            "needs_manual": outcome != MANAGEMENT_OUTCOME_SUCCESS, "created": True}
+    persisted_state = "RECOVERY_REQUIRED" if persistence_failed else target_state
+    if target_state == "RECOVERY_REQUIRED" and outcome != MANAGEMENT_OUTCOME_UNKNOWN:
+        persisted_state = "RECOVERY_REQUIRED"
+    return {"operation_id": operation_id, "management_status": persisted_state,
+            "outcome": outcome if not persistence_failed else MANAGEMENT_OUTCOME_UNKNOWN,
+            "needs_manual": persisted_state == "RECOVERY_REQUIRED" or outcome == MANAGEMENT_OUTCOME_UNKNOWN,
+            "created": True}
 
 
 def _safe_patch(operation: str, scope: str, patch: Mapping[str, Any] | None, enabled: bool | None) -> dict[str, Any] | None:
@@ -590,7 +625,12 @@ def _guard_current_operation(config: StorageConfig, record: TrackingRecord) -> N
     if not record.current_operation_id:
         return
     operation = load_tracking_operation(config, record.current_operation_id)
-    if operation.state in {TRACKING_OPERATION_STATE_PREPARED, TRACKING_OPERATION_STATE_IN_PROGRESS}:
+    if operation.state in {
+        TRACKING_OPERATION_STATE_PREPARED,
+        TRACKING_OPERATION_STATE_IN_PROGRESS,
+        "OUTCOME_UNKNOWN",
+        "RECOVERY_REQUIRED",
+    }:
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
 
 

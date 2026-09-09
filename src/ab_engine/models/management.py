@@ -5,8 +5,9 @@ Only the projection helpers may cross the management adapter boundary.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Literal
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any, Literal
 
 CapabilityState = Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
 ProbeStatus = Literal["VERIFIED", "PARTIAL", "FAILED"]
@@ -69,6 +70,10 @@ class ExternalSubscription:
     rss_ids: tuple[str, ...] = ()
     deleted: bool = False
     enabled: bool = True
+    # Request-scoped complete Auto Bangumi BangumiUpdate projection.  This is
+    # never persisted; it lets the writer retain fields not exposed by our
+    # public patch DTO.
+    upstream_fields: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def __repr__(self) -> str:
         return (
@@ -105,6 +110,7 @@ class ExternalRss:
     aggregate: bool = False
     parser: str | None = None
     enabled: bool = True
+    upstream_fields: Mapping[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
     def __repr__(self) -> str:
         return f"ExternalRss(external_id={self.external_id!r}, name={self.name!r}, aggregate={self.aggregate!r}, parser={self.parser!r}, enabled={self.enabled!r})"

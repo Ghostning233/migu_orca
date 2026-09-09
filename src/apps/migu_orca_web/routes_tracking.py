@@ -278,7 +278,10 @@ def _management_writer(client: AutoBangumiManagementClient, action: str):
                     calls.append(client.delete_rss(item.external_id))
                 elif action == "REFRESH_RSS":
                     calls.append(client.refresh_rss(item.external_id))
-        statuses = [result.get("status_code") for result in calls if isinstance(result, dict)]
+        statuses = [
+            (200 if result.get("status") is True else 400 if result.get("status") is False else result.get("status_code"))
+            for result in calls if isinstance(result, dict)
+        ]
         if statuses and all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
             return {"status_code": 200}
         return {"status_code": next((status for status in statuses if isinstance(status, int)), 502)}
@@ -290,14 +293,18 @@ def _management_result(config, *, tracking_id: str, action: str, result: dict[st
     operation = None
     if record.current_operation_id:
         operation = load_tracking_operation(config, record.current_operation_id)
+    management_status = result.get("management_status")
     safe_message = (
         "管理操作已完成"
-        if result.get("management_status") == TRACKING_OPERATION_STATE_SUCCEEDED
+        if management_status == TRACKING_OPERATION_STATE_SUCCEEDED
+        else "管理操作明确失败，外部系统未确认应用"
+        if management_status == "FAILED" and result.get("needs_manual") is not True
         else "外部管理结果未知，请人工恢复；不会自动重试"
     )
     return {
         "action": action,
-        "management_status": result.get("management_status", "RECOVERY_REQUIRED"),
+        "management_status": management_status or "RECOVERY_REQUIRED",
+        "outcome": result.get("outcome"),
         "needs_manual": result.get("needs_manual") is True,
         "safe_message": safe_message,
         "operation_id": result.get("operation_id"),

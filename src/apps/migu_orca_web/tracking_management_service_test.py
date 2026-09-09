@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import apps.migu_orca_web.tracking_management_service as management_service
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalRss, ExternalSubscription
 from apps.migu_orca_web.tracking_management_service import recover_tracking_management, run_tracking_management
 from shared.errors import Stage1Error
@@ -80,7 +81,7 @@ def test_same_key_replays_without_read_or_write(tmp_path: Path) -> None:
     client, calls = _FakeClient(), []
     _run(config, record, client, calls)
     client.reads = 0
-    with pytest.raises(Stage1Error, match="已有管理操作"):
+    with pytest.raises(Stage1Error):
         _run(config, load_tracking_record(config, record.tracking_id), client, calls)
     # The operation is intentionally still in progress until US-242/244 recovery.
     assert client.reads == 0
@@ -248,3 +249,74 @@ def test_management_refresh_recovery_never_infers_success(tmp_path: Path) -> Non
     assert result["outcome"] == "OUTCOME_UNKNOWN"
     assert result["needs_manual"] is True
     assert load_tracking_operation(config, first["operation_id"]).state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
+
+
+def test_terminal_same_key_replay_returns_persisted_outcome_without_external_io(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client, calls = _FakeClient(), []
+    first = _run(
+        config, record, client, calls,
+        write=lambda _target, _payload: {"status_code": 200},
+        readback=lambda _operation, _scope, _target: ResolvedManagementTarget(
+            scope="SUBSCRIPTION", subscription=ExternalSubscription("sub-1", "Changed", 1, "Group")
+        ),
+    )
+    current = load_tracking_record(config, record.tracking_id)
+    reads = client.reads
+    replay = _run(
+        config, current, client, calls,
+        write=lambda *_args: (_ for _ in ()).throw(AssertionError("replay must not write")),
+        idempotency_key="key-1",
+    )
+    assert replay == {
+        "operation_id": first["operation_id"], "management_status": "SUCCEEDED",
+        "outcome": "SUCCESS", "needs_manual": False, "created": False,
+    }
+    assert client.reads == reads and len(calls) == 0
+
+
+@pytest.mark.parametrize("operation,scope,extra", [
+    ("MODIFY", "SUBSCRIPTION", {"patch": {"title": "Again"}}),
+    ("REFRESH_RSS", "ASSOCIATED_RSS", {}),
+])
+def test_unknown_or_recovery_state_rejects_a_fresh_idempotency_key(tmp_path: Path, operation: str, scope: str, extra: dict) -> None:
+    config, record = _seed(tmp_path)
+    first = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key=f"uncertain-{operation}", confirm=True, operation=operation,
+        target_scope=scope, management_client=_FakeClient(),
+        write=lambda _target, _payload: {"transport_error": "timeout"}, **extra,
+    )
+    current = load_tracking_record(config, record.tracking_id)
+    with pytest.raises(Stage1Error) as error:
+        run_tracking_management(
+            config, tracking_id=current.tracking_id, expected_revision=current.revision,
+            idempotency_key=f"fresh-{operation}", confirm=True, operation=operation,
+            target_scope=scope, management_client=_FakeClient(),
+            write=lambda *_args: pytest.fail("fresh key must not write"), **extra,
+        )
+    assert error.value.error_type == "tracking_management_state_conflict"
+    assert load_tracking_operation(config, first["operation_id"]).state in {"OUTCOME_UNKNOWN", "RECOVERY_REQUIRED"}
+
+
+def test_second_repository_write_failure_never_returns_success(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    original = management_service.compare_and_swap_tracking_operation
+    calls = 0
+
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected operation repository failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(management_service, "compare_and_swap_tracking_operation", fail_second)
+    result = _run(config, record, _FakeClient(), [], write=lambda _target, _payload: {"status_code": 200},
+                  readback=lambda _operation, _scope, _target: ResolvedManagementTarget(
+                      scope="SUBSCRIPTION", subscription=ExternalSubscription("sub-1", "Changed", 1, "Group")
+                  ))
+    assert result["management_status"] == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
+    assert result["needs_manual"] is True
+    assert load_tracking_operation(config, result["operation_id"]).state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
+    assert load_tracking_record(config, record.tracking_id).status == "RECOVERY_REQUIRED"

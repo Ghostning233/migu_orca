@@ -77,6 +77,34 @@ def test_complete_bodies_preserve_snapshot_fields_and_never_accept_url() -> None
     assert all("url" not in body for body in bodies)
 
 
+def test_complete_bodies_use_31_18_field_names_and_retain_snapshot_fields() -> None:
+    sub = ExternalSubscription(
+        "sub-1", "旧标题", 2, "旧组", upstream_fields={
+            "official_title": "旧标题", "year": "2024", "title_raw": "raw",
+            "season": 2, "season_raw": "S2", "group_name": "旧组", "dpi": "1080p",
+            "source": "WEB", "subtitle": "简", "eps_collect": False, "offset": 0,
+            "filter": "720,\\d+-\\d+", "rss_link": "https://rss.invalid",
+            "poster_link": None, "added": True, "rule_name": "rule", "save_path": "/downloads",
+            "deleted": False,
+        }
+    )
+    target = resolve_management_target(_record(), "SUBSCRIPTION", [sub], [])
+    body = build_complete_subscription_update(target, {"title": "新标题", "subtitle_group": "新组", "expected_folder_name": "new"})
+    assert body["official_title"] == "新标题"
+    assert body["group_name"] == "新组"
+    assert body["save_path"] == "new"
+    assert body["title_raw"] == "raw" and body["filter"] == "720,\\d+-\\d+"
+
+    rss = ExternalRss("2", "早", "https://example.invalid/2", True, "mikan", True,
+                      {"name": "早", "url": "https://example.invalid/2", "aggregate": True,
+                       "parser": "mikan", "enabled": True})
+    rss_target = resolve_management_target(_record(), "ASSOCIATED_RSS", [], [rss, ExternalRss("12", "晚", "https://example.invalid/12")])
+    assert build_complete_rss_update(rss_target, {"name": "新名称"})[0] == {
+        "name": "新名称", "url": "https://example.invalid/2", "aggregate": True,
+        "parser": "mikan", "enabled": True,
+    }
+
+
 def test_binding_is_digest_only_and_deterministic() -> None:
     first = build_management_binding(action="MODIFY", scope="SUBSCRIPTION", patch={"title": "番剧"})
     second = build_management_binding(action="MODIFY", scope="SUBSCRIPTION", patch={"title": "番剧"})

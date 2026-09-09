@@ -115,12 +115,14 @@ def build_complete_subscription_update(
         raise _invalid("invalid_management_target")
     safe_patch = build_management_patch("SUBSCRIPTION", patch)
     current = target.subscription
-    body: dict[str, Any] = {
-        "title": current.title,
-        "season": current.season,
-        "subtitle_group": current.subtitle_group,
-    }
-    body.update(safe_patch)
+    if current.upstream_fields:
+        body = dict(current.upstream_fields)
+        aliases = {"title": "official_title", "subtitle_group": "group_name",
+                   "filter_rule": "filter", "expected_folder_name": "save_path"}
+        body.update({aliases.get(key, key): value for key, value in safe_patch.items()})
+    else:
+        body = {"title": current.title, "season": current.season, "subtitle_group": current.subtitle_group}
+        body.update(safe_patch)
     return body
 
 
@@ -131,10 +133,15 @@ def build_complete_rss_update(
     if target.scope != "ASSOCIATED_RSS" or not target.rss:
         raise _invalid("invalid_management_target")
     safe_patch = build_management_patch("ASSOCIATED_RSS", patch)
-    return tuple(
-        {"name": item.name, "aggregate": item.aggregate, "parser": item.parser, **safe_patch}
-        for item in target.rss
-    )
+    bodies = []
+    for item in target.rss:
+        if item.upstream_fields:
+            body = dict(item.upstream_fields)
+            body.update(safe_patch)
+        else:
+            body = {"name": item.name, "aggregate": item.aggregate, "parser": item.parser, **safe_patch}
+        bodies.append(body)
+    return tuple(bodies)
 
 
 def build_management_binding(
