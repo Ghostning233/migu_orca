@@ -247,6 +247,17 @@ def test_subscription_delete_verifies_absence_without_touching_local_record(tmp_
     assert stored.external_mapping["rss_ids"] == ["7"]
     assert calls[0][1] is None
 
+    replay = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="delete-subscription", confirm=True,
+        operation="DELETE_EXTERNAL", target_scope="SUBSCRIPTION",
+        write=lambda *_args: pytest.fail("terminal delete replay must not write"),
+    )
+    assert replay == {
+        "operation_id": result["operation_id"], "management_status": "SUCCEEDED",
+        "outcome": "SUCCESS", "needs_manual": False, "created": False,
+    }
+
 
 def test_disabled_subscription_can_still_use_the_file_safe_delete_path(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
@@ -423,7 +434,7 @@ def test_terminal_same_key_replay_returns_persisted_outcome_without_external_io(
     assert conflict.value.error_type == "tracking_idempotency_conflict"
 
 
-def test_orphaned_terminal_operation_is_converted_to_recovery_before_new_write(tmp_path: Path) -> None:
+def test_orphaned_terminal_operation_same_key_is_converted_to_recovery_not_replayed(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
     first = _run(config, record, _FakeClient(), [])
     operation = load_tracking_operation(config, first["operation_id"])
@@ -431,9 +442,8 @@ def test_orphaned_terminal_operation_is_converted_to_recovery_before_new_write(t
         config, operation.operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
         management_service.transition_tracking_operation(operation, state="SUCCEEDED"),
     )
-    started = load_tracking_record(config, record.tracking_id)
     with pytest.raises(Stage1Error) as error:
-        _run(config, started, _FakeClient(), [], idempotency_key="fresh-after-crash")
+        _run(config, record, _FakeClient(), [], idempotency_key="key-1")
     assert error.value.error_type == "tracking_management_state_conflict"
     assert load_tracking_operation(config, first["operation_id"]).state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
     assert load_tracking_record(config, record.tracking_id).status == "RECOVERY_REQUIRED"

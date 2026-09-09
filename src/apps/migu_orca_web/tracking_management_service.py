@@ -135,9 +135,6 @@ def run_tracking_management(
         raise Stage1Error("tracking_management_patch_invalid", "管理操作类型无效", "tracking_management")
     if operation == TRACKING_OPERATION_KIND_REFRESH_RSS and target_scope != "ASSOCIATED_RSS":
         raise Stage1Error("tracking_management_patch_invalid", "刷新操作目标无效", "tracking_management")
-    if not management_action_allowed(record.status, operation):
-        raise Stage1Error("tracking_management_state_conflict", "当前追番状态不允许该管理操作", "tracking_management")
-
     safe_patch = _safe_patch(operation, target_scope, patch, enabled)
     binding = build_management_binding(action=operation, scope=target_scope, patch=safe_patch if operation == "MODIFY" else None, enabled=enabled if operation == "SET_ENABLED" else None)
     existing = _load_operation_if_present(resolved_config, idempotency_key)
@@ -152,6 +149,11 @@ def run_tracking_management(
         if not same_binding or existing.expected_revision != expected_revision:
             raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         if existing.state in TRACKING_OPERATION_TERMINAL_STATES:
+            if not _record_has_management_outcome(record, existing.operation_id):
+                # Do not claim success for an operation whose paired tracking
+                # result was lost in the operation-first crash window.
+                _persist_management_storage_failure(resolved_config, record.tracking_id, existing, utc_now())
+                raise Stage1Error("tracking_management_state_conflict", "已有管理操作尚未完成本地落盘，请先恢复", "tracking_management")
             outcome = {
                 TRACKING_OPERATION_STATE_SUCCEEDED: MANAGEMENT_OUTCOME_SUCCESS,
                 "FAILED": MANAGEMENT_OUTCOME_DEFINITE_FAILURE,
@@ -166,6 +168,8 @@ def run_tracking_management(
                 "created": False,
             }
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
+    if not management_action_allowed(record.status, operation):
+        raise Stage1Error("tracking_management_state_conflict", "当前追番状态不允许该管理操作", "tracking_management")
     if expected_revision != record.revision:
         raise Stage1Error("tracking_revision_conflict", "追番记录版本已变化，请刷新后重试", "tracking_management", {"expected_revision": expected_revision, "current_revision": record.revision})
     _guard_current_operation(resolved_config, record)
