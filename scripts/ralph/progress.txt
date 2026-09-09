@@ -34,6 +34,8 @@
 - 3.1.18 management writes reuse the request-scoped password/Cookie session: authenticate, verify the exact
   version, call one fixed route, and clear the token in `finally`; destructive subscription routes build
   `?file=false` internally and never accept a caller-supplied query option.
+- RSS enable-many is a JSON array body; adapter methods must sort/deduplicate mapped numeric IDs and inject
+  the current request-scoped RSS URL for updates instead of accepting a caller URL.
 
 ## Stage 30 Handoff
 
@@ -106,4 +108,22 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 审核问题：`TRACKING_OPERATION_KINDS` 被错误保留为仅 `SUBMIT`，不符合本阶段五种 operation 的公开契约；纯分类器缺少定向测试。
 - 修复：公开 operation 集合改为完整 v2 集合，并新增指纹、动作分类、回查分类测试。
 - 验证：85 passed；Ruff、compileall、`git diff --check` 通过。
+---
+
+## 2026-09-09 00:00:00 +0800 - US-239
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the password-only Auto Bangumi 3.1.18 RSS management adapter for update,
+  mapped-set enable, single-item disable/delete/refresh, with exact routes, deterministic numeric ID handling,
+  request-scoped URL preservation, safe response parsing, and full RSS capability promotion only after exact
+  version verification.
+- Files changed: `src/ab_engine/controllers/ab_management_client.py`,
+  `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_management_client_test.py`,
+  `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: The legacy transport needs JSON encoding for list bodies as well as PATCH mappings;
+    RSS enable-many must receive a sorted, deduplicated ID array.
+  - Gotchas encountered: Recording fakes intentionally retain request headers, so token-clearing tests should
+    inspect adapter state/results rather than assert tokens are absent from the fake's audit log.
+  - Useful context: Auto Bangumi 3.1.18's `RSSUpdate` includes URL, but the adapter injects it only from the
+    current request-scoped snapshot and rejects a caller-provided URL.
 ---

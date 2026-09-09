@@ -1,7 +1,7 @@
-"""Read-only Auto Bangumi 3.1.18 management adapter."""
+"""Request-scoped Auto Bangumi 3.1.18 management adapter."""
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 from urllib.parse import quote, urlsplit
@@ -50,7 +50,9 @@ class Legacy31ManagementClient:
                 subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
                 subscription_modify="SUPPORTED", subscription_enable="SUPPORTED",
                 subscription_disable="SUPPORTED", subscription_delete="SUPPORTED",
-                rss_list="SUPPORTED", external_verify="SUPPORTED",
+                rss_list="SUPPORTED", rss_modify="SUPPORTED", rss_enable="SUPPORTED",
+                rss_disable="SUPPORTED", rss_delete="SUPPORTED", rss_refresh="SUPPORTED",
+                external_verify="SUPPORTED",
                 safe_message="已验证 Auto Bangumi 3.1.18 管理能力",
             )
             return capabilities, subscriptions, rss
@@ -109,11 +111,54 @@ class Legacy31ManagementClient:
             "DELETE", f"/api/v1/bangumi/delete/{_path_id(external_id)}?file=false", None
         )
 
+    def update_rss(
+        self, external_id: str, payload: Mapping[str, Any], current_url: str
+    ) -> dict[str, Any]:
+        """Update one RSS, retaining its URL from the current read snapshot."""
+        if not isinstance(payload, Mapping) or "url" in payload:
+            raise Stage1Error("invalid_ab_payload", "RSS 修改内容无效", "ab_management")
+        body = dict(payload)
+        body["url"] = _request_url(current_url)
+        return self._rss_action(
+            "PATCH", f"/api/v1/rss/update/{_rss_path_id(external_id)}", body
+        )
+
+    def enable_rss(self, external_ids: Iterable[str]) -> dict[str, Any]:
+        """Enable exactly the deduplicated RSS set bound to one tracking record."""
+        ids = _rss_ids(external_ids)
+        if not ids:
+            raise Stage1Error("invalid_ab_payload", "RSS 目标不能为空", "ab_management")
+        return self._rss_action("POST", "/api/v1/rss/enable/many", ids)
+
+    def disable_rss(self, external_id: str) -> dict[str, Any]:
+        return self._rss_action("PATCH", f"/api/v1/rss/disable/{_rss_path_id(external_id)}", None)
+
+    def delete_rss(self, external_id: str) -> dict[str, Any]:
+        return self._rss_action("DELETE", f"/api/v1/rss/delete/{_rss_path_id(external_id)}", None)
+
+    def refresh_rss(self, external_id: str) -> dict[str, Any]:
+        return self._rss_action("GET", f"/api/v1/rss/refresh/{_rss_path_id(external_id)}", None)
+
+    def _rss_action(self, method: Literal["GET", "POST", "PATCH", "DELETE"], path: str, payload: Any) -> dict[str, Any]:
+        if self._config.auth_mode != "password":
+            raise Stage1Error("ab_management_unsupported", "当前 Auto Bangumi 认证模式不支持管理写入", "ab_management")
+        try:
+            self._authenticate()
+            headers = {"Accept": "application/json", "Cookie": self._cookie()}
+            version = _version(self._request("GET", "/api/v1/status", headers))
+            if version != "3.1.18":
+                raise Stage1Error("ab_unsupported_version", "当前 Auto Bangumi 版本暂不受支持", "ab_management")
+            if method in {"POST", "PATCH"}:
+                headers = {**headers, "Content-Type": "application/json"}
+            return _action_response(self._request(method, path, headers, payload))
+        finally:
+            self._token = None
+
     def _subscription_action(
         self,
         method: Literal["GET", "PATCH", "DELETE"],
         path: str,
-        payload: Mapping[str, Any] | None,
+        payload: Any,
     ) -> dict[str, Any]:
         if self._config.auth_mode != "password":
             raise Stage1Error("ab_management_unsupported", "当前 Auto Bangumi 认证模式不支持管理写入", "ab_management")
@@ -149,7 +194,7 @@ class Legacy31ManagementClient:
         method: Literal["GET", "POST", "PATCH", "DELETE"],
         path: str,
         headers: Mapping[str, str],
-        payload: Mapping[str, Any] | None = None,
+        payload: Any = None,
     ) -> dict[str, Any]:
         try:
             return self._transport.request_json(method, _api_endpoint(self._config.base_url, path), headers, payload, timeout=self._timeout)
@@ -178,7 +223,9 @@ def _verified_legacy_capabilities(version: str) -> AutoBangumiCapabilities:
         subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
         subscription_modify="SUPPORTED", subscription_enable="SUPPORTED",
         subscription_disable="SUPPORTED", subscription_delete="SUPPORTED",
-        rss_list="SUPPORTED", external_verify="SUPPORTED",
+        rss_list="SUPPORTED", rss_modify="SUPPORTED", rss_enable="SUPPORTED",
+        rss_disable="SUPPORTED", rss_delete="SUPPORTED", rss_refresh="SUPPORTED",
+        external_verify="SUPPORTED",
         safe_message="已验证 Auto Bangumi 3.1.18 管理能力",
     )
 
@@ -267,6 +314,33 @@ def _opaque(value: Any, field: str) -> str:
 
 def _path_id(value: str) -> str:
     return quote(_opaque(value, "external_id"), safe="-._~")
+
+
+def _rss_path_id(value: str) -> str:
+    return quote(str(_rss_number(value)), safe="-._~")
+
+
+def _rss_number(value: Any) -> int:
+    result = _opaque(value, "rss_id")
+    try:
+        number = int(result)
+    except ValueError as exc:
+        raise Stage1Error("invalid_ab_payload", "RSS 目标无效", "ab_management") from exc
+    if number < 0:
+        raise Stage1Error("invalid_ab_payload", "RSS 目标无效", "ab_management")
+    return number
+
+
+def _rss_ids(values: Iterable[str]) -> list[int]:
+    try:
+        normalized = sorted({_rss_number(value) for value in values})
+    except TypeError as exc:
+        raise Stage1Error("invalid_ab_payload", "RSS 目标无效", "ab_management") from exc
+    return normalized
+
+
+def _request_url(value: Any) -> str:
+    return _url(value)
 
 
 def _action_response(response: Mapping[str, Any]) -> dict[str, Any]:

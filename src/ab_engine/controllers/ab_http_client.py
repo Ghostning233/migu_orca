@@ -31,7 +31,7 @@ class AutoBangumiHttpTransport(Protocol):
         method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: Mapping[str, Any] | None = None,
+        payload: Any | None = None,
         *,
         timeout: float,
     ) -> dict[str, Any]:
@@ -46,7 +46,7 @@ class AutoBangumiLegacyTransport(Protocol):
         method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: Mapping[str, Any] | None = None,
+        payload: Any | None = None,
         *,
         timeout: float,
     ) -> dict[str, Any]:
@@ -113,15 +113,15 @@ class UrlopenAutoBangumiHttpTransport:
         method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: Mapping[str, Any] | None = None,
+        payload: Any | None = None,
         *,
         timeout: float,
     ) -> dict[str, Any]:
         data = None
         request_headers = dict(headers)
         if payload is not None:
-            if method == "PATCH":
-                data = json.dumps(deepcopy(dict(payload)), ensure_ascii=False).encode("utf-8")
+            if method == "PATCH" or isinstance(payload, list):
+                data = json.dumps(deepcopy(payload), ensure_ascii=False).encode("utf-8")
                 request_headers.setdefault("Content-Type", "application/json")
             else:
                 data = urlencode(dict(payload)).encode("utf-8")
