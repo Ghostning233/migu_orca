@@ -170,3 +170,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
     IN_PROGRESS; response-bearing writers use the new readback path.
   - Useful context: Targeted management/model/adapter tests (34), Ruff, compileall, and `git diff --check` passed.
 ---
+
+## 2026-09-09 00:00:00 +0800 - US-243
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added DELETE_EXTERNAL absence verification for subscriptions and associated RSS, deterministic single-item RSS deletion with bounded aggregate outcomes, mapping-only RSS cleanup, EXTERNAL_DELETED subscription status, and conservative REFRESH_RSS recovery semantics. Unknown, timeout, and partial destructive outcomes use a fixed manual-recovery message and never touch local Request/media data.
+- Files changed: `src/apps/migu_orca_web/tracking_management_service.py`, `src/apps/migu_orca_web/tracking_management_service_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: External deletion is verified by absence, while RSS mapping is reduced only after every bound item is absent; local tracking records remain durable.
+  - Gotchas encountered: Refresh has no stable read projection, so even a successful transport response must remain `RECOVERY_REQUIRED`; partial RSS deletion is also unknown rather than a definite failure.
+  - Useful context: Targeted management/adapter/model tests (37), compileall, Ruff, and `git diff --check` passed; no nearby CODEX.md exists.
+---

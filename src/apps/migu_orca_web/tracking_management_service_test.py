@@ -10,8 +10,13 @@ from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import ensure_tracking_record, load_tracking_record
+from tracking_engine.controllers.management_target import ResolvedManagementTarget
 from tracking_engine.models.operation import TRACKING_OPERATION_STATE_IN_PROGRESS, TRACKING_OPERATION_STATE_SUCCEEDED
-from tracking_engine.models.tracking import TRACKING_STATUS_ACTIVE, create_external_tracking_record
+from tracking_engine.models.tracking import (
+    TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_EXTERNAL_DELETED,
+    create_external_tracking_record,
+)
 
 
 class _FakeClient:
@@ -123,3 +128,57 @@ def test_readback_mismatch_is_a_definite_failure_without_state_mutation(tmp_path
     assert result["outcome"] == "DEFINITE_FAILURE"
     assert load_tracking_operation(config, result["operation_id"]).state == "FAILED"
     assert load_tracking_record(config, record.tracking_id).status == record.status
+
+
+def test_subscription_delete_verifies_absence_without_touching_local_record(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client, calls = _FakeClient(), []
+    result = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="delete-subscription", confirm=True,
+        operation="DELETE_EXTERNAL", target_scope="SUBSCRIPTION",
+        management_client=client,
+        write=lambda target, payload: calls.append((target, payload)) or {"status_code": 200},
+        readback=lambda _operation, _scope, _target: None,
+    )
+    assert result["outcome"] == "SUCCESS"
+    stored = load_tracking_record(config, record.tracking_id)
+    assert stored.status == TRACKING_STATUS_EXTERNAL_DELETED
+    assert stored.external_mapping["subscription_id"] == "sub-1"
+    assert stored.external_mapping["rss_ids"] == ["7"]
+    assert calls[0][1] is None
+
+
+def test_rss_delete_calls_each_bound_id_and_removes_only_mapping(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client = _FakeClient()
+    client.read_snapshot = lambda: (
+        client.capabilities,
+        [ExternalSubscription("sub-1", "Test", 1, "Group")],
+        [ExternalRss("7", "Feed", "https://rss.invalid"), ExternalRss("8", "Feed 2", "https://rss2.invalid")],
+    )
+    calls = []
+    result = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="delete-rss", confirm=True,
+        operation="DELETE_EXTERNAL", target_scope="ASSOCIATED_RSS",
+        management_client=client,
+        write=lambda target, payload: calls.append(target) or {"status_code": 204},
+        readback=lambda _operation, _scope, _target: ResolvedManagementTarget(scope="ASSOCIATED_RSS"),
+    )
+    assert result["outcome"] == "SUCCESS"
+    assert [item.external_id for target in calls for item in target.rss] == ["7"]
+    assert load_tracking_record(config, record.tracking_id).external_mapping["rss_ids"] == []
+
+
+def test_refresh_is_recovery_required_even_when_transport_succeeds(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    result = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="refresh-rss", confirm=True,
+        operation="REFRESH_RSS", target_scope="ASSOCIATED_RSS",
+        management_client=_FakeClient(),
+        write=lambda _target, _payload: {"status_code": 200},
+    )
+    assert result["management_status"] == "RECOVERY_REQUIRED"
+    assert result["needs_manual"] is True

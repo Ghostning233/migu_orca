@@ -60,6 +60,7 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_MANAGEMENT_UNKNOWN,
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_DISABLED,
+    TRACKING_STATUS_EXTERNAL_DELETED,
     TRACKING_STATUS_RECOVERY_REQUIRED,
     TRACKING_STATUS_VERIFYING_EXTERNAL,
     TrackingRecord,
@@ -192,7 +193,9 @@ def run_tracking_management(
     )
     if write is not None:
         try:
-            response = write(target, _write_payload(operation, target, safe_patch, enabled))
+            response = _run_management_write(
+                write, operation, target, _write_payload(operation, target, safe_patch, enabled)
+            )
         except Exception as exc:
             outcome = classify_management_action(
                 transport_error="unknown" if _unknown_write_error(exc) else None,
@@ -213,12 +216,17 @@ def run_tracking_management(
             transport_error=response.get("transport_error") if isinstance(response, Mapping) and isinstance(response.get("transport_error"), str) else None,
             response_valid=not (isinstance(response, Mapping) and response.get("response_valid") is False),
         )
+        # A refresh has no stable, read-only projection proving that the
+        # upstream refresh ran.  Even a successful transport response must
+        # therefore remain a recoverable, non-retryable outcome.
+        if operation == TRACKING_OPERATION_KIND_REFRESH_RSS:
+            action_outcome = MANAGEMENT_OUTCOME_UNKNOWN
         if action_outcome != MANAGEMENT_OUTCOME_SUCCESS:
             return _finish_management(config=resolved_config, record=started,
                 operation=in_progress, outcome=action_outcome, target=target,
                 operation_id=in_progress.operation_id, reason="management_write_failed", now=now)
         try:
-            actual = readback(operation, target_scope, target) if readback is not None else _readback_target(management_client, record, target_scope)
+            actual = readback(operation, target_scope, target) if readback is not None else _readback_target(management_client, record, target_scope, operation)
             readback_outcome = _classify_target_readback(operation, target_scope, target, actual, binding.expected_external_fingerprint)
         except Exception:
             readback_outcome = MANAGEMENT_OUTCOME_UNKNOWN
@@ -235,10 +243,62 @@ def _unknown_write_error(exc: Exception) -> bool:
     return isinstance(exc, Stage1Error) and exc.error_type in {"ab_management_failed", "invalid_ab_response"}
 
 
-def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRecord, scope: str) -> Any:
+def _run_management_write(
+    write: ManagementWriter,
+    operation: str,
+    target: ResolvedManagementTarget,
+    payload: Mapping[str, Any] | None,
+) -> Any:
+    """Invoke RSS destructive actions one mapped item at a time.
+
+    The adapter owns the fixed routes and ``file=false`` safeguard.  This
+    service only supplies the request-scoped target, and aggregates bounded
+    status codes without retaining upstream response bodies.
+    """
+    if operation != TRACKING_OPERATION_KIND_DELETE_EXTERNAL or target.scope != "ASSOCIATED_RSS":
+        return write(target, payload)
+    responses: list[Mapping[str, Any]] = []
+    saw_side_effect_only = False
+    for item in target.rss:
+        single = ResolvedManagementTarget(scope="ASSOCIATED_RSS", rss=(item,))
+        response = write(single, payload)
+        if response is None:
+            saw_side_effect_only = True
+            continue
+        if not isinstance(response, Mapping):
+            return {"status_code": 502, "response_valid": False}
+        responses.append(response)
+    if saw_side_effect_only:
+        return None
+    if not responses:
+        return {"status_code": 200}
+    statuses = [item.get("status_code") for item in responses]
+    if all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
+        return {"status_code": 200}
+    if any(not isinstance(status, int) or status < 200 or status >= 300 for status in statuses):
+        # Mixed or partial results are deliberately treated as unknown: at
+        # least one upstream item may have been deleted already.
+        if any(isinstance(status, int) and 200 <= status < 300 for status in statuses):
+            return {"transport_error": "partial_external_result"}
+        return {"status_code": next((status for status in statuses if isinstance(status, int)), 502)}
+    return {"transport_error": "partial_external_result"}
+
+
+def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRecord, scope: str, operation: str) -> Any:
     if client is None:
         raise Stage1Error("tracking_management_readback_missing", "管理操作缺少外部回查", "tracking_management")
     _caps, subscriptions, rss_items = client.read_snapshot()
+    mapping = record.external_mapping or {}
+    if operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL:
+        if scope == "SUBSCRIPTION":
+            external_id = mapping.get("subscription_id")
+            match = next((item for item in subscriptions if item.external_id == external_id), None)
+            if match is None or match.deleted:
+                return None
+        else:
+            wanted = tuple(mapping.get("rss_ids", ()))
+            remaining = tuple(item for item in rss_items if item.external_id in wanted)
+            return ResolvedManagementTarget(scope="ASSOCIATED_RSS", rss=tuple(sorted(remaining, key=lambda item: item.external_id)))
     return resolve_management_target(record, scope, subscriptions, rss_items)
 
 
@@ -247,6 +307,18 @@ def _projection_digest(value: Any, action: str, scope: str) -> str:
 
 
 def _classify_target_readback(operation: str, scope: str, target: ResolvedManagementTarget, actual: Any, expected: str) -> str:
+    if operation == TRACKING_OPERATION_KIND_REFRESH_RSS:
+        return MANAGEMENT_OUTCOME_UNKNOWN
+    if operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL:
+        if scope == "SUBSCRIPTION":
+            return MANAGEMENT_OUTCOME_SUCCESS if actual is None else MANAGEMENT_OUTCOME_DEFINITE_FAILURE
+        if not isinstance(actual, ResolvedManagementTarget):
+            return MANAGEMENT_OUTCOME_UNKNOWN
+        if not actual.rss:
+            return MANAGEMENT_OUTCOME_SUCCESS
+        # A partial delete cannot distinguish an unprocessed item from an
+        # externally-unknown result, so it must be recovered manually.
+        return MANAGEMENT_OUTCOME_UNKNOWN
     if not isinstance(actual, ResolvedManagementTarget):
         return MANAGEMENT_OUTCOME_UNKNOWN
     if scope == "SUBSCRIPTION":
@@ -277,7 +349,9 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
     timestamp = now or utc_now()
     if outcome == MANAGEMENT_OUTCOME_SUCCESS:
         status = record.status
-        if operation.operation == TRACKING_OPERATION_KIND_SET_ENABLED:
+        if operation.operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL and operation.target_scope == "SUBSCRIPTION":
+            status = TRACKING_STATUS_EXTERNAL_DELETED
+        elif operation.operation == TRACKING_OPERATION_KIND_SET_ENABLED:
             status = TRACKING_STATUS_ACTIVE if enabled else TRACKING_STATUS_DISABLED
         elif record.status != TRACKING_STATUS_DISABLED:
             status = TRACKING_STATUS_ACTIVE
@@ -293,7 +367,10 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
         status = TRACKING_STATUS_VERIFYING_EXTERNAL if outcome == MANAGEMENT_OUTCOME_UNKNOWN else TRACKING_STATUS_RECOVERY_REQUIRED
         action = TRACKING_AUDIT_MANAGEMENT_UNKNOWN
         target_state = "OUTCOME_UNKNOWN" if outcome == MANAGEMENT_OUTCOME_UNKNOWN else "RECOVERY_REQUIRED"
-        message = "Auto Bangumi 管理结果未知，请先核验外部状态"
+        message = "外部管理结果未知，请人工恢复；不会自动重试"
+        if operation.operation in {TRACKING_OPERATION_KIND_DELETE_EXTERNAL, TRACKING_OPERATION_KIND_REFRESH_RSS}:
+            status = TRACKING_STATUS_RECOVERY_REQUIRED
+            target_state = "RECOVERY_REQUIRED"
     next_record = transition_record(record, status=status, audit_action=action,
         operation_id=operation_id, reason_code=reason, safe_message=message, now=timestamp)
     mapping = dict(next_record.external_mapping or {})
@@ -302,6 +379,14 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
         mapping.update({"enabled": item.enabled, "external_deleted": item.deleted})
         if operation.operation == TRACKING_OPERATION_KIND_MODIFY:
             next_record = replace(next_record, plan_summary={**next_record.plan_summary, "title": item.title, "season": item.season, "subtitle_group": item.subtitle_group})
+    if outcome == MANAGEMENT_OUTCOME_SUCCESS and operation.operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL:
+        if operation.target_scope == "SUBSCRIPTION":
+            mapping["external_deleted"] = True
+        else:
+            mapping["rss_ids"] = [
+                item.external_id
+                for item in (actual.rss if isinstance(actual, ResolvedManagementTarget) else ())
+            ]
     next_record = replace(next_record, external_mapping=mapping)
     try:
         final = compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
