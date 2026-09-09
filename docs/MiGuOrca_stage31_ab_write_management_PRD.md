@@ -6,7 +6,7 @@
 | --- | --- |
 | 文档名称 | Stage 31 PRD：Auto Bangumi 可靠写管理 |
 | 文档类型 | 执行 PRD / 前端体验重构 B-C2 |
-| 当前状态 | 已规划，待开发（US-237～US-246） |
+| 当前状态 | 已完成（US-237～US-246，2026-09-09） |
 | 创建日期 | 2026-09-09 |
 | Backlog | BL-025（B-C2） |
 | 优先级 | P0 |
@@ -344,3 +344,17 @@ Stage 32 不再补写新的外部管理动作，也不开发 F-F 页面。
 7. API/storage/log/test fixture 不含凭据、URL、外部 ID、patch、原始响应和绝对路径。
 8. OpenAPI、endpoint inventory、生成客户端与代码无漂移。
 9. 正式追番管理页面仍未实现；Stage 32 handoff 清楚且无隐含新增动作。
+
+## 18. 完成总结
+
+US-237～US-245 已分别完成并提交；US-246 完成最终离线 recording fixture 审计、文档收尾与归档。
+最终门禁通过：非浏览器后端 1548 passed、前端 unit 261 passed、真实 Chromium 133 passed，另有
+compileall、Ruff、OpenAPI drift 与 `git diff --check` 通过。Stage 31 只交付可靠写管理 API 和生成契约，
+没有声称交付正式追番管理页面；Stage 32 负责兼容/迁移、安全矩阵、生成契约冻结和前端 handoff。
+
+## 18. 完成总结
+
+US-237～US-245 已分别完成并提交；US-246 完成最终离线 recording fixture 审计、文档收尾与归档。
+最终门禁通过：非浏览器后端 1548 passed、前端 unit 261 passed、真实 Chromium 133 passed，另有
+compileall、Ruff、OpenAPI drift 与 `git diff --check` 通过。Stage 31 只交付可靠写管理 API 和生成契约，
+没有声称交付正式追番管理页面；Stage 32 负责兼容/迁移、安全矩阵、生成契约冻结和前端 handoff。

@@ -471,7 +471,7 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-025: 前端体验重构的后端支撑与 Auto Bangumi 管理契约
 
-- 状态：B-A～B-C1 已完成（Stage 28～30）；B-C2 已规划为 Stage 31（US-237～US-246）；B-D 仍待评审
+- 状态：B-A～B-C2 已完成（Stage 28～31，US-237～US-246）；B-D 仍待评审（Stage 32）
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：20，P0
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_backend_support_PRD.md`
@@ -479,7 +479,7 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 - Stage 29 执行 PRD：`docs/MiGuOrca_stage29_unified_tracking_PRD.md`
 - Stage 30 执行 PRD：`docs/MiGuOrca_stage30_ab_read_sync_PRD.md`
 - Stage 31 执行 PRD：`docs/MiGuOrca_stage31_ab_write_management_PRD.md`
-- Stage 31 执行分支：`ralph/stage31-ab-write-management`；Ralph stories 为 US-237～US-246（待开发）
+- Stage 31 执行分支：`ralph/stage31-ab-write-management`；Ralph stories 为 US-237～US-246（已归档）
 - Stage 28 执行分支：`ralph/stage28-draft-consistency`；Ralph stories 为 US-210～US-218（已归档）
 - Stage 29 执行分支：`ralph/stage29-unified-tracking`；Ralph stories 为 US-219～US-227（已归档）
 
@@ -528,7 +528,8 @@ Stage 31 B-C2 已冻结：仅允许 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`
 四类 operation kind，并须具备 confirm、幂等键、expected revision、可靠状态机、只读回查和
 `RECOVERY_REQUIRED` 结果未知恢复；删除外部对象强制 `file=false`，绝不删除本地媒体。
 
-Stage 31 执行范围见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md`（US-237～US-246）。
+Stage 31 执行范围见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md`（US-237～US-246，已完成）；
+B-D 的兼容/迁移、安全矩阵和前端 handoff 进入 Stage 32。
 
 ### BL-026: 桌面端前端体验分片重构
 

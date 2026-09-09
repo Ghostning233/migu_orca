@@ -58,6 +58,7 @@ M13 负责 Web UI 或管理界面能力，用于展示订阅方案、执行确�
 | Stage 28 | 草案一致性与原子保存确认 | 已接入 | 草案 `draft_id`/`draft_revision`/`idempotency_key` 只在组件内存维护（父组件持有 revision，`changed`/`draft-changed` 事件回写批量卡片），`preview-modify` 发送 `base_revision`、`preview-save` 预留草案；保存失败保留草案面板可重试（仅 `draft_expired` 等确认失效才清除）；单番/批量 save-confirm 一次完成保存确认，返回 `CONFIRMED` + ACCEPTED handoff（Stage 29 起扩展 tracking 字段） |
 | Stage 29 | 统一追番记录与可靠提交恢复 | API-only（无新页面） | 后端交付统一 tracking 列表/详情/revalidate/submit/retry/recover API 与旧入口收敛；前端只通过生成客户端获得新 DTO/operationId，现有保存确认返回 tracking handoff 字段但不渲染新状态；正式“追番管理”页面等待 B-C2/B-D，旧 `/app/workbench|requests|queue|settings` 保持不变 |
 | Stage 30 | Auto Bangumi 只读能力与外部同步 | API-only（无新页面） | B-C1 已交付 capability、只读 sync、外部安全投影和 `VERIFY_EXTERNAL`；OpenAPI/生成客户端已同步。未知版本/API Token 管理读取 fail closed；不得新增 modify/启停/删除/RSS 刷新页面或接口，正式追番管理页面等待 B-C2/B-D |
+| Stage 31 | Auto Bangumi 可靠写管理 | API-only（无新页面） | B-C2 已交付四类严格管理 API、operation v2、回查/恢复、OpenAPI 与生成客户端；不声称交付正式追番管理页面，Stage 32 负责兼容迁移与前端 handoff |
 
 以上能力都不应把真实 MiKan、Auto Bangumi 或 qBittorrent 的 endpoint、token、username、password、cookie、SID、原始 HTML、原始 RSS XML、原始响应体或本地绝对路径写入 storage JSON、状态历史、浏览器 storage、URL、日志、截图或测试 trace。Stage 15 只允许将非敏感 Storage 偏好写入浏览器 `localStorage`，URL query 只允许携带 `request_id` 等非敏感上下文。Stage 16 的 `mikan_bangumi` 和 Stage 17 的候选搜索/选择/直连 fallback 的 `mikan_config` 都是 request-scoped 字段，不应写入浏览器 storage、URL、history 或持久配置；候选搜索响应只包含公开候选元数据和 display-only 推荐标签。Stage 19 的批量解析和卡片展示只应渲染 batch/item 状态、解析元数据、公开 MiKan 候选字段、白名单过滤器摘要和种子标题摘要；raw HTML、raw RSS XML、cookie、token、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 20 的提交前队列只展示队列项目标题、状态、尝试次数、时间和脱敏结果摘要；endpoint、token、Authorization header、cookie、原始响应体、完整 RSS URL、magnet 和本地绝对路径必须被忽略或脱敏，AB 配置只存在于当前提交 POST body，不写入 URL、localStorage、sessionStorage、队列 JSON 或 Request snapshot。Stage 21 的偏好表单是非敏感表面，只提交已定义的非敏感偏好字段，拒绝的敏感输入回退到上次有效值；批量卡片只渲染 `preference_hits`/`preference_warnings`/`review_hints`/`applied_preferences`/`enhanced_search_queries` 中的公开规则摘要和中文提示，endpoint、token、cookie、raw HTML、raw RSS XML、magnet、完整失败 URL、原始响应体和本地绝对路径必须被忽略或脱敏。Stage 26 的 `storage_dir` 只允许服务端根目录下的相对 profile（空值回落服务端根，绝对路径/穿越/符号链接逃逸被拒绝），未保存草案只通过 opaque `draft_id` 交互，完整 Request、draft 内容与外部敏感配置绝不进入 URL 或浏览器 storage；OpenAPI 示例全部使用虚构脱敏值，凭据字段标记 `x-request-scoped`。Stage 28 的 `draft_revision`/`idempotency_key` 与 `draft_id` 一样只在请求体与组件内存中流转，绝不进入 URL/browser storage；save-confirm 错误与批量逐条结果只返回脱敏 error_type + 固定中文，`safe-info` 是“全部信息”的唯一允许数据源（`extra="forbid"` DTO + 默认拒绝 serializer）。
 
@@ -198,7 +199,8 @@ Stage 29 UI 调整（已完成，无新页面）：
    字段；现有页面继续使用 `request_id` + `status=ACCEPTED` 流程，不渲染 tracking 状态。
 3. 旧单番/批量提交与队列页面的后端行为收敛到统一 submission service，页面操作与安全边界不变；
    Stage 30 B-C1 只提供只读同步；等待 B-C2/B-D 冻结后再接入依赖外部写管理能力的“追番管理”页面（见 `MiGuOrca_future_stages.md`
-   Stage 29 handoff）。
+   Stage 29 handoff）。Stage 31 已完成 API-only 的可靠写管理，但正式追番管理页面仍等待 Stage 32
+   的兼容/迁移与前端 handoff。
 
 ## 4. 后续能力规划
 

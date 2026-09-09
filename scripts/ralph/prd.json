@@ -174,7 +174,7 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Only this story runs the complete test matrix. Stop and report if more than 12 total Ralph iterations are required."
     }
   ]

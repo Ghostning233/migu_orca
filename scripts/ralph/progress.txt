@@ -212,5 +212,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Patterns discovered: Management API boundaries can reuse the existing coordinator and adapter seams; route payloads should be strict and request-scoped while result projection is independently whitelisted.
   - Gotchas encountered: New error types must be added to the Flask HTTP classifier before declaring their OpenAPI status, and generated-client contract tests enumerate every operation/path explicitly.
-  - Useful context: Focused backend contract/management tests (32), OpenAPI/inventory checks (22), frontend typecheck/lint/unit tests (261), compileall, Ruff, and `git diff --check` passed.
+- Useful context: Focused backend contract/management tests (32), OpenAPI/inventory checks (22), frontend typecheck/lint/unit tests (261), compileall, Ruff, and `git diff --check` passed.
+---
+
+## 2026-09-09 15:55:00 +0800 - US-246
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: 完成 Stage 31 最终离线 recording fixture/安全边界审计，更新 README、主 PRD、架构、future stages、backlog、M10-M13 模块 PRD 与 Stage 31 PRD，明确 B-C2 已完成、API-only 边界和 Stage 32 B-D handoff；归档本轮 PRD 与 progress。
+- Files changed: `README.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage31_ab_write_management_PRD.md`, `docs/MiGuOrca_future_stages.md`, `docs/backlog.md`, `docs/design/architecture.md`, `docs/modules/M10-auto-bangumi-integration-PRD.md`, `docs/modules/M11-storage-state-PRD.md`, `docs/modules/M12-log-error-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/archive/2026-09-09-stage31-ab-write-management/`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Stage closeout keeps implementation scope, module docs, backlog, future roadmap and generated API contracts synchronized; final browser gate runs only after frontend build and with root `.migu_orca/storage` absent.
+  - Gotchas encountered: Stage 31 deliberately has no formal tracking-management page; Stage 32 owns compatibility/migration, security matrix, rollback and frontend handoff.
+  - Useful context: Final gates passed: non-browser backend 1548 passed/133 deselected, frontend unit 261 passed, Chromium 133 passed, compileall/Ruff/OpenAPI drift/git diff check passed.
 ---

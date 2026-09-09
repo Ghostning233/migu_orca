@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 工作目标 / 设计讨论基线（不是执行 PRD） |
-| 当前状态 | Gate 1～3 已完成；B-A～B-C1 已完成（Stage 28～30）；B-C2 已规划为 Stage 31；B-D 与前端工作包继续独立评审 |
+| 当前状态 | Gate 1～3 已完成；B-A～B-C2 已完成（Stage 28～31）；B-D 与前端工作包继续独立评审 |
 | 创建日期 | 2026-09-07 |
 | 适用范围 | MiGuOrca Web 前端的信息架构、用户流程、页面设计、视觉方案与后续实现 |
 | 前置事实 | Stage 26、Stage 27 已完成；Vue 3、TypeScript、Vite、OpenAPI 客户端和浏览器测试基线继续保留 |
@@ -382,16 +382,16 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 | B-A 草案一致性 | Stage 28 已完成 (2026-09-08) | revision、可靠保存、组合确认、36 部上限、安全信息 | US-210～US-218 全部 passes，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md` |
 | B-B 统一追番记录 | Stage 29 已完成 (2026-09-08) | tracking repository、迁移、复核、幂等提交与恢复 | US-219～US-227 全部 passes；执行 PRD 见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md` |
 | B-C1 只读同步 | Stage 30 已完成（US-228～US-236） | Auto Bangumi capability、只读同步、映射对账与外部核验、OpenAPI/生成客户端 handoff | US-228～US-236 已通过并归档，执行 PRD 见 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md` |
-| B-C2 后端写管理 | Stage 31 已规划（US-237～US-246） | Auto Bangumi 修改、启停、删除、RSS 管理与可靠操作 | Stage 30 已完成；执行 PRD 见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md` |
+| B-C2 后端写管理 | Stage 31 已完成（US-237～US-246） | Auto Bangumi 修改、启停、删除、RSS 管理与可靠操作 | Stage 30 已完成；执行 PRD 见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md` |
 | B-D 后端契约收尾 | PRD 待评审 | 兼容、迁移、安全矩阵与前端 handoff | Stage 31 完成后进入 |
 | F-A～F-G 前端分片 | PRD 待评审 | 壳层、共享审核、单番、批量、方案、管理、设置/收尾 | 对应后端能力已冻结或合入 |
 | 独立发布验收 | 待规划 | 跨流程 Chromium、无障碍/多视口/安全报告、文档切换 | 全部实现切片验收通过 |
 
 正式拆分原则：
 
-- B-A/B-B 已完成，Stage 30 B-C1 已完成；后续 B-C2 外部管理不得由前端 PR 临时顺带实现。
+- B-A/B-B 已完成，Stage 30 B-C1 与 Stage 31 B-C2 已完成；B-C2 外部管理不得由前端 PR 临时顺带实现。
 - F-A 壳层与设计系统不依赖新业务 API，可以先行；F-B 共享审核核心必须先于单番/批量页面。
-- F-C 单番、F-D 批量、F-E 追番方案可以在共享核心稳定后并行，F-F 追番管理等待 B-C2/B-D（B-B 已交付 Stage 29，B-C1 已交付 Stage 30）。
+- F-C 单番、F-D 批量、F-E 追番方案可以在共享核心稳定后并行，F-F 追番管理等待 B-D（B-B 已交付 Stage 29，B-C1 已交付 Stage 30，B-C2 已交付 Stage 31）。
 - 一个 Stage 可以包含一个小工作包，也可以把高风险工作包继续拆开；不能为了连续编号制造超大 PR。
 - 收尾可并入最后一个前端 Stage，也可在集成风险较高时单列，最终由未承担主要实现的 Agent 验收。
 
@@ -480,7 +480,7 @@ passes，2026-09-08，执行与完成记录见 `docs/MiGuOrca_stage28_draft_cons
 2. B-B 已完成：TrackingRecord 为新提交权威，accept/save-confirm handoff 兼容扩展 tracking
    状态，历史数据纯本地幂等迁移，新增列表/详情/复核/提交/重试/恢复 API；旧 queue 保留一个
    发布周期，结果未知禁止盲重试，旧单番/批量入口共享统一 submission service。
-3. Stage 30 B-C1 已完成；执行 Stage 31 B-C2 的可靠写管理，完成后由 Stage 32 评审 B-D 契约收尾。
+3. Stage 30 B-C1 与 Stage 31 B-C2 已完成；由 Stage 32 评审 B-D 契约收尾。
 4. 将[前端分片实施 PRD](MiGuOrca_frontend_ux_implementation_PRD.md)中的 F-A 壳层冻结为独立
    Stage 33；F-B～F-G 继续按依赖逐包评审。
 5. 评审 F-A～F-G 的整体依赖顺序、
