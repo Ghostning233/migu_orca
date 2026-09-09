@@ -102,7 +102,7 @@
         "Typecheck passes"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Do not add Web UI. Do not treat a 2xx write response alone as verified success."
     },
     {

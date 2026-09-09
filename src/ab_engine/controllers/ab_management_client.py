@@ -284,7 +284,10 @@ def _subscription(value: Any) -> ExternalSubscription:
     deleted = value.get("deleted", False)
     if not isinstance(deleted, bool):
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "deleted"})
-    return ExternalSubscription(external_id, title, season, group, ((rss_link,) if isinstance(rss_link, str) else ()), ids, deleted)
+    enabled = value.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "enabled"})
+    return ExternalSubscription(external_id, title, season, group, ((rss_link,) if isinstance(rss_link, str) else ()), ids, deleted, enabled)
 
 
 def _rss_items(response: Mapping[str, Any]) -> list[ExternalRss]:

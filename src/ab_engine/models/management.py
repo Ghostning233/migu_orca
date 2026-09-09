@@ -68,6 +68,7 @@ class ExternalSubscription:
     rss_urls: tuple[str, ...] = ()
     rss_ids: tuple[str, ...] = ()
     deleted: bool = False
+    enabled: bool = True
 
     def __repr__(self) -> str:
         return (

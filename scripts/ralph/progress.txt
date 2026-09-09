@@ -38,6 +38,8 @@
   the current request-scoped RSS URL for updates instead of accepting a caller URL.
 - Management target resolution is a pure request-scoped boundary: resolve IDs only from the current local
   mapping and fresh snapshot, then persist only deterministic SHA-256 summaries.
+- Management writes must bind the complete expected projection from the fresh snapshot, then terminalize the
+  operation only after a matching readback; transport or evidence uncertainty remains recoverable.
 
 ## Stage 30 Handoff
 
@@ -147,5 +149,24 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Patterns discovered: Management operations must bind both action and expected projection fingerprints before the tracking record CAS; the operation state gate is the only point that permits an external write.
   - Gotchas encountered: A successful management write cannot be terminalized before US-242 readback; adapter exceptions must leave the durable operation `IN_PROGRESS` because the call may have reached Auto Bangumi.
-  - Useful context: The coordinator keeps upstream snapshots and write payloads request-scoped; only the operation ID and safe binding digests cross durable storage.
+- Useful context: The coordinator keeps upstream snapshots and write payloads request-scoped; only the operation ID and safe binding digests cross durable storage.
+---
+
+## 2026-09-09 00:00:00 +0800 - US-242
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added MODIFY and SET_ENABLED execution semantics to the durable management coordinator,
+  including complete fresh-snapshot projections, bounded write-result classification, mandatory readback,
+  atomic tracking status/mapping/audit persistence, and terminal operation transitions. Subscription snapshots
+  now preserve the enabled flag for verification. Timeout, connection, malformed, and failed-readback outcomes
+  remain non-successful and do not blindly retry the external write.
+- Files changed: `src/apps/migu_orca_web/tracking_management_service.py`,
+  `src/apps/migu_orca_web/tracking_management_service_test.py`,
+  `src/ab_engine/models/management.py`, `src/ab_engine/controllers/ab_management_client.py`,
+  `src/tracking_engine/models/tracking.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Bind the expected post-write projection from the request-scoped fresh target and
+    compare it with a fresh readback before changing the durable tracking state.
+  - Gotchas encountered: Existing US-241 side-effect-only writer tests return no response and must remain at
+    IN_PROGRESS; response-bearing writers use the new readback path.
+  - Useful context: Targeted management/model/adapter tests (34), Ruff, compileall, and `git diff --check` passed.
 ---

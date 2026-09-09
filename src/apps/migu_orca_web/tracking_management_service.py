@@ -6,6 +6,7 @@ readback semantics are deliberately left to the later management stories.
 """
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable, Mapping
 from dataclasses import replace
 from typing import Any, Protocol
@@ -21,6 +22,14 @@ from storage_engine.controllers.storage_config import StorageConfig, load_storag
 from storage_engine.controllers.tracking_repository import (
     compare_and_swap_tracking_record,
     load_tracking_record,
+)
+from tracking_engine.controllers.management_operation import (
+    MANAGEMENT_OUTCOME_DEFINITE_FAILURE,
+    MANAGEMENT_OUTCOME_SUCCESS,
+    MANAGEMENT_OUTCOME_UNKNOWN,
+    canonical_management_fingerprint,
+    classify_management_action,
+    classify_management_readback,
 )
 from tracking_engine.controllers.management_target import (
     ManagementBinding,
@@ -45,10 +54,18 @@ from tracking_engine.models.operation import (
 )
 from tracking_engine.models.tracking import (
     TRACKING_AUDIT_ACTOR_USER,
+    TRACKING_AUDIT_MANAGEMENT_FAILED,
     TRACKING_AUDIT_MANAGEMENT_STARTED,
+    TRACKING_AUDIT_MANAGEMENT_SUCCEEDED,
+    TRACKING_AUDIT_MANAGEMENT_UNKNOWN,
+    TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_DISABLED,
+    TRACKING_STATUS_RECOVERY_REQUIRED,
+    TRACKING_STATUS_VERIFYING_EXTERNAL,
     TrackingRecord,
     append_audit_event,
     build_audit_event,
+    transition_record,
     utc_now,
 )
 
@@ -85,6 +102,7 @@ def run_tracking_management(
     patch: Mapping[str, Any] | None = None,
     enabled: bool | None = None,
     write: ManagementWriter | None = None,
+    readback: Callable[[str, str, ResolvedManagementTarget], Any] | None = None,
     now: str | None = None,
 ) -> dict[str, Any]:
     """Prepare and start one management operation, with an at-most-once gate.
@@ -113,9 +131,10 @@ def run_tracking_management(
     if existing is not None:
         if (existing.tracking_id, existing.operation, existing.expected_revision,
                 existing.target_scope, existing.request_fingerprint,
-                existing.expected_external_fingerprint) != (
+                ) != (
                     record.tracking_id, operation, expected_revision, target_scope,
-                    binding.action_fingerprint, binding.expected_external_fingerprint):
+                    binding.action_fingerprint,
+                ):
             raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         if existing.state in TRACKING_OPERATION_TERMINAL_STATES:
             return {"operation_id": existing.operation_id, "management_status": existing.state, "created": False}
@@ -128,6 +147,24 @@ def run_tracking_management(
     if field is None or getattr(effective_caps, field, "UNKNOWN") != "SUPPORTED":
         raise Stage1Error("tracking_management_capability_unknown", "当前 Auto Bangumi 管理能力未验证", "tracking_management")
     target = resolve_management_target(record, target_scope, subscriptions, rss_items)
+    # The operation binds the projection expected after the write, not merely
+    # the sparse browser patch.  The fresh snapshot is still request-scoped.
+    if operation == TRACKING_OPERATION_KIND_MODIFY:
+        expected_projection = (
+            build_complete_subscription_update(target, safe_patch)
+            if target_scope == "SUBSCRIPTION"
+            else list(build_complete_rss_update(target, safe_patch))
+        )
+    elif operation == TRACKING_OPERATION_KIND_SET_ENABLED:
+        expected_projection = (
+            {"enabled": enabled}
+            if target_scope == "SUBSCRIPTION"
+            else [{"enabled": enabled} for _item in target.rss]
+        )
+    else:
+        expected_projection = None
+    if expected_projection is not None:
+        binding = replace(binding, expected_external_fingerprint=_projection_digest(expected_projection, operation, target_scope))
     operation_record, created = bind_tracking_operation(
         resolved_config, tracking_id=record.tracking_id, operation=operation,
         idempotency_key=idempotency_key, expected_revision=expected_revision,
@@ -155,11 +192,132 @@ def run_tracking_management(
     )
     if write is not None:
         try:
-            write(target, _write_payload(operation, target, safe_patch, enabled))
+            response = write(target, _write_payload(operation, target, safe_patch, enabled))
+        except Exception as exc:
+            outcome = classify_management_action(
+                transport_error="unknown" if _unknown_write_error(exc) else None,
+                response_valid=not _unknown_write_error(exc),
+            )
+            return _finish_management(config=resolved_config, record=started,
+                operation=in_progress, outcome=outcome, target=target,
+                operation_id=in_progress.operation_id, reason="management_write_unknown" if outcome == MANAGEMENT_OUTCOME_UNKNOWN else "management_write_failed", now=now)
+
+        # The original coordinator's test seam used a side-effect-only writer.
+        # Preserve that contract; real writers return a bounded response and
+        # therefore continue through mandatory readback below.
+        if response is None and readback is None:
+            return {"operation_id": in_progress.operation_id, "management_status": "IN_PROGRESS", "created": True}
+
+        action_outcome = classify_management_action(
+            status_code=response.get("status_code") if isinstance(response, Mapping) and isinstance(response.get("status_code"), int) else 200,
+            transport_error=response.get("transport_error") if isinstance(response, Mapping) and isinstance(response.get("transport_error"), str) else None,
+            response_valid=not (isinstance(response, Mapping) and response.get("response_valid") is False),
+        )
+        if action_outcome != MANAGEMENT_OUTCOME_SUCCESS:
+            return _finish_management(config=resolved_config, record=started,
+                operation=in_progress, outcome=action_outcome, target=target,
+                operation_id=in_progress.operation_id, reason="management_write_failed", now=now)
+        try:
+            actual = readback(operation, target_scope, target) if readback is not None else _readback_target(management_client, record, target_scope)
+            readback_outcome = _classify_target_readback(operation, target_scope, target, actual, binding.expected_external_fingerprint)
         except Exception:
-            # IN_PROGRESS is durable evidence that the call may have happened.
-            raise
+            readback_outcome = MANAGEMENT_OUTCOME_UNKNOWN
+        return _finish_management(config=resolved_config, record=started,
+            operation=in_progress, outcome=readback_outcome, target=target,
+            operation_id=in_progress.operation_id, reason="management_readback_failed" if readback_outcome != MANAGEMENT_OUTCOME_SUCCESS else "management_verified", now=now,
+            actual=actual if 'actual' in locals() else None, enabled=enabled, patch=safe_patch)
     return {"operation_id": in_progress.operation_id, "management_status": "IN_PROGRESS", "created": True}
+
+
+def _unknown_write_error(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
+        return True
+    return isinstance(exc, Stage1Error) and exc.error_type in {"ab_management_failed", "invalid_ab_response"}
+
+
+def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRecord, scope: str) -> Any:
+    if client is None:
+        raise Stage1Error("tracking_management_readback_missing", "管理操作缺少外部回查", "tracking_management")
+    _caps, subscriptions, rss_items = client.read_snapshot()
+    return resolve_management_target(record, scope, subscriptions, rss_items)
+
+
+def _projection_digest(value: Any, action: str, scope: str) -> str:
+    return canonical_management_fingerprint(action=action, target_scope=scope, expected_projection=value)
+
+
+def _classify_target_readback(operation: str, scope: str, target: ResolvedManagementTarget, actual: Any, expected: str) -> str:
+    if not isinstance(actual, ResolvedManagementTarget):
+        return MANAGEMENT_OUTCOME_UNKNOWN
+    if scope == "SUBSCRIPTION":
+        item = actual.subscription
+        if item is None:
+            return MANAGEMENT_OUTCOME_UNKNOWN
+        if operation == "MODIFY":
+            projection = {"title": item.title, "season": item.season, "subtitle_group": item.subtitle_group}
+        else:
+            projection = {"enabled": item.enabled}
+        digest = _projection_digest(projection, operation, scope)
+    else:
+        items = actual.rss
+        if not items:
+            return MANAGEMENT_OUTCOME_UNKNOWN
+        if operation == "MODIFY":
+            projection = [{"name": item.name, "aggregate": item.aggregate, "parser": item.parser} for item in items]
+        else:
+            projection = [{"enabled": item.enabled} for item in items]
+        digest = _projection_digest(projection, operation, scope)
+    return classify_management_readback(expected_fingerprint=expected, actual_fingerprint=digest, read_succeeded=True)
+
+
+def _finish_management(*, config: StorageConfig, record: TrackingRecord, operation: TrackingOperation,
+                       outcome: str, target: ResolvedManagementTarget, operation_id: str,
+                       reason: str, now: str | None, actual: Any = None,
+                       enabled: bool | None = None, patch: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    timestamp = now or utc_now()
+    if outcome == MANAGEMENT_OUTCOME_SUCCESS:
+        status = record.status
+        if operation.operation == TRACKING_OPERATION_KIND_SET_ENABLED:
+            status = TRACKING_STATUS_ACTIVE if enabled else TRACKING_STATUS_DISABLED
+        elif record.status != TRACKING_STATUS_DISABLED:
+            status = TRACKING_STATUS_ACTIVE
+        action = TRACKING_AUDIT_MANAGEMENT_SUCCEEDED
+        target_state = "SUCCEEDED"
+        message = "Auto Bangumi 管理操作已完成并通过回查"
+    elif outcome == MANAGEMENT_OUTCOME_DEFINITE_FAILURE:
+        status = record.status
+        action = TRACKING_AUDIT_MANAGEMENT_FAILED
+        target_state = "FAILED"
+        message = "Auto Bangumi 未应用管理操作"
+    else:
+        status = TRACKING_STATUS_VERIFYING_EXTERNAL if outcome == MANAGEMENT_OUTCOME_UNKNOWN else TRACKING_STATUS_RECOVERY_REQUIRED
+        action = TRACKING_AUDIT_MANAGEMENT_UNKNOWN
+        target_state = "OUTCOME_UNKNOWN" if outcome == MANAGEMENT_OUTCOME_UNKNOWN else "RECOVERY_REQUIRED"
+        message = "Auto Bangumi 管理结果未知，请先核验外部状态"
+    next_record = transition_record(record, status=status, audit_action=action,
+        operation_id=operation_id, reason_code=reason, safe_message=message, now=timestamp)
+    mapping = dict(next_record.external_mapping or {})
+    if outcome == MANAGEMENT_OUTCOME_SUCCESS and operation.target_scope == "SUBSCRIPTION" and isinstance(actual, ResolvedManagementTarget) and actual.subscription:
+        item = actual.subscription
+        mapping.update({"enabled": item.enabled, "external_deleted": item.deleted})
+        if operation.operation == TRACKING_OPERATION_KIND_MODIFY:
+            next_record = replace(next_record, plan_summary={**next_record.plan_summary, "title": item.title, "season": item.season, "subtitle_group": item.subtitle_group})
+    next_record = replace(next_record, external_mapping=mapping)
+    try:
+        final = compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
+        compare_and_swap_tracking_operation(config, operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
+            transition_tracking_operation(operation, state=target_state, error_type=None if outcome == MANAGEMENT_OUTCOME_SUCCESS else reason, now=timestamp))
+    except Exception:
+        final = transition_record(record, status=TRACKING_STATUS_RECOVERY_REQUIRED,
+            audit_action=TRACKING_AUDIT_MANAGEMENT_UNKNOWN, operation_id=operation_id,
+            reason_code="management_result_persist_failed", safe_message="管理结果未能安全保存，请人工恢复", now=timestamp)
+        with contextlib.suppress(Exception):
+            compare_and_swap_tracking_record(config, record.tracking_id, record.revision, final)
+        with contextlib.suppress(Exception):
+            compare_and_swap_tracking_operation(config, operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
+                transition_tracking_operation(operation, state="RECOVERY_REQUIRED", error_type="management_result_persist_failed", now=timestamp))
+    return {"operation_id": operation_id, "management_status": target_state, "outcome": outcome,
+            "needs_manual": outcome != MANAGEMENT_OUTCOME_SUCCESS, "created": True}
 
 
 def _safe_patch(operation: str, scope: str, patch: Mapping[str, Any] | None, enabled: bool | None) -> dict[str, Any] | None:
