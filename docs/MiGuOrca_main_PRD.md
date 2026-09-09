@@ -89,7 +89,7 @@ Stage 26 已完成。Web API 契约固化与服务端边界治理：冻结全部
 
 Stage 28 已完成。草案一致性与原子保存确认（BL-025 的 B-A，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）：为每个服务端权威草案建立单调 revision（签发为 1，成功 CAS 修改 +1），`preview-modify` 必填 `base_revision` 做 compare-and-swap（过期 base → 409 `draft_revision_conflict`，只报 field/current_revision），`preview-save` 改为「预留 → 持久化 → 提交/释放」（写盘失败保留原 revision 可重试，正在保存 → 409 `draft_reserved`）；storage engine 新增持久化 save-confirm 幂等记录（`<storage>/idempotency/`，只含非敏感白名单字段，终态同键重放），新增单番 `POST /api/v1/requests/save-confirm`（一次完成校验/预留/持久化/确认/幂等提交并返回 `CONFIRMED` + `ACCEPTED` handoff）与批量 `POST /api/v1/batches/{batch_id}/save-confirm`（逐条复用单番用例、部分成功、成功项不因失败项回滚），批量 parse 按规范化非空行强制 1～36 部服务端边界（超限在任何标题解析/MiKan 调用前返回 400 `batch_limit_exceeded`），并新增 `GET /api/v1/requests/{request_id}/safe-info` 严格白名单 DTO 作为“全部信息”唯一安全数据源。Stage 28 只返回 ACCEPTED Request handoff，不创建或伪造 tracking record；B-B 阶段可从持久化 ACCEPTED Request 与 handoff 幂等建立 tracking record。
 
-Stage 29 已完成 B-B「统一追番记录与可靠提交恢复」（执行 PRD 见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`）：建立严格白名单的 `TrackingRecord`/`TrackingOperation` 与确定性 opaque ID，历史 Request、旧 batch queue 和 AB result 通过纯本地幂等迁移统一收敛；accept/save-confirm handoff、tracking 列表/详情、revalidate、submit、retry、recover 共享统一服务，提交过程具备持久化幂等、结果未知恢复和旧队列兼容投影。Stage 30 已规划承接 B-C1 的 Auto Bangumi 只读能力、外部同步和映射对账；B-C2 写管理与 B-D 契约收尾继续独立评审。
+Stage 29 已完成 B-B「统一追番记录与可靠提交恢复」（执行 PRD 见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`）：建立严格白名单的 `TrackingRecord`/`TrackingOperation` 与确定性 opaque ID，历史 Request、旧 batch queue 和 AB result 通过纯本地幂等迁移统一收敛；accept/save-confirm handoff、tracking 列表/详情、revalidate、submit、retry、recover 共享统一服务，提交过程具备持久化幂等、结果未知恢复和旧队列兼容投影。Stage 30 已完成 B-C1 的 Auto Bangumi 只读能力、外部同步和映射对账；B-C2 写管理与 B-D 契约收尾继续独立评审。
 
 ## 4. 第一阶段范围
 
@@ -242,9 +242,9 @@ M00 CLI 与流程编排
 | 第二十七阶段 | 前端工程化迁移与页面重构（已完成） | M13、API 契约、前端与测试基础设施 |
 | 第二十八阶段 | 草案一致性与原子保存确认（已完成） | M01、M09、M11、M13、API 契约与测试基础设施 |
 | 第二十九阶段 | 统一追番记录与可靠提交恢复（已完成） | M01、M09、M10、M11、M12、M13、API 契约与测试基础设施 |
-| 第三十阶段 | Auto Bangumi 只读能力与外部同步基础（已规划） | M10、M11、M12、M13、API 契约与测试基础设施 |
+| 第三十阶段 | Auto Bangumi 只读能力与外部同步基础（已完成，US-228～US-236） | M10、M11、M12、M13、API 契约与测试基础设施 |
 
-Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立响应 DTO 与确定性 OpenAPI、拆分 Web schema/serializer/service/context/route 职责、建立稳定 HTTP 状态语义、收紧 Web storage 根目录、建立服务端权威 draft 生命周期、增加 CI 与 local-only 部署基线，并完成兼容回归与文档收尾。Stage 27 已完成 BL-024：建立 Vue 3 + TypeScript + Vite 独立前端工程（Flask 在 `/app/` 同源托管），渐进迁移全部 Web 旅程并删除旧前端。Stage 28 已完成 BL-025 的 B-A：交付 draft revision、可靠保存、单番/批量原子保存确认、36 部上限与安全信息 DTO；成功 handoff 只返回 `request_id` + `ACCEPTED`。Stage 29 已完成 BL-025 的 B-B：从持久化 ACCEPTED Request 与 handoff 幂等建立统一 TrackingRecord，交付 tracking 列表/详情、纯本地 revalidate、统一 submit、retry/recover、结果未知恢复和旧入口/队列兼容。Stage 30 已规划承接 B-C1 只读同步；B-C2 外部管理写动作和 B-D 仍待 Gate 4 分包评审。
+Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立响应 DTO 与确定性 OpenAPI、拆分 Web schema/serializer/service/context/route 职责、建立稳定 HTTP 状态语义、收紧 Web storage 根目录、建立服务端权威 draft 生命周期、增加 CI 与 local-only 部署基线，并完成兼容回归与文档收尾。Stage 27 已完成 BL-024：建立 Vue 3 + TypeScript + Vite 独立前端工程（Flask 在 `/app/` 同源托管），渐进迁移全部 Web 旅程并删除旧前端。Stage 28 已完成 BL-025 的 B-A：交付 draft revision、可靠保存、单番/批量原子保存确认、36 部上限与安全信息 DTO；成功 handoff 只返回 `request_id` + `ACCEPTED`。Stage 29 已完成 BL-025 的 B-B：从持久化 ACCEPTED Request 与 handoff 幂等建立统一 TrackingRecord，交付 tracking 列表/详情、纯本地 revalidate、统一 submit、retry/recover、结果未知恢复和旧入口/队列兼容。Stage 30 已完成 B-C1 只读同步（US-228～US-236）；B-C2 外部管理写动作和 B-D 仍待 Gate 4 分包评审。
 
 ## 10. 主 PRD 已确认事项
 
@@ -261,7 +261,7 @@ Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立�
 | D-MAIN-07 | Stage 19 后产品定位 | 全部 | MiGuOrca 是 Auto Bangumi 前置订阅编排工作台，不是 Auto Bangumi 或 qBittorrent 替代品 |
 | D-MAIN-08 | 批量输入方向 | M00、M13、M03 | 下一阶段以批量番剧简称解析、订阅草案卡片和用户审核为主，不再把单番剧自动提交作为核心卖点 |
 | D-MAIN-09 | AI 能力边界 | M03、M08、M13 | AI 只生成候选标题和搜索词，不自动决定最终合集；低置信度结果必须可审核 |
-| D-MAIN-10 | 前端体验重构边界 | M01、M09、M10、M13 | Gate 1～3 已冻结四项导航与混合布局；Stage 28/29 已完成 B-A/B-B；Stage 30 已规划 B-C1；B-C2～B-D 与前端切片仍待后续 Gate 4 |
+| D-MAIN-10 | 前端体验重构边界 | M01、M09、M10、M13 | Gate 1～3 已冻结四项导航与混合布局；Stage 28/29/30 已完成 B-A/B-B/B-C1；B-C2～B-D 与前端切片仍待后续 Gate 4 |
 
 ## 11. 文档职责边界
 

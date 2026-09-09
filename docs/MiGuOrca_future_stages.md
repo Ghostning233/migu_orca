@@ -246,7 +246,7 @@ API 不接受 `file`，不得删除本地 Request、TrackingRecord、审计、�
 1. BL-025 后端支撑：B-A 已作为 Stage 28 完成，覆盖 draft revision、可靠保存、单番/批量保存
    确认、36 部上限和 safe-info（见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；B-B 已作为
    Stage 29 完成，覆盖统一追番记录/提交恢复契约（见
-   `docs/MiGuOrca_stage29_unified_tracking_PRD.md`）；B-C1 已规划为 Stage 30，只处理 Auto Bangumi
+   `docs/MiGuOrca_stage29_unified_tracking_PRD.md`）；B-C1 已作为 Stage 30 完成，只处理 Auto Bangumi
    3.1.18 只读同步与映射；B-C2～B-D 的写管理与契约收尾仍待评审。总体候选 PRD 为
    `docs/MiGuOrca_frontend_ux_backend_support_PRD.md`。
 2. BL-026 前端分片：四项导航、单番三步、1/12/36 部批量审核、追番方案、追番管理和设置。
@@ -262,7 +262,7 @@ Stage 28/Stage 29 的现有功能、OpenAPI 生成客户端和浏览器测试作
 
 ## 11. 未开发事项优先级池
 
-除已完成的 Stage 26～29 和已规划的 Stage 30 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
+除已完成的 Stage 26～30 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
 
 ### 未排期与条件触发事项
 
@@ -311,7 +311,7 @@ Stage 28/Stage 29 的现有功能、OpenAPI 生成客户端和浏览器测试作
 9. Stage 27：前端工程化迁移与页面重构（已完成，US-209 删除旧前端）。
 10. Stage 28：草案一致性与原子保存确认（已完成，US-210～US-218；只返回 ACCEPTED handoff，不创建 tracking record）。
 11. Stage 29：统一追番记录与可靠提交恢复（已完成，US-219～US-227；不实现 Auto Bangumi 管理/外部同步，B-C handoff 见上）。
-12. Stage 30：Auto Bangumi 只读能力与外部同步基础（已规划，US-228～US-236；B-C1，只读，不实现外部管理写动作）。
+12. Stage 30：Auto Bangumi 只读能力与外部同步基础（已完成，US-228～US-236；B-C1，只读，不实现外部管理写动作）。
 
 因此，Stage 19 到 Stage 29 的原产品闭环与前后端工程基线已经完成，Stage 26 作为 P0 后端基础
 阶段已交付，Stage 27 作为 P1 前端迁移阶段已交付，Stage 28 作为 BL-025 的 B-A 草案一致性

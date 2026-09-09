@@ -92,4 +92,3 @@ def test_deleted_and_in_progress_status_mapping() -> None:
     )
     assert protected is not None
     assert protected.status == "REVALIDATING"
-

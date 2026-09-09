@@ -14,7 +14,7 @@
 ## 当前工作目标
 
 - 前端体验全面重构的 Gate 1～3 已完成，产品方向、低保真骨架、交互规格、视觉方向和设计
-  Token 均已冻结；后端 B-A、B-B 已完成，B-C1 已规划为 Stage 30，B-C2～B-D 与前端分片
+  Token 均已冻结；后端 B-A、B-B、B-C1（Stage 30）已完成，B-C2～B-D 与前端分片
   仍待后续 Gate 4，不授权大规模页面编码。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
@@ -29,10 +29,10 @@
   [前端体验重构：前端分片实施 PRD](MiGuOrca_frontend_ux_implementation_PRD.md)。两份文档仍按
   工作包继续分包评审；其中 B-A 已完成并交付为[Stage 28：草案一致性与原子保存确认](MiGuOrca_stage28_draft_consistency_PRD.md)，
   B-B 已完成并交付为[Stage 29：统一追番记录与可靠提交恢复](MiGuOrca_stage29_unified_tracking_PRD.md)，
-  B-C1 已规划为[Stage 30：Auto Bangumi 只读能力与外部同步基础](MiGuOrca_stage30_ab_read_sync_PRD.md)，
+  B-C1 已完成并交付为[Stage 30：Auto Bangumi 只读能力与外部同步基础](MiGuOrca_stage30_ab_read_sync_PRD.md)，
   其余工作包仍未分配 Stage。
 
-截至 2026-09-09，最近完成阶段为 Stage 30「Auto Bangumi 只读能力与外部同步基础」（US-228～US-235 已完成：3.1.18 password 只读 adapter、capability、external mapping、严格对账、tracking sync、`VERIFY_EXTERNAL`、OpenAPI/生成客户端与 B-C2 handoff；US-236 保留最终回归与归档）。B-C1 不实现 Auto Bangumi 外部管理写操作或正式追番管理页面。
+截至 2026-09-09，最近完成阶段为 Stage 30「Auto Bangumi 只读能力与外部同步基础」（US-228～US-236 已完成：3.1.18 password 只读 adapter、capability、external mapping、严格对账、tracking sync、`VERIFY_EXTERNAL`、OpenAPI/生成客户端、B-C2 handoff、最终回归与归档）。B-C1 不实现 Auto Bangumi 外部管理写操作或正式追番管理页面。
 
 ## Stage PRD
 
