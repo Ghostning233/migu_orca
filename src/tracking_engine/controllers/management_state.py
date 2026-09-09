@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
+from ab_engine.models.management import AutoBangumiCapabilities
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_DISABLED,
@@ -14,6 +15,17 @@ from tracking_engine.models.tracking import (
 )
 
 MANAGEMENT_ACTIONS = frozenset({"MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"})
+
+# Management writes are deliberately narrower than submit/read capability.
+# Keep this table as the one server-side policy used by both the write and
+# recovery paths; a public capability projection is never sufficient by itself.
+_CAPABILITY_FIELDS = {
+    ("MODIFY", "SUBSCRIPTION"): "subscription_modify",
+    ("MODIFY", "ASSOCIATED_RSS"): "rss_modify",
+    ("DELETE_EXTERNAL", "SUBSCRIPTION"): "subscription_delete",
+    ("DELETE_EXTERNAL", "ASSOCIATED_RSS"): "rss_delete",
+    ("REFRESH_RSS", "ASSOCIATED_RSS"): "rss_refresh",
+}
 
 _ACTIONS_BY_STATUS: dict[str, frozenset[str]] = {
     TRACKING_STATUS_ACTIVE: MANAGEMENT_ACTIONS,
@@ -39,4 +51,48 @@ def is_management_action(action: str, actions: Collection[str] = MANAGEMENT_ACTI
     return action in actions
 
 
-__all__ = ["MANAGEMENT_ACTIONS", "management_action_allowed", "management_actions_for_status"]
+def management_capability_field(action: str, scope: str, enabled: bool | None = None) -> str | None:
+    """Return the exact capability required by one action direction."""
+    if scope not in {"SUBSCRIPTION", "ASSOCIATED_RSS"}:
+        return None
+    if action == "SET_ENABLED":
+        if type(enabled) is not bool:
+            return None
+        prefix = "subscription" if scope == "SUBSCRIPTION" else "rss"
+        return f"{prefix}_{'enable' if enabled else 'disable'}"
+    return _CAPABILITY_FIELDS.get((action, scope))
+
+
+def management_capability_allowed(
+    capabilities: AutoBangumiCapabilities,
+    action: str,
+    scope: str,
+    *,
+    enabled: bool | None = None,
+) -> bool:
+    """Fail closed unless the proven adapter/version supports this action."""
+    field = management_capability_field(action, scope, enabled)
+    return (
+        management_baseline_verified(capabilities)
+        and field is not None
+        and getattr(capabilities, field, "UNKNOWN") == "SUPPORTED"
+    )
+
+
+def management_baseline_verified(capabilities: AutoBangumiCapabilities) -> bool:
+    """Return whether the exact write/readback adapter baseline was proven."""
+    return (
+        capabilities.probe_status == "VERIFIED"
+        and capabilities.version == "3.1.18"
+        and capabilities.adapter == "legacy_3_1"
+    )
+
+
+__all__ = [
+    "MANAGEMENT_ACTIONS",
+    "management_action_allowed",
+    "management_actions_for_status",
+    "management_capability_allowed",
+    "management_capability_field",
+    "management_baseline_verified",
+]

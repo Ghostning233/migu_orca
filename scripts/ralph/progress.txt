@@ -10,6 +10,7 @@ Started: Thu Sep 10 00:50:47 CST 2026
 - Frontend contract fixtures should derive request/response shapes from `frontend/src/api/generated/api.ts`; use type-only assertions instead of feature-local DTO interfaces.
 - Legacy queue/AB projections must never resolve `VERIFYING_EXTERNAL` or `RECOVERY_REQUIRED`; only the tracking recovery flow may clear an ambiguous external boundary.
 - Versioned persistence readers must fail closed on future schemas and preserve the original artifact; migration is local, idempotent, and must not implicitly upgrade existing JSON.
+- Management writes must pass one shared matrix: VERIFIED probe, exact 3.1.18 legacy adapter, and the action/scope/direction-specific capability; recovery keeps the same exact baseline.
 
 ## 2026-09-10 01:05:00 CST - US-247
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -54,4 +55,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Versioned readers already provide the correct fail-closed boundary; rehearsal tests should assert both the stable error and byte preservation.
   - Existing TrackingRecord and operation files are evidence and must not be rewritten merely because migration is revisited.
   - Full validation passed: compileall and 1737 tests.
+---
+## 2026-09-10 01:21:22 CST - US-252
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Centralized the server-side capability/action matrix for tracking management writes and recovery. Management now fails closed for API-token adapters, non-exact versions, PARTIAL/FAILED probes, unsupported action capabilities, invalid scopes, and unspecified enable/disable direction; existing external deletion routes remain hardcoded to `file=false`. Added table-driven contract coverage for all supported action/scope/direction combinations and fail-closed variants.
+- Files changed: `src/tracking_engine/controllers/management_state.py`, `src/apps/migu_orca_web/tracking_management_service.py`, `tests/api_contract/test_stage32_capability_matrix.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Public capability fields are not sufficient authorization; write services must independently require the proven adapter/version/probe baseline and the exact directional capability.
+  - Recovery only needs the corresponding list-read capability, but it must still reject an unproven adapter/version baseline before readback.
+  - Full validation passed: compileall and 1754 tests.
 ---
