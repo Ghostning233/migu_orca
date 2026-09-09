@@ -12,6 +12,7 @@ Started: Thu Sep 10 00:50:47 CST 2026
 - Versioned persistence readers must fail closed on future schemas and preserve the original artifact; migration is local, idempotent, and must not implicitly upgrade existing JSON.
 - Management writes must pass one shared matrix: VERIFIED probe, exact 3.1.18 legacy adapter, and the action/scope/direction-specific capability; recovery keeps the same exact baseline.
 - API error envelopes recursively redact upstream evidence by field and value; production error logging must not emit exception tracebacks.
+- Release rollback only copies local storage and changes application version; uncertain external operations remain manual and are never automatically replayed.
 
 ## 2026-09-10 01:05:00 CST - US-247
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -74,4 +75,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Public capability fields are not sufficient authorization; write services must independently require the proven adapter/version/probe baseline and the exact directional capability.
   - Recovery only needs the corresponding list-read capability, but it must still reject an unproven adapter/version baseline before readback.
   - Full validation passed: compileall and 1754 tests.
+## 2026-09-10 01:36:00 CST - US-254
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added a local-only rollback policy and storage backup helper, plus a release/upgrade/rollback runbook covering evidence preservation, migration interruption, operation uncertainty, queue projection failure, and forward recovery. Added fault-window tests proving no automatic external replay and byte-for-byte source preservation during backup.
+- Files changed: `src/storage_engine/controllers/rollback.py`, `src/storage_engine/controllers/rollback_test.py`, `docs/operations/stage32-release-rollback.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Rollback must preserve all durable evidence and only change the application version; uncertain operation states require existing `VERIFY_EXTERNAL`/`RECOVER` flows.
+  - Local backup helpers should reject destinations inside the source and return aggregate summaries rather than filesystem paths.
+  - Targeted rollback tests and the full backend suite passed; no external services were contacted.
+---
 ---
