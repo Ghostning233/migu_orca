@@ -137,5 +137,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Patterns discovered: Keep target IDs and fresh external objects in a request-scoped resolved dataclass; only the action/projection digests are suitable for operation binding.
   - Gotchas encountered: Associated RSS targets must reject duplicate mapping IDs and missing snapshot members before sorting, otherwise a partial write set could be mistaken for the bound set.
-  - Useful context: Targeted management/model tests (43), Ruff, compileall, and `git diff --check` passed; no nearby CODEX.md exists for the edited module.
+- Useful context: Targeted management/model tests (43), Ruff, compileall, and `git diff --check` passed; no nearby CODEX.md exists for the edited module.
+---
+
+## 2026-09-09 00:00:00 +0800 - US-241
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the request-scoped management coordinator with strict confirmation, revision and capability gates, fresh target snapshot resolution, deterministic management binding, record CAS, PREPARED-to-IN_PROGRESS durability, injected at-most-once write execution, and fail-closed in-flight replay handling.
+- Files changed: `src/apps/migu_orca_web/tracking_management_service.py`, `src/apps/migu_orca_web/tracking_management_service_test.py`, `src/tracking_engine/models/tracking.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Management operations must bind both action and expected projection fingerprints before the tracking record CAS; the operation state gate is the only point that permits an external write.
+  - Gotchas encountered: A successful management write cannot be terminalized before US-242 readback; adapter exceptions must leave the durable operation `IN_PROGRESS` because the call may have reached Auto Bangumi.
+  - Useful context: The coordinator keeps upstream snapshots and write payloads request-scoped; only the operation ID and safe binding digests cross durable storage.
 ---

@@ -85,7 +85,7 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Build a common service skeleton; action-specific mutation semantics belong to US-242/243."
     },
     {
