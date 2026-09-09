@@ -101,7 +101,7 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
   next_action=OPEN_TRACKING`，并新增 `tracking_id/tracking_status/tracking_ready/safe_message`
   （US-222）；tracking 写失败不回滚已确认 Request，也不伪造 tracking 状态。
 
-- Stage 30（B-C1，US-228～US-235）把 Auto Bangumi 3.1.18 的只读 capability、番剧/RSS adapter、
+- Stage 30（B-C1，US-228～US-236，已完成并归档）把 Auto Bangumi 3.1.18 的只读 capability、番剧/RSS adapter、
   external mapping、对账和 `VERIFY_EXTERNAL` 放在 `ab_engine`/`tracking_engine` 与 Web sync service
   中；`POST /api/v1/autobangumi/capabilities`、`POST /api/v1/tracking/sync` 的 DTO、OpenAPI、
   inventory 与生成客户端必须保持同步。原始上游对象和 URL 只在 request-scoped adapter/service 内存中

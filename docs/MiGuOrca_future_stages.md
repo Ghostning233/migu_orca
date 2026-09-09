@@ -222,8 +222,8 @@ Stage 29 交付后，B-C 只能基于已冻结的 TrackingRecord 与 external ma
 
 ### Stage 30 已完成 B-C1：Auto Bangumi 只读能力与外部同步
 
-Stage 30 执行 PRD 为 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md`，US-228～US-235 已完成，US-236
-负责最终回归与归档。它交付 Auto Bangumi 3.1.18 capability、番剧/RSS 只读 adapter、安全投影、
+Stage 30 执行 PRD 为 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md`，US-228～US-236 已完成并归档。
+它交付 Auto Bangumi 3.1.18 capability、番剧/RSS 只读 adapter、安全投影、
 external mapping、严格对账、`EXTERNAL_ONLY` 记录、`POST /api/v1/tracking/sync` 与
 `VERIFY_EXTERNAL` 只读恢复；OpenAPI、endpoint inventory 和生成客户端已无漂移。未知版本与 API
 Token 管理读取 fail closed。Stage 30 不实现 modify、启停、删除、RSS 刷新或正式追番管理页面；

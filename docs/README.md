@@ -46,7 +46,7 @@
 - Stage 27：Vue/TypeScript/Vite 前端工程化与页面重构（US-197～US-209 全部完成，旧前端已删除）
 - Stage 28：草案一致性与原子保存确认（US-210～US-218 全部完成，已归档；只返回 ACCEPTED handoff，不创建 tracking record）
 - Stage 29：统一追番记录与可靠提交恢复（B-B，US-219～US-227 全部完成，已归档；不实现 Auto Bangumi 管理/外部同步，B-C handoff 见 future_stages）
-- Stage 30：Auto Bangumi 只读能力与外部同步基础（B-C1，US-228～US-235 已完成；US-236 为最终回归与归档；禁止外部管理写动作）
+- Stage 30：Auto Bangumi 只读能力与外部同步基础（B-C1，US-228～US-236 已完成并归档；禁止外部管理写动作）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

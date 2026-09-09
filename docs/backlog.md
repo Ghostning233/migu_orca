@@ -471,7 +471,7 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-025: 前端体验重构的后端支撑与 Auto Bangumi 管理契约
 
-- 状态：B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C1 已完成（Stage 30，US-228～US-235）；US-236 最终回归与归档待执行；B-C2～B-D 仍待评审
+- 状态：B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C1 已完成（Stage 30，US-228～US-236）；B-C2～B-D 仍待评审
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：20，P0
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_backend_support_PRD.md`
