@@ -121,6 +121,22 @@ def test_disable_requires_the_disable_capability_before_external_write(tmp_path:
     assert calls == []
 
 
+def test_subscription_disable_readback_derives_enabled_from_deleted(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client = _FakeClient()
+    result = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="disable-derived-from-deleted", confirm=True,
+        operation="SET_ENABLED", target_scope="SUBSCRIPTION", enabled=False,
+        management_client=client, write=lambda _target, _payload: {"status_code": 200},
+        readback=lambda _operation, _scope, _target: ResolvedManagementTarget(
+            scope="SUBSCRIPTION", subscription=ExternalSubscription("sub-1", "Test", 1, "Group", deleted=True),
+        ),
+    )
+    assert result["management_status"] == TRACKING_OPERATION_STATE_SUCCEEDED
+    assert load_tracking_record(config, record.tracking_id).status == "DISABLED"
+
+
 def test_modify_requires_matching_readback_and_persists_projection(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
     client, calls = _FakeClient(), []
@@ -154,6 +170,26 @@ def test_readback_mismatch_is_a_definite_failure_without_state_mutation(tmp_path
     assert result["outcome"] == "DEFINITE_FAILURE"
     assert load_tracking_operation(config, result["operation_id"]).state == "FAILED"
     assert load_tracking_record(config, record.tracking_id).status == record.status
+
+
+@pytest.mark.parametrize("response", [
+    {"status_code": 503},
+    {"transport_error": "timeout"},
+    {"transport_error": "connection"},
+    {"unexpected": "body"},
+])
+def test_write_timeout_connection_5xx_and_unknown_response_are_outcome_unknown(tmp_path: Path, response: dict) -> None:
+    config, record = _seed(tmp_path)
+    result = _run(config, record, _FakeClient(), [], write=lambda _target, _payload: response)
+    assert result["outcome"] == "OUTCOME_UNKNOWN"
+    assert load_tracking_operation(config, result["operation_id"]).state == "OUTCOME_UNKNOWN"
+
+
+@pytest.mark.parametrize("error", [TimeoutError(), ConnectionError()])
+def test_write_transport_exceptions_are_outcome_unknown(tmp_path: Path, error: Exception) -> None:
+    config, record = _seed(tmp_path)
+    result = _run(config, record, _FakeClient(), [], write=lambda _target, _payload: (_ for _ in ()).throw(error))
+    assert result["outcome"] == "OUTCOME_UNKNOWN"
 
 
 def test_subscription_delete_verifies_absence_without_touching_local_record(tmp_path: Path) -> None:
@@ -232,6 +268,39 @@ def test_management_verify_resolves_unknown_without_a_second_write(tmp_path: Pat
     assert load_tracking_operation(config, first["operation_id"]).state == TRACKING_OPERATION_STATE_FAILED
 
 
+def test_recovered_modify_and_rss_delete_restore_the_operation_previous_status(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    modify_client = _FakeClient()
+    first = _run(config, record, modify_client, [], write=lambda _target, _payload: {"transport_error": "timeout"})
+    modify_client.read_snapshot = lambda: (
+        modify_client.capabilities,
+        [ExternalSubscription("sub-1", "Changed", 1, "Group")],
+        [ExternalRss("7", "Feed", "https://rss.invalid")],
+    )
+    recovered = recover_tracking_management(
+        config, record=load_tracking_record(config, record.tracking_id),
+        operation=load_tracking_operation(config, first["operation_id"]), management_client=modify_client,
+    )
+    assert recovered["outcome"] == "SUCCESS"
+    assert load_tracking_record(config, record.tracking_id).status == record.status
+
+    config, record = _seed(tmp_path / "rss")
+    delete_client = _FakeClient()
+    first = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="recover-rss-delete", confirm=True, operation="DELETE_EXTERNAL",
+        target_scope="ASSOCIATED_RSS", management_client=delete_client,
+        write=lambda _target, _payload: {"transport_error": "timeout"},
+    )
+    delete_client.read_snapshot = lambda: (delete_client.capabilities, [ExternalSubscription("sub-1", "Test", 1, "Group")], [])
+    recovered = recover_tracking_management(
+        config, record=load_tracking_record(config, record.tracking_id),
+        operation=load_tracking_operation(config, first["operation_id"]), management_client=delete_client,
+    )
+    assert recovered["outcome"] == "SUCCESS"
+    assert load_tracking_record(config, record.tracking_id).status == record.status
+
+
 def test_management_refresh_recovery_never_infers_success(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
     first = run_tracking_management(
@@ -264,7 +333,7 @@ def test_terminal_same_key_replay_returns_persisted_outcome_without_external_io(
     current = load_tracking_record(config, record.tracking_id)
     reads = client.reads
     replay = _run(
-        config, current, client, calls,
+        config, record, client, calls,
         write=lambda *_args: (_ for _ in ()).throw(AssertionError("replay must not write")),
         idempotency_key="key-1",
     )
@@ -273,6 +342,10 @@ def test_terminal_same_key_replay_returns_persisted_outcome_without_external_io(
         "outcome": "SUCCESS", "needs_manual": False, "created": False,
     }
     assert client.reads == reads and len(calls) == 0
+
+    with pytest.raises(Stage1Error) as conflict:
+        _run(config, current, client, calls, idempotency_key="key-1")
+    assert conflict.value.error_type == "tracking_idempotency_conflict"
 
 
 @pytest.mark.parametrize("operation,scope,extra", [

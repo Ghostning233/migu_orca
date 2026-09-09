@@ -106,6 +106,16 @@ def test_detail_uses_a_fresh_request_scoped_login_and_escapes_id() -> None:
     assert transport.calls[1]["headers"]["Cookie"] == "token=detail-secret"
 
 
+def test_subscription_enabled_is_derived_from_31_18_deleted_not_response_enabled() -> None:
+    transport = RecordingTransport([
+        {"access_token": "detail-secret"},
+        {"data": {"id": "sub-42", "title_raw": "详情番剧", "deleted": True, "enabled": True}},
+    ])
+    subscription = create_legacy_31_management_client(_config(), transport=transport).get_subscription("sub-42")
+    assert subscription.deleted is True
+    assert subscription.enabled is False
+
+
 def test_unknown_version_stops_before_reading_lists_and_releases_token() -> None:
     transport = RecordingTransport([{"access_token": "secret"}, {"version": "3.1.17"}])
     client = create_legacy_31_management_client(_config(), transport=transport)

@@ -63,7 +63,7 @@ def test_complete_bodies_preserve_snapshot_fields_and_never_accept_url() -> None
         _record(), "SUBSCRIPTION", [ExternalSubscription("sub-1", "旧标题", 2, "旧组")], []
     )
     assert build_complete_subscription_update(sub_target, {"title": "新标题"}) == {
-        "title": "新标题", "season": 2, "subtitle_group": "旧组"
+        "official_title": "新标题", "season": 2, "group_name": "旧组", "deleted": False,
     }
 
     rss_target = resolve_management_target(
@@ -103,6 +103,22 @@ def test_complete_bodies_use_31_18_field_names_and_retain_snapshot_fields() -> N
         "name": "新名称", "url": "https://example.invalid/2", "aggregate": True,
         "parser": "mikan", "enabled": True,
     }
+
+
+def test_subscription_filter_patch_uses_the_existing_31_18_string_encoding() -> None:
+    target = resolve_management_target(
+        _record(), "SUBSCRIPTION", [ExternalSubscription(
+            "sub-1", "旧标题", 1, "组", upstream_fields={
+                "official_title": "旧标题", "season": 1, "group_name": "组",
+                "filter": "(?!)", "deleted": False,
+            },
+        )], [],
+    )
+    body = build_complete_subscription_update(target, {
+        "filter_rule": {"must_contain": "1080p", "must_not_contain": "合集", "use_regex": False, "case_sensitive": False},
+    })
+    assert body["filter"] == "(?is)(?:^(?!.*(?:1080p)).*$|.*(?:合集).*)"
+    assert not isinstance(body["filter"], dict)
 
 
 def test_binding_is_digest_only_and_deterministic() -> None:

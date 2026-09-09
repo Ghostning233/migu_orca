@@ -143,12 +143,10 @@ def run_tracking_management(
                         existing.request_fingerprint) == (
                             record.tracking_id, operation, target_scope,
                             binding.action_fingerprint)
-        # A terminal operation is replayable after its first call advanced the
-        # tracking revision.  The original expected revision remains durable
-        # binding evidence; requiring the caller to resend it makes replay
-        # impossible in the normal API flow.
-        if not same_binding or (existing.state not in TRACKING_OPERATION_TERMINAL_STATES
-                                and existing.expected_revision != expected_revision):
+        # A terminal operation is replayable only with its original revision.
+        # The durable revision is part of the external-action binding, even
+        # though the tracking record itself advanced after the first call.
+        if not same_binding or existing.expected_revision != expected_revision:
             raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         if existing.state in TRACKING_OPERATION_TERMINAL_STATES:
             outcome = {
@@ -175,7 +173,12 @@ def run_tracking_management(
     field = _capability_field(operation, target_scope, enabled)
     if field is None or getattr(effective_caps, field, "UNKNOWN") != "SUPPORTED":
         raise Stage1Error("tracking_management_capability_unknown", "当前 Auto Bangumi 管理能力未验证", "tracking_management")
-    target = resolve_management_target(record, target_scope, subscriptions, rss_items)
+    target = resolve_management_target(
+        record, target_scope, subscriptions, rss_items,
+        include_deleted_subscription=(
+            operation == TRACKING_OPERATION_KIND_SET_ENABLED and target_scope == "SUBSCRIPTION"
+        ),
+    )
     # The operation binds the projection expected after the write, not merely
     # the sparse browser patch.  The fresh snapshot is still request-scoped.
     if operation == TRACKING_OPERATION_KIND_MODIFY:
@@ -240,9 +243,15 @@ def run_tracking_management(
             return {"operation_id": in_progress.operation_id, "management_status": "IN_PROGRESS", "created": True}
 
         action_outcome = classify_management_action(
-            status_code=response.get("status_code") if isinstance(response, Mapping) and isinstance(response.get("status_code"), int) else 200,
+            status_code=(response.get("status_code") if isinstance(response, Mapping)
+                         and isinstance(response.get("status_code"), int) else None),
             transport_error=response.get("transport_error") if isinstance(response, Mapping) and isinstance(response.get("transport_error"), str) else None,
-            response_valid=not (isinstance(response, Mapping) and response.get("response_valid") is False),
+            response_valid=(
+                isinstance(response, Mapping)
+                and response.get("response_valid") is not False
+                and (isinstance(response.get("status_code"), int)
+                     or isinstance(response.get("transport_error"), str))
+            ),
         )
         if action_outcome != MANAGEMENT_OUTCOME_SUCCESS:
             return _finish_management(config=resolved_config, record=started,
@@ -325,12 +334,12 @@ def recover_tracking_management(
             status = (
                 TRACKING_STATUS_EXTERNAL_DELETED
                 if operation.target_scope == "SUBSCRIPTION"
-                else record.status
+                else operation.previous_tracking_status or record.status
             )
         elif operation.operation == TRACKING_OPERATION_KIND_SET_ENABLED:
             status = TRACKING_STATUS_ACTIVE if _target_enabled(target) else TRACKING_STATUS_DISABLED
         else:
-            status = TRACKING_STATUS_ACTIVE if record.status != TRACKING_STATUS_DISABLED else record.status
+            status = operation.previous_tracking_status or record.status
         return _persist_management_recovery(config, record, operation, status, "management_recovered", now, target, successful=True)
     if outcome == MANAGEMENT_OUTCOME_DEFINITE_FAILURE:
         status = operation.previous_tracking_status or record.status
@@ -341,7 +350,7 @@ def recover_tracking_management(
 def _target_enabled(target: Any) -> bool:
     if isinstance(target, ResolvedManagementTarget):
         if target.subscription is not None:
-            return target.subscription.enabled
+            return not target.subscription.deleted
         return bool(target.rss) and all(item.enabled for item in target.rss)
     return False
 
@@ -485,7 +494,12 @@ def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRe
             wanted = tuple(mapping.get("rss_ids", ()))
             remaining = tuple(item for item in rss_items if item.external_id in wanted)
             return ResolvedManagementTarget(scope="ASSOCIATED_RSS", rss=tuple(sorted(remaining, key=lambda item: item.external_id)))
-    return resolve_management_target(record, scope, subscriptions, rss_items)
+    return resolve_management_target(
+        record, scope, subscriptions, rss_items,
+        include_deleted_subscription=(
+            operation == TRACKING_OPERATION_KIND_SET_ENABLED and scope == "SUBSCRIPTION"
+        ),
+    )
 
 
 def _projection_digest(value: Any, action: str, scope: str) -> str:
@@ -515,9 +529,12 @@ def _classify_target_readback(operation: str, scope: str, target: ResolvedManage
             if item.upstream_fields:
                 projection = dict(item.upstream_fields)
             else:
-                projection = {"title": item.title, "season": item.season, "subtitle_group": item.subtitle_group}
+                projection = {
+                    "official_title": item.title, "season": item.season,
+                    "group_name": item.subtitle_group, "deleted": item.deleted,
+                }
         else:
-            projection = {"enabled": item.enabled}
+            projection = {"enabled": not item.deleted}
         digest = _projection_digest(projection, operation, scope)
     else:
         items = actual.rss
@@ -581,23 +598,12 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
     next_record = replace(next_record, external_mapping=mapping)
     persistence_failed = False
     try:
-        final = compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
+        compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
         compare_and_swap_tracking_operation(config, operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
             transition_tracking_operation(operation, state=target_state, error_type=None if outcome == MANAGEMENT_OUTCOME_SUCCESS else reason, now=timestamp))
     except Exception:
         persistence_failed = True
-        final = transition_record(record, status=TRACKING_STATUS_RECOVERY_REQUIRED,
-            audit_action=TRACKING_AUDIT_MANAGEMENT_UNKNOWN, operation_id=operation_id,
-            reason_code="management_result_persist_failed", safe_message="管理结果未能安全保存，请人工恢复", now=timestamp)
-        with contextlib.suppress(Exception):
-            current = load_tracking_record(config, record.tracking_id)
-            compare_and_swap_tracking_record(
-                config, record.tracking_id, current.revision,
-                replace(final, revision=current.revision + 1),
-            )
-        with contextlib.suppress(Exception):
-            compare_and_swap_tracking_operation(config, operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
-                transition_tracking_operation(operation, state="RECOVERY_REQUIRED", error_type="management_result_persist_failed", now=timestamp))
+        _persist_management_storage_failure(config, record.tracking_id, operation, timestamp)
     persisted_state = "RECOVERY_REQUIRED" if persistence_failed else target_state
     if target_state == "RECOVERY_REQUIRED" and outcome != MANAGEMENT_OUTCOME_UNKNOWN:
         persisted_state = "RECOVERY_REQUIRED"
@@ -605,6 +611,40 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
             "outcome": outcome if not persistence_failed else MANAGEMENT_OUTCOME_UNKNOWN,
             "needs_manual": persisted_state == "RECOVERY_REQUIRED" or outcome == MANAGEMENT_OUTCOME_UNKNOWN,
             "created": True}
+
+
+def _persist_management_storage_failure(
+    config: StorageConfig, tracking_id: str, operation: TrackingOperation, timestamp: str,
+) -> None:
+    """Converge both durable records to recovery without reviving stale data.
+
+    We cannot make two independent atomic files transactional.  Therefore any
+    failure between them is never reported as success, and compensation always
+    reloads the current tracking record before a CAS.  A concurrent update is
+    left intact rather than being overwritten from the pre-write snapshot.
+    """
+    with contextlib.suppress(Exception):
+        current = load_tracking_record(config, tracking_id)
+        if current.current_operation_id == operation.operation_id:
+            recovery = transition_record(
+                current, status=TRACKING_STATUS_RECOVERY_REQUIRED,
+                audit_action=TRACKING_AUDIT_MANAGEMENT_UNKNOWN,
+                operation_id=operation.operation_id,
+                reason_code="management_result_persist_failed",
+                safe_message="管理结果未能安全保存，请人工恢复",
+                now=timestamp,
+            )
+            compare_and_swap_tracking_record(config, tracking_id, current.revision, recovery)
+    with contextlib.suppress(Exception):
+        current_operation = load_tracking_operation(config, operation.operation_id)
+        if current_operation.state == TRACKING_OPERATION_STATE_IN_PROGRESS:
+            compare_and_swap_tracking_operation(
+                config, operation.operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
+                transition_tracking_operation(
+                    current_operation, state="RECOVERY_REQUIRED",
+                    error_type="management_result_persist_failed", now=timestamp,
+                ),
+            )
 
 
 def _safe_patch(operation: str, scope: str, patch: Mapping[str, Any] | None, enabled: bool | None) -> dict[str, Any] | None:

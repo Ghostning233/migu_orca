@@ -284,9 +284,10 @@ def _subscription(value: Any) -> ExternalSubscription:
     deleted = value.get("deleted", False)
     if not isinstance(deleted, bool):
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "deleted"})
-    enabled = value.get("enabled", True)
-    if not isinstance(enabled, bool):
-        raise Stage1Error("invalid_ab_response", "Auto Bangumi 番剧响应字段无效", "ab_management", {"field": "enabled"})
+    # 3.1.18 represents a disabled Bangumi through ``deleted``.  It has no
+    # independent enabled flag, so accepting an incidental field here would
+    # make a disable write look enabled again during mandatory readback.
+    enabled = not deleted
     # Keep the complete request-scoped upstream model so PATCH can satisfy
     # BangumiUpdate without dropping fields unknown to the public DTO.
     fields = {key: value[key] for key in (

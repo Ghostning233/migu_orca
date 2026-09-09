@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from ab_engine.controllers.subscription_payload import _legacy_31_filter
 from ab_engine.models.management import ExternalRss, ExternalSubscription
 from shared.errors import Stage1Error
 from tracking_engine.controllers.management_operation import canonical_management_fingerprint
@@ -56,6 +57,8 @@ def resolve_management_target(
     scope: str,
     subscriptions: Sequence[ExternalSubscription],
     rss_items: Sequence[ExternalRss],
+    *,
+    include_deleted_subscription: bool = False,
 ) -> ResolvedManagementTarget:
     """Resolve a public scope through the record's current mapping exactly once."""
     if scope not in {"SUBSCRIPTION", "ASSOCIATED_RSS"}:
@@ -68,7 +71,10 @@ def resolve_management_target(
         external_id = mapping.get("subscription_id")
         if not isinstance(external_id, str) or not external_id:
             raise _invalid("tracking_target_missing")
-        matches = [item for item in subscriptions if item.external_id == external_id and not item.deleted]
+        matches = [
+            item for item in subscriptions
+            if item.external_id == external_id and (include_deleted_subscription or not item.deleted)
+        ]
         if len(matches) != 1:
             raise _invalid("tracking_target_ambiguous" if len(matches) > 1 else "tracking_target_drift")
         return ResolvedManagementTarget(scope="SUBSCRIPTION", subscription=matches[0])
@@ -115,14 +121,19 @@ def build_complete_subscription_update(
         raise _invalid("invalid_management_target")
     safe_patch = build_management_patch("SUBSCRIPTION", patch)
     current = target.subscription
-    if current.upstream_fields:
-        body = dict(current.upstream_fields)
-        aliases = {"title": "official_title", "subtitle_group": "group_name",
-                   "filter_rule": "filter", "expected_folder_name": "save_path"}
-        body.update({aliases.get(key, key): value for key, value in safe_patch.items()})
-    else:
-        body = {"title": current.title, "season": current.season, "subtitle_group": current.subtitle_group}
-        body.update(safe_patch)
+    body = dict(current.upstream_fields) if current.upstream_fields else {
+        "official_title": current.title,
+        "season": current.season,
+        "group_name": current.subtitle_group,
+        "deleted": current.deleted,
+    }
+    aliases = {"title": "official_title", "subtitle_group": "group_name",
+               "filter_rule": "filter", "expected_folder_name": "save_path"}
+    for key, value in safe_patch.items():
+        upstream_key = aliases.get(key, key)
+        # Bangumi.filter is a 3.1.18 regex string, never MiGuOrca's
+        # structured public filter-rule object.
+        body[upstream_key] = _legacy_31_filter(value) if key == "filter_rule" else value
     return body
 
 

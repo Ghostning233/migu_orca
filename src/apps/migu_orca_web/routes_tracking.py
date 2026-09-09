@@ -284,6 +284,12 @@ def _management_writer(client: AutoBangumiManagementClient, action: str):
         ]
         if statuses and all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
             return {"status_code": 200}
+        # A batch with both accepted and rejected RSS writes has an externally
+        # indeterminate aggregate outcome.  It must not inherit the first
+        # rejected status as a definite failure.
+        if (any(isinstance(status, int) and 200 <= status < 300 for status in statuses)
+                and any(not isinstance(status, int) or not 200 <= status < 300 for status in statuses)):
+            return {"transport_error": "unknown"}
         return {"status_code": next((status for status in statuses if isinstance(status, int)), 502)}
     return write
 

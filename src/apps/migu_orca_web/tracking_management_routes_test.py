@@ -5,7 +5,9 @@ from typing import Any
 import pytest
 
 import apps.migu_orca_web.routes_tracking as routes_tracking
+from ab_engine.models.management import ExternalRss
 from apps.base import create_app
+from tracking_engine.controllers.management_target import ResolvedManagementTarget
 from tracking_engine.models.tracking import create_external_tracking_record
 
 
@@ -72,3 +74,18 @@ def test_management_result_distinguishes_explicit_failure_from_unknown(monkeypat
     assert result["needs_manual"] is False
     assert result["safe_message"] == "管理操作明确失败，外部系统未确认应用"
     assert result["outcome"] == "DEFINITE_FAILURE"
+
+
+def test_rss_mixed_write_statuses_are_not_reduced_to_the_first_failure() -> None:
+    class Client:
+        def delete_rss(self, external_id: str) -> dict[str, object]:
+            return {"status": external_id == "2"}
+
+    result = routes_tracking._management_writer(Client(), "DELETE_EXTERNAL")(
+        ResolvedManagementTarget(
+            scope="ASSOCIATED_RSS",
+            rss=(ExternalRss("1", "one", "https://rss.invalid/1"), ExternalRss("2", "two", "https://rss.invalid/2")),
+        ),
+        None,
+    )
+    assert result == {"transport_error": "unknown"}
