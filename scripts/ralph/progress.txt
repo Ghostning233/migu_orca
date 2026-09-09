@@ -74,3 +74,9 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
     feature-probe export; v2 validation uses a separate complete-kind set for compatibility.
   - Useful context: Targeted operation/repository tests (78), compileall, Ruff, and git diff check passed.
 ---
+
+## 2026-09-09 00:00:00 +0800 - US-237 审核修复
+- 审核问题：`TRACKING_OPERATION_KINDS` 被错误保留为仅 `SUBMIT`，不符合本阶段五种 operation 的公开契约；纯分类器缺少定向测试。
+- 修复：公开 operation 集合改为完整 v2 集合，并新增指纹、动作分类、回查分类测试。
+- 验证：85 passed；Ruff、compileall、`git diff --check` 通过。
+---

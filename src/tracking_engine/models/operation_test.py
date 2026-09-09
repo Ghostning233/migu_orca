@@ -13,6 +13,10 @@ from dataclasses import replace
 import pytest
 
 from tracking_engine.models.operation import (
+    TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
+    TRACKING_OPERATION_KIND_MODIFY,
+    TRACKING_OPERATION_KIND_REFRESH_RSS,
+    TRACKING_OPERATION_KIND_SET_ENABLED,
     TRACKING_OPERATION_KIND_SUBMIT,
     TRACKING_OPERATION_KINDS,
     TRACKING_OPERATION_SCHEMA_VERSION,
@@ -129,7 +133,6 @@ def test_create_operation_trims_safe_strings_and_derives_id() -> None:
         lambda: dict(expected_revision=0),
         lambda: dict(expected_revision=-3),
         lambda: dict(expected_revision=True),
-        lambda: dict(operation="MODIFY"),
         lambda: dict(attempt=0),
         lambda: dict(attempt=True),
     ],
@@ -146,8 +149,16 @@ def test_create_operation_rejects_invalid_bindings(mutator: object) -> None:
         create_tracking_operation(now=NOW, **kwargs)
 
 
-def test_operation_kind_set_is_submit_only_for_stage29() -> None:
-    assert frozenset({TRACKING_OPERATION_KIND_SUBMIT}) == TRACKING_OPERATION_KINDS
+def test_operation_kind_set_accepts_submit_and_all_management_actions() -> None:
+    assert frozenset(
+        {
+            TRACKING_OPERATION_KIND_SUBMIT,
+            TRACKING_OPERATION_KIND_MODIFY,
+            TRACKING_OPERATION_KIND_SET_ENABLED,
+            TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
+            TRACKING_OPERATION_KIND_REFRESH_RSS,
+        }
+    ) == TRACKING_OPERATION_KINDS
 
 
 def test_transition_to_in_progress_is_allowed_from_prepared() -> None:
