@@ -1,7 +1,6 @@
 # Ralph Progress Log
 Started: Thu Sep 10 00:50:47 CST 2026
 ---
-
 ## Codebase Patterns
 - Flask `/api/v1` routes use `<path:param>` while OpenAPI uses `{param}`; normalize both forms when checking contract drift.
 - `docs/api/openapi.json` is deterministic output from `apps.migu_orca_web.openapi_gen`; regenerate it after changing contract metadata.
@@ -82,6 +81,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Rollback must preserve all durable evidence and only change the application version; uncertain operation states require existing `VERIFY_EXTERNAL`/`RECOVER` flows.
   - Local backup helpers should reject destinations inside the source and return aggregate summaries rather than filesystem paths.
-  - Targeted rollback tests and the full backend suite passed; no external services were contacted.
+- Targeted rollback tests and the full backend suite passed; no external services were contacted.
+---
+## 2026-09-10 01:39:37 CST - US-255
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Delivered versioned frontend contract handoff v1 covering F-B through F-F operation mappings, generated request/response type boundaries, tracking action/recovery matrix, confirmation/revision/idempotency rules, capability/error handling, sensitive-value boundaries, F-F Stage 32 merge gate, QueueView compatibility scope, and the `updated_episode` placeholder.
+- Files changed: `docs/api/frontend-contract-handoff-v1.md`, `frontend/src/api/generated/frontend-contract-handoff.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Type-only frontend contract fixtures can derive all request/result assertions from `operations` and `components` in the generated OpenAPI client without feature-local DTOs.
+  - The F-F management surface shares revision, confirmation, idempotency, and capability requirements; recovery must remain explicit for unknown external outcomes.
+  - Quality gates passed: compileall, 1764 backend tests, OpenAPI drift check, frontend typecheck/lint, 265 unit tests, and production build.
 ---
 ---
