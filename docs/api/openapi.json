@@ -6,6 +6,368 @@
     "description": "MiGuOrca /api/v1 公开契约。成功信封 `{ok: true, result}`；失败信封 `{ok: false, error_type, error_message, error_data}`。所有示例均为虚构脱敏值；`example.invalid` 为文档保留域。凭据字段标记为 `x-request-scoped`，绝不进入 storage、URL、浏览器 storage、日志或 trace。request_id/batch_id/draft_id/candidate_context 生命周期见 `docs/api/endpoint_inventory.md` §5.3。"
   },
   "paths": {
+    "/api/v1/autobangumi/capabilities": {
+      "post": {
+        "summary": "探测 Auto Bangumi 只读能力",
+        "description": "ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。",
+        "operationId": "probeAutoBangumiCapabilities",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "result"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "probe_status": {
+                          "enum": [
+                            "VERIFIED",
+                            "PARTIAL",
+                            "FAILED"
+                          ],
+                          "title": "Probe Status",
+                          "type": "string"
+                        },
+                        "version": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Version"
+                        },
+                        "adapter": {
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "legacy_3_1",
+                                "api_token"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Adapter"
+                        },
+                        "subscription_list": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Subscription List",
+                          "type": "string"
+                        },
+                        "subscription_detail": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Subscription Detail",
+                          "type": "string"
+                        },
+                        "subscription_modify": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Subscription Modify",
+                          "type": "string"
+                        },
+                        "subscription_enable": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Subscription Enable",
+                          "type": "string"
+                        },
+                        "subscription_disable": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Subscription Disable",
+                          "type": "string"
+                        },
+                        "subscription_delete": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Subscription Delete",
+                          "type": "string"
+                        },
+                        "rss_list": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Rss List",
+                          "type": "string"
+                        },
+                        "rss_modify": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Rss Modify",
+                          "type": "string"
+                        },
+                        "rss_enable": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Rss Enable",
+                          "type": "string"
+                        },
+                        "rss_disable": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Rss Disable",
+                          "type": "string"
+                        },
+                        "rss_delete": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Rss Delete",
+                          "type": "string"
+                        },
+                        "rss_refresh": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Rss Refresh",
+                          "type": "string"
+                        },
+                        "external_verify": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "External Verify",
+                          "type": "string"
+                        },
+                        "checked_at": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Checked At"
+                        },
+                        "safe_message": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Safe Message"
+                        }
+                      },
+                      "required": [
+                        "probe_status",
+                        "version",
+                        "adapter",
+                        "subscription_list",
+                        "subscription_detail",
+                        "subscription_modify",
+                        "subscription_enable",
+                        "subscription_disable",
+                        "subscription_delete",
+                        "rss_list",
+                        "rss_modify",
+                        "rss_enable",
+                        "rss_disable",
+                        "rss_delete",
+                        "rss_refresh",
+                        "external_verify",
+                        "checked_at",
+                        "safe_message"
+                      ],
+                      "title": "AutoBangumiCapabilitiesDTO",
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true,
+                  "result": {
+                    "probe_status": "示例",
+                    "version": "示例",
+                    "adapter": "示例",
+                    "subscription_list": "示例",
+                    "subscription_detail": "示例",
+                    "subscription_modify": "示例",
+                    "subscription_enable": "示例",
+                    "subscription_disable": "示例",
+                    "subscription_delete": "示例",
+                    "rss_list": "示例",
+                    "rss_modify": "示例",
+                    "rss_enable": "示例",
+                    "rss_disable": "示例",
+                    "rss_delete": "示例",
+                    "rss_refresh": "示例",
+                    "external_verify": "示例",
+                    "checked_at": "示例",
+                    "safe_message": "示例"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "config_error: Auto Bangumi 配置无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "config_error",
+                  "error_message": "Auto Bangumi 配置无效",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ab_config"
+                ],
+                "properties": {
+                  "ab_config": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "x-request-scoped": true,
+                    "properties": {
+                      "auth_mode": {
+                        "type": "string",
+                        "enum": [
+                          "password",
+                          "api_token"
+                        ]
+                      },
+                      "base_url": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "username": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "password": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "token": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "fallback_enabled": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "auth_mode",
+                      "fallback_enabled"
+                    ]
+                  }
+                }
+              },
+              "example": {}
+            }
+          },
+          "description": "探测 Auto Bangumi 只读能力"
+        }
+      }
+    },
     "/api/v1/autobangumi/test-connection": {
       "post": {
         "summary": "测试 Auto Bangumi 连接",
@@ -8121,6 +8483,722 @@
             }
           }
         ]
+      }
+    },
+    "/api/v1/tracking/sync": {
+      "post": {
+        "summary": "同步外部追番安全投影",
+        "description": "US-233：使用 request-scoped Auto Bangumi 配置执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。",
+        "operationId": "syncTrackingItems",
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "ok",
+                    "result"
+                  ],
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "sync_status": {
+                          "enum": [
+                            "COMPLETE",
+                            "PARTIAL",
+                            "FAILED"
+                          ],
+                          "title": "Sync Status",
+                          "type": "string"
+                        },
+                        "checked_at": {
+                          "title": "Checked At",
+                          "type": "string"
+                        },
+                        "capabilities": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "probe_status": {
+                              "enum": [
+                                "VERIFIED",
+                                "PARTIAL",
+                                "FAILED"
+                              ],
+                              "title": "Probe Status",
+                              "type": "string"
+                            },
+                            "version": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Version"
+                            },
+                            "adapter": {
+                              "anyOf": [
+                                {
+                                  "enum": [
+                                    "legacy_3_1",
+                                    "api_token"
+                                  ],
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Adapter"
+                            },
+                            "subscription_list": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Subscription List",
+                              "type": "string"
+                            },
+                            "subscription_detail": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Subscription Detail",
+                              "type": "string"
+                            },
+                            "subscription_modify": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Subscription Modify",
+                              "type": "string"
+                            },
+                            "subscription_enable": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Subscription Enable",
+                              "type": "string"
+                            },
+                            "subscription_disable": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Subscription Disable",
+                              "type": "string"
+                            },
+                            "subscription_delete": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Subscription Delete",
+                              "type": "string"
+                            },
+                            "rss_list": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Rss List",
+                              "type": "string"
+                            },
+                            "rss_modify": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Rss Modify",
+                              "type": "string"
+                            },
+                            "rss_enable": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Rss Enable",
+                              "type": "string"
+                            },
+                            "rss_disable": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Rss Disable",
+                              "type": "string"
+                            },
+                            "rss_delete": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Rss Delete",
+                              "type": "string"
+                            },
+                            "rss_refresh": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Rss Refresh",
+                              "type": "string"
+                            },
+                            "external_verify": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "External Verify",
+                              "type": "string"
+                            },
+                            "checked_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Checked At"
+                            },
+                            "safe_message": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Safe Message"
+                            }
+                          },
+                          "required": [
+                            "probe_status",
+                            "version",
+                            "adapter",
+                            "subscription_list",
+                            "subscription_detail",
+                            "subscription_modify",
+                            "subscription_enable",
+                            "subscription_disable",
+                            "subscription_delete",
+                            "rss_list",
+                            "rss_modify",
+                            "rss_enable",
+                            "rss_disable",
+                            "rss_delete",
+                            "rss_refresh",
+                            "external_verify",
+                            "checked_at",
+                            "safe_message"
+                          ],
+                          "title": "AutoBangumiCapabilitiesDTO",
+                          "type": "object"
+                        },
+                        "summary": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "checked": {
+                              "title": "Checked",
+                              "type": "integer"
+                            },
+                            "created": {
+                              "title": "Created",
+                              "type": "integer"
+                            },
+                            "updated": {
+                              "title": "Updated",
+                              "type": "integer"
+                            },
+                            "unchanged": {
+                              "title": "Unchanged",
+                              "type": "integer"
+                            },
+                            "external_only": {
+                              "title": "External Only",
+                              "type": "integer"
+                            },
+                            "failed": {
+                              "title": "Failed",
+                              "type": "integer"
+                            },
+                            "unreadable": {
+                              "title": "Unreadable",
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "checked",
+                            "created",
+                            "updated",
+                            "unchanged",
+                            "external_only",
+                            "failed",
+                            "unreadable"
+                          ],
+                          "title": "TrackingSyncSummaryDTO",
+                          "type": "object"
+                        },
+                        "warnings": {
+                          "items": {
+                            "type": "string"
+                          },
+                          "title": "Warnings",
+                          "type": "array"
+                        },
+                        "items": {
+                          "items": {
+                            "additionalProperties": false,
+                            "description": "One unified tracking list item (Stage 29 PRD §11.2).\n\n``updated_episode`` is always null and ``updated_episode_status`` is always\nNOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).\n``poster_path`` may only be a same-origin opaque poster proxy route.",
+                            "properties": {
+                              "tracking_id": {
+                                "title": "Tracking Id",
+                                "type": "string"
+                              },
+                              "request_id": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Request Id"
+                              },
+                              "title": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Title"
+                              },
+                              "season": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Season"
+                              },
+                              "subtitle_group": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Subtitle Group"
+                              },
+                              "poster_path": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Poster Path"
+                              },
+                              "status": {
+                                "title": "Status",
+                                "type": "string"
+                              },
+                              "status_label": {
+                                "title": "Status Label",
+                                "type": "string"
+                              },
+                              "status_group": {
+                                "title": "Status Group",
+                                "type": "string"
+                              },
+                              "available_actions": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
+                                  "properties": {
+                                    "code": {
+                                      "title": "Code",
+                                      "type": "string"
+                                    },
+                                    "label": {
+                                      "title": "Label",
+                                      "type": "string"
+                                    },
+                                    "style": {
+                                      "title": "Style",
+                                      "type": "string"
+                                    },
+                                    "requires_confirmation": {
+                                      "title": "Requires Confirmation",
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "required": [
+                                    "code",
+                                    "label",
+                                    "style",
+                                    "requires_confirmation"
+                                  ],
+                                  "title": "TrackingAvailableActionDTO",
+                                  "type": "object"
+                                },
+                                "title": "Available Actions",
+                                "type": "array"
+                              },
+                              "valid_resource_count": {
+                                "default": 0,
+                                "title": "Valid Resource Count",
+                                "type": "integer"
+                              },
+                              "updated_episode": {
+                                "default": null,
+                                "title": "Updated Episode",
+                                "type": "null"
+                              },
+                              "updated_episode_status": {
+                                "const": "NOT_IMPLEMENTED",
+                                "default": "NOT_IMPLEMENTED",
+                                "title": "Updated Episode Status",
+                                "type": "string"
+                              },
+                              "total_episodes": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Total Episodes"
+                              },
+                              "revision": {
+                                "title": "Revision",
+                                "type": "integer"
+                              },
+                              "updated_at": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "default": null,
+                                "title": "Updated At"
+                              }
+                            },
+                            "required": [
+                              "tracking_id",
+                              "status",
+                              "status_label",
+                              "status_group",
+                              "revision"
+                            ],
+                            "title": "TrackingItemDTO",
+                            "type": "object"
+                          },
+                          "title": "Items",
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "sync_status",
+                        "checked_at",
+                        "capabilities",
+                        "summary"
+                      ],
+                      "title": "TrackingSyncResultDTO",
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "ok": true,
+                  "result": {
+                    "sync_status": "示例",
+                    "checked_at": "示例",
+                    "capabilities": {
+                      "probe_status": "示例",
+                      "version": "示例",
+                      "adapter": "示例",
+                      "subscription_list": "示例",
+                      "subscription_detail": "示例",
+                      "subscription_modify": "示例",
+                      "subscription_enable": "示例",
+                      "subscription_disable": "示例",
+                      "subscription_delete": "示例",
+                      "rss_list": "示例",
+                      "rss_modify": "示例",
+                      "rss_enable": "示例",
+                      "rss_disable": "示例",
+                      "rss_delete": "示例",
+                      "rss_refresh": "示例",
+                      "external_verify": "示例",
+                      "checked_at": "示例",
+                      "safe_message": "示例"
+                    },
+                    "summary": {
+                      "checked": 1,
+                      "created": 1,
+                      "updated": 1,
+                      "unchanged": 1,
+                      "external_only": 1,
+                      "failed": 1,
+                      "unreadable": 1
+                    },
+                    "warnings": [],
+                    "items": [
+                      {
+                        "tracking_id": "示例",
+                        "request_id": null,
+                        "title": null,
+                        "season": null,
+                        "subtitle_group": null,
+                        "poster_path": null,
+                        "status": "示例",
+                        "status_label": "示例",
+                        "status_group": "示例",
+                        "available_actions": [
+                          {
+                            "code": "示例",
+                            "label": "示例",
+                            "style": "示例",
+                            "requires_confirmation": true
+                          }
+                        ],
+                        "valid_resource_count": 0,
+                        "updated_episode": null,
+                        "updated_episode_status": "NOT_IMPLEMENTED",
+                        "total_episodes": null,
+                        "revision": 1,
+                        "updated_at": null
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / config_error: Auto Bangumi 配置无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "data_validation_errors",
+                  "error_message": "请求参数校验失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "tracking_storage_error: 追番同步存储失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": false,
+                  "description": "Failed envelope: ``{\"ok\": false, \"error_type\", \"error_message\", ...}``.\n\n``error_data`` is optional and, when present, always carries at least a\n``failed_step`` plus endpoint-specific safe details.",
+                  "properties": {
+                    "ok": {
+                      "description": "Always false for failures.",
+                      "title": "Ok",
+                      "type": "boolean"
+                    },
+                    "error_type": {
+                      "title": "Error Type",
+                      "type": "string"
+                    },
+                    "error_message": {
+                      "title": "Error Message",
+                      "type": "string"
+                    },
+                    "error_data": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": true,
+                          "type": "object"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "default": null,
+                      "title": "Error Data"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "error_type",
+                    "error_message"
+                  ],
+                  "title": "ApiErrorEnvelope",
+                  "type": "object"
+                },
+                "example": {
+                  "ok": false,
+                  "error_type": "tracking_storage_error",
+                  "error_message": "追番同步存储失败",
+                  "error_data": {
+                    "failed_step": "示例步骤"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "ab_config",
+                  "confirm"
+                ],
+                "properties": {
+                  "ab_config": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "x-request-scoped": true,
+                    "properties": {
+                      "auth_mode": {
+                        "type": "string",
+                        "enum": [
+                          "password",
+                          "api_token"
+                        ]
+                      },
+                      "base_url": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "username": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "password": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "token": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "fallback_enabled": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "auth_mode",
+                      "fallback_enabled"
+                    ]
+                  },
+                  "storage_dir": {
+                    "type": "string"
+                  },
+                  "confirm": {
+                    "const": true
+                  }
+                }
+              },
+              "example": {
+                "confirm": true
+              }
+            }
+          },
+          "description": "同步外部追番安全投影"
+        }
       }
     },
     "/api/v1/batches/{batch_id}/accept": {
@@ -19793,15 +20871,57 @@
                         "external_mapping": {
                           "anyOf": [
                             {
-                              "additionalProperties": true,
+                              "additionalProperties": false,
+                              "description": "Safe external state summary; opaque external identifiers stay server-side.",
+                              "properties": {
+                                "match_reason": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Match Reason"
+                                },
+                                "external_deleted": {
+                                  "default": false,
+                                  "title": "External Deleted",
+                                  "type": "boolean"
+                                },
+                                "enabled": {
+                                  "default": false,
+                                  "title": "Enabled",
+                                  "type": "boolean"
+                                },
+                                "missing_sync_count": {
+                                  "default": 0,
+                                  "title": "Missing Sync Count",
+                                  "type": "integer"
+                                },
+                                "last_verified_at": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Last Verified At"
+                                }
+                              },
+                              "title": "TrackingExternalSummaryDTO",
                               "type": "object"
                             },
                             {
                               "type": "null"
                             }
                           ],
-                          "default": null,
-                          "title": "External Mapping"
+                          "default": null
                         },
                         "audit_events": {
                           "items": {
@@ -20173,7 +21293,7 @@
     "/api/v1/tracking/items/{tracking_id}/recover": {
       "post": {
         "summary": "恢复统一追番记录（AUTO 纯本地或人工核验）",
-        "description": "US-226：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 只允许 AUTO/MARK_SUCCEEDED/MARK_FAILED：AUTO 只读取本地 operation、Request 脱敏 AB result 等证据，不访问外部系统，无明确证据时保持 RECOVERY_REQUIRED；两个人工动作必须 confirm=true 并写 USER 审计；MARK_SUCCEEDED 不接收外部 ID/URL/原始结果。已落盘恢复结果（ACTIVE/SUBMIT_FAILED/RECOVERY_REQUIRED）仍返回 HTTP 200。expected_revision 过期 → 409 tracking_revision_conflict；非可恢复状态 → 409 tracking_state_conflict；人工动作未确认 → 400 tracking_confirmation_required。",
+        "description": "US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。",
         "operationId": "recoverTrackingItem",
         "responses": {
           "200": {
@@ -20699,9 +21819,10 @@
                     "enum": [
                       "AUTO",
                       "MARK_SUCCEEDED",
-                      "MARK_FAILED"
+                      "MARK_FAILED",
+                      "VERIFY_EXTERNAL"
                     ],
-                    "description": "恢复动作：AUTO=纯本地自动恢复；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。"
+                    "description": "恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 request-scoped ab_config）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。"
                   },
                   "confirm": {
                     "type": "boolean",
@@ -20710,6 +21831,44 @@
                   "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
+                  },
+                  "ab_config": {
+                    "type": "object",
+                    "x-request-scoped": true,
+                    "description": "仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。",
+                    "properties": {
+                      "auth_mode": {
+                        "type": "string",
+                        "enum": [
+                          "password",
+                          "api_token"
+                        ]
+                      },
+                      "base_url": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "username": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "password": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "token": {
+                        "type": "string",
+                        "x-request-scoped": true
+                      },
+                      "fallback_enabled": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "auth_mode",
+                      "base_url",
+                      "fallback_enabled"
+                    ]
                   }
                 }
               },

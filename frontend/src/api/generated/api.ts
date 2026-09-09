@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/autobangumi/capabilities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 探测 Auto Bangumi 只读能力
+         * @description ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。
+         */
+        post: operations["probeAutoBangumiCapabilities"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/autobangumi/test-connection": {
         parameters: {
             query?: never;
@@ -215,6 +235,26 @@ export interface paths {
         get: operations["listTrackingItems"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracking/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * 同步外部追番安全投影
+         * @description US-233：使用 request-scoped Auto Bangumi 配置执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。
+         */
+        post: operations["syncTrackingItems"];
         delete?: never;
         options?: never;
         head?: never;
@@ -505,7 +545,7 @@ export interface paths {
         put?: never;
         /**
          * 恢复统一追番记录（AUTO 纯本地或人工核验）
-         * @description US-226：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 只允许 AUTO/MARK_SUCCEEDED/MARK_FAILED：AUTO 只读取本地 operation、Request 脱敏 AB result 等证据，不访问外部系统，无明确证据时保持 RECOVERY_REQUIRED；两个人工动作必须 confirm=true 并写 USER 审计；MARK_SUCCEEDED 不接收外部 ID/URL/原始结果。已落盘恢复结果（ACTIVE/SUBMIT_FAILED/RECOVERY_REQUIRED）仍返回 HTTP 200。expected_revision 过期 → 409 tracking_revision_conflict；非可恢复状态 → 409 tracking_state_conflict；人工动作未确认 → 400 tracking_confirmation_required。
+         * @description US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。
          */
         post: operations["recoverTrackingItem"];
         delete?: never;
@@ -617,6 +657,187 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    probeAutoBangumiCapabilities: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 探测 Auto Bangumi 只读能力 */
+        requestBody: {
+            content: {
+                /** @example {} */
+                "application/json": {
+                    ab_config: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url?: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "probe_status": "示例",
+                     *         "version": "示例",
+                     *         "adapter": "示例",
+                     *         "subscription_list": "示例",
+                     *         "subscription_detail": "示例",
+                     *         "subscription_modify": "示例",
+                     *         "subscription_enable": "示例",
+                     *         "subscription_disable": "示例",
+                     *         "subscription_delete": "示例",
+                     *         "rss_list": "示例",
+                     *         "rss_modify": "示例",
+                     *         "rss_enable": "示例",
+                     *         "rss_disable": "示例",
+                     *         "rss_delete": "示例",
+                     *         "rss_refresh": "示例",
+                     *         "external_verify": "示例",
+                     *         "checked_at": "示例",
+                     *         "safe_message": "示例"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /** AutoBangumiCapabilitiesDTO */
+                        result: {
+                            /**
+                             * Probe Status
+                             * @enum {string}
+                             */
+                            probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                            /** Version */
+                            version: string | null;
+                            /** Adapter */
+                            adapter: ("legacy_3_1" | "api_token") | null;
+                            /**
+                             * Subscription List
+                             * @enum {string}
+                             */
+                            subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Detail
+                             * @enum {string}
+                             */
+                            subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Modify
+                             * @enum {string}
+                             */
+                            subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Enable
+                             * @enum {string}
+                             */
+                            subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Disable
+                             * @enum {string}
+                             */
+                            subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Delete
+                             * @enum {string}
+                             */
+                            subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss List
+                             * @enum {string}
+                             */
+                            rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Modify
+                             * @enum {string}
+                             */
+                            rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Enable
+                             * @enum {string}
+                             */
+                            rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Disable
+                             * @enum {string}
+                             */
+                            rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Delete
+                             * @enum {string}
+                             */
+                            rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Rss Refresh
+                             * @enum {string}
+                             */
+                            rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * External Verify
+                             * @enum {string}
+                             */
+                            external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** Safe Message */
+                            safe_message: string | null;
+                        };
+                    };
+                };
+            };
+            /** @description config_error: Auto Bangumi 配置无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "config_error",
+                     *       "error_message": "Auto Bangumi 配置无效",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
     testAutoBangumiConnection: {
         parameters: {
             query?: never;
@@ -4862,6 +5083,375 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "storage_error",
                      *       "error_message": "读取追番记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    syncTrackingItems: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 同步外部追番安全投影 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "confirm": true
+                 *     }
+                 */
+                "application/json": {
+                    ab_config: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url?: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
+                    storage_dir?: string;
+                    /** @constant */
+                    confirm: true;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "sync_status": "示例",
+                     *         "checked_at": "示例",
+                     *         "capabilities": {
+                     *           "probe_status": "示例",
+                     *           "version": "示例",
+                     *           "adapter": "示例",
+                     *           "subscription_list": "示例",
+                     *           "subscription_detail": "示例",
+                     *           "subscription_modify": "示例",
+                     *           "subscription_enable": "示例",
+                     *           "subscription_disable": "示例",
+                     *           "subscription_delete": "示例",
+                     *           "rss_list": "示例",
+                     *           "rss_modify": "示例",
+                     *           "rss_enable": "示例",
+                     *           "rss_disable": "示例",
+                     *           "rss_delete": "示例",
+                     *           "rss_refresh": "示例",
+                     *           "external_verify": "示例",
+                     *           "checked_at": "示例",
+                     *           "safe_message": "示例"
+                     *         },
+                     *         "summary": {
+                     *           "checked": 1,
+                     *           "created": 1,
+                     *           "updated": 1,
+                     *           "unchanged": 1,
+                     *           "external_only": 1,
+                     *           "failed": 1,
+                     *           "unreadable": 1
+                     *         },
+                     *         "warnings": [],
+                     *         "items": [
+                     *           {
+                     *             "tracking_id": "示例",
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "season": null,
+                     *             "subtitle_group": null,
+                     *             "poster_path": null,
+                     *             "status": "示例",
+                     *             "status_label": "示例",
+                     *             "status_group": "示例",
+                     *             "available_actions": [
+                     *               {
+                     *                 "code": "示例",
+                     *                 "label": "示例",
+                     *                 "style": "示例",
+                     *                 "requires_confirmation": true
+                     *               }
+                     *             ],
+                     *             "valid_resource_count": 0,
+                     *             "updated_episode": null,
+                     *             "updated_episode_status": "NOT_IMPLEMENTED",
+                     *             "total_episodes": null,
+                     *             "revision": 1,
+                     *             "updated_at": null
+                     *           }
+                     *         ]
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /** TrackingSyncResultDTO */
+                        result: {
+                            /**
+                             * Sync Status
+                             * @enum {string}
+                             */
+                            sync_status: "COMPLETE" | "PARTIAL" | "FAILED";
+                            /** Checked At */
+                            checked_at: string;
+                            /** AutoBangumiCapabilitiesDTO */
+                            capabilities: {
+                                /**
+                                 * Probe Status
+                                 * @enum {string}
+                                 */
+                                probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                                /** Version */
+                                version: string | null;
+                                /** Adapter */
+                                adapter: ("legacy_3_1" | "api_token") | null;
+                                /**
+                                 * Subscription List
+                                 * @enum {string}
+                                 */
+                                subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Detail
+                                 * @enum {string}
+                                 */
+                                subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Modify
+                                 * @enum {string}
+                                 */
+                                subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Enable
+                                 * @enum {string}
+                                 */
+                                subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Disable
+                                 * @enum {string}
+                                 */
+                                subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Delete
+                                 * @enum {string}
+                                 */
+                                subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss List
+                                 * @enum {string}
+                                 */
+                                rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Modify
+                                 * @enum {string}
+                                 */
+                                rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Enable
+                                 * @enum {string}
+                                 */
+                                rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Disable
+                                 * @enum {string}
+                                 */
+                                rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Delete
+                                 * @enum {string}
+                                 */
+                                rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Refresh
+                                 * @enum {string}
+                                 */
+                                rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * External Verify
+                                 * @enum {string}
+                                 */
+                                external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /** Checked At */
+                                checked_at: string | null;
+                                /** Safe Message */
+                                safe_message: string | null;
+                            };
+                            /** TrackingSyncSummaryDTO */
+                            summary: {
+                                /** Checked */
+                                checked: number;
+                                /** Created */
+                                created: number;
+                                /** Updated */
+                                updated: number;
+                                /** Unchanged */
+                                unchanged: number;
+                                /** External Only */
+                                external_only: number;
+                                /** Failed */
+                                failed: number;
+                                /** Unreadable */
+                                unreadable: number;
+                            };
+                            /** Warnings */
+                            warnings?: string[];
+                            /** Items */
+                            items?: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Subtitle Group
+                                 * @default null
+                                 */
+                                subtitle_group: string | null;
+                                /**
+                                 * Poster Path
+                                 * @default null
+                                 */
+                                poster_path: string | null;
+                                /** Status */
+                                status: string;
+                                /** Status Label */
+                                status_label: string;
+                                /** Status Group */
+                                status_group: string;
+                                /** Available Actions */
+                                available_actions?: {
+                                    /** Code */
+                                    code: string;
+                                    /** Label */
+                                    label: string;
+                                    /** Style */
+                                    style: string;
+                                    /** Requires Confirmation */
+                                    requires_confirmation: boolean;
+                                }[];
+                                /**
+                                 * Valid Resource Count
+                                 * @default 0
+                                 */
+                                valid_resource_count: number;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** Revision */
+                                revision: number;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                            }[];
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须是服务器允许根目录下的相对目录 / config_error: Auto Bangumi 配置无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_storage_error: 追番同步存储失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_storage_error",
+                     *       "error_message": "追番同步存储失败",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -10981,12 +11571,33 @@ export interface operations {
                                 /** Recovery Action */
                                 recovery_action: string;
                             }[];
-                            /**
-                             * External Mapping
-                             * @default null
-                             */
+                            /** @default null */
                             external_mapping: {
-                                [key: string]: unknown;
+                                /**
+                                 * Match Reason
+                                 * @default null
+                                 */
+                                match_reason: string | null;
+                                /**
+                                 * External Deleted
+                                 * @default false
+                                 */
+                                external_deleted: boolean;
+                                /**
+                                 * Enabled
+                                 * @default false
+                                 */
+                                enabled: boolean;
+                                /**
+                                 * Missing Sync Count
+                                 * @default 0
+                                 */
+                                missing_sync_count: number;
+                                /**
+                                 * Last Verified At
+                                 * @default null
+                                 */
+                                last_verified_at: string | null;
                             } | null;
                             /** Audit Events */
                             audit_events?: {
@@ -11163,14 +11774,24 @@ export interface operations {
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 恢复）。 */
                     expected_revision: number;
                     /**
-                     * @description 恢复动作：AUTO=纯本地自动恢复；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
+                     * @description 恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 request-scoped ab_config）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。
                      * @enum {string}
                      */
-                    action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED";
+                    action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
                     /** @description 人工动作必须为 true；AUTO 忽略该字段。 */
                     confirm?: boolean;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
                     storage_dir?: string;
+                    /** @description 仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。 */
+                    ab_config?: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
                 };
             };
         };

@@ -9,6 +9,7 @@ from tracking_engine.controllers.recover import (
     RECOVERY_ACTION_AUTO,
     RECOVERY_ACTION_MARK_FAILED,
     RECOVERY_ACTION_MARK_SUCCEEDED,
+    RECOVERY_ACTION_VERIFY_EXTERNAL,
     RECOVERY_ACTIONS,
     AutoRecoveryDecision,
     RecoveryEvidence,
@@ -45,6 +46,7 @@ def test_recovery_actions_fixed_enum() -> None:
         RECOVERY_ACTION_AUTO,
         RECOVERY_ACTION_MARK_SUCCEEDED,
         RECOVERY_ACTION_MARK_FAILED,
+        RECOVERY_ACTION_VERIFY_EXTERNAL,
     } == RECOVERY_ACTIONS
 
 

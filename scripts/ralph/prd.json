@@ -1,19 +1,18 @@
 {
   "project": "MiGuOrca",
-  "branchName": "ralph/stage29-unified-tracking",
-  "description": "Stage 29：建立本地 TrackingRecord 与 TrackingOperation，以 Request 为方案内容权威、TrackingRecord 为新提交流程权威、旧 queue 为兼容投影；收敛新旧提交入口到统一可靠提交服务，提供列表/详情/复核/提交/重试/恢复 API。不实现 Auto Bangumi 全量管理和外部同步（B-C）。",
+  "branchName": "ralph/stage30-ab-read-sync",
+  "description": "Stage 30（B-C1）：为 Auto Bangumi 3.1.18 建立 capability、只读番剧/RSS adapter、安全投影、external mapping、严格对账、tracking sync 与 VERIFY_EXTERNAL。禁止外部管理写操作和正式前端页面。",
   "userStories": [
     {
-      "id": "US-219",
-      "title": "建立 TrackingRecord 模型、确定性 ID 与 repository",
-      "description": "作为后端开发者，我需要一个严格、版本化、原子写入的 TrackingRecord repository，以及确定性的 tracking_id，保证同一 Request 只产生一条记录。",
+      "id": "US-228",
+      "title": "冻结 3.1.18 只读管理模型与会话 adapter",
+      "description": "作为后端开发者，我需要一个只读、request-scoped 的 3.1.18 管理 adapter，以安全读取版本、番剧和 RSS。",
       "acceptanceCriteria": [
-        "新增 schema v1 严格白名单（schema_version/tracking_id/request_id/batch_id/origin/status/revision/request_fingerprint/plan_summary/external_mapping/current_operation_id/last_error/recovery/audit_events/created_at/updated_at/last_synced_at），未知字段 fail closed",
-        "确定性 opaque tracking_id（版本命名空间 + request_id 摘要），同一 Request 并发 ensure/重启/终态重放/迁移始终得到同一 ID",
-        "原子 repository：load/list/CAS/ensure，临时文件 + os.replace 原子写 + 进程内按键锁",
-        "storage layout 增加 tracking/tracking_operations/tracking_migrations 目录",
-        "每次状态变化、确认最新方案或人工恢复都令 revision + 1；审计内嵌 record 与状态变化原子写入",
-        "测试覆盖确定性、并发 ensure、revision CAS、损坏 JSON、路径逃逸和敏感字段缺失",
+        "建立 capability、内部 ExternalSubscription/ExternalRss 与安全投影模型；上游原始 URL 只能存在于 adapter/service 内存边界",
+        "password 模式一次登录并在同一请求内复用同源 token Cookie，支持 GET /api/v1/status、/api/v1/bangumi/get/all、/api/v1/bangumi/get/{id}、/api/v1/rss",
+        "recording fake transport 固定 method/path/header/response shape，并断言没有 modify/enable/disable/delete/refresh 等写或状态变更请求",
+        "非法/缺失/超大上游字段映射为稳定 Stage1Error，不回显原始响应、URL、Cookie 或凭据",
+        "自动化测试不访问真实 Auto Bangumi",
         "Typecheck passes",
         "Tests pass"
       ],
@@ -22,34 +21,32 @@
       "notes": ""
     },
     {
-      "id": "US-220",
-      "title": "建立 TrackingOperation 与提交幂等状态机",
-      "description": "作为后端开发者，我需要独立的 TrackingOperation repository 提供跨重启提交幂等和结果恢复证据，不扩展 Stage 28 仅服务 SAVE_CONFIRM 的幂等 repository。",
+      "id": "US-229",
+      "title": "提供 capability 探测服务与 API",
+      "description": "作为用户，我希望系统明确告诉我当前 Auto Bangumi 连接可安全使用哪些只读能力。",
       "acceptanceCriteria": [
-        "新增 operation repository（schema v1 白名单），operation 只允许 SUBMIT",
-        "operation state 固定 PREPARED/IN_PROGRESS/SUCCEEDED/FAILED/OUTCOME_UNKNOWN/RECOVERY_REQUIRED，PREPARED 表示幂等绑定已落盘但未调用外部",
-        "同一幂等键绑定 tracking_id/operation/expected_revision/request_fingerprint；同键同绑定重放相同公开结果，任一绑定不同返回 409 tracking_idempotency_conflict",
-        "按键并发锁；进程重启后可读取 IN_PROGRESS 和终态结果",
-        "operation 永不保存请求体、AB 配置、上游响应、标题、URL、magnet 或路径",
-        "测试覆盖绑定冲突、同键重放、重启恢复、损坏 JSON、敏感字段缺失",
+        "CapabilityState 固定 SUPPORTED/UNSUPPORTED/UNKNOWN，probe_status 固定 VERIFIED/PARTIAL/FAILED",
+        "password + 版本 3.1.18 仅把 subscription list/detail、rss list、external verify 标为 SUPPORTED；Stage 30 未实现写能力为 UNKNOWN",
+        "未知版本、探测失败与 API Token 管理读取全部 fail closed，不能推测支持",
+        "新增 POST /api/v1/autobangumi/capabilities，strict 请求/响应 DTO；成功与错误均不含完整地址、账号、密码、token、Cookie、header 或原始响应",
+        "同步 HTTP 分类、OpenAPI registry 的临时契约测试与 endpoint inventory 条目；最终生成文件留给 US-235 统一收尾",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 2,
       "passes": true,
-      "notes": ""
+      "notes": "已实现 request-scoped capability probe、严格 DTO、fail-closed unknown/failed 状态、POST API，并同步 endpoint inventory/OpenAPI/生成客户端。"
     },
     {
-      "id": "US-221",
-      "title": "实现历史数据幂等迁移",
-      "description": "作为用户，我希望历史单番、批量 queue 和已保存 AB result 能纯本地、幂等地回填到统一追番记录。",
+      "id": "US-230",
+      "title": "冻结 ExternalMapping v1 与外部孤立 TrackingRecord",
+      "description": "作为后端开发者，我需要稳定的外部映射和确定性的外部孤立记录，以便重复同步只产生一个追番条目。",
       "acceptanceCriteria": [
-        "manifest 记录 COMPLETE/PARTIAL、开始/完成时间和 created/existing/recovery_required/unreadable 计数；任意 tracking API 首次执行前运行 migration coordinator",
-        "只扫描本地 Request、batch queue 和 AB result，绝不访问外部系统",
-        "每个 Request 独立迁移，单条损坏不回滚健康记录；损坏项写 PARTIAL 且后续访问继续重试；COMPLETE 后不再全量扫描",
-        "覆盖 §10.2 证据优先级与映射（ACCEPTED Request/queue 各状态/AB result 成败与缺失/多 queue 冲突等）",
-        "重复运行不新增记录、不改变 tracking ID/revision、不重复审计事件；API 只返回安全计数和固定 warning，不返回文件名/路径/原始 JSON",
-        "测试证明纯本地、幂等、损坏安全报告、多 queue 收敛",
+        "新增 origin=EXTERNAL_SYNC、tracking_id_for_external(adapter, kind, external_id) 与 create_external_tracking_record，算法严格使用 PRD D30-09 的版本命名空间",
+        "ExternalMapping v1 严格白名单：schema_version/adapter/subscription_id/rss_ids/match_reason/external_deleted/enabled/missing_sync_count/last_verified_at",
+        "external ID/RSS ID 只允许有界 opaque token；rss_ids 有序去重且有数量上限；不得保存 URL、凭据、标题或原始响应",
+        "兼容读取 external_mapping=null 和 Stage 29 legacy opaque mapping；未知 nested schema 不被猜测改写",
+        "同一 adapter+kind+id 的重复 ensure 不新增记录、不 bump revision、不重复审计，request_id 必须为 null 且不伪造 Request",
         "Typecheck passes",
         "Tests pass"
       ],
@@ -58,15 +55,15 @@
       "notes": ""
     },
     {
-      "id": "US-222",
-      "title": "接入 accept/save-confirm handoff",
-      "description": "作为用户，我希望单番和批量确认后的方案进入同一个追番记录列表，并拿到 tracking handoff。",
+      "id": "US-231",
+      "title": "实现纯对账决策与状态映射",
+      "description": "作为用户，我希望本地方案和外部追番只在证据唯一时自动关联，避免同名番剧误绑定。",
       "acceptanceCriteria": [
-        "单番 accept、单番 save-confirm、批量 save-confirm 和终态重放都调用 ensure 收敛到同一 tracking_id",
-        "handoff 向后兼容扩展 tracking_id/tracking_status/tracking_ready/safe_message（保留 status=ACCEPTED 与 next_action=OPEN_TRACKING）",
-        "tracking 写入失败不回滚已确认 Request，也不伪造 tracking 状态；返回 tracking_ready=false + 安全 safe_message，后续访问可补偿",
-        "批量逐条返回 tracking_id/status/ready，一个 tracking 写入失败不回滚其他已确认条目",
-        "同步 DTO/OpenAPI/endpoint inventory/生成 TS client 且无漂移",
+        "纯 controller 不导入 storage/web，匹配顺序为已保存 external ID 优先，再使用正式标题+季度+字幕组并在双方可用时追加 RSS URL 内存等值证据",
+        "只有严格唯一候选可绑定；0 匹配生成 EXTERNAL_ONLY 决策；多匹配返回 AMBIGUOUS_EXTERNAL_MATCH 且不选择第一项",
+        "RSS URL 可参与当前内存比对，但不得进入决策持久化对象、日志、repr 或测试快照",
+        "状态映射覆盖 ACTIVE/DISABLED/EXTERNAL_DELETED/EXTERNAL_ONLY，SUBMITTING/REVALIDATING 等进行中状态不得被 sync 覆盖",
+        "同一输入重复分类结果确定；测试覆盖 ID 命中、唯一/零/多候选、字段冲突、外部 deleted 和进行中保护",
         "Typecheck passes",
         "Tests pass"
       ],
@@ -75,86 +72,89 @@
       "notes": ""
     },
     {
-      "id": "US-223",
-      "title": "提供 tracking 列表、详情与严格安全 DTO",
-      "description": "作为用户，我希望看到一个统一的追番管理列表和安全的方案详情。",
+      "id": "US-232",
+      "title": "实现 tracking 外部同步协调器",
+      "description": "作为用户，我希望一次只读同步能把本地记录和 Auto Bangumi 现状安全收敛，并允许部分失败。",
       "acceptanceCriteria": [
-        "新增 GET /api/v1/tracking/items 与 GET /api/v1/tracking/items/{tracking_id}，可读 operationId",
-        "列表支持安全 storage_dir、可选 q/status_group/sort（固定枚举），返回 summary 计数与 warnings",
-        "每条返回稳定 status、中文 status_label、status_group 和服务端计算 available_actions（不返回 disabled 假动作）",
-        "详情复用 Request safe-info，只额外返回当前 operation 安全摘要、revalidation issues、外部安全映射摘要和最近 20 条审计事件，不回显完整 Request/外部原始 JSON/完整 URL/凭据/magnet/绝对路径",
-        "单条损坏不阻塞健康列表（unreadable 计数 + 固定 warning，不暴露文件信息）",
-        "同步 OpenAPI/endpoint inventory/生成 TS client 且无漂移；Typecheck/Tests pass"
+        "服务顺序为 capability -> subscription/RSS read -> pure reconcile -> per-record ensure/CAS，不在 route 复制业务规则",
+        "完整、部分失败、失败三种结果返回安全 counts/warnings；任一列表读取失败不得把未知当空列表并标记 EXTERNAL_DELETED",
+        "重复同一完整 fixture 不新增记录、不重复审计、不改变业务 revision；实际持久化字段变化通过一次 CAS 同时写 revision+audit+mapping",
+        "外部孤立后来唯一关联本地时以 Request-backed tracking 为权威，旧外部记录只写安全 merged_into 指针且不再出现在默认列表，不删除历史文件",
+        "单条损坏、CAS 冲突或存储失败只计入 failed，不回滚健康项，不删除 Request/TrackingRecord/审计/媒体",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 5,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-224",
-      "title": "实现纯本地 revalidate 与方案变化确认",
-      "description": "作为用户，我希望提交前发现方案变化时要求确认最新方案，不会静默提交旧内容。",
+      "id": "US-233",
+      "title": "提供 tracking sync API 与安全列表投影",
+      "description": "作为用户，我希望通过统一 API 同步外部追番，并在现有追番列表看到安全结果。",
       "acceptanceCriteria": [
-        "新增 POST /api/v1/tracking/items/{tracking_id}/revalidate，请求只含 expected_revision 和可选 storage profile",
-        "纯本地操作：不接收 ab_config、不探测连接或 capability；复核 Request 存在且 ACCEPTED、fingerprint、标题/季度确认、MiKan 合集、字幕组、有效资源、外部映射、未完成 operation 和当前 tracking 状态",
-        "业务复核失败仍返回 HTTP 200，返回 ready=false、next_status=NEEDS_RECONFIRM 和固定 issue code 列表",
-        "submit confirm 只确认服务端重新读取的最新 Request，不信任浏览器 fingerprint；fingerprint 变化但 ACCEPTED 时 confirm=true 更新 fingerprint/revision/审计后继续同一次提交",
-        "issue code 固定为 §11.5 枚举",
-        "同步 OpenAPI/endpoint inventory/生成 TS client 且无漂移；Typecheck/Tests pass"
+        "新增 POST /api/v1/tracking/sync，payload 仅含 request-scoped ab_config、可选相对 storage_dir、confirm=true",
+        "响应 strict DTO：sync_status/checked_at/capabilities/summary/warnings/items，items 复用 TrackingSummaryDTO 唯一 serializer，不嵌入上游对象",
+        "EXTERNAL_ONLY 在默认列表按活跃外部追番展示；deleted/disabled 进入非活动状态；详情只返回安全 external summary，不暴露原始 external ID 或 URL",
+        "列表 q/status_group/sort 与损坏项容错继续兼容 Stage 29；merged alias 默认不重复展示",
+        "补 API/golden/DTO/递归敏感字段测试，并同步 HTTP 错误分类、OpenAPI registry 临时断言和 endpoint inventory",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 6,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-225",
-      "title": "实现统一 submit 与结果分类",
-      "description": "作为用户，我希望提交按可靠顺序执行，明确失败可重试、结果未知必须恢复。",
+      "id": "US-234",
+      "title": "实现 VERIFY_EXTERNAL 只读恢复",
+      "description": "作为用户，我希望结果未知时可以只读核验 Auto Bangumi，而不会盲目重复创建订阅。",
       "acceptanceCriteria": [
-        "新增 POST /api/v1/tracking/items/{tracking_id}/submit，confirm 必须严格 true，ab_config 只在单次请求内存",
-        "submit 重新读取当前 Request 并完整本地复核；不通过时不访问 Auto Bangumi",
-        "外部调用前先持久化 TrackingRecord SUBMITTING 和 operation IN_PROGRESS，作为外部调用可能发生的持久化边界",
-        "接入现有 Auto Bangumi create seam，分类成功、明确失败、未知和结果落盘失败为 ACTIVE/SUBMIT_FAILED/VERIFYING_EXTERNAL/RECOVERY_REQUIRED/NEEDS_RECONFIRM（已落盘业务结果返回 HTTP 200）",
-        "并发/重放只允许一次外部调用；同 idempotency_key 重放复用原 operation",
-        "测试覆盖成功、调用前失败、明确外部失败、结果未知、结果/record 落盘失败、幂等重放、并发单调用；Typecheck/Tests pass"
+        "扩展 recover action=VERIFY_EXTERNAL；只有该动作接收 request-scoped ab_config，AUTO/MARK_SUCCEEDED/MARK_FAILED shape 与行为保持兼容",
+        "VERIFY_EXTERNAL 只调用 capability 和 management read adapter，优先 external ID，缺 ID 时只接受唯一严格证据",
+        "精确命中收敛 ACTIVE/DISABLED 并安全终态化 operation；无匹配、多匹配或能力未知保持/进入 RECOVERY_REQUIRED 且 needs_manual=true",
+        "外部列表缺失默认不自动转为可重试失败；绝不调用 create/modify/enable/disable/delete/refresh",
+        "测试证明原 AUTO 仍纯本地且不需要 ab_config，VERIFY_EXTERNAL 的成功/缺失/歧义/失败路径无敏感泄漏",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 7,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-226",
-      "title": "实现 retry/recover 与旧入口兼容",
-      "description": "作为用户，我希望明确失败能安全重试、结果未知必须先恢复，且旧入口共享同一服务。",
+      "id": "US-235",
+      "title": "同步 OpenAPI、生成客户端与 B-C2 handoff",
+      "description": "作为项目维护者，我希望 Stage 30 的后端契约完整冻结，使后续写管理和前端开发不再临场猜测。",
       "acceptanceCriteria": [
-        "新增 POST /api/v1/tracking/items/{tracking_id}/retry（只允许 SUBMIT_FAILED，创建新 operation，重新读取 Request 和复核）",
-        "新增 POST /api/v1/tracking/items/{tracking_id}/recover（action=AUTO/MARK_SUCCEEDED/MARK_FAILED；AUTO 纯本地读本地证据不访问外部；人工动作 confirm=true 并写 USER 审计）",
-        "VERIFYING_EXTERNAL/RECOVERY_REQUIRED 必须先 recover 不能 retry；MARK_SUCCEEDED 不接收外部 ID/URL/原始结果",
-        "旧单番 submit-ab 与 batch submit/retry/recover 调用统一 tracking submission service，共享 ensure/revalidate/operation/SUBMITTING 预写/结果分类/恢复，不在 route 层复制",
-        "queue 兼容双写：调用前失败不访问外部，调用后失败不覆盖成功（§13 语义）",
-        "同步 OpenAPI/endpoint inventory/生成 TS client 且无漂移；Typecheck/Tests pass"
+        "同步 endpoint inventory、openapi_gen、docs/api/openapi.json、frontend generated client 与 api.test operationId/path/count，无漂移",
+        "同步 README、docs index、主 PRD、架构、M10/M11/M12/M13、backlog、future stages 和前端工作目标",
+        "B-C2 handoff 明确 MODIFY/SET_ENABLED/DELETE_EXTERNAL/REFRESH_RSS 等 operation kinds、可靠写边界、confirm/idempotency/revision 和绝不删除媒体规则",
+        "文档明确 Stage 30 只读范围、3.1.18 官方契约来源、未知版本 fail closed 和 API Token 限制",
+        "不得实现正式追番管理页面或任何外部管理写 endpoint",
+        "Typecheck passes",
+        "Tests pass"
       ],
       "priority": 8,
       "passes": true,
       "notes": ""
     },
     {
-      "id": "US-227",
-      "title": "完成契约回归、迁移演练与 B-C handoff",
-      "description": "作为项目维护者，我希望 Stage 29 有完整回归、迁移演练和 B-C handoff。",
+      "id": "US-236",
+      "title": "完成 Stage 30 回归、同步演练与归档",
+      "description": "作为项目维护者，我希望 Stage 30 经过完整离线演练与一次最终质量门禁，并留下可审计归档。",
       "acceptanceCriteria": [
-        "同步 OpenAPI、endpoint inventory、生成 TS client、主文档和模块文档（M01/M09/M10/M11/M12/M13）",
-        "使用脱敏 fixture 演练全量/部分迁移、崩溃窗口、旧入口兼容和回退",
-        "运行完整非浏览器、前端 typecheck/lint/unit/build、OpenAPI drift 和真实 Chromium 回归",
-        "输出 B-C capability/外部同步/管理 adapter handoff；Stage 29 不提前实现 B-C",
-        "记录实际测试数量、实现偏差、剩余风险和每个 story 的独立提交；确认仓库根 .migu_orca/storage 不存在且无未提交 build/trace/截图",
-        "prd.json 中 US-219 至 US-227 全部 passes=true 后归档 prd/progress",
+        "使用脱敏 fixture 演练首次同步、重复同步、外部孤立、唯一关联、歧义、外部缺失、部分读取失败、VERIFY_EXTERNAL 和回退",
+        "运行一次完整非浏览器测试、ruff/compileall、OpenAPI drift、前端 typecheck/lint/unit/build 与真实 Chromium；失败先跑最小子集，禁止无修改重复全量运行",
+        "记录准确测试数量、实现偏差、剩余风险和每个 story 独立提交",
+        "审计 recording transports，确认无真实网络和外部 create/modify/enable/disable/delete/refresh 请求；仓库无敏感 fixture、trace、截图或 build 产物",
+        "prd.json 中 US-228 至 US-236 全部 passes=true 后归档 prd/progress",
         "Typecheck passes",
         "Tests pass"
       ],
       "priority": 9,
       "passes": true,
-      "notes": "已同步 README/docs-README/主 PRD/架构/backlog/future stages/M01/M09/M10/M11/M12/M13/api 文档与 TS client 无漂移；新增脱敏 fixture 迁移演练测试 7 例（全量/部分迁移、崩溃窗口 AUTO 恢复、旧入口兼容与回退、同键终态重放）；完整回归 1496 非浏览器 + 133 Chromium + 261 前端 Vitest + typecheck/lint/api:check/build/OpenAPI drift/compileall/ruff/git diff --check 全绿；B-C handoff 写入 stage29 PRD §21 与 future_stages「Stage 29 handoff」；prd/progress 已归档。"
+      "notes": ""
     }
   ]
 }

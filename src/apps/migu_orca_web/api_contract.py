@@ -793,6 +793,16 @@ class TrackingOperationSummaryDTO(_StrictBase):
     completed_at: str | None = None
 
 
+class TrackingExternalSummaryDTO(_StrictBase):
+    """Safe external state summary; opaque external identifiers stay server-side."""
+
+    match_reason: str | None = None
+    external_deleted: bool = False
+    enabled: bool = False
+    missing_sync_count: int = 0
+    last_verified_at: str | None = None
+
+
 class TrackingItemDTO(_StrictBase):
     """One unified tracking list item (Stage 29 PRD §11.2).
 
@@ -873,7 +883,7 @@ class TrackingDetailResultDTO(_StrictBase):
     revalidation_issues: list[TrackingRevalidationIssueDTO] = Field(
         default_factory=list
     )
-    external_mapping: dict[str, Any] | None = None
+    external_mapping: TrackingExternalSummaryDTO | None = None
     audit_events: list[TrackingAuditEventDTO] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -976,6 +986,46 @@ class AutoBangumiConnectionResultDTO(_StrictBase):
     auth_mode: str
     adapter: str
     submit_supported: bool
+
+
+class AutoBangumiCapabilitiesDTO(_StrictBase):
+    probe_status: Literal["VERIFIED", "PARTIAL", "FAILED"]
+    version: str | None
+    adapter: Literal["legacy_3_1", "api_token"] | None
+    subscription_list: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_detail: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_modify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_enable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_disable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_delete: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_list: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_modify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_enable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_disable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_delete: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    rss_refresh: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    external_verify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    checked_at: str | None
+    safe_message: str | None
+
+
+class TrackingSyncSummaryDTO(_StrictBase):
+    checked: int
+    created: int
+    updated: int
+    unchanged: int
+    external_only: int
+    failed: int
+    unreadable: int
+
+
+class TrackingSyncResultDTO(_StrictBase):
+    sync_status: Literal["COMPLETE", "PARTIAL", "FAILED"]
+    checked_at: str
+    capabilities: AutoBangumiCapabilitiesDTO
+    summary: TrackingSyncSummaryDTO
+    warnings: list[str] = Field(default_factory=list)
+    items: list[TrackingItemDTO] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

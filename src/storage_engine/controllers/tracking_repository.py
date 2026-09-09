@@ -45,6 +45,7 @@ from storage_engine.controllers.storage_config import (
     ensure_storage_layout,
 )
 from tracking_engine.models.tracking import (
+    TRACKING_ORIGIN_EXTERNAL_SYNC,
     TrackingRecord,
     tracking_from_storage_dict,
     tracking_id_for_request,
@@ -88,6 +89,29 @@ def ensure_tracking_record(
     Returns ``(record, created)``.
     """
     request_id = record.request_id
+    if record.origin == TRACKING_ORIGIN_EXTERNAL_SYNC:
+        if request_id is not None:
+            raise Stage1Error(
+                "invalid_tracking_record",
+                "外部同步记录不得包含 request_id",
+                "ensure_tracking_record",
+                {"field": "request_id"},
+            )
+        clean_id = _validated_tracking_id(record.tracking_id, "ensure_tracking_record")
+        if record.revision != 1:
+            raise Stage1Error(
+                "invalid_tracking_record",
+                "新建追番记录 revision 必须为 1",
+                "ensure_tracking_record",
+                {"field": "revision", "revision": record.revision},
+            )
+        ensure_storage_layout(config)
+        with _key_lock(clean_id):
+            if _tracking_path(config, clean_id, "ensure_tracking_record").exists():
+                return _load_tracking_record(config, clean_id, "ensure_tracking_record"), False
+            normalized = _normalize(record, "ensure_tracking_record")
+            _atomic_write(config, clean_id, normalized, "ensure_tracking_record")
+            return normalized, True
     if not isinstance(request_id, str) or not request_id.strip():
         raise Stage1Error(
             "invalid_tracking_record",

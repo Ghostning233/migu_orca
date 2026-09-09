@@ -37,6 +37,7 @@ from pydantic import BaseModel
 from apps.base import create_app
 from apps.migu_orca_web.api_contract import (
     ApiErrorEnvelope,
+    AutoBangumiCapabilitiesDTO,
     AutoBangumiConnectionResultDTO,
     BatchAcceptResultDTO,
     BatchParseResultDTO,
@@ -62,6 +63,7 @@ from apps.migu_orca_web.api_contract import (
     TrackingRecoverResultDTO,
     TrackingRevalidateResultDTO,
     TrackingSubmitResultDTO,
+    TrackingSyncResultDTO,
 )
 
 OPENAPI_VERSION = "3.1.0"
@@ -699,6 +701,41 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "POST /api/v1/tracking/sync": {
+        "operationId": "syncTrackingItems",
+        "summary": "同步外部追番安全投影",
+        "description": "US-233：使用 request-scoped Auto Bangumi 配置执行一次只读同步。confirm 必须为 true；响应只返回能力、安全计数与 TrackingItemDTO，不返回上游对象、外部 ID、URL 或凭据。",
+        "requestBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["ab_config", "confirm"],
+            "properties": {
+                "ab_config": {
+                    "type": "object", "additionalProperties": False, "x-request-scoped": True,
+                    "properties": {
+                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
+                        "base_url": {"type": "string", "x-request-scoped": True},
+                        "username": {"type": "string", "x-request-scoped": True},
+                        "password": {"type": "string", "x-request-scoped": True},
+                        "token": {"type": "string", "x-request-scoped": True},
+                        "fallback_enabled": {"type": "boolean"},
+                    },
+                    "required": ["auth_mode", "fallback_enabled"],
+                },
+                "storage_dir": {"type": "string"},
+                "confirm": {"const": True},
+            },
+        },
+        "success": TrackingSyncResultDTO,
+        "errors": {
+            "400": {
+                "data_validation_errors": "请求参数校验失败",
+                "invalid_storage_dir": "storage_dir 必须是服务器允许根目录下的相对目录",
+                "config_error": "Auto Bangumi 配置无效",
+            },
+            "500": {"tracking_storage_error": "追番同步存储失败"},
+        },
+    },
     "GET /api/v1/tracking/items/<path:tracking_id>": {
         "operationId": "getTrackingItemDetail",
         "summary": "查看统一追番记录安全详情",
@@ -934,7 +971,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/recover": {
         "operationId": "recoverTrackingItem",
         "summary": "恢复统一追番记录（AUTO 纯本地或人工核验）",
-        "description": "US-226：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 只允许 AUTO/MARK_SUCCEEDED/MARK_FAILED：AUTO 只读取本地 operation、Request 脱敏 AB result 等证据，不访问外部系统，无明确证据时保持 RECOVERY_REQUIRED；两个人工动作必须 confirm=true 并写 USER 审计；MARK_SUCCEEDED 不接收外部 ID/URL/原始结果。已落盘恢复结果（ACTIVE/SUBMIT_FAILED/RECOVERY_REQUIRED）仍返回 HTTP 200。expected_revision 过期 → 409 tracking_revision_conflict；非可恢复状态 → 409 tracking_state_conflict；人工动作未确认 → 400 tracking_confirmation_required。",
+        "description": "US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。",
         "requestBody": {
             "type": "object",
             "required": ["expected_revision", "action"],
@@ -946,8 +983,8 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 },
                 "action": {
                     "type": "string",
-                    "enum": ["AUTO", "MARK_SUCCEEDED", "MARK_FAILED"],
-                    "description": "恢复动作：AUTO=纯本地自动恢复；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。",
+                    "enum": ["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"],
+                    "description": "恢复动作：AUTO=纯本地；VERIFY_EXTERNAL=只读外部核验（需 request-scoped ab_config）；MARK_SUCCEEDED/MARK_FAILED=人工核验（需 confirm=true）。",
                 },
                 "confirm": {
                     "type": "boolean",
@@ -956,6 +993,20 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "storage_dir": {
                     "type": "string",
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。",
+                },
+                "ab_config": {
+                    "type": "object",
+                    "x-request-scoped": True,
+                    "description": "仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。",
+                    "properties": {
+                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
+                        "base_url": {"type": "string", "x-request-scoped": True},
+                        "username": {"type": "string", "x-request-scoped": True},
+                        "password": {"type": "string", "x-request-scoped": True},
+                        "token": {"type": "string", "x-request-scoped": True},
+                        "fallback_enabled": {"type": "boolean"},
+                    },
+                    "required": ["auth_mode", "base_url", "fallback_enabled"],
                 },
             },
         },
@@ -1456,6 +1507,34 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
             },
             "504": {"ab_timeout": "请求超时"},
         },
+    },
+    "POST /api/v1/autobangumi/capabilities": {
+        "operationId": "probeAutoBangumiCapabilities",
+        "summary": "探测 Auto Bangumi 只读能力",
+        "description": "ab_config 仅为 request-scoped 凭据；响应严格白名单，未知能力 fail closed。",
+        "requestBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["ab_config"],
+            "properties": {
+                "ab_config": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "x-request-scoped": True,
+                    "properties": {
+                        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
+                        "base_url": {"type": "string", "x-request-scoped": True},
+                        "username": {"type": "string", "x-request-scoped": True},
+                        "password": {"type": "string", "x-request-scoped": True},
+                        "token": {"type": "string", "x-request-scoped": True},
+                        "fallback_enabled": {"type": "boolean"},
+                    },
+                    "required": ["auth_mode", "fallback_enabled"],
+                }
+            },
+        },
+        "success": AutoBangumiCapabilitiesDTO,
+        "errors": {"400": {"config_error": "Auto Bangumi 配置无效"}},
     },
 }
 

@@ -32,6 +32,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from ab_engine.controllers.ab_config import AutoBangumiConfig
+from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
+from ab_engine.controllers.ab_management_client import Legacy31ManagementClient
+from ab_engine.models.management import ExternalSubscription
 from apps.migu_orca_web.serializers import serialize_request_safe_info
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_queue_compat import (
@@ -57,6 +61,7 @@ from tracking_engine.controllers.recover import (
     RECOVERY_ACTION_AUTO,
     RECOVERY_ACTION_MARK_FAILED,
     RECOVERY_ACTION_MARK_SUCCEEDED,
+    RECOVERY_ACTION_VERIFY_EXTERNAL,
     RECOVERY_ACTIONS,
     RECOVERY_AUTO_FAILED_MESSAGE,
     RECOVERY_AUTO_SUCCEEDED_MESSAGE,
@@ -81,10 +86,12 @@ from tracking_engine.models.tracking import (
     TRACKING_AUDIT_ACTOR_USER,
     TRACKING_AUDIT_RECOVERY_AUTO_FAILED,
     TRACKING_AUDIT_RECOVERY_AUTO_SUCCEEDED,
+    TRACKING_AUDIT_RECOVERY_EXTERNAL_VERIFIED,
     TRACKING_AUDIT_RECOVERY_MANUAL_FAILED,
     TRACKING_AUDIT_RECOVERY_MANUAL_SUCCEEDED,
     TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL,
     TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_DISABLED,
     TRACKING_STATUS_RECOVERY_REQUIRED,
     TrackingRecord,
     transition_record,
@@ -92,6 +99,124 @@ from tracking_engine.models.tracking import (
 )
 
 _RECOVER_FAILED_STEP = "tracking_recover"
+
+
+def _verify_external(
+    config: StorageConfig,
+    *,
+    record: TrackingRecord,
+    request: dict[str, Any] | None,
+    checked_revision: int,
+    timestamp: str,
+    ab_config: AutoBangumiConfig,
+    management_client: Any | None,
+) -> dict[str, Any]:
+    """Read-only recovery against one verified management snapshot."""
+    try:
+        client = management_client or _management_client(ab_config)
+        capabilities, subscriptions, _rss = client.read_snapshot()
+        if (
+            capabilities.probe_status != "VERIFIED"
+            or capabilities.subscription_list != "SUPPORTED"
+            or capabilities.external_verify != "SUPPORTED"
+        ):
+            return _verification_needs_manual(
+                config, record=record, request=request, checked_revision=checked_revision,
+                timestamp=timestamp, reason="external_capability_unknown",
+            )
+        matches = _external_matches(record, subscriptions)
+        if len(matches) != 1:
+            return _verification_needs_manual(
+                config, record=record, request=request, checked_revision=checked_revision,
+                timestamp=timestamp,
+                reason="external_match_missing" if not matches else "external_match_ambiguous",
+            )
+        external = matches[0]
+        return _persist_recovery_outcome(
+            config,
+            action=RECOVERY_ACTION_VERIFY_EXTERNAL,
+            record=record,
+            operation=_load_current_operation(config, record),
+            target_status=TRACKING_STATUS_DISABLED if external.deleted else TRACKING_STATUS_ACTIVE,
+            audit_action=TRACKING_AUDIT_RECOVERY_EXTERNAL_VERIFIED,
+            audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
+            reason_code="external_verified_disabled" if external.deleted else "external_verified_active",
+            safe_message="已只读核验 Auto Bangumi 状态并恢复追番记录",
+            target_operation_state=TRACKING_OPERATION_STATE_SUCCEEDED,
+            request=request,
+            checked_revision=checked_revision,
+            needs_manual=False,
+            timestamp=timestamp,
+        )
+    except Exception:
+        reason = "external_verification_failed"
+        return _verification_needs_manual(
+            config, record=record, request=request, checked_revision=checked_revision,
+            timestamp=timestamp, reason=reason,
+        )
+
+
+def _management_client(config: AutoBangumiConfig) -> Legacy31ManagementClient:
+    if config.auth_mode != "password":
+        raise Stage1Error("ab_management_unsupported", "当前认证模式不支持外部核验", _RECOVER_FAILED_STEP)
+    return Legacy31ManagementClient(config, transport=UrlopenAutoBangumiHttpTransport())
+
+
+def _external_matches(
+    record: TrackingRecord, subscriptions: list[ExternalSubscription]
+) -> list[ExternalSubscription]:
+    mapping = record.external_mapping if isinstance(record.external_mapping, dict) else {}
+    external_id = mapping.get("subscription_id")
+    if isinstance(external_id, str) and external_id:
+        return [item for item in subscriptions if item.external_id == external_id]
+    summary = record.plan_summary
+    title = summary.get("title")
+    season = summary.get("season")
+    group = summary.get("subtitle_group")
+    if not isinstance(title, str) or not title.strip() or not isinstance(season, int) or isinstance(season, bool):
+        return []
+    if not isinstance(group, str) or not group.strip():
+        return []
+    return [
+        item for item in subscriptions
+        if item.season == season
+        and item.subtitle_group is not None
+        and " ".join(item.title.split()).casefold() == " ".join(title.split()).casefold()
+        and " ".join(item.subtitle_group.split()).casefold() == " ".join(group.split()).casefold()
+    ]
+
+
+def _verification_needs_manual(
+    config: StorageConfig,
+    *,
+    record: TrackingRecord,
+    request: dict[str, Any] | None,
+    checked_revision: int,
+    timestamp: str,
+    reason: str,
+) -> dict[str, Any]:
+    if record.status == TRACKING_STATUS_RECOVERY_REQUIRED:
+        next_record = record
+    else:
+        next_record = transition_record(
+            record,
+            status=TRACKING_STATUS_RECOVERY_REQUIRED,
+            audit_action=TRACKING_AUDIT_RECOVERY_NEEDS_MANUAL,
+            audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
+            reason_code=reason,
+            safe_message=RECOVERY_NEEDS_MANUAL_MESSAGE,
+            now=timestamp,
+        )
+        next_record = compare_and_swap_tracking_record(
+            config, record.tracking_id, base_revision=record.revision, record=next_record
+        )
+    _sync_queue_projection(config, next_record, TRACKING_STATUS_RECOVERY_REQUIRED)
+    return _recover_result_payload(
+        record=next_record, action=RECOVERY_ACTION_VERIFY_EXTERNAL,
+        outcome=TRACKING_STATUS_RECOVERY_REQUIRED, checked_revision=checked_revision,
+        operation_id=record.current_operation_id, needs_manual=True, request=request,
+        timestamp=timestamp,
+    )
 
 
 def run_tracking_recover(
@@ -102,6 +227,8 @@ def run_tracking_recover(
     action: str,
     confirm: bool,
     now: str | None = None,
+    ab_config: AutoBangumiConfig | None = None,
+    management_client: Any | None = None,
 ) -> dict[str, Any]:
     """Run one explicit recovery for a tracking item.
 
@@ -125,7 +252,7 @@ def run_tracking_recover(
     if action not in RECOVERY_ACTIONS:
         raise Stage1Error(
             "validation_error",
-            "恢复动作必须是 AUTO、MARK_SUCCEEDED 或 MARK_FAILED",
+            "恢复动作必须是 AUTO、MARK_SUCCEEDED、MARK_FAILED 或 VERIFY_EXTERNAL",
             _RECOVER_FAILED_STEP,
             {"field": "action"},
         )
@@ -142,6 +269,21 @@ def run_tracking_recover(
     operation = _load_current_operation(config, record)
     request = _tolerant_load_request(config, record)
     ab_result = _ab_result_of(request)
+
+    if action == RECOVERY_ACTION_VERIFY_EXTERNAL:
+        if ab_config is None:
+            raise Stage1Error(
+                "validation_error", "外部核验需要连接配置", _RECOVER_FAILED_STEP, {"field": "ab_config"}
+            )
+        return _verify_external(
+            config,
+            record=record,
+            request=request,
+            checked_revision=checked_revision,
+            timestamp=timestamp,
+            ab_config=ab_config,
+            management_client=management_client,
+        )
 
     if action == RECOVERY_ACTION_AUTO:
         decision = classify_auto_recovery(

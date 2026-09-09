@@ -9,10 +9,12 @@ serialization; failures are mapped through the shared sanitized error helpers.
 
 from typing import Any
 
+from ab_engine.controllers.ab_capability_service import probe_capabilities, safe_failed_capabilities
 from ab_engine.controllers.ab_config import build_ab_config
 from ab_engine.controllers.ab_connection_controller import test_ab_connection
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
+    AutoBangumiCapabilitiesPayload,
     AutoBangumiTestConnectionPayload,
     QbittorrentTestConnectionPayload,
 )
@@ -27,6 +29,23 @@ from qbittorrent_engine.controllers.qbittorrent_controller import (
     test_qbittorrent_connection,
 )
 from shared.errors import Stage1Error
+
+
+@class_route(api_blueprint, "/api/v1/autobangumi/capabilities", methods=["POST"])
+class AutoBangumiCapabilitiesView(PostView):
+    request_validator_model = AutoBangumiCapabilitiesPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, AutoBangumiCapabilitiesPayload)
+        config = build_ab_config(self.request_validator_model.ab_config.model_dump(exclude_none=True))
+        try:
+            return probe_capabilities(config).to_public_dict()
+        except Stage1Error as exc:
+            # Capability probing is itself a successful, fail-closed result;
+            # malformed configuration remains a normal API error.
+            if exc.error_type == "config_error":
+                raise
+            return safe_failed_capabilities(config, exc).to_public_dict()
 
 
 def _raise_qbittorrent_result_error(result: dict[str, Any]) -> None:

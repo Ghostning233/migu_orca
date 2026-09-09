@@ -7,7 +7,9 @@
 > 与 safe-info 端点/错误并入同一基线并保持无漂移。Stage 29（US-222～US-226）把
 > `/api/v1/tracking/items` 六条端点与 tracking handoff 扩展并入同一基线（§3.6 与 §4
 > US 里程碑），全部为严格 DTO + 可读 operationId，保持无漂移。
-> 它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
+> Stage 30（B-C1）新增的 capability 与 tracking sync 端点也在本清单、OpenAPI registry、
+> `docs/api/openapi.json`、生成 TypeScript client 和 operation fixture 中保持同步；B-C1 不注册任何
+> Auto Bangumi 管理写端点。它不是 OpenAPI 契约（US-190 已基于 Pydantic DTO 生成 `docs/api/openapi.json`，
 > 见 `docs/api/README.md`），也不替代 README 的示例用法。
 >
 > 自动核对：`tests/api_contract/test_inventory_consistency.py` 会把本清单与 Flask
@@ -82,6 +84,8 @@
 | POST | `/api/v1/batches/<batch_id>/recover` | `migu_orca_web_api.BatchRecoverView` | BatchRecoverView |
 | POST | `/api/v1/qbittorrent/test-connection` | `migu_orca_web_api.QbittorrentTestConnectionView` | QbittorrentTestConnectionView |
 | POST | `/api/v1/autobangumi/test-connection` | `migu_orca_web_api.AutoBangumiTestConnectionView` | AutoBangumiTestConnectionView |
+| POST | `/api/v1/autobangumi/capabilities` | `migu_orca_web_api.AutoBangumiCapabilitiesView` | AutoBangumiCapabilitiesView |
+| POST | `/api/v1/tracking/sync` | `migu_orca_web_api.TrackingSyncView` | TrackingSyncView |
 | GET | `/api/v1/tracking/items` | `migu_orca_web_api.TrackingItemListView` | TrackingItemListView |
 | GET | `/api/v1/tracking/items/<path:tracking_id>` | `migu_orca_web_api.TrackingItemDetailView` | TrackingItemDetailView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/revalidate` | `migu_orca_web_api.TrackingItemRevalidateView` | TrackingItemRevalidateView |
@@ -203,6 +207,7 @@ JSON 损坏不阻塞健康列表，只增加 `unreadable` 计数与固定 warnin
 | 端点 | 请求字段 | 成功 `result`（白名单） | 业务失败示例 |
 | --- | --- | --- | --- |
 | GET `/api/v1/tracking/items` | `storage_dir?`、`q?`、`status_group?`（`PENDING`/`PROCESSING`/`ACTIVE`/`ATTENTION`/`INACTIVE`）、`sort?`（`updated_at`/`title`/`status`） | `{"items": [<TrackingItemDTO>], "summary": {total, pending, processing, active, needs_attention, unreadable}, "warnings": []}` | 非法枚举 → `data_validation_errors`；`invalid_storage_dir` |
+| POST `/api/v1/tracking/sync`（US-233） | `ab_config`（request-scoped）、`confirm=true`、`storage_dir?` | `{sync_status, checked_at, capabilities, summary, warnings[], items: [<TrackingItemDTO>]}`；详情 external_mapping 仅返回安全状态摘要，不返回外部 ID/RSS ID | `confirm` 非 true/多余字段 → `data_validation_errors`；`invalid_storage_dir`；`config_error` |
 | GET `/api/v1/tracking/items/<tracking_id>` | `tracking_id`（路径）、`storage_dir?` | `{...summary 字段, origin, batch_id?, created_at, updated_at?, last_synced_at?, safe_info?, current_operation?, revalidation_issues: [], external_mapping?, audit_events[]（最近 20 条）, warnings}` | 缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id`；损坏 → `storage_json_error` |
 | POST `/api/v1/tracking/items/<tracking_id>/revalidate`（US-224） | `tracking_id`（路径）、`expected_revision`（必填）、`storage_dir?` | `{tracking_id, ready, checked_revision, next_revision, checked_at, next_status, issues[], tracking}`（业务复核失败仍 HTTP 200：`ready=false`、`next_status=NEEDS_RECONFIRM` + 固定 §11.5 issue code） | 缺 `expected_revision`/多余字段（如 `ab_config`）→ `data_validation_errors`；`expected_revision` 过期 → `tracking_revision_conflict`（409）；非可复核状态 → `tracking_state_conflict`（409）；缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id` |
 | POST `/api/v1/tracking/items/<tracking_id>/submit`（US-225） | `tracking_id`（路径）、`expected_revision`（必填）、`idempotency_key`（必填）、`confirm`（必须严格 `true`）、`ab_config`（request-scoped，必填）、`storage_dir?` | `{tracking_id, outcome, checked_revision, next_revision, checked_at, operation_id?, issues[], tracking}`（已落盘业务结果 HTTP 200，`outcome` ∈ `ACTIVE`/`SUBMIT_FAILED`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`/`NEEDS_RECONFIRM`） | `confirm=false` → `tracking_confirmation_required`（400）；`expected_revision` 过期 → `tracking_revision_conflict`（409）；非可提交状态 → `tracking_state_conflict`（409）；同键不同绑定 → `tracking_idempotency_conflict`（409）；进行中提交 → `tracking_operation_in_progress`（409）；缺失 → `tracking_not_found`（404）；路径片段 → `invalid_tracking_id`；非法 `idempotency_key` → `data_validation_errors` |
@@ -305,7 +310,8 @@ issues、外部安全映射摘要和最近 20 条审计事件；绝不回显完�
   profile 错误仍走普通失败 envelope。
 - US-226：新增 `POST /api/v1/tracking/items/{tracking_id}/retry`（`TrackingItemRetryView`，
   operationId `retryTrackingItem`）与 `POST /api/v1/tracking/items/{tracking_id}/recover`
-  （`TrackingItemRecoverView`，operationId `recoverTrackingItem`）。retry 请求 shape 与 submit
+  （`TrackingItemRecoverView`，operationId `recoverTrackingItem`）。recover 支持 AUTO、人工确认及
+  request-scoped `VERIFY_EXTERNAL` 只读核验；retry 请求 shape 与 submit
   相同，但只允许从 `SUBMIT_FAILED` 开始（`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED` 必须先
   recover，不能盲重试 D29-07）；复用 `run_tracking_submit` 的完整可靠序列（新键 bind 新
   operation、SUBMITTING 预写、单次外部调用、结果分类）。recover 的 `AUTO` 由

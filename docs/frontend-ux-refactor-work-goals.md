@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 工作目标 / 设计讨论基线（不是执行 PRD） |
-| 当前状态 | Gate 1～3 已完成；B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C～B-D 与前端工作包仍待 Gate 4，尚未授权全面开发 |
+| 当前状态 | Gate 1～3 已完成；B-A 已完成（Stage 28）；B-B 已完成（Stage 29）；B-C1 已完成（Stage 30，US-228～US-236）；B-C2～B-D 与前端工作包仍待后续 Gate 4 |
 | 创建日期 | 2026-09-07 |
 | 适用范围 | MiGuOrca Web 前端的信息架构、用户流程、页面设计、视觉方案与后续实现 |
 | 前置事实 | Stage 26、Stage 27 已完成；Vue 3、TypeScript、Vite、OpenAPI 客户端和浏览器测试基线继续保留 |
@@ -381,15 +381,16 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 | 视觉设计 | 已完成 | 选定方向、修正版、关键异常状态、设计 Token | 已通过 Gate 3 |
 | B-A 草案一致性 | Stage 28 已完成 (2026-09-08) | revision、可靠保存、组合确认、36 部上限、安全信息 | US-210～US-218 全部 passes，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md` |
 | B-B 统一追番记录 | Stage 29 已完成 (2026-09-08) | tracking repository、迁移、复核、幂等提交与恢复 | US-219～US-227 全部 passes；执行 PRD 见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md` |
-| B-C～B-D 后端支撑 | PRD 待评审 | Auto Bangumi 管理、外部同步与契约收尾 | Gate 4 确认 capability、路由、DTO 和 PR 边界 |
+| B-C1 只读同步 | Stage 30 已完成（US-228～US-236） | Auto Bangumi capability、只读同步、映射对账与外部核验、OpenAPI/生成客户端 handoff | US-228～US-236 已通过并归档，执行 PRD 见 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md` |
+| B-C2～B-D 后端支撑 | PRD 待评审 | Auto Bangumi 写管理与契约收尾 | Stage 30 完成后确认写动作、DTO 和 PR 边界 |
 | F-A～F-G 前端分片 | PRD 待评审 | 壳层、共享审核、单番、批量、方案、管理、设置/收尾 | 对应后端能力已冻结或合入 |
 | 独立发布验收 | 待规划 | 跨流程 Chromium、无障碍/多视口/安全报告、文档切换 | 全部实现切片验收通过 |
 
 正式拆分原则：
 
-- B-A 草案一致性可以先行；B-B tracking 与 B-C 外部管理不得由前端 PR 临时顺带实现。
+- B-A/B-B 已完成，Stage 30 B-C1 已完成；后续 B-C2 外部管理不得由前端 PR 临时顺带实现。
 - F-A 壳层与设计系统不依赖新业务 API，可以先行；F-B 共享审核核心必须先于单番/批量页面。
-- F-C 单番、F-D 批量、F-E 追番方案可以在共享核心稳定后并行，F-F 追番管理等待 B-C（B-B 统一追番已交付 Stage 29）。
+- F-C 单番、F-D 批量、F-E 追番方案可以在共享核心稳定后并行，F-F 追番管理等待 B-C2/B-D（B-B 已交付 Stage 29，B-C1 已交付 Stage 30）。
 - 一个 Stage 可以包含一个小工作包，也可以把高风险工作包继续拆开；不能为了连续编号制造超大 PR。
 - 收尾可并入最后一个前端 Stage，也可在集成风险较高时单列，最终由未承担主要实现的 Agent 验收。
 
@@ -478,8 +479,8 @@ passes，2026-09-08，执行与完成记录见 `docs/MiGuOrca_stage28_draft_cons
 2. B-B 已完成：TrackingRecord 为新提交权威，accept/save-confirm handoff 兼容扩展 tracking
    状态，历史数据纯本地幂等迁移，新增列表/详情/复核/提交/重试/恢复 API；旧 queue 保留一个
    发布周期，结果未知禁止盲重试，旧单番/批量入口共享统一 submission service。
-3. 继续评审[后端支撑 PRD](MiGuOrca_frontend_ux_backend_support_PRD.md)中的 B-C～B-D、Auto Bangumi
-   3.1.18 capability、外部同步与管理边界（Stage 29 handoff 见 future_stages）。
+3. 执行 Stage 30 B-C1：Auto Bangumi 3.1.18 capability、只读同步、映射对账、EXTERNAL_ONLY 与
+   VERIFY_EXTERNAL；完成后再评审 B-C2 写管理动作和 B-D 契约收尾。
 4. 评审[前端分片实施 PRD](MiGuOrca_frontend_ux_implementation_PRD.md)中的 F-A～F-G、依赖顺序、
    旧路由迁移、共享组件和独立 PR 边界。
 5. 后续实施包通过 Gate 4 评审后再生成 Ralph `prd.json`；其他通过评审的实施包按工作量映射

@@ -14,13 +14,16 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+import pytest
 from flask.testing import FlaskClient
 
+from ab_engine.models.management import AutoBangumiCapabilities
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.api_contract import (
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
 )
+from apps.migu_orca_web.tracking_sync_service import TrackingSyncResult, TrackingSyncSummary
 from request_engine.controllers.request_controller import accept_request
 from shared.models import EntryRequest
 from storage_engine.controllers.operation_repository import bind_tracking_operation
@@ -113,6 +116,46 @@ def _all_json_leaves(value: Any) -> Any:
             yield from _all_json_leaves(child)
     else:
         yield value
+
+
+def test_tracking_sync_is_strict_and_never_echoes_request_scoped_credentials(
+    client: FlaskClient, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """US-233: sync output is a safe projection, never an upstream echo."""
+    def fake_sync(**_: Any) -> TrackingSyncResult:
+        return TrackingSyncResult(
+            sync_status="COMPLETE",
+            checked_at="2026-01-01T00:00:00+00:00",
+            capabilities=AutoBangumiCapabilities(
+                probe_status="VERIFIED", version="3.1.18", adapter="legacy_3_1",
+                subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
+                rss_list="SUPPORTED", external_verify="SUPPORTED",
+                safe_message="已验证 Auto Bangumi 只读能力",
+            ),
+            summary=TrackingSyncSummary(checked=1, unchanged=1),
+        )
+
+    monkeypatch.setattr("apps.migu_orca_web.routes_tracking.run_tracking_sync", fake_sync)
+    response = client.post("/api/v1/tracking/sync", json={
+        "confirm": True,
+        "storage_dir": "storage",
+        "ab_config": {
+            "auth_mode": "password", "fallback_enabled": False,
+            "base_url": "https://private.example", "username": "operator",
+            "password": "password-secret",
+        },
+    })
+
+    assert response.status_code == 200
+    result = response.get_json()["result"]
+    assert result["sync_status"] == "COMPLETE"
+    assert result["summary"] == {"checked": 1, "created": 0, "updated": 0, "unchanged": 1, "external_only": 0, "failed": 0, "unreadable": 0}
+    rendered = " ".join(str(item) for item in _all_json_leaves(response.get_json()))
+    for forbidden in ("private.example", "operator", "password-secret"):
+        assert forbidden not in rendered
+
+    invalid = client.post("/api/v1/tracking/sync", json={"confirm": False, "ab_config": {"fallback_enabled": False}})
+    assert invalid.status_code == 400
 
 
 # ---------------------------------------------------------------------------
