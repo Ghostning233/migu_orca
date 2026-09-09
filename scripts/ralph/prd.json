@@ -1,160 +1,181 @@
 {
-  "project": "MiGuOrca",
-  "branchName": "ralph/stage30-ab-read-sync",
-  "description": "Stage 30（B-C1）：为 Auto Bangumi 3.1.18 建立 capability、只读番剧/RSS adapter、安全投影、external mapping、严格对账、tracking sync 与 VERIFY_EXTERNAL。禁止外部管理写操作和正式前端页面。",
+  "project": "MiGuOrca Stage 31 - Auto Bangumi 可靠写管理",
+  "branchName": "ralph/stage31-ab-write-management",
+  "description": "前端体验重构 B-C2：在 Stage 30 只读同步基础上，为 Auto Bangumi 3.1.18 提供具备确认、幂等、revision CAS、写后回查、未知结果恢复与 file=false 保护的管理写能力。",
   "userStories": [
     {
-      "id": "US-228",
-      "title": "冻结 3.1.18 只读管理模型与会话 adapter",
-      "description": "作为后端开发者，我需要一个只读、request-scoped 的 3.1.18 管理 adapter，以安全读取版本、番剧和 RSS。",
+      "id": "US-237",
+      "title": "冻结管理 operation v2 与纯动作契约",
+      "description": "As a developer, I need versioned durable management-operation bindings so that external writes remain idempotent and recoverable without persisting their payloads.",
       "acceptanceCriteria": [
-        "建立 capability、内部 ExternalSubscription/ExternalRss 与安全投影模型；上游原始 URL 只能存在于 adapter/service 内存边界",
-        "password 模式一次登录并在同一请求内复用同源 token Cookie，支持 GET /api/v1/status、/api/v1/bangumi/get/all、/api/v1/bangumi/get/{id}、/api/v1/rss",
-        "recording fake transport 固定 method/path/header/response shape，并断言没有 modify/enable/disable/delete/refresh 等写或状态变更请求",
-        "非法/缺失/超大上游字段映射为稳定 Stage1Error，不回显原始响应、URL、Cookie 或凭据",
-        "自动化测试不访问真实 Auto Bangumi",
-        "Typecheck passes",
-        "Tests pass"
+        "TrackingOperation accepts exactly SUBMIT, MODIFY, SET_ENABLED, DELETE_EXTERNAL and REFRESH_RSS operation kinds",
+        "Schema v2 adds strict target_scope, previous_tracking_status and expected_external_fingerprint fields while existing v1 SUBMIT records remain readable",
+        "Management bindings persist only canonical SHA-256 summaries and reject external IDs, URLs, paths, credentials and raw patches",
+        "Same-key same-binding replay is stable; different kind, scope, revision or summary raises tracking_idempotency_conflict",
+        "Pure action/result classifiers cover success, definite failure, outcome unknown and recovery required without web, storage or network imports",
+        "Targeted operation model, repository and classifier tests pass",
+        "Typecheck passes"
       ],
       "priority": 1,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "Keep deterministic operation IDs and the existing state machine; do not rewrite v1 files merely because they were read."
     },
     {
-      "id": "US-229",
-      "title": "提供 capability 探测服务与 API",
-      "description": "作为用户，我希望系统明确告诉我当前 Auto Bangumi 连接可安全使用哪些只读能力。",
+      "id": "US-238",
+      "title": "实现 3.1.18 番剧写 adapter 与 capability",
+      "description": "As a tracking service, I need a version-pinned subscription writer so that supported Auto Bangumi actions use only audited routes.",
       "acceptanceCriteria": [
-        "CapabilityState 固定 SUPPORTED/UNSUPPORTED/UNKNOWN，probe_status 固定 VERIFIED/PARTIAL/FAILED",
-        "password + 版本 3.1.18 仅把 subscription list/detail、rss list、external verify 标为 SUPPORTED；Stage 30 未实现写能力为 UNKNOWN",
-        "未知版本、探测失败与 API Token 管理读取全部 fail closed，不能推测支持",
-        "新增 POST /api/v1/autobangumi/capabilities，strict 请求/响应 DTO；成功与错误均不含完整地址、账号、密码、token、Cookie、header 或原始响应",
-        "同步 HTTP 分类、OpenAPI registry 的临时契约测试与 endpoint inventory 条目；最终生成文件留给 US-235 统一收尾",
-        "Typecheck passes",
-        "Tests pass"
+        "Password plus exact version 3.1.18 reports subscription modify, enable, disable and delete as SUPPORTED; other versions and API Token remain UNKNOWN",
+        "Adapter implements PATCH bangumi update, GET bangumi enable, DELETE bangumi disable and DELETE bangumi delete using exact 3.1.18 paths",
+        "Every disable and delete request appends a transport-owned file=false query and no public caller can override it",
+        "A request-scoped login token is cleared after every action and never appears in repr, result or error details",
+        "Recording transport tests assert method, path, body, call count and absence of arbitrary proxy behavior",
+        "Targeted Auto Bangumi adapter and capability tests pass",
+        "Typecheck passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "已实现 request-scoped capability probe、严格 DTO、fail-closed unknown/failed 状态、POST API，并同步 endpoint inventory/OpenAPI/生成客户端。"
+      "passes": false,
+      "notes": "Pinned facts: official Auto_Bangumi 3.1.18 backend/src/module/api/bangumi.py. Never access a real instance."
     },
     {
-      "id": "US-230",
-      "title": "冻结 ExternalMapping v1 与外部孤立 TrackingRecord",
-      "description": "作为后端开发者，我需要稳定的外部映射和确定性的外部孤立记录，以便重复同步只产生一个追番条目。",
+      "id": "US-239",
+      "title": "实现 3.1.18 RSS 写 adapter 与 capability",
+      "description": "As a tracking service, I need bounded RSS management actions so that linked feeds can be managed without exposing their upstream identifiers.",
       "acceptanceCriteria": [
-        "新增 origin=EXTERNAL_SYNC、tracking_id_for_external(adapter, kind, external_id) 与 create_external_tracking_record，算法严格使用 PRD D30-09 的版本命名空间",
-        "ExternalMapping v1 严格白名单：schema_version/adapter/subscription_id/rss_ids/match_reason/external_deleted/enabled/missing_sync_count/last_verified_at",
-        "external ID/RSS ID 只允许有界 opaque token；rss_ids 有序去重且有数量上限；不得保存 URL、凭据、标题或原始响应",
-        "兼容读取 external_mapping=null 和 Stage 29 legacy opaque mapping；未知 nested schema 不被猜测改写",
-        "同一 adapter+kind+id 的重复 ensure 不新增记录、不 bump revision、不重复审计，request_id 必须为 null 且不伪造 Request",
-        "Typecheck passes",
-        "Tests pass"
+        "Password plus exact version 3.1.18 reports RSS modify, enable, disable, delete and refresh as SUPPORTED; unknown adapters remain fail closed",
+        "Adapter implements PATCH update, POST enable/many for only the mapped set, PATCH single disable, DELETE single delete and GET single refresh",
+        "Adapter never calls refresh/all, delete/many or a caller-provided method/path",
+        "RSS update preserves the current request-scoped upstream URL while the public patch cannot accept or replace a URL",
+        "Multiple mapped RSS actions have deterministic order and expose only safe aggregate outcome classifications",
+        "Recording transport tests cover complete, partial, timeout and malformed responses without real network access",
+        "Typecheck passes"
       ],
       "priority": 3,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "Pinned facts: official Auto_Bangumi 3.1.18 backend/src/module/api/rss.py."
     },
     {
-      "id": "US-231",
-      "title": "实现纯对账决策与状态映射",
-      "description": "作为用户，我希望本地方案和外部追番只在证据唯一时自动关联，避免同名番剧误绑定。",
+      "id": "US-240",
+      "title": "实现服务端目标解析与安全 patch 构造",
+      "description": "As an API boundary, I need to resolve local tracking targets and whitelist edits so that browsers never control upstream IDs or raw payloads.",
       "acceptanceCriteria": [
-        "纯 controller 不导入 storage/web，匹配顺序为已保存 external ID 优先，再使用正式标题+季度+字幕组并在双方可用时追加 RSS URL 内存等值证据",
-        "只有严格唯一候选可绑定；0 匹配生成 EXTERNAL_ONLY 决策；多匹配返回 AMBIGUOUS_EXTERNAL_MATCH 且不选择第一项",
-        "RSS URL 可参与当前内存比对，但不得进入决策持久化对象、日志、repr 或测试快照",
-        "状态映射覆盖 ACTIVE/DISABLED/EXTERNAL_DELETED/EXTERNAL_ONLY，SUBMITTING/REVALIDATING 等进行中状态不得被 sync 覆盖",
-        "同一输入重复分类结果确定；测试覆盖 ID 命中、唯一/零/多候选、字段冲突、外部 deleted 和进行中保护",
-        "Typecheck passes",
-        "Tests pass"
+        "Target scopes are exactly SUBSCRIPTION and ASSOCIATED_RSS and resolve only through the current TrackingRecord external mapping",
+        "Subscription patch accepts only title, season, subtitle_group, filter_rule, offset and expected_folder_name; RSS patch accepts only name, aggregate and parser",
+        "Empty patches, cross-scope fields, raw filter expressions, URL fields, file fields, absolute paths, traversal and unknown keys are rejected before external calls",
+        "The adapter completes required 3.1.18 write bodies only from a freshly read request-scoped upstream snapshot",
+        "Canonical action and expected-projection fingerprints are deterministic and contain no reversible business or sensitive values",
+        "Targeted resolver, patch and sensitive-input tests pass",
+        "Typecheck passes"
       ],
       "priority": 4,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "Public APIs use tracking_id only; external subscription/RSS IDs must not cross the serializer boundary."
     },
     {
-      "id": "US-232",
-      "title": "实现 tracking 外部同步协调器",
-      "description": "作为用户，我希望一次只读同步能把本地记录和 Auto Bangumi 现状安全收敛，并允许部分失败。",
+      "id": "US-241",
+      "title": "建立可靠管理操作协调器",
+      "description": "As a user, I need every external management action to be durable before execution so that retries and concurrency cannot duplicate writes.",
       "acceptanceCriteria": [
-        "服务顺序为 capability -> subscription/RSS read -> pure reconcile -> per-record ensure/CAS，不在 route 复制业务规则",
-        "完整、部分失败、失败三种结果返回安全 counts/warnings；任一列表读取失败不得把未知当空列表并标记 EXTERNAL_DELETED",
-        "重复同一完整 fixture 不新增记录、不重复审计、不改变业务 revision；实际持久化字段变化通过一次 CAS 同时写 revision+audit+mapping",
-        "外部孤立后来唯一关联本地时以 Request-backed tracking 为权威，旧外部记录只写安全 merged_into 指针且不再出现在默认列表，不删除历史文件",
-        "单条损坏、CAS 冲突或存储失败只计入 failed，不回滚健康项，不删除 Request/TrackingRecord/审计/媒体",
-        "Typecheck passes",
-        "Tests pass"
+        "Coordinator validates confirm=true, expected_revision, idempotency key, allowed tracking state and no unresolved current operation",
+        "Capability and fresh target reads complete before PREPARED binding and no unsupported or ambiguous target reaches a write adapter",
+        "TrackingRecord current_operation_id is persisted by CAS and operation reaches IN_PROGRESS before exactly one external write call",
+        "Same-key terminal replay returns the stored safe result without network access and a concurrent different key loses before writing",
+        "Credential config exists only in request memory and operation/record storage contains no endpoint, credential, upstream ID or action body",
+        "Injected-adapter tests cover restart, CAS conflicts, bind failure and at-most-once external invocation",
+        "Typecheck passes"
       ],
       "priority": 5,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "Build a common service skeleton; action-specific mutation semantics belong to US-242/243."
     },
     {
-      "id": "US-233",
-      "title": "提供 tracking sync API 与安全列表投影",
-      "description": "作为用户，我希望通过统一 API 同步外部追番，并在现有追番列表看到安全结果。",
+      "id": "US-242",
+      "title": "接入 MODIFY 与 SET_ENABLED",
+      "description": "As a user, I want to modify or enable and disable mapped external subscriptions and RSS feeds with verified outcomes.",
       "acceptanceCriteria": [
-        "新增 POST /api/v1/tracking/sync，payload 仅含 request-scoped ab_config、可选相对 storage_dir、confirm=true",
-        "响应 strict DTO：sync_status/checked_at/capabilities/summary/warnings/items，items 复用 TrackingSummaryDTO 唯一 serializer，不嵌入上游对象",
-        "EXTERNAL_ONLY 在默认列表按活跃外部追番展示；deleted/disabled 进入非活动状态；详情只返回安全 external summary，不暴露原始 external ID 或 URL",
-        "列表 q/status_group/sort 与损坏项容错继续兼容 Stage 29；merged alias 默认不重复展示",
-        "补 API/golden/DTO/递归敏感字段测试，并同步 HTTP 错误分类、OpenAPI registry 临时断言和 endpoint inventory",
-        "Typecheck passes",
-        "Tests pass"
+        "MODIFY supports both allowed scopes and calls only the whitelist payload generated from the fresh snapshot",
+        "SET_ENABLED uses exact boolean input; subscription disable is always file=false and associated RSS applies only to the operation-bound mapped set",
+        "A successful upstream response is followed by a complete readback and only a matching projection can mark the operation SUCCEEDED",
+        "Verified results update mapping, status, revision and a safe audit event in one TrackingRecord CAS",
+        "Definite failure preserves the prior safe state; timeout, 5xx, malformed response or failed readback produces VERIFYING_EXTERNAL or RECOVERY_REQUIRED and disables blind retry",
+        "Tests cover success, definite failure, unknown, partial RSS, replay and local persistence failure",
+        "Typecheck passes"
       ],
       "priority": 6,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "Do not add Web UI. Do not treat a 2xx write response alone as verified success."
     },
     {
-      "id": "US-234",
-      "title": "实现 VERIFY_EXTERNAL 只读恢复",
-      "description": "作为用户，我希望结果未知时可以只读核验 Auto Bangumi，而不会盲目重复创建订阅。",
+      "id": "US-243",
+      "title": "接入 DELETE_EXTERNAL 与 REFRESH_RSS",
+      "description": "As a user, I want explicit external deletion and RSS refresh while MiGuOrca guarantees local and media retention.",
       "acceptanceCriteria": [
-        "扩展 recover action=VERIFY_EXTERNAL；只有该动作接收 request-scoped ab_config，AUTO/MARK_SUCCEEDED/MARK_FAILED shape 与行为保持兼容",
-        "VERIFY_EXTERNAL 只调用 capability 和 management read adapter，优先 external ID，缺 ID 时只接受唯一严格证据",
-        "精确命中收敛 ACTIVE/DISABLED 并安全终态化 operation；无匹配、多匹配或能力未知保持/进入 RECOVERY_REQUIRED 且 needs_manual=true",
-        "外部列表缺失默认不自动转为可重试失败；绝不调用 create/modify/enable/disable/delete/refresh",
-        "测试证明原 AUTO 仍纯本地且不需要 ab_config，VERIFY_EXTERNAL 的成功/缺失/歧义/失败路径无敏感泄漏",
-        "Typecheck passes",
-        "Tests pass"
+        "DELETE_EXTERNAL accepts one tracking record and one allowed scope only; it has no file request field",
+        "Subscription delete always records a DELETE path with file=false and never invokes qBittorrent, filesystem deletion or local repository deletion",
+        "Associated RSS deletion operates only on mapped IDs in deterministic single-item calls and never calls upstream delete/many",
+        "REFRESH_RSS operates only on associated mapped RSS IDs and never calls refresh/all",
+        "Verified subscription absence produces EXTERNAL_DELETED while RSS deletion updates only mapping; Request, TrackingRecord and audits remain",
+        "Timeout, partial deletion or unknown refresh is non-retryable pending recovery and has a fixed safe message",
+        "Targeted destructive-boundary and media-retention tests pass",
+        "Typecheck passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "This story must prove file=false twice: adapter unit assertions and service-level recording transport assertions."
     },
     {
-      "id": "US-235",
-      "title": "同步 OpenAPI、生成客户端与 B-C2 handoff",
-      "description": "作为项目维护者，我希望 Stage 30 的后端契约完整冻结，使后续写管理和前端开发不再临场猜测。",
+      "id": "US-244",
+      "title": "扩展 VERIFY_EXTERNAL 管理操作恢复",
+      "description": "As a user, I need uncertain management outcomes verified against external state without starting another write.",
       "acceptanceCriteria": [
-        "同步 endpoint inventory、openapi_gen、docs/api/openapi.json、frontend generated client 与 api.test operationId/path/count，无漂移",
-        "同步 README、docs index、主 PRD、架构、M10/M11/M12/M13、backlog、future stages 和前端工作目标",
-        "B-C2 handoff 明确 MODIFY/SET_ENABLED/DELETE_EXTERNAL/REFRESH_RSS 等 operation kinds、可靠写边界、confirm/idempotency/revision 和绝不删除媒体规则",
-        "文档明确 Stage 30 只读范围、3.1.18 官方契约来源、未知版本 fail closed 和 API Token 限制",
-        "不得实现正式追番管理页面或任何外部管理写 endpoint",
-        "Typecheck passes",
-        "Tests pass"
+        "VERIFY_EXTERNAL recognizes the current management operation kind, target scope and expected fingerprint and never creates a new management operation",
+        "Modify, enable and delete recovery uses a complete read snapshot to classify verified success, verified non-application or still-unknown state",
+        "Refresh unknown outcomes remain RECOVERY_REQUIRED because no stable snapshot proves that the refresh ran",
+        "Successful or definite recovery terminalizes the original operation and updates record status, revision and audit by CAS",
+        "Read failure, unknown capability, mapping drift, missing evidence or partial RSS evidence remains manual without blind retry",
+        "Existing SUBMIT recovery and Stage 30 ordinary VERIFY_EXTERNAL behavior remain compatible",
+        "Restart and recovery regression tests pass",
+        "Typecheck passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "Never infer refresh success from unchanged data and never use a fresh idempotency key to resolve an unknown write."
     },
     {
-      "id": "US-236",
-      "title": "完成 Stage 30 回归、同步演练与归档",
-      "description": "作为项目维护者，我希望 Stage 30 经过完整离线演练与一次最终质量门禁，并留下可审计归档。",
+      "id": "US-245",
+      "title": "提供管理 API 与安全 DTO",
+      "description": "As a frontend client, I need strict generated management contracts so that the future tracking page can invoke only server-authorized actions.",
       "acceptanceCriteria": [
-        "使用脱敏 fixture 演练首次同步、重复同步、外部孤立、唯一关联、歧义、外部缺失、部分读取失败、VERIFY_EXTERNAL 和回退",
-        "运行一次完整非浏览器测试、ruff/compileall、OpenAPI drift、前端 typecheck/lint/unit/build 与真实 Chromium；失败先跑最小子集，禁止无修改重复全量运行",
-        "记录准确测试数量、实现偏差、剩余风险和每个 story 独立提交",
-        "审计 recording transports，确认无真实网络和外部 create/modify/enable/disable/delete/refresh 请求；仓库无敏感 fixture、trace、截图或 build 产物",
-        "prd.json 中 US-228 至 US-236 全部 passes=true 后归档 prd/progress",
-        "Typecheck passes",
-        "Tests pass"
+        "POST modify, set-enabled, delete-external and refresh routes are registered through strict request schemas and thin service calls",
+        "Requests require confirm=true, idempotency_key, expected_revision and request-scoped password ab_config plus only action-specific fields",
+        "Responses reuse safe TrackingItem and operation summaries and return only action, management_status, needs_manual and fixed safe_message",
+        "Recursive leak tests prove external IDs, RSS IDs, URLs, patches, fingerprints, methods, paths, credentials, raw responses and absolute paths are absent",
+        "Endpoint inventory, OpenAPI registry/JSON, generated TypeScript client and operation/path fixtures are synchronized",
+        "Stable 400/404/409 and business-unknown HTTP semantics have contract tests",
+        "API, OpenAPI drift and generated-client tests pass",
+        "Typecheck passes"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": ""
+      "passes": false,
+      "notes": "Do not implement a tracking-management page or hand-written frontend DTO."
+    },
+    {
+      "id": "US-246",
+      "title": "完成 Stage 31 回归、文档与归档",
+      "description": "As a maintainer, I need one bounded final gate and complete handoff so that Stage 31 can merge safely and Stage 32 does not reopen write semantics.",
+      "acceptanceCriteria": [
+        "Offline recording fixtures cover all four actions across success, definite failure, unknown, recovery, replay, concurrency and partial RSS outcomes",
+        "A repository audit finds no real Auto Bangumi calls, arbitrary proxy paths, file=true, global refresh, batch delete, media deletion or sensitive fixtures",
+        "Full non-browser backend, frontend typecheck/lint/unit/build, OpenAPI drift and real Chromium regression gates pass once and exact counts are recorded",
+        "README, architecture, M10-M13, backlog, future stages and backend-support PRD state Stage 31 complete without claiming a frontend page",
+        "Stage 32 B-D handoff freezes compatibility, migration, generated contract, security matrix and release rollback scope without adding new write actions",
+        "PRD and progress are archived under the Stage 31 archive directory and all stories pass",
+        "git diff --check passes",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "Only this story runs the complete test matrix. Stop and report if more than 12 total Ralph iterations are required."
     }
   ]
 }
