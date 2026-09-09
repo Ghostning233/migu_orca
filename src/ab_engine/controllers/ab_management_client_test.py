@@ -67,7 +67,7 @@ def test_snapshot_logs_one_login_and_only_same_origin_reads() -> None:
     assert capabilities.subscription_detail == "SUPPORTED"
     assert capabilities.rss_list == "SUPPORTED"
     assert capabilities.external_verify == "SUPPORTED"
-    assert capabilities.subscription_modify == "UNKNOWN"
+    assert capabilities.subscription_modify == "SUPPORTED"
     assert [call["method"] for call in transport.calls] == ["POST", "GET", "GET", "GET"]
     assert [call["endpoint"] for call in transport.calls] == [
         "https://auto-bangumi.example/api/v1/auth/login",
@@ -147,3 +147,46 @@ def test_api_token_management_is_fail_closed_without_transport_calls() -> None:
     assert error.value.error_type == "ab_management_unsupported"
     assert transport.calls == []
     assert "token-secret" not in repr(error.value.as_dict())
+
+
+def test_subscription_write_actions_use_exact_routes_and_clear_session() -> None:
+    transport = RecordingTransport([
+        {"access_token": "write-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "enable-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "disable-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "delete-secret"}, {"version": "3.1.18"}, {"status": True},
+    ])
+    client = create_legacy_31_management_client(_config(), transport=transport)
+
+    client.update_subscription("sub/42", {"title": "新标题"})
+    client.set_subscription_enabled("sub/42", True)
+    client.set_subscription_enabled("sub/42", False)
+    client.delete_subscription("sub/42")
+
+    assert [(call["method"], call["endpoint"]) for call in transport.calls] == [
+        ("POST", "https://auto-bangumi.example/api/v1/auth/login"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("PATCH", "https://auto-bangumi.example/api/v1/bangumi/update/sub%2F42"),
+        ("POST", "https://auto-bangumi.example/api/v1/auth/login"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("GET", "https://auto-bangumi.example/api/v1/bangumi/enable/sub%2F42"),
+        ("POST", "https://auto-bangumi.example/api/v1/auth/login"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("DELETE", "https://auto-bangumi.example/api/v1/bangumi/disable/sub%2F42?file=false"),
+        ("POST", "https://auto-bangumi.example/api/v1/auth/login"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("DELETE", "https://auto-bangumi.example/api/v1/bangumi/delete/sub%2F42?file=false"),
+    ]
+    assert transport.calls[2]["payload"] == {"title": "新标题"}
+    assert transport.calls[8]["endpoint"].endswith("?file=false")
+    assert transport.calls[11]["endpoint"].endswith("?file=false")
+    assert all("write-secret" not in repr(call) for call in transport.calls[3:])
+
+
+def test_write_capability_is_unknown_for_non_exact_version() -> None:
+    transport = RecordingTransport([{"access_token": "secret"}, {"version": "3.1.19"}])
+    capabilities = create_legacy_31_management_client(_config(), transport=transport).probe_capabilities()
+    assert capabilities.subscription_modify == "UNKNOWN"
+    assert capabilities.subscription_enable == "UNKNOWN"
+    assert capabilities.subscription_disable == "UNKNOWN"
+    assert capabilities.subscription_delete == "UNKNOWN"

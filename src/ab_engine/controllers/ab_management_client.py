@@ -48,8 +48,10 @@ class Legacy31ManagementClient:
             capabilities = AutoBangumiCapabilities(
                 probe_status="VERIFIED", version=version, adapter="legacy_3_1",
                 subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
+                subscription_modify="SUPPORTED", subscription_enable="SUPPORTED",
+                subscription_disable="SUPPORTED", subscription_delete="SUPPORTED",
                 rss_list="SUPPORTED", external_verify="SUPPORTED",
-                safe_message="已验证 Auto Bangumi 只读能力",
+                safe_message="已验证 Auto Bangumi 3.1.18 管理能力",
             )
             return capabilities, subscriptions, rss
         finally:
@@ -83,6 +85,51 @@ class Legacy31ManagementClient:
         finally:
             self._token = None
 
+    def update_subscription(self, external_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Update one subscription through the fixed 3.1.18 route."""
+        return self._subscription_action(
+            "PATCH", f"/api/v1/bangumi/update/{_path_id(external_id)}", payload
+        )
+
+    def set_subscription_enabled(self, external_id: str, enabled: bool) -> dict[str, Any]:
+        """Enable or disable one subscription without exposing the file option."""
+        if type(enabled) is not bool:
+            raise Stage1Error("invalid_ab_payload", "启用状态必须是布尔值", "ab_management")
+        if enabled:
+            method = "GET"
+            path = f"/api/v1/bangumi/enable/{_path_id(external_id)}"
+        else:
+            method = "DELETE"
+            path = f"/api/v1/bangumi/disable/{_path_id(external_id)}?file=false"
+        return self._subscription_action(method, path, None)
+
+    def delete_subscription(self, external_id: str) -> dict[str, Any]:
+        """Delete the external subscription while retaining its files."""
+        return self._subscription_action(
+            "DELETE", f"/api/v1/bangumi/delete/{_path_id(external_id)}?file=false", None
+        )
+
+    def _subscription_action(
+        self,
+        method: Literal["GET", "PATCH", "DELETE"],
+        path: str,
+        payload: Mapping[str, Any] | None,
+    ) -> dict[str, Any]:
+        if self._config.auth_mode != "password":
+            raise Stage1Error("ab_management_unsupported", "当前 Auto Bangumi 认证模式不支持管理写入", "ab_management")
+        try:
+            self._authenticate()
+            headers = {"Accept": "application/json", "Cookie": self._cookie()}
+            status = _version(self._request("GET", "/api/v1/status", headers))
+            if status != "3.1.18":
+                raise Stage1Error("ab_unsupported_version", "当前 Auto Bangumi 版本暂不受支持", "ab_management")
+            if method == "PATCH":
+                headers = {**headers, "Content-Type": "application/json"}
+            response = self._request(method, path, headers, payload)
+            return _action_response(response)
+        finally:
+            self._token = None
+
     def _authenticate(self) -> None:
         response = self._request("POST", "/api/v1/auth/login", {
             "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"
@@ -97,7 +144,13 @@ class Legacy31ManagementClient:
             raise Stage1Error("ab_auth_failed", "Auto Bangumi 认证失败", "ab_management")
         return f"token={self._token}"
 
-    def _request(self, method: Literal["GET", "POST"], path: str, headers: Mapping[str, str], payload: Mapping[str, str] | None = None) -> dict[str, Any]:
+    def _request(
+        self,
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
+        path: str,
+        headers: Mapping[str, str],
+        payload: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         try:
             return self._transport.request_json(method, _api_endpoint(self._config.base_url, path), headers, payload, timeout=self._timeout)
         except Stage1Error:
@@ -123,8 +176,10 @@ def _verified_legacy_capabilities(version: str) -> AutoBangumiCapabilities:
     return AutoBangumiCapabilities(
         probe_status="VERIFIED", version=version, adapter="legacy_3_1",
         subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
+        subscription_modify="SUPPORTED", subscription_enable="SUPPORTED",
+        subscription_disable="SUPPORTED", subscription_delete="SUPPORTED",
         rss_list="SUPPORTED", external_verify="SUPPORTED",
-        safe_message="已验证 Auto Bangumi 只读能力",
+        safe_message="已验证 Auto Bangumi 3.1.18 管理能力",
     )
 
 
@@ -207,6 +262,25 @@ def _opaque(value: Any, field: str) -> str:
     result = str(value).strip()
     if not result or len(result) > 128 or any(ord(char) < 32 for char in result):
         raise Stage1Error("invalid_ab_response", "Auto Bangumi 响应字段无效", "ab_management", {"field": field})
+    return result
+
+
+def _path_id(value: str) -> str:
+    return quote(_opaque(value, "external_id"), safe="-._~")
+
+
+def _action_response(response: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep action results bounded and reject malformed upstream responses."""
+    if not isinstance(response, Mapping) or len(response) > 32:
+        raise Stage1Error("invalid_ab_response", "Auto Bangumi 管理响应无效", "ab_management")
+    result: dict[str, Any] = {}
+    for key, value in response.items():
+        if not isinstance(key, str) or len(key) > 64:
+            raise Stage1Error("invalid_ab_response", "Auto Bangumi 管理响应无效", "ab_management")
+        if key.lower() in {"token", "access_token", "cookie", "password", "authorization"}:
+            continue
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            result[key] = value
     return result
 
 

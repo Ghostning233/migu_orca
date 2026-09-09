@@ -31,6 +31,9 @@
   ordinary SUBMIT writes; management binding dimensions must be immutable in repository CAS.
 - Pure management fingerprints/classifiers belong in tracking controllers with no web, storage, or transport
   imports; only the SHA-256 digest and outcome code cross durable boundaries.
+- 3.1.18 management writes reuse the request-scoped password/Cookie session: authenticate, verify the exact
+  version, call one fixed route, and clear the token in `finally`; destructive subscription routes build
+  `?file=false` internally and never accept a caller-supplied query option.
 
 ## Stage 30 Handoff
 
@@ -73,6 +76,24 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Gotchas encountered: Existing Stage 29 tests expect the legacy SUBMIT-only `TRACKING_OPERATION_KINDS`
     feature-probe export; v2 validation uses a separate complete-kind set for compatibility.
   - Useful context: Targeted operation/repository tests (78), compileall, Ruff, and git diff check passed.
+---
+
+## 2026-09-09 00:00:00 +0800 - US-238
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the password-only Auto Bangumi 3.1.18 subscription write adapter for update,
+  enable, disable, and delete; promoted those capabilities only after exact-version verification; added
+  bounded action response parsing and transport support for PATCH/DELETE while preserving request-scoped
+  authentication and mandatory `file=false` on destructive routes.
+- Files changed: `src/ab_engine/controllers/ab_management_client.py`,
+  `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_management_client_test.py`,
+  `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Each management action performs a fresh login and status/version check, then clears
+    the in-memory token regardless of success or failure.
+  - Gotchas encountered: The legacy transport previously modeled only GET/POST and form payloads; PATCH
+    management bodies require JSON encoding while DELETE routes must keep their query fixed in the adapter.
+  - Useful context: `uv run pytest -q src/ab_engine/controllers` passed 91 tests; Ruff, compileall, and
+    `git diff --check` also passed.
 ---
 
 ## 2026-09-09 00:00:00 +0800 - US-237 审核修复

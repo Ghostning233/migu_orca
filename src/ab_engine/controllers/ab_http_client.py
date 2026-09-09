@@ -28,10 +28,10 @@ class AutoBangumiHttpTransport(Protocol):
 
     def request_json(
         self,
-        method: Literal["GET", "POST"],
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: Mapping[str, str] | None = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         timeout: float,
     ) -> dict[str, Any]:
@@ -43,10 +43,10 @@ class AutoBangumiLegacyTransport(Protocol):
 
     def request_json(
         self,
-        method: Literal["GET", "POST"],
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: Mapping[str, str] | None = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         timeout: float,
     ) -> dict[str, Any]:
@@ -118,9 +118,14 @@ class UrlopenAutoBangumiHttpTransport:
         timeout: float,
     ) -> dict[str, Any]:
         data = None
+        request_headers = dict(headers)
         if payload is not None:
-            data = urlencode(dict(payload)).encode("utf-8")
-        request = Request(endpoint, data=data, headers=dict(headers), method=method)
+            if method == "PATCH":
+                data = json.dumps(deepcopy(dict(payload)), ensure_ascii=False).encode("utf-8")
+                request_headers.setdefault("Content-Type", "application/json")
+            else:
+                data = urlencode(dict(payload)).encode("utf-8")
+        request = Request(endpoint, data=data, headers=request_headers, method=method)
         try:
             # Never follow redirects: a token Cookie must not leave the service origin.
             with build_opener(_RejectRedirects()).open(request, timeout=timeout) as response:
