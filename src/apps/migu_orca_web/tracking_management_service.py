@@ -32,6 +32,7 @@ from tracking_engine.controllers.management_operation import (
     classify_management_action,
     classify_management_readback,
 )
+from tracking_engine.controllers.management_state import management_action_allowed
 from tracking_engine.controllers.management_target import (
     ManagementBinding,
     ResolvedManagementTarget,
@@ -134,6 +135,8 @@ def run_tracking_management(
         raise Stage1Error("tracking_management_patch_invalid", "管理操作类型无效", "tracking_management")
     if operation == TRACKING_OPERATION_KIND_REFRESH_RSS and target_scope != "ASSOCIATED_RSS":
         raise Stage1Error("tracking_management_patch_invalid", "刷新操作目标无效", "tracking_management")
+    if not management_action_allowed(record.status, operation):
+        raise Stage1Error("tracking_management_state_conflict", "当前追番状态不允许该管理操作", "tracking_management")
 
     safe_patch = _safe_patch(operation, target_scope, patch, enabled)
     binding = build_management_binding(action=operation, scope=target_scope, patch=safe_patch if operation == "MODIFY" else None, enabled=enabled if operation == "SET_ENABLED" else None)
@@ -511,8 +514,11 @@ def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRe
         if scope == "SUBSCRIPTION":
             external_id = mapping.get("subscription_id")
             match = next((item for item in subscriptions if item.external_id == external_id), None)
-            if match is None or match.deleted:
+            if match is None:
                 return None
+            # A disabled 3.1.18 Bangumi remains present in the list with
+            # deleted=true.  DELETE_EXTERNAL succeeds only after it vanishes.
+            return ResolvedManagementTarget(scope="SUBSCRIPTION", subscription=match)
         else:
             wanted = tuple(mapping.get("rss_ids", ()))
             remaining = tuple(item for item in rss_items if item.external_id in wanted)
@@ -732,6 +738,25 @@ def _guard_current_operation(config: StorageConfig, record: TrackingRecord) -> N
         "RECOVERY_REQUIRED",
     }:
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
+    if operation.state in TRACKING_OPERATION_TERMINAL_STATES and not _record_has_management_outcome(record, operation.operation_id):
+        # A crash may land the operation result before its paired TrackingRecord
+        # CAS.  Turn that orphaned terminal state into the normal recovery gate
+        # before rejecting any fresh idempotency key.
+        _persist_management_storage_failure(config, record.tracking_id, operation, utc_now())
+        raise Stage1Error("tracking_management_state_conflict", "已有管理操作尚未完成本地落盘，请先恢复", "tracking_management")
+
+
+def _record_has_management_outcome(record: TrackingRecord, operation_id: str) -> bool:
+    return any(
+        isinstance(event, Mapping)
+        and event.get("operation_id") == operation_id
+        and event.get("action") in {
+            TRACKING_AUDIT_MANAGEMENT_SUCCEEDED,
+            TRACKING_AUDIT_MANAGEMENT_FAILED,
+            TRACKING_AUDIT_MANAGEMENT_UNKNOWN,
+        }
+        for event in record.audit_events
+    )
 
 
 def _load_operation_if_present(config: StorageConfig, idempotency_key: str) -> TrackingOperation | None:

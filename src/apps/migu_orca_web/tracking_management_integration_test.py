@@ -39,6 +39,10 @@ def _subscription(title: str) -> dict[str, Any]:
     }
 
 
+def _rss() -> dict[str, Any]:
+    return {"id": 7, "name": "Feed", "url": "https://rss.invalid/feed", "aggregate": False, "enabled": True}
+
+
 def test_real_adapter_writer_and_coordinator_complete_modify_readback(tmp_path: Path) -> None:
     """Exercise adapter -> route writer -> coordinator without mocking it."""
     config = load_storage_config(tmp_path / "storage")
@@ -106,4 +110,30 @@ def test_real_adapter_writer_and_coordinator_complete_rss_modify_readback(tmp_pa
         "name": "Changed feed", "url": "https://rss.invalid/feed", "aggregate": False,
         "parser": "rss", "enabled": True,
     }
+    assert transport.responses == []
+
+
+def test_real_delete_readback_requires_list_absence_not_deleted_flag(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path / "storage")
+    record, _ = ensure_tracking_record(config, create_external_tracking_record(
+        adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
+        subscription_id="sub-1", rss_ids=("7",), title="Test", season=1,
+    ))
+    disabled = {**_subscription("Test"), "deleted": True}
+    transport = _OfflineTransport([
+        {"access_token": "first"}, {"version": "3.1.18"}, {"data": [disabled]}, {"data": [_rss()]},
+        {"access_token": "write"}, {"version": "3.1.18"}, {"status": True},
+        # The disabled item remains in the actual upstream list.
+        {"access_token": "readback"}, {"version": "3.1.18"}, {"data": [disabled]}, {"data": [_rss()]},
+    ])
+    client = create_legacy_31_management_client(AutoBangumiConfig(
+        base_url="https://ab.invalid", auth_mode="password", username="user", password="secret", fallback_enabled=False,
+    ), transport=transport)
+    result = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="delete-presence-readback", confirm=True, operation="DELETE_EXTERNAL",
+        target_scope="SUBSCRIPTION", management_client=client, write=_management_writer(client, "DELETE_EXTERNAL"),
+    )
+    assert result["outcome"] == "DEFINITE_FAILURE"
+    assert load_tracking_record(config, record.tracking_id).status != "EXTERNAL_DELETED"
     assert transport.responses == []

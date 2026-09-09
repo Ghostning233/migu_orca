@@ -268,6 +268,24 @@ def test_disabled_subscription_can_still_use_the_file_safe_delete_path(tmp_path:
     assert len(calls) == 1
 
 
+def test_deleted_subscription_is_not_treated_as_confirmed_external_deletion(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client = _FakeClient()
+    client.read_snapshot = lambda: (
+        client.capabilities,
+        [ExternalSubscription("sub-1", "Test", 1, "Group", deleted=True)],
+        [ExternalRss("7", "Feed", "https://rss.invalid")],
+    )
+    result = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="deleted-is-still-present", confirm=True,
+        operation="DELETE_EXTERNAL", target_scope="SUBSCRIPTION", management_client=client,
+        write=lambda _target, _payload: {"status_code": 200},
+    )
+    assert result["outcome"] == "DEFINITE_FAILURE"
+    assert load_tracking_record(config, record.tracking_id).status != TRACKING_STATUS_EXTERNAL_DELETED
+
+
 def test_rss_delete_calls_each_bound_id_and_removes_only_mapping(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
     client = _FakeClient()
@@ -403,6 +421,31 @@ def test_terminal_same_key_replay_returns_persisted_outcome_without_external_io(
     with pytest.raises(Stage1Error) as conflict:
         _run(config, current, client, calls, idempotency_key="key-1")
     assert conflict.value.error_type == "tracking_idempotency_conflict"
+
+
+def test_orphaned_terminal_operation_is_converted_to_recovery_before_new_write(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    first = _run(config, record, _FakeClient(), [])
+    operation = load_tracking_operation(config, first["operation_id"])
+    management_service.compare_and_swap_tracking_operation(
+        config, operation.operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
+        management_service.transition_tracking_operation(operation, state="SUCCEEDED"),
+    )
+    started = load_tracking_record(config, record.tracking_id)
+    with pytest.raises(Stage1Error) as error:
+        _run(config, started, _FakeClient(), [], idempotency_key="fresh-after-crash")
+    assert error.value.error_type == "tracking_management_state_conflict"
+    assert load_tracking_operation(config, first["operation_id"]).state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
+    assert load_tracking_record(config, record.tracking_id).status == "RECOVERY_REQUIRED"
+
+
+def test_management_service_rejects_status_outside_frozen_matrix(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    record = management_service.replace(record, status=TRACKING_STATUS_EXTERNAL_DELETED, revision=record.revision + 1)
+    management_service.compare_and_swap_tracking_record(config, record.tracking_id, record.revision - 1, record)
+    with pytest.raises(Stage1Error) as error:
+        _run(config, record, _FakeClient(), [], idempotency_key="illegal-status")
+    assert error.value.error_type == "tracking_management_state_conflict"
 
 
 @pytest.mark.parametrize("operation,scope,extra", [
