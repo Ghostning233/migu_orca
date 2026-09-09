@@ -10,6 +10,8 @@ Stage 30「Auto Bangumi 只读能力与外部同步基础」已完成 B-C1：以
 
 Stage 31「Auto Bangumi 可靠写管理」已完成 B-C2：在精确 3.1.18 password capability 下交付 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`REFRESH_RSS` 的 request-scoped adapter、tracking operation v2、confirm/idempotency/revision CAS、写后只读回查与 `VERIFY_EXTERNAL` 恢复；番剧停用/删除固定 `file=false`，RSS 只处理启动时映射的单项集合，删除始终保留本地 Request、TrackingRecord、审计、任务与媒体。四个管理 API、OpenAPI、endpoint inventory 和生成客户端已同步；本阶段仍不实现正式追番管理页面。实现与验收见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md`，B-D 兼容/迁移/安全矩阵与前端 handoff 进入 Stage 32。
 
+Stage 32「后端契约固化、兼容迁移与前端交接」已规划为 B-D：冻结 B-A～B-C2 端点生命周期、严格 DTO/OpenAPI/生成类型、旧入口兼容与 tracking 权威状态、历史 schema 迁移、capability 降级、安全泄漏矩阵、发布回退和版本化前端 handoff。Stage 32 使用 US-247～US-256；不新增管理动作、不删除仍有调用方的旧端点、不开发正式追番管理页面。执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`。
+
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI、静态检查、OpenAPI 漂移检查、真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。
@@ -490,8 +492,11 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 > 当前 `ralph.sh` 只支持 `amp`、`claude`、`codex` 三种执行工具，不包含 DSH 或 provider 配置。项目保留的轻量定制是可通过 `--model`、`--claude-model` 或 `RALPH_MODEL` 指定模型；模型参数会传给 Claude 和 Codex，Amp 分支不使用该参数。
 
-- 当前 Ralph 状态快照：Stage 29 已完成并归档；`scripts/ralph/prd.json` 与 `progress.txt` 保留 Stage 29 最终完成快照，下一 Stage 启动时再替换
-- 最近完成阶段：Stage 29，统一追番记录与可靠提交恢复
+- 当前 Ralph 状态快照：Stage 32 已规划；`scripts/ralph/prd.json` 与 `progress.txt` 已切换到 US-247～US-256，全部待开发
+- 当前执行阶段：Stage 32，后端契约固化、兼容迁移与前端交接（B-D）
+- 最近完成阶段：Stage 31，Auto Bangumi 可靠写管理
+- 前一完成阶段：Stage 30，Auto Bangumi 只读能力与外部同步基础
+- 前一完成阶段：Stage 29，统一追番记录与可靠提交恢复
 - 前一完成阶段：Stage 28，草案一致性与原子保存确认
 - 前一完成阶段：Stage 27，前端工程化迁移与页面重构
 - 前一完成阶段：Stage 26，Web API 契约固化与服务端边界治理
@@ -516,6 +521,9 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - Stage 27 执行：`docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`；执行分支 `agent/stage27-frontend-engineering-migration`，Ralph stories 为 US-197～US-209（已全部完成并归档）
 - Stage 28 执行：`docs/MiGuOrca_stage28_draft_consistency_PRD.md`；执行分支 `ralph/stage28-draft-consistency`，Ralph stories 为 US-210～US-218（已全部完成并归档）
 - Stage 29 执行：`docs/MiGuOrca_stage29_unified_tracking_PRD.md`；执行分支 `ralph/stage29-unified-tracking`，Ralph stories 为 US-219～US-227（已全部完成并归档；B-C handoff 见 future_stages「Stage 29 handoff」）
+- Stage 30 执行：`docs/MiGuOrca_stage30_ab_read_sync_PRD.md`；执行分支 `ralph/stage30-ab-read-sync`，Ralph stories 为 US-228～US-236（已全部完成并归档）
+- Stage 31 执行：`docs/MiGuOrca_stage31_ab_write_management_PRD.md`；执行分支 `ralph/stage31-ab-write-management`，Ralph stories 为 US-237～US-246（已全部完成并归档）
+- Stage 32 执行：`docs/MiGuOrca_stage32_contract_hardening_PRD.md`；执行分支 `ralph/stage32-contract-hardening`，Ralph stories 为 US-247～US-256（已规划，全部待开发）
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude，可指定模型）：`./scripts/ralph/ralph.sh --tool claude --model claude-model-id 7`

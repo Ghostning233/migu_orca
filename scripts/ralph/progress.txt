@@ -1,232 +1,43 @@
-# MiGuOrca Ralph Progress - Stage 31
+# MiGuOrca Ralph Progress - Stage 32
 
 ## Codebase Patterns
 
-- 正式执行 PRD：`docs/MiGuOrca_stage31_ab_write_management_PRD.md`；分支：
-  `ralph/stage31-ab-write-management`；stories：US-237～US-246。
-- 本阶段只实现 B-C2 后端写管理，不实现 F-F 追番管理页面，不删除旧 API，不顺带完成 Stage 32 B-D。
-- 只对 password + 精确 Auto Bangumi 3.1.18 开放写 capability；未知版本/API Token/探测失败全部
-  fail closed。测试只用 recording fake，禁止访问真实实例。
-- 固定 operation kind：MODIFY、SET_ENABLED、DELETE_EXTERNAL、REFRESH_RSS；公共目标只允许
-  SUBSCRIPTION/ASSOCIATED_RSS，并始终从本地 tracking mapping 解析，不接受或返回外部 ID。
-- 所有写入先 capability/read-before-write，再持久化 PREPARED、record current_operation_id 和
-  IN_PROGRESS；完成这些边界前不得调用外部。相同幂等键最多一次外部调用。
-- 写响应 2xx 后必须只读回查；timeout、连接中断、5xx、未知响应或回查失败保持结果未知，禁止
-  换新 key 盲重试，只能 VERIFY_EXTERNAL/人工恢复。
-- 番剧 disable/delete 的 `file=false` 必须由 adapter 常量生成，API schema 不得出现 file；禁止
-  qBittorrent、文件系统或本地 Request/TrackingRecord 删除调用。
-- 禁止 `/rss/refresh/all`、`/rss/delete/many` 和通用 method/path 代理；关联 RSS 只处理 operation
-  启动时 mapping 中的有界 ID 集合。
-- TrackingOperation v2 兼容读取 v1 SUBMIT；operation 只保存 kind/scope/status/摘要，不保存 patch、
-  标题、外部 ID、URL、路径、凭据、请求/响应或异常原文。
-- Web API 保持 routes/schemas/api_contract/serializer/service 分层；端点同步 inventory、
-  openapi_gen、openapi.json、生成 TypeScript client 与 contract tests。
-- 每次 Ralph 迭代只完成一个最高优先级未通过 story，完成定向验收并提交后才设置 passes=true。
-- US-237～US-245 仅运行受影响定向测试和必要静态/drift 检查；US-246 才运行一次完整后端、前端与
-  Chromium 门禁。禁止无修改重复跑全套。
-- 若累计超过 12 次迭代仍未完成，停止循环并报告剩余 story/阻塞，避免无界 token 与测试开销。
-- Stage 30 的 ExternalMapping v1、sync 幂等、合并别名、安全 serializer 与 VERIFY_EXTERNAL 语义是
-  迁移基线；不可通过大重写破坏 Stage 29/30 兼容。
-- Operation schema migrations may accept legacy v1 on read while omitting null v2 management fields from
-  ordinary SUBMIT writes; management binding dimensions must be immutable in repository CAS.
-- Pure management fingerprints/classifiers belong in tracking controllers with no web, storage, or transport
-  imports; only the SHA-256 digest and outcome code cross durable boundaries.
-- 3.1.18 management writes reuse the request-scoped password/Cookie session: authenticate, verify the exact
-  version, call one fixed route, and clear the token in `finally`; destructive subscription routes build
-  `?file=false` internally and never accept a caller-supplied query option.
-- RSS enable-many is a JSON array body; adapter methods must sort/deduplicate mapped numeric IDs and inject
-  the current request-scoped RSS URL for updates instead of accepting a caller URL.
-- Management target resolution is a pure request-scoped boundary: resolve IDs only from the current local
-  mapping and fresh snapshot, then persist only deterministic SHA-256 summaries.
-- Management writes must bind the complete expected projection from the fresh snapshot, then terminalize the
-  operation only after a matching readback; transport or evidence uncertainty remains recoverable.
-- Keep ordinary operation transitions terminal-only; explicit management recovery uses a separate CAS seam to
-  resolve OUTCOME_UNKNOWN/RECOVERY_REQUIRED without creating a new idempotency binding.
-- Web management write routes share strict request-scoped credential/idempotency/revision fields and a single
-  safe result DTO; keep path tracking IDs out of request-body OpenAPI requirements while Flask injects them.
+- 正式执行 PRD：`docs/MiGuOrca_stage32_contract_hardening_PRD.md`；分支：
+  `ralph/stage32-contract-hardening`；stories：US-247～US-256。
+- Stage 31 已合入远端 main；TrackingRecord 是外部提交流程权威，旧 queue 与 AB result 只作兼容
+  投影或迁移证据，任何路径不得降级已持久化成功。
+- 本阶段只完成 B-D 契约收尾：生命周期、严格 DTO/OpenAPI/生成类型、兼容/迁移、安全矩阵、发布
+  回退和前端 handoff；不得新增管理动作、删除旧端点或开发正式页面。
+- 旧 preview-save、单番 submit-ab、batch accept/queue/submit/retry/recover 仍有真实前端调用方；本阶段
+  保持兼容并证明共用 tracking 服务，不以“未发现调用”作为删除依据。
+- `available_actions` 只表示不带凭据的本地可执行性；真正外部动作必须在同次 POST 中重新探测
+  request-scoped capability，并执行 confirm/idempotency/revision/read-before-write/recovery guard。
+- 管理写只允许 password + 精确 Auto Bangumi 3.1.18；API Token、其他/未知版本和探测失败均 fail
+  closed。操作仍只有 MODIFY、SET_ENABLED、DELETE_EXTERNAL、REFRESH_RSS。
+- 番剧停用/删除固定 `file=false`；不接受 file 输入，不删除本地 Request、TrackingRecord、operation、
+  审计、queue、下载任务、目录或媒体。
+- TrackingRecord v1、ExternalMapping v1、manifest v1、operation v1/v2 按当前规则兼容读取；纯读取不
+  改写，未知未来 schema 保留原文件并安全拒绝，迁移纯本地、可重入、逐条隔离。
+- OpenAPI、endpoint inventory 和 generated TypeScript client 必须同步；前端只使用生成类型，不手写
+  DTO，不读取 Python 常量或 Auto Bangumi 原始响应。
+- `updated_episode` 继续为 null/NOT_IMPLEMENTED；禁止用种子、RSS 或下载数量推断。
+- US-247～US-255 只跑定向检查；US-256 才运行一次完整非浏览器、前端与 Chromium 门禁。无代码
+  变化禁止重复跑全套。
+- 预计 10 个实现迭代，最多 2 个修复迭代；超过 12 轮停止并报告，不得无界循环。
 
-## Stage 30 Handoff
+## Stage 32 Handoff
 
-- Stage 30 已完成并归档：3.1.18 password 只读 adapter、capability、ExternalMapping v1、严格
-  对账、tracking sync、EXTERNAL_ONLY 和 VERIFY_EXTERNAL 已可复用。
-- `TrackingOperation` 当前只有 SUBMIT/schema v1；Stage 31 应显式扩展版本并保留既有 operation ID、
-  状态机和 repository CAS 行为。
-- `TrackingRecord.external_mapping` 内部已有 subscription_id/rss_ids，公开 serializer 会隐藏这些
-  ID；Stage 31 继续以 tracking_id + 固定 scope 作为唯一公共定位方式。
-- capability DTO 已预留 subscription/RSS modify/enable/disable/delete/refresh 字段，Stage 31 只需在
-  精确验证后将对应字段提升为 SUPPORTED。
-- Stage 30 sync/recovery 已有 request-scoped password 会话与 recording transport seam；写 adapter
-  应扩展 action-specific 方法，不创建通用代理。
+- Stage 28 已冻结 draft revision、save-confirm、1/12/36 和 safe-info；Stage 29 已冻结 tracking、
+  submit/retry/recover 与历史迁移；Stage 30/31 已交付 3.1.18 只读同步和可靠写管理。
+- 前端 Stage 33 在独立 clone 并行开发，使用 US-257～US-265；本分支只使用预留的 US-247～US-256，
+  不触碰 Stage 33 工作区。
+- Stage 32 完成并合入后才允许正式规划 F-F 追番管理；F-B～F-E 仍按前端依赖和实际合并状态评审。
+- 保存并确认只产生待提交 tracking，外部提交必须再次显式确认；用户必须选择真实 MiKan 合集，
+  MiGuOrca 不绕过 Auto Bangumi 创建 qBittorrent 下载。
 
 ## Cost Control
 
-- 一个 story 一个上下文窗口；不要顺带开发 Stage 32、F-F 或重写 Stage 29/30。
-- 模型/controller/adapter story 不生成 OpenAPI；只有 US-245 同步 API 契约与生成客户端。
-- 最终 US-246 之前不执行全量 pytest 或完整 Chromium。
-- 测试失败时先运行最小失败命令；无代码变化不重复执行相同的全量命令。
-- 预计 10 个 story，Ralph 最大迭代建议为 12；超过上限停止并报告。
-
-## Planning Baseline
-
-- 2026-09-09：Stage 31 PRD 已冻结，所有 story 初始 `passes=false`。
-- 当前阶段没有实现代码；下一步从 US-237 开始。
-
-## 2026-09-09 00:00:00 +0800 - US-237
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Extended TrackingOperation to v2 management kinds and strict scope/status/projection
-  binding fields, preserved readable v1 SUBMIT records, expanded repository idempotency/CAS binding checks,
-  and added pure management fingerprint and action/readback outcome classifiers.
-- Files changed: `src/tracking_engine/models/operation.py`,
-  `src/storage_engine/controllers/operation_repository.py`,
-  `src/tracking_engine/controllers/management_operation.py`, `scripts/ralph/prd.json`,
-  `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: Keep management binding fields in the immutable operation tuple so same-key replay
-    conflicts are detected before any external work.
-  - Gotchas encountered: Existing Stage 29 tests expect the legacy SUBMIT-only `TRACKING_OPERATION_KINDS`
-    feature-probe export; v2 validation uses a separate complete-kind set for compatibility.
-  - Useful context: Targeted operation/repository tests (78), compileall, Ruff, and git diff check passed.
----
-
-## 2026-09-09 00:00:00 +0800 - US-238
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added the password-only Auto Bangumi 3.1.18 subscription write adapter for update,
-  enable, disable, and delete; promoted those capabilities only after exact-version verification; added
-  bounded action response parsing and transport support for PATCH/DELETE while preserving request-scoped
-  authentication and mandatory `file=false` on destructive routes.
-- Files changed: `src/ab_engine/controllers/ab_management_client.py`,
-  `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_management_client_test.py`,
-  `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: Each management action performs a fresh login and status/version check, then clears
-    the in-memory token regardless of success or failure.
-  - Gotchas encountered: The legacy transport previously modeled only GET/POST and form payloads; PATCH
-    management bodies require JSON encoding while DELETE routes must keep their query fixed in the adapter.
-  - Useful context: `uv run pytest -q src/ab_engine/controllers` passed 91 tests; Ruff, compileall, and
-    `git diff --check` also passed.
----
-
-## 2026-09-09 00:00:00 +0800 - US-238 审核修复
-- 审核问题：urllib transport 的实际 PATCH/DELETE 支持未同步到实现签名，且管理写失败文案仍错误称为“只读”。
-- 修复：对齐 transport 的 method/payload 类型注解，并改正安全错误文案。
-- 验证：14 passed；Ruff、compileall、`git diff --check` 通过。
----
-
-## 2026-09-09 00:00:00 +0800 - US-237 审核修复
-- 审核问题：`TRACKING_OPERATION_KINDS` 被错误保留为仅 `SUBMIT`，不符合本阶段五种 operation 的公开契约；纯分类器缺少定向测试。
-- 修复：公开 operation 集合改为完整 v2 集合，并新增指纹、动作分类、回查分类测试。
-- 验证：85 passed；Ruff、compileall、`git diff --check` 通过。
----
-
-## 2026-09-09 00:00:00 +0800 - US-239
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added the password-only Auto Bangumi 3.1.18 RSS management adapter for update,
-  mapped-set enable, single-item disable/delete/refresh, with exact routes, deterministic numeric ID handling,
-  request-scoped URL preservation, safe response parsing, and full RSS capability promotion only after exact
-  version verification.
-- Files changed: `src/ab_engine/controllers/ab_management_client.py`,
-  `src/ab_engine/controllers/ab_http_client.py`, `src/ab_engine/controllers/ab_management_client_test.py`,
-  `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: The legacy transport needs JSON encoding for list bodies as well as PATCH mappings;
-    RSS enable-many must receive a sorted, deduplicated ID array.
-  - Gotchas encountered: Recording fakes intentionally retain request headers, so token-clearing tests should
-    inspect adapter state/results rather than assert tokens are absent from the fake's audit log.
-- Useful context: Auto Bangumi 3.1.18's `RSSUpdate` includes URL, but the adapter injects it only from the
-  current request-scoped snapshot and rejects a caller-provided URL.
----
-
-## 2026-09-09 15:13:49 +0800 - US-240
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added pure management target resolution and patch construction for SUBSCRIPTION and ASSOCIATED_RSS scopes. Mapping drift, missing/ambiguous targets, empty or mixed patches, raw filter expressions, URLs, absolute paths, traversal, and invalid types are rejected before adapter calls. Complete request-scoped update bodies preserve snapshot fields while RSS URLs remain adapter-owned, and management bindings expose only deterministic SHA-256 summaries.
-- Files changed: `src/tracking_engine/controllers/management_target.py`, `src/tracking_engine/controllers/management_target_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: Keep target IDs and fresh external objects in a request-scoped resolved dataclass; only the action/projection digests are suitable for operation binding.
-  - Gotchas encountered: Associated RSS targets must reject duplicate mapping IDs and missing snapshot members before sorting, otherwise a partial write set could be mistaken for the bound set.
-- Useful context: Targeted management/model tests (43), Ruff, compileall, and `git diff --check` passed; no nearby CODEX.md exists for the edited module.
----
-
-## 2026-09-09 00:00:00 +0800 - US-241
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added the request-scoped management coordinator with strict confirmation, revision and capability gates, fresh target snapshot resolution, deterministic management binding, record CAS, PREPARED-to-IN_PROGRESS durability, injected at-most-once write execution, and fail-closed in-flight replay handling.
-- Files changed: `src/apps/migu_orca_web/tracking_management_service.py`, `src/apps/migu_orca_web/tracking_management_service_test.py`, `src/tracking_engine/models/tracking.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: Management operations must bind both action and expected projection fingerprints before the tracking record CAS; the operation state gate is the only point that permits an external write.
-  - Gotchas encountered: A successful management write cannot be terminalized before US-242 readback; adapter exceptions must leave the durable operation `IN_PROGRESS` because the call may have reached Auto Bangumi.
-- Useful context: The coordinator keeps upstream snapshots and write payloads request-scoped; only the operation ID and safe binding digests cross durable storage.
----
-
-## 2026-09-09 00:00:00 +0800 - US-242
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added MODIFY and SET_ENABLED execution semantics to the durable management coordinator,
-  including complete fresh-snapshot projections, bounded write-result classification, mandatory readback,
-  atomic tracking status/mapping/audit persistence, and terminal operation transitions. Subscription snapshots
-  now preserve the enabled flag for verification. Timeout, connection, malformed, and failed-readback outcomes
-  remain non-successful and do not blindly retry the external write.
-- Files changed: `src/apps/migu_orca_web/tracking_management_service.py`,
-  `src/apps/migu_orca_web/tracking_management_service_test.py`,
-  `src/ab_engine/models/management.py`, `src/ab_engine/controllers/ab_management_client.py`,
-  `src/tracking_engine/models/tracking.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: Bind the expected post-write projection from the request-scoped fresh target and
-    compare it with a fresh readback before changing the durable tracking state.
-  - Gotchas encountered: Existing US-241 side-effect-only writer tests return no response and must remain at
-    IN_PROGRESS; response-bearing writers use the new readback path.
-  - Useful context: Targeted management/model/adapter tests (34), Ruff, compileall, and `git diff --check` passed.
----
-
-## 2026-09-09 00:00:00 +0800 - US-243
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added DELETE_EXTERNAL absence verification for subscriptions and associated RSS, deterministic single-item RSS deletion with bounded aggregate outcomes, mapping-only RSS cleanup, EXTERNAL_DELETED subscription status, and conservative REFRESH_RSS recovery semantics. Unknown, timeout, and partial destructive outcomes use a fixed manual-recovery message and never touch local Request/media data.
-- Files changed: `src/apps/migu_orca_web/tracking_management_service.py`, `src/apps/migu_orca_web/tracking_management_service_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: External deletion is verified by absence, while RSS mapping is reduced only after every bound item is absent; local tracking records remain durable.
-  - Gotchas encountered: Refresh has no stable read projection, so even a successful transport response must remain `RECOVERY_REQUIRED`; partial RSS deletion is also unknown rather than a definite failure.
-  - Useful context: Targeted management/adapter/model tests (37), compileall, Ruff, and `git diff --check` passed; no nearby CODEX.md exists.
----
-
-## 2026-09-09 15:45:00 +0800 - US-244
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Extended VERIFY_EXTERNAL dispatch for management operations. Recovery now reads only the
-  current verified 3.1.18 snapshot, validates the persisted operation kind/scope/fingerprint, classifies modify,
-  enable and delete outcomes, preserves safe prior state on verified non-application, keeps refresh and incomplete
-  RSS evidence manual, and updates the original record/audit/operation through CAS without a second write or key.
-- Files changed: `src/apps/migu_orca_web/tracking_management_service.py`,
-  `src/apps/migu_orca_web/tracking_management_service_test.py`,
-  `src/apps/migu_orca_web/tracking_recovery_service.py`,
-  `src/storage_engine/controllers/operation_repository.py`, `scripts/ralph/prd.json`,
-  `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: Recovery of uncertain terminal operations needs a dedicated repository CAS boundary;
-    ordinary transition validation should continue to reject outgoing terminal transitions.
-  - Gotchas encountered: Definite non-application and unresolved evidence both update the record, but only the
-    latter remains `needs_manual`; refresh has no stable projection and must remain `RECOVERY_REQUIRED`.
-- Useful context: Targeted management/recovery/operation/repository tests: 106 passed; compileall, Ruff, and
-  `git diff --check` passed. Browser and frontend gates are deferred to final US-246 as required by the PRD.
----
-
-## 2026-09-09 15:50:00 +0800 - US-245
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added strict POST management contracts for modify, set-enabled, delete-external, and RSS refresh; wired thin request-scoped adapter/coordinator routes with fixed action dispatch; added safe management result DTOs containing only action/status/manual flag/message, tracking summary, and operation summary; synchronized endpoint inventory, OpenAPI, and generated TypeScript client contracts.
-- Files changed: `src/apps/migu_orca_web/schemas.py`, `src/apps/migu_orca_web/routes_tracking.py`, `src/apps/migu_orca_web/api_contract.py`, `src/apps/migu_orca_web/openapi_gen.py`, `src/extensions/flask_api/api.py`, `docs/api/endpoint_inventory.md`, `docs/api/openapi.json`, `frontend/src/api/generated/api.ts`, `frontend/src/api/generated/api.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Patterns discovered: Management API boundaries can reuse the existing coordinator and adapter seams; route payloads should be strict and request-scoped while result projection is independently whitelisted.
-  - Gotchas encountered: New error types must be added to the Flask HTTP classifier before declaring their OpenAPI status, and generated-client contract tests enumerate every operation/path explicitly.
-- Useful context: Focused backend contract/management tests (32), OpenAPI/inventory checks (22), frontend typecheck/lint/unit tests (261), compileall, Ruff, and `git diff --check` passed.
----
-
-## 2026-09-09 15:55:00 +0800 - US-246
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: 完成 Stage 31 最终离线 recording fixture/安全边界审计，更新 README、主 PRD、架构、future stages、backlog、M10-M13 模块 PRD 与 Stage 31 PRD，明确 B-C2 已完成、API-only 边界和 Stage 32 B-D handoff；归档本轮 PRD 与 progress。
-- Files changed: `README.md`, `docs/MiGuOrca_main_PRD.md`, `docs/MiGuOrca_stage31_ab_write_management_PRD.md`, `docs/MiGuOrca_future_stages.md`, `docs/backlog.md`, `docs/design/architecture.md`, `docs/modules/M10-auto-bangumi-integration-PRD.md`, `docs/modules/M11-storage-state-PRD.md`, `docs/modules/M12-log-error-PRD.md`, `docs/modules/M13-web-ui-PRD.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, `scripts/ralph/archive/2026-09-09-stage31-ab-write-management/`.
-- **Learnings for future iterations:**
-  - Patterns discovered: Stage closeout keeps implementation scope, module docs, backlog, future roadmap and generated API contracts synchronized; final browser gate runs only after frontend build and with root `.migu_orca/storage` absent.
-  - Gotchas encountered: Stage 31 deliberately has no formal tracking-management page; Stage 32 owns compatibility/migration, security matrix, rollback and frontend handoff.
-  - Useful context: Final gates passed: non-browser backend 1548 passed/133 deselected, frontend unit 261 passed, Chromium 133 passed, compileall/Ruff/OpenAPI drift/git diff check passed.
----
-
-## 2026-09-09 16:00:00 +0800 - Stage 31 审核修复
-- 审核问题：`SET_ENABLED=false` 错误复用 enable capability；RSS refresh 的有效成功响应被无条件归类为未知。
-- 修复：按操作方向选择 enable/disable capability；refresh 仅在响应丢失、超时或无效时进入恢复，明确成功直接终态化。
-- 验证：40 项定向回归、Ruff、compileall、`git diff --check` 通过；完整回归随后执行。
----
+- 每轮只完成一个最高优先级未通过 story，并提交后再更新 passes/progress。
+- 先运行最小相关单元、API contract、migration 或 generated type 测试；失败后只复跑最小失败用例。
+- 安全、兼容和回退使用脱敏临时 fixture/recording fake，绝不连接真实外部服务。
+- 只有 US-256 运行完整 pytest、前端门禁和完整 Chromium；不得因文档或无变化重复全量。

@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | B-A～B-C2 已完成（Stage 28～31，US-237～US-246）；B-D 待评审 |
+| 当前状态 | B-A～B-C2 已完成（Stage 28～31）；B-D 已规划为 Stage 32（US-247～US-256） |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-025 |
 | 优先级 | P0，阻塞依赖目标能力的前端切片 |
@@ -323,11 +323,11 @@ serializer 必须按默认拒绝原则显式构造字段。不能先输出 Reque
 | B-B 统一追番记录 | Stage 29：tracking repository、回填、状态映射、纯本地复核、幂等提交/恢复 | 单番与批量进入同一待提交列表 | 已完成 (Stage 29, 2026-09-08)，执行 PRD 见 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`；B-C 由此扩展 |
 | B-C1 AB 只读同步（Stage 30） | 3.1.18 capability、番剧/RSS 列表与详情、映射对账、EXTERNAL_ONLY、VERIFY_EXTERNAL | 外部现状可安全收敛到统一 tracking 列表 | B-B；已完成（US-228～US-236），执行 PRD 见 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md` |
 | B-C2 AB 写管理 adapter（Stage 31） | 修改、启停、外部删除、RSS 修改/启停/删除/刷新与可靠操作 | 3.1.18 完整管理闭环可由 API 验收 | B-C1；已完成，执行 PRD 见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md` |
-| B-D 契约收尾 | OpenAPI、TS client、泄漏回归、兼容与迁移演练 | 后端 handoff 冻结，可启动全部依赖前端切片 | B-A～B-C2 |
+| B-D 契约收尾（Stage 32） | 端点生命周期、严格 DTO/OpenAPI/TS client、泄漏、兼容/迁移、回退与前端 handoff | 后端 handoff 冻结，可启动全部依赖前端切片 | B-A～B-C2；已规划为 US-247～US-256，执行 PRD 见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md` |
 
 B-A 已完成（Stage 28），B-B 已完成（Stage 29），B-C1 已完成（Stage 30，US-228～US-236）；
-B-C2 已作为 Stage 31 完成（US-237～US-246）。B-C1 与 B-C2 使用独立分支和 PR，Stage 31 不顺带
-实现 B-D 或正式前端页面。
+B-C2 已作为 Stage 31 完成（US-237～US-246）。B-D 已作为 Stage 32 规划（US-247～US-256），只做
+契约、兼容、迁移、安全、回退与前端 handoff，不新增外部管理动作、不删除旧端点或开发正式页面。
 
 ## 12. 验收
 
