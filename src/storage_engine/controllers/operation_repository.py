@@ -79,6 +79,9 @@ _IMMUTABLE_FIELDS = (
     "request_fingerprint",
     "attempt",
     "created_at",
+    "target_scope",
+    "previous_tracking_status",
+    "expected_external_fingerprint",
 )
 
 
@@ -90,6 +93,9 @@ def bind_tracking_operation(
     idempotency_key: str,
     expected_revision: int,
     request_fingerprint: str,
+    target_scope: str | None = None,
+    previous_tracking_status: str | None = None,
+    expected_external_fingerprint: str | None = None,
     attempt: int = 1,
     now: str | None = None,
 ) -> tuple[TrackingOperation, bool]:
@@ -123,6 +129,9 @@ def bind_tracking_operation(
                 operation=operation,
                 expected_revision=expected_revision,
                 request_fingerprint=request_fingerprint,
+                target_scope=target_scope,
+                previous_tracking_status=previous_tracking_status,
+                expected_external_fingerprint=expected_external_fingerprint,
             )
             return existing, False
         try:
@@ -132,6 +141,9 @@ def bind_tracking_operation(
                 expected_revision=expected_revision,
                 request_fingerprint=request_fingerprint,
                 operation=operation,
+                target_scope=target_scope,
+                previous_tracking_status=previous_tracking_status,
+                expected_external_fingerprint=expected_external_fingerprint,
                 attempt=attempt,
                 now=now,
             )
@@ -225,6 +237,9 @@ def _check_binding(
     operation: str,
     expected_revision: int,
     request_fingerprint: str,
+    target_scope: str | None = None,
+    previous_tracking_status: str | None = None,
+    expected_external_fingerprint: str | None = None,
 ) -> None:
     """Raise ``tracking_idempotency_conflict`` when the binding differs."""
     binding = (
@@ -232,12 +247,18 @@ def _check_binding(
         existing.operation,
         existing.expected_revision,
         existing.request_fingerprint,
+        existing.target_scope,
+        existing.previous_tracking_status,
+        existing.expected_external_fingerprint,
     )
     incoming = (
         tracking_id,
         operation,
         expected_revision,
         request_fingerprint,
+        target_scope,
+        previous_tracking_status,
+        expected_external_fingerprint,
     )
     if binding != incoming:
         raise Stage1Error(

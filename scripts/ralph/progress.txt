@@ -27,6 +27,10 @@
 - 若累计超过 12 次迭代仍未完成，停止循环并报告剩余 story/阻塞，避免无界 token 与测试开销。
 - Stage 30 的 ExternalMapping v1、sync 幂等、合并别名、安全 serializer 与 VERIFY_EXTERNAL 语义是
   迁移基线；不可通过大重写破坏 Stage 29/30 兼容。
+- Operation schema migrations may accept legacy v1 on read while omitting null v2 management fields from
+  ordinary SUBMIT writes; management binding dimensions must be immutable in repository CAS.
+- Pure management fingerprints/classifiers belong in tracking controllers with no web, storage, or transport
+  imports; only the SHA-256 digest and outcome code cross durable boundaries.
 
 ## Stage 30 Handoff
 
@@ -53,3 +57,20 @@
 
 - 2026-09-09：Stage 31 PRD 已冻结，所有 story 初始 `passes=false`。
 - 当前阶段没有实现代码；下一步从 US-237 开始。
+
+## 2026-09-09 00:00:00 +0800 - US-237
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Extended TrackingOperation to v2 management kinds and strict scope/status/projection
+  binding fields, preserved readable v1 SUBMIT records, expanded repository idempotency/CAS binding checks,
+  and added pure management fingerprint and action/readback outcome classifiers.
+- Files changed: `src/tracking_engine/models/operation.py`,
+  `src/storage_engine/controllers/operation_repository.py`,
+  `src/tracking_engine/controllers/management_operation.py`, `scripts/ralph/prd.json`,
+  `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Keep management binding fields in the immutable operation tuple so same-key replay
+    conflicts are detected before any external work.
+  - Gotchas encountered: Existing Stage 29 tests expect the legacy SUBMIT-only `TRACKING_OPERATION_KINDS`
+    feature-probe export; v2 validation uses a separate complete-kind set for compatibility.
+  - Useful context: Targeted operation/repository tests (78), compileall, Ruff, and git diff check passed.
+---
