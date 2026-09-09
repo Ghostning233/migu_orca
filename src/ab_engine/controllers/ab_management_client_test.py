@@ -67,7 +67,12 @@ def test_snapshot_logs_one_login_and_only_same_origin_reads() -> None:
     assert capabilities.subscription_detail == "SUPPORTED"
     assert capabilities.rss_list == "SUPPORTED"
     assert capabilities.external_verify == "SUPPORTED"
-    assert capabilities.subscription_modify == "UNKNOWN"
+    assert capabilities.subscription_modify == "SUPPORTED"
+    assert capabilities.rss_modify == "SUPPORTED"
+    assert capabilities.rss_enable == "SUPPORTED"
+    assert capabilities.rss_disable == "SUPPORTED"
+    assert capabilities.rss_delete == "SUPPORTED"
+    assert capabilities.rss_refresh == "SUPPORTED"
     assert [call["method"] for call in transport.calls] == ["POST", "GET", "GET", "GET"]
     assert [call["endpoint"] for call in transport.calls] == [
         "https://auto-bangumi.example/api/v1/auth/login",
@@ -99,6 +104,16 @@ def test_detail_uses_a_fresh_request_scoped_login_and_escapes_id() -> None:
         "https://auto-bangumi.example/api/v1/bangumi/get/sub-42",
     ]
     assert transport.calls[1]["headers"]["Cookie"] == "token=detail-secret"
+
+
+def test_subscription_enabled_is_derived_from_31_18_deleted_not_response_enabled() -> None:
+    transport = RecordingTransport([
+        {"access_token": "detail-secret"},
+        {"data": {"id": "sub-42", "title_raw": "详情番剧", "deleted": True, "enabled": True}},
+    ])
+    subscription = create_legacy_31_management_client(_config(), transport=transport).get_subscription("sub-42")
+    assert subscription.deleted is True
+    assert subscription.enabled is False
 
 
 def test_unknown_version_stops_before_reading_lists_and_releases_token() -> None:
@@ -147,3 +162,91 @@ def test_api_token_management_is_fail_closed_without_transport_calls() -> None:
     assert error.value.error_type == "ab_management_unsupported"
     assert transport.calls == []
     assert "token-secret" not in repr(error.value.as_dict())
+
+
+def test_subscription_write_actions_use_exact_routes_and_clear_session() -> None:
+    transport = RecordingTransport([
+        {"access_token": "write-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "enable-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "disable-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "delete-secret"}, {"version": "3.1.18"}, {"status": True},
+    ])
+    client = create_legacy_31_management_client(_config(), transport=transport)
+
+    client.update_subscription("sub/42", {"title": "新标题"})
+    client.set_subscription_enabled("sub/42", True)
+    client.set_subscription_enabled("sub/42", False)
+    client.delete_subscription("sub/42")
+
+    assert [(call["method"], call["endpoint"]) for call in transport.calls] == [
+        ("POST", "https://auto-bangumi.example/api/v1/auth/login"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("PATCH", "https://auto-bangumi.example/api/v1/bangumi/update/sub%2F42"),
+        ("POST", "https://auto-bangumi.example/api/v1/auth/login"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("GET", "https://auto-bangumi.example/api/v1/bangumi/enable/sub%2F42"),
+        ("POST", "https://auto-bangumi.example/api/v1/auth/login"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("DELETE", "https://auto-bangumi.example/api/v1/bangumi/disable/sub%2F42?file=false"),
+        ("POST", "https://auto-bangumi.example/api/v1/auth/login"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("DELETE", "https://auto-bangumi.example/api/v1/bangumi/delete/sub%2F42?file=false"),
+    ]
+    assert transport.calls[2]["payload"] == {"title": "新标题"}
+    assert transport.calls[8]["endpoint"].endswith("?file=false")
+    assert transport.calls[11]["endpoint"].endswith("?file=false")
+    assert all("write-secret" not in repr(call) for call in transport.calls[3:])
+
+
+def test_write_capability_is_unknown_for_non_exact_version() -> None:
+    transport = RecordingTransport([{"access_token": "secret"}, {"version": "3.1.19"}])
+    capabilities = create_legacy_31_management_client(_config(), transport=transport).probe_capabilities()
+    assert capabilities.subscription_modify == "UNKNOWN"
+    assert capabilities.subscription_enable == "UNKNOWN"
+    assert capabilities.subscription_disable == "UNKNOWN"
+    assert capabilities.subscription_delete == "UNKNOWN"
+
+
+def test_rss_write_actions_use_bounded_routes_and_preserve_snapshot_url() -> None:
+    transport = RecordingTransport([
+        {"access_token": "update-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "enable-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "disable-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "delete-secret"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "refresh-secret"}, {"version": "3.1.18"}, {"status": True},
+    ])
+    client = create_legacy_31_management_client(_config(), transport=transport)
+
+    client.update_rss("7", {"name": "新 RSS", "aggregate": False}, "https://rss.example/feed")
+    client.enable_rss(["9", "7", "9"])
+    client.disable_rss("7")
+    client.delete_rss("9")
+    client.refresh_rss("7")
+
+    assert [(call["method"], call["endpoint"]) for call in transport.calls if call["method"] not in {"POST"} or "auth/login" not in call["endpoint"]] == [
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("PATCH", "https://auto-bangumi.example/api/v1/rss/update/7"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("POST", "https://auto-bangumi.example/api/v1/rss/enable/many"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("PATCH", "https://auto-bangumi.example/api/v1/rss/disable/7"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("DELETE", "https://auto-bangumi.example/api/v1/rss/delete/9"),
+        ("GET", "https://auto-bangumi.example/api/v1/status"),
+        ("GET", "https://auto-bangumi.example/api/v1/rss/refresh/7"),
+    ]
+    assert transport.calls[2]["payload"] == {"name": "新 RSS", "aggregate": False, "url": "https://rss.example/feed"}
+    assert transport.calls[5]["payload"] == [7, 9]
+    assert all("file" not in call["endpoint"] for call in transport.calls)
+    assert client._token is None
+
+
+def test_rss_update_cannot_replace_url_and_rss_targets_are_numeric() -> None:
+    transport = RecordingTransport([])
+    client = create_legacy_31_management_client(_config(), transport=transport)
+
+    with pytest.raises(Stage1Error):
+        client.update_rss("7", {"url": "https://attacker.example"}, "https://rss.example/feed")
+    with pytest.raises(Stage1Error):
+        client.enable_rss(["rss-not-numeric"])
+    assert transport.calls == []

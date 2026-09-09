@@ -104,6 +104,8 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     # operation that only recovery may resolve (Stage 29 PRD §14).
     "tracking_idempotency_conflict",
     "tracking_operation_in_progress",
+    # US-245: a management operation already owns the record or key.
+    "tracking_management_state_conflict",
 }
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {

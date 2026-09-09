@@ -98,3 +98,9 @@ capability 未知、版本不支持、管理读取失败和 sync 部分失败只
 与 capability state；不得把读取失败当空列表，也不得回显上游 URL、Cookie、token、账号、密码、
 header、原始响应或 RSS URL。`VERIFY_EXTERNAL` 的无匹配/歧义保持 `RECOVERY_REQUIRED`，不伪装成
 可重试失败；未知外部写结果的 `RECOVERY_REQUIRED` 规则留给 B-C2。
+
+## 12. Stage 31 外部管理写错误边界（已完成）
+
+Stage 31 将 capability/校验/认证/明确 4xx 分类为确定失败；timeout、连接中断、5xx、未知响应与写后
+回查失败保持 `VERIFYING_EXTERNAL` 或 `RECOVERY_REQUIRED`，使用固定中文安全消息，不回显 URL、凭据、
+外部 ID、方法、路径、body 或原始响应。恢复只核验原 operation，不创建新幂等 key 或重复写入。

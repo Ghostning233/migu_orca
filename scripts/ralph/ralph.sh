@@ -8,6 +8,7 @@ set -e
 TOOL="codex" # Default to the available local Codex CLI for this project.
 MAX_ITERATIONS=10
 MODEL="${RALPH_MODEL:-}"
+REASONING_EFFORT="${RALPH_REASONING_EFFORT:-}"
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -33,6 +34,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --claude-model=*)
       MODEL="${1#*=}"
+      shift
+      ;;
+    --reasoning-effort)
+      REASONING_EFFORT="$2"
+      shift 2
+      ;;
+    --reasoning-effort=*)
+      REASONING_EFFORT="${1#*=}"
       shift
       ;;
     *)
@@ -114,6 +123,9 @@ for i in $(seq 1 $MAX_ITERATIONS); do
     CODEX_ARGS=(exec --dangerously-bypass-approvals-and-sandbox --output-last-message "$LAST_MESSAGE_FILE")
     if [[ -n "$MODEL" ]]; then
       CODEX_ARGS+=(--model "$MODEL")
+    fi
+    if [[ -n "$REASONING_EFFORT" ]]; then
+      CODEX_ARGS+=(-c "model_reasoning_effort=\"$REASONING_EFFORT\"")
     fi
     CODEX_ARGS+=(-)
     OUTPUT=$(codex "${CODEX_ARGS[@]}" < "$SCRIPT_DIR/CODEX.md" 2>&1 | tee /dev/stderr) || true

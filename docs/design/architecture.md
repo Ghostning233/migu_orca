@@ -108,6 +108,12 @@ Web 业务操作统一通过 `/api/v1/*` JSON API 完成，页面是 Stage 27 �
   存在，未知版本/API Token 管理读取 fail closed。B-C2 才能增加外部写 adapter，且必须复用 tracking
   operation CAS/idempotency/recovery 边界。
 
+- Stage 31（B-C2，US-237～US-246，已完成并归档）在同一 request-scoped 边界内增加四类可靠管理写动作：
+  operation v2、严格目标/patch 解析、3.1.18 action-specific adapter、写后回查和 VERIFY_EXTERNAL 恢复。
+  管理 route 只接收 tracking ID、固定 scope 与严格白名单字段；operation 仅保存 SHA-256 摘要。番剧
+  destructive route 由 adapter 固定 `file=false`，RSS 只执行映射集合内的单项调用；正式管理页面和
+  B-D 兼容迁移仍不属于本阶段。
+
 因此前端工程化已先固化 API 契约和服务端安全边界，再渐进替换页面；Stage 26 已完成该固化
 （清单/DTO/OpenAPI/HTTP 状态/storage 根/draft/CI），Stage 27 完成迁移与旧前端删除，handoff
 见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。Stage 28 在 DraftStore 上

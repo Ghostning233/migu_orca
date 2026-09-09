@@ -14,8 +14,8 @@
 ## 当前工作目标
 
 - 前端体验全面重构的 Gate 1～3 已完成，产品方向、低保真骨架、交互规格、视觉方向和设计
-  Token 均已冻结；后端 B-A、B-B、B-C1（Stage 30）已完成，B-C2～B-D 与前端分片
-  仍待后续 Gate 4，不授权大规模页面编码。
+  Token 均已冻结；后端 B-A、B-B、B-C1（Stage 30）、B-C2（Stage 31）已完成，
+  B-D 与后续前端分片仍按 Gate 4 独立评审。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
@@ -32,7 +32,7 @@
   B-C1 已完成并交付为[Stage 30：Auto Bangumi 只读能力与外部同步基础](MiGuOrca_stage30_ab_read_sync_PRD.md)，
   其余工作包仍未分配 Stage。
 
-截至 2026-09-09，最近完成阶段为 Stage 30「Auto Bangumi 只读能力与外部同步基础」（US-228～US-236 已完成：3.1.18 password 只读 adapter、capability、external mapping、严格对账、tracking sync、`VERIFY_EXTERNAL`、OpenAPI/生成客户端、B-C2 handoff、最终回归与归档）。B-C1 不实现 Auto Bangumi 外部管理写操作或正式追番管理页面。
+截至 2026-09-09，最近完成阶段为 Stage 31「Auto Bangumi 可靠写管理」（US-237～US-246 已完成：3.1.18 password 写 adapter、四类可靠管理动作、operation v2、回查恢复、API/OpenAPI/生成客户端、最终回归与归档）。Stage 31 不实现正式追番管理页面。
 
 ## Stage PRD
 
@@ -47,6 +47,7 @@
 - Stage 28：草案一致性与原子保存确认（US-210～US-218 全部完成，已归档；只返回 ACCEPTED handoff，不创建 tracking record）
 - Stage 29：统一追番记录与可靠提交恢复（B-B，US-219～US-227 全部完成，已归档；不实现 Auto Bangumi 管理/外部同步，B-C handoff 见 future_stages）
 - Stage 30：Auto Bangumi 只读能力与外部同步基础（B-C1，US-228～US-236 已完成并归档；禁止外部管理写动作）
+- Stage 31：[Auto Bangumi 可靠写管理](MiGuOrca_stage31_ab_write_management_PRD.md)（B-C2，US-237～US-246 已完成；不开发正式页面）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

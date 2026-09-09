@@ -23,6 +23,7 @@ from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_DISABLED,
+    TRACKING_STATUS_EXTERNAL_ONLY,
     TRACKING_STATUS_NEEDS_RECONFIRM,
     TRACKING_STATUS_PENDING_SUBMIT,
     TRACKING_STATUS_RECOVERY_REQUIRED,
@@ -82,10 +83,20 @@ def test_available_actions_empty_when_no_state_change_possible() -> None:
     for status in (
         TRACKING_STATUS_REVALIDATING,
         TRACKING_STATUS_SUBMITTING,
-        TRACKING_STATUS_ACTIVE,
-        TRACKING_STATUS_DISABLED,
     ):
         assert tracking_available_actions(status) == []
+
+
+def test_available_actions_expose_stage31_management_actions() -> None:
+    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_ACTIVE)] == [
+        "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
+    ]
+    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_DISABLED)] == [
+        "SET_ENABLED", "DELETE_EXTERNAL",
+    ]
+    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_EXTERNAL_ONLY)] == [
+        "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
+    ]
 
 
 def test_available_action_objects_are_strict_shape() -> None:

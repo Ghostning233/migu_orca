@@ -48,13 +48,46 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
-TRACKING_OPERATION_SCHEMA_VERSION = 1
+TRACKING_OPERATION_SCHEMA_VERSION = 2
+TRACKING_OPERATION_LEGACY_SCHEMA_VERSION = 1
 
 # -- operation kinds ----------------------------------------------------------
 #: The only operation kind Stage 29 B-B produces.  Future B-C actions
 #: (e.g. ``MODIFY``/``DISABLE``) extend this set in a later story.
 TRACKING_OPERATION_KIND_SUBMIT = "SUBMIT"
-TRACKING_OPERATION_KINDS = frozenset({TRACKING_OPERATION_KIND_SUBMIT})
+TRACKING_OPERATION_KIND_MODIFY = "MODIFY"
+TRACKING_OPERATION_KIND_SET_ENABLED = "SET_ENABLED"
+TRACKING_OPERATION_KIND_DELETE_EXTERNAL = "DELETE_EXTERNAL"
+TRACKING_OPERATION_KIND_REFRESH_RSS = "REFRESH_RSS"
+TRACKING_OPERATION_KINDS = frozenset(
+    {
+        TRACKING_OPERATION_KIND_SUBMIT,
+        TRACKING_OPERATION_KIND_MODIFY,
+        TRACKING_OPERATION_KIND_SET_ENABLED,
+        TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
+        TRACKING_OPERATION_KIND_REFRESH_RSS,
+    }
+)
+# Alias retained for early Stage 31 callers; both names deliberately expose
+# the complete, accepted operation set.
+TRACKING_OPERATION_MANAGEMENT_KINDS = TRACKING_OPERATION_KINDS
+TRACKING_OPERATION_ALL_KINDS = TRACKING_OPERATION_KINDS
+
+TRACKING_OPERATION_TARGET_SCOPE_SUBSCRIPTION = "SUBSCRIPTION"
+TRACKING_OPERATION_TARGET_SCOPE_ASSOCIATED_RSS = "ASSOCIATED_RSS"
+TRACKING_OPERATION_TARGET_SCOPES = frozenset(
+    {
+        TRACKING_OPERATION_TARGET_SCOPE_SUBSCRIPTION,
+        TRACKING_OPERATION_TARGET_SCOPE_ASSOCIATED_RSS,
+    }
+)
+TRACKING_OPERATION_TRACKING_STATUSES = frozenset(
+    {
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    }
+)
 
 # -- states -------------------------------------------------------------------
 #: Binding is durable on disk but the external system has not been called.
@@ -126,6 +159,9 @@ _OPERATION_FIELDS = frozenset(
         "created_at",
         "updated_at",
         "completed_at",
+        "target_scope",
+        "previous_tracking_status",
+        "expected_external_fingerprint",
     }
 )
 
@@ -180,6 +216,9 @@ class TrackingOperation:
     created_at: str | None = None
     updated_at: str | None = None
     completed_at: str | None = None
+    target_scope: str | None = None
+    previous_tracking_status: str | None = None
+    expected_external_fingerprint: str | None = None
 
 
 def utc_now() -> str:
@@ -194,6 +233,9 @@ def create_tracking_operation(
     expected_revision: int,
     request_fingerprint: str,
     operation: str = TRACKING_OPERATION_KIND_SUBMIT,
+    target_scope: str | None = None,
+    previous_tracking_status: str | None = None,
+    expected_external_fingerprint: str | None = None,
     attempt: int = 1,
     now: str | None = None,
 ) -> TrackingOperation:
@@ -204,8 +246,14 @@ def create_tracking_operation(
     ``operation_id`` is derived deterministically from the key so the same key
     always produces the same operation file.
     """
-    if operation not in TRACKING_OPERATION_KINDS:
+    if operation not in TRACKING_OPERATION_ALL_KINDS:
         raise ValueError(f"unknown tracking operation kind: {operation}")
+    _validate_management_binding(
+        operation,
+        target_scope,
+        previous_tracking_status,
+        expected_external_fingerprint,
+    )
     clean_tracking_id = _require_non_empty_str(tracking_id, "tracking_id")
     clean_key = _validated_idempotency_key(idempotency_key, "create_tracking_operation")
     if not isinstance(expected_revision, int) or isinstance(expected_revision, bool):
@@ -230,6 +278,9 @@ def create_tracking_operation(
         attempt=attempt,
         created_at=timestamp,
         updated_at=timestamp,
+        target_scope=target_scope,
+        previous_tracking_status=previous_tracking_status,
+        expected_external_fingerprint=expected_external_fingerprint,
     )
 
 
@@ -274,7 +325,7 @@ def operation_to_storage_dict(operation: TrackingOperation) -> dict[str, Any]:
     The writer emits exactly the top-level whitelist with normalized values, so
     an accidental sensitive field can never reach disk.
     """
-    return {
+    payload = {
         "schema_version": TRACKING_OPERATION_SCHEMA_VERSION,
         "operation_id": operation.operation_id,
         "tracking_id": operation.tracking_id,
@@ -290,6 +341,25 @@ def operation_to_storage_dict(operation: TrackingOperation) -> dict[str, Any]:
         "updated_at": operation.updated_at,
         "completed_at": operation.completed_at,
     }
+    # Keep ordinary SUBMIT files byte-compatible with the v1 shape.  Management
+    # bindings always carry a target scope and fingerprint, so their v2 fields
+    # are emitted explicitly (including a null previous status).
+    if operation.operation != TRACKING_OPERATION_KIND_SUBMIT or any(
+        value is not None
+        for value in (
+            operation.target_scope,
+            operation.previous_tracking_status,
+            operation.expected_external_fingerprint,
+        )
+    ):
+        payload.update(
+            {
+                "target_scope": operation.target_scope,
+                "previous_tracking_status": operation.previous_tracking_status,
+                "expected_external_fingerprint": operation.expected_external_fingerprint,
+            }
+        )
+    return payload
 
 
 def operation_from_storage_dict(data: Any) -> TrackingOperation:
@@ -307,7 +377,10 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
         raise ValueError(f"unknown tracking operation fields: {', '.join(unknown)}")
 
     schema_version = data.get("schema_version")
-    if schema_version != TRACKING_OPERATION_SCHEMA_VERSION:
+    if schema_version not in {
+        TRACKING_OPERATION_LEGACY_SCHEMA_VERSION,
+        TRACKING_OPERATION_SCHEMA_VERSION,
+    }:
         raise ValueError(
             f"unsupported tracking operation schema_version: {schema_version!r}"
         )
@@ -315,7 +388,7 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
     operation_id = _require_non_empty_str(data.get("operation_id"), "operation_id")
     tracking_id = _require_non_empty_str(data.get("tracking_id"), "tracking_id")
     operation = data.get("operation")
-    if operation not in TRACKING_OPERATION_KINDS:
+    if operation not in TRACKING_OPERATION_ALL_KINDS:
         raise ValueError(f"invalid tracking operation kind: {operation!r}")
     idempotency_key = _validated_idempotency_key(
         data.get("idempotency_key"), "operation_from_storage_dict"
@@ -343,8 +416,15 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
     created_at = _require_non_empty_str(data.get("created_at"), "created_at")
     updated_at = _require_non_empty_str(data.get("updated_at"), "updated_at")
 
+    target_scope = data.get("target_scope") if schema_version == TRACKING_OPERATION_SCHEMA_VERSION else None
+    previous_tracking_status = data.get("previous_tracking_status") if schema_version == TRACKING_OPERATION_SCHEMA_VERSION else None
+    expected_external_fingerprint = data.get("expected_external_fingerprint") if schema_version == TRACKING_OPERATION_SCHEMA_VERSION else None
+    _validate_management_binding(
+        operation, target_scope, previous_tracking_status, expected_external_fingerprint
+    )
+
     return TrackingOperation(
-        schema_version=TRACKING_OPERATION_SCHEMA_VERSION,
+        schema_version=schema_version,
         operation_id=operation_id,
         tracking_id=tracking_id,
         operation=operation,
@@ -362,6 +442,9 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
         created_at=created_at,
         updated_at=updated_at,
         completed_at=_optional_clean_str(data.get("completed_at"), "completed_at"),
+        target_scope=target_scope,
+        previous_tracking_status=previous_tracking_status,
+        expected_external_fingerprint=expected_external_fingerprint,
     )
 
 
@@ -391,10 +474,42 @@ def _optional_clean_str(value: Any, name: str) -> str | None:
     return value.strip()
 
 
+def _validate_management_binding(
+    operation: str,
+    target_scope: Any,
+    previous_tracking_status: Any,
+    expected_external_fingerprint: Any,
+) -> None:
+    """Validate v2's management-only binding without importing tracking code."""
+    if operation == TRACKING_OPERATION_KIND_SUBMIT:
+        if any(value is not None for value in (target_scope, previous_tracking_status, expected_external_fingerprint)):
+            raise ValueError("SUBMIT operations cannot carry management binding fields")
+        return
+    if target_scope not in TRACKING_OPERATION_TARGET_SCOPES:
+        raise ValueError("management operation requires a valid target_scope")
+    if previous_tracking_status is not None and previous_tracking_status not in TRACKING_OPERATION_TRACKING_STATUSES:
+        raise ValueError("previous_tracking_status must be a known tracking status or null")
+    if not isinstance(expected_external_fingerprint, str) or not re.fullmatch(
+        r"sha256:[0-9a-f]{64}", expected_external_fingerprint
+    ):
+        raise ValueError("expected_external_fingerprint must be a SHA-256 digest")
+
+
 __all__ = [
     "TRACKING_OPERATION_KINDS",
+    "TRACKING_OPERATION_ALL_KINDS",
+    "TRACKING_OPERATION_MANAGEMENT_KINDS",
     "TRACKING_OPERATION_KIND_SUBMIT",
+    "TRACKING_OPERATION_KIND_MODIFY",
+    "TRACKING_OPERATION_KIND_SET_ENABLED",
+    "TRACKING_OPERATION_KIND_DELETE_EXTERNAL",
+    "TRACKING_OPERATION_KIND_REFRESH_RSS",
     "TRACKING_OPERATION_SCHEMA_VERSION",
+    "TRACKING_OPERATION_LEGACY_SCHEMA_VERSION",
+    "TRACKING_OPERATION_TARGET_SCOPE_SUBSCRIPTION",
+    "TRACKING_OPERATION_TARGET_SCOPE_ASSOCIATED_RSS",
+    "TRACKING_OPERATION_TARGET_SCOPES",
+    "TRACKING_OPERATION_TRACKING_STATUSES",
     "TRACKING_OPERATION_STATES",
     "TRACKING_OPERATION_STATE_FAILED",
     "TRACKING_OPERATION_STATE_IN_PROGRESS",

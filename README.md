@@ -8,6 +8,8 @@ Stage 29「统一追番记录与可靠提交恢复」已完成：建立本地 `T
 
 Stage 30「Auto Bangumi 只读能力与外部同步基础」已完成 B-C1：以 Auto Bangumi 3.1.18 官方源码契约为事实源，冻结 password request-scoped 只读 adapter、capability 探测、ExternalMapping v1、严格对账、`EXTERNAL_ONLY` 和 `VERIFY_EXTERNAL`；新增 `POST /api/v1/autobangumi/capabilities` 与 `POST /api/v1/tracking/sync`，同步进入 OpenAPI、endpoint inventory 和生成 TypeScript client。未知版本/API Token 管理读取 fail closed，Stage 30 不实现外部管理写操作或正式追番管理页面。后续 B-C2 handoff 仅允许在可靠写状态机、confirm/idempotency/revision 和“绝不删除媒体”边界冻结后实现 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`REFRESH_RSS`。
 
+Stage 31「Auto Bangumi 可靠写管理」已完成 B-C2：在精确 3.1.18 password capability 下交付 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`REFRESH_RSS` 的 request-scoped adapter、tracking operation v2、confirm/idempotency/revision CAS、写后只读回查与 `VERIFY_EXTERNAL` 恢复；番剧停用/删除固定 `file=false`，RSS 只处理启动时映射的单项集合，删除始终保留本地 Request、TrackingRecord、审计、任务与媒体。四个管理 API、OpenAPI、endpoint inventory 和生成客户端已同步；本阶段仍不实现正式追番管理页面。实现与验收见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md`，B-D 兼容/迁移/安全矩阵与前端 handoff 进入 Stage 32。
+
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI、静态检查、OpenAPI 漂移检查、真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。

@@ -245,7 +245,12 @@ def test_tracking_list_returns_safe_summaries_and_actions(
 
     active = result["items"][1]
     assert active["status"] == "ACTIVE"
-    assert active["available_actions"] == []
+    assert [action["code"] for action in active["available_actions"]] == [
+        "MODIFY",
+        "SET_ENABLED",
+        "REFRESH_RSS",
+        "DELETE_EXTERNAL",
+    ]
 
     failed = result["items"][0]
     assert failed["status"] == "SUBMIT_FAILED"

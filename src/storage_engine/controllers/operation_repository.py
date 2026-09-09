@@ -42,6 +42,7 @@ import contextlib
 import json
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -52,12 +53,17 @@ from storage_engine.controllers.storage_config import (
     ensure_storage_layout,
 )
 from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
     TrackingOperation,
     create_tracking_operation,
     operation_from_storage_dict,
     operation_to_storage_dict,
     tracking_operation_id_for_idempotency_key,
     tracking_operation_transition_allowed,
+    utc_now,
 )
 
 #: Opaque operation-id shape (``op_<32 hex>``).  The character whitelist keeps
@@ -79,6 +85,9 @@ _IMMUTABLE_FIELDS = (
     "request_fingerprint",
     "attempt",
     "created_at",
+    "target_scope",
+    "previous_tracking_status",
+    "expected_external_fingerprint",
 )
 
 
@@ -90,6 +99,9 @@ def bind_tracking_operation(
     idempotency_key: str,
     expected_revision: int,
     request_fingerprint: str,
+    target_scope: str | None = None,
+    previous_tracking_status: str | None = None,
+    expected_external_fingerprint: str | None = None,
     attempt: int = 1,
     now: str | None = None,
 ) -> tuple[TrackingOperation, bool]:
@@ -123,6 +135,9 @@ def bind_tracking_operation(
                 operation=operation,
                 expected_revision=expected_revision,
                 request_fingerprint=request_fingerprint,
+                target_scope=target_scope,
+                previous_tracking_status=previous_tracking_status,
+                expected_external_fingerprint=expected_external_fingerprint,
             )
             return existing, False
         try:
@@ -132,6 +147,9 @@ def bind_tracking_operation(
                 expected_revision=expected_revision,
                 request_fingerprint=request_fingerprint,
                 operation=operation,
+                target_scope=target_scope,
+                previous_tracking_status=previous_tracking_status,
+                expected_external_fingerprint=expected_external_fingerprint,
                 attempt=attempt,
                 now=now,
             )
@@ -218,6 +236,53 @@ def compare_and_swap_tracking_operation(
         return normalized
 
 
+def recover_tracking_operation(
+    config: StorageConfig,
+    operation_id: str,
+    expected_state: str,
+    *,
+    target_state: str,
+    error_type: str | None = None,
+    now: str | None = None,
+) -> TrackingOperation:
+    """Resolve an uncertain operation after explicit read-only verification.
+
+    This is deliberately separate from ordinary CAS transitions.  Unknown and
+    recovery-required outcomes may be resolved to a verified terminal result;
+    a completed success/failure may only be compensated to
+    ``RECOVERY_REQUIRED`` when the paired TrackingRecord write failed.  No new
+    operation binding is created.
+    """
+    if expected_state not in {
+        TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+        TRACKING_OPERATION_STATE_SUCCEEDED,
+        TRACKING_OPERATION_STATE_FAILED,
+    }:
+        raise Stage1Error("tracking_operation_state_conflict", "该操作不处于待恢复状态", "recover_tracking_operation")
+    if target_state not in {
+        TRACKING_OPERATION_STATE_SUCCEEDED,
+        TRACKING_OPERATION_STATE_FAILED,
+        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    }:
+        raise ValueError("recovery target must be a terminal recovery state")
+    if expected_state in {TRACKING_OPERATION_STATE_SUCCEEDED, TRACKING_OPERATION_STATE_FAILED} and target_state != TRACKING_OPERATION_STATE_RECOVERY_REQUIRED:
+        raise ValueError("completed operation can only be compensated to recovery required")
+    clean_id = _validated_operation_id(operation_id, "recover_tracking_operation")
+    ensure_storage_layout(config)
+    with _key_lock(clean_id):
+        current = _load_tracking_operation(config, clean_id, "recover_tracking_operation")
+        if current.state != expected_state:
+            raise Stage1Error("tracking_operation_state_conflict", "提交操作状态已变化，请重新读取后重试", "recover_tracking_operation")
+        recovered = replace(
+            current, state=target_state, error_type=error_type,
+            updated_at=now or utc_now(), completed_at=now or utc_now(),
+        )
+        normalized = _normalize(recovered, "recover_tracking_operation")
+        _atomic_write(config, clean_id, normalized, "recover_tracking_operation")
+        return normalized
+
+
 def _check_binding(
     existing: TrackingOperation,
     *,
@@ -225,6 +290,9 @@ def _check_binding(
     operation: str,
     expected_revision: int,
     request_fingerprint: str,
+    target_scope: str | None = None,
+    previous_tracking_status: str | None = None,
+    expected_external_fingerprint: str | None = None,
 ) -> None:
     """Raise ``tracking_idempotency_conflict`` when the binding differs."""
     binding = (
@@ -232,12 +300,18 @@ def _check_binding(
         existing.operation,
         existing.expected_revision,
         existing.request_fingerprint,
+        existing.target_scope,
+        existing.previous_tracking_status,
+        existing.expected_external_fingerprint,
     )
     incoming = (
         tracking_id,
         operation,
         expected_revision,
         request_fingerprint,
+        target_scope,
+        previous_tracking_status,
+        expected_external_fingerprint,
     )
     if binding != incoming:
         raise Stage1Error(
@@ -447,5 +521,6 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 __all__ = [
     "bind_tracking_operation",
     "compare_and_swap_tracking_operation",
+    "recover_tracking_operation",
     "load_tracking_operation",
 ]

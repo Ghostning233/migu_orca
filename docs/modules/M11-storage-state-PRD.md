@@ -141,6 +141,13 @@ opaque token，RSS ID 有序去重，绝不保存 endpoint、RSS URL、标题、
 revision、不重复审计。同步的状态、mapping、审计和 revision 变化必须走一次 CAS；完整快照无变化
 时不写盘。合并后的旧外部记录保留安全 `merged_into_tracking_id` 指针，不删除历史文件或媒体。
 
+## 9.4 Stage 31 管理 operation 与可靠写结果（已完成）
+
+Stage 31 扩展 operation 为 v2 管理绑定：持久化 scope、先前 tracking 状态和预期投影摘要，动作正文、
+外部 ID、URL、凭据、路径、请求/响应和异常原文均不落盘。管理写入前先以 operation/record CAS 固化
+幂等边界，写后回查或 VERIFY_EXTERNAL 恢复只更新安全 tracking 投影；外部删除不删除本地 Request、
+TrackingRecord、审计、任务或媒体。
+
 ## 8. 待确认问题
 
 | 编号 | 问题 | 是否阻塞定稿 | 当前处理 |

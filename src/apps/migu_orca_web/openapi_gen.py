@@ -60,6 +60,7 @@ from apps.migu_orca_web.api_contract import (
     RequestSaveConfirmResultDTO,
     TrackingDetailResultDTO,
     TrackingItemListResultDTO,
+    TrackingManagementResultDTO,
     TrackingRecoverResultDTO,
     TrackingRevalidateResultDTO,
     TrackingSubmitResultDTO,
@@ -246,7 +247,64 @@ def _example_value(prop: dict[str, Any], *, required: bool) -> Any:
 # the url_map form). Each entry declares the request body schema (JSON
 # endpoints), the success result DTO, and explicit error responses.
 
+_MANAGEMENT_AB_CONFIG = {
+    "type": "object", "additionalProperties": False, "x-request-scoped": True,
+    "properties": {
+        "auth_mode": {"type": "string", "enum": ["password", "api_token"]},
+        "base_url": {"type": "string", "x-request-scoped": True},
+        "username": {"type": "string", "x-request-scoped": True},
+        "password": {"type": "string", "x-request-scoped": True},
+        "token": {"type": "string", "x-request-scoped": True},
+        "fallback_enabled": {"type": "boolean"},
+    },
+    "required": ["auth_mode", "fallback_enabled"],
+}
+_MANAGEMENT_COMMON = {
+    "tracking_id": {"type": "string"},
+    "target_scope": {"type": "string", "enum": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
+    "expected_revision": {"type": "integer", "minimum": 1},
+    "idempotency_key": {"type": "string", "x-request-scoped": True},
+    "confirm": {"const": True},
+    "ab_config": _MANAGEMENT_AB_CONFIG,
+    "storage_dir": {"type": "string"},
+}
+_MANAGEMENT_ERRORS = {
+    "400": {"data_validation_errors": "请求参数校验失败", "tracking_management_confirmation_required": "管理操作必须显式确认", "invalid_storage_dir": "storage_dir 必须为允许的相对目录"},
+    "404": {"tracking_not_found": "未找到该追番记录"},
+    "409": {"tracking_revision_conflict": "追番记录版本已变化，请刷新后重试", "tracking_idempotency_conflict": "同一幂等键已绑定不同的管理操作", "tracking_management_state_conflict": "已有管理操作正在执行，请先恢复"},
+}
+
+
+def _management_endpoint(operation_id: str, summary: str, *, extra: dict[str, Any] | None = None, required_extra: list[str] | None = None, scope: list[str] | None = None) -> dict[str, Any]:
+    properties = {**_MANAGEMENT_COMMON, **(extra or {})}
+    if scope is not None:
+        properties["target_scope"] = {"type": "string", "enum": scope}
+    properties = {key: value for key, value in properties.items() if key != "tracking_id"}
+    required = ["target_scope", "expected_revision", "idempotency_key", "confirm", "ab_config"] + (required_extra or [])
+    return {
+        "operationId": operation_id,
+        "summary": summary,
+        "parameters": [{"name": "tracking_id", "in": "path", "required": True, "schema": {"type": "string"}}],
+        "requestBody": {"type": "object", "additionalProperties": False, "required": required, "properties": properties},
+        "success": TrackingManagementResultDTO,
+        "errors": _MANAGEMENT_ERRORS,
+    }
+
 _ENDPOINTS: dict[str, dict[str, Any]] = {
+    "POST /api/v1/tracking/items/<path:tracking_id>/modify": _management_endpoint(
+        "modifyTrackingItem", "修改外部追番方案",
+        extra={"patch": {"type": "object", "additionalProperties": False}}, required_extra=["patch"]
+    ),
+    "POST /api/v1/tracking/items/<path:tracking_id>/set-enabled": _management_endpoint(
+        "setTrackingItemEnabled", "启用或停用外部追番方案",
+        extra={"enabled": {"type": "boolean"}}, required_extra=["enabled"]
+    ),
+    "POST /api/v1/tracking/items/<path:tracking_id>/delete-external": _management_endpoint(
+        "deleteExternalTrackingItem", "删除外部追番方案（保留本地数据）"
+    ),
+    "POST /api/v1/tracking/items/<path:tracking_id>/refresh": _management_endpoint(
+        "refreshTrackingRss", "刷新关联 RSS", scope=["ASSOCIATED_RSS"]
+    ),
     "GET /api/v1/requests": {
         "operationId": "listRequests",
         "summary": "列出所有已保存订阅方案摘要",
