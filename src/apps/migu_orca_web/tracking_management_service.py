@@ -34,8 +34,8 @@ from tracking_engine.controllers.management_operation import (
 )
 from tracking_engine.controllers.management_state import (
     management_action_allowed,
-    management_capability_allowed,
     management_baseline_verified,
+    management_capability_allowed,
 )
 from tracking_engine.controllers.management_target import (
     ManagementBinding,

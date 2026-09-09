@@ -29,7 +29,7 @@
 | 17 | BL-018 | 正式番名与季数解析 | 已完成 (Stage 25, 2026-08-27) |
 | 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
 | 19 | BL-024 | 前端工程化迁移与页面重构 | 已完成 (Stage 27, 2026-08-31) |
-| 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | B-A～B-C2 已完成；B-D 已规划为 Stage 32（US-247～US-256） |
+| 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | B-A～B-D 已完成（Stage 28～32，US-210～US-256） |
 | 21 | BL-026 | 桌面端前端体验分片重构 | 候选，PRD 待 Gate 4 评审 |
 | 22 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
@@ -471,7 +471,7 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 
 ### BL-025: 前端体验重构的后端支撑与 Auto Bangumi 管理契约
 
-- 状态：B-A～B-C2 已完成（Stage 28～31，US-210～US-246）；B-D 已规划为 Stage 32（US-247～US-256）
+- 状态：B-A～B-D 已完成（Stage 28～32，US-210～US-256）
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：20，P0
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_backend_support_PRD.md`
@@ -481,7 +481,7 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 - Stage 31 执行 PRD：`docs/MiGuOrca_stage31_ab_write_management_PRD.md`
 - Stage 31 执行分支：`ralph/stage31-ab-write-management`；Ralph stories 为 US-237～US-246（已归档）
 - Stage 32 执行 PRD：`docs/MiGuOrca_stage32_contract_hardening_PRD.md`
-- Stage 32 执行分支：`ralph/stage32-contract-hardening`；Ralph stories 为 US-247～US-256（已规划）
+- Stage 32 执行分支：`ralph/stage32-contract-hardening`；Ralph stories 为 US-247～US-256（已完成并归档）
 - Stage 28 执行分支：`ralph/stage28-draft-consistency`；Ralph stories 为 US-210～US-218（已归档）
 - Stage 29 执行分支：`ralph/stage29-unified-tracking`；Ralph stories 为 US-219～US-227（已归档）
 
@@ -523,7 +523,7 @@ Stage 25 实际结论：普通流程使用确定性规则解析器，单个与�
 B-A 已按 US-210～US-218 独立完成 Stage 28，B-B 已按 US-219～US-227 独立完成 Stage 29
 （归档于 `scripts/ralph/archive/2026-09-08-stage29-unified-tracking/`）。B-B 不实现 Auto Bangumi
 全量同步、外部管理或新前端页面。B-C1 已拆为 Stage 30，只处理 3.1.18 capability、只读同步、
-映射对账、EXTERNAL_ONLY 与 VERIFY_EXTERNAL；B-C2 已完成 Stage 31，B-D 已规划为 Stage 32，
+映射对账、EXTERNAL_ONLY 与 VERIFY_EXTERNAL；B-C2 已完成 Stage 31，B-D 已完成 Stage 32，
 不能把外部写管理动作追加回 Stage 29 或 Stage 30。
 
 Stage 31 B-C2 已冻结：仅允许 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`REFRESH_RSS`
@@ -531,7 +531,7 @@ Stage 31 B-C2 已冻结：仅允许 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`
 `RECOVERY_REQUIRED` 结果未知恢复；删除外部对象强制 `file=false`，绝不删除本地媒体。
 
 Stage 31 执行范围见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md`（US-237～US-246，已完成）；
-Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-247～US-256，已规划），
+Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-247～US-256，已完成并归档），
 只完成兼容/迁移、安全矩阵、发布回退和前端 handoff，不新增管理动作或删除旧端点。
 
 ### BL-026: 桌面端前端体验分片重构

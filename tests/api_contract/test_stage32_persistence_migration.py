@@ -141,15 +141,24 @@ def test_future_schema_fails_closed_and_preserves_original_evidence(
     config = _config(tmp_path)
     if kind == "tracking":
         path = config.tracking_dir / f"{TRACKING_ID}.json"
-        loader = lambda: load_tracking_record(config, TRACKING_ID)
+
+        def loader() -> object:
+            return load_tracking_record(config, TRACKING_ID)
+
         payload = {"schema_version": 99}
     elif kind == "operation":
         path = config.tracking_operations_dir / f"{OPERATION_ID}.json"
-        loader = lambda: load_tracking_operation(config, OPERATION_ID)
+
+        def loader() -> object:
+            return load_tracking_operation(config, OPERATION_ID)
+
         payload = {"schema_version": 99}
     else:
         path = config.tracking_migrations_dir / MIGRATION_MANIFEST_FILENAME
-        loader = lambda: load_migration_manifest(config)
+
+        def loader() -> object:
+            return load_migration_manifest(config)
+
         payload = {"schema_version": 99}
     path.parent.mkdir(parents=True, exist_ok=True)
     original = (json.dumps(payload) + "\n").encode()

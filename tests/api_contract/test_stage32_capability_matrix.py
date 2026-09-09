@@ -5,9 +5,9 @@ import pytest
 
 from ab_engine.models.management import AutoBangumiCapabilities
 from tracking_engine.controllers.management_state import (
+    management_baseline_verified,
     management_capability_allowed,
     management_capability_field,
-    management_baseline_verified,
 )
 
 

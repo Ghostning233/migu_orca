@@ -7,7 +7,7 @@
 | Stage | 32 |
 | 工作包 | B-D：后端契约收尾 |
 | Backlog | BL-025 |
-| 状态 | 已规划，待开发 |
+| 状态 | 已完成并归档（2026-09-10） |
 | 目标分支 | `ralph/stage32-contract-hardening` |
 | Ralph stories | US-247～US-256 |
 | 前置 | Stage 28 B-A、Stage 29 B-B、Stage 30 B-C1、Stage 31 B-C2 已完成 |
@@ -300,6 +300,9 @@ git diff --check
 
 不得使用真实 Auto Bangumi、MiKan 或 qBittorrent 作为门禁。若环境无法运行 Chromium，Stage 32
 不能仅凭静态测试宣告完成，必须记录阻塞并在可用环境补跑。
+
+本次最终门禁实际结果：非浏览器测试 1,630 passed、前端 unit tests 265 passed、真实 Chromium 测试
+134 passed；compileall、Ruff、OpenAPI drift、typecheck、lint、build 与 diff check 均通过。
 
 ## 11. 完成定义
 

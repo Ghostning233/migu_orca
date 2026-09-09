@@ -169,5 +169,5 @@ password + 精确 3.1.18 开放 `MODIFY`、`SET_ENABLED`、`DELETE_EXTERNAL`、`
 tracking ID、confirm、幂等 operation、revision CAS、写后只读回查和未知结果恢复。番剧停用与
 删除由 adapter 固定 `file=false`；禁止真实实例测试、全局 RSS 刷新、批量外部删除、媒体删除和
 正式前端页面。US-237～US-246 已完成；Stage 32 B-D 已按
-`docs/MiGuOrca_stage32_contract_hardening_PRD.md` 规划 US-247～US-256，负责端点生命周期、严格
+`docs/MiGuOrca_stage32_contract_hardening_PRD.md` 完成 US-247～US-256，负责端点生命周期、严格
 契约、兼容/迁移、安全矩阵、发布回退和前端 handoff，不新增管理动作或删除旧端点。
