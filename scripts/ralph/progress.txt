@@ -36,6 +36,8 @@
   `?file=false` internally and never accept a caller-supplied query option.
 - RSS enable-many is a JSON array body; adapter methods must sort/deduplicate mapped numeric IDs and inject
   the current request-scoped RSS URL for updates instead of accepting a caller URL.
+- Management target resolution is a pure request-scoped boundary: resolve IDs only from the current local
+  mapping and fresh snapshot, then persist only deterministic SHA-256 summaries.
 
 ## Stage 30 Handoff
 
@@ -124,6 +126,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
     RSS enable-many must receive a sorted, deduplicated ID array.
   - Gotchas encountered: Recording fakes intentionally retain request headers, so token-clearing tests should
     inspect adapter state/results rather than assert tokens are absent from the fake's audit log.
-  - Useful context: Auto Bangumi 3.1.18's `RSSUpdate` includes URL, but the adapter injects it only from the
-    current request-scoped snapshot and rejects a caller-provided URL.
+- Useful context: Auto Bangumi 3.1.18's `RSSUpdate` includes URL, but the adapter injects it only from the
+  current request-scoped snapshot and rejects a caller-provided URL.
+---
+
+## 2026-09-09 15:13:49 +0800 - US-240
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added pure management target resolution and patch construction for SUBSCRIPTION and ASSOCIATED_RSS scopes. Mapping drift, missing/ambiguous targets, empty or mixed patches, raw filter expressions, URLs, absolute paths, traversal, and invalid types are rejected before adapter calls. Complete request-scoped update bodies preserve snapshot fields while RSS URLs remain adapter-owned, and management bindings expose only deterministic SHA-256 summaries.
+- Files changed: `src/tracking_engine/controllers/management_target.py`, `src/tracking_engine/controllers/management_target_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Keep target IDs and fresh external objects in a request-scoped resolved dataclass; only the action/projection digests are suitable for operation binding.
+  - Gotchas encountered: Associated RSS targets must reject duplicate mapping IDs and missing snapshot members before sorting, otherwise a partial write set could be mistaken for the bound set.
+  - Useful context: Targeted management/model tests (43), Ruff, compileall, and `git diff --check` passed; no nearby CODEX.md exists for the edited module.
 ---

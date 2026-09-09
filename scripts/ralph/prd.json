@@ -68,7 +68,7 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Public APIs use tracking_id only; external subscription/RSS IDs must not cross the serializer boundary."
     },
     {
