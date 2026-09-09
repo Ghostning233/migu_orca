@@ -8,6 +8,7 @@ Started: Thu Sep 10 00:50:47 CST 2026
 - `TrackingRecord` is the external submission authority; legacy queue and AB result data are compatibility projections or migration evidence.
 - Public tracking action/status DTOs use finite enums, while request-scoped credentials/capability observations stay out of durable or response contracts.
 - Frontend contract fixtures should derive request/response shapes from `frontend/src/api/generated/api.ts`; use type-only assertions instead of feature-local DTO interfaces.
+- Legacy queue/AB projections must never resolve `VERIFYING_EXTERNAL` or `RECOVERY_REQUIRED`; only the tracking recovery flow may clear an ambiguous external boundary.
 
 ## 2026-09-10 01:05:00 CST - US-247
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -32,6 +33,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - Files changed: `frontend/src/api/generated/contract-consumer.test.ts`, `docs/api/README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
 - **Learnings for future iterations:**
   - The generated OpenAPI client exposes inline response shapes, so fixtures can validate deep fields by deriving types from `operations` without duplicating DTO interfaces.
-  - Defaulted list fields may still be optional in generated TypeScript and should be narrowed with `NonNullable` when consuming an individual element.
-  - Full backend tests and frontend checks passed; no browser/UI behavior changed.
+- Defaulted list fields may still be optional in generated TypeScript and should be narrowed with `NonNullable` when consuming an individual element.
+- Full backend tests and frontend checks passed; no browser/UI behavior changed.
+---
+## 2026-09-10 01:11:58 CST - US-250
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Hardened legacy queue/AB compatibility projection so `VERIFYING_EXTERNAL` and `RECOVERY_REQUIRED` remain authoritative until explicit recovery. Added sanitized compatibility rehearsals for old-first/new-second, new-first/old-stale ordering, and late legacy results after unknown/recovery outcomes, with a recording fake proving no duplicate external create call.
+- Files changed: `src/apps/migu_orca_web/tracking_queue_compat.py`, `src/apps/migu_orca_web/tracking_queue_compat_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Legacy queue/AB data is evidence-only once an external boundary is ambiguous; it must not downgrade or resolve tracking state by itself.
+  - The unified submit service rejects fresh idempotency keys from `ACTIVE`, `VERIFYING_EXTERNAL`, and `RECOVERY_REQUIRED`; compatibility tests should assert the external seam call count.
+  - Full backend validation passed: compileall and 1732 tests.
 ---
