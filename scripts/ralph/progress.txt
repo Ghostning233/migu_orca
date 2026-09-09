@@ -96,6 +96,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
     `git diff --check` also passed.
 ---
 
+## 2026-09-09 00:00:00 +0800 - US-238 审核修复
+- 审核问题：urllib transport 的实际 PATCH/DELETE 支持未同步到实现签名，且管理写失败文案仍错误称为“只读”。
+- 修复：对齐 transport 的 method/payload 类型注解，并改正安全错误文案。
+- 验证：14 passed；Ruff、compileall、`git diff --check` 通过。
+---
+
 ## 2026-09-09 00:00:00 +0800 - US-237 审核修复
 - 审核问题：`TRACKING_OPERATION_KINDS` 被错误保留为仅 `SUBMIT`，不符合本阶段五种 operation 的公开契约；纯分类器缺少定向测试。
 - 修复：公开 operation 集合改为完整 v2 集合，并新增指纹、动作分类、回查分类测试。

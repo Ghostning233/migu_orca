@@ -110,10 +110,10 @@ class UrlopenAutoBangumiHttpTransport:
 
     def request_json(
         self,
-        method: Literal["GET", "POST"],
+        method: Literal["GET", "POST", "PATCH", "DELETE"],
         endpoint: str,
         headers: Mapping[str, str],
-        payload: Mapping[str, str] | None = None,
+        payload: Mapping[str, Any] | None = None,
         *,
         timeout: float,
     ) -> dict[str, Any]:

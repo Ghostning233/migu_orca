@@ -156,7 +156,7 @@ class Legacy31ManagementClient:
         except Stage1Error:
             raise
         except Exception as exc:
-            raise Stage1Error("ab_management_failed", "Auto Bangumi 只读请求失败", "ab_management", {"reason": exc.__class__.__name__}) from exc
+            raise Stage1Error("ab_management_failed", "Auto Bangumi 管理请求失败", "ab_management", {"reason": exc.__class__.__name__}) from exc
 
 
 def create_legacy_31_management_client(config: AutoBangumiConfig, *, transport: AutoBangumiLegacyTransport) -> Legacy31ManagementClient:
