@@ -505,6 +505,49 @@ def test_second_repository_write_failure_never_returns_success(monkeypatch: pyte
     assert load_tracking_record(config, record.tracking_id).status == "RECOVERY_REQUIRED"
 
 
+def test_outcome_unknown_replay_requires_matching_unknown_audit_and_is_read_only(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client, calls = _FakeClient(), []
+    first = _run(config, record, client, calls, write=lambda _target, _payload: {"transport_error": "timeout"})
+    current = load_tracking_record(config, record.tracking_id)
+    revision = current.revision
+    reads = client.reads
+    replay = run_tracking_management(config, tracking_id=record.tracking_id,
+                  expected_revision=record.revision, idempotency_key="key-1", confirm=True,
+                  operation="MODIFY", target_scope="SUBSCRIPTION", patch={"title": "Changed"}, management_client=client,
+                  write=lambda *_args: pytest.fail("OUTCOME_UNKNOWN replay must not write"))
+    assert replay["operation_id"] == first["operation_id"]
+    assert replay["management_status"] == "OUTCOME_UNKNOWN"
+    assert replay["outcome"] == "OUTCOME_UNKNOWN" and replay["needs_manual"] is True
+    assert load_tracking_record(config, record.tracking_id).revision == revision
+    assert client.reads == reads and calls == []
+
+
+def test_recovery_required_replay_requires_matching_unknown_audit_and_is_read_only(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client, calls = _FakeClient(), []
+    first = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="recovery-replay", confirm=True, operation="REFRESH_RSS",
+        target_scope="ASSOCIATED_RSS", management_client=client,
+        write=lambda _target, _payload: {"transport_error": "timeout"},
+    )
+    current = load_tracking_record(config, record.tracking_id)
+    revision = current.revision
+    reads = client.reads
+    replay = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="recovery-replay", confirm=True, operation="REFRESH_RSS",
+        target_scope="ASSOCIATED_RSS", management_client=client,
+        write=lambda *_args: pytest.fail("RECOVERY_REQUIRED replay must not write"),
+    )
+    assert replay["operation_id"] == first["operation_id"]
+    assert replay["management_status"] == "RECOVERY_REQUIRED"
+    assert replay["outcome"] == "OUTCOME_UNKNOWN" and replay["needs_manual"] is True
+    assert load_tracking_record(config, record.tracking_id).revision == revision
+    assert client.reads == reads and calls == []
+
+
 def test_result_operation_is_persisted_before_record_and_record_fault_compensates_both(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:

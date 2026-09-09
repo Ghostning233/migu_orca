@@ -143,9 +143,9 @@ def run_tracking_management(
                         existing.request_fingerprint) == (
                             record.tracking_id, operation, target_scope,
                             binding.action_fingerprint)
-        # A terminal operation is replayable only with its original revision.
-        # The durable revision is part of the external-action binding, even
-        # though the tracking record itself advanced after the first call.
+        # Terminal replay remains bound to the original revision.  The caller
+        # may safely replay with that stale-but-recorded revision; a different
+        # revision is a different request and must conflict.
         if not same_binding or existing.expected_revision != expected_revision:
             raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         if existing.state in TRACKING_OPERATION_TERMINAL_STATES:
@@ -752,15 +752,22 @@ def _guard_current_operation(config: StorageConfig, record: TrackingRecord) -> N
 
 def _record_matches_management_terminal(record: TrackingRecord, operation: TrackingOperation) -> bool:
     """Prove the record persisted the precise terminal operation outcome."""
-    if operation.state not in {TRACKING_OPERATION_STATE_SUCCEEDED, "FAILED"}:
-        # Unknown and recovery-required operations are never safe replay
-        # successes; they always retain the recovery gate.
+    if record.current_operation_id != operation.operation_id:
         return False
-    expected_audit = (
-        TRACKING_AUDIT_MANAGEMENT_SUCCEEDED
-        if operation.state == TRACKING_OPERATION_STATE_SUCCEEDED
-        else TRACKING_AUDIT_MANAGEMENT_FAILED
-    )
+    expected_audit = {
+        TRACKING_OPERATION_STATE_SUCCEEDED: TRACKING_AUDIT_MANAGEMENT_SUCCEEDED,
+        "FAILED": TRACKING_AUDIT_MANAGEMENT_FAILED,
+        "OUTCOME_UNKNOWN": TRACKING_AUDIT_MANAGEMENT_UNKNOWN,
+        "RECOVERY_REQUIRED": TRACKING_AUDIT_MANAGEMENT_UNKNOWN,
+    }.get(operation.state)
+    expected_status = {
+        TRACKING_OPERATION_STATE_SUCCEEDED: None,
+        "FAILED": None,
+        "OUTCOME_UNKNOWN": TRACKING_STATUS_VERIFYING_EXTERNAL,
+        "RECOVERY_REQUIRED": TRACKING_STATUS_RECOVERY_REQUIRED,
+    }.get(operation.state)
+    if expected_audit is None:
+        return False
     relevant = [
         event for event in record.audit_events
         if isinstance(event, Mapping) and event.get("operation_id") == operation.operation_id
@@ -772,6 +779,8 @@ def _record_matches_management_terminal(record: TrackingRecord, operation: Track
     ]
     if not relevant or relevant[-1].get("action") != expected_audit:
         return False
+    if expected_status is not None:
+        return record.status == expected_status
     return record.status not in {TRACKING_STATUS_VERIFYING_EXTERNAL, TRACKING_STATUS_RECOVERY_REQUIRED}
 
 
