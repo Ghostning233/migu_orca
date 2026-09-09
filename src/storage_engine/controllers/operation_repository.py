@@ -42,6 +42,7 @@ import contextlib
 import json
 import os
 import re
+from dataclasses import replace
 from pathlib import Path
 from threading import RLock
 from typing import Any
@@ -52,12 +53,17 @@ from storage_engine.controllers.storage_config import (
     ensure_storage_layout,
 )
 from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
     TrackingOperation,
     create_tracking_operation,
     operation_from_storage_dict,
     operation_to_storage_dict,
     tracking_operation_id_for_idempotency_key,
     tracking_operation_transition_allowed,
+    utc_now,
 )
 
 #: Opaque operation-id shape (``op_<32 hex>``).  The character whitelist keeps
@@ -227,6 +233,45 @@ def compare_and_swap_tracking_operation(
         _atomic_write(
             config, clean_id, normalized, "compare_and_swap_tracking_operation"
         )
+        return normalized
+
+
+def recover_tracking_operation(
+    config: StorageConfig,
+    operation_id: str,
+    expected_state: str,
+    *,
+    target_state: str,
+    error_type: str | None = None,
+    now: str | None = None,
+) -> TrackingOperation:
+    """Resolve an uncertain operation after explicit read-only verification.
+
+    This is deliberately separate from ordinary CAS transitions: only
+    ``OUTCOME_UNKNOWN``/``RECOVERY_REQUIRED`` may be resolved, and the caller
+    must provide a terminal success/failure state.  No new operation binding
+    is created.
+    """
+    if expected_state not in {TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, TRACKING_OPERATION_STATE_RECOVERY_REQUIRED}:
+        raise Stage1Error("tracking_operation_state_conflict", "该操作不处于待恢复状态", "recover_tracking_operation")
+    if target_state not in {
+        TRACKING_OPERATION_STATE_SUCCEEDED,
+        TRACKING_OPERATION_STATE_FAILED,
+        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    }:
+        raise ValueError("recovery target must be a terminal recovery state")
+    clean_id = _validated_operation_id(operation_id, "recover_tracking_operation")
+    ensure_storage_layout(config)
+    with _key_lock(clean_id):
+        current = _load_tracking_operation(config, clean_id, "recover_tracking_operation")
+        if current.state != expected_state:
+            raise Stage1Error("tracking_operation_state_conflict", "提交操作状态已变化，请重新读取后重试", "recover_tracking_operation")
+        recovered = replace(
+            current, state=target_state, error_type=error_type,
+            updated_at=now or utc_now(), completed_at=now or utc_now(),
+        )
+        normalized = _normalize(recovered, "recover_tracking_operation")
+        _atomic_write(config, clean_id, normalized, "recover_tracking_operation")
         return normalized
 
 
@@ -468,5 +513,6 @@ def _is_relative_to(path: Path, parent: Path) -> bool:
 __all__ = [
     "bind_tracking_operation",
     "compare_and_swap_tracking_operation",
+    "recover_tracking_operation",
     "load_tracking_operation",
 ]

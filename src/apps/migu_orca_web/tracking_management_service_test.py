@@ -5,13 +5,18 @@ from pathlib import Path
 import pytest
 
 from ab_engine.models.management import AutoBangumiCapabilities, ExternalRss, ExternalSubscription
-from apps.migu_orca_web.tracking_management_service import run_tracking_management
+from apps.migu_orca_web.tracking_management_service import recover_tracking_management, run_tracking_management
 from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import ensure_tracking_record, load_tracking_record
 from tracking_engine.controllers.management_target import ResolvedManagementTarget
-from tracking_engine.models.operation import TRACKING_OPERATION_STATE_IN_PROGRESS, TRACKING_OPERATION_STATE_SUCCEEDED
+from tracking_engine.models.operation import (
+    TRACKING_OPERATION_STATE_FAILED,
+    TRACKING_OPERATION_STATE_IN_PROGRESS,
+    TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
+)
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_EXTERNAL_DELETED,
@@ -182,3 +187,44 @@ def test_refresh_is_recovery_required_even_when_transport_succeeds(tmp_path: Pat
     )
     assert result["management_status"] == "RECOVERY_REQUIRED"
     assert result["needs_manual"] is True
+
+
+def test_management_verify_resolves_unknown_without_a_second_write(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client = _FakeClient()
+    first = _run(
+        config, record, client, [],
+        write=lambda _target, _payload: {"transport_error": "timeout"},
+    )
+    uncertain_record = load_tracking_record(config, record.tracking_id)
+    uncertain_operation = load_tracking_operation(config, first["operation_id"])
+    assert uncertain_operation.state == "OUTCOME_UNKNOWN"
+
+    # The original title is still present, so the bound title change is
+    # definitively known not to have been applied.
+    result = recover_tracking_management(
+        config, record=uncertain_record, operation=uncertain_operation,
+        management_client=client, now="2026-09-09T01:00:00+00:00",
+    )
+    assert result["outcome"] == "DEFINITE_FAILURE"
+    assert result["needs_manual"] is False
+    assert load_tracking_operation(config, first["operation_id"]).state == TRACKING_OPERATION_STATE_FAILED
+
+
+def test_management_refresh_recovery_never_infers_success(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    first = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="refresh-unknown", confirm=True,
+        operation="REFRESH_RSS", target_scope="ASSOCIATED_RSS",
+        management_client=_FakeClient(),
+        write=lambda _target, _payload: {"transport_error": "timeout"},
+    )
+    result = recover_tracking_management(
+        config, record=load_tracking_record(config, record.tracking_id),
+        operation=load_tracking_operation(config, first["operation_id"]),
+        management_client=_FakeClient(),
+    )
+    assert result["outcome"] == "OUTCOME_UNKNOWN"
+    assert result["needs_manual"] is True
+    assert load_tracking_operation(config, first["operation_id"]).state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED

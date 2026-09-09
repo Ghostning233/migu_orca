@@ -40,6 +40,8 @@
   mapping and fresh snapshot, then persist only deterministic SHA-256 summaries.
 - Management writes must bind the complete expected projection from the fresh snapshot, then terminalize the
   operation only after a matching readback; transport or evidence uncertainty remains recoverable.
+- Keep ordinary operation transitions terminal-only; explicit management recovery uses a separate CAS seam to
+  resolve OUTCOME_UNKNOWN/RECOVERY_REQUIRED without creating a new idempotency binding.
 
 ## Stage 30 Handoff
 
@@ -179,4 +181,24 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Patterns discovered: External deletion is verified by absence, while RSS mapping is reduced only after every bound item is absent; local tracking records remain durable.
   - Gotchas encountered: Refresh has no stable read projection, so even a successful transport response must remain `RECOVERY_REQUIRED`; partial RSS deletion is also unknown rather than a definite failure.
   - Useful context: Targeted management/adapter/model tests (37), compileall, Ruff, and `git diff --check` passed; no nearby CODEX.md exists.
+---
+
+## 2026-09-09 15:45:00 +0800 - US-244
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Extended VERIFY_EXTERNAL dispatch for management operations. Recovery now reads only the
+  current verified 3.1.18 snapshot, validates the persisted operation kind/scope/fingerprint, classifies modify,
+  enable and delete outcomes, preserves safe prior state on verified non-application, keeps refresh and incomplete
+  RSS evidence manual, and updates the original record/audit/operation through CAS without a second write or key.
+- Files changed: `src/apps/migu_orca_web/tracking_management_service.py`,
+  `src/apps/migu_orca_web/tracking_management_service_test.py`,
+  `src/apps/migu_orca_web/tracking_recovery_service.py`,
+  `src/storage_engine/controllers/operation_repository.py`, `scripts/ralph/prd.json`,
+  `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Recovery of uncertain terminal operations needs a dedicated repository CAS boundary;
+    ordinary transition validation should continue to reject outgoing terminal transitions.
+  - Gotchas encountered: Definite non-application and unresolved evidence both update the record, but only the
+    latter remains `needs_manual`; refresh has no stable projection and must remain `RECOVERY_REQUIRED`.
+  - Useful context: Targeted management/recovery/operation/repository tests: 106 passed; compileall, Ruff, and
+    `git diff --check` passed. Browser and frontend gates are deferred to final US-246 as required by the PRD.
 ---

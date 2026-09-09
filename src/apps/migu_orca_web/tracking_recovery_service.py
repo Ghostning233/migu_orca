@@ -37,6 +37,7 @@ from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
 from ab_engine.controllers.ab_management_client import Legacy31ManagementClient
 from ab_engine.models.management import ExternalSubscription
 from apps.migu_orca_web.serializers import serialize_request_safe_info
+from apps.migu_orca_web.tracking_management_service import recover_tracking_management
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
 from apps.migu_orca_web.tracking_queue_compat import (
     sync_queue_projection_for_tracking,
@@ -267,6 +268,35 @@ def run_tracking_recover(
         )
 
     operation = _load_current_operation(config, record)
+    if action == RECOVERY_ACTION_VERIFY_EXTERNAL and operation is not None and operation.operation in {
+        "MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"
+    }:
+        if ab_config is None:
+            raise Stage1Error(
+                "validation_error", "外部核验需要连接配置", _RECOVER_FAILED_STEP, {"field": "ab_config"}
+            )
+        try:
+            client = management_client or _management_client(ab_config)
+        except Exception:
+            return _verification_needs_manual(
+                config, record=record, request=None, checked_revision=checked_revision,
+                timestamp=timestamp, reason="management_capability_unknown",
+            )
+        result = recover_tracking_management(
+            config, record=record, operation=operation, management_client=client, now=timestamp
+        )
+        resolved_record = load_tracking_record(config, tracking_id)
+        result.update(
+            {
+                "tracking_id": resolved_record.tracking_id,
+                "action": RECOVERY_ACTION_VERIFY_EXTERNAL,
+                "checked_revision": checked_revision,
+                "next_revision": resolved_record.revision,
+                "checked_at": timestamp,
+                "tracking": tracking_summary_fields(resolved_record, valid_resource_count=0),
+            }
+        )
+        return result
     request = _tolerant_load_request(config, record)
     ab_result = _ab_result_of(request)
 

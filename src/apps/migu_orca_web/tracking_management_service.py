@@ -17,6 +17,7 @@ from storage_engine.controllers.operation_repository import (
     bind_tracking_operation,
     compare_and_swap_tracking_operation,
     load_tracking_operation,
+    recover_tracking_operation,
 )
 from storage_engine.controllers.storage_config import StorageConfig, load_storage_config
 from storage_engine.controllers.tracking_repository import (
@@ -47,6 +48,7 @@ from tracking_engine.models.operation import (
     TRACKING_OPERATION_KIND_SET_ENABLED,
     TRACKING_OPERATION_STATE_IN_PROGRESS,
     TRACKING_OPERATION_STATE_PREPARED,
+    TRACKING_OPERATION_STATE_SUCCEEDED,
     TRACKING_OPERATION_TERMINAL_STATES,
     TrackingOperation,
     tracking_operation_id_for_idempotency_key,
@@ -235,6 +237,159 @@ def run_tracking_management(
             operation_id=in_progress.operation_id, reason="management_readback_failed" if readback_outcome != MANAGEMENT_OUTCOME_SUCCESS else "management_verified", now=now,
             actual=actual if 'actual' in locals() else None, enabled=enabled, patch=safe_patch)
     return {"operation_id": in_progress.operation_id, "management_status": "IN_PROGRESS", "created": True}
+
+
+def recover_tracking_management(
+    config: StorageConfig,
+    *,
+    record: TrackingRecord,
+    operation: TrackingOperation,
+    management_client: ManagementSnapshotClient,
+    now: str | None = None,
+) -> dict[str, Any]:
+    """Verify one uncertain management operation without issuing a write.
+
+    The operation binding is the sole source of action, scope and expected
+    projection.  In particular, this function does not accept an idempotency
+    key or construct a replacement operation.
+    """
+    if operation.tracking_id != record.tracking_id or operation.operation not in {
+        TRACKING_OPERATION_KIND_MODIFY,
+        TRACKING_OPERATION_KIND_SET_ENABLED,
+        TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
+        TRACKING_OPERATION_KIND_REFRESH_RSS,
+    } or operation.target_scope is None:
+        return _management_recovery_result(record, operation, "RECOVERY_REQUIRED", True)
+    if operation.state not in {
+        TRACKING_OPERATION_STATE_IN_PROGRESS,
+        "OUTCOME_UNKNOWN",
+        "RECOVERY_REQUIRED",
+    }:
+        return _management_recovery_result(record, operation, "RECOVERY_REQUIRED", True)
+
+    try:
+        capabilities, subscriptions, rss_items = management_client.read_snapshot()
+        required = "subscription_list" if operation.target_scope == "SUBSCRIPTION" else "rss_list"
+        if (
+            capabilities.probe_status != "VERIFIED"
+            or capabilities.version != "3.1.18"
+            or getattr(capabilities, required, "UNKNOWN") != "SUPPORTED"
+        ):
+            return _persist_management_recovery(
+                config, record, operation, "RECOVERY_REQUIRED", "management_capability_unknown", now,
+                successful=False,
+            )
+        target = _readback_target(
+            management_client, record, operation.target_scope, operation.operation
+        )
+        outcome = _classify_target_readback(
+            operation.operation, operation.target_scope, target, target,
+            operation.expected_external_fingerprint or "",
+        )
+    except Exception:
+        return _persist_management_recovery(
+            config, record, operation, "RECOVERY_REQUIRED", "management_readback_failed", now,
+            successful=False,
+        )
+
+    if outcome == MANAGEMENT_OUTCOME_SUCCESS:
+        if operation.operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL:
+            status = (
+                TRACKING_STATUS_EXTERNAL_DELETED
+                if operation.target_scope == "SUBSCRIPTION"
+                else record.status
+            )
+        elif operation.operation == TRACKING_OPERATION_KIND_SET_ENABLED:
+            status = TRACKING_STATUS_ACTIVE if _target_enabled(target) else TRACKING_STATUS_DISABLED
+        else:
+            status = TRACKING_STATUS_ACTIVE if record.status != TRACKING_STATUS_DISABLED else record.status
+        return _persist_management_recovery(config, record, operation, status, "management_recovered", now, target, successful=True)
+    if outcome == MANAGEMENT_OUTCOME_DEFINITE_FAILURE:
+        status = operation.previous_tracking_status or record.status
+        return _persist_management_recovery(config, record, operation, status, "management_not_applied", now, successful=False)
+    return _persist_management_recovery(config, record, operation, "RECOVERY_REQUIRED", "management_recovery_required", now, successful=False)
+
+
+def _target_enabled(target: Any) -> bool:
+    if isinstance(target, ResolvedManagementTarget):
+        if target.subscription is not None:
+            return target.subscription.enabled
+        return bool(target.rss) and all(item.enabled for item in target.rss)
+    return False
+
+
+def _management_recovery_result(
+    record: TrackingRecord, operation: TrackingOperation, status: str, needs_manual: bool
+) -> dict[str, Any]:
+    return {
+        "operation_id": operation.operation_id,
+        "management_status": "RECOVERY_REQUIRED" if needs_manual else status,
+        "outcome": status,
+        "needs_manual": needs_manual,
+        "created": False,
+    }
+
+
+def _persist_management_recovery(
+    config: StorageConfig,
+    record: TrackingRecord,
+    operation: TrackingOperation,
+    status: str,
+    reason: str,
+    now: str | None,
+    target: Any = None,
+    successful: bool | None = None,
+) -> dict[str, Any]:
+    timestamp = now or utc_now()
+    success = successful if successful is not None else status not in {TRACKING_STATUS_RECOVERY_REQUIRED, TRACKING_STATUS_VERIFYING_EXTERNAL}
+    definite_failure = not success and status not in {TRACKING_STATUS_RECOVERY_REQUIRED, TRACKING_STATUS_VERIFYING_EXTERNAL}
+    audit = (
+        TRACKING_AUDIT_MANAGEMENT_SUCCEEDED if success
+        else TRACKING_AUDIT_MANAGEMENT_FAILED if definite_failure
+        else TRACKING_AUDIT_MANAGEMENT_UNKNOWN
+    )
+    message = (
+        "Auto Bangumi 管理结果已通过只读回查确认"
+        if success or definite_failure
+        else "外部管理结果仍未知，请人工恢复；不会自动重试"
+    )
+    next_record = transition_record(
+        record, status=status, audit_action=audit, operation_id=operation.operation_id,
+        reason_code=reason, safe_message=message, now=timestamp,
+    )
+    if success and operation.operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL:
+        mapping = dict(next_record.external_mapping or {})
+        if operation.target_scope == "SUBSCRIPTION":
+            mapping["external_deleted"] = True
+        elif isinstance(target, ResolvedManagementTarget):
+            mapping["rss_ids"] = [item.external_id for item in target.rss]
+        next_record = replace(next_record, external_mapping=mapping)
+    final = compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
+    terminal = TRACKING_OPERATION_STATE_SUCCEEDED if success else (
+        "RECOVERY_REQUIRED" if status == TRACKING_STATUS_RECOVERY_REQUIRED else "FAILED"
+    )
+    if operation.state in {"OUTCOME_UNKNOWN", "RECOVERY_REQUIRED"}:
+        recover_tracking_operation(
+            config, operation.operation_id, operation.state,
+            target_state=("SUCCEEDED" if success else
+                          ("RECOVERY_REQUIRED" if status == TRACKING_STATUS_RECOVERY_REQUIRED else "FAILED")),
+            error_type=None if success else reason, now=timestamp,
+        )
+    else:
+        compare_and_swap_tracking_operation(
+            config, operation.operation_id, operation.state,
+            transition_tracking_operation(operation, state=terminal, error_type=None if success else reason, now=timestamp),
+        )
+    return {
+        "operation_id": operation.operation_id,
+        "management_status": terminal,
+        "outcome": "SUCCESS" if success else (
+            "OUTCOME_UNKNOWN" if status == TRACKING_STATUS_RECOVERY_REQUIRED else "DEFINITE_FAILURE"
+        ),
+        "needs_manual": not success and not definite_failure,
+        "created": False,
+        "tracking": final.tracking_id,
+    }
 
 
 def _unknown_write_error(exc: Exception) -> bool:
@@ -437,4 +592,4 @@ def _load_operation_if_present(config: StorageConfig, idempotency_key: str) -> T
         raise
 
 
-__all__ = ["ManagementBinding", "ManagementSnapshotClient", "ManagementWriter", "run_tracking_management"]
+__all__ = ["ManagementBinding", "ManagementSnapshotClient", "ManagementWriter", "recover_tracking_management", "run_tracking_management"]

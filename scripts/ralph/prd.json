@@ -138,7 +138,7 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "Never infer refresh success from unchanged data and never use a fresh idempotency key to resolve an unknown write."
     },
     {
