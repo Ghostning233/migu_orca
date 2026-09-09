@@ -224,3 +224,9 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Gotchas encountered: Stage 31 deliberately has no formal tracking-management page; Stage 32 owns compatibility/migration, security matrix, rollback and frontend handoff.
   - Useful context: Final gates passed: non-browser backend 1548 passed/133 deselected, frontend unit 261 passed, Chromium 133 passed, compileall/Ruff/OpenAPI drift/git diff check passed.
 ---
+
+## 2026-09-09 16:00:00 +0800 - Stage 31 审核修复
+- 审核问题：`SET_ENABLED=false` 错误复用 enable capability；RSS refresh 的有效成功响应被无条件归类为未知。
+- 修复：按操作方向选择 enable/disable capability；refresh 仅在响应丢失、超时或无效时进入恢复，明确成功直接终态化。
+- 验证：40 项定向回归、Ruff、compileall、`git diff --check` 通过；完整回归随后执行。
+---

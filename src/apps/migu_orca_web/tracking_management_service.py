@@ -90,6 +90,16 @@ _CAPABILITY_FIELDS = {
 }
 
 
+def _capability_field(operation: str, target_scope: str, enabled: bool | None) -> str | None:
+    """Select the exact verified capability required by this action direction."""
+    if operation == TRACKING_OPERATION_KIND_SET_ENABLED:
+        if enabled is not True and enabled is not False:
+            return None
+        suffix = "enable" if enabled else "disable"
+        return f"subscription_{suffix}" if target_scope == "SUBSCRIPTION" else f"rss_{suffix}"
+    return _CAPABILITY_FIELDS.get((operation, target_scope))
+
+
 def run_tracking_management(
     config: StorageConfig | None = None,
     *,
@@ -146,7 +156,7 @@ def run_tracking_management(
         raise Stage1Error("tracking_management_capability_unknown", "管理能力尚未验证", "tracking_management")
     caps, subscriptions, rss_items = management_client.read_snapshot()
     effective_caps = capabilities or caps
-    field = _CAPABILITY_FIELDS.get((operation, target_scope))
+    field = _capability_field(operation, target_scope, enabled)
     if field is None or getattr(effective_caps, field, "UNKNOWN") != "SUPPORTED":
         raise Stage1Error("tracking_management_capability_unknown", "当前 Auto Bangumi 管理能力未验证", "tracking_management")
     target = resolve_management_target(record, target_scope, subscriptions, rss_items)
@@ -218,15 +228,17 @@ def run_tracking_management(
             transport_error=response.get("transport_error") if isinstance(response, Mapping) and isinstance(response.get("transport_error"), str) else None,
             response_valid=not (isinstance(response, Mapping) and response.get("response_valid") is False),
         )
-        # A refresh has no stable, read-only projection proving that the
-        # upstream refresh ran.  Even a successful transport response must
-        # therefore remain a recoverable, non-retryable outcome.
-        if operation == TRACKING_OPERATION_KIND_REFRESH_RSS:
-            action_outcome = MANAGEMENT_OUTCOME_UNKNOWN
         if action_outcome != MANAGEMENT_OUTCOME_SUCCESS:
             return _finish_management(config=resolved_config, record=started,
                 operation=in_progress, outcome=action_outcome, target=target,
                 operation_id=in_progress.operation_id, reason="management_write_failed", now=now)
+        # Refresh has no post-write projection for readback.  A bounded,
+        # successful upstream response is therefore its terminal evidence;
+        # only a lost or malformed response remains recovery-required.
+        if operation == TRACKING_OPERATION_KIND_REFRESH_RSS:
+            return _finish_management(config=resolved_config, record=started,
+                operation=in_progress, outcome=MANAGEMENT_OUTCOME_SUCCESS, target=target,
+                operation_id=in_progress.operation_id, reason="management_verified", now=now)
         try:
             actual = readback(operation, target_scope, target) if readback is not None else _readback_target(management_client, record, target_scope, operation)
             readback_outcome = _classify_target_readback(operation, target_scope, target, actual, binding.expected_external_fingerprint)

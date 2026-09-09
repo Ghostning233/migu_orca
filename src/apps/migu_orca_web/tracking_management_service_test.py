@@ -100,6 +100,26 @@ def test_capability_failure_happens_before_operation_binding(tmp_path: Path) -> 
     assert calls == []
 
 
+def test_disable_requires_the_disable_capability_before_external_write(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client = _FakeClient()
+    client.capabilities = AutoBangumiCapabilities(
+        probe_status="VERIFIED", version="3.1.18", adapter="legacy_3_1",
+        subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
+        subscription_enable="SUPPORTED", subscription_disable="UNKNOWN",
+    )
+    calls = []
+    with pytest.raises(Stage1Error) as error:
+        run_tracking_management(
+            config, tracking_id=record.tracking_id, expected_revision=record.revision,
+            idempotency_key="disable-without-capability", confirm=True,
+            operation="SET_ENABLED", target_scope="SUBSCRIPTION", enabled=False,
+            management_client=client, write=lambda *_args: calls.append(True),
+        )
+    assert error.value.error_type == "tracking_management_capability_unknown"
+    assert calls == []
+
+
 def test_modify_requires_matching_readback_and_persists_projection(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
     client, calls = _FakeClient(), []
@@ -176,7 +196,7 @@ def test_rss_delete_calls_each_bound_id_and_removes_only_mapping(tmp_path: Path)
     assert load_tracking_record(config, record.tracking_id).external_mapping["rss_ids"] == []
 
 
-def test_refresh_is_recovery_required_even_when_transport_succeeds(tmp_path: Path) -> None:
+def test_refresh_success_terminalizes_from_bounded_transport_evidence(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
     result = run_tracking_management(
         config, tracking_id=record.tracking_id, expected_revision=record.revision,
@@ -185,8 +205,8 @@ def test_refresh_is_recovery_required_even_when_transport_succeeds(tmp_path: Pat
         management_client=_FakeClient(),
         write=lambda _target, _payload: {"status_code": 200},
     )
-    assert result["management_status"] == "RECOVERY_REQUIRED"
-    assert result["needs_manual"] is True
+    assert result["management_status"] == "SUCCEEDED"
+    assert result["needs_manual"] is False
 
 
 def test_management_verify_resolves_unknown_without_a_second_write(tmp_path: Path) -> None:
