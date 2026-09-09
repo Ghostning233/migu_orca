@@ -741,9 +741,12 @@ class TrackingAvailableActionDTO(_StrictBase):
     never a disabled fake action.
     """
 
-    code: str
+    code: Literal[
+        "REVALIDATE", "SUBMIT", "RETRY", "RECOVER_AUTO", "MARK_SUCCEEDED",
+        "MARK_FAILED", "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
+    ]
     label: str
-    style: str
+    style: Literal["PRIMARY", "SECONDARY", "DANGER"]
     requires_confirmation: bool
 
 
@@ -788,8 +791,8 @@ class TrackingOperationSummaryDTO(_StrictBase):
     attempt: int
     external_result_id: str | None = None
     error_type: str | None = None
-    created_at: str
-    updated_at: str
+    created_at: str | None = None
+    updated_at: str | None = None
     completed_at: str | None = None
 
 
@@ -968,7 +971,10 @@ class TrackingManagementResultDTO(_StrictBase):
     """Safe result shared by the four Stage 31 management write routes."""
 
     action: Literal["MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"]
-    management_status: str
+    management_status: Literal[
+        "PREPARED", "IN_PROGRESS", "SUCCEEDED", "FAILED",
+        "OUTCOME_UNKNOWN", "RECOVERY_REQUIRED",
+    ]
     needs_manual: bool
     safe_message: str
     operation_id: str | None = None

@@ -5042,12 +5042,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -5431,12 +5437,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -11323,12 +11335,18 @@ export interface operations {
                             status_group: string;
                             /** Available Actions */
                             available_actions?: {
-                                /** Code */
-                                code: string;
+                                /**
+                                 * Code
+                                 * @enum {string}
+                                 */
+                                code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                 /** Label */
                                 label: string;
-                                /** Style */
-                                style: string;
+                                /**
+                                 * Style
+                                 * @enum {string}
+                                 */
+                                style: "PRIMARY" | "SECONDARY" | "DANGER";
                                 /** Requires Confirmation */
                                 requires_confirmation: boolean;
                             }[];
@@ -11615,10 +11633,16 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /** Created At */
-                                created_at: string;
-                                /** Updated At */
-                                updated_at: string;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
                                 /**
                                  * Completed At
                                  * @default null
@@ -11918,8 +11942,11 @@ export interface operations {
                              * @enum {string}
                              */
                             action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
-                            /** Management Status */
-                            management_status: string;
+                            /**
+                             * Management Status
+                             * @enum {string}
+                             */
+                            management_status: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                             /** Needs Manual */
                             needs_manual: boolean;
                             /** Safe Message */
@@ -11973,12 +12000,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -12031,10 +12064,16 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /** Created At */
-                                created_at: string;
-                                /** Updated At */
-                                updated_at: string;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
                                 /**
                                  * Completed At
                                  * @default null
@@ -12254,8 +12293,11 @@ export interface operations {
                              * @enum {string}
                              */
                             action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
-                            /** Management Status */
-                            management_status: string;
+                            /**
+                             * Management Status
+                             * @enum {string}
+                             */
+                            management_status: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                             /** Needs Manual */
                             needs_manual: boolean;
                             /** Safe Message */
@@ -12309,12 +12351,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -12367,10 +12415,16 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /** Created At */
-                                created_at: string;
-                                /** Updated At */
-                                updated_at: string;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
                                 /**
                                  * Completed At
                                  * @default null
@@ -12666,12 +12720,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -12951,8 +13011,11 @@ export interface operations {
                              * @enum {string}
                              */
                             action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
-                            /** Management Status */
-                            management_status: string;
+                            /**
+                             * Management Status
+                             * @enum {string}
+                             */
+                            management_status: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                             /** Needs Manual */
                             needs_manual: boolean;
                             /** Safe Message */
@@ -13006,12 +13069,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -13064,10 +13133,16 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /** Created At */
-                                created_at: string;
-                                /** Updated At */
-                                updated_at: string;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
                                 /**
                                  * Completed At
                                  * @default null
@@ -13373,12 +13448,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -13726,12 +13807,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -14013,8 +14100,11 @@ export interface operations {
                              * @enum {string}
                              */
                             action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
-                            /** Management Status */
-                            management_status: string;
+                            /**
+                             * Management Status
+                             * @enum {string}
+                             */
+                            management_status: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                             /** Needs Manual */
                             needs_manual: boolean;
                             /** Safe Message */
@@ -14068,12 +14158,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];
@@ -14126,10 +14222,16 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /** Created At */
-                                created_at: string;
-                                /** Updated At */
-                                updated_at: string;
+                                /**
+                                 * Created At
+                                 * @default null
+                                 */
+                                created_at: string | null;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
                                 /**
                                  * Completed At
                                  * @default null
@@ -14435,12 +14537,18 @@ export interface operations {
                                 status_group: string;
                                 /** Available Actions */
                                 available_actions?: {
-                                    /** Code */
-                                    code: string;
+                                    /**
+                                     * Code
+                                     * @enum {string}
+                                     */
+                                    code: "REVALIDATE" | "SUBMIT" | "RETRY" | "RECOVER_AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "MODIFY" | "SET_ENABLED" | "REFRESH_RSS" | "DELETE_EXTERNAL";
                                     /** Label */
                                     label: string;
-                                    /** Style */
-                                    style: string;
+                                    /**
+                                     * Style
+                                     * @enum {string}
+                                     */
+                                    style: "PRIMARY" | "SECONDARY" | "DANGER";
                                     /** Requires Confirmation */
                                     requires_confirmation: boolean;
                                 }[];

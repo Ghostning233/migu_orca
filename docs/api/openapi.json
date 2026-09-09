@@ -8207,6 +8207,18 @@
                                   "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                   "properties": {
                                     "code": {
+                                      "enum": [
+                                        "REVALIDATE",
+                                        "SUBMIT",
+                                        "RETRY",
+                                        "RECOVER_AUTO",
+                                        "MARK_SUCCEEDED",
+                                        "MARK_FAILED",
+                                        "MODIFY",
+                                        "SET_ENABLED",
+                                        "REFRESH_RSS",
+                                        "DELETE_EXTERNAL"
+                                      ],
                                       "title": "Code",
                                       "type": "string"
                                     },
@@ -8215,6 +8227,11 @@
                                       "type": "string"
                                     },
                                     "style": {
+                                      "enum": [
+                                        "PRIMARY",
+                                        "SECONDARY",
+                                        "DANGER"
+                                      ],
                                       "title": "Style",
                                       "type": "string"
                                     },
@@ -8936,6 +8953,18 @@
                                   "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                   "properties": {
                                     "code": {
+                                      "enum": [
+                                        "REVALIDATE",
+                                        "SUBMIT",
+                                        "RETRY",
+                                        "RECOVER_AUTO",
+                                        "MARK_SUCCEEDED",
+                                        "MARK_FAILED",
+                                        "MODIFY",
+                                        "SET_ENABLED",
+                                        "REFRESH_RSS",
+                                        "DELETE_EXTERNAL"
+                                      ],
                                       "title": "Code",
                                       "type": "string"
                                     },
@@ -8944,6 +8973,11 @@
                                       "type": "string"
                                     },
                                     "style": {
+                                      "enum": [
+                                        "PRIMARY",
+                                        "SECONDARY",
+                                        "DANGER"
+                                      ],
                                       "title": "Style",
                                       "type": "string"
                                     },
@@ -20340,6 +20374,18 @@
                             "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REVALIDATE",
+                                  "SUBMIT",
+                                  "RETRY",
+                                  "RECOVER_AUTO",
+                                  "MARK_SUCCEEDED",
+                                  "MARK_FAILED",
+                                  "MODIFY",
+                                  "SET_ENABLED",
+                                  "REFRESH_RSS",
+                                  "DELETE_EXTERNAL"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -20348,6 +20394,11 @@
                                 "type": "string"
                               },
                               "style": {
+                                "enum": [
+                                  "PRIMARY",
+                                  "SECONDARY",
+                                  "DANGER"
+                                ],
                                 "title": "Style",
                                 "type": "string"
                               },
@@ -20940,12 +20991,28 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "title": "Created At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Created At"
                                 },
                                 "updated_at": {
-                                  "title": "Updated At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Updated At"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -20964,9 +21031,7 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt",
-                                "created_at",
-                                "updated_at"
+                                "attempt"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -21481,6 +21546,14 @@
                           "type": "string"
                         },
                         "management_status": {
+                          "enum": [
+                            "PREPARED",
+                            "IN_PROGRESS",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "OUTCOME_UNKNOWN",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Management Status",
                           "type": "string"
                         },
@@ -21590,6 +21663,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -21598,6 +21683,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -21720,12 +21810,28 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "title": "Created At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Created At"
                                 },
                                 "updated_at": {
-                                  "title": "Updated At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Updated At"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -21744,9 +21850,7 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt",
-                                "created_at",
-                                "updated_at"
+                                "attempt"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -22109,6 +22213,14 @@
                           "type": "string"
                         },
                         "management_status": {
+                          "enum": [
+                            "PREPARED",
+                            "IN_PROGRESS",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "OUTCOME_UNKNOWN",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Management Status",
                           "type": "string"
                         },
@@ -22218,6 +22330,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -22226,6 +22350,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -22348,12 +22477,28 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "title": "Created At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Created At"
                                 },
                                 "updated_at": {
-                                  "title": "Updated At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Updated At"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -22372,9 +22517,7 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt",
-                                "created_at",
-                                "updated_at"
+                                "attempt"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -22859,6 +23002,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -22867,6 +23022,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -23341,6 +23501,14 @@
                           "type": "string"
                         },
                         "management_status": {
+                          "enum": [
+                            "PREPARED",
+                            "IN_PROGRESS",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "OUTCOME_UNKNOWN",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Management Status",
                           "type": "string"
                         },
@@ -23450,6 +23618,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -23458,6 +23638,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -23580,12 +23765,28 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "title": "Created At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Created At"
                                 },
                                 "updated_at": {
-                                  "title": "Updated At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Updated At"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -23604,9 +23805,7 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt",
-                                "created_at",
-                                "updated_at"
+                                "attempt"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -24116,6 +24315,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -24124,6 +24335,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -24740,6 +24956,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -24748,6 +24976,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -25173,6 +25406,14 @@
                           "type": "string"
                         },
                         "management_status": {
+                          "enum": [
+                            "PREPARED",
+                            "IN_PROGRESS",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "OUTCOME_UNKNOWN",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Management Status",
                           "type": "string"
                         },
@@ -25282,6 +25523,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -25290,6 +25543,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -25412,12 +25670,28 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "title": "Created At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Created At"
                                 },
                                 "updated_at": {
-                                  "title": "Updated At",
-                                  "type": "string"
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "default": null,
+                                  "title": "Updated At"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -25436,9 +25710,7 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt",
-                                "created_at",
-                                "updated_at"
+                                "attempt"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -25954,6 +26226,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -25962,6 +26246,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
