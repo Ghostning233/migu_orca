@@ -9,6 +9,7 @@ Started: Thu Sep 10 00:50:47 CST 2026
 - Public tracking action/status DTOs use finite enums, while request-scoped credentials/capability observations stay out of durable or response contracts.
 - Frontend contract fixtures should derive request/response shapes from `frontend/src/api/generated/api.ts`; use type-only assertions instead of feature-local DTO interfaces.
 - Legacy queue/AB projections must never resolve `VERIFYING_EXTERNAL` or `RECOVERY_REQUIRED`; only the tracking recovery flow may clear an ambiguous external boundary.
+- Versioned persistence readers must fail closed on future schemas and preserve the original artifact; migration is local, idempotent, and must not implicitly upgrade existing JSON.
 
 ## 2026-09-10 01:05:00 CST - US-247
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -44,4 +45,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Legacy queue/AB data is evidence-only once an external boundary is ambiguous; it must not downgrade or resolve tracking state by itself.
   - The unified submit service rejects fresh idempotency keys from `ACTIVE`, `VERIFYING_EXTERNAL`, and `RECOVERY_REQUIRED`; compatibility tests should assert the external seam call count.
   - Full backend validation passed: compileall and 1732 tests.
+---
+## 2026-09-10 01:16:19 CST - US-251
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added a persistence-version and historical-migration rehearsal covering sanitized Request/AB evidence, TrackingRecord v1 with ExternalMapping v1, legacy TrackingOperation v1, manifest v1, future-schema rejection, and damaged-record isolation. The tests prove migration is idempotent/local, preserves existing versioned bytes, and never deletes failed evidence.
+- Files changed: `tests/api_contract/test_stage32_persistence_migration.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Versioned readers already provide the correct fail-closed boundary; rehearsal tests should assert both the stable error and byte preservation.
+  - Existing TrackingRecord and operation files are evidence and must not be rewritten merely because migration is revisited.
+  - Full validation passed: compileall and 1737 tests.
 ---
