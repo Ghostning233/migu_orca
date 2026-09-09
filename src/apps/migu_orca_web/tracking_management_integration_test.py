@@ -73,3 +73,37 @@ def test_real_adapter_writer_and_coordinator_complete_modify_readback(tmp_path: 
     assert patch_calls[0][2]["official_title"] == "Changed"
     assert patch_calls[0][2]["filter"] == "(?!)"
     assert transport.responses == []
+
+
+def test_real_adapter_writer_and_coordinator_complete_rss_modify_readback(tmp_path: Path) -> None:
+    config = load_storage_config(tmp_path / "storage")
+    record, _ = ensure_tracking_record(config, create_external_tracking_record(
+        adapter="legacy_3_1", object_kind="subscription", external_id="sub-1",
+        subscription_id="sub-1", rss_ids=("7",), title="Test", season=1,
+    ))
+    transport = _OfflineTransport([
+        {"access_token": "first"}, {"version": "3.1.18"}, {"data": [_subscription("Test")]},
+        {"data": [{"id": 7, "name": "Feed", "url": "https://rss.invalid/feed", "aggregate": False, "parser": "rss", "enabled": True}]},
+        {"access_token": "write"}, {"version": "3.1.18"}, {"status": True},
+        {"access_token": "readback"}, {"version": "3.1.18"}, {"data": [_subscription("Test")]},
+        {"data": [{"id": 7, "name": "Changed feed", "url": "https://rss.invalid/feed", "aggregate": False, "parser": "rss", "enabled": True}]},
+    ])
+    client = create_legacy_31_management_client(AutoBangumiConfig(
+        base_url="https://ab.invalid", auth_mode="password", username="user", password="secret", fallback_enabled=False,
+    ), transport=transport)
+
+    result = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="adapter-writer-rss", confirm=True, operation="MODIFY",
+        target_scope="ASSOCIATED_RSS", management_client=client,
+        patch={"name": "Changed feed"}, write=_management_writer(client, "MODIFY"),
+    )
+
+    assert result["management_status"] == "SUCCEEDED"
+    patch_calls = [call for call in transport.calls if call[0] == "PATCH"]
+    assert patch_calls[0][1].endswith("/api/v1/rss/update/7")
+    assert patch_calls[0][2] == {
+        "name": "Changed feed", "url": "https://rss.invalid/feed", "aggregate": False,
+        "parser": "rss", "enabled": True,
+    }
+    assert transport.responses == []

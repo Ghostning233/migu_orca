@@ -176,7 +176,8 @@ def run_tracking_management(
     target = resolve_management_target(
         record, target_scope, subscriptions, rss_items,
         include_deleted_subscription=(
-            operation == TRACKING_OPERATION_KIND_SET_ENABLED and target_scope == "SUBSCRIPTION"
+            operation in {TRACKING_OPERATION_KIND_SET_ENABLED, TRACKING_OPERATION_KIND_DELETE_EXTERNAL}
+            and target_scope == "SUBSCRIPTION"
         ),
     )
     # The operation binds the projection expected after the write, not merely
@@ -218,10 +219,16 @@ def run_tracking_management(
     ))
     started = replace(started, revision=record.revision + 1, updated_at=now or utc_now())
     compare_and_swap_tracking_record(resolved_config, record.tracking_id, record.revision, started)
-    in_progress = compare_and_swap_tracking_operation(
-        resolved_config, operation_record.operation_id, TRACKING_OPERATION_STATE_PREPARED,
-        transition_tracking_operation(operation_record, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now=now),
-    )
+    try:
+        in_progress = compare_and_swap_tracking_operation(
+            resolved_config, operation_record.operation_id, TRACKING_OPERATION_STATE_PREPARED,
+            transition_tracking_operation(operation_record, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now=now),
+        )
+    except Exception:
+        # The external boundary was never crossed.  Compensate the durable
+        # PREPARED binding and its record pointer before surfacing the failure.
+        _compensate_prepared_start(resolved_config, started, operation_record, now or utc_now())
+        raise
     if write is not None:
         try:
             response = _run_management_write(
@@ -401,22 +408,30 @@ def _persist_management_recovery(
         elif isinstance(target, ResolvedManagementTarget):
             mapping["rss_ids"] = [item.external_id for item in target.rss]
         next_record = replace(next_record, external_mapping=mapping)
-    final = compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
     terminal = TRACKING_OPERATION_STATE_SUCCEEDED if success else (
         "RECOVERY_REQUIRED" if status == TRACKING_STATUS_RECOVERY_REQUIRED else "FAILED"
     )
-    if operation.state in {"OUTCOME_UNKNOWN", "RECOVERY_REQUIRED"}:
-        recover_tracking_operation(
-            config, operation.operation_id, operation.state,
-            target_state=("SUCCEEDED" if success else
-                          ("RECOVERY_REQUIRED" if status == TRACKING_STATUS_RECOVERY_REQUIRED else "FAILED")),
-            error_type=None if success else reason, now=timestamp,
-        )
-    else:
-        compare_and_swap_tracking_operation(
-            config, operation.operation_id, operation.state,
-            transition_tracking_operation(operation, state=terminal, error_type=None if success else reason, now=timestamp),
-        )
+    try:
+        if operation.state in {"OUTCOME_UNKNOWN", "RECOVERY_REQUIRED"}:
+            recover_tracking_operation(
+                config, operation.operation_id, operation.state,
+                target_state=terminal, error_type=None if success else reason, now=timestamp,
+            )
+        else:
+            compare_and_swap_tracking_operation(
+                config, operation.operation_id, operation.state,
+                transition_tracking_operation(operation, state=terminal, error_type=None if success else reason, now=timestamp),
+            )
+        final = compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
+    except Exception:
+        _persist_management_storage_failure(config, record.tracking_id, operation, timestamp)
+        return {
+            "operation_id": operation.operation_id,
+            "management_status": "RECOVERY_REQUIRED",
+            "outcome": "OUTCOME_UNKNOWN",
+            "needs_manual": True,
+            "created": False,
+        }
     return {
         "operation_id": operation.operation_id,
         "management_status": terminal,
@@ -432,7 +447,15 @@ def _persist_management_recovery(
 def _unknown_write_error(exc: Exception) -> bool:
     if isinstance(exc, (TimeoutError, ConnectionError, OSError)):
         return True
-    return isinstance(exc, Stage1Error) and exc.error_type in {"ab_management_failed", "invalid_ab_response"}
+    if not isinstance(exc, Stage1Error):
+        return False
+    status_code = exc.details.get("status_code")
+    return (
+        exc.error_type in {
+            "ab_management_failed", "invalid_ab_response", "ab_timeout", "ab_connection_failed",
+        }
+        or (isinstance(status_code, int) and not isinstance(status_code, bool) and status_code >= 500)
+    )
 
 
 def _run_management_write(
@@ -497,7 +520,8 @@ def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRe
     return resolve_management_target(
         record, scope, subscriptions, rss_items,
         include_deleted_subscription=(
-            operation == TRACKING_OPERATION_KIND_SET_ENABLED and scope == "SUBSCRIPTION"
+            operation in {TRACKING_OPERATION_KIND_SET_ENABLED, TRACKING_OPERATION_KIND_DELETE_EXTERNAL}
+            and scope == "SUBSCRIPTION"
         ),
     )
 
@@ -598,9 +622,9 @@ def _finish_management(*, config: StorageConfig, record: TrackingRecord, operati
     next_record = replace(next_record, external_mapping=mapping)
     persistence_failed = False
     try:
-        compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
         compare_and_swap_tracking_operation(config, operation_id, TRACKING_OPERATION_STATE_IN_PROGRESS,
             transition_tracking_operation(operation, state=target_state, error_type=None if outcome == MANAGEMENT_OUTCOME_SUCCESS else reason, now=timestamp))
+        compare_and_swap_tracking_record(config, record.tracking_id, record.revision, next_record)
     except Exception:
         persistence_failed = True
         _persist_management_storage_failure(config, record.tracking_id, operation, timestamp)
@@ -644,6 +668,42 @@ def _persist_management_storage_failure(
                     current_operation, state="RECOVERY_REQUIRED",
                     error_type="management_result_persist_failed", now=timestamp,
                 ),
+            )
+        elif current_operation.state in {"SUCCEEDED", "FAILED", "OUTCOME_UNKNOWN", "RECOVERY_REQUIRED"}:
+            recover_tracking_operation(
+                config, operation.operation_id, current_operation.state,
+                target_state="RECOVERY_REQUIRED",
+                error_type="management_result_persist_failed", now=timestamp,
+            )
+
+
+def _compensate_prepared_start(
+    config: StorageConfig, record: TrackingRecord, operation: TrackingOperation, timestamp: str,
+) -> None:
+    """Close a pre-write CAS failure without leaving a stale operation gate."""
+    with contextlib.suppress(Exception):
+        current_operation = load_tracking_operation(config, operation.operation_id)
+        if current_operation.state == TRACKING_OPERATION_STATE_PREPARED:
+            compare_and_swap_tracking_operation(
+                config, operation.operation_id, TRACKING_OPERATION_STATE_PREPARED,
+                transition_tracking_operation(
+                    current_operation, state="FAILED", error_type="management_start_persist_failed", now=timestamp,
+                ),
+            )
+    with contextlib.suppress(Exception):
+        current = load_tracking_record(config, record.tracking_id)
+        if current.current_operation_id == operation.operation_id:
+            reverted = transition_record(
+                current, status=operation.previous_tracking_status or current.status,
+                audit_action=TRACKING_AUDIT_MANAGEMENT_FAILED,
+                operation_id=operation.operation_id,
+                reason_code="management_start_persist_failed",
+                safe_message="管理操作启动未完成，未执行外部写入",
+                now=timestamp,
+            )
+            compare_and_swap_tracking_record(
+                config, current.tracking_id, current.revision,
+                replace(reverted, current_operation_id=None),
             )
 
 

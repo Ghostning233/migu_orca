@@ -21,6 +21,8 @@ from typing import Any
 from apps.migu_orca_web.serializers import _safe_label
 from tracking_engine.models.operation import TrackingOperation
 from tracking_engine.models.tracking import (
+    TRACKING_STATUS_ACTIVE,
+    TRACKING_STATUS_DISABLED,
     TRACKING_STATUS_LABELS,
     TRACKING_STATUS_NEEDS_RECONFIRM,
     TRACKING_STATUS_PENDING_SUBMIT,
@@ -75,8 +77,20 @@ def tracking_available_actions(status: str) -> list[dict[str, Any]]:
         actions.append(
             _action("MARK_FAILED", "标记为失败", _STYLE_DANGER, requires_confirmation=True)
         )
-    # REVALIDATING / SUBMITTING / ACTIVE / DISABLED / EXTERNAL_DELETED /
-    # EXTERNAL_ONLY have no currently-executable state-changing action.
+    elif status == TRACKING_STATUS_ACTIVE:
+        actions.extend([
+            _action("MODIFY", "修改外部订阅", _STYLE_SECONDARY, requires_confirmation=True),
+            _action("SET_ENABLED", "停用外部订阅", _STYLE_SECONDARY, requires_confirmation=True),
+            _action("REFRESH_RSS", "刷新关联 RSS", _STYLE_SECONDARY, requires_confirmation=True),
+            _action("DELETE_EXTERNAL", "删除外部订阅", _STYLE_DANGER, requires_confirmation=True),
+        ])
+    elif status == TRACKING_STATUS_DISABLED:
+        actions.extend([
+            _action("SET_ENABLED", "启用外部订阅", _STYLE_PRIMARY, requires_confirmation=True),
+            _action("DELETE_EXTERNAL", "删除外部订阅", _STYLE_DANGER, requires_confirmation=True),
+        ])
+    # REVALIDATING / SUBMITTING / EXTERNAL_DELETED / EXTERNAL_ONLY have no
+    # currently-executable state-changing action.
     return actions
 
 

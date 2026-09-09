@@ -88,6 +88,32 @@ def test_same_key_replays_without_read_or_write(tmp_path: Path) -> None:
     assert len(calls) == 1
 
 
+def test_prepared_to_in_progress_cas_failure_is_compensated_before_any_write(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    config, record = _seed(tmp_path)
+    original = management_service.compare_and_swap_tracking_operation
+    attempts = 0
+
+    def fail_start(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1 and args[2] == "PREPARED":
+            raise OSError("injected prepared CAS failure")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(management_service, "compare_and_swap_tracking_operation", fail_start)
+    calls: list[object] = []
+    with pytest.raises(OSError):
+        _run(config, record, _FakeClient(), calls)
+    operation = load_tracking_operation(config, management_service.tracking_operation_id_for_idempotency_key("key-1"))
+    assert operation.state == TRACKING_OPERATION_STATE_FAILED
+    stored = load_tracking_record(config, record.tracking_id)
+    assert stored.current_operation_id is None
+    assert stored.status == record.status
+    assert calls == []
+
+
 def test_capability_failure_happens_before_operation_binding(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
     client, calls = _FakeClient(), []
@@ -192,6 +218,17 @@ def test_write_transport_exceptions_are_outcome_unknown(tmp_path: Path, error: E
     assert result["outcome"] == "OUTCOME_UNKNOWN"
 
 
+@pytest.mark.parametrize("error", [
+    Stage1Error("ab_timeout", "timeout", "ab_management"),
+    Stage1Error("ab_connection_failed", "connection", "ab_management"),
+    Stage1Error("ab_management_failed", "server", "ab_management", {"status_code": 503}),
+])
+def test_real_adapter_stage1_transport_errors_are_outcome_unknown(tmp_path: Path, error: Stage1Error) -> None:
+    config, record = _seed(tmp_path)
+    result = _run(config, record, _FakeClient(), [], write=lambda _target, _payload: (_ for _ in ()).throw(error))
+    assert result["outcome"] == "OUTCOME_UNKNOWN"
+
+
 def test_subscription_delete_verifies_absence_without_touching_local_record(tmp_path: Path) -> None:
     config, record = _seed(tmp_path)
     client, calls = _FakeClient(), []
@@ -209,6 +246,26 @@ def test_subscription_delete_verifies_absence_without_touching_local_record(tmp_
     assert stored.external_mapping["subscription_id"] == "sub-1"
     assert stored.external_mapping["rss_ids"] == ["7"]
     assert calls[0][1] is None
+
+
+def test_disabled_subscription_can_still_use_the_file_safe_delete_path(tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client = _FakeClient()
+    client.read_snapshot = lambda: (
+        client.capabilities,
+        [ExternalSubscription("sub-1", "Test", 1, "Group", deleted=True)],
+        [ExternalRss("7", "Feed", "https://rss.invalid")],
+    )
+    calls: list[object] = []
+    result = run_tracking_management(
+        config, tracking_id=record.tracking_id, expected_revision=record.revision,
+        idempotency_key="delete-disabled-subscription", confirm=True,
+        operation="DELETE_EXTERNAL", target_scope="SUBSCRIPTION", management_client=client,
+        write=lambda target, payload: calls.append((target, payload)) or {"status_code": 200},
+        readback=lambda _operation, _scope, _target: None,
+    )
+    assert result["management_status"] == TRACKING_OPERATION_STATE_SUCCEEDED
+    assert len(calls) == 1
 
 
 def test_rss_delete_calls_each_bound_id_and_removes_only_mapping(tmp_path: Path) -> None:
@@ -393,3 +450,62 @@ def test_second_repository_write_failure_never_returns_success(monkeypatch: pyte
     assert result["needs_manual"] is True
     assert load_tracking_operation(config, result["operation_id"]).state == TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
     assert load_tracking_record(config, record.tracking_id).status == "RECOVERY_REQUIRED"
+
+
+def test_result_operation_is_persisted_before_record_and_record_fault_compensates_both(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    config, record = _seed(tmp_path)
+    events: list[str] = []
+    original_operation = management_service.compare_and_swap_tracking_operation
+    original_record = management_service.compare_and_swap_tracking_record
+    record_calls = 0
+
+    def observe_operation(*args, **kwargs):
+        events.append("operation")
+        return original_operation(*args, **kwargs)
+
+    def fail_result_record(*args, **kwargs):
+        nonlocal record_calls
+        record_calls += 1
+        events.append("record")
+        if record_calls == 2:
+            raise OSError("injected result record persistence failure")
+        return original_record(*args, **kwargs)
+
+    monkeypatch.setattr(management_service, "compare_and_swap_tracking_operation", observe_operation)
+    monkeypatch.setattr(management_service, "compare_and_swap_tracking_record", fail_result_record)
+    result = _run(config, record, _FakeClient(), [], write=lambda _target, _payload: {"status_code": 200},
+                  readback=lambda _operation, _scope, _target: ResolvedManagementTarget(
+                      scope="SUBSCRIPTION", subscription=ExternalSubscription("sub-1", "Changed", 1, "Group"),
+                  ))
+    assert events[2:4] == ["operation", "record"]
+    assert result["management_status"] == "RECOVERY_REQUIRED"
+    assert load_tracking_operation(config, result["operation_id"]).state == "RECOVERY_REQUIRED"
+    assert load_tracking_record(config, record.tracking_id).status == "RECOVERY_REQUIRED"
+
+
+def test_recovery_operation_first_record_fault_compensates_both(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config, record = _seed(tmp_path)
+    client = _FakeClient()
+    first = _run(config, record, client, [], write=lambda _target, _payload: {"transport_error": "timeout"})
+    client.read_snapshot = lambda: (
+        client.capabilities, [ExternalSubscription("sub-1", "Changed", 1, "Group")],
+        [ExternalRss("7", "Feed", "https://rss.invalid")],
+    )
+    original_record = management_service.compare_and_swap_tracking_record
+
+    def fail_once(*args, **kwargs):
+        raise OSError("injected recovery record persistence failure")
+
+    monkeypatch.setattr(management_service, "compare_and_swap_tracking_record", fail_once)
+    result = recover_tracking_management(
+        config, record=load_tracking_record(config, record.tracking_id),
+        operation=load_tracking_operation(config, first["operation_id"]), management_client=client,
+    )
+    assert result["management_status"] == "RECOVERY_REQUIRED"
+    assert load_tracking_operation(config, first["operation_id"]).state == "RECOVERY_REQUIRED"
+    # The injected repository remains unwritable, so no stale snapshot may be
+    # written over the current verifying record.
+    monkeypatch.setattr(management_service, "compare_and_swap_tracking_record", original_record)
+    assert load_tracking_record(config, record.tracking_id).status == "VERIFYING_EXTERNAL"

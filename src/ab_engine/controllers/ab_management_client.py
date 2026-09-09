@@ -115,10 +115,15 @@ class Legacy31ManagementClient:
         self, external_id: str, payload: Mapping[str, Any], current_url: str
     ) -> dict[str, Any]:
         """Update one RSS, retaining its URL from the current read snapshot."""
-        if not isinstance(payload, Mapping) or "url" in payload:
+        if not isinstance(payload, Mapping):
+            raise Stage1Error("invalid_ab_payload", "RSS 修改内容无效", "ab_management")
+        snapshot_url = _request_url(current_url)
+        # The coordinator may carry a complete RSSUpdate body.  Its URL is
+        # valid only when it is exactly the request-scoped snapshot URL.
+        if "url" in payload and payload["url"] != snapshot_url:
             raise Stage1Error("invalid_ab_payload", "RSS 修改内容无效", "ab_management")
         body = dict(payload)
-        body["url"] = _request_url(current_url)
+        body["url"] = snapshot_url
         return self._rss_action(
             "PATCH", f"/api/v1/rss/update/{_rss_path_id(external_id)}", body
         )

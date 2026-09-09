@@ -247,12 +247,18 @@ def recover_tracking_operation(
 ) -> TrackingOperation:
     """Resolve an uncertain operation after explicit read-only verification.
 
-    This is deliberately separate from ordinary CAS transitions: only
-    ``OUTCOME_UNKNOWN``/``RECOVERY_REQUIRED`` may be resolved, and the caller
-    must provide a terminal success/failure state.  No new operation binding
-    is created.
+    This is deliberately separate from ordinary CAS transitions.  Unknown and
+    recovery-required outcomes may be resolved to a verified terminal result;
+    a completed success/failure may only be compensated to
+    ``RECOVERY_REQUIRED`` when the paired TrackingRecord write failed.  No new
+    operation binding is created.
     """
-    if expected_state not in {TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN, TRACKING_OPERATION_STATE_RECOVERY_REQUIRED}:
+    if expected_state not in {
+        TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
+        TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
+        TRACKING_OPERATION_STATE_SUCCEEDED,
+        TRACKING_OPERATION_STATE_FAILED,
+    }:
         raise Stage1Error("tracking_operation_state_conflict", "该操作不处于待恢复状态", "recover_tracking_operation")
     if target_state not in {
         TRACKING_OPERATION_STATE_SUCCEEDED,
@@ -260,6 +266,8 @@ def recover_tracking_operation(
         TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
     }:
         raise ValueError("recovery target must be a terminal recovery state")
+    if expected_state in {TRACKING_OPERATION_STATE_SUCCEEDED, TRACKING_OPERATION_STATE_FAILED} and target_state != TRACKING_OPERATION_STATE_RECOVERY_REQUIRED:
+        raise ValueError("completed operation can only be compensated to recovery required")
     clean_id = _validated_operation_id(operation_id, "recover_tracking_operation")
     ensure_storage_layout(config)
     with _key_lock(clean_id):
