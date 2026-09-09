@@ -469,6 +469,67 @@ class TestAppRequestDetailSensitive:
         # role=alert for the detail error.
         assert error.get_attribute("role") == "alert"
 
+    def test_stage32_canary_stays_out_of_browser_observables(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """US-253: upstream failure evidence is not visible or persisted in SPA."""
+        _require_dist()
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-stage32-canary")
+        set_storage_preferences(page, storage_dir)
+        canaries = (
+            "stage32-browser-token",
+            "stage32-browser-cookie",
+            "stage32-browser-endpoint",
+            "stage32-browser-rss",
+            "stage32-browser-magnet",
+            "stage32-browser-body",
+            "stage32-browser-id",
+            str(storage_dir),
+        )
+
+        def _poisoned_detail(route: Any, request: Any) -> None:
+            assert "stage32-browser" not in request.url
+            route.fulfill(
+                status=502,
+                content_type="application/json",
+                body=(
+                    '{"ok": false, "error_type": "mikan_http_failed", '
+                    '"error_message": "upstream https://stage32-browser-endpoint.invalid/api", '
+                    '"error_data": {"token": "stage32-browser-token", '
+                    '"raw_response_body": "stage32-browser-body", '
+                    '"external_id": "stage32-browser-id", '
+                    '"magnet": "stage32-browser-magnet", '
+                    '"rss_url": "stage32-browser-rss", '
+                    '"cookie": "stage32-browser-cookie"}}'
+                ),
+            )
+
+        page.route("**/api/v1/requests/req-stage32-canary**", _poisoned_detail)
+        page.goto(
+            f"{live_server_url}/app/requests?request_id=req-stage32-canary"
+        )
+        page.wait_for_selector("#request-detail-container .error-state", timeout=5000)
+        browser_state = page.evaluate(
+            """() => ({
+                url: window.location.href,
+                history: JSON.stringify(window.history.state),
+                localStorage: JSON.stringify(window.localStorage),
+                sessionStorage: JSON.stringify(window.sessionStorage),
+                bodyText: document.body.innerText,
+            })"""
+        )
+        persisted = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in storage_dir.rglob("*.json")
+        )
+        for value in canaries:
+            assert value not in browser_state["url"]
+            assert value not in browser_state["history"]
+            assert value not in browser_state["localStorage"]
+            assert value not in browser_state["sessionStorage"]
+            assert value not in browser_state["bodyText"]
+            assert value not in persisted
+
 
 class TestAppRequestDetailResponsiveA11y:
     """AC: 360px 无横向溢出；中文状态码不暴露内部代码."""

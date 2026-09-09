@@ -11,6 +11,7 @@ Started: Thu Sep 10 00:50:47 CST 2026
 - Legacy queue/AB projections must never resolve `VERIFYING_EXTERNAL` or `RECOVERY_REQUIRED`; only the tracking recovery flow may clear an ambiguous external boundary.
 - Versioned persistence readers must fail closed on future schemas and preserve the original artifact; migration is local, idempotent, and must not implicitly upgrade existing JSON.
 - Management writes must pass one shared matrix: VERIFIED probe, exact 3.1.18 legacy adapter, and the action/scope/direction-specific capability; recovery keeps the same exact baseline.
+- API error envelopes recursively redact upstream evidence by field and value; production error logging must not emit exception tracebacks.
 
 ## 2026-09-10 01:05:00 CST - US-247
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -28,6 +29,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - OpenAPI-generated TypeScript must be regenerated whenever response `Literal` enums or nullable fields change; the full backend suite checks this drift when frontend dependencies are installed.
   - Strict integer fields are needed for revision guards because ordinary Pydantic integer fields can coerce booleans.
   - Public action availability is a server projection; capability and external configuration remain request-scoped and must be revalidated by the write service.
+---
+## 2026-09-10 01:30:25 CST - US-253
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Hardened the shared API error boundary against nested raw response bodies, traceback/patch data, external IDs, magnets, endpoints, Unix/Windows paths, and sensitive values in error strings. Removed production exception traceback logging from API and legacy entry safety boundaries. Added a backend canary matrix and a real Chromium SPA test covering API failure responses, DOM, URL/history, browser storage, and persisted Request JSON.
+- Files changed: `src/extensions/flask_api/api.py`, `src/extensions/flask_api/api_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `tests/browser/test_app_request_detail.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Endpoint fields retain the established `[redacted-url]` shape for URL values, while non-URL endpoint values are blocked entirely.
+  - Sensitive browser regressions should assert URL, history, local/session storage, visible body text, and storage JSON together; the Playwright suite runs against real Chromium.
+  - Quality gates passed: compileall, 1756 backend tests, frontend typecheck/lint/263 unit tests/build, and 134 browser tests.
 ---
 ## 2026-09-10 01:08:00 CST - US-249
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID

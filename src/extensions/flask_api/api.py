@@ -13,6 +13,7 @@ from extensions.flask_api.exceptions import APIException
 from shared.errors import Stage1Error
 
 _ABSOLUTE_PATH_RE = re.compile(r"(?<!\w)(?:/[^\s<>'\"]+)+")
+_WINDOWS_PATH_RE = re.compile(r"(?i)(?<![\w])(?:[a-z]:\\|\\\\)[^\s<>'\"]+")
 _URL_RE = re.compile(r"https?://[^\s<>'\"]+")
 _TOKEN_RE = re.compile(
     r"(?i)(token|secret|cookie|authorization|password|passwd|bearer|username|sid|session)"
@@ -28,6 +29,11 @@ _SENSITIVE_KEY_VALUE_RE = re.compile(
 _SENSITIVE_WORD_VALUE_RE = re.compile(
     r"(?i)\b(?:token|secret|cookie|authorization|password|passwd|bearer|"
     r"username|sid|session)\s+[^\s,;'\"<>]+"
+)
+_SENSITIVE_FIELD_RE = re.compile(
+    r"(?i)(?:raw(?:_|-)?(?:response|body)|traceback|stack(?:_|-)?trace|"
+    r"endpoint|external(?:_|-)?id|"
+    r"authorization|cookie|magnet|patch)"
 )
 
 # HTTP status classification for Stage1Error error types (US-192).
@@ -295,7 +301,11 @@ def handle_exception(view_name: str, exception: Exception) -> Response:
     if current_app.config.get("TESTING") or current_app.config.get("DEBUG"):
         raise exception
 
-    current_app.logger.exception("Unhandled API error in %s", view_name)
+    # Do not emit ``logger.exception`` here: the traceback can contain an
+    # upstream URL, response body, credential, or local path.  The public
+    # envelope is already sanitized below; production diagnostics must stay
+    # equally bounded.
+    current_app.logger.error("Unhandled API error in %s", view_name)
     return failed_response("internal_server_error", "A server error occurred.", status=500)
 
 
@@ -319,8 +329,14 @@ def sanitize_error_data(value: Any) -> Any:
         sanitized: dict[str, Any] = {}
         for key, item in value.items():
             key_text = str(key)
-            if _TOKEN_RE.search(key_text):
-                sanitized[key_text] = "[redacted]"
+            if _TOKEN_RE.search(key_text) or _SENSITIVE_FIELD_RE.search(key_text):
+                # Preserve the established safe shape for endpoint fields
+                # (``[redacted-url]``) while still blocking non-URL endpoint
+                # values and all other sensitive field values.
+                if key_text.lower() == "endpoint" and isinstance(item, str):
+                    sanitized[key_text] = _sanitize_string(item)
+                else:
+                    sanitized[key_text] = "[redacted]"
             else:
                 sanitized[key_text] = sanitize_error_data(item)
         return sanitized
@@ -336,11 +352,14 @@ def sanitize_error_data(value: Any) -> Any:
 def _sanitize_string(value: str) -> str:
     sanitized = _URL_RE.sub("[redacted-url]", value)
     sanitized = _ABSOLUTE_PATH_RE.sub("[redacted-path]", sanitized)
+    sanitized = _WINDOWS_PATH_RE.sub("[redacted-path]", sanitized)
     # Keyword + space-separated value FIRST (so "Bearer abc123" is swallowed as
     # one unit), then "key=value"/"key: value" pairs — the reverse order would
     # let the pair regex consume the keyword and leave the raw value behind.
     sanitized = _SENSITIVE_WORD_VALUE_RE.sub("[redacted]", sanitized)
     sanitized = _SENSITIVE_KEY_VALUE_RE.sub("[redacted]", sanitized)
+    if "magnet:?" in sanitized.lower():
+        return "[redacted-magnet]"
     if "<rss" in sanitized.lower() or "<html" in sanitized.lower():
         return "[redacted-content]"
     if _TOKEN_RE.search(sanitized):
