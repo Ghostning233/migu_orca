@@ -7,6 +7,7 @@ Started: Thu Sep 10 00:50:47 CST 2026
 - `docs/api/openapi.json` is deterministic output from `apps.migu_orca_web.openapi_gen`; regenerate it after changing contract metadata.
 - `TrackingRecord` is the external submission authority; legacy queue and AB result data are compatibility projections or migration evidence.
 - Public tracking action/status DTOs use finite enums, while request-scoped credentials/capability observations stay out of durable or response contracts.
+- Frontend contract fixtures should derive request/response shapes from `frontend/src/api/generated/api.ts`; use type-only assertions instead of feature-local DTO interfaces.
 
 ## 2026-09-10 01:05:00 CST - US-247
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -16,7 +17,6 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Flask route placeholders and OpenAPI placeholders use different syntax; contract tests must normalize both forms.
   - OpenAPI is generated deterministically and must be regenerated when operation metadata changes.
   - Legacy queue/AB result paths remain compatibility projections; TrackingRecord is the external submission authority.
----
 ## 2026-09-10 01:04:00 CST - US-248
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - What was implemented: Froze the tracking management action contract with machine-readable endpoint suffixes, allowed scopes, confirmation, capability-probe, read-before-write, and stable validation/conflict/unknown-result semantics. Tightened public action/style/status DTO enums and strict revision/idempotency request types, then regenerated OpenAPI and the TypeScript client.
@@ -25,4 +25,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - OpenAPI-generated TypeScript must be regenerated whenever response `Literal` enums or nullable fields change; the full backend suite checks this drift when frontend dependencies are installed.
   - Strict integer fields are needed for revision guards because ordinary Pydantic integer fields can coerce booleans.
   - Public action availability is a server projection; capability and external configuration remain request-scoped and must be revalidated by the write service.
+---
+## 2026-09-10 01:08:00 CST - US-249
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added a compile-level generated TypeScript contract consumer fixture covering review/save, batch, tracking, capability, nullable, enum, and error-envelope surfaces. Documented the fixture and generated-client-only DTO rule in the API README; marked US-249 passing.
+- Files changed: `frontend/src/api/generated/contract-consumer.test.ts`, `docs/api/README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The generated OpenAPI client exposes inline response shapes, so fixtures can validate deep fields by deriving types from `operations` without duplicating DTO interfaces.
+  - Defaulted list fields may still be optional in generated TypeScript and should be narrowed with `NonNullable` when consuming an individual element.
+  - Full backend tests and frontend checks passed; no browser/UI behavior changed.
 ---
