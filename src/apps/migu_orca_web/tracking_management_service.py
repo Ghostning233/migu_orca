@@ -149,7 +149,7 @@ def run_tracking_management(
         if not same_binding or existing.expected_revision != expected_revision:
             raise Stage1Error("tracking_idempotency_conflict", "同一幂等键已绑定不同的管理操作", "tracking_management")
         if existing.state in TRACKING_OPERATION_TERMINAL_STATES:
-            if not _record_has_management_outcome(record, existing.operation_id):
+            if not _record_matches_management_terminal(record, existing):
                 # Do not claim success for an operation whose paired tracking
                 # result was lost in the operation-first crash window.
                 _persist_management_storage_failure(resolved_config, record.tracking_id, existing, utc_now())
@@ -742,7 +742,7 @@ def _guard_current_operation(config: StorageConfig, record: TrackingRecord) -> N
         "RECOVERY_REQUIRED",
     }:
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
-    if operation.state in TRACKING_OPERATION_TERMINAL_STATES and not _record_has_management_outcome(record, operation.operation_id):
+    if operation.state in TRACKING_OPERATION_TERMINAL_STATES and not _record_matches_management_terminal(record, operation):
         # A crash may land the operation result before its paired TrackingRecord
         # CAS.  Turn that orphaned terminal state into the normal recovery gate
         # before rejecting any fresh idempotency key.
@@ -750,17 +750,29 @@ def _guard_current_operation(config: StorageConfig, record: TrackingRecord) -> N
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作尚未完成本地落盘，请先恢复", "tracking_management")
 
 
-def _record_has_management_outcome(record: TrackingRecord, operation_id: str) -> bool:
-    return any(
-        isinstance(event, Mapping)
-        and event.get("operation_id") == operation_id
+def _record_matches_management_terminal(record: TrackingRecord, operation: TrackingOperation) -> bool:
+    """Prove the record persisted the precise terminal operation outcome."""
+    if operation.state not in {TRACKING_OPERATION_STATE_SUCCEEDED, "FAILED"}:
+        # Unknown and recovery-required operations are never safe replay
+        # successes; they always retain the recovery gate.
+        return False
+    expected_audit = (
+        TRACKING_AUDIT_MANAGEMENT_SUCCEEDED
+        if operation.state == TRACKING_OPERATION_STATE_SUCCEEDED
+        else TRACKING_AUDIT_MANAGEMENT_FAILED
+    )
+    relevant = [
+        event for event in record.audit_events
+        if isinstance(event, Mapping) and event.get("operation_id") == operation.operation_id
         and event.get("action") in {
             TRACKING_AUDIT_MANAGEMENT_SUCCEEDED,
             TRACKING_AUDIT_MANAGEMENT_FAILED,
             TRACKING_AUDIT_MANAGEMENT_UNKNOWN,
         }
-        for event in record.audit_events
-    )
+    ]
+    if not relevant or relevant[-1].get("action") != expected_audit:
+        return False
+    return record.status not in {TRACKING_STATUS_VERIFYING_EXTERNAL, TRACKING_STATUS_RECOVERY_REQUIRED}
 
 
 def _load_operation_if_present(config: StorageConfig, idempotency_key: str) -> TrackingOperation | None:

@@ -562,3 +562,38 @@ def test_recovery_operation_first_record_fault_compensates_both(monkeypatch: pyt
     # written over the current verifying record.
     monkeypatch.setattr(management_service, "compare_and_swap_tracking_record", original_record)
     assert load_tracking_record(config, record.tracking_id).status == "VERIFYING_EXTERNAL"
+
+
+def test_record_compensation_with_failed_operation_compensation_never_replays_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    config, record = _seed(tmp_path)
+    original_record = management_service.compare_and_swap_tracking_record
+    record_calls = 0
+
+    def fail_result_record(*args, **kwargs):
+        nonlocal record_calls
+        record_calls += 1
+        if record_calls == 2:
+            raise OSError("injected result record fault")
+        return original_record(*args, **kwargs)
+
+    def fail_operation_compensation(*args, **kwargs):
+        raise OSError("injected operation compensation fault")
+
+    monkeypatch.setattr(management_service, "compare_and_swap_tracking_record", fail_result_record)
+    monkeypatch.setattr(management_service, "recover_tracking_operation", fail_operation_compensation)
+    result = _run(config, record, _FakeClient(), [], write=lambda _target, _payload: {"status_code": 200},
+                  readback=lambda _operation, _scope, _target: ResolvedManagementTarget(
+                      scope="SUBSCRIPTION", subscription=ExternalSubscription("sub-1", "Changed", 1, "Group"),
+                  ))
+    assert result["management_status"] == "RECOVERY_REQUIRED"
+    assert load_tracking_record(config, record.tracking_id).status == "RECOVERY_REQUIRED"
+    assert load_tracking_operation(config, result["operation_id"]).state == TRACKING_OPERATION_STATE_SUCCEEDED
+
+    with pytest.raises(Stage1Error) as replay:
+        _run(
+            config, record, _FakeClient(), [], idempotency_key="key-1",
+            write=lambda *_args: pytest.fail("inconsistent terminal must not write"),
+        )
+    assert replay.value.error_type == "tracking_management_state_conflict"
