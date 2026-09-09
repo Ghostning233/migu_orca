@@ -156,7 +156,7 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Do not implement a tracking-management page or hand-written frontend DTO."
     },
     {

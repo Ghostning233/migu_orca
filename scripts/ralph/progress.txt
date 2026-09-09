@@ -42,6 +42,8 @@
   operation only after a matching readback; transport or evidence uncertainty remains recoverable.
 - Keep ordinary operation transitions terminal-only; explicit management recovery uses a separate CAS seam to
   resolve OUTCOME_UNKNOWN/RECOVERY_REQUIRED without creating a new idempotency binding.
+- Web management write routes share strict request-scoped credential/idempotency/revision fields and a single
+  safe result DTO; keep path tracking IDs out of request-body OpenAPI requirements while Flask injects them.
 
 ## Stage 30 Handoff
 
@@ -199,6 +201,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
     ordinary transition validation should continue to reject outgoing terminal transitions.
   - Gotchas encountered: Definite non-application and unresolved evidence both update the record, but only the
     latter remains `needs_manual`; refresh has no stable projection and must remain `RECOVERY_REQUIRED`.
-  - Useful context: Targeted management/recovery/operation/repository tests: 106 passed; compileall, Ruff, and
-    `git diff --check` passed. Browser and frontend gates are deferred to final US-246 as required by the PRD.
+- Useful context: Targeted management/recovery/operation/repository tests: 106 passed; compileall, Ruff, and
+  `git diff --check` passed. Browser and frontend gates are deferred to final US-246 as required by the PRD.
+---
+
+## 2026-09-09 15:50:00 +0800 - US-245
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added strict POST management contracts for modify, set-enabled, delete-external, and RSS refresh; wired thin request-scoped adapter/coordinator routes with fixed action dispatch; added safe management result DTOs containing only action/status/manual flag/message, tracking summary, and operation summary; synchronized endpoint inventory, OpenAPI, and generated TypeScript client contracts.
+- Files changed: `src/apps/migu_orca_web/schemas.py`, `src/apps/migu_orca_web/routes_tracking.py`, `src/apps/migu_orca_web/api_contract.py`, `src/apps/migu_orca_web/openapi_gen.py`, `src/extensions/flask_api/api.py`, `docs/api/endpoint_inventory.md`, `docs/api/openapi.json`, `frontend/src/api/generated/api.ts`, `frontend/src/api/generated/api.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Patterns discovered: Management API boundaries can reuse the existing coordinator and adapter seams; route payloads should be strict and request-scoped while result projection is independently whitelisted.
+  - Gotchas encountered: New error types must be added to the Flask HTTP classifier before declaring their OpenAPI status, and generated-client contract tests enumerate every operation/path explicitly.
+  - Useful context: Focused backend contract/management tests (32), OpenAPI/inventory checks (22), frontend typecheck/lint/unit tests (261), compileall, Ruff, and `git diff --check` passed.
 ---

@@ -686,3 +686,89 @@ class TrackingRecoverPayload(BaseModel):
         if action not in _RECOVERY_ACTIONS:
             raise ValueError("action 必须为 AUTO、MARK_SUCCEEDED 或 MARK_FAILED")
         return action
+
+
+# ---------------------------------------------------------------------------
+# Tracking management writes (US-245)
+# ---------------------------------------------------------------------------
+
+_MANAGEMENT_SCOPES = frozenset({"SUBSCRIPTION", "ASSOCIATED_RSS"})
+_SUBSCRIPTION_MANAGEMENT_FIELDS = frozenset(
+    {"title", "season", "subtitle_group", "filter_rule", "offset", "expected_folder_name"}
+)
+_RSS_MANAGEMENT_FIELDS = frozenset({"name", "aggregate", "parser"})
+
+
+class _TrackingManagementBasePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tracking_id: str
+    target_scope: str
+    expected_revision: int = Field(ge=1)
+    idempotency_key: str
+    confirm: Literal[True]
+    ab_config: AutoBangumiCapabilitiesConfigPayload
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_management_tracking_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("tracking_id cannot be empty")
+        return value
+
+    @field_validator("target_scope")
+    @classmethod
+    def _validate_management_scope(cls, value: str) -> str:
+        value = value.strip().upper()
+        if value not in _MANAGEMENT_SCOPES:
+            raise ValueError("target_scope 必须为 SUBSCRIPTION 或 ASSOCIATED_RSS")
+        return value
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def _clean_management_idempotency_key(cls, value: str) -> str:
+        value = value.strip()
+        if not _IDEMPOTENCY_KEY_RE.fullmatch(value):
+            raise ValueError("idempotency_key 包含不合法字符")
+        return value
+
+
+class TrackingModifyPayload(_TrackingManagementBasePayload):
+    patch: dict[str, Any]
+
+    @field_validator("patch")
+    @classmethod
+    def _validate_management_patch(cls, value: dict[str, Any]) -> dict[str, Any]:
+        if not value:
+            raise ValueError("patch 不能为空")
+        unknown = set(value) - (_SUBSCRIPTION_MANAGEMENT_FIELDS | _RSS_MANAGEMENT_FIELDS)
+        if unknown:
+            raise ValueError("patch 包含不支持的字段")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_scope_fields(self) -> TrackingModifyPayload:
+        allowed = (_SUBSCRIPTION_MANAGEMENT_FIELDS if self.target_scope == "SUBSCRIPTION"
+                   else _RSS_MANAGEMENT_FIELDS)
+        if set(self.patch) - allowed:
+            raise ValueError("patch 字段与 target_scope 不匹配")
+        return self
+
+
+class TrackingSetEnabledPayload(_TrackingManagementBasePayload):
+    enabled: bool
+
+
+class TrackingDeleteExternalPayload(_TrackingManagementBasePayload):
+    pass
+
+
+class TrackingRefreshRssPayload(_TrackingManagementBasePayload):
+    @field_validator("target_scope")
+    @classmethod
+    def _rss_scope_only(cls, value: str) -> str:
+        if value != "ASSOCIATED_RSS":
+            raise ValueError("刷新操作只能作用于 ASSOCIATED_RSS")
+        return value

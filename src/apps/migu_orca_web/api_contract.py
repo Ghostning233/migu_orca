@@ -964,6 +964,18 @@ class TrackingRecoverResultDTO(_StrictBase):
     tracking: TrackingItemDTO
 
 
+class TrackingManagementResultDTO(_StrictBase):
+    """Safe result shared by the four Stage 31 management write routes."""
+
+    action: Literal["MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"]
+    management_status: str
+    needs_manual: bool
+    safe_message: str
+    operation_id: str | None = None
+    tracking: TrackingItemDTO
+    operation: TrackingOperationSummaryDTO | None = None
+
+
 # ---------------------------------------------------------------------------
 # Connection tests family
 # ---------------------------------------------------------------------------

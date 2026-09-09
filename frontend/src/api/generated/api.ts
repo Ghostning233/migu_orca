@@ -534,6 +534,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tracking/items/{tracking_id}/delete-external": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 删除外部追番方案（保留本地数据） */
+        post: operations["deleteExternalTrackingItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracking/items/{tracking_id}/modify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 修改外部追番方案 */
+        post: operations["modifyTrackingItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracking/items/{tracking_id}/recover": {
         parameters: {
             query?: never;
@@ -548,6 +582,23 @@ export interface paths {
          * @description US-234：解决外部结果未知（VERIFYING_EXTERNAL）、本地结果落盘失败（RECOVERY_REQUIRED）或状态未知（UNKNOWN）的追番记录。action 允许 AUTO/MARK_SUCCEEDED/MARK_FAILED/VERIFY_EXTERNAL：AUTO 纯本地；VERIFY_EXTERNAL 仅在本次请求内接收 ab_config 并调用 3.1.18 只读管理读取，能力未知、无匹配或多匹配保持 RECOVERY_REQUIRED；人工动作必须 confirm=true。绝不接收外部 ID/URL/原始结果或调用管理写操作。
          */
         post: operations["recoverTrackingItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracking/items/{tracking_id}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 刷新关联 RSS */
+        post: operations["refreshTrackingRss"];
         delete?: never;
         options?: never;
         head?: never;
@@ -588,6 +639,23 @@ export interface paths {
          * @description US-224：对单条统一追番记录执行 revision-aware 纯本地复核。请求只接受 expected_revision 与可选 storage profile，绝不接收 ab_config/连接/capability 配置。服务端重新读取最新本地 Request 并复核（存在且 ACCEPTED、fingerprint、标题/季度、MiKan 合集、字幕组、有效资源、外部映射、未完成 operation 与当前 tracking 状态），业务复核失败仍返回 HTTP 200：ready=false、next_status=NEEDS_RECONFIRM 与固定 §11.5 issue code 列表；通过时 ready=true。expected_revision 过期 → 409 tracking_revision_conflict；非可复核状态 → 409 tracking_state_conflict。
          */
         post: operations["revalidateTrackingItem"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tracking/items/{tracking_id}/set-enabled": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 启用或停用外部追番方案 */
+        post: operations["setTrackingItemEnabled"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11753,6 +11821,676 @@ export interface operations {
             };
         };
     };
+    deleteExternalTrackingItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tracking_id: string;
+            };
+            cookie?: never;
+        };
+        /** @description 删除外部追番方案（保留本地数据） */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "target_scope": "示例",
+                 *       "expected_revision": 1,
+                 *       "confirm": true
+                 *     }
+                 */
+                "application/json": {
+                    /** @enum {string} */
+                    target_scope: "SUBSCRIPTION" | "ASSOCIATED_RSS";
+                    expected_revision: number;
+                    idempotency_key: string;
+                    /** @constant */
+                    confirm: true;
+                    ab_config: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url?: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
+                    storage_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "action": "示例",
+                     *         "management_status": "示例",
+                     *         "needs_manual": true,
+                     *         "safe_message": "示例",
+                     *         "operation_id": null,
+                     *         "tracking": {
+                     *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
+                     *           "status": "示例",
+                     *           "status_label": "示例",
+                     *           "status_group": "示例",
+                     *           "available_actions": [
+                     *             {
+                     *               "code": "示例",
+                     *               "label": "示例",
+                     *               "style": "示例",
+                     *               "requires_confirmation": true
+                     *             }
+                     *           ],
+                     *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
+                     *           "updated_episode_status": "NOT_IMPLEMENTED",
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
+                     *         },
+                     *         "operation": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingManagementResultDTO
+                         * @description Safe result shared by the four Stage 31 management write routes.
+                         */
+                        result: {
+                            /**
+                             * Action
+                             * @enum {string}
+                             */
+                            action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                            /** Management Status */
+                            management_status: string;
+                            /** Needs Manual */
+                            needs_manual: boolean;
+                            /** Safe Message */
+                            safe_message: string;
+                            /**
+                             * Operation Id
+                             * @default null
+                             */
+                            operation_id: string | null;
+                            /**
+                             * TrackingItemDTO
+                             * @description One unified tracking list item (Stage 29 PRD §11.2).
+                             *
+                             *     ``updated_episode`` is always null and ``updated_episode_status`` is always
+                             *     NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+                             *     ``poster_path`` may only be a same-origin opaque poster proxy route.
+                             */
+                            tracking: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Subtitle Group
+                                 * @default null
+                                 */
+                                subtitle_group: string | null;
+                                /**
+                                 * Poster Path
+                                 * @default null
+                                 */
+                                poster_path: string | null;
+                                /** Status */
+                                status: string;
+                                /** Status Label */
+                                status_label: string;
+                                /** Status Group */
+                                status_group: string;
+                                /** Available Actions */
+                                available_actions?: {
+                                    /** Code */
+                                    code: string;
+                                    /** Label */
+                                    label: string;
+                                    /** Style */
+                                    style: string;
+                                    /** Requires Confirmation */
+                                    requires_confirmation: boolean;
+                                }[];
+                                /**
+                                 * Valid Resource Count
+                                 * @default 0
+                                 */
+                                valid_resource_count: number;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** Revision */
+                                revision: number;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                            };
+                            /** @default null */
+                            operation: {
+                                /** Operation Id */
+                                operation_id: string;
+                                /** Operation */
+                                operation: string;
+                                /** State */
+                                state: string;
+                                /** Attempt */
+                                attempt: number;
+                                /**
+                                 * External Result Id
+                                 * @default null
+                                 */
+                                external_result_id: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
+                                /**
+                                 * Completed At
+                                 * @default null
+                                 */
+                                completed_at: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该追番记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_revision_conflict",
+                     *       "error_message": "追番记录版本已变化，请刷新后重试",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    modifyTrackingItem: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tracking_id: string;
+            };
+            cookie?: never;
+        };
+        /** @description 修改外部追番方案 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "target_scope": "示例",
+                 *       "expected_revision": 1,
+                 *       "confirm": true,
+                 *       "patch": {}
+                 *     }
+                 */
+                "application/json": {
+                    /** @enum {string} */
+                    target_scope: "SUBSCRIPTION" | "ASSOCIATED_RSS";
+                    expected_revision: number;
+                    idempotency_key: string;
+                    /** @constant */
+                    confirm: true;
+                    ab_config: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url?: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
+                    storage_dir?: string;
+                    patch: Record<string, never>;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "action": "示例",
+                     *         "management_status": "示例",
+                     *         "needs_manual": true,
+                     *         "safe_message": "示例",
+                     *         "operation_id": null,
+                     *         "tracking": {
+                     *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
+                     *           "status": "示例",
+                     *           "status_label": "示例",
+                     *           "status_group": "示例",
+                     *           "available_actions": [
+                     *             {
+                     *               "code": "示例",
+                     *               "label": "示例",
+                     *               "style": "示例",
+                     *               "requires_confirmation": true
+                     *             }
+                     *           ],
+                     *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
+                     *           "updated_episode_status": "NOT_IMPLEMENTED",
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
+                     *         },
+                     *         "operation": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingManagementResultDTO
+                         * @description Safe result shared by the four Stage 31 management write routes.
+                         */
+                        result: {
+                            /**
+                             * Action
+                             * @enum {string}
+                             */
+                            action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                            /** Management Status */
+                            management_status: string;
+                            /** Needs Manual */
+                            needs_manual: boolean;
+                            /** Safe Message */
+                            safe_message: string;
+                            /**
+                             * Operation Id
+                             * @default null
+                             */
+                            operation_id: string | null;
+                            /**
+                             * TrackingItemDTO
+                             * @description One unified tracking list item (Stage 29 PRD §11.2).
+                             *
+                             *     ``updated_episode`` is always null and ``updated_episode_status`` is always
+                             *     NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+                             *     ``poster_path`` may only be a same-origin opaque poster proxy route.
+                             */
+                            tracking: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Subtitle Group
+                                 * @default null
+                                 */
+                                subtitle_group: string | null;
+                                /**
+                                 * Poster Path
+                                 * @default null
+                                 */
+                                poster_path: string | null;
+                                /** Status */
+                                status: string;
+                                /** Status Label */
+                                status_label: string;
+                                /** Status Group */
+                                status_group: string;
+                                /** Available Actions */
+                                available_actions?: {
+                                    /** Code */
+                                    code: string;
+                                    /** Label */
+                                    label: string;
+                                    /** Style */
+                                    style: string;
+                                    /** Requires Confirmation */
+                                    requires_confirmation: boolean;
+                                }[];
+                                /**
+                                 * Valid Resource Count
+                                 * @default 0
+                                 */
+                                valid_resource_count: number;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** Revision */
+                                revision: number;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                            };
+                            /** @default null */
+                            operation: {
+                                /** Operation Id */
+                                operation_id: string;
+                                /** Operation */
+                                operation: string;
+                                /** State */
+                                state: string;
+                                /** Attempt */
+                                attempt: number;
+                                /**
+                                 * External Result Id
+                                 * @default null
+                                 */
+                                external_result_id: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
+                                /**
+                                 * Completed At
+                                 * @default null
+                                 */
+                                completed_at: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该追番记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_revision_conflict",
+                     *       "error_message": "追番记录版本已变化，请刷新后重试",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
     recoverTrackingItem: {
         parameters: {
             query?: never;
@@ -12089,6 +12827,340 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "storage_error",
                      *       "error_message": "写入/读取追番记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    refreshTrackingRss: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tracking_id: string;
+            };
+            cookie?: never;
+        };
+        /** @description 刷新关联 RSS */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "target_scope": "示例",
+                 *       "expected_revision": 1,
+                 *       "confirm": true
+                 *     }
+                 */
+                "application/json": {
+                    /** @enum {string} */
+                    target_scope: "ASSOCIATED_RSS";
+                    expected_revision: number;
+                    idempotency_key: string;
+                    /** @constant */
+                    confirm: true;
+                    ab_config: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url?: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
+                    storage_dir?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "action": "示例",
+                     *         "management_status": "示例",
+                     *         "needs_manual": true,
+                     *         "safe_message": "示例",
+                     *         "operation_id": null,
+                     *         "tracking": {
+                     *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
+                     *           "status": "示例",
+                     *           "status_label": "示例",
+                     *           "status_group": "示例",
+                     *           "available_actions": [
+                     *             {
+                     *               "code": "示例",
+                     *               "label": "示例",
+                     *               "style": "示例",
+                     *               "requires_confirmation": true
+                     *             }
+                     *           ],
+                     *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
+                     *           "updated_episode_status": "NOT_IMPLEMENTED",
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
+                     *         },
+                     *         "operation": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingManagementResultDTO
+                         * @description Safe result shared by the four Stage 31 management write routes.
+                         */
+                        result: {
+                            /**
+                             * Action
+                             * @enum {string}
+                             */
+                            action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                            /** Management Status */
+                            management_status: string;
+                            /** Needs Manual */
+                            needs_manual: boolean;
+                            /** Safe Message */
+                            safe_message: string;
+                            /**
+                             * Operation Id
+                             * @default null
+                             */
+                            operation_id: string | null;
+                            /**
+                             * TrackingItemDTO
+                             * @description One unified tracking list item (Stage 29 PRD §11.2).
+                             *
+                             *     ``updated_episode`` is always null and ``updated_episode_status`` is always
+                             *     NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+                             *     ``poster_path`` may only be a same-origin opaque poster proxy route.
+                             */
+                            tracking: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Subtitle Group
+                                 * @default null
+                                 */
+                                subtitle_group: string | null;
+                                /**
+                                 * Poster Path
+                                 * @default null
+                                 */
+                                poster_path: string | null;
+                                /** Status */
+                                status: string;
+                                /** Status Label */
+                                status_label: string;
+                                /** Status Group */
+                                status_group: string;
+                                /** Available Actions */
+                                available_actions?: {
+                                    /** Code */
+                                    code: string;
+                                    /** Label */
+                                    label: string;
+                                    /** Style */
+                                    style: string;
+                                    /** Requires Confirmation */
+                                    requires_confirmation: boolean;
+                                }[];
+                                /**
+                                 * Valid Resource Count
+                                 * @default 0
+                                 */
+                                valid_resource_count: number;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** Revision */
+                                revision: number;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                            };
+                            /** @default null */
+                            operation: {
+                                /** Operation Id */
+                                operation_id: string;
+                                /** Operation */
+                                operation: string;
+                                /** State */
+                                state: string;
+                                /** Attempt */
+                                attempt: number;
+                                /**
+                                 * External Result Id
+                                 * @default null
+                                 */
+                                external_result_id: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
+                                /**
+                                 * Completed At
+                                 * @default null
+                                 */
+                                completed_at: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该追番记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_revision_conflict",
+                     *       "error_message": "追番记录版本已变化，请刷新后重试",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -12815,6 +13887,342 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "storage_error",
                      *       "error_message": "读取追番记录失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    setTrackingItemEnabled: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tracking_id: string;
+            };
+            cookie?: never;
+        };
+        /** @description 启用或停用外部追番方案 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "target_scope": "示例",
+                 *       "expected_revision": 1,
+                 *       "confirm": true,
+                 *       "enabled": true
+                 *     }
+                 */
+                "application/json": {
+                    /** @enum {string} */
+                    target_scope: "SUBSCRIPTION" | "ASSOCIATED_RSS";
+                    expected_revision: number;
+                    idempotency_key: string;
+                    /** @constant */
+                    confirm: true;
+                    ab_config: {
+                        /** @enum {string} */
+                        auth_mode: "password" | "api_token";
+                        base_url?: string;
+                        username?: string;
+                        password?: string;
+                        token?: string;
+                        fallback_enabled: boolean;
+                    };
+                    storage_dir?: string;
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "action": "示例",
+                     *         "management_status": "示例",
+                     *         "needs_manual": true,
+                     *         "safe_message": "示例",
+                     *         "operation_id": null,
+                     *         "tracking": {
+                     *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
+                     *           "status": "示例",
+                     *           "status_label": "示例",
+                     *           "status_group": "示例",
+                     *           "available_actions": [
+                     *             {
+                     *               "code": "示例",
+                     *               "label": "示例",
+                     *               "style": "示例",
+                     *               "requires_confirmation": true
+                     *             }
+                     *           ],
+                     *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
+                     *           "updated_episode_status": "NOT_IMPLEMENTED",
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
+                     *         },
+                     *         "operation": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * TrackingManagementResultDTO
+                         * @description Safe result shared by the four Stage 31 management write routes.
+                         */
+                        result: {
+                            /**
+                             * Action
+                             * @enum {string}
+                             */
+                            action: "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                            /** Management Status */
+                            management_status: string;
+                            /** Needs Manual */
+                            needs_manual: boolean;
+                            /** Safe Message */
+                            safe_message: string;
+                            /**
+                             * Operation Id
+                             * @default null
+                             */
+                            operation_id: string | null;
+                            /**
+                             * TrackingItemDTO
+                             * @description One unified tracking list item (Stage 29 PRD §11.2).
+                             *
+                             *     ``updated_episode`` is always null and ``updated_episode_status`` is always
+                             *     NOT_IMPLEMENTED (BL-020 out of scope — never guessed from seeds/RSS).
+                             *     ``poster_path`` may only be a same-origin opaque poster proxy route.
+                             */
+                            tracking: {
+                                /** Tracking Id */
+                                tracking_id: string;
+                                /**
+                                 * Request Id
+                                 * @default null
+                                 */
+                                request_id: string | null;
+                                /**
+                                 * Title
+                                 * @default null
+                                 */
+                                title: string | null;
+                                /**
+                                 * Season
+                                 * @default null
+                                 */
+                                season: number | null;
+                                /**
+                                 * Subtitle Group
+                                 * @default null
+                                 */
+                                subtitle_group: string | null;
+                                /**
+                                 * Poster Path
+                                 * @default null
+                                 */
+                                poster_path: string | null;
+                                /** Status */
+                                status: string;
+                                /** Status Label */
+                                status_label: string;
+                                /** Status Group */
+                                status_group: string;
+                                /** Available Actions */
+                                available_actions?: {
+                                    /** Code */
+                                    code: string;
+                                    /** Label */
+                                    label: string;
+                                    /** Style */
+                                    style: string;
+                                    /** Requires Confirmation */
+                                    requires_confirmation: boolean;
+                                }[];
+                                /**
+                                 * Valid Resource Count
+                                 * @default 0
+                                 */
+                                valid_resource_count: number;
+                                /**
+                                 * Updated Episode
+                                 * @default null
+                                 */
+                                updated_episode: null;
+                                /**
+                                 * Updated Episode Status
+                                 * @default NOT_IMPLEMENTED
+                                 * @constant
+                                 */
+                                updated_episode_status: "NOT_IMPLEMENTED";
+                                /**
+                                 * Total Episodes
+                                 * @default null
+                                 */
+                                total_episodes: number | null;
+                                /** Revision */
+                                revision: number;
+                                /**
+                                 * Updated At
+                                 * @default null
+                                 */
+                                updated_at: string | null;
+                            };
+                            /** @default null */
+                            operation: {
+                                /** Operation Id */
+                                operation_id: string;
+                                /** Operation */
+                                operation: string;
+                                /** State */
+                                state: string;
+                                /** Attempt */
+                                attempt: number;
+                                /**
+                                 * External Result Id
+                                 * @default null
+                                 */
+                                external_result_id: string | null;
+                                /**
+                                 * Error Type
+                                 * @default null
+                                 */
+                                error_type: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
+                                /**
+                                 * Completed At
+                                 * @default null
+                                 */
+                                completed_at: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "data_validation_errors",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_not_found: 未找到该追番记录 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_not_found",
+                     *       "error_message": "未找到该追番记录",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "tracking_revision_conflict",
+                     *       "error_message": "追番记录版本已变化，请刷新后重试",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

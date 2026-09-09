@@ -15,22 +15,30 @@ local storage is read — no external system is ever contacted.
 """
 
 from ab_engine.controllers.ab_config import build_ab_config
+from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
+from ab_engine.controllers.ab_management_client import AutoBangumiManagementClient, create_legacy_31_management_client
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
+    TrackingDeleteExternalPayload,
     TrackingDetailQuery,
     TrackingListQuery,
+    TrackingModifyPayload,
     TrackingRecoverPayload,
+    TrackingRefreshRssPayload,
     TrackingRevalidatePayload,
+    TrackingSetEnabledPayload,
     TrackingSubmitPayload,
     TrackingSyncPayload,
 )
 from apps.migu_orca_web.services import _storage_dir
+from apps.migu_orca_web.tracking_management_service import run_tracking_management
 from apps.migu_orca_web.tracking_read_service import (
     build_tracking_detail,
     list_tracking_items,
 )
 from apps.migu_orca_web.tracking_recovery_service import run_tracking_recover
 from apps.migu_orca_web.tracking_revalidate_service import run_tracking_revalidate
+from apps.migu_orca_web.tracking_serializers import serialize_tracking_operation_summary, tracking_summary_fields
 from apps.migu_orca_web.tracking_submission_service import (
     run_tracking_retry,
     run_tracking_submit,
@@ -38,7 +46,11 @@ from apps.migu_orca_web.tracking_submission_service import (
 from apps.migu_orca_web.tracking_sync_service import run_tracking_sync
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
+from storage_engine.controllers.operation_repository import load_tracking_operation
 from storage_engine.controllers.storage_config import load_storage_config
+from storage_engine.controllers.tracking_repository import load_tracking_record
+from tracking_engine.controllers.management_target import ResolvedManagementTarget
+from tracking_engine.models.operation import TRACKING_OPERATION_STATE_SUCCEEDED
 
 
 @class_route(api_blueprint, "/api/v1/tracking/items", methods=["GET"])
@@ -237,12 +249,124 @@ class TrackingItemRecoverView(PostView):
         )
 
 
+def _management_writer(client: AutoBangumiManagementClient, action: str):
+    """Build the fixed-route adapter closure for one request-scoped action."""
+    def write(target: ResolvedManagementTarget, payload: object) -> dict[str, object]:
+        calls: list[dict[str, object]] = []
+        if target.scope == "SUBSCRIPTION":
+            item = target.subscription
+            assert item is not None
+            if action == "MODIFY":
+                calls.append(client.update_subscription(item.external_id, payload))
+            elif action == "SET_ENABLED":
+                calls.append(client.set_subscription_enabled(item.external_id, payload["enabled"]))
+            elif action == "DELETE_EXTERNAL":
+                calls.append(client.delete_subscription(item.external_id))
+            else:
+                raise ValueError("invalid management action")
+        else:
+            rss_payloads = payload.get("items", []) if isinstance(payload, dict) else []
+            for index, item in enumerate(target.rss):
+                if action == "MODIFY":
+                    body = rss_payloads[index] if index < len(rss_payloads) else payload
+                    calls.append(client.update_rss(item.external_id, body, item.url))
+                elif action == "SET_ENABLED":
+                    calls.append(client.enable_rss([rss.external_id for rss in target.rss]) if payload["enabled"] else client.disable_rss(item.external_id))
+                    if payload["enabled"]:
+                        break
+                elif action == "DELETE_EXTERNAL":
+                    calls.append(client.delete_rss(item.external_id))
+                elif action == "REFRESH_RSS":
+                    calls.append(client.refresh_rss(item.external_id))
+        statuses = [result.get("status_code") for result in calls if isinstance(result, dict)]
+        if statuses and all(isinstance(status, int) and 200 <= status < 300 for status in statuses):
+            return {"status_code": 200}
+        return {"status_code": next((status for status in statuses if isinstance(status, int)), 502)}
+    return write
+
+
+def _management_result(config, *, tracking_id: str, action: str, result: dict[str, object]) -> dict[str, object]:
+    record = load_tracking_record(config, tracking_id)
+    operation = None
+    if record.current_operation_id:
+        operation = load_tracking_operation(config, record.current_operation_id)
+    safe_message = (
+        "管理操作已完成"
+        if result.get("management_status") == TRACKING_OPERATION_STATE_SUCCEEDED
+        else "外部管理结果未知，请人工恢复；不会自动重试"
+    )
+    return {
+        "action": action,
+        "management_status": result.get("management_status", "RECOVERY_REQUIRED"),
+        "needs_manual": result.get("needs_manual") is True,
+        "safe_message": safe_message,
+        "operation_id": result.get("operation_id"),
+        "tracking": tracking_summary_fields(record),
+        "operation": serialize_tracking_operation_summary(operation) if operation else None,
+    }
+
+
+def _run_management_route(payload, action: str, patch: dict[str, object] | None = None, enabled: bool | None = None) -> dict[str, object]:
+    config = load_storage_config(_storage_dir(payload.storage_dir))
+    ab_config = build_ab_config(payload.ab_config.model_dump(exclude_none=True))
+    client = create_legacy_31_management_client(ab_config, transport=UrlopenAutoBangumiHttpTransport())
+    result = run_tracking_management(
+        config, tracking_id=payload.tracking_id, expected_revision=payload.expected_revision,
+        idempotency_key=payload.idempotency_key, confirm=payload.confirm, operation=action,
+        target_scope=payload.target_scope, ab_config=ab_config, management_client=client,
+        patch=patch, enabled=enabled, write=_management_writer(client, action),
+    )
+    return _management_result(config, tracking_id=payload.tracking_id, action=action, result=result)
+
+
+@class_route(api_blueprint, "/api/v1/tracking/items/<path:tracking_id>/modify", methods=["POST"])
+class TrackingItemModifyView(PostView):
+    request_validator_model = TrackingModifyPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingModifyPayload)
+        payload = self.request_validator_model
+        return _run_management_route(payload, "MODIFY", patch=payload.patch)
+
+
+@class_route(api_blueprint, "/api/v1/tracking/items/<path:tracking_id>/set-enabled", methods=["POST"])
+class TrackingItemSetEnabledView(PostView):
+    request_validator_model = TrackingSetEnabledPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingSetEnabledPayload)
+        payload = self.request_validator_model
+        return _run_management_route(payload, "SET_ENABLED", enabled=payload.enabled)
+
+
+@class_route(api_blueprint, "/api/v1/tracking/items/<path:tracking_id>/delete-external", methods=["POST"])
+class TrackingItemDeleteExternalView(PostView):
+    request_validator_model = TrackingDeleteExternalPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingDeleteExternalPayload)
+        return _run_management_route(self.request_validator_model, "DELETE_EXTERNAL")
+
+
+@class_route(api_blueprint, "/api/v1/tracking/items/<path:tracking_id>/refresh", methods=["POST"])
+class TrackingItemRefreshView(PostView):
+    request_validator_model = TrackingRefreshRssPayload
+
+    def save(self) -> dict[str, object]:
+        assert isinstance(self.request_validator_model, TrackingRefreshRssPayload)
+        return _run_management_route(self.request_validator_model, "REFRESH_RSS")
+
+
 __all__ = [
     "TrackingItemDetailView",
+    "TrackingItemDeleteExternalView",
     "TrackingItemListView",
+    "TrackingItemModifyView",
+    "TrackingItemRefreshView",
     "TrackingItemRecoverView",
     "TrackingItemRetryView",
     "TrackingItemRevalidateView",
     "TrackingItemSubmitView",
+    "TrackingItemSetEnabledView",
     "TrackingSyncView",
 ]
