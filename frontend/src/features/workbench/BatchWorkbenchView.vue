@@ -441,7 +441,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
 <template>
   <PanelSection title="批量工作台" class="batch-workbench-panel">
     <form id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch">
-      <label for="batch-raw-input">批量番剧名称</label>
+      <label v-if="!props.hideInput" for="batch-raw-input">批量番剧名称</label>
       <AnimeTitleInput
         v-if="!props.hideInput"
         id="batch-raw-input"
@@ -449,7 +449,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
         mode="batch"
         :disabled="parseLoading"
       />
-      <p class="field-help" id="batch-parse-help">
+      <p v-if="!props.hideInput" class="field-help" id="batch-parse-help">
         每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。
       </p>
       <p v-if="parseError" id="batch-parse-error" class="field-error" role="alert">

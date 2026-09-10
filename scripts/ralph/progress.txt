@@ -64,4 +64,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 仅更新 `tests/browser/test_app_batch_workbench.py` 与 `tests/browser/test_app_responsive_a11y.py` 的模式切换前置步骤；未修改 OpenAPI、generated client、后端或 Stage 34 后续 story。
 - 定向批量浏览器测试、前端 typecheck、相关 Vitest 与 `git diff --check` 已通过。
 
+## 2026-09-10 - US-266～US-268 review fix
+- 修复 `useDraftSession` 的 applying/retry 生命周期：reset、invalidate、失效错误和旧请求结束均不会遗留 `applying=true`；成功、reset、invalidate 会清除 retry 能力，普通失败才允许 retry；并行 apply 在首个 revision 写入完成前明确拒绝。
+- 修复 US-267 模式隔离：批量模式不渲染单番 `DraftPreviewPanel` 或其 loading，切回单番仍保留 component-local 草案；批量输入由一份正确关联的 label/help 管理，并验证切换后的输入光标/选择范围恢复。
+- 文件范围：`frontend/src/app/composables/useDraftSession.ts` 及其测试、`frontend/src/features/workbench/WorkbenchView.vue` 及其测试、`frontend/src/features/workbench/BatchWorkbenchView.vue`、本 progress 记录；未进入 US-269，未修改 OpenAPI、generated client、后端或 SafeInfo。
+- 验证通过：指定 5 个 Vitest 文件 36 passed、typecheck、lint、build、`tests/browser/test_app_mode_input.py` 1 passed、`git diff --check`。
+
 ---

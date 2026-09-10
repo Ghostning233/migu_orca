@@ -410,7 +410,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
   <!-- ── draft preview ───────────────────────────────────────────── -->
   <DraftPreviewPanel
-    v-if="draftRequest && draftId"
+    v-if="mode === 'single' && draftRequest && draftId"
     :key="draftId"
     :request="draftRequest"
     :draft-id="draftId"
@@ -420,7 +420,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     @failed="onDraftOperationFailed"
     @changed="onDraftChanged"
   />
-  <LoadingState v-if="draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />
+  <LoadingState v-if="mode === 'single' && draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />
 
   <!-- ── batch workbench (US-205) ────────────────────────────────── -->
   <template v-if="mode === 'batch'">

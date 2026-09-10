@@ -331,6 +331,44 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(wrapper.text()).not.toContain('opaque-draft-token')
   })
 
+  it('isolates batch mode from the single draft panel and keeps the draft in memory', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult()).mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(false)
+    expect(wrapper.findAll('label[for="batch-raw-input"]')).toHaveLength(1)
+    expect(wrapper.findAll('#batch-raw-input-help')).toHaveLength(1)
+
+    await wrapper.find('#anime-mode-single').trigger('click')
+    await nextTick()
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+  })
+
+  it('restores the single input cursor after switching modes', async () => {
+    const { wrapper } = await mountWorkbench()
+    const input = wrapper.find('#mikan-candidate-query').element as HTMLInputElement
+    await wrapper.find('#mikan-candidate-query').setValue('葬送的芙莉莲')
+    input.setSelectionRange(2, 4)
+
+    await wrapper.find('#anime-mode-batch').trigger('click')
+    await wrapper.find('#anime-mode-single').trigger('click')
+    await nextTick()
+
+    const restored = wrapper.find('#mikan-candidate-query').element as HTMLInputElement
+    expect(document.activeElement).toBe(restored)
+    expect(restored.selectionStart).toBe(2)
+    expect(restored.selectionEnd).toBe(4)
+  })
+
   it('applies preview-modify edits and recomputes the display', async () => {
     apiPost
       .mockResolvedValueOnce(candidateResult())

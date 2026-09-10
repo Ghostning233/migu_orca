@@ -69,12 +69,13 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
   const error = ref<ApiError | null>(null)
   const requestSequence = ref(0)
   const invalid = ref(false)
+  const retryable = ref(false)
 
   // The last attempted patch is request-scoped memory, used only by retry.
   let lastPatch: DraftPatch | null = null
   let lastStorageDir: string | undefined
 
-  const canRetry = computed(() => lastPatch !== null && !invalid.value && !applying.value)
+  const canRetry = computed(() => retryable.value && !invalid.value && !applying.value)
 
   function setDirty(value: boolean): void {
     if (!invalid.value) dirty.value = value
@@ -88,14 +89,19 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
     draftId.value = null
     draftRevision.value = null
     dirty.value = false
+    applying.value = false
     invalid.value = true
+    retryable.value = false
     error.value = null
     lastPatch = null
     lastStorageDir = undefined
   }
 
   async function apply(patch: DraftPatch, storageDir?: string): Promise<DraftModifyResult | null> {
-    if (invalid.value || !draftId.value || draftRevision.value === null) return null
+    // A second request cannot safely reuse the current base_revision. Reject
+    // it while the first request owns the session instead of issuing two CAS
+    // writes with the same revision.
+    if (applying.value || invalid.value || !draftId.value || draftRevision.value === null) return null
 
     const sequence = ++requestSequence.value
     lastPatch = patch
@@ -120,6 +126,9 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
       if (typeof result.draft_revision === 'number') draftRevision.value = result.draft_revision
       dirty.value = false
       error.value = null
+      retryable.value = false
+      lastPatch = null
+      lastStorageDir = undefined
       return result
     } catch (cause) {
       if (sequence !== requestSequence.value || invalid.value) return null
@@ -130,6 +139,7 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
         // Keep the last successful snapshot and the uncommitted form intent so
         // the host can offer retry or reset without losing the user's edits.
         error.value = safeError
+        retryable.value = true
       }
       return null
     } finally {
@@ -143,7 +153,9 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
     if (invalid.value) return
     requestSequence.value += 1
     dirty.value = false
+    applying.value = false
     error.value = null
+    retryable.value = false
     lastPatch = null
     lastStorageDir = undefined
   }
