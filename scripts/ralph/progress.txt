@@ -87,3 +87,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Shared review display components should receive helper-derived public projections and emit only controlled field updates; draft/session ownership stays in the parent.
   - Verification passed: compileall, targeted Vitest (23 tests), frontend typecheck, lint, build, `test_app_workbench.py` Chromium suite (20 tests), and git diff check.
 ---
+
+## 2026-09-11 00:00:00 Asia/Shanghai - US-270
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the controlled shared `AnimeDraftEditor` structure for single and batch draft review. It composes the shared subtitle-group selector and resource summary, renders common overview/source/filter/resource sections, supports progressive advanced settings, emits only a minimal preview patch and dirty state, and keeps request/session ownership in the parent.
+- Files changed: `frontend/src/features/workbench/AnimeDraftEditor.vue`, `frontend/src/features/workbench/AnimeDraftEditor.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The shared editor can remain transport-free by accepting the public `RequestSnapshot` and emitting `PreviewPatch`; save and preview-modify orchestration stays in the compatibility/session host.
+  - Verification passed: targeted Vitest (3 tests), frontend typecheck, lint, build, and real Chromium workbench suite (20 tests); storage was clean before browser verification.
+---
