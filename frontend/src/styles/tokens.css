@@ -1,0 +1,90 @@
+/* MiGuOrca semantic design tokens (Stage 33, US-258).
+ *
+ * This is the only source of brand colours, focus treatment and shell
+ * elevation. Components consume semantic names so later visual tuning does
+ * not create a second palette or duplicate magic values.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* Colour: warm paper surfaces, deep-sea ink and restrained coral accents. */
+  --color-surface-canvas: #f7f3ea;
+  --color-surface-raised: #fffdf8;
+  --color-surface-subtle: #eee8de;
+  --color-surface-inverse: #17384f;
+  --color-text-primary: #173044;
+  --color-text-muted: #5d6972;
+  --color-text-inverse: #fffaf2;
+  --color-border-subtle: #d7cfc3;
+  --color-action-primary: #174968;
+  --color-action-primary-hover: #103b56;
+  --color-accent-emphasis: #b85237;
+  --color-danger-emphasis: #a63c36;
+  --color-focus-ring: #b85237;
+
+  /* Typography. */
+  --font-family-sans:
+    system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+    'Microsoft YaHei', sans-serif;
+  --font-size-xs: 0.8125rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.375rem;
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --line-height-tight: 1.25;
+  --line-height-body: 1.5;
+
+  /* Spacing and dimensions. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --size-control-min: 2.5rem;
+  --size-shell-header: 4.5rem;
+  --size-content-max: 94.5rem;
+
+  /* Shape, elevation and stacking. */
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --shadow-shell: 0 0.25rem 1.25rem rgb(23 48 68 / 10%);
+  --shadow-dialog: 0 0.75rem 2rem rgb(23 48 68 / 20%);
+  --z-base: 0;
+  --z-sticky: 40;
+  --z-overlay: 100;
+  --z-skip-link: 200;
+
+  /* Focus and motion. */
+  --focus-ring-width: 0.125rem;
+  --focus-ring-offset: 0.125rem;
+  --motion-duration-fast: 140ms;
+  --motion-duration-standard: 220ms;
+  --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --motion-distance: 0.25rem;
+  --motion-scroll-behavior: smooth;
+
+  /* Stage 27 compatibility aliases. Remove only as components migrate. */
+  --color-text: var(--color-text-primary);
+  --color-bg: var(--color-surface-raised);
+  --color-bg-muted: var(--color-surface-subtle);
+  --color-border: var(--color-border-subtle);
+  --color-accent: var(--color-action-primary);
+  --color-danger: var(--color-danger-emphasis);
+  --font-stack: var(--font-family-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-duration-fast: 0ms;
+    --motion-duration-standard: 0ms;
+    --motion-distance: 0px;
+    --motion-scroll-behavior: auto;
+  }
+}

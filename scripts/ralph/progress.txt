@@ -38,3 +38,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Treat duplicate query keys as invalid arrays even when one value would otherwise be acceptable; sanitize per field so a valid public identifier survives alongside dropped unknown values.
   - Validation passed: targeted catalog Vitest (14 tests), Flask route tests (`app_routes_test.py` and `views_test.py`, 202 tests), frontend typecheck, and `git diff --check`. Chromium and full-suite checks were intentionally not run.
 ---
+## 2026-09-10 19:45:54 CST - US-258
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the single semantic design-token entry for warm surfaces, deep-sea text/actions, restrained coral accent, danger/focus, typography, spacing, dimensions, radii, elevation, stacking and motion. Global styles now consume the token layer without changing component props or page structure, and reduced-motion preferences set transition durations/displacement to zero and scrolling to auto. Added a style drift guard and a production-build Chromium assertion for computed tokens and reduced motion.
+- Files changed: `frontend/src/styles/tokens.css`, `frontend/src/styles/tokens.test.ts`, `frontend/src/styles/main.css`, `tests/browser/test_app_shell.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep all shell palette, focus and elevation literals in `tokens.css`; `tokens.test.ts` prevents global shell styles from introducing a parallel brand colour, focus ring or box shadow.
+  - Vitest's jsdom environment rewrites `import.meta.url`; filesystem-backed style tests should resolve from the frontend `process.cwd()`.
+  - Validation passed: targeted token Vitest (14 tests), frontend typecheck/build, targeted real-Chromium reduced-motion test, and `git diff --check`. Full suites were intentionally deferred to US-265.
+---

@@ -69,6 +69,37 @@ def test_app_shell_loads_and_mounts_spa(page: Page, live_server_url: str) -> Non
     assert "frontend/dist" not in page.content()
 
 
+def test_semantic_tokens_and_reduced_motion_reach_chromium(
+    page: Page, live_server_url: str
+) -> None:
+    """US-258: production CSS exposes one palette and honors reduced motion."""
+    _require_dist()
+
+    page.emulate_media(reduced_motion="reduce")
+    page.goto(f"{live_server_url}/app/workbench")
+    page.wait_for_selector(".app-title")
+
+    values = page.evaluate(
+        """() => {
+          const style = getComputedStyle(document.documentElement)
+          return {
+            canvas: style.getPropertyValue('--color-surface-canvas').trim(),
+            primary: style.getPropertyValue('--color-action-primary').trim(),
+            focus: style.getPropertyValue('--color-focus-ring').trim(),
+            shadow: style.getPropertyValue('--shadow-shell').trim(),
+            duration: style.getPropertyValue('--motion-duration-standard').trim(),
+            distance: style.getPropertyValue('--motion-distance').trim(),
+            scrollBehavior: style.getPropertyValue('--motion-scroll-behavior').trim(),
+          }
+        }"""
+    )
+
+    assert all(values[name] for name in ("canvas", "primary", "focus", "shadow"))
+    assert values["duration"] == "0ms"
+    assert values["distance"] == "0px"
+    assert values["scrollBehavior"] == "auto"
+
+
 def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> None:
     """Client-side navigation between all four shell routes works."""
     _require_dist()
