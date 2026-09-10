@@ -754,10 +754,28 @@ class TrackingAuditEventDTO(_StrictBase):
     """One safe embedded audit event (Stage 29 PRD §9)."""
 
     event_id: str
-    action: str
+    action: Literal[
+        "TRACKING_CREATED", "TRACKING_BACKFILLED", "PLAN_CHANGE_DETECTED",
+        "REVALIDATION_PASSED", "REVALIDATION_FAILED", "SUBMIT_STARTED",
+        "SUBMIT_SUCCEEDED", "SUBMIT_FAILED", "SUBMIT_OUTCOME_UNKNOWN",
+        "MANAGEMENT_STARTED", "MANAGEMENT_SUCCEEDED", "MANAGEMENT_FAILED",
+        "MANAGEMENT_UNKNOWN", "RESULT_PERSIST_FAILED", "RECOVERY_AUTO_SUCCEEDED",
+        "RECOVERY_AUTO_FAILED", "RECOVERY_NEEDS_MANUAL",
+        "RECOVERY_MANUAL_SUCCEEDED", "RECOVERY_MANUAL_FAILED",
+        "RECOVERY_EXTERNAL_VERIFIED", "COMPAT_QUEUE_UPDATED",
+        "COMPAT_QUEUE_UPDATE_FAILED",
+    ]
     actor: str
-    from_status: str | None = None
-    to_status: str | None = None
+    from_status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ] | None = None
+    to_status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ] | None = None
     tracking_revision: int
     operation_id: str | None = None
     reason_code: str | None = None
@@ -771,10 +789,16 @@ class TrackingRevalidationIssueDTO(_StrictBase):
     ``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.
     """
 
-    code: str
+    code: Literal[
+        "REQUEST_MISSING", "REQUEST_NOT_ACCEPTED", "REQUEST_CHANGED",
+        "TITLE_MISSING", "SEASON_REVIEW_REQUIRED", "MIKAN_SELECTION_MISSING",
+        "SUBTITLE_GROUP_MISSING", "NO_VALID_RESOURCES",
+        "EXTERNAL_ALREADY_LINKED", "OPERATION_IN_PROGRESS",
+        "TRACKING_STATE_INVALID",
+    ]
     field: str | None = None
     message: str
-    recovery_action: str
+    recovery_action: Literal["", "SUBMIT"]
 
 
 class TrackingOperationSummaryDTO(_StrictBase):
@@ -786,13 +810,16 @@ class TrackingOperationSummaryDTO(_StrictBase):
     """
 
     operation_id: str
-    operation: str
-    state: str
+    operation: Literal["SUBMIT", "MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"]
+    state: Literal[
+        "PREPARED", "IN_PROGRESS", "SUCCEEDED", "FAILED",
+        "OUTCOME_UNKNOWN", "RECOVERY_REQUIRED",
+    ]
     attempt: int
     external_result_id: str | None = None
     error_type: str | None = None
-    created_at: str | None = None
-    updated_at: str | None = None
+    created_at: str
+    updated_at: str
     completed_at: str | None = None
 
 
@@ -820,9 +847,13 @@ class TrackingItemDTO(_StrictBase):
     season: int | None = None
     subtitle_group: str | None = None
     poster_path: str | None = None
-    status: str
+    status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ]
     status_label: str
-    status_group: str
+    status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
     available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
     valid_resource_count: int = 0
     updated_episode: None = None
@@ -911,7 +942,11 @@ class TrackingRevalidateResultDTO(_StrictBase):
     checked_revision: int
     next_revision: int
     checked_at: str
-    next_status: str
+    next_status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ]
     issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
     tracking: TrackingItemDTO
 
@@ -931,7 +966,10 @@ class TrackingSubmitResultDTO(_StrictBase):
     """
 
     tracking_id: str
-    outcome: str
+    outcome: Literal[
+        "ACTIVE", "SUBMIT_FAILED", "VERIFYING_EXTERNAL",
+        "RECOVERY_REQUIRED", "NEEDS_RECONFIRM",
+    ]
     checked_revision: int
     next_revision: int
     checked_at: str
@@ -957,8 +995,8 @@ class TrackingRecoverResultDTO(_StrictBase):
     """
 
     tracking_id: str
-    action: str
-    outcome: str
+    action: Literal["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"]
+    outcome: Literal["ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED"]
     checked_revision: int
     next_revision: int
     checked_at: str

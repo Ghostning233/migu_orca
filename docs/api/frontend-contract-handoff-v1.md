@@ -15,7 +15,7 @@
 
 | 页面用例 | 首要流程 | operationId | 生成请求/响应类型的来源 |
 | --- | --- | --- | --- |
-| F-B 共享审核核心 | 生成、修改、保存草案 | `createRequest` → `previewModifyRequest` → `previewSaveRequest` | `operations['createRequest']`、`operations['previewModifyRequest']`、`operations['previewSaveRequest']` |
+| F-B 共享审核核心 | 生成、修改内存草案 | `createRequest` → `previewModifyRequest` | `operations['createRequest']`、`operations['previewModifyRequest']`；不得调用会消费草案的 `previewSaveRequest` |
 | F-C 单番确认 | 明确确认后保存并进入待提交 | `confirmRequestSave` | `operations['confirmRequestSave']`；结果中的 `handoff.tracking_id` 是后续入口 |
 | F-D 批量确认 | 逐条确认，允许部分成功 | `saveConfirmBatchItems` | `operations['saveConfirmBatchItems']`；按输入顺序消费 `results[]` |
 | F-E 追番方案 | 列表、详情、安全信息、复核 | `listTrackingItems`、`getTrackingItemDetail`、`getRequestSafeInfo`、`revalidateTrackingItem` | 对应 `operations[...]` 的 query/path/body 与 `result` |
@@ -50,7 +50,7 @@ F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。S
 
 ## F-B～F-E 交付边界
 
-- F-B 可以消费 draft create/modify/save 的 generated request/result，但不得把完整 Request 快照当作客户端 DTO 回传。
+- F-B 只消费 draft create/modify 的 generated request/result，绝不调用会消费 draft 的 `previewSaveRequest`；保存确认由 F-C/F-D 的 `save-confirm` 流程负责，且不得把完整 Request 快照当作客户端 DTO 回传。
 - F-C 使用 `confirmRequestSave` 的 `handoff`；`tracking_ready=false` 时保留已确认 Request，提示用户打开追番列表恢复，不重复保存。
 - F-D 只按 `results[]` 逐条显示 `confirmed`/`failed`/`skipped`，一条失败不回滚其他已确认项；失败条目沿用服务端给出的公开 `error_type` 分类，不显示原始详情。
 - F-E 使用 tracking list/detail 和 safe-info；`safe_info` 是白名单展示数据，不能推断外部原始响应或本地路径。
@@ -63,4 +63,3 @@ F-F 必须等待 Stage 32 合入后，以最终 `openapi.json` 重新生成并�
 ## 集数占位
 
 所有相关结果的 `updated_episode` 固定为 `null`，`updated_episode_status` 固定为 `NOT_IMPLEMENTED`。前端不得从种子、RSS、下载进度或标题猜测已更新集数，也不得把该字段渲染成已更新集数。
-

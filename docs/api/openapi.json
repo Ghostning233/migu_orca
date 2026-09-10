@@ -8190,6 +8190,20 @@
                                 "title": "Poster Path"
                               },
                               "status": {
+                                "enum": [
+                                  "PENDING_SUBMIT",
+                                  "REVALIDATING",
+                                  "NEEDS_RECONFIRM",
+                                  "SUBMITTING",
+                                  "VERIFYING_EXTERNAL",
+                                  "ACTIVE",
+                                  "SUBMIT_FAILED",
+                                  "RECOVERY_REQUIRED",
+                                  "UNKNOWN",
+                                  "DISABLED",
+                                  "EXTERNAL_DELETED",
+                                  "EXTERNAL_ONLY"
+                                ],
                                 "title": "Status",
                                 "type": "string"
                               },
@@ -8198,6 +8212,13 @@
                                 "type": "string"
                               },
                               "status_group": {
+                                "enum": [
+                                  "PENDING",
+                                  "PROCESSING",
+                                  "ACTIVE",
+                                  "ATTENTION",
+                                  "INACTIVE"
+                                ],
                                 "title": "Status Group",
                                 "type": "string"
                               },
@@ -8936,6 +8957,20 @@
                                 "title": "Poster Path"
                               },
                               "status": {
+                                "enum": [
+                                  "PENDING_SUBMIT",
+                                  "REVALIDATING",
+                                  "NEEDS_RECONFIRM",
+                                  "SUBMITTING",
+                                  "VERIFYING_EXTERNAL",
+                                  "ACTIVE",
+                                  "SUBMIT_FAILED",
+                                  "RECOVERY_REQUIRED",
+                                  "UNKNOWN",
+                                  "DISABLED",
+                                  "EXTERNAL_DELETED",
+                                  "EXTERNAL_ONLY"
+                                ],
                                 "title": "Status",
                                 "type": "string"
                               },
@@ -8944,6 +8979,13 @@
                                 "type": "string"
                               },
                               "status_group": {
+                                "enum": [
+                                  "PENDING",
+                                  "PROCESSING",
+                                  "ACTIVE",
+                                  "ATTENTION",
+                                  "INACTIVE"
+                                ],
                                 "title": "Status Group",
                                 "type": "string"
                               },
@@ -20955,10 +20997,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -20991,28 +21048,12 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Created At"
+                                  "title": "Created At",
+                                  "type": "string"
                                 },
                                 "updated_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Updated At"
+                                  "title": "Updated At",
+                                  "type": "string"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -21031,7 +21072,9 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt"
+                                "attempt",
+                                "created_at",
+                                "updated_at"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -21048,6 +21091,19 @@
                             "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REQUEST_MISSING",
+                                  "REQUEST_NOT_ACCEPTED",
+                                  "REQUEST_CHANGED",
+                                  "TITLE_MISSING",
+                                  "SEASON_REVIEW_REQUIRED",
+                                  "MIKAN_SELECTION_MISSING",
+                                  "SUBTITLE_GROUP_MISSING",
+                                  "NO_VALID_RESOURCES",
+                                  "EXTERNAL_ALREADY_LINKED",
+                                  "OPERATION_IN_PROGRESS",
+                                  "TRACKING_STATE_INVALID"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -21068,6 +21124,10 @@
                                 "type": "string"
                               },
                               "recovery_action": {
+                                "enum": [
+                                  "",
+                                  "SUBMIT"
+                                ],
                                 "title": "Recovery Action",
                                 "type": "string"
                               }
@@ -21148,6 +21208,30 @@
                                 "type": "string"
                               },
                               "action": {
+                                "enum": [
+                                  "TRACKING_CREATED",
+                                  "TRACKING_BACKFILLED",
+                                  "PLAN_CHANGE_DETECTED",
+                                  "REVALIDATION_PASSED",
+                                  "REVALIDATION_FAILED",
+                                  "SUBMIT_STARTED",
+                                  "SUBMIT_SUCCEEDED",
+                                  "SUBMIT_FAILED",
+                                  "SUBMIT_OUTCOME_UNKNOWN",
+                                  "MANAGEMENT_STARTED",
+                                  "MANAGEMENT_SUCCEEDED",
+                                  "MANAGEMENT_FAILED",
+                                  "MANAGEMENT_UNKNOWN",
+                                  "RESULT_PERSIST_FAILED",
+                                  "RECOVERY_AUTO_SUCCEEDED",
+                                  "RECOVERY_AUTO_FAILED",
+                                  "RECOVERY_NEEDS_MANUAL",
+                                  "RECOVERY_MANUAL_SUCCEEDED",
+                                  "RECOVERY_MANUAL_FAILED",
+                                  "RECOVERY_EXTERNAL_VERIFIED",
+                                  "COMPAT_QUEUE_UPDATED",
+                                  "COMPAT_QUEUE_UPDATE_FAILED"
+                                ],
                                 "title": "Action",
                                 "type": "string"
                               },
@@ -21158,6 +21242,20 @@
                               "from_status": {
                                 "anyOf": [
                                   {
+                                    "enum": [
+                                      "PENDING_SUBMIT",
+                                      "REVALIDATING",
+                                      "NEEDS_RECONFIRM",
+                                      "SUBMITTING",
+                                      "VERIFYING_EXTERNAL",
+                                      "ACTIVE",
+                                      "SUBMIT_FAILED",
+                                      "RECOVERY_REQUIRED",
+                                      "UNKNOWN",
+                                      "DISABLED",
+                                      "EXTERNAL_DELETED",
+                                      "EXTERNAL_ONLY"
+                                    ],
                                     "type": "string"
                                   },
                                   {
@@ -21170,6 +21268,20 @@
                               "to_status": {
                                 "anyOf": [
                                   {
+                                    "enum": [
+                                      "PENDING_SUBMIT",
+                                      "REVALIDATING",
+                                      "NEEDS_RECONFIRM",
+                                      "SUBMITTING",
+                                      "VERIFYING_EXTERNAL",
+                                      "ACTIVE",
+                                      "SUBMIT_FAILED",
+                                      "RECOVERY_REQUIRED",
+                                      "UNKNOWN",
+                                      "DISABLED",
+                                      "EXTERNAL_DELETED",
+                                      "EXTERNAL_ONLY"
+                                    ],
                                     "type": "string"
                                   },
                                   {
@@ -21646,6 +21758,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -21654,6 +21780,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -21774,10 +21907,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -21810,28 +21958,12 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Created At"
+                                  "title": "Created At",
+                                  "type": "string"
                                 },
                                 "updated_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Updated At"
+                                  "title": "Updated At",
+                                  "type": "string"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -21850,7 +21982,9 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt"
+                                "attempt",
+                                "created_at",
+                                "updated_at"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -21914,7 +22048,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -22022,7 +22156,7 @@
             }
           },
           "409": {
-            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
+            "description": "tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
             "content": {
               "application/json": {
                 "schema": {
@@ -22066,8 +22200,8 @@
                 },
                 "example": {
                   "ok": false,
-                  "error_type": "tracking_revision_conflict",
-                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_type": "tracking_management_capability_unknown",
+                  "error_message": "当前 Auto Bangumi 管理能力未验证",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -22313,6 +22447,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -22321,6 +22469,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -22441,10 +22596,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -22477,28 +22647,12 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Created At"
+                                  "title": "Created At",
+                                  "type": "string"
                                 },
                                 "updated_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Updated At"
+                                  "title": "Updated At",
+                                  "type": "string"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -22517,7 +22671,9 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt"
+                                "attempt",
+                                "created_at",
+                                "updated_at"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -22581,7 +22737,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -22689,7 +22845,7 @@
             }
           },
           "409": {
-            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
+            "description": "tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
             "content": {
               "application/json": {
                 "schema": {
@@ -22733,8 +22889,8 @@
                 },
                 "example": {
                   "ok": false,
-                  "error_type": "tracking_revision_conflict",
-                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_type": "tracking_management_capability_unknown",
+                  "error_message": "当前 Auto Bangumi 管理能力未验证",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -22880,10 +23036,21 @@
                           "type": "string"
                         },
                         "action": {
+                          "enum": [
+                            "AUTO",
+                            "MARK_SUCCEEDED",
+                            "MARK_FAILED",
+                            "VERIFY_EXTERNAL"
+                          ],
                           "title": "Action",
                           "type": "string"
                         },
                         "outcome": {
+                          "enum": [
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Outcome",
                           "type": "string"
                         },
@@ -22985,6 +23152,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -22993,6 +23174,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -23601,6 +23789,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -23609,6 +23811,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -23729,10 +23938,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -23765,28 +23989,12 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Created At"
+                                  "title": "Created At",
+                                  "type": "string"
                                 },
                                 "updated_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Updated At"
+                                  "title": "Updated At",
+                                  "type": "string"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -23805,7 +24013,9 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt"
+                                "attempt",
+                                "created_at",
+                                "updated_at"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -23869,7 +24079,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -23977,7 +24187,7 @@
             }
           },
           "409": {
-            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
+            "description": "tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
             "content": {
               "application/json": {
                 "schema": {
@@ -24021,8 +24231,8 @@
                 },
                 "example": {
                   "ok": false,
-                  "error_type": "tracking_revision_conflict",
-                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_type": "tracking_management_capability_unknown",
+                  "error_message": "当前 Auto Bangumi 管理能力未验证",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -24161,6 +24371,13 @@
                           "type": "string"
                         },
                         "outcome": {
+                          "enum": [
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "VERIFYING_EXTERNAL",
+                            "RECOVERY_REQUIRED",
+                            "NEEDS_RECONFIRM"
+                          ],
                           "title": "Outcome",
                           "type": "string"
                         },
@@ -24194,6 +24411,19 @@
                             "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REQUEST_MISSING",
+                                  "REQUEST_NOT_ACCEPTED",
+                                  "REQUEST_CHANGED",
+                                  "TITLE_MISSING",
+                                  "SEASON_REVIEW_REQUIRED",
+                                  "MIKAN_SELECTION_MISSING",
+                                  "SUBTITLE_GROUP_MISSING",
+                                  "NO_VALID_RESOURCES",
+                                  "EXTERNAL_ALREADY_LINKED",
+                                  "OPERATION_IN_PROGRESS",
+                                  "TRACKING_STATE_INVALID"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -24214,6 +24444,10 @@
                                 "type": "string"
                               },
                               "recovery_action": {
+                                "enum": [
+                                  "",
+                                  "SUBMIT"
+                                ],
                                 "title": "Recovery Action",
                                 "type": "string"
                               }
@@ -24298,6 +24532,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -24306,6 +24554,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -24826,6 +25081,20 @@
                           "type": "string"
                         },
                         "next_status": {
+                          "enum": [
+                            "PENDING_SUBMIT",
+                            "REVALIDATING",
+                            "NEEDS_RECONFIRM",
+                            "SUBMITTING",
+                            "VERIFYING_EXTERNAL",
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "RECOVERY_REQUIRED",
+                            "UNKNOWN",
+                            "DISABLED",
+                            "EXTERNAL_DELETED",
+                            "EXTERNAL_ONLY"
+                          ],
                           "title": "Next Status",
                           "type": "string"
                         },
@@ -24835,6 +25104,19 @@
                             "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REQUEST_MISSING",
+                                  "REQUEST_NOT_ACCEPTED",
+                                  "REQUEST_CHANGED",
+                                  "TITLE_MISSING",
+                                  "SEASON_REVIEW_REQUIRED",
+                                  "MIKAN_SELECTION_MISSING",
+                                  "SUBTITLE_GROUP_MISSING",
+                                  "NO_VALID_RESOURCES",
+                                  "EXTERNAL_ALREADY_LINKED",
+                                  "OPERATION_IN_PROGRESS",
+                                  "TRACKING_STATE_INVALID"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -24855,6 +25137,10 @@
                                 "type": "string"
                               },
                               "recovery_action": {
+                                "enum": [
+                                  "",
+                                  "SUBMIT"
+                                ],
                                 "title": "Recovery Action",
                                 "type": "string"
                               }
@@ -24939,6 +25225,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -24947,6 +25247,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -25506,6 +25813,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -25514,6 +25835,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -25634,10 +25962,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -25670,28 +26013,12 @@
                                   "title": "Error Type"
                                 },
                                 "created_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Created At"
+                                  "title": "Created At",
+                                  "type": "string"
                                 },
                                 "updated_at": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ],
-                                  "default": null,
-                                  "title": "Updated At"
+                                  "title": "Updated At",
+                                  "type": "string"
                                 },
                                 "completed_at": {
                                   "anyOf": [
@@ -25710,7 +26037,9 @@
                                 "operation_id",
                                 "operation",
                                 "state",
-                                "attempt"
+                                "attempt",
+                                "created_at",
+                                "updated_at"
                               ],
                               "title": "TrackingOperationSummaryDTO",
                               "type": "object"
@@ -25774,7 +26103,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -25882,7 +26211,7 @@
             }
           },
           "409": {
-            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
+            "description": "tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
             "content": {
               "application/json": {
                 "schema": {
@@ -25926,8 +26255,8 @@
                 },
                 "example": {
                   "ok": false,
-                  "error_type": "tracking_revision_conflict",
-                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_type": "tracking_management_capability_unknown",
+                  "error_message": "当前 Auto Bangumi 管理能力未验证",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -26072,6 +26401,13 @@
                           "type": "string"
                         },
                         "outcome": {
+                          "enum": [
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "VERIFYING_EXTERNAL",
+                            "RECOVERY_REQUIRED",
+                            "NEEDS_RECONFIRM"
+                          ],
                           "title": "Outcome",
                           "type": "string"
                         },
@@ -26105,6 +26441,19 @@
                             "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REQUEST_MISSING",
+                                  "REQUEST_NOT_ACCEPTED",
+                                  "REQUEST_CHANGED",
+                                  "TITLE_MISSING",
+                                  "SEASON_REVIEW_REQUIRED",
+                                  "MIKAN_SELECTION_MISSING",
+                                  "SUBTITLE_GROUP_MISSING",
+                                  "NO_VALID_RESOURCES",
+                                  "EXTERNAL_ALREADY_LINKED",
+                                  "OPERATION_IN_PROGRESS",
+                                  "TRACKING_STATE_INVALID"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -26125,6 +26474,10 @@
                                 "type": "string"
                               },
                               "recovery_action": {
+                                "enum": [
+                                  "",
+                                  "SUBMIT"
+                                ],
                                 "title": "Recovery Action",
                                 "type": "string"
                               }
@@ -26209,6 +26562,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -26217,6 +26584,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },

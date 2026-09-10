@@ -323,6 +323,14 @@ def test_stage1_error_maps_to_semantic_http_status(app: Flask) -> None:
             "test_view",
             Stage1Error("ab_submit_failed", "AB 提交失败", "submit"),
         )
+        capability_unknown = handle_exception(
+            "test_view",
+            Stage1Error(
+                "tracking_management_capability_unknown",
+                "当前 Auto Bangumi 管理能力未验证",
+                "tracking_management",
+            ),
+        )
 
     assert not_found.status_code == 404
     assert not_found.get_json()["error_type"] == "request_not_found"
@@ -336,4 +344,6 @@ def test_stage1_error_maps_to_semantic_http_status(app: Flask) -> None:
     assert timeout.status_code == 504
     assert timeout.get_json()["error_type"] == "mikan_timeout"
     assert gateway.status_code == 502
+    assert capability_unknown.status_code == 409
+    assert capability_unknown.get_json()["error_type"] == "tracking_management_capability_unknown"
     assert gateway.get_json()["error_type"] == "ab_submit_failed"

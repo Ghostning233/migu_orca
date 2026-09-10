@@ -4,8 +4,10 @@ import pytest
 from pydantic import ValidationError
 
 from apps.migu_orca_web.api_contract import TrackingAvailableActionDTO, TrackingManagementResultDTO
+from apps.migu_orca_web.openapi_gen import generate_openapi
 from apps.migu_orca_web.schemas import TrackingModifyPayload, TrackingRefreshRssPayload, TrackingSetEnabledPayload
 from apps.migu_orca_web.tracking_contract import MANAGEMENT_ACTION_CONTRACTS, MANAGEMENT_ERROR_SEMANTICS
+from extensions.flask_api.api import _error_http_status
 
 
 def test_management_contract_freezes_actions_and_guards() -> None:
@@ -19,6 +21,17 @@ def test_management_error_semantics_freeze_boundaries() -> None:
     assert MANAGEMENT_ERROR_SEMANTICS["tracking_management_confirmation_required"] == (400, "validation")
     assert MANAGEMENT_ERROR_SEMANTICS["tracking_revision_conflict"] == (409, "conflict")
     assert MANAGEMENT_ERROR_SEMANTICS["tracking_management_outcome_unknown"] == (200, "unknown")
+    assert _error_http_status("tracking_management_capability_unknown") == 409
+    assert MANAGEMENT_ERROR_SEMANTICS["tracking_management_capability_unknown"] == (409, "capability")
+    documented = {
+        error_type
+        for path in generate_openapi()["paths"].values()
+        for operation in path.values()
+        if isinstance(operation, dict)
+        for error_type in MANAGEMENT_ERROR_SEMANTICS
+        if error_type in operation.get("responses", {}).get("409", {}).get("description", "")
+    }
+    assert "tracking_management_capability_unknown" in documented
 
 
 def test_management_payloads_are_strict_and_revision_is_not_coerced() -> None:

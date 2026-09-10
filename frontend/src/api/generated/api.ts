@@ -5034,12 +5034,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -5429,12 +5435,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -11617,10 +11629,16 @@ export interface operations {
                             current_operation: {
                                 /** Operation Id */
                                 operation_id: string;
-                                /** Operation */
-                                operation: string;
-                                /** State */
-                                state: string;
+                                /**
+                                 * Operation
+                                 * @enum {string}
+                                 */
+                                operation: "SUBMIT" | "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                                /**
+                                 * State
+                                 * @enum {string}
+                                 */
+                                state: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                                 /** Attempt */
                                 attempt: number;
                                 /**
@@ -11633,16 +11651,10 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
                                 /**
                                  * Completed At
                                  * @default null
@@ -11651,8 +11663,11 @@ export interface operations {
                             } | null;
                             /** Revalidation Issues */
                             revalidation_issues?: {
-                                /** Code */
-                                code: string;
+                                /**
+                                 * Code
+                                 * @enum {string}
+                                 */
+                                code: "REQUEST_MISSING" | "REQUEST_NOT_ACCEPTED" | "REQUEST_CHANGED" | "TITLE_MISSING" | "SEASON_REVIEW_REQUIRED" | "MIKAN_SELECTION_MISSING" | "SUBTITLE_GROUP_MISSING" | "NO_VALID_RESOURCES" | "EXTERNAL_ALREADY_LINKED" | "OPERATION_IN_PROGRESS" | "TRACKING_STATE_INVALID";
                                 /**
                                  * Field
                                  * @default null
@@ -11660,8 +11675,11 @@ export interface operations {
                                 field: string | null;
                                 /** Message */
                                 message: string;
-                                /** Recovery Action */
-                                recovery_action: string;
+                                /**
+                                 * Recovery Action
+                                 * @enum {string}
+                                 */
+                                recovery_action: "" | "SUBMIT";
                             }[];
                             /** @default null */
                             external_mapping: {
@@ -11695,20 +11713,23 @@ export interface operations {
                             audit_events?: {
                                 /** Event Id */
                                 event_id: string;
-                                /** Action */
-                                action: string;
+                                /**
+                                 * Action
+                                 * @enum {string}
+                                 */
+                                action: "TRACKING_CREATED" | "TRACKING_BACKFILLED" | "PLAN_CHANGE_DETECTED" | "REVALIDATION_PASSED" | "REVALIDATION_FAILED" | "SUBMIT_STARTED" | "SUBMIT_SUCCEEDED" | "SUBMIT_FAILED" | "SUBMIT_OUTCOME_UNKNOWN" | "MANAGEMENT_STARTED" | "MANAGEMENT_SUCCEEDED" | "MANAGEMENT_FAILED" | "MANAGEMENT_UNKNOWN" | "RESULT_PERSIST_FAILED" | "RECOVERY_AUTO_SUCCEEDED" | "RECOVERY_AUTO_FAILED" | "RECOVERY_NEEDS_MANUAL" | "RECOVERY_MANUAL_SUCCEEDED" | "RECOVERY_MANUAL_FAILED" | "RECOVERY_EXTERNAL_VERIFIED" | "COMPAT_QUEUE_UPDATED" | "COMPAT_QUEUE_UPDATE_FAILED";
                                 /** Actor */
                                 actor: string;
                                 /**
                                  * From Status
                                  * @default null
                                  */
-                                from_status: string | null;
+                                from_status: ("PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY") | null;
                                 /**
                                  * To Status
                                  * @default null
                                  */
-                                to_status: string | null;
+                                to_status: ("PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY") | null;
                                 /** Tracking Revision */
                                 tracking_revision: number;
                                 /**
@@ -11992,12 +12013,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -12048,10 +12075,16 @@ export interface operations {
                             operation: {
                                 /** Operation Id */
                                 operation_id: string;
-                                /** Operation */
-                                operation: string;
-                                /** State */
-                                state: string;
+                                /**
+                                 * Operation
+                                 * @enum {string}
+                                 */
+                                operation: "SUBMIT" | "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                                /**
+                                 * State
+                                 * @enum {string}
+                                 */
+                                state: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                                 /** Attempt */
                                 attempt: number;
                                 /**
@@ -12064,16 +12097,10 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
                                 /**
                                  * Completed At
                                  * @default null
@@ -12084,7 +12111,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录 */
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12156,7 +12183,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12165,8 +12192,8 @@ export interface operations {
                     /**
                      * @example {
                      *       "ok": false,
-                     *       "error_type": "tracking_revision_conflict",
-                     *       "error_message": "追番记录版本已变化，请刷新后重试",
+                     *       "error_type": "tracking_management_capability_unknown",
+                     *       "error_message": "当前 Auto Bangumi 管理能力未验证",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -12343,12 +12370,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -12399,10 +12432,16 @@ export interface operations {
                             operation: {
                                 /** Operation Id */
                                 operation_id: string;
-                                /** Operation */
-                                operation: string;
-                                /** State */
-                                state: string;
+                                /**
+                                 * Operation
+                                 * @enum {string}
+                                 */
+                                operation: "SUBMIT" | "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                                /**
+                                 * State
+                                 * @enum {string}
+                                 */
+                                state: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                                 /** Attempt */
                                 attempt: number;
                                 /**
@@ -12415,16 +12454,10 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
                                 /**
                                  * Completed At
                                  * @default null
@@ -12435,7 +12468,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录 */
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -12507,7 +12540,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -12516,8 +12549,8 @@ export interface operations {
                     /**
                      * @example {
                      *       "ok": false,
-                     *       "error_type": "tracking_revision_conflict",
-                     *       "error_message": "追番记录版本已变化，请刷新后重试",
+                     *       "error_type": "tracking_management_capability_unknown",
+                     *       "error_message": "当前 Auto Bangumi 管理能力未验证",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -12656,10 +12689,16 @@ export interface operations {
                         result: {
                             /** Tracking Id */
                             tracking_id: string;
-                            /** Action */
-                            action: string;
-                            /** Outcome */
-                            outcome: string;
+                            /**
+                             * Action
+                             * @enum {string}
+                             */
+                            action: "AUTO" | "MARK_SUCCEEDED" | "MARK_FAILED" | "VERIFY_EXTERNAL";
+                            /**
+                             * Outcome
+                             * @enum {string}
+                             */
+                            outcome: "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED";
                             /** Checked Revision */
                             checked_revision: number;
                             /** Next Revision */
@@ -12712,12 +12751,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -13061,12 +13106,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -13117,10 +13168,16 @@ export interface operations {
                             operation: {
                                 /** Operation Id */
                                 operation_id: string;
-                                /** Operation */
-                                operation: string;
-                                /** State */
-                                state: string;
+                                /**
+                                 * Operation
+                                 * @enum {string}
+                                 */
+                                operation: "SUBMIT" | "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                                /**
+                                 * State
+                                 * @enum {string}
+                                 */
+                                state: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                                 /** Attempt */
                                 attempt: number;
                                 /**
@@ -13133,16 +13190,10 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
                                 /**
                                  * Completed At
                                  * @default null
@@ -13153,7 +13204,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录 */
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13225,7 +13276,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13234,8 +13285,8 @@ export interface operations {
                     /**
                      * @example {
                      *       "ok": false,
-                     *       "error_type": "tracking_revision_conflict",
-                     *       "error_message": "追番记录版本已变化，请刷新后重试",
+                     *       "error_type": "tracking_management_capability_unknown",
+                     *       "error_message": "当前 Auto Bangumi 管理能力未验证",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -13377,8 +13428,11 @@ export interface operations {
                         result: {
                             /** Tracking Id */
                             tracking_id: string;
-                            /** Outcome */
-                            outcome: string;
+                            /**
+                             * Outcome
+                             * @enum {string}
+                             */
+                            outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM";
                             /** Checked Revision */
                             checked_revision: number;
                             /** Next Revision */
@@ -13392,8 +13446,11 @@ export interface operations {
                             operation_id: string | null;
                             /** Issues */
                             issues?: {
-                                /** Code */
-                                code: string;
+                                /**
+                                 * Code
+                                 * @enum {string}
+                                 */
+                                code: "REQUEST_MISSING" | "REQUEST_NOT_ACCEPTED" | "REQUEST_CHANGED" | "TITLE_MISSING" | "SEASON_REVIEW_REQUIRED" | "MIKAN_SELECTION_MISSING" | "SUBTITLE_GROUP_MISSING" | "NO_VALID_RESOURCES" | "EXTERNAL_ALREADY_LINKED" | "OPERATION_IN_PROGRESS" | "TRACKING_STATE_INVALID";
                                 /**
                                  * Field
                                  * @default null
@@ -13401,8 +13458,11 @@ export interface operations {
                                 field: string | null;
                                 /** Message */
                                 message: string;
-                                /** Recovery Action */
-                                recovery_action: string;
+                                /**
+                                 * Recovery Action
+                                 * @enum {string}
+                                 */
+                                recovery_action: "" | "SUBMIT";
                             }[];
                             /**
                              * TrackingItemDTO
@@ -13440,12 +13500,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -13747,12 +13813,18 @@ export interface operations {
                             next_revision: number;
                             /** Checked At */
                             checked_at: string;
-                            /** Next Status */
-                            next_status: string;
+                            /**
+                             * Next Status
+                             * @enum {string}
+                             */
+                            next_status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                             /** Issues */
                             issues?: {
-                                /** Code */
-                                code: string;
+                                /**
+                                 * Code
+                                 * @enum {string}
+                                 */
+                                code: "REQUEST_MISSING" | "REQUEST_NOT_ACCEPTED" | "REQUEST_CHANGED" | "TITLE_MISSING" | "SEASON_REVIEW_REQUIRED" | "MIKAN_SELECTION_MISSING" | "SUBTITLE_GROUP_MISSING" | "NO_VALID_RESOURCES" | "EXTERNAL_ALREADY_LINKED" | "OPERATION_IN_PROGRESS" | "TRACKING_STATE_INVALID";
                                 /**
                                  * Field
                                  * @default null
@@ -13760,8 +13832,11 @@ export interface operations {
                                 field: string | null;
                                 /** Message */
                                 message: string;
-                                /** Recovery Action */
-                                recovery_action: string;
+                                /**
+                                 * Recovery Action
+                                 * @enum {string}
+                                 */
+                                recovery_action: "" | "SUBMIT";
                             }[];
                             /**
                              * TrackingItemDTO
@@ -13799,12 +13874,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -14150,12 +14231,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**
@@ -14206,10 +14293,16 @@ export interface operations {
                             operation: {
                                 /** Operation Id */
                                 operation_id: string;
-                                /** Operation */
-                                operation: string;
-                                /** State */
-                                state: string;
+                                /**
+                                 * Operation
+                                 * @enum {string}
+                                 */
+                                operation: "SUBMIT" | "MODIFY" | "SET_ENABLED" | "DELETE_EXTERNAL" | "REFRESH_RSS";
+                                /**
+                                 * State
+                                 * @enum {string}
+                                 */
+                                state: "PREPARED" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED" | "OUTCOME_UNKNOWN" | "RECOVERY_REQUIRED";
                                 /** Attempt */
                                 attempt: number;
                                 /**
@@ -14222,16 +14315,10 @@ export interface operations {
                                  * @default null
                                  */
                                 error_type: string | null;
-                                /**
-                                 * Created At
-                                 * @default null
-                                 */
-                                created_at: string | null;
-                                /**
-                                 * Updated At
-                                 * @default null
-                                 */
-                                updated_at: string | null;
+                                /** Created At */
+                                created_at: string;
+                                /** Updated At */
+                                updated_at: string;
                                 /**
                                  * Completed At
                                  * @default null
@@ -14242,7 +14329,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录 */
+            /** @description data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效 */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -14314,7 +14401,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
+            /** @description tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -14323,8 +14410,8 @@ export interface operations {
                     /**
                      * @example {
                      *       "ok": false,
-                     *       "error_type": "tracking_revision_conflict",
-                     *       "error_message": "追番记录版本已变化，请刷新后重试",
+                     *       "error_type": "tracking_management_capability_unknown",
+                     *       "error_message": "当前 Auto Bangumi 管理能力未验证",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }
@@ -14466,8 +14553,11 @@ export interface operations {
                         result: {
                             /** Tracking Id */
                             tracking_id: string;
-                            /** Outcome */
-                            outcome: string;
+                            /**
+                             * Outcome
+                             * @enum {string}
+                             */
+                            outcome: "ACTIVE" | "SUBMIT_FAILED" | "VERIFYING_EXTERNAL" | "RECOVERY_REQUIRED" | "NEEDS_RECONFIRM";
                             /** Checked Revision */
                             checked_revision: number;
                             /** Next Revision */
@@ -14481,8 +14571,11 @@ export interface operations {
                             operation_id: string | null;
                             /** Issues */
                             issues?: {
-                                /** Code */
-                                code: string;
+                                /**
+                                 * Code
+                                 * @enum {string}
+                                 */
+                                code: "REQUEST_MISSING" | "REQUEST_NOT_ACCEPTED" | "REQUEST_CHANGED" | "TITLE_MISSING" | "SEASON_REVIEW_REQUIRED" | "MIKAN_SELECTION_MISSING" | "SUBTITLE_GROUP_MISSING" | "NO_VALID_RESOURCES" | "EXTERNAL_ALREADY_LINKED" | "OPERATION_IN_PROGRESS" | "TRACKING_STATE_INVALID";
                                 /**
                                  * Field
                                  * @default null
@@ -14490,8 +14583,11 @@ export interface operations {
                                 field: string | null;
                                 /** Message */
                                 message: string;
-                                /** Recovery Action */
-                                recovery_action: string;
+                                /**
+                                 * Recovery Action
+                                 * @enum {string}
+                                 */
+                                recovery_action: "" | "SUBMIT";
                             }[];
                             /**
                              * TrackingItemDTO
@@ -14529,12 +14625,18 @@ export interface operations {
                                  * @default null
                                  */
                                 poster_path: string | null;
-                                /** Status */
-                                status: string;
+                                /**
+                                 * Status
+                                 * @enum {string}
+                                 */
+                                status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                                 /** Status Label */
                                 status_label: string;
-                                /** Status Group */
-                                status_group: string;
+                                /**
+                                 * Status Group
+                                 * @enum {string}
+                                 */
+                                status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                                 /** Available Actions */
                                 available_actions?: {
                                     /**

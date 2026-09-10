@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -529,6 +530,46 @@ class TestAppRequestDetailSensitive:
             assert value not in browser_state["sessionStorage"]
             assert value not in browser_state["bodyText"]
             assert value not in persisted
+
+    def test_stage32_canary_stays_out_of_screenshot_and_trace(
+        self, page: Page, live_server_url: str, storage_dir: Path, tmp_path: Path
+    ) -> None:
+        """US-253: actual screenshot/trace artifacts do not retain canaries."""
+        _require_dist()
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-stage32-artifacts")
+        set_storage_preferences(page, storage_dir)
+        canary = "stage32-artifact-canary"
+        screenshot_path = tmp_path / "request-detail.png"
+        trace_path = tmp_path / "request-detail-trace.zip"
+
+        def _poisoned_detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=502,
+                content_type="application/json",
+                body=(
+                    '{"ok": false, "error_type": "mikan_http_failed", '
+                    f'"error_message": "{canary}"}}'
+                ),
+            )
+
+        page.route("**/api/v1/requests/req-stage32-artifacts**", _poisoned_detail)
+        page.goto(
+            f"{live_server_url}/app/requests?request_id=req-stage32-artifacts"
+        )
+        page.wait_for_selector("#request-detail-container .error-state", timeout=5000)
+        # Start tracing after the mocked raw response has been processed:
+        # Playwright records route.fulfill arguments verbatim, so starting it
+        # earlier would test the fixture's canary rather than the safe page.
+        page.context.tracing.start(screenshots=True, snapshots=True, sources=False)
+        try:
+            page.screenshot(path=str(screenshot_path), full_page=True)
+        finally:
+            page.context.tracing.stop(path=str(trace_path))
+
+        assert canary.encode() not in screenshot_path.read_bytes()
+        with zipfile.ZipFile(trace_path) as trace:
+            for member in trace.infolist():
+                assert canary.encode() not in trace.read(member)
 
 
 class TestAppRequestDetailResponsiveA11y:

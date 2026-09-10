@@ -9,6 +9,9 @@ from flask import Blueprint, Response, current_app, jsonify
 from flask.views import MethodView
 from pydantic import ValidationError
 
+from apps.migu_orca_web.tracking_contract import (
+    MANAGEMENT_ERROR_SEMANTICS,
+)
 from extensions.flask_api.exceptions import APIException
 from shared.errors import Stage1Error
 
@@ -113,6 +116,11 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     # US-245: a management operation already owns the record or key.
     "tracking_management_state_conflict",
 }
+_HTTP_CONFLICT_ERROR_TYPES.update(
+    name
+    for name, (status, _semantic) in MANAGEMENT_ERROR_SEMANTICS.items()
+    if status == 409
+)
 # 401 — authentication against the external service failed.
 _HTTP_UNAUTHORIZED_ERROR_TYPES = {
     "ab_auth_failed",

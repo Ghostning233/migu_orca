@@ -100,3 +100,14 @@ def test_storage_backup_rejects_destination_inside_or_equal_to_source(
 
     with pytest.raises(ValueError, match="outside"):
         backup_storage(storage, tmp_path / bad_destination)
+
+
+def test_storage_backup_rejects_symbolic_links(tmp_path: Path) -> None:
+    storage = tmp_path / "storage"
+    storage.mkdir()
+    target = tmp_path / "outside-evidence"
+    target.write_text("must not be copied")
+    (storage / "linked-evidence").symlink_to(target)
+
+    with pytest.raises(ValueError, match="symbolic links"):
+        backup_storage(storage, tmp_path / "backup")

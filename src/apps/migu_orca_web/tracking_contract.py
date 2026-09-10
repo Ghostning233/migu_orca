@@ -17,6 +17,23 @@ MANAGEMENT_ERROR_SEMANTICS: Final = {
     "tracking_management_outcome_unknown": (200, "unknown"),
 }
 
+MANAGEMENT_ERROR_MESSAGES: Final = {
+    "tracking_management_confirmation_required": "管理操作必须显式确认",
+    "tracking_management_patch_invalid": "管理操作参数无效",
+    "tracking_management_capability_unknown": "当前 Auto Bangumi 管理能力未验证",
+    "tracking_revision_conflict": "追番记录版本已变化，请刷新后重试",
+    "tracking_idempotency_conflict": "同一幂等键已绑定不同的管理操作",
+    "tracking_management_state_conflict": "已有管理操作正在执行，请先恢复",
+}
+
+
+def management_error_names_for_status(status: int) -> tuple[str, ...]:
+    """Return registered management errors for one public HTTP status."""
+    return tuple(
+        name for name, (error_status, _semantic) in MANAGEMENT_ERROR_SEMANTICS.items()
+        if error_status == status and name in MANAGEMENT_ERROR_MESSAGES
+    )
+
 @dataclass(frozen=True)
 class ManagementActionContract:
     action: str

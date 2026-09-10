@@ -98,8 +98,13 @@ def backup_storage(storage_dir: Path, backup_dir: Path) -> StorageBackup:
         raise ValueError("storage backup destination must be outside the source")
     if destination.exists():
         raise ValueError("storage backup destination must not already exist")
+    # A backup is evidence preservation, not a way to retain references to
+    # arbitrary files outside storage.  Reject links before copytree so both
+    # the copied tree and its aggregate accounting stay self-contained.
+    if source.is_symlink() or any(path.is_symlink() for path in source.rglob("*")):
+        raise ValueError("storage backup source must not contain symbolic links")
 
-    shutil.copytree(source, destination, symlinks=True)
+    shutil.copytree(source, destination, symlinks=False)
     files = tuple(path for path in destination.rglob("*") if path.is_file())
     return StorageBackup(
         file_count=len(files),
