@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 工作目标 / 设计讨论基线（不是执行 PRD） |
-| 当前状态 | Gate 1～3、B-A～B-D 已完成；F-A 已规划为 Stage 33，F-B～F-G 继续独立评审 |
+| 当前状态 | Gate 1～3、B-A～B-D、F-A（Stage 33）已完成；F-B～F-G 继续独立评审 |
 | 创建日期 | 2026-09-07 |
 | 适用范围 | MiGuOrca Web 前端的信息架构、用户流程、页面设计、视觉方案与后续实现 |
 | 前置事实 | Stage 26、Stage 27 已完成；Vue 3、TypeScript、Vite、OpenAPI 客户端和浏览器测试基线继续保留 |
@@ -384,7 +384,7 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 | B-C1 只读同步 | Stage 30 已完成（US-228～US-236） | Auto Bangumi capability、只读同步、映射对账与外部核验、OpenAPI/生成客户端 handoff | US-228～US-236 已通过并归档，执行 PRD 见 `docs/MiGuOrca_stage30_ab_read_sync_PRD.md` |
 | B-C2 后端写管理 | Stage 31 已完成（US-237～US-246） | Auto Bangumi 修改、启停、删除、RSS 管理与可靠操作 | Stage 30 已完成；执行 PRD 见 `docs/MiGuOrca_stage31_ab_write_management_PRD.md` |
 | B-D 后端契约收尾 | Stage 32 已完成（US-247～US-256） | 生命周期、严格契约、兼容、迁移、安全、回退与前端 handoff | Stage 31 已完成；执行 PRD 已归档，见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md` |
-| F-A 壳层与设计系统 | Stage 33 已规划（US-257～US-265） | 新路由、四项导航、Token、共享状态、现有页面兼容挂载 | Stage 32 已合入；执行 PRD 见 `docs/MiGuOrca_stage33_frontend_shell_PRD.md` |
+| F-A 壳层与设计系统 | Stage 33 已完成（US-257～US-265） | 新路由、四项导航、Token、共享状态、现有页面兼容挂载 | Stage 32 已合入；执行 PRD 见 `docs/MiGuOrca_stage33_frontend_shell_PRD.md` |
 | F-B～F-G 前端分片 | 待评审 | 共享审核、单番、批量、方案、管理、设置/收尾 | Stage 33 完成后按依赖推进 |
 | 独立发布验收 | 待规划 | 跨流程 Chromium、无障碍/多视口/安全报告、文档切换 | 全部实现切片验收通过 |
 
@@ -482,7 +482,7 @@ passes，2026-09-08，执行与完成记录见 `docs/MiGuOrca_stage28_draft_cons
    状态，历史数据纯本地幂等迁移，新增列表/详情/复核/提交/重试/恢复 API；旧 queue 保留一个
    发布周期，结果未知禁止盲重试，旧单番/批量入口共享统一 submission service。
 3. Stage 30 B-C1、Stage 31 B-C2 与 Stage 32 B-D 已完成；US-247～US-256 的契约收尾证据已归档。
-4. 按[Stage 33 执行 PRD](MiGuOrca_stage33_frontend_shell_PRD.md)实施 F-A 壳层与设计系统；
+4. 按[Stage 33 执行 PRD](MiGuOrca_stage33_frontend_shell_PRD.md)完成 F-A 壳层与设计系统；
    F-B～F-G 继续按依赖逐包评审。
 5. 在 Stage 33 完成后评审 F-B～F-G 的整体依赖顺序、
    旧路由迁移、共享组件和独立 PR 边界。

@@ -254,8 +254,8 @@ Stage 32 执行 PRD 为 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`，分�
 
 2026-09-07 已完成桌面端前端体验重构的产品方向、混合低保真、组件级交互和视觉方案评审。
 2026-09-08 B-A 已作为 Stage 28 完成并交付，B-B 已作为 Stage 29 完成并交付；2026-09-09 B-C1
-已作为 Stage 30 完成，B-C2 已作为 Stage 31 完成；B-D 已作为 Stage 32 完成，F-A 已规划为
-Stage 33，其余工作包暂不分配正式 Stage 编号：
+已作为 Stage 30 完成，B-C2 已作为 Stage 31 完成；B-D 已作为 Stage 32 完成，F-A 已作为
+Stage 33 完成，其余工作包暂不分配正式 Stage 编号：
 
 1. BL-025 后端支撑：B-A 已作为 Stage 28 完成，覆盖 draft revision、可靠保存、单番/批量保存
    确认、36 部上限和 safe-info（见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；B-B 已作为
@@ -264,7 +264,7 @@ Stage 33，其余工作包暂不分配正式 Stage 编号：
    3.1.18 只读同步与映射；B-C2 已作为 Stage 31 完成；B-D 已作为 Stage 32 完成（见
    `docs/MiGuOrca_stage32_contract_hardening_PRD.md`）。总体候选 PRD 为
    `docs/MiGuOrca_frontend_ux_backend_support_PRD.md`。
-2. BL-026 前端分片：F-A 已规划为 Stage 33（US-257～US-265），只实现四项导航、壳层、Token、
+2. BL-026 前端分片：F-A 已完成为 Stage 33（US-257～US-265），只实现四项导航、壳层、Token、
    共享状态与现有页面兼容挂载，执行 PRD 为 `docs/MiGuOrca_stage33_frontend_shell_PRD.md`；
    单番三步、1/12/36 部批量审核、追番方案、正式追番管理和设置收尾继续作为 F-B～F-G 评审。
 
@@ -278,7 +278,7 @@ Stage 28～32 的现有功能、OpenAPI 生成客户端和浏览器测试作为 
 
 ## 11. 未开发事项优先级池
 
-除已完成的 Stage 26～32 和已规划的 Stage 33 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
+除已完成的 Stage 26～33 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
 
 ### 未排期与条件触发事项
 
@@ -330,12 +330,13 @@ Stage 28～32 的现有功能、OpenAPI 生成客户端和浏览器测试作为 
 12. Stage 30：Auto Bangumi 只读能力与外部同步基础（已完成，US-228～US-236；B-C1，只读，不实现外部管理写动作）。
 13. Stage 31：Auto Bangumi 可靠写管理（已完成，US-237～US-246；B-C2，不实现正式页面）。
 14. Stage 32：后端契约固化、兼容迁移与前端交接（已完成，US-247～US-256；B-D，不新增动作或删除旧端点）。
-15. Stage 33：前端应用壳层与设计系统（已规划，US-257～US-265；F-A，不实现新业务页面）。
+15. Stage 33：前端应用壳层与设计系统（已完成，US-257～US-265；F-A，不实现新业务页面）。
 
 因此，Stage 19 到 Stage 29 的原产品闭环与前后端工程基线已经完成，Stage 26 作为 P0 后端基础
 阶段已交付，Stage 27 作为 P1 前端迁移阶段已交付，Stage 28 作为 BL-025 的 B-A 草案一致性
 阶段已交付，Stage 29 作为 BL-025 的 B-B 统一追番阶段已交付；Stage 30 已完成 B-C1 只读同步，
 Stage 31 已完成 B-C2 可靠写管理；Stage 32 已完成 B-D 契约收尾，BL-026 的 F-A 已在最新
-`main` 基线上规划为 Stage 33，目标分支为 `ralph/stage33-frontend-shell`。
-其余前端工作包仍按依赖和真实工作量拆分。
+`main` 基线上完成为 Stage 33，目标分支为 `ralph/stage33-frontend-shell`。
+其余前端工作包仍按依赖和真实工作量拆分。Stage 33 完成后，下一候选为 F-B 共享审核核心；F-F
+正式追番管理仍须在 F-B 后单独规划，并复用 Stage 32 最终 generated contract。
 流式封面代理等未排期方向继续记录在 `docs/optional_features.md`。

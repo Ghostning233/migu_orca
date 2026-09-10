@@ -8,7 +8,7 @@
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
 | 当前版本 | v0.33 |
-| 文档状态 | Stage 26～Stage 32 均已完成；Stage 33 前端壳层与设计系统已规划，尚未开始实现 |
+| 文档状态 | Stage 26～Stage 33 均已完成；F-B～F-G 前端分片继续独立评审 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -297,9 +297,9 @@ Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立�
 1. BL-023 已完成为 Stage 26 Web API 契约固化与服务端边界治理；执行范围见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。Stage 26 不重构页面视觉，不引入新前端框架。
 2. BL-024 已完成 Stage 27 前端工程化迁移与页面重构；执行范围见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。前端只通过生成类型/client 使用后端，不导入 Python 模型或复制旧 `app.js` 内部状态（旧 `app.js` 已随 US-209 删除）。
 3. BL-025 的 B-A～B-D 已分别完成 Stage 28～32（US-210～US-256）并归档，覆盖契约、兼容、迁移、安全、回退与前端 handoff；正式追番管理页面仍待后续前端阶段。
-4. BL-026 的 F-A 已规划为 Stage 33（US-257～US-265）：先完成四项导航、语义 Token、路由安全迁移、桌面壳层、共享状态和现有页面兼容挂载；F-B～F-G 不进入本阶段。
+4. BL-026 的 F-A 已完成为 Stage 33（US-257～US-265）：交付四项导航、语义 Token、路由安全迁移、桌面壳层、共享状态和现有页面兼容挂载；F-B～F-G 不属于本阶段。
 5. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
 6. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
 7. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
-8. 当前 `/app/workbench|requests|queue|settings` 在 Stage 33 完成前保持兼容；目标信息架构为 `/app/add|plans|tracking|settings`。所有流程继续禁止把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
+8. 当前 `/app/workbench|requests|queue|settings` 作为兼容入口保留；目标信息架构已交付为 `/app/add|plans|tracking|settings`。所有流程继续禁止把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
 9. 每次阶段推进继续使用 `uv run pytest`、`uv run python -m compileall -q src tests` 和前端工程的 `cd frontend && npm run typecheck && npm run lint && npm run test:unit -- --run && npm run build` 验证；UI story 必须执行真实 Chromium 检查。

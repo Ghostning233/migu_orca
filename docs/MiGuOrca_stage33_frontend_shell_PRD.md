@@ -7,13 +7,13 @@
 | Stage | 33 |
 | 工作包 | F-A：应用壳层与设计系统 |
 | Backlog | BL-026 |
-| 状态 | 已规划，待开发 |
+| 状态 | 已完成（2026-09-10） |
 | 目标分支 | `ralph/stage33-frontend-shell` |
 | Ralph stories | US-257～US-265 |
 | 实时基线 | `origin/main` 合并提交 `6f2a595`（Stage 32 已合入） |
 | 前置 | Stage 27 前端工程基线、Gate 1～3 设计包、Stage 32 前端契约 handoff v1 |
 
-Stage 33 原规划曾位于独立前端 clone，但该分支停在 Stage 30 基线且没有实现提交。当前规划已在
+Stage 33 原规划曾位于独立前端 clone，但该分支停在 Stage 30 基线且没有实现提交。当前实现已在
 Stage 32 合入后的主仓重新落地；旧 clone 的环境脚本、符号链接和未完成代码不是执行事实来源。
 
 ## 2. 背景与阶段判断
@@ -203,3 +203,19 @@ git diff --check
 3. 语义 Token 与共享原语成为后续页面唯一基线，没有新增 API、业务状态机或平行 UI 系统。
 4. Stage 32 generated contract 保持无漂移，敏感信息不进入任何浏览器可观察面。
 5. 下一候选 Stage 为 F-B“共享审核核心”；F-F 虽已被 Stage 32 解锁，仍必须按依赖在 F-B 后单独规划。
+
+## 11. 最终验收记录（2026-09-10）
+
+US-257～US-265 全部通过。完整门禁结果：`compileall`、Ruff、203 个 Flask 路由测试、OpenAPI
+drift check、前端 typecheck/lint、305 个 Vitest、生产 build 和 157 个真实 Chromium 测试全部通过。
+`git diff --check` 通过，未修改 OpenAPI、generated client 或后端业务契约。
+
+实际设计偏差仅限于兼容挂载：`/app/tracking` 按 D33-01 继续挂载既有 `QueueView`，不宣称正式
+追番管理能力；200% 缩放以 1280 px 视口下的 2x 文档缩放等效模型验收。浏览器安全 canary 验证
+URL、DOM、history 与 browser storage 不包含凭据、endpoint、原始响应或其他敏感值；仓库未纳入
+`dist`、trace、截图、临时 storage 或环境 symlink。
+
+F-B handoff：共享审核核心必须复用现有 App shell、`tokens.css`、`frontend/src/app/router/catalog.ts`
+及 Base*/PanelSection/FormField/反馈原语，不另建平行 V2 组件或路由 query 规则。F-F 正式追番管理
+仍须在 F-B 之后单独规划，并以 Stage 32 的最终 generated contract 为准；本阶段的 QueueView
+兼容挂载不构成 F-F 交付。
