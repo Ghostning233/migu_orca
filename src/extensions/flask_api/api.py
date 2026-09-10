@@ -9,11 +9,9 @@ from flask import Blueprint, Response, current_app, jsonify
 from flask.views import MethodView
 from pydantic import ValidationError
 
-from apps.migu_orca_web.tracking_contract import (
-    MANAGEMENT_ERROR_SEMANTICS,
-)
 from extensions.flask_api.exceptions import APIException
 from shared.errors import Stage1Error
+from shared.management_contract import MANAGEMENT_ERROR_SEMANTICS
 
 _ABSOLUTE_PATH_RE = re.compile(r"(?<!\w)(?:/[^\s<>'\"]+)+")
 _WINDOWS_PATH_RE = re.compile(r"(?i)(?<![\w])(?:[a-z]:\\|\\\\)[^\s<>'\"]+")

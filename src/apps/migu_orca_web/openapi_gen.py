@@ -67,7 +67,7 @@ from apps.migu_orca_web.api_contract import (
     TrackingSyncResultDTO,
 )
 from apps.migu_orca_web.endpoint_lifecycle import lifecycle_for
-from apps.migu_orca_web.tracking_contract import (
+from shared.management_contract import (
     MANAGEMENT_ERROR_MESSAGES,
     management_error_names_for_status,
 )

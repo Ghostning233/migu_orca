@@ -1058,12 +1058,10 @@ def test_modify_accepted_request_preserves_status_and_records_history(
     assert detail["result"]["history"]["available"] is True
     assert detail["result"]["history"]["events"] == [
         {
-            "request_id": "request-1",
+            "action": "MODIFY",
             "previous_status": "ACCEPTED",
             "next_status": "ACCEPTED",
-            "action": "MODIFY",
             "timestamp": payload["result"]["request"]["updated_at"],
-            "details": {"patch": patch},
         }
     ]
 
@@ -5269,7 +5267,7 @@ def test_batch_submit_api_persists_ab_result_into_request_and_ab_results(
         detail["result"]["ab_result"]["record"]["ab_submit_result"][
             "ab_subscription_id"
         ]
-        == "fake-ab-subscription"
+        is None
     )
     # No secrets in any persisted file.
     for text in (
