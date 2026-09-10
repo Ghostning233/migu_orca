@@ -1,0 +1,120 @@
+# MiGuOrca Ralph Progress - Stage 33
+
+## Codebase Patterns
+
+- 正式执行 PRD：`docs/MiGuOrca_stage33_frontend_shell_PRD.md`；分支：
+  `ralph/stage33-frontend-shell`；stories：US-257～US-265。
+- 实现基线是 Stage 32 合入提交 `6f2a595`。OpenAPI、generated client 与
+  `docs/api/frontend-contract-handoff-v1.md` 只读，不得在前端 story 中临时改变后端契约。
+- 本阶段只实现 F-A：路由、四项导航、壳层、语义 Token、共享原语视觉和现有页面兼容挂载；
+  `/tracking` 仍挂载现有 `QueueView`，不得开发 F-B～F-G。
+- Vue Router base 保持 `/app/`；新 route record 为 `/add`、`/plans`、`/tracking`、`/settings`。
+- `WorkbenchView` 内嵌的 `BatchWorkbenchView` 使用 `batch_id`，所以 `/add` 与 `/tracking` 都允许
+  scalar `batch_id`；`/plans` 与 `/settings` 只允许 scalar `request_id`，其他 query 全部丢弃。
+- route catalog 必须由真实 router、导航和内部跳转消费；不要提交下一 story 必须删除的
+  “迁移前新路径不存在”断言。Python Flask 入口使用独立明确常量和表驱动测试。
+- 复用现有 Base*、PanelSection、FormField、ConfirmDialog 和状态组件，不增加平行 V2 原语。
+- 不修改 OpenAPI、不手写 API DTO、不改变 Request/draft/tracking/submit/recover/management 语义。
+- 凭据、Cookie、endpoint、原始响应、完整 RSS/MiKan URL、绝对路径不得进入 URL、storage、DOM、
+  日志、截图或 trace。
+- UI story 必须按 `dev-browser` skill 使用真实 Chromium 验证；jsdom 和静态截图不能替代。
+- 每轮只完成一个最高优先级 story。US-257～US-264 只运行定向检查，US-265 才运行一次完整门禁；
+  无代码变化不重复全量检查，总计超过 11 轮立即停止并报告。
+
+## Stage 33 Handoff
+
+- 原独立前端 clone 停在 Stage 30 基线，没有实现提交。其未提交 route matrix 仅作为调查材料：
+  `/add` query 白名单为空的结论错误，且迁移前断言不可作为长期 drift guard。
+- 不迁移旧 clone 的 Claude/K3 runner、Chromium 动态库 symlink、重复 `.gitignore` 或网络失败记录。
+- 下一候选切片为 F-B“共享审核核心”；它只能在 Stage 33 完成后复用本阶段基线。
+- Canonical Vue routes must sanitize their own incoming query on direct visits as well as
+  legacy redirects; otherwise unknown or sensitive values remain in the browser URL.
+- Desktop accessibility coverage can model 200% zoom with a 2x document scale at a
+  1280px viewport, while checking all public shell navigation targets remain visible.
+
+---
+## 2026-09-10 19:28:34 CST - US-257
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the production route catalog and reusable query sanitizer for the Stage 33 route matrix. The catalog records `/app/add`, `/app/plans`, `/app/tracking`, and `/app/settings`, their existing Workbench/Requests/Queue/Settings views, parity test coverage, three SPA compatibility paths, and Flask entry mappings. The sanitizer preserves only one non-empty scalar `batch_id` for add/tracking or `request_id` for plans/settings, rejecting arrays, duplicates, empty values, unknown keys, and sensitive query values. No router migration, business page, OpenAPI, or generated client behavior was changed.
+- Files changed: `frontend/src/app/router/catalog.ts`, `frontend/src/app/router/catalog.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep the route/query contract in one production module before US-259 changes the real router and internal navigation.
+  - Treat duplicate query keys as invalid arrays even when one value would otherwise be acceptable; sanitize per field so a valid public identifier survives alongside dropped unknown values.
+  - Validation passed: targeted catalog Vitest (14 tests), Flask route tests (`app_routes_test.py` and `views_test.py`, 202 tests), frontend typecheck, and `git diff --check`. Chromium and full-suite checks were intentionally not run.
+---
+## 2026-09-10 19:45:54 CST - US-258
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the single semantic design-token entry for warm surfaces, deep-sea text/actions, restrained coral accent, danger/focus, typography, spacing, dimensions, radii, elevation, stacking and motion. Global styles now consume the token layer without changing component props or page structure, and reduced-motion preferences set transition durations/displacement to zero and scrolling to auto. Added a style drift guard and a production-build Chromium assertion for computed tokens and reduced motion.
+- Files changed: `frontend/src/styles/tokens.css`, `frontend/src/styles/tokens.test.ts`, `frontend/src/styles/main.css`, `tests/browser/test_app_shell.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep all shell palette, focus and elevation literals in `tokens.css`; `tokens.test.ts` prevents global shell styles from introducing a parallel brand colour, focus ring or box shadow.
+  - Vitest's jsdom environment rewrites `import.meta.url`; filesystem-backed style tests should resolve from the frontend `process.cwd()`.
+  - Validation passed: targeted token Vitest (14 tests), frontend typecheck/build, targeted real-Chromium reduced-motion test, and `git diff --check`. Full suites were intentionally deferred to US-265.
+---
+## 2026-09-10 19:55:36 CST - US-259
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: The production Vue router now consumes the Stage 33 route catalog for `/add`, `/plans`, `/tracking`, `/settings`, root redirect and all three legacy replace redirects. Internal navigation uses `routeLocation` exclusively. Query migration retains only a single valid ASCII public identifier owned by the destination, rejecting arrays, duplicates, empty values, unknown fields, URLs and path-shaped values. Flask `/` and `/index` now redirect to `/app/add` with only `batch_id`; both settings entries retain only `request_id`. The scoped SPA fallback and non-app routes remain unchanged.
+- Files changed: route catalog/router and their tests, App route links and affected feature navigation/tests, Flask entry routes/tests, targeted shell browser coverage, and current frontend/Web agent guidance; plus `scripts/ralph/prd.json` and `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Redirect query validation must reject sensitive-shaped values even when they are placed under an otherwise allowed key; current generated request/batch identifiers fit `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`.
+  - Feature navigation should call `routeLocation` instead of repeating paths so catalog, router and internal links cannot drift.
+  - Validation passed: 9 targeted Vitest files (126 tests), frontend typecheck/build, Flask app route tests (17 tests), four targeted real-Chromium route/navigation checks, and `git diff --check`. Full suites were intentionally deferred to US-265.
+---
+## 2026-09-10 20:02:34 CST - US-260
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Rebuilt the desktop App shell around a bounded brand area, the fixed four-item “添加番剧 / 追番方案 / 追番管理 / 设置” navigation, and a public local-workspace status. The active item now has `aria-current=page`, a visible “当前” label and a coral underline in addition to colour. The existing skip link remains first in keyboard order, and route-name changes focus the main landmark without stealing focus for query-only in-page selection changes. The shell consumes Stage 33 tokens for layout, elevation, focus, colour and reduced motion and does not persist feature or sensitive state.
+- Files changed: `frontend/src/App.vue`, `frontend/src/App.test.ts`, `frontend/src/styles/main.css`, `frontend/src/styles/tokens.test.ts`, `tests/browser/test_app_shell.py`, `frontend/AGENTS.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Focus management must observe route names instead of full paths so public `request_id`/`batch_id` query changes do not disrupt the user's current control.
+  - The style drift guard should permit `box-shadow: var(--shadow-shell)` consumption while rejecting literal or parallel shell shadows.
+  - Validation passed: targeted App/token Vitest (20 tests), frontend typecheck/build, three targeted real-Chromium shell/navigation/skip-link tests, and `git diff --check`. Full suites were intentionally deferred to US-265.
+---
+## 2026-09-10 20:18:09 CST - US-261 implementation record
+- **Implementation:** commit `c8e3544` unified the existing `BaseButton`, `BaseInput`, `BaseSelect`, `BaseTextarea`, `CheckboxRow`, `FormField` and `PanelSection` primitives around the Stage 33 semantic tokens. It preserved their existing props, emits, focus behavior and page call sites; no parallel V2 component or business action was added.
+- **Verification:** the Stage 33 shared-component Vitest and typecheck gates passed for the implementation; the subsequent review reran the five affected Chromium route/feature assertions and they passed after updating their final `/app/*` paths. No OpenAPI or generated client change was part of US-261.
+
+## 2026-09-10 20:20:00 CST - US-261 review fix
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was reviewed: Ralph committed US-261 as `c8e3544`; its source changes were kept, but the first full browser run exposed five stale Stage 33 route assertions. Updated browser helpers and URL/navigation assertions to use `/app/add`, `/app/plans`, and `/app/tracking` with the final Chinese navigation labels.
+- Files changed: `tests/browser/test_app_request_detail.py`, `tests/browser/test_app_requests.py`, `tests/browser/test_app_responsive_a11y.py`, `tests/browser/test_app_workbench.py`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - A route migration is incomplete until browser helper defaults, wait-for-URL assertions, responsive route matrices, and navigation labels all consume the new catalog paths.
+  - Ralph must not classify route assertion failures as pre-existing when the failing tests are direct consumers of the current Stage 33 paths.
+  - Targeted rerun passed: all five previously failing Chromium tests; archive pollution from the Ralph launcher was discarded and Stage 33 progress was restored before this review entry.
+---
+## 2026-09-10 20:24:00 CST - US-262
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: unified feedback tokens and accessible system-state styling across ConfirmDialog, StatusAlert, LoadingState, EmptyState, ErrorState, ErrorBoundary, GlobalLoadingBar, and GlobalNotification; corrected global error notifications to use assertive live announcements while preserving focus trapping, recovery actions, and existing component APIs.
+- Files changed: `frontend/src/components/feedback/{ConfirmDialog,StatusAlert,LoadingState,EmptyState,ErrorState,ErrorBoundary,GlobalLoadingBar,GlobalNotification}.vue`, `frontend/src/styles/tokens.css`, `scripts/ralph/prd.json`.
+- **Learnings for future iterations:**
+  - Patterns discovered: feedback surfaces use dedicated semantic success/error/scrim tokens in `tokens.css`; component styles should consume those roles rather than legacy compatibility aliases.
+  - Gotchas encountered: full Python tests still contain three stale pre-Stage-33 redirect expectations for `/app/workbench`; the current route contract intentionally redirects root and `/index` to `/app/add` and filters `request_id` there.
+  - Useful context: frontend typecheck, lint, 304 unit tests, production build, compileall, and all 138 Chromium browser tests passed; full Python suite was 1771 passed and 3 failed only on the stale redirect assertions.
+---
+## 2026-09-10 20:30:00 CST - US-263
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Confirmed the production router mounts the existing WorkbenchView, RequestsView, QueueView, and SettingsView at `/add`, `/plans`, `/tracking`, and `/settings`; added a real-Chromium feature-parity matrix for each route and a queue-specific assertion proving `/tracking` remains the established submit/recover workflow rather than a mock page. Updated stale Flask redirect tests to the final `/app/add` contract and preserved the public `batch_id` sanitizer behavior.
+- Files changed: `tests/browser/test_app_feature_parity.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - QueueView renders its submit form only after a queue item loads; parity tests must provide a safe mocked queue response when asserting submit controls.
+  - Existing feature unit/browser suites already own business behavior; shell parity should assert route mounting and distinctive entry controls without duplicating domain logic.
+  - Validation passed: frontend typecheck, lint, 304 unit tests, production build, feature-parity Chromium tests (5), existing feature Chromium regression set (119), compileall, and full Python suite (1776 passed).
+---
+## 2026-09-10 20:33:58 CST - US-264
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Extended the real-Chromium responsive/accessibility matrix to 1440 and 1920 desktop widths, added 200%-equivalent route reachability checks, verified keyboard access to all four public navigation targets, and added a shell-level query-canary check across URL, DOM, browser storage, and history. Fixed the production router to sanitize query parameters on direct visits to canonical routes, not only compatibility redirects.
+- Files changed: `frontend/src/app/router/index.ts`, `frontend/src/app/router/index.test.ts`, `tests/browser/test_app_responsive_a11y.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Canonical route guards must reapply the route catalog sanitizer because users can enter new paths directly without passing through a legacy redirect.
+  - Validation passed: 36 targeted Chromium tests, frontend lint, 305 frontend unit tests, typecheck, production build, Python compileall, and `git diff --check`. Full cross-project/browser gates remain reserved for US-265.
+
+## 2026-09-10 20:37:00 CST - US-265
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Completed Stage 33 F-A closeout documentation and handoff. Marked US-257～US-265 passing, synchronized README, main PRD, future stages, backlog, M13 and frontend work-goal status, and documented the `/tracking` QueueView compatibility deviation, 200% zoom-equivalent model, security canary evidence, and F-B/F-F boundaries.
+- Files changed: Stage 33 PRD, README, docs/README.md, main PRD, future stages, backlog, M13 PRD, frontend UX work goals, implementation PRD, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Full closeout evidence is recorded in the Stage 33 PRD; the next frontend package must reuse the shell, semantic tokens, route catalog and shared primitives.
+  - The complete gate passed: compileall, Ruff, 203 Flask route tests, OpenAPI drift check, frontend typecheck/lint/305 unit tests/build, 157 Chromium tests and `git diff --check`.
+  - Stage 33 intentionally does not deliver formal tracking management; `/app/tracking` remains the existing QueueView compatibility mount, and F-F requires a separate plan after F-B.
+---
+---

@@ -7,8 +7,8 @@
 | 项目名称 | MiGuOrca |
 | 文档名称 | MiGuOrca 主 PRD |
 | 文档类型 | 主 PRD |
-| 当前版本 | v0.29 |
-| 文档状态 | Stage 26～Stage 29 均已完成；Web UI 已迁移到独立前端工程并删除旧前端；草案一致性、统一追番记录、可靠提交与恢复能力已交付 |
+| 当前版本 | v0.33 |
+| 文档状态 | Stage 26～Stage 33 均已完成；F-B～F-G 前端分片继续独立评审 |
 | 适用阶段 | 需求讨论、模块拆分、开发规划 |
 | 相关系统 | MiKanProject、Auto Bangumi、qBittorrent |
 | 简称约定 | Auto Bangumi 简称为 AB |
@@ -245,8 +245,9 @@ M00 CLI 与流程编排
 | 第三十阶段 | Auto Bangumi 只读能力与外部同步基础（已完成，US-228～US-236） | M10、M11、M12、M13、API 契约与测试基础设施 |
 | 第三十一阶段 | Auto Bangumi 可靠写管理（已完成，US-237～US-246；B-C2，不实现正式页面） | M10、M11、M12、M13、API 契约与测试基础设施 |
 | 第三十二阶段 | 后端契约固化、兼容迁移与前端交接（已完成，US-247～US-256；B-D） | M01、M09、M10、M11、M12、M13、API 契约与测试基础设施 |
+| 第三十三阶段 | 前端应用壳层与设计系统（已完成，US-257～US-265；F-A，不实现 F-B～F-G） | M13、前端与测试基础设施 |
 
-Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立响应 DTO 与确定性 OpenAPI、拆分 Web schema/serializer/service/context/route 职责、建立稳定 HTTP 状态语义、收紧 Web storage 根目录、建立服务端权威 draft 生命周期、增加 CI 与 local-only 部署基线，并完成兼容回归与文档收尾。Stage 27 已完成 BL-024：建立 Vue 3 + TypeScript + Vite 独立前端工程（Flask 在 `/app/` 同源托管），渐进迁移全部 Web 旅程并删除旧前端。Stage 28 已完成 BL-025 的 B-A：交付 draft revision、可靠保存、单番/批量原子保存确认、36 部上限与安全信息 DTO；成功 handoff 只返回 `request_id` + `ACCEPTED`。Stage 29 已完成 BL-025 的 B-B：从持久化 ACCEPTED Request 与 handoff 幂等建立统一 TrackingRecord，交付 tracking 列表/详情、纯本地 revalidate、统一 submit、retry/recover、结果未知恢复和旧入口/队列兼容。Stage 30 已完成 B-C1 只读同步（US-228～US-236）；Stage 31 已完成 B-C2 可靠写管理（US-237～US-246）；Stage 32 已完成 B-D 契约收尾（US-247～US-256）。
+Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立响应 DTO 与确定性 OpenAPI、拆分 Web schema/serializer/service/context/route 职责、建立稳定 HTTP 状态语义、收紧 Web storage 根目录、建立服务端权威 draft 生命周期、增加 CI 与 local-only 部署基线，并完成兼容回归与文档收尾。Stage 27 已完成 BL-024：建立 Vue 3 + TypeScript + Vite 独立前端工程（Flask 在 `/app/` 同源托管），渐进迁移全部 Web 旅程并删除旧前端。Stage 28 已完成 BL-025 的 B-A：交付 draft revision、可靠保存、单番/批量原子保存确认、36 部上限与安全信息 DTO；成功 handoff 只返回 `request_id` + `ACCEPTED`。Stage 29 已完成 BL-025 的 B-B：从持久化 ACCEPTED Request 与 handoff 幂等建立统一 TrackingRecord，交付 tracking 列表/详情、纯本地 revalidate、统一 submit、retry/recover、结果未知恢复和旧入口/队列兼容。Stage 30 已完成 B-C1 只读同步（US-228～US-236）；Stage 31 已完成 B-C2 可靠写管理（US-237～US-246）；Stage 32 已完成 B-D 契约收尾（US-247～US-256）。Stage 33 已完成 BL-026 的 F-A：交付 `/app/add`、`/app/plans`、`/app/tracking`、`/app/settings` 壳层与安全 query 路由迁移、语义 Token、共享 UI 原语、现有业务页兼容挂载及真实 Chromium 可访问性回归；`/app/tracking` 仍是 QueueView 兼容内容，F-B～F-G 继续独立评审。
 
 ## 10. 主 PRD 已确认事项
 
@@ -297,8 +298,9 @@ Stage 26 已完成 BL-023：冻结 `/api/v1` 端点与 golden contract、建立�
 1. BL-023 已完成为 Stage 26 Web API 契约固化与服务端边界治理；执行范围见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。Stage 26 不重构页面视觉，不引入新前端框架。
 2. BL-024 已完成 Stage 27 前端工程化迁移与页面重构；执行范围见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。前端只通过生成类型/client 使用后端，不导入 Python 模型或复制旧 `app.js` 内部状态（旧 `app.js` 已随 US-209 删除）。
 3. BL-025 的 B-A～B-D 已分别完成 Stage 28～32（US-210～US-256）并归档，覆盖契约、兼容、迁移、安全、回退与前端 handoff；正式追番管理页面仍待后续前端阶段。
-4. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
-5. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
-6. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
-7. 当前 `/app/workbench|requests|queue|settings` 在前端分片实施前保持可用；目标信息架构为 `/app/add|plans|tracking|settings`。所有流程继续禁止把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
-8. 每次阶段推进继续使用 `uv run pytest`、`uv run python -m compileall -q src tests` 和前端工程的 `cd frontend && npm run typecheck && npm run lint && npm run test:run && npm run build` 验证；UI story 必须执行 `uv run pytest tests/browser/ -q`。
+4. BL-026 的 F-A 已完成为 Stage 33（US-257～US-265）：交付四项导航、语义 Token、路由安全迁移、桌面壳层、共享状态和现有页面兼容挂载；F-B～F-G 不属于本阶段。
+5. BL-020 当前最新播出集数、BL-021 真实 LLM provider 和 BL-022 新版 AutoBangumi Bearer 写契约尚未排期，必须先满足各自的数据源、供应商/密钥或逐版本契约前提。
+6. fixture 生成能力继续保留给 CLI、API seam、离线开发和回归测试，但不再作为普通 Web 主流程。
+7. 后续不应实现自己的 qBittorrent 下载任务创建，不应绕过 Auto Bangumi 建立长期订阅状态机，不应复制 Auto Bangumi 已有的 MiKan 到下载链路，不应引入后台常驻 worker 或复杂调度器；批量提交继续采用前台顺序编排。
+8. 当前 `/app/workbench|requests|queue|settings` 作为兼容入口保留；目标信息架构已交付为 `/app/add|plans|tracking|settings`。所有流程继续禁止把 MiKan config、ab_config、raw HTML、raw RSS XML、magnet、cookie、token 和原始响应体写入 storage JSON、浏览器 storage、URL、history、日志、截图或 trace。
+9. 每次阶段推进继续使用 `uv run pytest`、`uv run python -m compileall -q src tests` 和前端工程的 `cd frontend && npm run typecheck && npm run lint && npm run test:unit -- --run && npm run build` 验证；UI story 必须执行真实 Chromium 检查。

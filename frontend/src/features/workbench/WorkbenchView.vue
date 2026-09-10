@@ -48,6 +48,7 @@ import {
 import { displayValue } from '@/features/requests/requestDetail'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
+import { routeLocation } from '@/app/router/catalog'
 
 type CreateRequestResult = NonNullable<
   operations['createRequest']['responses']['200']['content']['application/json']['result']
@@ -232,7 +233,7 @@ function onSaved(requestId: string): void {
   draftRevision.value = 1
   seasonConfirmations.value = {}
   notification.success('保存成功', `已保存订阅草案 ${requestId}`)
-  void router.push({ path: '/requests', query: { request_id: requestId } })
+  void router.push(routeLocation('plans', { request_id: requestId }))
 }
 
 function onDraftExpired(): void {

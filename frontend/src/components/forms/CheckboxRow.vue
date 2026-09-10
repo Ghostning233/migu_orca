@@ -54,17 +54,17 @@ function onChange(event: Event): void {
 .checkbox-row {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 .checkbox-row-copy {
   display: grid;
-  gap: 0.15rem;
+  gap: var(--space-1);
 }
 
 .checkbox-row-label {
-  font-weight: 500;
-  font-size: 0.875rem;
+  font-weight: var(--font-weight-medium);
+  font-size: var(--font-size-sm);
 }
 
 .checkbox-row-help {
@@ -72,9 +72,18 @@ function onChange(event: Event): void {
 }
 
 .base-checkbox {
-  width: 1.05rem;
-  height: 1.05rem;
-  margin-top: 0.15rem;
-  accent-color: var(--color-accent);
+  width: var(--control-checkbox-size);
+  height: var(--control-checkbox-size);
+  margin-top: var(--space-1);
+  accent-color: var(--color-action-primary);
+}
+
+.base-checkbox:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.base-checkbox:disabled {
+  cursor: not-allowed;
 }
 </style>

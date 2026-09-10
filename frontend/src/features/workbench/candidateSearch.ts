@@ -5,7 +5,7 @@
  * tests. They mirror the legacy `app.js` single-search flow
  * (renderCandidateCard / buildCandidateSearchPayload / candidateSelectionIsBlocked
  * / renderTitleParseSummary / collectPreviewEditPatch) so the old `/index`
- * and the new `/app/workbench` stay parity for the same API result.
+ * and the new `/app/add` stay parity for the same API result.
  *
  * Security boundary: these helpers operate on the generated OpenAPI candidate
  * types only. They never receive credentials, raw bodies or local absolute

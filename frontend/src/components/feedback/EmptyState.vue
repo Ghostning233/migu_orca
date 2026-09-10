@@ -14,12 +14,12 @@ defineProps<{
 
 <style scoped>
 .empty-state {
-  background: var(--color-bg-muted);
-  border: 1px dashed var(--color-border);
-  border-radius: 6px;
+  background: var(--color-surface-subtle);
+  border: 1px dashed var(--color-border-subtle);
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   min-height: 120px;
-  padding: 16px;
+  padding: var(--space-4);
   display: flex;
   align-items: center;
   justify-content: center;

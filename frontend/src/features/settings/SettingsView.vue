@@ -26,6 +26,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
 
 import { api } from '@/api/client'
+import { routeLocation } from '@/app/router/catalog'
 import { useNotificationStore } from '@/app/stores/notification'
 import { useSensitiveFields } from '@/app/composables/useSensitiveFields'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
@@ -823,7 +824,7 @@ onMounted(() => {
             v-if="hasRequestContext"
             id="settings-ab-return-link"
             class="base-button secondary-button"
-            :to="{ path: '/requests', query: { request_id: requestId } }"
+            :to="routeLocation('plans', { request_id: requestId })"
           >
             返回订阅方案详情
           </RouterLink>

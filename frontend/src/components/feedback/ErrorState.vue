@@ -25,12 +25,12 @@ const emit = defineEmits<{
 
 <style scoped>
 .error-state {
-  background: var(--color-bg-muted);
-  border: 1px solid var(--color-danger);
-  border-radius: 6px;
+  background: var(--color-feedback-error-surface);
+  border: 1px solid var(--color-feedback-error-border);
+  border-radius: var(--radius-md);
   color: var(--color-text);
   min-height: 120px;
-  padding: 16px;
+  padding: var(--space-4);
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
@@ -41,7 +41,7 @@ const emit = defineEmits<{
 .error-state-title {
   margin: 0;
   font-weight: 600;
-  color: var(--color-danger);
+  color: var(--color-feedback-error-text);
 }
 
 .error-state-message {

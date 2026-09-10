@@ -1,0 +1,159 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage33-frontend-shell",
+  "description": "Stage 33（F-A）：在 Stage 32 最终契约上建立桌面应用壳层、四项导航、安全路由迁移、语义设计 Token 和共享 UI 状态，并无损挂载现有页面。",
+  "userStories": [
+    {
+      "id": "US-257",
+      "title": "冻结最新路由 query 与功能对等基线",
+      "description": "作为维护者，我需要可由实现直接消费的路由与 query 迁移矩阵，以便后续迁移不丢失公开定位状态或携带敏感参数。",
+      "acceptanceCriteria": [
+        "建立四个新路径、四个现有 View、三个旧路径和 Flask 入口的可检查映射",
+        "建立按目标页区分的 query sanitizer：/add 与 /tracking 允许 scalar batch_id，/plans 与 /settings 允许 scalar request_id，未知/数组/空值全部丢弃",
+        "route catalog 是后续真实 router 和导航可直接消费的生产模块，不包含只适用于迁移前、下一 story 必须删除的断言",
+        "记录 Workbench、Requests、Queue、Settings 的现有功能与对应 Vitest/Chromium 用例，不修改业务页面",
+        "Targeted route-matrix tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-258",
+      "title": "实现语义设计 Token",
+      "description": "作为前端开发者，我需要统一的语义 Token，以便壳层和共享组件在不复制 magic value 的情况下实现批准的视觉方向。",
+      "acceptanceCriteria": [
+        "新增单一 Token 入口，覆盖 surface/text/accent/danger/focus、排版、间距、尺寸、圆角、阴影、层级和 motion",
+        "全局样式接入 Token，保持现有页面结构和组件 props 不变",
+        "prefers-reduced-motion 的基础变量能关闭非必要位移与平滑动画",
+        "样式检查能阻止新增第二套品牌主色、焦点色或壳层阴影常量",
+        "Targeted style tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-259",
+      "title": "实现新路由与安全兼容重定向",
+      "description": "作为旧书签和现有流程的用户，我需要安全迁移到新路径，并只保留目标页真正使用的公开定位参数。",
+      "acceptanceCriteria": [
+        "真实 Vue router 消费 route catalog，提供 /add、/plans、/tracking、/settings，并让根路径 replace 到 /add",
+        "/workbench、/requests、/queue 按 PRD 矩阵 replace 重定向，过滤未知、敏感、数组和空 query",
+        "Flask /、/index 指向 /app/add 且只保留 batch_id；/settings 与 /Settings 只保留 request_id",
+        "生产代码内部导航只生成新路径；SPA fallback 不吞掉 API、媒体、assets、healthz 或 readiness",
+        "Targeted router and Flask route tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-260",
+      "title": "实现桌面应用壳层与四项导航",
+      "description": "作为普通番剧用户，我希望通过清晰的四项导航理解当前位置和下一步，而不需要理解内部工程对象。",
+      "acceptanceCriteria": [
+        "App 壳层显示添加番剧、追番方案、追番管理、设置四项导航并使用新路径",
+        "当前项具有 aria-current=page、文字和视觉标记，颜色不是唯一提示",
+        "提供跳到主要内容链接，路由切换后焦点进入主标题或主内容起点",
+        "壳层只展示公开全局状态，不保存 draft、candidate context、凭据或外部响应",
+        "Targeted shell component tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-261",
+      "title": "统一共享表单与动作原语",
+      "description": "作为用户，我希望按钮和表单控件在所有现有页面具有一致、清晰且可访问的交互状态。",
+      "acceptanceCriteria": [
+        "现有 BaseButton、输入、文本域、选择、复选、FormField 和 PanelSection 消费语义 Token",
+        "统一 hover/focus/disabled/busy/error 状态并保持现有 props、emit、透传和焦点行为兼容",
+        "危险色仅用于危险动作，每个现有任务区不新增第二个强主操作",
+        "不新增 V2/新前缀的平行表单或按钮组件",
+        "Targeted shared-component tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-262",
+      "title": "统一反馈弹窗与系统状态",
+      "description": "作为用户，我希望确认、加载、空、错误和通知状态具有一致语义，并在失败后仍能找到恢复入口。",
+      "acceptanceCriteria": [
+        "现有 ConfirmDialog、StatusAlert、LoadingState、EmptyState、ErrorState、ErrorBoundary、GlobalNotification 和 GlobalLoading 消费统一 Token",
+        "错误使用明确 alert 语义，普通状态使用适当 live region，状态不只靠颜色",
+        "关键失败与恢复动作留在页面上下文，Toast 不作为唯一恢复入口",
+        "确认弹窗继续保持 focus trap、Escape/backdrop 取消和关闭后焦点恢复",
+        "Targeted feedback-component tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-263",
+      "title": "挂载现有业务页并证明功能对等",
+      "description": "作为现有用户，我需要四个业务页在新壳层中继续完成原有操作，而不是被占位页面或视觉重构替代。",
+      "acceptanceCriteria": [
+        "/add、/plans、/tracking、/settings 分别挂载现有 WorkbenchView、RequestsView、QueueView、SettingsView",
+        "定向回归单番/批量草案、Request 列表详情、队列提交恢复和设置连接流程",
+        "/tracking 明确为 QueueView 兼容内容，不出现 mock-only 正式追番管理功能",
+        "只修复新容器、样式或路径造成的回归，不改变 API、generated client 或领域状态机",
+        "Targeted feature parity tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-264",
+      "title": "完成桌面可访问与真实浏览器回归",
+      "description": "作为桌面端和辅助技术用户，我需要在目标视口、缩放与键盘路径下完整使用应用。",
+      "acceptanceCriteria": [
+        "真实 Chromium 覆盖 1280、1440、1920 宽度和 200% 缩放等效布局",
+        "验证跳到主要内容、Tab 顺序、当前项、路由焦点恢复和 reduced-motion",
+        "关键导航、表单、弹窗和恢复操作无横向丢失或不可达控件",
+        "URL、DOM、browser storage、截图和 trace 的 canary 检查不含敏感值",
+        "Targeted accessibility and browser tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-265",
+      "title": "完成最终门禁归档与 F-B handoff",
+      "description": "作为项目维护者，我需要可信的最终门禁和版本化交接，使后续共享审核核心只复用一套前端基线。",
+      "acceptanceCriteria": [
+        "运行一次 compileall、Ruff、必要 Flask route、OpenAPI drift、前端 typecheck/lint/unit/build 和完整 Chromium 门禁",
+        "更新 README、主 PRD、future stages、backlog、M13 与前端工作目标，记录实际设计偏差和安全证据",
+        "归档 Stage 33 prd/progress，确认 US-257～US-265 全部 passes 且无 dist、trace、截图、临时 storage 或环境 symlink 入库",
+        "F-B handoff 明确复用 shell、Token、route catalog 和共享原语；F-F 仍须单独规划",
+        "Tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

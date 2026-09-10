@@ -32,7 +32,7 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
   不属于 `migu_orca_app.*`）。
 - `frontend/dist` 不入库；CI 的 frontend/browser job 在跑套件前执行 `npm ci && npm run build`。
   浏览器测试 `tests/browser/test_app_shell.py` 在 `MIGU_ORCA_CI=1` 下缺构建直接失败（不 skip）。
-- US-199 起 SPA 客户端路由为 4 条：`/app/workbench`、`/app/requests`、`/app/queue`、
+- Stage 33 起 SPA 客户端路由为 4 条：`/app/add`、`/app/plans`、`/app/tracking`、
   `/app/settings`（history base `/app/`，见 `frontend/src/app/router/index.ts`）。这些是
   客户端路由，Flask 侧除 `/app/` 与 `/app/<path:subpath>` fallback 外**不需要**新增任何
   服务端路由；浏览器测试在 `test_app_shell.py` 断言 4 项导航与各 route 挂载。
@@ -40,8 +40,8 @@ Stage 26 US-191 将原先 2,000+ 行的 `views.py` 按职责拆分。新增/修�
 ## 默认入口（US-209）
 
 - `views.py` 的入口路由**始终重定向到 SPA**（旧 Jinja 页面与 `web_entry_mode()`
-  已在 US-209 删除）：`GET /`、`GET /index` → `/app/workbench`，`GET /Settings`、
-  `GET /settings` → `/app/settings`，保留 `request_id`/`batch_id` query。
+  已在 US-209 删除）：`GET /`、`GET /index` → `/app/add` 且只保留 `batch_id`，
+  `GET /Settings`、`GET /settings` → `/app/settings` 且只保留 `request_id`。
 - 重定向只转发公开已保存标识符（`request_id`/`batch_id`），endpoint/token/storage
   路径等敏感值绝不进入重定向 URL（
   `app_routes_test.py::test_spa_entry_never_forwards_sensitive_query_values` 守护）。

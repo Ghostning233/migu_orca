@@ -47,7 +47,7 @@ def _save_accepted_request(storage_dir: Path, title: str, request_id: str) -> di
 def _goto_requests(page: Page, live_server_url: str, query: str = "") -> None:
     """Navigate to the SPA requests list and wait for it to load."""
     _require_dist()
-    page.goto(f"{live_server_url}/app/requests{query}")
+    page.goto(f"{live_server_url}/app/plans{query}")
     page.wait_for_selector("#request-list-container", timeout=5000)
     page.wait_for_selector(".request-list-item", timeout=5000)
 
@@ -61,7 +61,7 @@ def _open_detail(page: Page, live_server_url: str, request_id: str) -> None:
 def _open_detail_or_error(page: Page, live_server_url: str, request_id: str) -> None:
     """Open the detail panel without assuming the load succeeds."""
     _require_dist()
-    page.goto(f"{live_server_url}/app/requests?request_id={request_id}")
+    page.goto(f"{live_server_url}/app/plans?request_id={request_id}")
     page.wait_for_selector("#request-detail-container", timeout=5000)
     page.wait_for_selector("#request-detail-container .overview-section, #request-detail-container .error-state", timeout=5000)
 
@@ -143,7 +143,7 @@ class TestAppRequestDetailUrlState:
         _goto_requests(page, live_server_url)
 
         page.locator("[data-request-id='req-url-click']").click()
-        page.wait_for_url("**/app/requests?request_id=req-url-click", timeout=5000)
+        page.wait_for_url("**/app/plans?request_id=req-url-click", timeout=5000)
         page.wait_for_selector("#request-detail-container .overview-section", timeout=5000)
 
         assert "req-url-click" in page.locator("#request-detail-container").inner_text()
@@ -507,7 +507,7 @@ class TestAppRequestDetailSensitive:
 
         page.route("**/api/v1/requests/req-stage32-canary**", _poisoned_detail)
         page.goto(
-            f"{live_server_url}/app/requests?request_id=req-stage32-canary"
+            f"{live_server_url}/app/plans?request_id=req-stage32-canary"
         )
         page.wait_for_selector("#request-detail-container .error-state", timeout=5000)
         browser_state = page.evaluate(
@@ -602,7 +602,7 @@ class TestAppRequestDetailSensitive:
         page.context.tracing.start(screenshots=True, snapshots=True, sources=False)
         try:
             page.goto(
-                f"{live_server_url}/app/requests?request_id=req-stage32-artifacts"
+            f"{live_server_url}/app/plans?request_id=req-stage32-artifacts"
             )
             page.wait_for_selector(
                 "#request-detail-container .overview-section", timeout=5000
@@ -669,8 +669,11 @@ class TestAppRequestDetailResponsiveA11y:
 
         entry = page.locator("#detail-ab-submit-entry")
         assert entry.count() >= 1
-        assert entry.get_attribute("href") == "/app/settings?request_id=req-ab-entry&ab=1"
+        assert entry.get_attribute("href") == "/app/settings?request_id=req-ab-entry"
 
         entry.click()
-        page.wait_for_url("**/app/settings?request_id=req-ab-entry**", timeout=5000)
+        page.wait_for_url(
+            f"{live_server_url}/app/settings?request_id=req-ab-entry", timeout=5000
+        )
+        assert page.url == f"{live_server_url}/app/settings?request_id=req-ab-entry"
         expect(page.locator("#settings-ab-request-id")).to_have_text("req-ab-entry")

@@ -40,7 +40,7 @@ def _require_dist() -> None:
 def _goto_workbench(page: Page, live_server_url: str) -> None:
     """Navigate to the SPA workbench and wait for the search form."""
     _require_dist()
-    page.goto(f"{live_server_url}/app/workbench")
+    page.goto(f"{live_server_url}/app/add")
     page.wait_for_selector("#mikan-candidate-search-form", timeout=5000)
 
 
@@ -663,7 +663,7 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
 
         # Save through the real preview-save backend (draft consumed once).
         page.locator("#request-detail-container button:has-text('保存草案')").click()
-        page.wait_for_url("**/app/requests?request_id=req-wb-save", timeout=5000)
+        page.wait_for_url("**/app/plans?request_id=req-wb-save", timeout=5000)
 
         saved_path = storage_dir / "requests" / "req-wb-save.json"
         assert saved_path.exists()

@@ -21,7 +21,7 @@ const role = computed(() => (current.value?.kind === 'error' ? 'alert' : 'status
     class="global-notification"
     :class="`global-notification-${current.kind}`"
     :role="role"
-    aria-live="polite"
+    :aria-live="current.kind === 'error' ? 'assertive' : 'polite'"
     aria-atomic="true"
   >
     <div class="global-notification-copy">
@@ -41,34 +41,34 @@ const role = computed(() => (current.value?.kind === 'error' ? 'alert' : 'status
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
-  border-radius: 8px;
-  padding: 0.875rem 1rem;
-  margin: 0 auto 1rem;
+  gap: var(--space-4);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  margin: 0 auto var(--space-4);
   max-width: 1180px;
 }
 
 .global-notification-success {
-  background: #edf8f0;
-  border: 1px solid #abd3b6;
-  color: #1f5f34;
+  background: var(--color-feedback-success-surface);
+  border: 1px solid var(--color-feedback-success-border);
+  color: var(--color-feedback-success-text);
 }
 
 .global-notification-error {
-  background: #fff3f1;
-  border: 1px solid #e3bbb4;
-  color: #8d2f20;
+  background: var(--color-feedback-error-surface);
+  border: 1px solid var(--color-feedback-error-border);
+  color: var(--color-feedback-error-text);
 }
 
 .global-notification-info {
   background: var(--color-bg-muted);
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
 }
 
 .global-notification-copy {
   display: grid;
-  gap: 0.25rem;
+  gap: var(--space-1);
 }
 
 .global-notification-title {

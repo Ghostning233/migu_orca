@@ -4,7 +4,7 @@
 // Migrated from the legacy `/index` 批量搜索 tab onto the shared primitives
 // and the generated OpenAPI client. The batch workbench is a separate panel
 // below the single-search workbench (the old tab layout is replaced by a
-// dedicated 批量工作台 section on /app/workbench):
+// dedicated 批量工作台 section on /app/add):
 //
 //   - batch input (textarea, one title per line) → POST /api/v1/batches/parse
 //     returns independent FOUND / EMPTY / FAILED cards plus a batch_id;
@@ -72,6 +72,7 @@ import BatchCandidatePopover from '@/features/workbench/BatchCandidatePopover.vu
 import BatchDraftPreviewPanel from '@/features/workbench/BatchDraftPreviewPanel.vue'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
+import { routeLocation } from '@/app/router/catalog'
 
 type CreateRequestResult = NonNullable<
   import('@/api/generated/api').operations['createRequest']['responses']['200']['content']['application/json']['result']
@@ -130,9 +131,9 @@ function batchQueueStatusText(): string {
 
 function syncBatchIdToUrl(batchIdValue: string): void {
   if (batchIdValue) {
-    void router.replace({ path: '/workbench', query: { batch_id: batchIdValue } })
+    void router.replace(routeLocation('add', { batch_id: batchIdValue }))
   } else {
-    void router.replace({ path: '/workbench' })
+    void router.replace(routeLocation('add'))
   }
 }
 

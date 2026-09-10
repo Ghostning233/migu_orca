@@ -50,7 +50,7 @@ def _require_dist() -> None:
     )
 
 
-def _goto(page: Page, live_server_url: str, path: str = "/app/workbench") -> None:
+def _goto(page: Page, live_server_url: str, path: str = "/app/add") -> None:
     _require_dist()
     page.goto(f"{live_server_url}{path}")
     page.wait_for_selector(".app-title", timeout=5000)
@@ -67,10 +67,10 @@ def _no_horizontal_overflow(page: Page, viewport: int) -> None:
 def _nav_targets() -> list[tuple[str, str]]:
     """(nav link text, expected route marker selector) for the four SPA routes."""
     return [
-        ("订阅方案工作台", "#workbench-heading"),
-        ("订阅方案", "#request-list-container"),
-        ("提交队列", "#batch-queue-list"),
-        ("Settings", "#settings-heading"),
+        ("添加番剧", "#workbench-heading"),
+        ("追番方案", "#request-list-container"),
+        ("追番管理", "#batch-queue-list"),
+        ("设置", "#settings-heading"),
     ]
 
 
@@ -80,13 +80,15 @@ class TestCrossFeatureResponsive:
     @pytest.mark.parametrize(
         ("path", "selector"),
         [
-            ("/app/workbench", "#workbench-heading"),
-            ("/app/requests", "#request-list-container"),
-            ("/app/queue", "#batch-queue-list"),
+            ("/app/add", "#workbench-heading"),
+            ("/app/plans", "#request-list-container"),
+            ("/app/tracking", "#batch-queue-list"),
             ("/app/settings", "#settings-heading"),
         ],
     )
-    @pytest.mark.parametrize("viewport", [(360, 800), (768, 1024), (1280, 900)])
+    @pytest.mark.parametrize(
+        "viewport", [(360, 800), (768, 1024), (1280, 900), (1440, 900), (1920, 1080)]
+    )
     def test_routes_no_horizontal_overflow(
         self,
         page: Page,
@@ -105,7 +107,7 @@ class TestCrossFeatureResponsive:
     ) -> None:
         """The 4-item nav must wrap (flex-wrap) instead of overflowing at 360px."""
         page.set_viewport_size({"width": 360, "height": 800})
-        _goto(page, live_server_url, "/app/workbench")
+        _goto(page, live_server_url, "/app/add")
         _no_horizontal_overflow(page, 360)
         # Every nav link is visible and inside the viewport.
         for label, _selector in _nav_targets():
@@ -119,7 +121,7 @@ class TestCrossFeatureResponsive:
     ) -> None:
         """Queue status chips carry a text label (not color-only state)."""
         set_storage_preferences(page, storage_dir)
-        _goto(page, live_server_url, "/app/queue?batch_id=batch-spa")
+        _goto(page, live_server_url, "/app/tracking?batch_id=batch-spa")
 
         page.route(
             "**/api/v1/batches/batch-spa/queue*",
@@ -164,6 +166,68 @@ class TestCrossFeatureResponsive:
         status = page.locator(".batch-queue-status")
         assert "batch-queue-status-" in (status.get_attribute("class") or "")
 
+    @pytest.mark.parametrize(
+        "path, selector",
+        [
+            ("/app/add", "#workbench-heading"),
+            ("/app/plans", "#request-list-container"),
+            ("/app/tracking", "#batch-queue-list"),
+            ("/app/settings", "#settings-heading"),
+        ],
+    )
+    def test_desktop_200_percent_equivalent_keeps_route_content_reachable(
+        self,
+        page: Page,
+        live_server_url: str,
+        path: str,
+        selector: str,
+    ) -> None:
+        """A 2x page scale models the desktop 200% effective CSS viewport."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        _goto(page, live_server_url, path)
+        page.evaluate("() => { document.documentElement.style.zoom = '2' }")
+        expect(page.locator(selector).first).to_be_visible()
+        _no_horizontal_overflow(page, 1280)
+
+        # The shell remains usable at the reduced effective width: every
+        # public navigation target is still visible and keyboard reachable.
+        for label, _selector in _nav_targets():
+            link = page.get_by_role("link", name=label, exact=True)
+            expect(link).to_be_visible()
+            box = link.bounding_box()
+            assert box is not None and box["x"] >= 0 and box["x"] + box["width"] <= 1280
+
+    def test_public_shell_drops_sensitive_query_canaries(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """Shell navigation never exposes unknown or sensitive query values."""
+        canaries = (
+            "shell-token-canary",
+            "shell-cookie-canary",
+            "shell-endpoint-canary.invalid",
+        )
+        page.goto(
+            f"{live_server_url}/app/add?batch_id=batch-public"
+            f"&token={canaries[0]}&cookie={canaries[1]}"
+            f"&endpoint={canaries[2]}"
+        )
+        page.wait_for_selector(".app-title")
+
+        assert page.url.endswith("/app/add?batch_id=batch-public")
+        visible = page.locator("body").inner_text()
+        browser_storage = page.evaluate(
+            """() => ({
+              local: JSON.stringify(localStorage),
+              session: JSON.stringify(sessionStorage),
+              history: JSON.stringify(window.history.state),
+            })"""
+        )
+        for canary in canaries:
+            assert canary not in visible
+            assert canary not in browser_storage["local"]
+            assert canary not in browser_storage["session"]
+            assert canary not in browser_storage["history"]
+
 
 class TestKeyboardAndFocus:
     """AC: 键盘导航、焦点恢复和 skip link."""
@@ -172,7 +236,7 @@ class TestKeyboardAndFocus:
         self, page: Page, live_server_url: str
     ) -> None:
         """Tab lands on the skip link first and it jumps to the main landmark."""
-        _goto(page, live_server_url, "/app/workbench")
+        _goto(page, live_server_url, "/app/add")
 
         page.keyboard.press("Tab")
         active_id = page.evaluate("() => document.activeElement?.id || ''")
@@ -194,17 +258,40 @@ class TestKeyboardAndFocus:
     ) -> None:
         """The main landmark is a focus target on every SPA route."""
         for label, _selector in _nav_targets():
-            _goto(page, live_server_url, "/app/workbench")
+            _goto(page, live_server_url, "/app/add")
             page.get_by_role("link", name=label, exact=True).click()
             main = page.locator("main#app-main")
             expect(main).to_have_attribute("tabindex", "-1")
+
+    def test_keyboard_can_reach_every_public_navigation_target(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """The skip link and all four route links are in the keyboard path."""
+        _goto(page, live_server_url, "/app/add")
+        page.keyboard.press("Tab")
+        assert page.locator("#skip-link").evaluate(
+            "el => el === document.activeElement"
+        )
+
+        focused_labels: list[str] = []
+        for _ in range(12):
+            page.keyboard.press("Tab")
+            label = page.evaluate(
+                """() => document.activeElement?.getAttribute('aria-label') ||
+                document.activeElement?.textContent?.trim() || ''"""
+            )
+            for expected in ("添加番剧", "追番方案", "追番管理", "设置"):
+                if expected in label and expected not in focused_labels:
+                    focused_labels.append(expected)
+
+        assert focused_labels == ["添加番剧", "追番方案", "追番管理", "设置"]
 
     def test_batch_popover_escape_restores_focus_to_trigger(
         self, page: Page, live_server_url: str
     ) -> None:
         """Opening the batch candidate popover focuses it; Escape closes and
         restores focus to the trigger button (US-207 keyboard accessibility)."""
-        _goto(page, live_server_url, "/app/workbench")
+        _goto(page, live_server_url, "/app/add")
 
         page.route(
             "**/api/v1/batches/parse",
@@ -296,7 +383,7 @@ class TestReducedMotionAndFeedback:
         """With prefers-reduced-motion, the loading spinner stops animating but
         the text message remains (aria-busy + visible copy)."""
         page.emulate_media(reduced_motion="reduce")
-        _goto(page, live_server_url, "/app/queue?batch_id=test-slow-queue")
+        _goto(page, live_server_url, "/app/tracking?batch_id=test-slow-queue")
 
         loading = page.locator(".loading-state", has_text="正在读取提交前队列")
         expect(loading).to_be_visible()
@@ -309,7 +396,7 @@ class TestReducedMotionAndFeedback:
         """A loading button shows aria-busy + disabled text even when the
         spinner animation is suppressed by reduced-motion."""
         page.emulate_media(reduced_motion="reduce")
-        _goto(page, live_server_url, "/app/queue?batch_id=test-slow-queue")
+        _goto(page, live_server_url, "/app/tracking?batch_id=test-slow-queue")
 
         # The refresh button is loading while the slow queue read is in flight.
         refresh = page.locator("#batch-queue-refresh")
@@ -348,7 +435,7 @@ class TestRuntimeQuality:
         assert asset_resp.status == 200
         assert "immutable" in (asset_resp.headers.get("cache-control") or "")
 
-        shell_resp = page.request.get(f"{live_server_url}/app/workbench")
+        shell_resp = page.request.get(f"{live_server_url}/app/add")
         assert shell_resp.status == 200
         cc = shell_resp.headers.get("cache-control") or ""
         assert "no-cache" in cc, f"shell cache-control was {cc!r}"

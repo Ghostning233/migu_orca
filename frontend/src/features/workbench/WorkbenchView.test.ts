@@ -128,12 +128,12 @@ async function mountWorkbench() {
   const router = createRouter({
     history: createMemoryHistory('/app/'),
     routes: [
-      { path: '/workbench', name: 'workbench', component: WorkbenchView },
-      { path: '/requests', name: 'requests', component: { template: '<p>requests</p>' } },
+      { path: '/add', name: 'add', component: WorkbenchView },
+      { path: '/plans', name: 'plans', component: { template: '<p>requests</p>' } },
       { path: '/settings', name: 'settings', component: { template: '<p>settings</p>' } },
     ],
   })
-  await router.push({ path: '/workbench' })
+  await router.push({ path: '/add' })
   await router.isReady()
 
   const wrapper = mount(WorkbenchView, {
@@ -465,7 +465,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
       // US-212: the save reserves the draft against the last-observed revision.
       body: { draft_id: 'opaque-draft-token', base_revision: 1, storage_dir: null },
     })
-    expect(router.currentRoute.value.path).toBe('/requests')
+    expect(router.currentRoute.value.path).toBe('/plans')
     expect(router.currentRoute.value.query.request_id).toBe('req-draft-1')
   })
 
@@ -499,7 +499,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     // The draft panel (and its draft_id/revision) is preserved for retry.
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
     expect(wrapper.find('#draft-save-button').exists()).toBe(true)
-    expect(router.currentRoute.value.path).toBe('/workbench')
+    expect(router.currentRoute.value.path).toBe('/add')
   })
 
   it('shows a safe error and keeps the search state when generation fails', async () => {

@@ -99,9 +99,9 @@ function submitResult(
 async function mountQueue(query: Record<string, string> = { batch_id: 'batch-1' }) {
   const router = createRouter({
     history: createMemoryHistory('/app/'),
-    routes: [{ path: '/queue', name: 'queue', component: QueueView }],
+    routes: [{ path: '/tracking', name: 'tracking', component: QueueView }],
   })
-  await router.push({ path: '/queue', query })
+  await router.push({ path: '/tracking', query })
   await router.isReady()
 
   const wrapper = mount(QueueView, {
@@ -182,7 +182,7 @@ describe('QueueView queue read (US-206)', () => {
     const { router } = await mountQueue()
     await flushPromises()
 
-    await router.push({ path: '/queue', query: { batch_id: 'batch-2' } })
+    await router.push({ path: '/tracking', query: { batch_id: 'batch-2' } })
     await flushPromises()
     expect(apiGet).toHaveBeenLastCalledWith('/api/v1/batches/{batch_id}/queue', {
       path: { batch_id: 'batch-2' },

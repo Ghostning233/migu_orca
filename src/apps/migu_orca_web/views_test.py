@@ -244,28 +244,28 @@ class _MappedCandidateSearchClient:
         return self.responses.get(raw_title, [])
 
 
-def test_root_redirects_to_index() -> None:
-    """US-208: the default entry redirects / to the SPA workbench (legacy mode keeps /index)."""
+def test_root_redirects_to_add() -> None:
+    """US-259: the default entry redirects / to the public add route."""
     response = _client().get("/")
 
     assert response.status_code == 302
-    assert response.headers["Location"] == "/app/workbench"
+    assert response.headers["Location"] == "/app/add"
 
 
-def test_index_redirects_to_spa_workbench_by_default() -> None:
-    """US-208: /index now redirects to the SPA workbench (the new default entry)."""
+def test_index_redirects_to_spa_add_by_default() -> None:
+    """US-259: /index now redirects to the public add route."""
     response = _client().get("/index")
 
     assert response.status_code == 302
-    assert response.headers["Location"] == "/app/workbench"
+    assert response.headers["Location"] == "/app/add"
 
 
 def test_index_redirect_preserves_public_query_params() -> None:
-    """US-208: request_id/batch_id bookmarks from the legacy UI keep working."""
+    """US-259: only the add route's public batch_id survives the redirect."""
     response = _client().get("/index?request_id=req-1&batch_id=batch-2")
 
     assert response.status_code == 302
-    assert response.headers["Location"] == "/app/workbench?request_id=req-1&batch_id=batch-2"
+    assert response.headers["Location"] == "/app/add?batch_id=batch-2"
 
 
 def test_settings_case_redirects_to_settings() -> None:

@@ -131,20 +131,20 @@ async function mountRequests(query: Record<string, string> = {}) {
     history: createMemoryHistory('/app/'),
     routes: [
       {
-        path: '/requests',
-        name: 'requests',
+        path: '/plans',
+        name: 'plans',
         component: RequestsView,
       },
       // The detail route is registered in the real app (US-203 renders it);
       // keep the test router table in sync so navigation never warns.
       {
-        path: '/requests/:requestId',
+        path: '/plans/:requestId',
         name: 'request-detail',
         component: { template: '<p>detail</p>' },
       },
     ],
   })
-  await router.push({ path: '/requests', query })
+  await router.push({ path: '/plans', query })
   await router.isReady()
 
   const wrapper = mount(RequestsView, {
