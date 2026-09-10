@@ -21,9 +21,21 @@
 - 每轮只完成一个 story；每次 Ralph 严格最多 3 轮。完成 US-268、US-271 时必须停止并等待独立审核。
 - 普通 story 只跑定向 Vitest/typecheck/少量 Chromium；只有 US-274 运行一次完整门禁。UI story
   必须使用 `dev-browser` skill 在真实 Chromium 验证。
+- 共享草案状态应从 generated `createRequest`/`previewModifyRequest` 类型提取别名；用本地请求序号
+  只允许最新 preview-modify 响应提交，失效错误先使 opaque capability 失效，普通错误保留最后一致快照。
 
 ## Stage 34 Handoff
 
-- 待实现。第一开发批次仅允许 US-266～US-268。
+- US-266 已完成；第一开发批次仍仅允许 US-267～US-268。
+
+## 2026-09-10 22:56:00 Asia/Shanghai - US-266
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the component-local `useDraftSession` state machine with generated create/preview-modify contract aliases, atomic successful updates, latest-request sequencing, safe error normalization, invalid-draft invalidation, dirty tracking, retry, and reset behavior. Added focused tests for success, out-of-order responses, conflicts, and ordinary failures.
+- Files changed: `frontend/src/app/composables/useDraftSession.ts`, `frontend/src/app/composables/useDraftSession.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The existing transport returns safe `ApiError` objects; draft-session code can classify only stable error types and must not surface raw thrown values.
+  - `vue` refs expose generated object snapshots through proxies in tests, so snapshot assertions should use structural equality.
+  - Quality checks passed: compileall, 1793 backend tests, 308 frontend unit tests, typecheck, lint, build, API drift check, and git diff check.
+---
 
 ---
