@@ -66,8 +66,8 @@ async function mountSettings(query: Record<string, string> = {}) {
       // the detail panel lives (US-203); keep the test router table in sync
       // with the real one to avoid "No match found".
       {
-        path: '/requests',
-        name: 'requests',
+        path: '/plans',
+        name: 'plans',
         component: { template: '<p>requests</p>' },
       },
     ],

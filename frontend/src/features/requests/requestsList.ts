@@ -4,7 +4,7 @@
  * Pure functions shared by the RequestsView and its unit tests: status
  * labels, searchable text, filtering and sorting. They mirror the legacy
  * `app.js` behavior exactly so the old `/index` list and the new
- * `/app/requests` list stay parity (same API result, same empty state, same
+ * `/app/plans` list stay parity (same API result, same empty state, same
  * search/filter/sort semantics).
  *
  * Security boundary: these helpers operate on public `summary` DTOs only

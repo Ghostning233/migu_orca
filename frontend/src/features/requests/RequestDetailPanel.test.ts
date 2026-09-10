@@ -104,8 +104,8 @@ async function mountPanel(requestId = 'req-a', options: { stubsTeleport?: boolea
     history: createMemoryHistory('/app/'),
     routes: [
       {
-        path: '/requests',
-        name: 'requests',
+        path: '/plans',
+        name: 'plans',
         component: { template: '<p>list</p>' },
       },
       {
@@ -115,7 +115,7 @@ async function mountPanel(requestId = 'req-a', options: { stubsTeleport?: boolea
       },
     ],
   })
-  await router.push({ path: '/requests', query: { request_id: requestId } })
+  await router.push({ path: '/plans', query: { request_id: requestId } })
   await router.isReady()
 
   const wrapper = mount(RequestDetailPanel, {

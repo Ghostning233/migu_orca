@@ -5,7 +5,7 @@
  * They mirror the legacy `app.js` detail rendering (renderDetailPayload /
  * selectedRssSource / combinedSeedNames / displayValue / actionLabel /
  * scrubConfig) so the old `/index` detail panel and the new
- * `/app/requests` detail panel stay parity for the same API result.
+ * `/app/plans` detail panel stay parity for the same API result.
  *
  * Security boundary: these helpers operate on the generated OpenAPI detail
  * types only. They never receive credentials, raw bodies or local absolute

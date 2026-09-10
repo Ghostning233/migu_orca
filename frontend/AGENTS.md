@@ -6,7 +6,7 @@ MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全
 ## 工程结构与约定
 
 - `src/app/router/index.ts`：Vue Router，history base 固定 `/app/`。路由 `to` 用相对路径
-  （`/workbench`、`/settings`），完整 URL 是 `/app/workbench`。RouterLink **不要**再写
+  （`/add`、`/settings`），完整 URL 是 `/app/add`。RouterLink **不要**再写
   `/app/` 前缀（`createWebHistory('/app/')` 已处理 base）。
 - `src/styles/main.css`：共享设计基线（layout shell + panel/field-help 等原语）。
   feature 样式随迁移 story 加入，避免全局选择器膨胀。
@@ -15,8 +15,8 @@ MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全
   否则 Flask 静态路径与 SPA fallback 全部错位。
 - SPA fallback 只接管 `/app/*`；feature 里**不要**自行拼接 `/api/v1` URL——US-199 统一
   transport 会接管；海报、健康检查与旧 Flask 页面都不能被 SPA 路由吞掉。
-- US-208/209 起 `/index`、`/settings` 入口路由重定向到 `/app/workbench`、`/app/settings`
-  （Flask `views.py` 入口路由，保留 `request_id`/`batch_id` query；旧 Jinja 页面与
+- Stage 33 起 `/index`、`/settings` 入口路由重定向到 `/app/add`、`/app/settings`
+  （Flask `views.py` 入口路由，分别只保留 `batch_id`/`request_id` query；旧 Jinja 页面与
   `web_entry_mode()` 已在 US-209 删除）。SPA 各 feature 已从 URL query 读
   `request_id`/`batch_id`（RequestsView/QueueView/BatchWorkbenchView），旧书签直接可用；
   **不要**再往 URL 拼 `/index` 或 `/settings`。
@@ -119,7 +119,7 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 
 - `src/App.test.ts` 用 `createMemoryHistory('/app/')` + 与真实路由同表的 stub 组件测外壳；
   RouterLink 在测试里会按 `/app/` base 解析，路由表必须与真实一致，否则出现
-  "No match found" 警告。US-199 起导航为 4 项（工作台/订阅方案/提交队列/Settings）。
+  "No match found" 警告。Stage 33 路径为 `/add`、`/plans`、`/tracking`、`/settings`。
 - transport 单测（`src/api/client.test.ts`）用 `vi.stubGlobal('fetch', ...)` 直接 stub
   `fetch`；jsdom 的 `Response.blob()` 可能不是真 `Blob`，海报测试断言 URL/值而不依赖
   `instanceof Blob`。

@@ -8,6 +8,7 @@
 import ErrorBoundary from '@/components/feedback/ErrorBoundary.vue'
 import GlobalLoadingBar from '@/components/feedback/GlobalLoadingBar.vue'
 import GlobalNotification from '@/components/feedback/GlobalNotification.vue'
+import { routeLocation } from '@/app/router/catalog'
 </script>
 
 <template>
@@ -24,10 +25,10 @@ import GlobalNotification from '@/components/feedback/GlobalNotification.vue'
         </p>
       </div>
       <nav class="top-nav" aria-label="页面导航">
-        <RouterLink to="/workbench" class="nav-link">订阅方案工作台</RouterLink>
-        <RouterLink to="/requests" class="nav-link">订阅方案</RouterLink>
-        <RouterLink to="/queue" class="nav-link">提交队列</RouterLink>
-        <RouterLink to="/settings" class="nav-link">Settings</RouterLink>
+        <RouterLink :to="routeLocation('add')" class="nav-link">订阅方案工作台</RouterLink>
+        <RouterLink :to="routeLocation('plans')" class="nav-link">订阅方案</RouterLink>
+        <RouterLink :to="routeLocation('tracking')" class="nav-link">提交队列</RouterLink>
+        <RouterLink :to="routeLocation('settings')" class="nav-link">Settings</RouterLink>
       </nav>
     </header>
 

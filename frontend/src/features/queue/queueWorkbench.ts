@@ -6,7 +6,7 @@
  * (batchQueueStatusLabel / batchQueueStatusClass / batchQueueItemSummary /
  * batchQueueSummaryMessage / showBatchQueueSubmitNotification /
  * buildAbConfig / syncAbAuthMode) so the old `/index` queue panel and the new
- * `/app/queue` route stay parity for the same API result.
+ * `/app/tracking` route stay parity for the same API result.
  *
  * Security boundary: these helpers operate on the generated OpenAPI queue
  * types only (public, sanitized queue items and the request-scoped AB config

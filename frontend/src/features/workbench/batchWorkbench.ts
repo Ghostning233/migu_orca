@@ -8,7 +8,7 @@
  * batchCardRequest / renderBatchCandidateChoices / resolveBatchAcceptDescriptors
  * / applyBatchAcceptResult / showBatchAcceptNotification / batchQueueStatusLabel
  * / batchQueueItemSummary / batchQueueSummaryMessage / recordUserCorrection) so
- * the old `/index` batch tab and the new `/app/workbench` batch section stay
+ * the old `/index` batch tab and the new `/app/add` batch section stay
  * parity for the same API result.
  *
  * Security boundary: these helpers operate on the generated OpenAPI batch

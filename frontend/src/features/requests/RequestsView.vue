@@ -44,6 +44,7 @@ import {
 } from '@/features/requests/requestsList'
 import { storageQuery as requestStorageQuery } from '@/features/requests/requestStorage'
 import RequestDetailPanel from '@/features/requests/RequestDetailPanel.vue'
+import { routeLocation } from '@/app/router/catalog'
 
 type ListResult = operations['listRequests']['responses']['200']['content']['application/json']['result']
 
@@ -102,9 +103,9 @@ function selectRequest(requestId: string | null | undefined): void {
   const id = requestId ?? ''
   selectedRequestId.value = id
   if (id) {
-    void router.push({ path: '/requests', query: { request_id: id } })
+    void router.push(routeLocation('plans', { request_id: id }))
   } else {
-    void router.push({ path: '/requests' })
+    void router.push(routeLocation('plans'))
   }
 }
 
@@ -129,7 +130,7 @@ function onDetailDeleted(requestId: string): void {
   // Clear the URL selection and drop the deleted item from the loaded list.
   loadedRequests.value = loadedRequests.value.filter((summary) => summary.request_id !== requestId)
   selectedRequestId.value = ''
-  void router.push({ path: '/requests' })
+  void router.push(routeLocation('plans'))
   void loadList()
 }
 

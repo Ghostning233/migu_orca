@@ -132,7 +132,7 @@ def test_app_shell_never_cached(tmp_path: Path, monkeypatch: Any) -> None:
     """
     _point_dist(tmp_path, monkeypatch)
 
-    for path in ("/app/", "/app/workbench", "/app/settings"):
+    for path in ("/app/", "/app/add", "/app/settings"):
         response = _client().get(path)
         assert response.status_code == 200, path
         assert response.headers.get("Cache-Control") == "no-cache", path
@@ -159,7 +159,7 @@ def test_app_fallback_returns_shell_for_spa_routes(tmp_path: Path, monkeypatch: 
     """Client-side routes under /app/* get the shell for Vue Router."""
     _point_dist(tmp_path, monkeypatch)
 
-    for path in ("/app/workbench", "/app/settings", "/app/requests/abc-123"):
+    for path in ("/app/add", "/app/settings", "/app/plans/abc-123"):
         response = _client().get(path)
         assert response.status_code == 200, path
         html = response.get_data(as_text=True)
@@ -196,7 +196,7 @@ def test_entry_routes_and_probes_not_intercepted() -> None:
     # pages are gone); they stay registered so old bookmarks keep working.
     index = client.get("/index")
     assert index.status_code == 302
-    assert index.headers["Location"] == "/app/workbench"
+    assert index.headers["Location"] == "/app/add"
 
     settings = client.get("/settings")
     assert settings.status_code == 302
@@ -207,19 +207,17 @@ def test_entry_routes_and_probes_not_intercepted() -> None:
     assert healthz.get_json() == {"ok": True, "result": "ok"}
 
 
-def test_spa_entry_redirects_preserve_public_query_params() -> None:
-    """US-208: Web entries forward public request_id/batch_id to the SPA."""
+def test_spa_entry_redirects_preserve_only_destination_query() -> None:
+    """US-259: each Web entry forwards only its destination's public ID."""
     client = _client()
 
     root = client.get("/?request_id=req-root&batch_id=batch-root")
     assert root.status_code == 302
-    assert root.headers["Location"] == (
-        "/app/workbench?request_id=req-root&batch_id=batch-root"
-    )
+    assert root.headers["Location"] == "/app/add?batch_id=batch-root"
 
     index = client.get("/index?request_id=req-1&batch_id=batch-2")
     assert index.status_code == 302
-    assert index.headers["Location"] == "/app/workbench?request_id=req-1&batch_id=batch-2"
+    assert index.headers["Location"] == "/app/add?batch_id=batch-2"
 
     settings = client.get("/settings?request_id=req-ab-3")
     assert settings.status_code == 302
@@ -242,10 +240,33 @@ def test_spa_entry_never_forwards_sensitive_query_values() -> None:
         "/index?request_id=req-1&token=secret-token&storage_dir=/etc/passwd&endpoint=http://x"
     )
     assert response.status_code == 302
-    assert response.headers["Location"] == "/app/workbench?request_id=req-1"
+    assert response.headers["Location"] == "/app/add"
     assert "secret-token" not in response.headers["Location"]
     assert "storage_dir" not in response.headers["Location"]
     assert "endpoint" not in response.headers["Location"]
+
+
+def test_spa_entry_drops_empty_and_duplicate_public_query_values() -> None:
+    """US-259: arrays and empty values never survive an entry redirect."""
+    client = _client()
+
+    assert client.get("/index?batch_id=").headers["Location"] == "/app/add"
+    assert (
+        client.get("/index?batch_id=batch-1&batch_id=batch-2").headers["Location"]
+        == "/app/add"
+    )
+    assert (
+        client.get("/settings?request_id=req-1&request_id=req-2").headers["Location"]
+        == "/app/settings"
+    )
+    assert (
+        client.get("/index?batch_id=https://private.invalid/path").headers["Location"]
+        == "/app/add"
+    )
+    assert (
+        client.get("/settings?request_id=/private/storage/path").headers["Location"]
+        == "/app/settings"
+    )
 
 
 def test_app_blueprint_registered() -> None:

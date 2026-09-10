@@ -137,11 +137,11 @@ async function mountBatch() {
   const router = createRouter({
     history: createMemoryHistory('/app/'),
     routes: [
-      { path: '/workbench', name: 'workbench', component: BatchWorkbenchView },
-      { path: '/requests', name: 'requests', component: { template: '<p>requests</p>' } },
+      { path: '/add', name: 'add', component: BatchWorkbenchView },
+      { path: '/plans', name: 'plans', component: { template: '<p>requests</p>' } },
     ],
   })
-  await router.push({ path: '/workbench' })
+  await router.push({ path: '/add' })
   await router.isReady()
 
   const wrapper = mount(BatchWorkbenchView, {

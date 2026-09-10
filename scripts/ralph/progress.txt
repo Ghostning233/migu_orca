@@ -47,3 +47,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Vitest's jsdom environment rewrites `import.meta.url`; filesystem-backed style tests should resolve from the frontend `process.cwd()`.
   - Validation passed: targeted token Vitest (14 tests), frontend typecheck/build, targeted real-Chromium reduced-motion test, and `git diff --check`. Full suites were intentionally deferred to US-265.
 ---
+## 2026-09-10 19:55:36 CST - US-259
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: The production Vue router now consumes the Stage 33 route catalog for `/add`, `/plans`, `/tracking`, `/settings`, root redirect and all three legacy replace redirects. Internal navigation uses `routeLocation` exclusively. Query migration retains only a single valid ASCII public identifier owned by the destination, rejecting arrays, duplicates, empty values, unknown fields, URLs and path-shaped values. Flask `/` and `/index` now redirect to `/app/add` with only `batch_id`; both settings entries retain only `request_id`. The scoped SPA fallback and non-app routes remain unchanged.
+- Files changed: route catalog/router and their tests, App route links and affected feature navigation/tests, Flask entry routes/tests, targeted shell browser coverage, and current frontend/Web agent guidance; plus `scripts/ralph/prd.json` and `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Redirect query validation must reject sensitive-shaped values even when they are placed under an otherwise allowed key; current generated request/batch identifiers fit `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`.
+  - Feature navigation should call `routeLocation` instead of repeating paths so catalog, router and internal links cannot drift.
+  - Validation passed: 9 targeted Vitest files (126 tests), frontend typecheck/build, Flask app route tests (17 tests), four targeted real-Chromium route/navigation checks, and `git diff --check`. Full suites were intentionally deferred to US-265.
+---

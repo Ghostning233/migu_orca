@@ -104,7 +104,7 @@ type QueryInput =
 function nonEmptyScalar(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
   const trimmed = value.trim()
-  return trimmed || undefined
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(trimmed) ? trimmed : undefined
 }
 
 /**

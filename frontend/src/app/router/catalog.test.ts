@@ -60,6 +60,9 @@ describe('Stage 33 route catalog (US-257)', () => {
     ['settings', { request_id: '' }, {}],
     ['add', { batch_id: 'batch-1', request_id: 'request-1', token: 'secret' }, { batch_id: 'batch-1' }],
     ['plans', { request_id: 'request-1', endpoint: 'https://private.invalid' }, { request_id: 'request-1' }],
+    ['add', { batch_id: 'https://private.invalid/credential' }, {}],
+    ['plans', { request_id: '/private/storage/path' }, {}],
+    ['settings', { request_id: 'request id with spaces' }, {}],
   ] as const)('drops arrays, empty values, unknown and sensitive query for %s', (route, query, expected) => {
     expect(sanitizeRouteQuery(route, query)).toEqual(expected)
   })

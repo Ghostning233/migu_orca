@@ -9,28 +9,28 @@ import { useNotificationStore } from '@/app/stores/notification'
 // The test router mirrors the application route table (paths are relative to
 // the `/app/` history base used in src/app/router/index.ts). Using real
 // routes keeps the shell test honest: RouterLink resolves to the actual
-// workbench/settings destinations.
+// add/settings destinations.
 function makeRouter() {
   return createRouter({
     history: createMemoryHistory('/app/'),
     routes: [
       {
         path: '/',
-        redirect: '/workbench',
+        redirect: '/add',
       },
       {
-        path: '/workbench',
-        name: 'workbench',
+        path: '/add',
+        name: 'add',
         component: { template: '<p class="shell-route">工作台路由内容</p>' },
       },
       {
-        path: '/requests',
-        name: 'requests',
+        path: '/plans',
+        name: 'plans',
         component: { template: '<p class="shell-route">订阅方案路由内容</p>' },
       },
       {
-        path: '/queue',
-        name: 'queue',
+        path: '/tracking',
+        name: 'tracking',
         component: { template: '<p class="shell-route">提交队列路由内容</p>' },
       },
       {
@@ -55,7 +55,7 @@ describe('App shell (US-199)', () => {
       },
     })
     await router.isReady()
-    await router.push('/workbench')
+    await router.push('/add')
 
     expect(wrapper.find('.app-shell').exists()).toBe(true)
     expect(wrapper.find('.app-title').text()).toBe('MiGuOrca')
@@ -82,10 +82,10 @@ describe('App shell (US-199)', () => {
     })
     await router.isReady()
 
-    await router.push('/requests')
+    await router.push('/plans')
     expect(wrapper.find('.app-main .shell-route').text()).toBe('订阅方案路由内容')
 
-    await router.push('/queue')
+    await router.push('/tracking')
     expect(wrapper.find('.app-main .shell-route').text()).toBe('提交队列路由内容')
 
     await router.push('/settings')
@@ -146,7 +146,7 @@ describe('App shell (US-199)', () => {
       },
     })
     await router.isReady()
-    await router.push('/requests')
+    await router.push('/plans')
 
     const skip = wrapper.find('.skip-link')
     expect(skip.exists()).toBe(true)
