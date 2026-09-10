@@ -669,8 +669,11 @@ class TestAppRequestDetailResponsiveA11y:
 
         entry = page.locator("#detail-ab-submit-entry")
         assert entry.count() >= 1
-        assert entry.get_attribute("href") == "/app/settings?request_id=req-ab-entry&ab=1"
+        assert entry.get_attribute("href") == "/app/settings?request_id=req-ab-entry"
 
         entry.click()
-        page.wait_for_url("**/app/settings?request_id=req-ab-entry**", timeout=5000)
+        page.wait_for_url(
+            f"{live_server_url}/app/settings?request_id=req-ab-entry", timeout=5000
+        )
+        assert page.url == f"{live_server_url}/app/settings?request_id=req-ab-entry"
         expect(page.locator("#settings-ab-request-id")).to_have_text("req-ab-entry")

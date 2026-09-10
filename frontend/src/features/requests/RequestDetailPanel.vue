@@ -23,6 +23,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
+import { routeLocation } from '@/app/router/catalog'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
@@ -400,7 +401,7 @@ watch(modifyClearFolderName, (clear) => {
           <RouterLink
             id="detail-ab-submit-entry"
             class="base-button secondary-button"
-            :to="{ path: '/settings', query: { request_id: props.requestId, ab: '1' } }"
+            :to="routeLocation('settings', { request_id: props.requestId })"
           >
             去 Settings 提交 Auto Bangumi
           </RouterLink>

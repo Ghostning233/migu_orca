@@ -533,6 +533,6 @@ describe('RequestDetailPanel actions (US-203)', () => {
 
     const link = wrapper.find('#detail-ab-submit-entry')
     expect(link.exists()).toBe(true)
-    expect(link.attributes('href')).toBe('/app/settings?request_id=req-a&ab=1')
+    expect(link.attributes('href')).toBe('/app/settings?request_id=req-a')
   })
 })
