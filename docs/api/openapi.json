@@ -12811,8 +12811,8 @@
                       "additionalProperties": false,
                       "properties": {
                         "request": {
-                          "additionalProperties": true,
-                          "description": "Typed view of the saved Request snapshot the detail panel renders.\n\nOnly the display fields are typed; the engine may add fields without\nbreaking the boundary (``extra=\"allow\"``). ``mikan_url``/``rss_url``/\n``poster_url`` are declared for schema accuracy but the frontend must\nnever render them (URLs are redacted at display time).",
+                          "additionalProperties": false,
+                          "description": "Strict, sanitized Request projection used only by GET detail.",
                           "properties": {
                             "request_id": {
                               "anyOf": [
@@ -12841,7 +12841,7 @@
                             "input": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "raw_title": {
                                       "anyOf": [
@@ -12856,7 +12856,7 @@
                                       "title": "Raw Title"
                                     }
                                   },
-                                  "title": "RequestInputDTO",
+                                  "title": "_RequestDetailInputDTO",
                                   "type": "object"
                                 },
                                 {
@@ -12868,12 +12868,12 @@
                             "source_info": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "matched_bangumi": {
                                       "anyOf": [
                                         {
-                                          "additionalProperties": true,
+                                          "additionalProperties": false,
                                           "properties": {
                                             "title": {
                                               "anyOf": [
@@ -12888,24 +12888,11 @@
                                               "title": "Title"
                                             },
                                             "aliases": {
-                                              "default": [],
                                               "items": {
                                                 "type": "string"
                                               },
                                               "title": "Aliases",
                                               "type": "array"
-                                            },
-                                            "mikan_url": {
-                                              "anyOf": [
-                                                {
-                                                  "type": "string"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
-                                              "default": null,
-                                              "title": "Mikan Url"
                                             },
                                             "match_score": {
                                               "anyOf": [
@@ -12918,21 +12905,9 @@
                                               ],
                                               "default": null,
                                               "title": "Match Score"
-                                            },
-                                            "poster_url": {
-                                              "anyOf": [
-                                                {
-                                                  "type": "string"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
-                                              "default": null,
-                                              "title": "Poster Url"
                                             }
                                           },
-                                          "title": "MatchedBangumiDTO",
+                                          "title": "_RequestDetailMatchedBangumiDTO",
                                           "type": "object"
                                         },
                                         {
@@ -12942,9 +12917,8 @@
                                       "default": null
                                     },
                                     "rss_sources": {
-                                      "default": [],
                                       "items": {
-                                        "additionalProperties": true,
+                                        "additionalProperties": false,
                                         "properties": {
                                           "subtitle_group": {
                                             "anyOf": [
@@ -12957,18 +12931,6 @@
                                             ],
                                             "default": null,
                                             "title": "Subtitle Group"
-                                          },
-                                          "rss_url": {
-                                            "anyOf": [
-                                              {
-                                                "type": "string"
-                                              },
-                                              {
-                                                "type": "null"
-                                              }
-                                            ],
-                                            "default": null,
-                                            "title": "Rss Url"
                                           },
                                           "source_type": {
                                             "anyOf": [
@@ -12995,7 +12957,6 @@
                                             "title": "Total Seed Count"
                                           },
                                           "seed_names": {
-                                            "default": [],
                                             "items": {
                                               "type": "string"
                                             },
@@ -13027,7 +12988,6 @@
                                             "title": "Invalid Seed Count"
                                           },
                                           "valid_seed_names": {
-                                            "default": [],
                                             "items": {
                                               "type": "string"
                                             },
@@ -13035,16 +12995,16 @@
                                             "type": "array"
                                           },
                                           "excluded_seed_names": {
-                                            "default": [],
                                             "items": {
-                                              "additionalProperties": true,
+                                              "additionalProperties": {
+                                                "type": "string"
+                                              },
                                               "type": "object"
                                             },
                                             "title": "Excluded Seed Names",
                                             "type": "array"
                                           },
                                           "warnings": {
-                                            "default": [],
                                             "items": {
                                               "type": "string"
                                             },
@@ -13052,14 +13012,14 @@
                                             "type": "array"
                                           }
                                         },
-                                        "title": "RssSourceDTO",
+                                        "title": "_RequestDetailRssSourceDTO",
                                         "type": "object"
                                       },
                                       "title": "Rss Sources",
                                       "type": "array"
                                     }
                                   },
-                                  "title": "SourceInfoDTO",
+                                  "title": "_RequestDetailSourceInfoDTO",
                                   "type": "object"
                                 },
                                 {
@@ -13071,7 +13031,7 @@
                             "confirmable_config": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "selected_subtitle_group": {
                                       "anyOf": [
@@ -13088,6 +13048,7 @@
                                     "selected_rss_url": {
                                       "anyOf": [
                                         {
+                                          "const": "SELECTED",
                                           "type": "string"
                                         },
                                         {
@@ -13100,7 +13061,7 @@
                                     "filter_rule": {
                                       "anyOf": [
                                         {
-                                          "additionalProperties": true,
+                                          "additionalProperties": false,
                                           "properties": {
                                             "must_contain": {
                                               "anyOf": [
@@ -13151,7 +13112,7 @@
                                               "title": "Case Sensitive"
                                             }
                                           },
-                                          "title": "FilterRuleDTO",
+                                          "title": "_RequestDetailFilterRuleDTO",
                                           "type": "object"
                                         },
                                         {
@@ -13161,7 +13122,6 @@
                                       "default": null
                                     },
                                     "effective_seed_names": {
-                                      "default": [],
                                       "items": {
                                         "type": "string"
                                       },
@@ -13181,7 +13141,6 @@
                                       "title": "Expected Folder Name"
                                     },
                                     "warnings": {
-                                      "default": [],
                                       "items": {
                                         "type": "string"
                                       },
@@ -13189,7 +13148,7 @@
                                       "type": "array"
                                     }
                                   },
-                                  "title": "ConfirmableConfigDTO",
+                                  "title": "_RequestDetailConfirmableConfigDTO",
                                   "type": "object"
                                 },
                                 {
@@ -13197,19 +13156,6 @@
                                 }
                               ],
                               "default": null
-                            },
-                            "ab_submit_result": {
-                              "anyOf": [
-                                {
-                                  "additionalProperties": true,
-                                  "type": "object"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ],
-                              "default": null,
-                              "title": "Ab Submit Result"
                             },
                             "created_at": {
                               "anyOf": [
@@ -13238,7 +13184,7 @@
                             "user_action": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "action": {
                                       "anyOf": [
@@ -13277,7 +13223,7 @@
                                       "title": "Decided At"
                                     }
                                   },
-                                  "title": "UserActionDTO",
+                                  "title": "_RequestDetailUserActionDTO",
                                   "type": "object"
                                 },
                                 {
@@ -13287,11 +13233,11 @@
                               "default": null
                             }
                           },
-                          "title": "RequestSnapshotDTO",
+                          "title": "_RequestDetailSnapshotDTO",
                           "type": "object"
                         },
                         "history": {
-                          "additionalProperties": true,
+                          "additionalProperties": false,
                           "properties": {
                             "available": {
                               "default": true,
@@ -13299,9 +13245,8 @@
                               "type": "boolean"
                             },
                             "events": {
-                              "default": [],
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
                                 "properties": {
                                   "request_id": {
                                     "anyOf": [
@@ -13362,22 +13307,9 @@
                                     ],
                                     "default": null,
                                     "title": "Timestamp"
-                                  },
-                                  "details": {
-                                    "anyOf": [
-                                      {
-                                        "additionalProperties": true,
-                                        "type": "object"
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
-                                    ],
-                                    "default": null,
-                                    "title": "Details"
                                   }
                                 },
-                                "title": "HistoryEventDTO",
+                                "title": "_RequestDetailHistoryEventDTO",
                                 "type": "object"
                               },
                               "title": "Events",
@@ -13397,11 +13329,11 @@
                               "title": "Error"
                             }
                           },
-                          "title": "HistorySectionDTO",
+                          "title": "_RequestDetailHistorySectionDTO",
                           "type": "object"
                         },
                         "ab_result": {
-                          "additionalProperties": true,
+                          "additionalProperties": false,
                           "properties": {
                             "available": {
                               "default": true,
@@ -13411,7 +13343,7 @@
                             "record": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "request_id": {
                                       "anyOf": [
@@ -13440,8 +13372,7 @@
                                     "ab_submit_result": {
                                       "anyOf": [
                                         {
-                                          "additionalProperties": true,
-                                          "description": "Lenient copy of the sanitized AB submit result for the Audit section.\n\nThe strict ``AbSubmitResultDTO`` (extra=\"forbid\") whitelists the\nsubmit-ab *response*; records read back from storage may carry extra\nfields, so the detail panel uses this lenient variant.",
+                                          "additionalProperties": false,
                                           "properties": {
                                             "success": {
                                               "anyOf": [
@@ -13456,42 +13387,14 @@
                                               "title": "Success"
                                             },
                                             "ab_subscription_id": {
-                                              "anyOf": [
-                                                {
-                                                  "type": "string"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
                                               "default": null,
-                                              "title": "Ab Subscription Id"
-                                            },
-                                            "ab_response": {
-                                              "anyOf": [
-                                                {
-                                                  "additionalProperties": true,
-                                                  "type": "object"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
-                                              "default": null,
-                                              "title": "Ab Response"
+                                              "title": "Ab Subscription Id",
+                                              "type": "null"
                                             },
                                             "fallback_config": {
-                                              "anyOf": [
-                                                {
-                                                  "additionalProperties": true,
-                                                  "type": "object"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
                                               "default": null,
-                                              "title": "Fallback Config"
+                                              "title": "Fallback Config",
+                                              "type": "null"
                                             },
                                             "error": {
                                               "anyOf": [
@@ -13507,7 +13410,7 @@
                                               "title": "Error"
                                             }
                                           },
-                                          "title": "AbSubmitResultRecordDTO",
+                                          "title": "_RequestDetailAbSubmitResultDTO",
                                           "type": "object"
                                         },
                                         {
@@ -13517,7 +13420,7 @@
                                       "default": null
                                     }
                                   },
-                                  "title": "AbResultRecordDTO",
+                                  "title": "_RequestDetailAbRecordDTO",
                                   "type": "object"
                                 },
                                 {
@@ -13540,7 +13443,7 @@
                               "title": "Error"
                             }
                           },
-                          "title": "AbResultSectionDTO",
+                          "title": "_RequestDetailAbResultSectionDTO",
                           "type": "object"
                         }
                       },
@@ -13563,14 +13466,21 @@
                       "input": null,
                       "source_info": null,
                       "confirmable_config": null,
-                      "ab_submit_result": null,
                       "created_at": null,
                       "updated_at": null,
                       "user_action": null
                     },
                     "history": {
                       "available": true,
-                      "events": [],
+                      "events": [
+                        {
+                          "request_id": null,
+                          "previous_status": null,
+                          "next_status": null,
+                          "action": null,
+                          "timestamp": null
+                        }
+                      ],
                       "error": null
                     },
                     "ab_result": {

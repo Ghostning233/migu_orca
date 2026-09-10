@@ -27,7 +27,10 @@ from mikan_engine.controllers.mikan_config import MikanConfig
 from request_engine.controllers.request_controller import summarize_request
 from shared.errors import Stage1Error
 from shared.models import EntryRequest
-from storage_engine.controllers.request_repository import load_request_snapshot
+from storage_engine.controllers.request_repository import (
+    load_request_snapshot,
+    save_request_snapshot,
+)
 from storage_engine.controllers.storage_config import load_storage_config
 from storage_engine.controllers.tracking_repository import list_tracking_records
 from tests.api_contract.conftest import saved_request
@@ -118,6 +121,57 @@ def test_golden_request_detail_success(client: FlaskClient, tmp_path: Path) -> N
     assert set(payload["result"]) == {"request", "history", "ab_result"}
     assert set(payload["result"]["history"]) == {"available", "events", "error"}
     assert set(payload["result"]["ab_result"]) == {"available", "record", "error"}
+
+
+def test_request_detail_security_projection_excludes_d32_canaries(
+    client: FlaskClient, tmp_path: Path
+) -> None:
+    request = saved_request(tmp_path, "芙莉莲", "request-d32-detail")
+    source = request["source_info"]["rss_sources"][0]
+    source.update(
+        {
+            "rss_url": "https://stage32-d32-rss.invalid/rss.xml",
+            "raw_response_body": "stage32-d32-raw-response",
+            "token": "stage32-d32-token",
+            "cookie": "stage32-d32-cookie",
+            "authorization": "stage32-d32-authorization",
+            "password": "stage32-d32-password",
+            "endpoint": "stage32-d32-endpoint.invalid",
+            "magnet": "stage32-d32-magnet",
+            "external_id": "stage32-d32-external-id",
+            "patch": "stage32-d32-patch-body",
+            "traceback": "stage32-d32-traceback",
+            "absolute_path": "/stage32/d32/private/path",
+        }
+    )
+    request["source_info"]["matched_bangumi"]["mikan_url"] = (
+        "https://stage32-d32-mikan.invalid/Home/Bangumi/32032"
+    )
+    save_request_snapshot(load_storage_config(tmp_path / "storage"), request)
+
+    response = client.get(
+        "/api/v1/requests/request-d32-detail",
+        query_string={"storage_dir": "storage"},
+    )
+
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    for canary in (
+        "stage32-d32-password",
+        "stage32-d32-token",
+        "stage32-d32-cookie",
+        "stage32-d32-authorization",
+        "stage32-d32-endpoint.invalid",
+        "stage32-d32-rss.invalid/rss.xml",
+        "stage32-d32-mikan.invalid/Home/Bangumi/32032",
+        "stage32-d32-magnet",
+        "stage32-d32-external-id",
+        "stage32-d32-raw-response",
+        "stage32-d32-patch-body",
+        "stage32-d32-traceback",
+        "/stage32/d32/private/path",
+    ):
+        assert canary not in body
 
 
 def test_golden_request_safe_info_success(client: FlaskClient, tmp_path: Path) -> None:

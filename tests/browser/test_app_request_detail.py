@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 import os
-import json
 import zipfile
 from pathlib import Path
 from typing import Any
-from urllib.request import urlopen
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -599,37 +597,8 @@ class TestAppRequestDetailSensitive:
             )
 
         page.route("**/api/v1/requests?storage_dir=storage", _safe_request_list)
-
-        def _redact_real_detail(route: Any, _request: Any) -> None:
-            with urlopen(
-                f"{live_server_url}/api/v1/requests/req-stage32-artifacts"
-                "?storage_dir=storage"
-            ) as response:
-                payload = json.load(response)
-
-            def redact(value: Any) -> Any:
-                if isinstance(value, str):
-                    for canary in canaries:
-                        value = value.replace(canary, "[redacted]")
-                    return value
-                if isinstance(value, list):
-                    return [redact(item) for item in value]
-                if isinstance(value, dict):
-                    return {key: redact(item) for key, item in value.items()}
-                return value
-
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(redact(payload), ensure_ascii=False),
-            )
-
-        page.route(
-            "**/api/v1/requests/req-stage32-artifacts?storage_dir=storage",
-            _redact_real_detail,
-        )
         # Trace from before navigation so the assertion covers the real Flask
-        # response path and the Vue detail flow consumes its safe projection.
+        # detail serializer and the Vue detail flow consumes its safe projection.
         page.context.tracing.start(screenshots=True, snapshots=True, sources=False)
         try:
             page.goto(

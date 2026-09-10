@@ -7453,14 +7453,21 @@ export interface operations {
                      *           "input": null,
                      *           "source_info": null,
                      *           "confirmable_config": null,
-                     *           "ab_submit_result": null,
                      *           "created_at": null,
                      *           "updated_at": null,
                      *           "user_action": null
                      *         },
                      *         "history": {
                      *           "available": true,
-                     *           "events": [],
+                     *           "events": [
+                     *             {
+                     *               "request_id": null,
+                     *               "previous_status": null,
+                     *               "next_status": null,
+                     *               "action": null,
+                     *               "timestamp": null
+                     *             }
+                     *           ],
                      *           "error": null
                      *         },
                      *         "ab_result": {
@@ -7477,13 +7484,8 @@ export interface operations {
                         /** RequestDetailResultDTO */
                         result: {
                             /**
-                             * RequestSnapshotDTO
-                             * @description Typed view of the saved Request snapshot the detail panel renders.
-                             *
-                             *     Only the display fields are typed; the engine may add fields without
-                             *     breaking the boundary (``extra="allow"``). ``mikan_url``/``rss_url``/
-                             *     ``poster_url`` are declared for schema accuracy but the frontend must
-                             *     never render them (URLs are redacted at display time).
+                             * _RequestDetailSnapshotDTO
+                             * @description Strict, sanitized Request projection used only by GET detail.
                              */
                             request: {
                                 /**
@@ -7497,62 +7499,37 @@ export interface operations {
                                  */
                                 status: string | null;
                                 /** @default null */
-                                input: ({
+                                input: {
                                     /**
                                      * Raw Title
                                      * @default null
                                      */
                                     raw_title: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
+                                } | null;
                                 /** @default null */
-                                source_info: ({
+                                source_info: {
                                     /** @default null */
-                                    matched_bangumi: ({
+                                    matched_bangumi: {
                                         /**
                                          * Title
                                          * @default null
                                          */
                                         title: string | null;
-                                        /**
-                                         * Aliases
-                                         * @default []
-                                         */
-                                        aliases: string[];
-                                        /**
-                                         * Mikan Url
-                                         * @default null
-                                         */
-                                        mikan_url: string | null;
+                                        /** Aliases */
+                                        aliases?: string[];
                                         /**
                                          * Match Score
                                          * @default null
                                          */
                                         match_score: number | null;
-                                        /**
-                                         * Poster Url
-                                         * @default null
-                                         */
-                                        poster_url: string | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Rss Sources
-                                     * @default []
-                                     */
-                                    rss_sources: ({
+                                    } | null;
+                                    /** Rss Sources */
+                                    rss_sources?: {
                                         /**
                                          * Subtitle Group
                                          * @default null
                                          */
                                         subtitle_group: string | null;
-                                        /**
-                                         * Rss Url
-                                         * @default null
-                                         */
-                                        rss_url: string | null;
                                         /**
                                          * Source Type
                                          * @default null
@@ -7563,11 +7540,8 @@ export interface operations {
                                          * @default null
                                          */
                                         total_seed_count: number | null;
-                                        /**
-                                         * Seed Names
-                                         * @default []
-                                         */
-                                        seed_names: string[];
+                                        /** Seed Names */
+                                        seed_names?: string[];
                                         /**
                                          * Valid Seed Count
                                          * @default null
@@ -7578,31 +7552,18 @@ export interface operations {
                                          * @default null
                                          */
                                         invalid_seed_count: number | null;
-                                        /**
-                                         * Valid Seed Names
-                                         * @default []
-                                         */
-                                        valid_seed_names: string[];
-                                        /**
-                                         * Excluded Seed Names
-                                         * @default []
-                                         */
-                                        excluded_seed_names: {
-                                            [key: string]: unknown;
+                                        /** Valid Seed Names */
+                                        valid_seed_names?: string[];
+                                        /** Excluded Seed Names */
+                                        excluded_seed_names?: {
+                                            [key: string]: string;
                                         }[];
-                                        /**
-                                         * Warnings
-                                         * @default []
-                                         */
-                                        warnings: string[];
-                                    } & {
-                                        [key: string]: unknown;
-                                    })[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
+                                        /** Warnings */
+                                        warnings?: string[];
+                                    }[];
+                                } | null;
                                 /** @default null */
-                                confirmable_config: ({
+                                confirmable_config: {
                                     /**
                                      * Selected Subtitle Group
                                      * @default null
@@ -7612,9 +7573,9 @@ export interface operations {
                                      * Selected Rss Url
                                      * @default null
                                      */
-                                    selected_rss_url: string | null;
+                                    selected_rss_url: "SELECTED" | null;
                                     /** @default null */
-                                    filter_rule: ({
+                                    filter_rule: {
                                         /**
                                          * Must Contain
                                          * @default null
@@ -7635,33 +7596,16 @@ export interface operations {
                                          * @default null
                                          */
                                         case_sensitive: boolean | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                    /**
-                                     * Effective Seed Names
-                                     * @default []
-                                     */
-                                    effective_seed_names: string[];
+                                    } | null;
+                                    /** Effective Seed Names */
+                                    effective_seed_names?: string[];
                                     /**
                                      * Expected Folder Name
                                      * @default null
                                      */
                                     expected_folder_name: string | null;
-                                    /**
-                                     * Warnings
-                                     * @default []
-                                     */
-                                    warnings: string[];
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                                /**
-                                 * Ab Submit Result
-                                 * @default null
-                                 */
-                                ab_submit_result: {
-                                    [key: string]: unknown;
+                                    /** Warnings */
+                                    warnings?: string[];
                                 } | null;
                                 /**
                                  * Created At
@@ -7674,7 +7618,7 @@ export interface operations {
                                  */
                                 updated_at: string | null;
                                 /** @default null */
-                                user_action: ({
+                                user_action: {
                                     /**
                                      * Action
                                      * @default null
@@ -7690,24 +7634,17 @@ export interface operations {
                                      * @default null
                                      */
                                     decided_at: string | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
-                            } & {
-                                [key: string]: unknown;
+                                } | null;
                             };
-                            /** HistorySectionDTO */
+                            /** _RequestDetailHistorySectionDTO */
                             history: {
                                 /**
                                  * Available
                                  * @default true
                                  */
                                 available: boolean;
-                                /**
-                                 * Events
-                                 * @default []
-                                 */
-                                events: ({
+                                /** Events */
+                                events?: {
                                     /**
                                      * Request Id
                                      * @default null
@@ -7733,16 +7670,7 @@ export interface operations {
                                      * @default null
                                      */
                                     timestamp: string | null;
-                                    /**
-                                     * Details
-                                     * @default null
-                                     */
-                                    details: {
-                                        [key: string]: unknown;
-                                    } | null;
-                                } & {
-                                    [key: string]: unknown;
-                                })[];
+                                }[];
                                 /**
                                  * Error
                                  * @default null
@@ -7750,10 +7678,8 @@ export interface operations {
                                 error: {
                                     [key: string]: unknown;
                                 } | null;
-                            } & {
-                                [key: string]: unknown;
                             };
-                            /** AbResultSectionDTO */
+                            /** _RequestDetailAbResultSectionDTO */
                             ab_result: {
                                 /**
                                  * Available
@@ -7761,7 +7687,7 @@ export interface operations {
                                  */
                                 available: boolean;
                                 /** @default null */
-                                record: ({
+                                record: {
                                     /**
                                      * Request Id
                                      * @default null
@@ -7773,7 +7699,7 @@ export interface operations {
                                      */
                                     recorded_at: string | null;
                                     /** @default null */
-                                    ab_submit_result: ({
+                                    ab_submit_result: {
                                         /**
                                          * Success
                                          * @default null
@@ -7783,21 +7709,12 @@ export interface operations {
                                          * Ab Subscription Id
                                          * @default null
                                          */
-                                        ab_subscription_id: string | null;
-                                        /**
-                                         * Ab Response
-                                         * @default null
-                                         */
-                                        ab_response: {
-                                            [key: string]: unknown;
-                                        } | null;
+                                        ab_subscription_id: null;
                                         /**
                                          * Fallback Config
                                          * @default null
                                          */
-                                        fallback_config: {
-                                            [key: string]: unknown;
-                                        } | null;
+                                        fallback_config: null;
                                         /**
                                          * Error
                                          * @default null
@@ -7805,12 +7722,8 @@ export interface operations {
                                         error: {
                                             [key: string]: unknown;
                                         } | null;
-                                    } & {
-                                        [key: string]: unknown;
-                                    }) | null;
-                                } & {
-                                    [key: string]: unknown;
-                                }) | null;
+                                    } | null;
+                                } | null;
                                 /**
                                  * Error
                                  * @default null
@@ -7818,8 +7731,6 @@ export interface operations {
                                 error: {
                                     [key: string]: unknown;
                                 } | null;
-                            } & {
-                                [key: string]: unknown;
                             };
                         };
                     };

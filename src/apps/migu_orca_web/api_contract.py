@@ -219,10 +219,108 @@ class AbResultSectionDTO(_SnapshotBase):
     error: dict[str, Any] | None = None
 
 
+class _RequestDetailInputDTO(_StrictBase):
+    raw_title: str | None = None
+
+
+class _RequestDetailMatchedBangumiDTO(_StrictBase):
+    title: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    match_score: float | None = None
+
+
+class _RequestDetailRssSourceDTO(_StrictBase):
+    subtitle_group: str | None = None
+    source_type: str | None = None
+    total_seed_count: int | None = None
+    seed_names: list[str] = Field(default_factory=list)
+    valid_seed_count: int | None = None
+    invalid_seed_count: int | None = None
+    valid_seed_names: list[str] = Field(default_factory=list)
+    excluded_seed_names: list[dict[str, str]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class _RequestDetailSourceInfoDTO(_StrictBase):
+    matched_bangumi: _RequestDetailMatchedBangumiDTO | None = None
+    rss_sources: list[_RequestDetailRssSourceDTO] = Field(default_factory=list)
+
+
+class _RequestDetailFilterRuleDTO(_StrictBase):
+    must_contain: str | None = None
+    must_not_contain: str | None = None
+    use_regex: bool | None = None
+    case_sensitive: bool | None = None
+
+
+class _RequestDetailConfirmableConfigDTO(_StrictBase):
+    selected_subtitle_group: str | None = None
+    # The UI only needs to know whether a source was selected; the URL itself
+    # is never part of the detail response.
+    selected_rss_url: Literal["SELECTED"] | None = None
+    filter_rule: _RequestDetailFilterRuleDTO | None = None
+    effective_seed_names: list[str] = Field(default_factory=list)
+    expected_folder_name: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class _RequestDetailUserActionDTO(_StrictBase):
+    action: str | None = None
+    reason: str | None = None
+    decided_at: str | None = None
+
+
+class _RequestDetailSnapshotDTO(_StrictBase):
+    """Strict, sanitized Request projection used only by GET detail."""
+
+    request_id: str | None = None
+    status: str | None = None
+    input: _RequestDetailInputDTO | None = None
+    source_info: _RequestDetailSourceInfoDTO | None = None
+    confirmable_config: _RequestDetailConfirmableConfigDTO | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    user_action: _RequestDetailUserActionDTO | None = None
+
+
+class _RequestDetailHistoryEventDTO(_StrictBase):
+    request_id: str | None = None
+    previous_status: str | None = None
+    next_status: str | None = None
+    action: str | None = None
+    timestamp: str | None = None
+
+
+class _RequestDetailHistorySectionDTO(_StrictBase):
+    available: bool = True
+    events: list[_RequestDetailHistoryEventDTO] = Field(default_factory=list)
+    error: dict[str, Any] | None = None
+
+
+class _RequestDetailAbSubmitResultDTO(_StrictBase):
+    success: bool | None = None
+    # External IDs and upstream response/config bodies are deliberately absent.
+    ab_subscription_id: None = None
+    fallback_config: None = None
+    error: dict[str, Any] | None = None
+
+
+class _RequestDetailAbRecordDTO(_StrictBase):
+    request_id: str | None = None
+    recorded_at: str | None = None
+    ab_submit_result: _RequestDetailAbSubmitResultDTO | None = None
+
+
+class _RequestDetailAbResultSectionDTO(_StrictBase):
+    available: bool = True
+    record: _RequestDetailAbRecordDTO | None = None
+    error: dict[str, Any] | None = None
+
+
 class RequestDetailResultDTO(_StrictBase):
-    request: RequestSnapshotDTO
-    history: HistorySectionDTO
-    ab_result: AbResultSectionDTO
+    request: _RequestDetailSnapshotDTO
+    history: _RequestDetailHistorySectionDTO
+    ab_result: _RequestDetailAbResultSectionDTO
 
 
 class RequestCreateResultDTO(_StrictBase):

@@ -574,6 +574,157 @@ def serialize_request_safe_info(
     }
 
 
+def serialize_request_detail(
+    request: dict[str, Any],
+    *,
+    history_section: dict[str, Any],
+    ab_section: dict[str, Any],
+    storage_profile: str | None = None,
+) -> dict[str, Any]:
+    """Build the strict, UI-shaped projection for GET request detail.
+
+    The legacy detail page needs the Request-shaped sections for rendering
+    seeds and edit controls, so this is intentionally not a copy of the
+    compact ``safe-info`` response.  Every nested field is selected here;
+    credentials, URLs, external IDs, raw responses, patches, tracebacks and
+    paths have no output slot at this boundary.
+    """
+    history_events = history_section.get("events")
+    history_events = history_events if isinstance(history_events, list) else []
+    ab_record = ab_section.get("record")
+    ab_record = ab_record if isinstance(ab_record, dict) else {}
+    raw_ab_result = ab_record.get("ab_submit_result")
+    raw_ab_result = raw_ab_result if isinstance(raw_ab_result, dict) else None
+    safe_info = serialize_request_safe_info(
+        request,
+        history_events=history_events,
+        ab_submit_result=raw_ab_result,
+        storage_profile=storage_profile,
+    )
+
+    source_info = request.get("source_info")
+    source_info = source_info if isinstance(source_info, dict) else {}
+    matched = source_info.get("matched_bangumi")
+    matched = matched if isinstance(matched, dict) else {}
+    rss_sources = _rss_source_dicts(source_info)
+    safe_sources: list[dict[str, Any]] = []
+    for source in rss_sources:
+        excluded: list[dict[str, str]] = []
+        raw_excluded = source.get("excluded_seed_names")
+        if isinstance(raw_excluded, list):
+            for entry in raw_excluded:
+                if isinstance(entry, dict):
+                    excluded.append(
+                        {
+                            "name": _safe_label(entry.get("name")) or "",
+                            "reason": _safe_label(entry.get("reason")) or "",
+                        }
+                    )
+        safe_sources.append(
+            {
+                "subtitle_group": _safe_label(source.get("subtitle_group")),
+                "source_type": _safe_label(source.get("source_type")),
+                "total_seed_count": _safe_count(source.get("total_seed_count")),
+                "seed_names": _safe_string_list(source.get("seed_names")),
+                "valid_seed_count": _safe_count(source.get("valid_seed_count")),
+                "invalid_seed_count": _safe_count(source.get("invalid_seed_count")),
+                "valid_seed_names": _safe_string_list(source.get("valid_seed_names")),
+                "excluded_seed_names": excluded,
+                "warnings": [
+                    _safe_label(item) or ""
+                    for item in source.get("warnings", [])
+                    if isinstance(item, str)
+                ],
+            }
+        )
+
+    raw_filter = request.get("confirmable_config", {})
+    raw_filter = raw_filter if isinstance(raw_filter, dict) else {}
+    filter_rule = raw_filter.get("filter_rule")
+    filter_rule = filter_rule if isinstance(filter_rule, dict) else {}
+    detail_request = {
+        "request_id": safe_info["request_id"],
+        "status": safe_info["status"],
+        "input": {"raw_title": safe_info["raw_title"]},
+        "source_info": {
+            "matched_bangumi": {
+                "title": safe_info["title"],
+                "aliases": safe_info["aliases"],
+                "match_score": (
+                    matched.get("match_score")
+                    if isinstance(matched.get("match_score"), (int, float))
+                    else None
+                ),
+            },
+            "rss_sources": safe_sources,
+        },
+        "confirmable_config": {
+            "selected_subtitle_group": safe_info["selected_subtitle_group"],
+            "selected_rss_url": (
+                "SELECTED" if raw_filter.get("selected_rss_url") else None
+            ),
+            "filter_rule": {
+                "must_contain": _safe_label(filter_rule.get("must_contain")),
+                "must_not_contain": _safe_label(filter_rule.get("must_not_contain")),
+                "use_regex": _safe_bool(filter_rule.get("use_regex")),
+                "case_sensitive": _safe_bool(filter_rule.get("case_sensitive")),
+            },
+            "effective_seed_names": safe_info["resources"]["valid_file_names"],
+            "expected_folder_name": safe_info["folder_name"],
+            "warnings": safe_info["subtitle_groups"][0]["warnings"]
+            if safe_info["subtitle_groups"]
+            else [],
+        },
+        "created_at": _safe_label(request.get("created_at")),
+        "updated_at": _safe_label(request.get("updated_at")),
+        "user_action": None,
+    }
+
+    raw_user_action = request.get("user_action")
+    if isinstance(raw_user_action, dict):
+        detail_request["user_action"] = {
+            "action": _safe_label(raw_user_action.get("action")),
+            "reason": _safe_label(raw_user_action.get("reason")),
+            "decided_at": _safe_label(raw_user_action.get("decided_at")),
+        }
+
+    history_error = None
+    if history_section.get("available") is not True:
+        history_error = {
+            "error_type": "storage_error",
+            "error_message": "状态历史不可用",
+        }
+    safe_history = {
+        "available": history_section.get("available") is True,
+        "events": safe_info["history_summary"],
+        "error": history_error,
+    }
+
+    ab_error = None
+    if ab_section.get("available") is not True:
+        ab_error = {"error_type": "storage_error", "error_message": "提交结果不可用"}
+    safe_ab = safe_info["ab_status"]
+    safe_ab_result = {
+        "available": ab_section.get("available") is True,
+        "record": (
+            {
+                "request_id": safe_info["request_id"],
+                "recorded_at": _safe_label(ab_record.get("recorded_at")),
+                "ab_submit_result": {
+                    "success": safe_ab["success"],
+                    "ab_subscription_id": None,
+                    "fallback_config": None,
+                    "error": None,
+                },
+            }
+            if safe_ab["submitted"]
+            else None
+        ),
+        "error": ab_error,
+    }
+    return {"request": detail_request, "history": safe_history, "ab_result": safe_ab_result}
+
+
 def _safe_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
