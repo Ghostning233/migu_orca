@@ -65,3 +65,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The style drift guard should permit `box-shadow: var(--shadow-shell)` consumption while rejecting literal or parallel shell shadows.
   - Validation passed: targeted App/token Vitest (20 tests), frontend typecheck/build, three targeted real-Chromium shell/navigation/skip-link tests, and `git diff --check`. Full suites were intentionally deferred to US-265.
 ---
+## 2026-09-10 20:20:00 CST - US-261 review fix
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was reviewed: Ralph committed US-261 as `c8e3544`; its source changes were kept, but the first full browser run exposed five stale Stage 33 route assertions. Updated browser helpers and URL/navigation assertions to use `/app/add`, `/app/plans`, and `/app/tracking` with the final Chinese navigation labels.
+- Files changed: `tests/browser/test_app_request_detail.py`, `tests/browser/test_app_requests.py`, `tests/browser/test_app_responsive_a11y.py`, `tests/browser/test_app_workbench.py`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - A route migration is incomplete until browser helper defaults, wait-for-URL assertions, responsive route matrices, and navigation labels all consume the new catalog paths.
+  - Ralph must not classify route assertion failures as pre-existing when the failing tests are direct consumers of the current Stage 33 paths.
+  - Targeted rerun passed: all five previously failing Chromium tests; archive pollution from the Ralph launcher was discarded and Stage 33 progress was restored before this review entry.
+---

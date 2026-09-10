@@ -46,7 +46,7 @@ def storage_with_requests(storage_dir: Path) -> Path:
 def _goto_requests(page: Page, live_server_url: str, query: str = "") -> None:
     """Navigate to the SPA requests list and wait for it to load."""
     _require_dist()
-    page.goto(f"{live_server_url}/app/requests{query}")
+    page.goto(f"{live_server_url}/app/plans{query}")
     page.wait_for_selector("#request-list-container", timeout=5000)
     page.wait_for_selector(".request-list-item", timeout=5000)
 
@@ -77,7 +77,7 @@ class TestAppRequestsLoadsList:
     ) -> None:
         set_storage_preferences(page, storage_dir)
         _require_dist()
-        page.goto(f"{live_server_url}/app/requests")
+        page.goto(f"{live_server_url}/app/plans")
         page.wait_for_selector("#request-list-container", timeout=5000)
 
         container = page.locator("#request-list-container")
@@ -163,7 +163,7 @@ class TestAppRequestsSelection:
         _goto_requests(page, live_server_url)
 
         page.locator("[data-request-id='req-b']").click()
-        page.wait_for_url("**/app/requests?request_id=req-b", timeout=5000)
+        page.wait_for_url("**/app/plans?request_id=req-b", timeout=5000)
         selected = page.locator(".request-list-item.is-selected")
         expect(selected).to_have_attribute("data-request-id", "req-b")
         expect(selected).to_have_attribute("aria-current", "true")
@@ -237,7 +237,7 @@ class TestAppRequestsResponsiveAndA11y:
                 route.continue_()
 
         page.route("**/api/v1/requests**", _fail)
-        page.goto(f"{live_server_url}/app/requests")
+        page.goto(f"{live_server_url}/app/plans")
         page.wait_for_selector("#request-list-container .error-state", timeout=5000)
 
         error = page.locator("#request-list-container .error-state")
@@ -269,7 +269,7 @@ class TestAppRequestsErrorState:
                 route.continue_()
 
         page.route("**/api/v1/requests**", _fail)
-        page.goto(f"{live_server_url}/app/requests")
+        page.goto(f"{live_server_url}/app/plans")
         page.wait_for_selector("#request-list-container", timeout=5000)
 
         error = page.locator("#request-list-container .error-state")
