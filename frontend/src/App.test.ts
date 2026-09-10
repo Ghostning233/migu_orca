@@ -42,7 +42,7 @@ function makeRouter() {
   })
 }
 
-describe('App shell (US-199)', () => {
+describe('App shell (US-260)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
   })
@@ -59,14 +59,18 @@ describe('App shell (US-199)', () => {
 
     expect(wrapper.find('.app-shell').exists()).toBe(true)
     expect(wrapper.find('.app-title').text()).toBe('MiGuOrca')
-    expect(wrapper.find('.mode-summary').exists()).toBe(true)
+    expect(wrapper.find('.brand-eyebrow').text()).toBe('桌面番剧工作台')
+    expect(wrapper.find('.workspace-status').text()).toBe('本地桌面工作区')
 
     const navLinks = wrapper.findAll('.top-nav .nav-link')
     expect(navLinks).toHaveLength(4)
-    expect(navLinks[0]?.text()).toContain('订阅方案工作台')
-    expect(navLinks[1]?.text()).toContain('订阅方案')
-    expect(navLinks[2]?.text()).toContain('提交队列')
-    expect(navLinks[3]?.text()).toContain('Settings')
+    expect(navLinks[0]?.text()).toContain('添加番剧')
+    expect(navLinks[1]?.text()).toContain('追番方案')
+    expect(navLinks[2]?.text()).toContain('追番管理')
+    expect(navLinks[3]?.text()).toContain('设置')
+    expect(navLinks[0]?.attributes('aria-current')).toBe('page')
+    expect(navLinks[0]?.find('.nav-current-marker').text()).toBe('当前')
+    expect(navLinks.slice(1).every((link) => link.attributes('aria-current') === undefined)).toBe(true)
 
     const main = wrapper.find('.app-main')
     expect(main.exists()).toBe(true)
@@ -90,6 +94,34 @@ describe('App shell (US-199)', () => {
 
     await router.push('/settings')
     expect(wrapper.find('.app-main .shell-route').text()).toBe('Settings 路由内容')
+  })
+
+  it('moves focus to the main content only when the page route changes', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const router = makeRouter()
+    const wrapper = mount(App, {
+      attachTo: host,
+      global: {
+        plugins: [createPinia(), router],
+      },
+    })
+    await router.isReady()
+
+    await router.push('/plans')
+    await wrapper.vm.$nextTick()
+    expect(document.activeElement).toBe(wrapper.find('main#app-main').element)
+    expect(wrapper.findAll('.nav-link')[1]?.attributes('aria-current')).toBe('page')
+
+    const search = document.createElement('input')
+    wrapper.find('main#app-main').element.append(search)
+    search.focus()
+    await router.push({ path: '/plans', query: { request_id: 'request-1' } })
+    await wrapper.vm.$nextTick()
+    expect(document.activeElement).toBe(search)
+
+    wrapper.unmount()
+    host.remove()
   })
 
   it('shows the global notification region with an aria-live role', async () => {

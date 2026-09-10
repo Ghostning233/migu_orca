@@ -8,6 +8,9 @@ MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全
 - `src/app/router/index.ts`：Vue Router，history base 固定 `/app/`。路由 `to` 用相对路径
   （`/add`、`/settings`），完整 URL 是 `/app/add`。RouterLink **不要**再写
   `/app/` 前缀（`createWebHistory('/app/')` 已处理 base）。
+- Stage 33 壳层导航固定为“添加番剧 / 追番方案 / 追番管理 / 设置”，统一消费
+  `app/router/catalog.ts` 的 `routeLocation`。路由切换后的主内容焦点只监听 route name；
+  `request_id`/`batch_id` 的 query 更新属于页内选择，不能抢走当前控件焦点。
 - `src/styles/main.css`：共享设计基线（layout shell + panel/field-help 等原语）。
   feature 样式随迁移 story 加入，避免全局选择器膨胀。
 - 生产构建由 Flask 同源托管：Vite `base: '/app/'`，`dist/index.html` 引用 `/app/assets/*`，
@@ -138,9 +141,9 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   localStorage 里的**相对 profile**（`sanitizeStorageProfile` 已挡绝对路径/穿越）；
   `result.requests ?? []` 兜底空数组，避免 200 无字段时崩溃。
 - 选择状态由 URL query `request_id` 驱动（`router.push({ path, query })`），刷新恢复；
-  清空/点空项用 `router.push({ path: '/requests' })` 去掉 query。`request_id` 是公开已保存
+  清空/点空项用 `routeLocation('plans')` 去掉 query。`request_id` 是公开已保存
   标识符，可进 URL；凭据/endpoint 永远不进 URL。
-- 浏览器测试：`tests/browser/test_app_requests.py`（SPA `/app/requests`），fixture 用
+- 浏览器测试：`tests/browser/test_app_requests.py`（SPA `/app/plans`），fixture 用
   conftest `create_saved_request` 预置 + `set_storage_preferences` 设相对 profile；错误态
   用 `page.route("**/api/v1/requests**")` mock 500 后断言脱敏文案（error_type/error_data
   不得进 DOM）。断言列表项用 `.request-list-item`（含 `data-request-id`）、状态用
@@ -148,7 +151,7 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 
 ## Request 详情与管理动作（US-203）
 
-- 详情面板在 `features/requests/RequestDetailPanel.vue`（挂载于 `/app/requests` 列表下方，
+- 详情面板在 `features/requests/RequestDetailPanel.vue`（挂载于 `/app/plans` 列表下方，
   选中项即渲染；`RequestDetailPanel` 用 `:key="selectedRequestId"` 保证切换请求时重挂载）。
 - 纯展示逻辑收敛到 `features/requests/requestDetail.ts`（`displayValue`/`actionLabel`/
   `selectedRssSource`/`effectiveSeeds`/`excludedSeeds`/`completeSeedGroups`/
@@ -169,7 +172,7 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 动作失败只显示固定中文反馈（确认失败/取消失败/修改失败/删除失败），绝不渲染服务端
   `error_message`（可能含凭据）。详情加载失败显示 `订阅方案详情加载失败`（role=alert），
   不泄漏 `error_type`/`error_data`。
-- Settings AB 面板的「返回订阅方案详情」链接指向 `/requests?request_id=...`（US-203 起
+- Settings AB 面板的「返回订阅方案详情」链接指向 `/plans?request_id=...`（US-203 起
   详情在列表页而非工作台）；AB 提交成功后 `@changed` 由详情面板刷新。
 - 浏览器测试：`tests/browser/test_app_request_detail.py`（23 例真实 Chromium）：分区渲染/
   URL 状态恢复/缺失 request_id 安全错误/确认/取消/删除/修改 patch/脱敏/360px/中文状态码/
@@ -178,7 +181,7 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 
 ## 单个搜索与服务端草案（US-204）
 
-- 工作台在 `features/workbench/WorkbenchView.vue`（`/app/workbench`）：单个搜索
+- 工作台在 `features/workbench/WorkbenchView.vue`（`/app/add`）：单个搜索
   （`POST /api/v1/mikan/candidates`）、直连 fallback（`POST /api/v1/requests` 带
   `mikan_bangumi`）与 DraftPreviewPanel（`features/workbench/DraftPreviewPanel.vue`）。
   纯函数逻辑收敛到 `features/workbench/candidateSearch.ts`（`validateCandidateQuery`/
@@ -204,12 +207,12 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `_register_generation_capture`（注意 `**/api/v1/requests` 只匹配精确路径，preview-modify/
   preview-save 仍走真实后端）；SPA 通知断言用 `.global-notification:not(:empty)`（不是旧页的
   `#page-notification`）。
-- 保存草案成功后面板 `@saved` 由工作台 `router.push('/requests?request_id=...')` 跳转到
+- 保存草案成功后面板 `@saved` 由工作台 `routeLocation('plans', ...)` 跳转到
   已保存 Request 列表/详情（US-203 面板）。
 
 ## 批量工作台（US-205）
 
-- 批量工作台在 `features/workbench/BatchWorkbenchView.vue`（挂在 `/app/workbench` 的
+- 批量工作台在 `features/workbench/BatchWorkbenchView.vue`（挂在 `/app/add` 的
   `WorkbenchView.vue` 底部，`<BatchWorkbenchView class="batch-workbench-section">`）。
   纯函数逻辑收敛到 `features/workbench/batchWorkbench.ts`（`batchStatusLabel`/
   `batchCardTitle`/`batchCardPreferenceSummary`/`batchCardSeedSummary`/
@@ -230,8 +233,8 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   preview-save（一次性消费 draft_id）再 accept；成功后的卡片置 `status: ACCEPTED`、
   `draft_id: null`（已消费的 draft 绝不重复引用）、`queue_status` 从 accept 响应的
   queue 同步。
-- `batch_id` 是公开标识符，可进 URL query（`router.replace({ path: '/workbench',
-  query: { batch_id } })`）供提交队列刷新恢复；批量卡片本身服务端不持久化，刷新后
+- `batch_id` 是公开标识符，可进 URL query（`routeLocation('add', { batch_id })`）供
+  提交队列刷新恢复；批量卡片本身服务端不持久化，刷新后
   不恢复卡片（与旧 `/index` parity）。`candidate_context`/`draft_id` 仍只在组件内存。
 - 浏览器测试：`tests/browser/test_app_batch_workbench.py`（13 例真实 Chromium）。mock
   批量解析用 `page.route("**/api/v1/batches/parse", ...)`；卡片 draft 用 conftest
@@ -244,13 +247,13 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 
 ## 提交队列（US-206）
 
-- 提交队列在 `features/queue/QueueView.vue`（`/app/queue`）。纯函数逻辑收敛到
+- 提交队列在 `features/queue/QueueView.vue`（`/app/tracking`）。纯函数逻辑收敛到
   `features/queue/queueWorkbench.ts`（`queueStatusLabel`/`queueStatusClass`/
   `queueItemSummary`/`queueItemCanRetry`/`queueItemCanRecover`/`buildAbConfig`/
   `validateAbConfig`/`batchSubmitSummaryMessage`/`batchSubmitNotification`/
   `recoverOutcomeNeedsManual` + transport wrappers），feature 与 Vitest 共用，
   不复制第二套（legacy `batchQueueStatusLabel`/`buildAbConfig` parity）。
-- `batch_id` 是公开标识符，从 URL query 读取（`/app/queue?batch_id=...`）驱动队列
+- `batch_id` 是公开标识符，从 URL query 读取（`/app/tracking?batch_id=...`）驱动队列
   加载与刷新恢复；批量工作台（US-205）解析后把 `batch_id` 推入 URL，因此从批量
   接受 → 提交队列是同一条链路。无 `batch_id` 时显示空状态并禁用刷新。
 - 队列项按状态分派动作：`FAILED`/`RETRYABLE` → 单项「重试」

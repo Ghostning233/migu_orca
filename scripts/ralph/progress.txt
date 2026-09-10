@@ -56,3 +56,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Feature navigation should call `routeLocation` instead of repeating paths so catalog, router and internal links cannot drift.
   - Validation passed: 9 targeted Vitest files (126 tests), frontend typecheck/build, Flask app route tests (17 tests), four targeted real-Chromium route/navigation checks, and `git diff --check`. Full suites were intentionally deferred to US-265.
 ---
+## 2026-09-10 20:02:34 CST - US-260
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Rebuilt the desktop App shell around a bounded brand area, the fixed four-item “添加番剧 / 追番方案 / 追番管理 / 设置” navigation, and a public local-workspace status. The active item now has `aria-current=page`, a visible “当前” label and a coral underline in addition to colour. The existing skip link remains first in keyboard order, and route-name changes focus the main landmark without stealing focus for query-only in-page selection changes. The shell consumes Stage 33 tokens for layout, elevation, focus, colour and reduced motion and does not persist feature or sensitive state.
+- Files changed: `frontend/src/App.vue`, `frontend/src/App.test.ts`, `frontend/src/styles/main.css`, `frontend/src/styles/tokens.test.ts`, `tests/browser/test_app_shell.py`, `frontend/AGENTS.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Focus management must observe route names instead of full paths so public `request_id`/`batch_id` query changes do not disrupt the user's current control.
+  - The style drift guard should permit `box-shadow: var(--shadow-shell)` consumption while rejecting literal or parallel shell shadows.
+  - Validation passed: targeted App/token Vitest (20 tests), frontend typecheck/build, three targeted real-Chromium shell/navigation/skip-link tests, and `git diff --check`. Full suites were intentionally deferred to US-265.
+---

@@ -34,7 +34,8 @@ describe('Stage 33 semantic design tokens (US-258)', () => {
     expect(globalStyles.trimStart().startsWith("@import './tokens.css';")).toBe(true)
     expect(globalStyles).not.toMatch(/#[0-9a-f]{3,8}\b/i)
     expect(globalStyles).not.toMatch(/\brgba?\(/i)
-    expect(globalStyles).not.toMatch(/box-shadow\s*:/i)
+    const shadowDeclarations = globalStyles.match(/box-shadow\s*:[^;]+;/gi) ?? []
+    expect(shadowDeclarations).toEqual(['box-shadow: var(--shadow-shell);'])
     expect(globalStyles).not.toMatch(/outline:\s*[^;]*var\(--color-accent\)/i)
     expect(globalStyles).toContain('var(--color-focus-ring)')
   })

@@ -59,10 +59,13 @@ def test_app_shell_loads_and_mounts_spa(page: Page, live_server_url: str) -> Non
     assert page.locator(".app-title").inner_text() == "MiGuOrca"
     nav = page.locator(".top-nav .nav-link")
     assert nav.count() == 4
-    assert nav.nth(0).inner_text().strip() == "订阅方案工作台"
-    assert nav.nth(1).inner_text().strip() == "订阅方案"
-    assert nav.nth(2).inner_text().strip() == "提交队列"
-    assert nav.nth(3).inner_text().strip() == "Settings"
+    assert nav.nth(0).locator("span").first.inner_text().strip() == "添加番剧"
+    assert nav.nth(1).locator("span").first.inner_text().strip() == "追番方案"
+    assert nav.nth(2).locator("span").first.inner_text().strip() == "追番管理"
+    assert nav.nth(3).locator("span").first.inner_text().strip() == "设置"
+    assert nav.nth(0).get_attribute("aria-current") == "page"
+    assert nav.nth(0).locator(".nav-current-marker").inner_text().strip() == "当前"
+    assert page.locator(".workspace-status").inner_text().strip() == "本地桌面工作区"
     # The lazy-loaded workbench view mounted.
     assert page.locator("#workbench-heading").count() >= 1
     # The placeholder must not leak into a built SPA.
@@ -107,23 +110,39 @@ def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> 
     page.goto(f"{live_server_url}/app/add")
     page.wait_for_selector(".app-title")
 
-    page.get_by_role("link", name="订阅方案", exact=True).click()
+    page.get_by_role("link", name="追番方案", exact=True).click()
     page.wait_for_url("**/app/plans", timeout=5000)
+    assert page.locator("#app-main").evaluate("el => el === document.activeElement")
+    assert page.get_by_role("link", name="追番方案", exact=True).get_attribute("aria-current") == "page"
     assert page.locator("#request-list-container").count() >= 1
     assert page.locator("#request-list-count").count() >= 1
 
-    page.get_by_role("link", name="提交队列", exact=True).click()
+    page.get_by_role("link", name="追番管理", exact=True).click()
     page.wait_for_url("**/app/tracking", timeout=5000)
     assert page.locator("#batch-queue-count").count() >= 1
     assert page.locator("#batch-queue-list").count() >= 1
 
-    page.locator(".top-nav .nav-link", has_text="Settings").click()
+    page.get_by_role("link", name="设置", exact=True).click()
     page.wait_for_url("**/app/settings", timeout=5000)
     assert page.locator("#settings-heading").count() >= 1
 
-    page.locator(".top-nav .nav-link", has_text="订阅方案工作台").click()
+    page.get_by_role("link", name="添加番剧", exact=True).click()
     page.wait_for_url("**/app/add", timeout=5000)
     assert page.locator("#workbench-heading").count() >= 1
+
+
+def test_app_shell_skip_link_moves_keyboard_focus_to_main(
+    page: Page, live_server_url: str
+) -> None:
+    """US-260: keyboard users can bypass the brand and four navigation links."""
+    _require_dist()
+
+    page.goto(f"{live_server_url}/app/add")
+    page.wait_for_selector(".app-title")
+    page.keyboard.press("Tab")
+    assert page.locator("#skip-link").evaluate("el => el === document.activeElement")
+    page.keyboard.press("Enter")
+    assert page.locator("#app-main").evaluate("el => el === document.activeElement")
 
 
 def test_legacy_spa_routes_replace_with_sanitized_public_query(
