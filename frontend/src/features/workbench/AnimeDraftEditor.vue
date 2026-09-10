@@ -34,12 +34,20 @@ const props = defineProps<{
   applying?: boolean
   error?: string
   disabled?: boolean
+  idPrefix?: string
+  containerId?: string
+  formId?: string
+  canRetry?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'apply', patch: PreviewPatch): void
   (e: 'dirty-change', dirty: boolean): void
+  (e: 'retry'): void
+  (e: 'reset'): void
 }>()
+
+const idPrefix = computed(() => props.idPrefix ?? 'anime-draft')
 
 const editGroup = ref('')
 const editMustContain = ref('')
@@ -109,45 +117,52 @@ function apply(): void {
   if (!dirty.value) return
   emit('apply', patch.value)
 }
+
+defineExpose({ patch, dirty })
 </script>
 
 <template>
   <PanelSection title="订阅方案详情" class="anime-draft-editor">
-    <div id="anime-draft-editor" class="request-detail" aria-live="polite" aria-relevant="additions text">
+    <div :id="props.containerId ?? 'anime-draft-editor'" class="request-detail" aria-live="polite" aria-relevant="additions text">
       <h3 class="request-detail-title">
         {{ request.input?.raw_title || request.source_info?.matched_bangumi?.title || '订阅方案' }}
       </h3>
 
-      <form class="detail-inline-form" @submit.prevent="apply">
+      <form :id="props.formId" class="detail-inline-form" @submit.prevent="apply">
         <h4 class="detail-form-heading">编辑订阅草案</h4>
-        <FormField label="字幕组" inputId="anime-draft-subtitle-group">
+        <FormField :label="'字幕组'" :inputId="`${idPrefix}-subtitle-group`">
           <SubtitleGroupSelect
             v-model="editGroup"
             :options="groupOptions"
+            :input-id="`${idPrefix}-subtitle-group`"
             :disabled="disabled"
             :applying="applying"
           />
         </FormField>
-        <FormField label="包含规则" inputId="anime-draft-must-contain">
-          <BaseInput id="anime-draft-must-contain" v-model="editMustContain" type="text" placeholder="如 1080p（默认按字面匹配）" :disabled="disabled" />
+        <FormField label="包含规则" :inputId="`${idPrefix}-must-contain`">
+          <BaseInput :id="`${idPrefix}-must-contain`" v-model="editMustContain" type="text" placeholder="如 1080p（默认按字面匹配）" :disabled="disabled" />
         </FormField>
-        <FormField label="排除规则" inputId="anime-draft-must-not-contain">
-          <BaseInput id="anime-draft-must-not-contain" v-model="editMustNotContain" type="text" placeholder="如 [v2]（默认按字面匹配）" :disabled="disabled" />
+        <FormField label="排除规则" :inputId="`${idPrefix}-must-not-contain`">
+          <BaseInput :id="`${idPrefix}-must-not-contain`" v-model="editMustNotContain" type="text" placeholder="如 [v2]（默认按字面匹配）" :disabled="disabled" />
         </FormField>
         <details class="advanced-settings">
           <summary>高级筛选设置</summary>
           <div class="filter-options">
-            <CheckboxRow id="anime-draft-use-regex" v-model:checked="editUseRegex" label="使用正则" :disabled="disabled" />
-            <CheckboxRow id="anime-draft-case-sensitive" v-model:checked="editCaseSensitive" label="大小写敏感" :disabled="disabled" />
+            <CheckboxRow :id="`${idPrefix}-use-regex`" v-model:checked="editUseRegex" label="使用正则" :disabled="disabled" />
+            <CheckboxRow :id="`${idPrefix}-case-sensitive`" v-model:checked="editCaseSensitive" label="大小写敏感" :disabled="disabled" />
           </div>
           <p class="field-help">默认按字面文本匹配且不区分大小写。</p>
-          <FormField label="存储目录名" inputId="anime-draft-folder-name">
-            <BaseInput id="anime-draft-folder-name" v-model="editFolderName" type="text" placeholder="期望存储目录名" :disabled="disabled" />
+          <FormField label="存储目录名" :inputId="`${idPrefix}-folder-name`">
+            <BaseInput :id="`${idPrefix}-folder-name`" v-model="editFolderName" type="text" placeholder="期望存储目录名" :disabled="disabled" />
           </FormField>
         </details>
         <p v-if="error" class="field-error" role="alert">{{ error }}</p>
+        <div v-if="canRetry" class="detail-form-recovery" role="group" aria-label="修改失败恢复">
+          <BaseButton :id="`${idPrefix}-retry-button`" type="button" variant="secondary" :loading="applying" @click="$emit('retry')">重试修改</BaseButton>
+          <BaseButton :id="`${idPrefix}-reset-button`" type="button" variant="secondary" :disabled="applying" @click="$emit('reset')">恢复上次结果</BaseButton>
+        </div>
         <div class="detail-form-actions">
-          <BaseButton type="submit" variant="primary" :loading="applying" :disabled="disabled || !dirty">应用修改</BaseButton>
+          <BaseButton :id="`${idPrefix}-apply-button`" type="submit" variant="primary" :loading="applying" :disabled="disabled || !dirty">应用修改</BaseButton>
         </div>
       </form>
 
@@ -178,6 +193,8 @@ function apply(): void {
           <div class="detail-row"><dt>匹配模式</dt><dd>{{ request.confirmable_config?.filter_rule?.use_regex === true ? '正则' : '普通字符' }}</dd></div>
           <div class="detail-row"><dt>大小写</dt><dd>{{ request.confirmable_config?.filter_rule?.case_sensitive === true ? '区分大小写' : '不区分大小写' }}</dd></div>
           <div class="detail-row"><dt>存储目录名</dt><dd>{{ displayValue(request.confirmable_config?.expected_folder_name) }}</dd></div>
+          <div class="detail-row"><dt>有效种子数</dt><dd>{{ effective.length }}</dd></div>
+          <div class="detail-row"><dt>排除种子数</dt><dd>{{ excluded.length }}</dd></div>
         </dl>
       </section>
 

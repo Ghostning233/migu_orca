@@ -17,6 +17,7 @@ const props = defineProps<{
   disabled?: boolean
   applying?: boolean
   error?: string
+  inputId?: string
 }>()
 
 const emit = defineEmits<{
@@ -27,7 +28,7 @@ const emit = defineEmits<{
 <template>
   <div class="subtitle-group-select">
     <BaseSelect
-      id="preview-subtitle-group"
+      :id="props.inputId ?? 'preview-subtitle-group'"
       label="字幕组"
       :model-value="props.modelValue"
       :options="props.options"

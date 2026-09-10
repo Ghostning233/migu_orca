@@ -40,6 +40,7 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Quality checks passed: compileall, 1793 backend tests, 308 frontend unit tests, typecheck, lint, build, API drift check, and git diff check.
 ---
 
+
 ## 2026-09-10 23:03:00 Asia/Shanghai - US-267
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - What was implemented: Added the single/batch mode switch and unified title input. `/app/add` now defaults to single search, shows only the active mode, preserves independent input values and cursor selections, normalizes single-line input, auto-grows batch input, and keeps mode state out of URL and browser storage. Existing batch parsing remains on its established API path.
@@ -102,7 +103,17 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - Files changed: `frontend/src/app/composables/useDraftSession.ts`, `frontend/src/app/composables/useDraftSession.test.ts`, `frontend/src/features/workbench/DraftPreviewPanel.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
 - **Learnings for future iterations:**
   - The shared session must be the only preview-modify writer; compatibility save flows can consume its current snapshot/revision while retaining preview-save outside the shared core.
-  - Invalidation clears the session immediately, so a host component needs a render-safe transient fallback until its `expired` event removes the panel.
-  - Verification passed: 24 targeted Vitest tests, frontend typecheck/lint/build, Python compileall and diff check, 20 real Chromium workbench tests, and 1794 backend tests.
+- Invalidation clears the session immediately, so a host component needs a render-safe transient fallback until its `expired` event removes the panel.
+- Verification passed: 24 targeted Vitest tests, frontend typecheck/lint/build, Python compileall and diff check, 20 real Chromium workbench tests, and 1794 backend tests.
+---
+
+## 2026-09-11 00:18:30 Asia/Shanghai - US-272
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Reduced DraftPreviewPanel to a single-item compatibility adapter around the shared AnimeDraftEditor. Preview-modify remains revision-aware through useDraftSession, while preview-save stays exclusively in the adapter; pending editor patches are applied before save, and legacy saved/expired/failed/changed events and DOM selectors remain compatible.
+- Files changed: frontend/src/features/workbench/DraftPreviewPanel.vue, frontend/src/features/workbench/AnimeDraftEditor.vue, frontend/src/features/workbench/SubtitleGroupSelect.vue, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Compatibility hosts may expose only minimal editor patch state to preserve save-before-save behavior; the shared editor still owns transient controls and public review rendering.
+  - Legacy browser selectors can be preserved through configurable IDs on shared components while keeping the default shared-editor IDs stable.
+  - Verification passed: frontend typecheck, lint, targeted Vitest (22), build, compileall, diff check, and real Chromium workbench tests (20).
 ---
 ---
