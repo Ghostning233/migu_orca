@@ -83,3 +83,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Gotchas encountered: full Python tests still contain three stale pre-Stage-33 redirect expectations for `/app/workbench`; the current route contract intentionally redirects root and `/index` to `/app/add` and filters `request_id` there.
   - Useful context: frontend typecheck, lint, 304 unit tests, production build, compileall, and all 138 Chromium browser tests passed; full Python suite was 1771 passed and 3 failed only on the stale redirect assertions.
 ---
+## 2026-09-10 20:30:00 CST - US-263
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Confirmed the production router mounts the existing WorkbenchView, RequestsView, QueueView, and SettingsView at `/add`, `/plans`, `/tracking`, and `/settings`; added a real-Chromium feature-parity matrix for each route and a queue-specific assertion proving `/tracking` remains the established submit/recover workflow rather than a mock page. Updated stale Flask redirect tests to the final `/app/add` contract and preserved the public `batch_id` sanitizer behavior.
+- Files changed: `tests/browser/test_app_feature_parity.py`, `src/apps/migu_orca_web/views_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - QueueView renders its submit form only after a queue item loads; parity tests must provide a safe mocked queue response when asserting submit controls.
+  - Existing feature unit/browser suites already own business behavior; shell parity should assert route mounting and distinctive entry controls without duplicating domain logic.
+  - Validation passed: frontend typecheck, lint, 304 unit tests, production build, feature-parity Chromium tests (5), existing feature Chromium regression set (119), compileall, and full Python suite (1776 passed).
+---
