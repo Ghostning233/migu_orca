@@ -24,6 +24,7 @@
 - 共享草案状态应从 generated `createRequest`/`previewModifyRequest` 类型提取别名；用本地请求序号
   只允许最新 preview-modify 响应提交，失效错误先使 opaque capability 失效，普通错误保留最后一致快照。
 - 模式输入使用 `AnimeModeSwitch` 的 tab 语义与键盘激活；`AnimeTitleInput` 统一单行/批量输入，模式值、输入值和选择范围只保存在工作台组件内存。
+- 共享审核展示组件使用受控 props/事件边界；资源摘要只消费 `requestDetail` 的公开 helper 投影，绝不接收完整 Request 或敏感源字段。
 
 ## Stage 34 Handoff
 
@@ -76,4 +77,13 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 未进入 US-269，未修改其他组件、OpenAPI、generated client 或后端。
 - 验证通过：`useDraftSession.test.ts` 4 passed、typecheck、lint、`git diff --check`。
 
+---
+
+## 2026-09-10 23:54:00 Asia/Shanghai - US-269
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Extracted controlled `SubtitleGroupSelect` and public-data-only `ResourceSummary` components from the draft detail panel. The summary reuses existing effective/excluded/complete helper projections, shows the fixed “已更新集数：待开发 / 不可用” state, and redacts URL/magnet-like seed values before DOM rendering.
+- Files changed: `frontend/src/features/workbench/SubtitleGroupSelect.vue`, `frontend/src/features/workbench/SubtitleGroupSelect.test.ts`, `frontend/src/features/workbench/ResourceSummary.vue`, `frontend/src/features/workbench/ResourceSummary.test.ts`, `frontend/src/features/workbench/DraftPreviewPanel.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Shared review display components should receive helper-derived public projections and emit only controlled field updates; draft/session ownership stays in the parent.
+  - Verification passed: compileall, targeted Vitest (23 tests), frontend typecheck, lint, build, `test_app_workbench.py` Chromium suite (20 tests), and git diff check.
 ---

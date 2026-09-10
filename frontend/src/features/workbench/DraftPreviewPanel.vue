@@ -28,7 +28,6 @@ import type { operations } from '@/api/generated/api'
 import { useNotificationStore } from '@/app/stores/notification'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import BaseInput from '@/components/forms/BaseInput.vue'
-import BaseSelect from '@/components/forms/BaseSelect.vue'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import FormField from '@/components/layout/FormField.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
@@ -38,16 +37,11 @@ import {
   collectPreviewEditPatch,
   type PreviewEditState,
 } from '@/features/workbench/candidateSearch'
-import {
-  completeSeedGroups,
-  displayValue,
-  effectiveSeeds,
-  excludedSeeds,
-  totalCompleteSeedCount,
-  type RequestSnapshot,
-} from '@/features/requests/requestDetail'
+import { displayValue, effectiveSeeds, excludedSeeds, completeSeedGroups, type RequestSnapshot } from '@/features/requests/requestDetail'
 import { statusLabel } from '@/features/requests/requestsList'
 import { storageQuery } from '@/features/requests/requestStorage'
+import ResourceSummary from '@/features/workbench/ResourceSummary.vue'
+import SubtitleGroupSelect from '@/features/workbench/SubtitleGroupSelect.vue'
 
 type PreviewModifyResult = NonNullable<
   operations['previewModifyRequest']['responses']['200']['content']['application/json']['result']
@@ -115,7 +109,6 @@ const groupOptions = computed(() => {
 const effective = computed(() => effectiveSeeds(request.value))
 const excluded = computed(() => excludedSeeds(request.value))
 const completeGroups = computed(() => completeSeedGroups(request.value))
-const completeTotal = computed(() => totalCompleteSeedCount(request.value))
 const selectedGroupName = computed(
   () => request.value.confirmable_config?.selected_subtitle_group ?? '未选择字幕组',
 )
@@ -382,11 +375,10 @@ defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
         <h4 class="detail-form-heading">编辑订阅草案</h4>
 
         <FormField label="字幕组" inputId="preview-subtitle-group">
-          <BaseSelect
-            id="preview-subtitle-group"
+          <SubtitleGroupSelect
             v-model="editGroup"
-            label="字幕组"
             :options="groupOptions"
+            :applying="applying"
           />
         </FormField>
 
@@ -512,42 +504,12 @@ defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
       <!-- ── Seeds ─────────────────────────────────────────────────── -->
       <section class="detail-section seeds-section" aria-label="Seeds">
         <h4 class="detail-section-heading">Seeds</h4>
-
-        <details class="seed-details seed-group effective-seed-group" open>
-          <summary>有效种子（当前选中字幕组：{{ selectedGroupName }}）({{ effective.length }})</summary>
-          <ul v-if="effective.length" class="seed-list">
-            <li v-for="seed in effective" :key="seed">{{ seed }}</li>
-          </ul>
-          <p v-else class="muted-text">无有效种子标题。</p>
-        </details>
-
-        <details class="seed-details complete-seed-details">
-          <summary>完整种子（按字幕组分组）({{ completeTotal }})</summary>
-          <div class="seed-groups complete-seed-groups">
-            <template v-if="completeGroups.length">
-              <details v-for="group in completeGroups" :key="group.subtitleGroup" class="subgroup-seed-group">
-                <summary>{{ group.subtitleGroup }} ({{ group.seedNames.length }})</summary>
-                <ul v-if="group.seedNames.length" class="seed-list">
-                  <li v-for="seed in group.seedNames" :key="seed">{{ seed }}</li>
-                </ul>
-                <p v-else class="muted-text">无种子标题。</p>
-              </details>
-            </template>
-            <p v-else class="muted-text">无种子标题。</p>
-          </div>
-        </details>
-
-        <details class="seed-details excluded-seed-details">
-          <summary>排除种子 ({{ excluded.length }})</summary>
-          <div class="seed-group">
-            <ul v-if="excluded.length" class="seed-list excluded-seed-list">
-              <li v-for="seed in excluded" :key="`${seed.name}-${seed.reason}`">
-                {{ seed.name }}<span v-if="seed.reason" class="seed-exclude-reason"> - {{ seed.reason }}</span>
-              </li>
-            </ul>
-            <p v-else class="muted-text">无排除种子标题。</p>
-          </div>
-        </details>
+        <ResourceSummary
+          :effective-seeds="effective"
+          :complete-groups="completeGroups"
+          :excluded-seeds="excluded"
+          :selected-group-name="selectedGroupName"
+        />
       </section>
     </div>
     <LoadingState v-if="saving" message="正在保存订阅草案..." />
@@ -632,28 +594,6 @@ defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
 .detail-row dd {
   margin: 0;
   overflow-wrap: anywhere;
-}
-
-.seed-details {
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 0.5rem 0.75rem;
-}
-
-.seed-details summary {
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.seed-list {
-  margin: 0.5rem 0 0;
-  padding-left: 1.25rem;
-  display: grid;
-  gap: 0.25rem;
-}
-
-.excluded-seed-list .seed-exclude-reason {
-  color: var(--color-text-muted);
 }
 
 .muted-text {
