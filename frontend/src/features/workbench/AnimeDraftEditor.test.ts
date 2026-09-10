@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
@@ -51,6 +52,17 @@ describe('AnimeDraftEditor', () => {
 
     await wrapper.setProps({ request: { ...request, request_id: 'new-draft' } })
     expect(wrapper.find('#anime-draft-must-contain').element).toHaveProperty('value', '')
+    expect(wrapper.emitted('dirty-change')?.at(-1)).toEqual([false])
+  })
+
+  it('exposes a reset that restores the last authoritative snapshot', async () => {
+    const wrapper = mount(AnimeDraftEditor, { props: { request } })
+    await wrapper.find('#anime-draft-must-not-contain').setValue('v2')
+
+    wrapper.vm.reset()
+    await nextTick()
+
+    expect(wrapper.find('#anime-draft-must-not-contain').element).toHaveProperty('value', '')
     expect(wrapper.emitted('dirty-change')?.at(-1)).toEqual([false])
   })
 })

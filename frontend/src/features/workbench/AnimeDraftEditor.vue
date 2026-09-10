@@ -118,7 +118,7 @@ function apply(): void {
   emit('apply', patch.value)
 }
 
-defineExpose({ patch, dirty })
+defineExpose({ patch, dirty, reset: resetForm })
 </script>
 
 <template>

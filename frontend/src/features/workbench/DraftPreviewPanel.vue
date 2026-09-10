@@ -71,6 +71,7 @@ async function retryModify(): Promise<void> {
 }
 
 function resetFailedModify(): void {
+  editor.value?.reset()
   session.reset()
   formError.value = ''
 }
