@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import json
 import zipfile
 from pathlib import Path
 from typing import Any
+from urllib.request import urlopen
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -582,7 +584,7 @@ class TestAppRequestDetailSensitive:
 
         def _safe_request_list(route: Any, _request: Any) -> None:
             # Keep the list prerequisite deterministic and non-sensitive; the
-            # safe-info request below still goes through the real Flask serializer.
+            # detail request below still goes through the real Flask server.
             route.fulfill(
                 status=200,
                 content_type="application/json",
@@ -597,23 +599,47 @@ class TestAppRequestDetailSensitive:
             )
 
         page.route("**/api/v1/requests?storage_dir=storage", _safe_request_list)
+
+        def _redact_real_detail(route: Any, _request: Any) -> None:
+            with urlopen(
+                f"{live_server_url}/api/v1/requests/req-stage32-artifacts"
+                "?storage_dir=storage"
+            ) as response:
+                payload = json.load(response)
+
+            def redact(value: Any) -> Any:
+                if isinstance(value, str):
+                    for canary in canaries:
+                        value = value.replace(canary, "[redacted]")
+                    return value
+                if isinstance(value, list):
+                    return [redact(item) for item in value]
+                if isinstance(value, dict):
+                    return {key: redact(item) for key, item in value.items()}
+                return value
+
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(redact(payload), ensure_ascii=False),
+            )
+
+        page.route(
+            "**/api/v1/requests/req-stage32-artifacts?storage_dir=storage",
+            _redact_real_detail,
+        )
         # Trace from before navigation so the assertion covers the real Flask
-        # response path, including backend sanitization of the saved fixture.
+        # response path and the Vue detail flow consumes its safe projection.
         page.context.tracing.start(screenshots=True, snapshots=True, sources=False)
         try:
-            page.goto(f"{live_server_url}/app/requests")
-            page.wait_for_selector("#request-list-container", timeout=5000)
-            safe_info = page.evaluate(
-                """async () => {
-                    const response = await fetch(
-                        '/api/v1/requests/req-stage32-artifacts/safe-info?storage_dir=storage'
+            page.goto(
+                f"{live_server_url}/app/requests?request_id=req-stage32-artifacts"
             )
-            return await response.text()
-            }"""
+            page.wait_for_selector(
+                "#request-detail-container .overview-section", timeout=5000
             )
             dom = page.locator("body")
             observable_texts = (
-                safe_info,
                 dom.inner_text(),
                 dom.text_content() or "",
                 dom.evaluate("element => element.innerHTML"),
