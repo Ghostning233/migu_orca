@@ -39,15 +39,35 @@ withDefaults(
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.375rem;
-  border-radius: 6px;
-  padding: 0.45rem 0.85rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  line-height: 1.25;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  border-radius: var(--radius-sm);
+  padding: var(--control-padding-block) var(--control-padding-inline);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-tight);
   cursor: pointer;
   border: 1px solid transparent;
   text-decoration: none;
+  transition:
+    background-color var(--control-transition),
+    border-color var(--control-transition),
+    color var(--control-transition),
+    transform var(--control-transition);
+}
+
+.base-button:hover:not(:disabled) {
+  transform: translateY(calc(var(--motion-distance) * -1));
+}
+
+.base-button:focus-visible {
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.base-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .base-button-spinner {

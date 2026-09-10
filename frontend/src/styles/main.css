@@ -206,7 +206,7 @@ body {
 /* Shared primitives -------------------------------------------------------- */
 
 .panel {
-  border: 1px solid var(--color-border);
+  border: var(--control-border-width) solid var(--color-border-subtle);
   border-radius: var(--radius-md);
   background-color: var(--color-bg);
   padding: var(--space-4) var(--space-5);
@@ -240,14 +240,15 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--radius-sm);
+  gap: var(--space-2);
+  min-height: var(--control-height);
   border-radius: var(--radius-sm);
-  padding: 0.45rem 0.85rem;
+  padding: var(--control-padding-block) var(--control-padding-inline);
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   line-height: var(--line-height-tight);
   cursor: pointer;
-  border: 1px solid transparent;
+  border: var(--control-border-width) solid transparent;
 }
 
 .primary-button {
@@ -257,7 +258,8 @@ body {
 }
 
 .primary-button:hover {
-  filter: brightness(0.95);
+  background-color: var(--color-action-primary-hover);
+  border-color: var(--color-action-primary-hover);
 }
 
 .primary-button:disabled {
@@ -272,7 +274,7 @@ body {
 }
 
 .secondary-button:hover {
-  background-color: var(--color-bg-muted);
+  background-color: var(--color-control-surface-hover);
 }
 
 .danger-button {
@@ -282,7 +284,8 @@ body {
 }
 
 .danger-button:hover {
-  filter: brightness(0.92);
+  background-color: color-mix(in srgb, var(--color-danger-emphasis) 88%, black);
+  border-color: color-mix(in srgb, var(--color-danger-emphasis) 88%, black);
 }
 
 /* US-200: shared form primitives (BaseInput/BaseTextarea/BaseSelect live in

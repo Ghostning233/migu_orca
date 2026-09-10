@@ -41,12 +41,12 @@ const helpId = computed(() => `${fieldId.value}-help`)
 <style scoped>
 .form-field {
   display: grid;
-  gap: 0.35rem;
+  gap: var(--space-1);
 }
 
 .form-field-label {
-  font-weight: 600;
-  font-size: 0.875rem;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--font-size-sm);
 }
 
 .visually-hidden {

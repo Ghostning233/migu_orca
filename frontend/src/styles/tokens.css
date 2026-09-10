@@ -23,6 +23,13 @@
   --color-danger-emphasis: #a63c36;
   --color-focus-ring: #b85237;
 
+  /* Shared interactive control states. Keep form primitives on this small
+     semantic surface instead of introducing component-specific colours. */
+  --color-control-surface: var(--color-surface-raised);
+  --color-control-surface-hover: var(--color-surface-subtle);
+  --color-control-disabled: var(--color-text-muted);
+  --color-control-border: var(--color-border-subtle);
+
   /* Typography. */
   --font-family-sans:
     system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
@@ -69,6 +76,14 @@
   --motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
   --motion-distance: 0.25rem;
   --motion-scroll-behavior: smooth;
+
+  /* Form control geometry. */
+  --control-height: var(--size-control-min);
+  --control-padding-inline: var(--space-3);
+  --control-padding-block: var(--space-2);
+  --control-border-width: 1px;
+  --control-checkbox-size: 1.05rem;
+  --control-transition: var(--motion-duration-fast) var(--motion-easing-standard);
 
   /* Stage 27 compatibility aliases. Remove only as components migrate. */
   --color-text: var(--color-text-primary);

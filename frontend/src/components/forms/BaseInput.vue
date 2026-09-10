@@ -41,21 +41,28 @@ function onInput(event: Event): void {
 <style scoped>
 .base-input {
   width: 100%;
-  min-height: 40px;
-  padding: 0.5rem 0.625rem;
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  background: var(--color-bg);
+  min-height: var(--control-height);
+  padding: var(--control-padding-block) var(--control-padding-inline);
+  border: var(--control-border-width) solid var(--color-control-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-control-surface);
   color: var(--color-text);
   font: inherit;
+  transition: border-color var(--control-transition), box-shadow var(--control-transition);
 }
 
 .base-input:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
+  outline: var(--focus-ring-width) solid var(--color-focus-ring);
+  outline-offset: var(--focus-ring-offset);
 }
 
 .base-input[aria-invalid='true'] {
   border-color: var(--color-danger);
+}
+
+.base-input:disabled {
+  color: var(--color-control-disabled);
+  background: var(--color-surface-subtle);
+  cursor: not-allowed;
 }
 </style>
