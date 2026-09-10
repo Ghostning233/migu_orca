@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -468,6 +469,167 @@ class TestAppRequestDetailSensitive:
         assert "load_request_snapshot" not in error_text
         # role=alert for the detail error.
         assert error.get_attribute("role") == "alert"
+
+    def test_stage32_canary_stays_out_of_browser_observables(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        """US-253: upstream failure evidence is not visible or persisted in SPA."""
+        _require_dist()
+        create_saved_request(storage_dir, "葬送的芙莉莲", "req-stage32-canary")
+        set_storage_preferences(page, storage_dir)
+        canaries = (
+            "stage32-browser-token",
+            "stage32-browser-cookie",
+            "stage32-browser-endpoint",
+            "stage32-browser-rss",
+            "stage32-browser-magnet",
+            "stage32-browser-body",
+            "stage32-browser-id",
+            str(storage_dir),
+        )
+
+        def _poisoned_detail(route: Any, request: Any) -> None:
+            assert "stage32-browser" not in request.url
+            route.fulfill(
+                status=502,
+                content_type="application/json",
+                body=(
+                    '{"ok": false, "error_type": "mikan_http_failed", '
+                    '"error_message": "upstream https://stage32-browser-endpoint.invalid/api", '
+                    '"error_data": {"token": "stage32-browser-token", '
+                    '"raw_response_body": "stage32-browser-body", '
+                    '"external_id": "stage32-browser-id", '
+                    '"magnet": "stage32-browser-magnet", '
+                    '"rss_url": "stage32-browser-rss", '
+                    '"cookie": "stage32-browser-cookie"}}'
+                ),
+            )
+
+        page.route("**/api/v1/requests/req-stage32-canary**", _poisoned_detail)
+        page.goto(
+            f"{live_server_url}/app/requests?request_id=req-stage32-canary"
+        )
+        page.wait_for_selector("#request-detail-container .error-state", timeout=5000)
+        browser_state = page.evaluate(
+            """() => ({
+                url: window.location.href,
+                history: JSON.stringify(window.history.state),
+                localStorage: JSON.stringify(window.localStorage),
+                sessionStorage: JSON.stringify(window.sessionStorage),
+                bodyText: document.body.innerText,
+            })"""
+        )
+        persisted = "\n".join(
+            path.read_text(encoding="utf-8")
+            for path in storage_dir.rglob("*.json")
+        )
+        for value in canaries:
+            assert value not in browser_state["url"]
+            assert value not in browser_state["history"]
+            assert value not in browser_state["localStorage"]
+            assert value not in browser_state["sessionStorage"]
+            assert value not in browser_state["bodyText"]
+            assert value not in persisted
+
+    def test_stage32_canary_stays_out_of_screenshot_and_trace(
+        self, page: Page, live_server_url: str, storage_dir: Path, tmp_path: Path
+    ) -> None:
+        """US-253: actual screenshot/trace artifacts do not retain canaries."""
+        _require_dist()
+        request = create_saved_request(storage_dir, "葬送的芙莉莲", "req-stage32-artifacts")
+        selected_source = request["source_info"]["rss_sources"][0]
+        selected_source.update(
+            {
+                "rss_url": "https://stage32-d32-rss.invalid/rss.xml",
+                "raw_response_body": "stage32-d32-raw-response",
+                "token": "stage32-d32-token",
+                "cookie": "stage32-d32-cookie",
+                "authorization": "stage32-d32-authorization",
+                "password": "stage32-d32-password",
+                "endpoint": "stage32-d32-endpoint.invalid",
+                "magnet": "stage32-d32-magnet",
+                "external_id": "stage32-d32-external-id",
+                "patch": "stage32-d32-patch-body",
+                "traceback": "stage32-d32-traceback",
+                "absolute_path": "/stage32/d32/private/path",
+            }
+        )
+        request["source_info"]["matched_bangumi"]["mikan_url"] = (
+            "https://stage32-d32-mikan.invalid/Home/Bangumi/32032"
+        )
+        request["confirmable_config"]["selected_rss_url"] = (
+            "https://stage32-d32-rss.invalid/rss.xml"
+        )
+        save_request_snapshot(load_storage_config(storage_dir), request)
+        set_storage_preferences(page, storage_dir)
+        canaries = (
+            "stage32-d32-password",
+            "stage32-d32-token",
+            "stage32-d32-cookie",
+            "stage32-d32-authorization",
+            "stage32-d32-endpoint.invalid",
+            "stage32-d32-rss.invalid/rss.xml",
+            "stage32-d32-mikan.invalid/Home/Bangumi/32032",
+            "stage32-d32-magnet",
+            "stage32-d32-external-id",
+            "stage32-d32-raw-response",
+            "stage32-d32-patch-body",
+            "stage32-d32-traceback",
+            "/stage32/d32/private/path",
+        )
+        screenshot_path = tmp_path / "request-detail.png"
+        trace_path = tmp_path / "request-detail-trace.zip"
+
+        def _safe_request_list(route: Any, _request: Any) -> None:
+            # Keep the list prerequisite deterministic and non-sensitive; the
+            # detail request below still goes through the real Flask server.
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=(
+                    '{"ok":true,"result":{"requests":[{"request_id":'
+                    '"req-stage32-artifacts","status":"PENDING_CONFIRM",'
+                    '"bangumi_title":"葬送的芙莉莲",'
+                    '"candidate_subtitle_groups":[],"selected_subtitle_group":null,'
+                    '"effective_seed_count":0,"expected_folder_name":null,'
+                    '"warnings":[]}]}}'
+                ),
+            )
+
+        page.route("**/api/v1/requests?storage_dir=storage", _safe_request_list)
+        # Trace from before navigation so the assertion covers the real Flask
+        # detail serializer and the Vue detail flow consumes its safe projection.
+        page.context.tracing.start(screenshots=True, snapshots=True, sources=False)
+        try:
+            page.goto(
+                f"{live_server_url}/app/requests?request_id=req-stage32-artifacts"
+            )
+            page.wait_for_selector(
+                "#request-detail-container .overview-section", timeout=5000
+            )
+            dom = page.locator("body")
+            observable_texts = (
+                dom.inner_text(),
+                dom.text_content() or "",
+                dom.evaluate("element => element.innerHTML"),
+                dom.aria_snapshot(),
+            )
+            for canary in canaries:
+                assert all(canary not in text for text in observable_texts)
+            page.screenshot(path=str(screenshot_path), full_page=True)
+        finally:
+            page.context.tracing.stop(path=str(trace_path))
+
+        # The DOM/accessible-text assertions above are the primary screenshot
+        # safety proof; the binary scan is only an additional artifact check.
+        screenshot_bytes = screenshot_path.read_bytes()
+        for canary in canaries:
+            assert canary.encode() not in screenshot_bytes
+        with zipfile.ZipFile(trace_path) as trace:
+            for member in trace.infolist():
+                artifact = trace.read(member)
+                for canary in canaries:
+                    assert canary.encode() not in artifact
 
 
 class TestAppRequestDetailResponsiveA11y:

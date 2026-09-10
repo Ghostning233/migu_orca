@@ -170,3 +170,8 @@ Stage 29（US-222）在不改变 Stage 28 语义的前提下扩展确认 handoff
   写失败不失败 HTTP、也不回滚同批其他已确认条目。
 - 确认后的“下一步”统一为 OPEN_TRACKING；统一的追番列表/详情/revalidate/submit/retry/recover
   入口见 M13 与 `docs/MiGuOrca_stage29_unified_tracking_PRD.md`。
+
+## 9. Stage 32 B-D 契约收尾（已完成）
+
+Stage 32 已完成保存确认与旧 accept/preview 入口的兼容演练、严格 OpenAPI/生成客户端同步及安全泄漏门禁。
+确认只进入已保存的 `ACCEPTED`/待提交状态；外部提交仍需独立显式确认，结果未知必须走既有恢复流程。

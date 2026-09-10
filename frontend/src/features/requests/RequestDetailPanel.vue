@@ -44,7 +44,7 @@ import {
   scrubConfig,
   totalCompleteSeedCount,
   type RequestDetailResult,
-  type RequestSnapshot,
+  type RequestDetailSnapshot,
 } from '@/features/requests/requestDetail'
 import { statusLabel as detailStatusLabel } from '@/features/requests/requestsList'
 import { storageQuery } from '@/features/requests/requestStorage'
@@ -89,7 +89,7 @@ const modifyError = ref('')
 
 const cancelReason = ref('')
 
-const request = computed<RequestSnapshot | null>(() => detail.value?.request ?? null)
+const request = computed<RequestDetailSnapshot | null>(() => detail.value?.request ?? null)
 const isAccepted = computed(() => request.value?.status === 'ACCEPTED')
 const isPending = computed(() => request.value?.status === 'PENDING_CONFIRM')
 const isCancelled = computed(() => request.value?.status === 'CANCELLED')
@@ -315,7 +315,7 @@ async function confirmDelete(): Promise<void> {
 async function performAction(action: 'accept' | 'cancel' | 'modify', body: Record<string, unknown>): Promise<void> {
   actionInFlight.value = true
   try {
-    const result = await api.post<ActionResult>(`/api/v1/requests/{request_id}/${action}`, {
+    await api.post<ActionResult>(`/api/v1/requests/{request_id}/${action}`, {
       path: { request_id: props.requestId },
       query: storageQuery(),
       body: { ...body, storage_dir: storageQuery().storage_dir ?? null },
@@ -326,11 +326,8 @@ async function performAction(action: 'accept' | 'cancel' | 'modify', body: Recor
       modify: '修改成功',
     }
     notification.success(titles[action] ?? '操作成功', `订阅方案 ${props.requestId}`)
-    // Update the in-memory snapshot with the server-authoritative result so
-    // the panel reflects the new status immediately, then refresh the list.
-    if (result?.request) {
-      detail.value = { ...(detail.value as RequestDetailResult), request: result.request }
-    }
+    // Refresh through GET detail so the panel only consumes the safe
+    // server-authoritative projection, then refresh the list.
     cancelFormOpen.value = false
     modifyFormOpen.value = false
     emit('changed')

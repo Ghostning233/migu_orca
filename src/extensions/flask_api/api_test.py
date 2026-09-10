@@ -10,6 +10,7 @@ from extensions.flask_api.api import (
     handle_exception,
     ok_response,
     route,
+    sanitize_error_data,
 )
 from extensions.flask_api.exceptions import APIException
 from extensions.flask_api.views import GetView, PostView
@@ -61,6 +62,43 @@ def test_failed_response_sanitizes_error_data(app: Flask) -> None:
         "token": "[redacted]",
         "payload": "[redacted-content]",
     }
+
+
+def test_stage32_security_matrix_redacts_nested_upstream_evidence() -> None:
+    """US-253: error details never carry upstream or local evidence."""
+    canaries = (
+        "stage32-password",
+        "stage32-token",
+        "stage32-cookie",
+        "stage32-external-id",
+        "stage32-response-body",
+        "stage32-magnet",
+        "stage32-stack",
+        "stage32-file",
+    )
+    sanitized = sanitize_error_data(
+        {
+            "password": canaries[0],
+            "nested": [
+                {"authorization": canaries[1]},
+                {"cookie": canaries[2]},
+                {"external_id": canaries[3]},
+                {"raw_response_body": canaries[4]},
+                {"magnet": canaries[5]},
+                {"traceback": canaries[6]},
+                {"local_path": f"/private/{canaries[7]}"},
+                {"safe": "public-summary"},
+            ],
+            "endpoint": "https://private.stage32.invalid/api?token=stage32-token",
+            "windows_path": r"C:\private\stage32-secret.json",
+            "raw_text": "<rss>stage32-response-body</rss>",
+        }
+    )
+    rendered = repr(sanitized)
+    assert all(canary not in rendered for canary in canaries)
+    assert sanitized["nested"][-1] == {"safe": "public-summary"}
+    assert sanitized["endpoint"] == "[redacted-url]"
+    assert sanitized["windows_path"] == "[redacted-path]"
 
 
 def test_error_http_status_maps_semantic_categories() -> None:
@@ -285,6 +323,14 @@ def test_stage1_error_maps_to_semantic_http_status(app: Flask) -> None:
             "test_view",
             Stage1Error("ab_submit_failed", "AB 提交失败", "submit"),
         )
+        capability_unknown = handle_exception(
+            "test_view",
+            Stage1Error(
+                "tracking_management_capability_unknown",
+                "当前 Auto Bangumi 管理能力未验证",
+                "tracking_management",
+            ),
+        )
 
     assert not_found.status_code == 404
     assert not_found.get_json()["error_type"] == "request_not_found"
@@ -298,4 +344,6 @@ def test_stage1_error_maps_to_semantic_http_status(app: Flask) -> None:
     assert timeout.status_code == 504
     assert timeout.get_json()["error_type"] == "mikan_timeout"
     assert gateway.status_code == 502
+    assert capability_unknown.status_code == 409
+    assert capability_unknown.get_json()["error_type"] == "tracking_management_capability_unknown"
     assert gateway.get_json()["error_type"] == "ab_submit_failed"

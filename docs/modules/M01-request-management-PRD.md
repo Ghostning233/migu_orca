@@ -255,3 +255,8 @@ build_pending_request(input, source_info, confirmable_config) -> request
 | Q-M01-01 | 第一阶段是否需要持久化 Request？ | 否 | 当前按可不持久化处理 |
 | Q-M01-02 | Request 过期时间如何定义？ | 否 | 第一阶段暂不实现自动过期 |
 | Q-M01-03 | FAILED 是否纳入主状态流转表？ | 否 | 已确认不纳入；失败使用独立 ErrorResult |
+
+## 12. Stage 32 B-D 契约收尾（已完成）
+
+Stage 32 已完成 Request 与 TrackingRecord 权威边界、旧入口兼容、safe-info 安全投影、历史迁移和敏感信息回归。
+Request 仍是本地订阅方案快照；外部提交流程以 TrackingRecord 为唯一权威，旧 queue/AB result 仅作兼容投影或迁移证据。

@@ -1,11 +1,31 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from ab_engine.controllers.ab_connection_controller import test_ab_connection as run_connection_test
 from shared.errors import Stage1Error
+
+
+def test_connection_controller_imports_first_in_a_clean_process() -> None:
+    """The lower AB layer must not initialize the Web application package."""
+    src_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(src_root)
+    result = subprocess.run(
+        [sys.executable, "-c", "import ab_engine.controllers.ab_connection_controller"],
+        cwd=src_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 class FakeClient:

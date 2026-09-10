@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from apps.migu_orca_web.tracking_handoff import ensure_confirmed_request_tracking
 from apps.migu_orca_web.tracking_queue_compat import (
@@ -11,6 +13,7 @@ from apps.migu_orca_web.tracking_queue_compat import (
     reflect_queue_outcome_into_tracking,
     sync_queue_projection_for_tracking,
 )
+from apps.migu_orca_web.tracking_submission_service import run_tracking_submit
 from batch_engine.controllers.batch_queue_controller import (
     create_submission_queue,
     enqueue_item,
@@ -21,6 +24,7 @@ from batch_engine.models import (
     BATCH_QUEUE_STATUS_SUCCEEDED,
 )
 from request_engine.controllers.request_controller import accept_request
+from shared.errors import Stage1Error
 from shared.models import EntryRequest
 from storage_engine.controllers.queue_repository import (
     load_submission_queue,
@@ -39,8 +43,10 @@ from tracking_engine.models.tracking import (
     TRACKING_ORIGIN_SAVE_CONFIRM,
     TRACKING_STATUS_ACTIVE,
     TRACKING_STATUS_PENDING_SUBMIT,
+    TRACKING_STATUS_RECOVERY_REQUIRED,
     TRACKING_STATUS_SUBMIT_FAILED,
     TRACKING_STATUS_SUBMITTING,
+    TRACKING_STATUS_VERIFYING_EXTERNAL,
 )
 
 NOW = "2026-09-08T00:00:00+00:00"
@@ -266,3 +272,129 @@ def test_sync_skips_missing_queue_without_error(tmp_path: Path) -> None:
         tracking_status=TRACKING_STATUS_ACTIVE,
         now=NOW,
     )  # no queue exists -> no-op, never raises
+
+
+class _FakeAbConfig:
+    pass
+
+
+def _submit_success(calls: list[int]):
+    def submit(request: dict, ab_config: object) -> dict:
+        calls.append(1)
+        return {"success": True, "ab_subscription_id": "ab-1", "error": None}
+
+    return submit
+
+
+def test_legacy_success_then_new_submit_converges_without_second_external_call(
+    tmp_path: Path,
+) -> None:
+    """An old successful submit makes the authoritative record non-submittable."""
+    _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path)
+    config = _config(tmp_path)
+    _seed_queue(tmp_path)
+    reflect_queue_outcome_into_tracking(
+        config,
+        request_id="request-1",
+        queue_status=BATCH_QUEUE_STATUS_SUCCEEDED,
+        now=NOW,
+    )
+
+    calls: list[int] = []
+    with pytest.raises(Stage1Error) as excinfo:
+        run_tracking_submit(
+            config,
+            tracking_id=record.tracking_id,
+            expected_revision=record.revision,
+            idempotency_key="new-after-legacy-success",
+            confirm=True,
+            ab_config=_FakeAbConfig(),
+            submit_one=_submit_success(calls),
+            now=NOW,
+        )
+    assert excinfo.value.error_type == "tracking_state_conflict"
+    assert calls == []
+
+
+def test_new_success_then_legacy_failure_keeps_tracking_authority(
+    tmp_path: Path,
+) -> None:
+    """A stale old queue result cannot downgrade a new authoritative success."""
+    _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path)
+    config = _config(tmp_path)
+    _seed_queue(tmp_path)
+    calls: list[int] = []
+    result = run_tracking_submit(
+        config,
+        tracking_id=record.tracking_id,
+        expected_revision=record.revision,
+        idempotency_key="new-first",
+        confirm=True,
+        ab_config=_FakeAbConfig(),
+        submit_one=_submit_success(calls),
+        now=NOW,
+    )
+    assert result["outcome"] == TRACKING_STATUS_ACTIVE
+    assert calls == [1]
+
+    reflect_queue_outcome_into_tracking(
+        config,
+        request_id="request-1",
+        queue_status=BATCH_QUEUE_STATUS_FAILED,
+        now=NOW,
+    )
+    assert load_tracking_record(config, record.tracking_id).status == TRACKING_STATUS_ACTIVE
+
+
+def test_legacy_projection_cannot_bypass_unknown_or_recovery_required(
+    tmp_path: Path,
+) -> None:
+    """Late old results never turn an unresolved external boundary into retryable state."""
+    _accepted_request(tmp_path)
+    record = _seed_tracking(tmp_path)
+    config = _config(tmp_path)
+
+    reflect_ab_result_into_tracking(
+        config,
+        request_id="request-1",
+        ab_result={"success": False, "error": {"error_type": "ab_timeout"}},
+        now=NOW,
+    )
+    assert load_tracking_record(config, record.tracking_id).status == TRACKING_STATUS_VERIFYING_EXTERNAL
+    reflect_queue_outcome_into_tracking(
+        config,
+        request_id="request-1",
+        queue_status=BATCH_QUEUE_STATUS_SUCCEEDED,
+        now=NOW,
+    )
+    assert load_tracking_record(config, record.tracking_id).status == TRACKING_STATUS_VERIFYING_EXTERNAL
+
+    # Recovery-required is equally sticky until the recovery endpoint resolves it.
+    current = load_tracking_record(config, record.tracking_id)
+    from storage_engine.controllers.tracking_repository import compare_and_swap_tracking_record
+    from tracking_engine.models.tracking import (
+        TRACKING_AUDIT_RESULT_PERSIST_FAILED,
+        transition_record,
+    )
+
+    recovery = transition_record(
+        current,
+        status=TRACKING_STATUS_RECOVERY_REQUIRED,
+        audit_action=TRACKING_AUDIT_RESULT_PERSIST_FAILED,
+        now=NOW,
+    )
+    compare_and_swap_tracking_record(
+        config,
+        record.tracking_id,
+        base_revision=current.revision,
+        record=recovery,
+    )
+    reflect_ab_result_into_tracking(
+        config,
+        request_id="request-1",
+        ab_result={"success": True, "ab_subscription_id": "ab-late"},
+        now=NOW,
+    )
+    assert load_tracking_record(config, record.tracking_id).status == TRACKING_STATUS_RECOVERY_REQUIRED

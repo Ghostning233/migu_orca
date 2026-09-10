@@ -23,11 +23,26 @@ export type RequestDetailResult = NonNullable<
   operations['getRequestDetail']['responses']['200']['content']['application/json']['result']
 >
 
-/** The typed Request snapshot inside the detail result. */
-export type RequestSnapshot = RequestDetailResult['request']
+/** The strict, server-sanitized Request snapshot used by the detail panel. */
+export type RequestDetailSnapshot = RequestDetailResult['request']
+
+/**
+ * The legacy action/preview snapshot returned by request creation and draft
+ * endpoints. It is intentionally separate from the safe detail projection:
+ * draft editing needs its historical shape, while detail rendering must not
+ * widen back into engine fields or URL-bearing fields.
+ */
+export type RequestSnapshot = NonNullable<
+  NonNullable<
+    operations['createRequest']['responses']['200']['content']['application/json']['result']
+  >['request']
+>
 
 /** One RSS source in the snapshot (lenient, extra fields allowed). */
-export type RssSource = NonNullable<NonNullable<RequestSnapshot['source_info']>['rss_sources']>[number]
+export type RssSource = NonNullable<
+  NonNullable<RequestSnapshot['source_info'] | RequestDetailSnapshot['source_info']>['rss_sources']
+>[number]
+type DisplaySnapshot = RequestSnapshot | RequestDetailSnapshot
 
 /** One excluded-seed entry: either a bare title or `{name, reason, rule}`. */
 export interface ExcludedSeed {
@@ -78,7 +93,7 @@ export function displayValue(value: unknown): string {
  * Pick the RSS source whose subtitle group matches the selected group,
  * falling back to the first source (legacy `selectedRssSource`).
  */
-export function selectedRssSource(snapshot: RequestSnapshot): RssSource | null {
+export function selectedRssSource(snapshot: DisplaySnapshot): RssSource | null {
   const sources = snapshot.source_info?.rss_sources ?? []
   const selectedGroup = snapshot.confirmable_config?.selected_subtitle_group
   if (selectedGroup) {
@@ -100,7 +115,7 @@ export function combinedSeedNames(valid: readonly string[] = [], excluded: reado
 }
 
 /** Split the raw `excluded_seed_names` entries into `{name, reason}` pairs. */
-export function excludedSeeds(snapshot: RequestSnapshot): ExcludedSeed[] {
+export function excludedSeeds(snapshot: DisplaySnapshot): ExcludedSeed[] {
   const source = selectedRssSource(snapshot)
   const raw = source?.excluded_seed_names ?? []
   return raw.map((entry) => {
@@ -114,13 +129,13 @@ export function excludedSeeds(snapshot: RequestSnapshot): ExcludedSeed[] {
 }
 
 /** Effective seed titles for the current subtitle group (legacy fallback chain). */
-export function effectiveSeeds(snapshot: RequestSnapshot): string[] {
+export function effectiveSeeds(snapshot: DisplaySnapshot): string[] {
   const source = selectedRssSource(snapshot)
   return source?.valid_seed_names ?? snapshot.confirmable_config?.effective_seed_names ?? []
 }
 
 /** Complete seeds grouped by the MiKan subtitle group (legacy grouping). */
-export function completeSeedGroups(snapshot: RequestSnapshot): CompleteSeedGroup[] {
+export function completeSeedGroups(snapshot: DisplaySnapshot): CompleteSeedGroup[] {
   const sources = snapshot.source_info?.rss_sources ?? []
   return sources.map((source) => ({
     subtitleGroup: source.subtitle_group ?? '未知字幕组',
@@ -134,7 +149,7 @@ export function completeSeedGroups(snapshot: RequestSnapshot): CompleteSeedGroup
 }
 
 /** Total complete seed count across all subtitle groups. */
-export function totalCompleteSeedCount(snapshot: RequestSnapshot): number {
+export function totalCompleteSeedCount(snapshot: DisplaySnapshot): number {
   return completeSeedGroups(snapshot).reduce((sum, group) => sum + group.seedNames.length, 0)
 }
 

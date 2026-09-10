@@ -110,6 +110,15 @@ def reflect_queue_outcome_into_tracking(
         return
     if record.status == target:
         return
+    if record.status in {
+        TRACKING_STATUS_VERIFYING_EXTERNAL,
+        TRACKING_STATUS_RECOVERY_REQUIRED,
+    }:
+        # An ambiguous external boundary is authoritative until the tracking
+        # recovery flow resolves it.  A late legacy queue/AB response is only
+        # compatibility evidence and must not turn OUTCOME_UNKNOWN or
+        # RECOVERY_REQUIRED into a blindly actionable result.
+        return
     if target != TRACKING_STATUS_ACTIVE and record.status == TRACKING_STATUS_ACTIVE:
         # A durable success is never downgraded by a stale/desynced queue.
         return

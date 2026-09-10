@@ -40,7 +40,10 @@ from apps.migu_orca_web.api_contract import (
     RequestSummaryDTO,
     SaveConfirmFailedErrorDataDTO,
 )
-from apps.migu_orca_web.serializers import serialize_request_safe_info
+from apps.migu_orca_web.serializers import (
+    serialize_request_detail,
+    serialize_request_safe_info,
+)
 from batch_engine.controllers.batch_draft_controller import create_batch_draft
 from batch_engine.controllers.batch_queue_controller import serialize_queue
 from batch_engine.models import BatchSubmissionQueue
@@ -53,6 +56,19 @@ from shared.models import EntryRequest
 
 def _generated_request(title: str = "芙莉莲") -> dict[str, Any]:
     return generate_request(EntryRequest(raw_title=title))["request"]
+
+
+def _safe_detail_request(title: str = "芙莉莲") -> dict[str, Any]:
+    """Return the GET-detail whitelist projection used by DTO fixtures."""
+    request = _generated_request(title)
+    matched = request["source_info"]["matched_bangumi"]
+    matched.pop("mikan_url", None)
+    matched.pop("poster_url", None)
+    for source in request["source_info"]["rss_sources"]:
+        source.pop("rss_url", None)
+    request["confirmable_config"]["selected_rss_url"] = "SELECTED"
+    request.pop("ab_submit_result", None)
+    return request
 
 
 def _summary(request: dict[str, Any]) -> dict[str, Any]:
@@ -357,7 +373,7 @@ def test_save_confirm_failed_error_data_dto_whitelists_details() -> None:
 
 def test_request_detail_dto_shape() -> None:
     payload = {
-        "request": _generated_request(),
+        "request": _safe_detail_request(),
         "history": {"available": True, "events": [], "error": None},
         "ab_result": {"available": False, "record": None, "error": None},
     }
@@ -367,8 +383,48 @@ def test_request_detail_dto_shape() -> None:
 
 
 def test_request_detail_dto_accepts_real_sections() -> None:
-    """US-203: the detail result types the history/AB section shapes the UI renders."""
-    request = _generated_request()
+    """US-203: the detail result accepts only the safe UI projection."""
+    request = {
+        "request_id": "req-1",
+        "status": "PENDING_CONFIRM",
+        "input": {"raw_title": "芙莉莲"},
+        "source_info": {
+            "matched_bangumi": {
+                "title": "芙莉莲",
+                "aliases": ["Frieren"],
+                "match_score": 1.0,
+            },
+            "rss_sources": [
+                {
+                    "subtitle_group": "喵萌奶茶屋",
+                    "source_type": "mikan",
+                    "total_seed_count": 1,
+                    "seed_names": ["芙莉莲 01.mkv"],
+                    "valid_seed_count": 1,
+                    "invalid_seed_count": 0,
+                    "valid_seed_names": ["芙莉莲 01.mkv"],
+                    "excluded_seed_names": [],
+                    "warnings": [],
+                }
+            ],
+        },
+        "confirmable_config": {
+            "selected_subtitle_group": "喵萌奶茶屋",
+            "selected_rss_url": "SELECTED",
+            "filter_rule": {
+                "must_contain": "",
+                "must_not_contain": "",
+                "use_regex": False,
+                "case_sensitive": False,
+            },
+            "effective_seed_names": ["芙莉莲 01.mkv"],
+            "expected_folder_name": "芙莉莲",
+            "warnings": [],
+        },
+        "user_action": None,
+        "created_at": "2026-08-31T00:00:00+00:00",
+        "updated_at": "2026-08-31T00:00:00+00:00",
+    }
     payload = {
         "request": request,
         "history": {
@@ -380,7 +436,6 @@ def test_request_detail_dto_accepts_real_sections() -> None:
                     "next_status": "ACCEPTED",
                     "action": "ACCEPT",
                     "timestamp": "2026-08-31T00:00:00+00:00",
-                    "details": None,
                 }
             ],
             "error": None,
@@ -392,8 +447,7 @@ def test_request_detail_dto_accepts_real_sections() -> None:
                 "recorded_at": "2026-08-31T00:00:00+00:00",
                 "ab_submit_result": {
                     "success": True,
-                    "ab_subscription_id": "ab-sub-1",
-                    "ab_response": {"id": "ab-sub-1"},
+                    "ab_subscription_id": None,
                     "fallback_config": None,
                     "error": None,
                 },
@@ -407,7 +461,7 @@ def test_request_detail_dto_accepts_real_sections() -> None:
     assert validated.request.source_info.rss_sources[0].subtitle_group
     assert validated.request.confirmable_config.filter_rule.use_regex is False
     assert validated.history.events[0].action == "ACCEPT"
-    assert validated.ab_result.record.ab_submit_result.ab_subscription_id == "ab-sub-1"
+    assert validated.ab_result.record.ab_submit_result.success is True
     # Lenient snapshot shapes still reject unknown envelope fields.
     with pytest.raises(ValidationError):
         RequestDetailResultDTO.model_validate({**payload, "leaked": 1})
@@ -416,7 +470,7 @@ def test_request_detail_dto_accepts_real_sections() -> None:
 def test_request_detail_dto_accepts_error_sections() -> None:
     """US-203: history/AB sections may carry a sanitized error dict."""
     payload = {
-        "request": _generated_request(),
+        "request": _safe_detail_request(),
         "history": {
             "available": False,
             "events": [],
@@ -441,6 +495,35 @@ def test_request_detail_dto_accepts_error_sections() -> None:
     validated = RequestDetailResultDTO.model_validate(payload)
     assert validated.history.error is not None
     assert validated.ab_result.error is not None
+
+
+def test_request_detail_serializer_preserves_ab_missing_vs_read_error() -> None:
+    request = _generated_request()
+    common = {"events": [], "available": True, "error": None}
+
+    missing = serialize_request_detail(
+        request,
+        history_section=common,
+        ab_section={"available": False, "record": None, "error": None},
+    )
+    assert missing["ab_result"] == {
+        "available": False,
+        "record": None,
+        "error": None,
+    }
+
+    read_error = {
+        "error_type": "ab_result_corrupt",
+        "error_message": "提交结果记录损坏",
+        "failed_step": "load_ab_submit_result",
+    }
+    damaged = serialize_request_detail(
+        request,
+        history_section=common,
+        ab_section={"available": False, "record": None, "error": read_error},
+    )
+    assert damaged["ab_result"]["available"] is False
+    assert damaged["ab_result"]["error"] == read_error
 
 
 def test_request_snapshot_dto_rejects_unknown_envelope_field() -> None:

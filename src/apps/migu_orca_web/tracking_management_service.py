@@ -32,7 +32,11 @@ from tracking_engine.controllers.management_operation import (
     classify_management_action,
     classify_management_readback,
 )
-from tracking_engine.controllers.management_state import management_action_allowed
+from tracking_engine.controllers.management_state import (
+    management_action_allowed,
+    management_baseline_verified,
+    management_capability_allowed,
+)
 from tracking_engine.controllers.management_target import (
     ManagementBinding,
     ResolvedManagementTarget,
@@ -79,27 +83,6 @@ class ManagementSnapshotClient(Protocol):
 
 
 ManagementWriter = Callable[[ResolvedManagementTarget, Mapping[str, Any] | None], Any]
-
-_CAPABILITY_FIELDS = {
-    (TRACKING_OPERATION_KIND_MODIFY, "SUBSCRIPTION"): "subscription_modify",
-    (TRACKING_OPERATION_KIND_MODIFY, "ASSOCIATED_RSS"): "rss_modify",
-    (TRACKING_OPERATION_KIND_SET_ENABLED, "SUBSCRIPTION"): "subscription_enable",
-    (TRACKING_OPERATION_KIND_SET_ENABLED, "ASSOCIATED_RSS"): "rss_enable",
-    (TRACKING_OPERATION_KIND_DELETE_EXTERNAL, "SUBSCRIPTION"): "subscription_delete",
-    (TRACKING_OPERATION_KIND_DELETE_EXTERNAL, "ASSOCIATED_RSS"): "rss_delete",
-    (TRACKING_OPERATION_KIND_REFRESH_RSS, "ASSOCIATED_RSS"): "rss_refresh",
-}
-
-
-def _capability_field(operation: str, target_scope: str, enabled: bool | None) -> str | None:
-    """Select the exact verified capability required by this action direction."""
-    if operation == TRACKING_OPERATION_KIND_SET_ENABLED:
-        if enabled is not True and enabled is not False:
-            return None
-        suffix = "enable" if enabled else "disable"
-        return f"subscription_{suffix}" if target_scope == "SUBSCRIPTION" else f"rss_{suffix}"
-    return _CAPABILITY_FIELDS.get((operation, target_scope))
-
 
 def run_tracking_management(
     config: StorageConfig | None = None,
@@ -168,7 +151,7 @@ def run_tracking_management(
                 "created": False,
             }
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
-    if not management_action_allowed(record.status, operation):
+    if not management_action_allowed(record.status, operation, enabled=enabled):
         raise Stage1Error("tracking_management_state_conflict", "当前追番状态不允许该管理操作", "tracking_management")
     if expected_revision != record.revision:
         raise Stage1Error("tracking_revision_conflict", "追番记录版本已变化，请刷新后重试", "tracking_management", {"expected_revision": expected_revision, "current_revision": record.revision})
@@ -177,8 +160,7 @@ def run_tracking_management(
         raise Stage1Error("tracking_management_capability_unknown", "管理能力尚未验证", "tracking_management")
     caps, subscriptions, rss_items = management_client.read_snapshot()
     effective_caps = capabilities or caps
-    field = _capability_field(operation, target_scope, enabled)
-    if field is None or getattr(effective_caps, field, "UNKNOWN") != "SUPPORTED":
+    if not management_capability_allowed(effective_caps, operation, target_scope, enabled=enabled):
         raise Stage1Error("tracking_management_capability_unknown", "当前 Auto Bangumi 管理能力未验证", "tracking_management")
     target = resolve_management_target(
         record, target_scope, subscriptions, rss_items,
@@ -321,11 +303,7 @@ def recover_tracking_management(
     try:
         capabilities, subscriptions, rss_items = management_client.read_snapshot()
         required = "subscription_list" if operation.target_scope == "SUBSCRIPTION" else "rss_list"
-        if (
-            capabilities.probe_status != "VERIFIED"
-            or capabilities.version != "3.1.18"
-            or getattr(capabilities, required, "UNKNOWN") != "SUPPORTED"
-        ):
+        if not management_baseline_verified(capabilities) or getattr(capabilities, required, "UNKNOWN") != "SUPPORTED":
             return _persist_management_recovery(
                 config, record, operation, "RECOVERY_REQUIRED", "management_capability_unknown", now,
                 successful=False,

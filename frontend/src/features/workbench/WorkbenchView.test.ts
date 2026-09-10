@@ -442,7 +442,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(wrapper.text()).not.toContain('draft_revision_conflict')
   })
 
-  it('saves the draft through preview-save and routes to the saved request', async () => {
+  it('COMPATIBILITY: saves the draft through preview-save and routes to the saved request', async () => {
     apiPost
       .mockResolvedValueOnce(candidateResult())
       .mockResolvedValueOnce(createDraftResult())

@@ -1,0 +1,103 @@
+# Ralph Progress Log
+Started: Thu Sep 10 00:50:47 CST 2026
+---
+## Codebase Patterns
+- Flask `/api/v1` routes use `<path:param>` while OpenAPI uses `{param}`; normalize both forms when checking contract drift.
+- `docs/api/openapi.json` is deterministic output from `apps.migu_orca_web.openapi_gen`; regenerate it after changing contract metadata.
+- `TrackingRecord` is the external submission authority; legacy queue and AB result data are compatibility projections or migration evidence.
+- Public tracking action/status DTOs use finite enums, while request-scoped credentials/capability observations stay out of durable or response contracts.
+- Frontend contract fixtures should derive request/response shapes from `frontend/src/api/generated/api.ts`; use type-only assertions instead of feature-local DTO interfaces.
+- Legacy queue/AB projections must never resolve `VERIFYING_EXTERNAL` or `RECOVERY_REQUIRED`; only the tracking recovery flow may clear an ambiguous external boundary.
+- Versioned persistence readers must fail closed on future schemas and preserve the original artifact; migration is local, idempotent, and must not implicitly upgrade existing JSON.
+- Management writes must pass one shared matrix: VERIFIED probe, exact 3.1.18 legacy adapter, and the action/scope/direction-specific capability; recovery keeps the same exact baseline.
+- API error envelopes recursively redact upstream evidence by field and value; production error logging must not emit exception tracebacks.
+- Release rollback only copies local storage and changes application version; uncertain external operations remain manual and are never automatically replayed.
+
+## 2026-09-10 01:05:00 CST - US-247
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the machine-readable B-A~B-C2 endpoint lifecycle registry with PRIMARY, RECOVERY, and COMPATIBILITY classifications, replacement/retention rationale, and authority metadata. Projected it into OpenAPI `x-lifecycle` metadata and the endpoint inventory, with drift tests covering live routes, inventory, OpenAPI, legacy compatibility entries, and TrackingRecord authority.
+- Files changed: `src/apps/migu_orca_web/endpoint_lifecycle.py`, `src/apps/migu_orca_web/openapi_gen.py`, `tests/api_contract/test_endpoint_lifecycle.py`, `docs/api/endpoint_inventory.md`, `docs/api/openapi.json`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Flask route placeholders and OpenAPI placeholders use different syntax; contract tests must normalize both forms.
+  - OpenAPI is generated deterministically and must be regenerated when operation metadata changes.
+  - Legacy queue/AB result paths remain compatibility projections; TrackingRecord is the external submission authority.
+## 2026-09-10 01:04:00 CST - US-248
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Froze the tracking management action contract with machine-readable endpoint suffixes, allowed scopes, confirmation, capability-probe, read-before-write, and stable validation/conflict/unknown-result semantics. Tightened public action/style/status DTO enums and strict revision/idempotency request types, then regenerated OpenAPI and the TypeScript client.
+- Files changed: `src/apps/migu_orca_web/tracking_contract.py`, `src/apps/migu_orca_web/api_contract.py`, `src/apps/migu_orca_web/schemas.py`, `tests/api_contract/test_tracking_management_contract.py`, `docs/api/openapi.json`, `frontend/src/api/generated/api.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - OpenAPI-generated TypeScript must be regenerated whenever response `Literal` enums or nullable fields change; the full backend suite checks this drift when frontend dependencies are installed.
+  - Strict integer fields are needed for revision guards because ordinary Pydantic integer fields can coerce booleans.
+  - Public action availability is a server projection; capability and external configuration remain request-scoped and must be revalidated by the write service.
+---
+## 2026-09-10 01:30:25 CST - US-253
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Hardened the shared API error boundary against nested raw response bodies, traceback/patch data, external IDs, magnets, endpoints, Unix/Windows paths, and sensitive values in error strings. Removed production exception traceback logging from API and legacy entry safety boundaries. Added a backend canary matrix and a real Chromium SPA test covering API failure responses, DOM, URL/history, browser storage, and persisted Request JSON.
+- Files changed: `src/extensions/flask_api/api.py`, `src/extensions/flask_api/api_test.py`, `src/apps/migu_orca_entry/controllers/entry_controller.py`, `tests/browser/test_app_request_detail.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Endpoint fields retain the established `[redacted-url]` shape for URL values, while non-URL endpoint values are blocked entirely.
+  - Sensitive browser regressions should assert URL, history, local/session storage, visible body text, and storage JSON together; the Playwright suite runs against real Chromium.
+  - Quality gates passed: compileall, 1756 backend tests, frontend typecheck/lint/263 unit tests/build, and 134 browser tests.
+---
+## 2026-09-10 01:08:00 CST - US-249
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added a compile-level generated TypeScript contract consumer fixture covering review/save, batch, tracking, capability, nullable, enum, and error-envelope surfaces. Documented the fixture and generated-client-only DTO rule in the API README; marked US-249 passing.
+- Files changed: `frontend/src/api/generated/contract-consumer.test.ts`, `docs/api/README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The generated OpenAPI client exposes inline response shapes, so fixtures can validate deep fields by deriving types from `operations` without duplicating DTO interfaces.
+- Defaulted list fields may still be optional in generated TypeScript and should be narrowed with `NonNullable` when consuming an individual element.
+- Full backend tests and frontend checks passed; no browser/UI behavior changed.
+---
+## 2026-09-10 01:11:58 CST - US-250
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Hardened legacy queue/AB compatibility projection so `VERIFYING_EXTERNAL` and `RECOVERY_REQUIRED` remain authoritative until explicit recovery. Added sanitized compatibility rehearsals for old-first/new-second, new-first/old-stale ordering, and late legacy results after unknown/recovery outcomes, with a recording fake proving no duplicate external create call.
+- Files changed: `src/apps/migu_orca_web/tracking_queue_compat.py`, `src/apps/migu_orca_web/tracking_queue_compat_test.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Legacy queue/AB data is evidence-only once an external boundary is ambiguous; it must not downgrade or resolve tracking state by itself.
+  - The unified submit service rejects fresh idempotency keys from `ACTIVE`, `VERIFYING_EXTERNAL`, and `RECOVERY_REQUIRED`; compatibility tests should assert the external seam call count.
+  - Full backend validation passed: compileall and 1732 tests.
+---
+## 2026-09-10 01:16:19 CST - US-251
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added a persistence-version and historical-migration rehearsal covering sanitized Request/AB evidence, TrackingRecord v1 with ExternalMapping v1, legacy TrackingOperation v1, manifest v1, future-schema rejection, and damaged-record isolation. The tests prove migration is idempotent/local, preserves existing versioned bytes, and never deletes failed evidence.
+- Files changed: `tests/api_contract/test_stage32_persistence_migration.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Versioned readers already provide the correct fail-closed boundary; rehearsal tests should assert both the stable error and byte preservation.
+  - Existing TrackingRecord and operation files are evidence and must not be rewritten merely because migration is revisited.
+  - Full validation passed: compileall and 1737 tests.
+---
+## 2026-09-10 01:21:22 CST - US-252
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Centralized the server-side capability/action matrix for tracking management writes and recovery. Management now fails closed for API-token adapters, non-exact versions, PARTIAL/FAILED probes, unsupported action capabilities, invalid scopes, and unspecified enable/disable direction; existing external deletion routes remain hardcoded to `file=false`. Added table-driven contract coverage for all supported action/scope/direction combinations and fail-closed variants.
+- Files changed: `src/tracking_engine/controllers/management_state.py`, `src/apps/migu_orca_web/tracking_management_service.py`, `tests/api_contract/test_stage32_capability_matrix.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Public capability fields are not sufficient authorization; write services must independently require the proven adapter/version/probe baseline and the exact directional capability.
+  - Recovery only needs the corresponding list-read capability, but it must still reject an unproven adapter/version baseline before readback.
+  - Full validation passed: compileall and 1754 tests.
+## 2026-09-10 01:36:00 CST - US-254
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added a local-only rollback policy and storage backup helper, plus a release/upgrade/rollback runbook covering evidence preservation, migration interruption, operation uncertainty, queue projection failure, and forward recovery. Added fault-window tests proving no automatic external replay and byte-for-byte source preservation during backup.
+- Files changed: `src/storage_engine/controllers/rollback.py`, `src/storage_engine/controllers/rollback_test.py`, `docs/operations/stage32-release-rollback.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Rollback must preserve all durable evidence and only change the application version; uncertain operation states require existing `VERIFY_EXTERNAL`/`RECOVER` flows.
+  - Local backup helpers should reject destinations inside the source and return aggregate summaries rather than filesystem paths.
+- Targeted rollback tests and the full backend suite passed; no external services were contacted.
+---
+## 2026-09-10 01:39:37 CST - US-255
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Delivered versioned frontend contract handoff v1 covering F-B through F-F operation mappings, generated request/response type boundaries, tracking action/recovery matrix, confirmation/revision/idempotency rules, capability/error handling, sensitive-value boundaries, F-F Stage 32 merge gate, QueueView compatibility scope, and the `updated_episode` placeholder.
+- Files changed: `docs/api/frontend-contract-handoff-v1.md`, `frontend/src/api/generated/frontend-contract-handoff.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Type-only frontend contract fixtures can derive all request/result assertions from `operations` and `components` in the generated OpenAPI client without feature-local DTOs.
+  - The F-F management surface shares revision, confirmation, idempotency, and capability requirements; recovery must remain explicit for unknown external outcomes.
+- Quality gates passed: compileall, 1764 backend tests, OpenAPI drift check, frontend typecheck/lint, 265 unit tests, and production build.
+---
+---
+## 2026-09-10 01:50:00 CST - US-256
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Completed Stage 32 closeout documentation and final quality gates; synchronized current Stage 32 completion state across README, main/backend-support PRDs, architecture, M01/M09/M10/M11/M12/M13 module PRDs, backlog, future stages, docs README, and frontend work goals. Marked US-256 passing and prepared the Ralph snapshot for archive.
+- Files changed: Documentation listed above, scripts/ralph/prd.json, scripts/ralph/progress.txt, plus mechanical Ruff fixes in src/apps/migu_orca_web/tracking_management_service.py, tests/api_contract/test_stage32_capability_matrix.py, and tests/api_contract/test_stage32_persistence_migration.py.
+- **Learnings for future iterations:**
+  - Final Stage closeout must update both current-status summaries and module-level historical boundaries; retain explicit non-goals for no new actions, no old endpoint deletion, no formal management page, and no updated-episode implementation.
+  - Full final gate passed: compileall, Ruff, 1,630 non-browser tests, OpenAPI drift, frontend API/typecheck/lint/265 unit tests/build, 134 Chromium tests, and git diff check.
+---

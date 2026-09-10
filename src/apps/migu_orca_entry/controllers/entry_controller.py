@@ -171,7 +171,7 @@ def generate_request(
         LOGGER.warning("Request 生成失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("订阅方案生成发生未预期错误")
+        LOGGER.error("订阅方案生成发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
             "订阅方案生成发生未预期错误",
@@ -229,7 +229,7 @@ def apply_confirmation_action(
         LOGGER.warning("Request 确认失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("订阅方案确认发生未预期错误")
+        LOGGER.error("订阅方案确认发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
             "订阅方案确认发生未预期错误",
@@ -253,7 +253,7 @@ def apply_modify_action(
         LOGGER.warning("Request 修改失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("订阅方案修改发生未预期错误")
+        LOGGER.error("订阅方案修改发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
             "订阅方案修改发生未预期错误",
@@ -312,7 +312,7 @@ def apply_ab_submit_action(
             "error": exc.as_dict(),
         }
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("Auto Bangumi 提交发生未预期错误")
+        LOGGER.error("Auto Bangumi 提交发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
             "Auto Bangumi 提交发生未预期错误",
@@ -353,7 +353,7 @@ def apply_request_save_action(
         LOGGER.warning("Request 保存失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("订阅方案保存发生未预期错误")
+        LOGGER.error("订阅方案保存发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
             "订阅方案保存发生未预期错误",
@@ -377,7 +377,7 @@ def list_saved_requests(
         LOGGER.warning("Request 查询失败：%s", exc.message)
         return {"success": False, "requests": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("订阅方案查询发生未预期错误")
+        LOGGER.error("订阅方案查询发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
             "订阅方案查询发生未预期错误",
@@ -400,7 +400,7 @@ def load_saved_request(
         LOGGER.warning("Request 读取失败：%s", exc.message)
         return {"success": False, "request": None, "error": exc.as_dict()}
     except Exception as exc:  # pragma: no cover - safety boundary
-        LOGGER.exception("订阅方案读取发生未预期错误")
+        LOGGER.error("订阅方案读取发生未预期错误")
         error = Stage1Error(
             "unexpected_error",
             "订阅方案读取发生未预期错误",

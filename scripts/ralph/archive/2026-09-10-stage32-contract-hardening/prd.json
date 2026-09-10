@@ -1,0 +1,169 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage32-contract-hardening",
+  "description": "Stage 32（B-D）：固化 B-A～B-C2 后端契约，完成旧入口兼容、历史迁移、安全泄漏、发布回退演练与版本化前端 handoff，不新增管理动作、不删除旧端点、不开发正式页面。",
+  "userStories": [
+    {
+      "id": "US-247",
+      "title": "冻结端点生命周期与 B-D 基线",
+      "description": "作为维护者，我需要一份可机器检查的端点生命周期和数据权威清单，以便契约收尾不遗漏现有调用方或误删兼容入口。",
+      "acceptanceCriteria": [
+        "建立 B-A～B-C2 相关 endpoint 的 PRIMARY、RECOVERY、COMPATIBILITY 生命周期清单，记录 method、OpenAPI path、替代关系或保留原因",
+        "清单覆盖实现路由、docs/api/endpoint_inventory.md 和 docs/api/openapi.json 中全部目标端点，并由自动化 drift 测试校验",
+        "固定 TrackingRecord 为外部提交流程权威，旧 queue/AB result 仅为兼容投影或迁移证据",
+        "本 story 不删除、重定向、隐藏或改变任何旧端点请求响应语义",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-248",
+      "title": "冻结公开 DTO 枚举动作与错误语义",
+      "description": "作为前端开发者，我需要稳定且严格的 tracking 管理契约，以便不用从状态字符串或服务端实现猜测行为。",
+      "acceptanceCriteria": [
+        "审计并冻结 tracking、capability、operation、handoff、management result 的公开字段、nullable、默认值和枚举集合",
+        "available_actions 明确只表达本地可执行性；外部动作仍在 POST 内以 request-scoped ab_config 重新探测 capability 并由服务端最终校验",
+        "每类 action 的 endpoint、scope、confirm、idempotency、expected_revision、capability 与恢复语义可由严格契约无歧义表达",
+        "固定校验错误、冲突错误、外部故障与结果未知的 HTTP/业务态边界；只允许向后兼容扩展",
+        "Strict DTO tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-249",
+      "title": "固化 OpenAPI 与生成 TypeScript 契约",
+      "description": "作为前端开发者，我希望只使用生成客户端即可覆盖后续页面需要的类型和操作，从而避免手写 DTO 漂移。",
+      "acceptanceCriteria": [
+        "同步确定性 OpenAPI、稳定 operationId、endpoint inventory 与 frontend/src/api/generated/api.ts",
+        "为 F-B～F-F 所需请求响应、nullable 字段、枚举和错误增加最小编译级 generated type 消费 fixture",
+        "B-A～B-C2 关键公开深层结构不依赖长期 any、任意 dict 或手写重复 interface",
+        "OpenAPI examples、description 与生成 fixture 不含凭据、endpoint、完整 URL、外部 ID、绝对路径或原始响应",
+        "OpenAPI and generated-client drift checks pass",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-250",
+      "title": "完成旧入口与 tracking 权威状态兼容演练",
+      "description": "作为升级用户，我希望旧客户端和新 tracking 入口混用时仍收敛到同一追番状态且不会重复提交。",
+      "acceptanceCriteria": [
+        "脱敏 fixture 覆盖旧 preview/accept/submit/batch queue 与新 save-confirm/tracking 入口的先旧后新、先新后旧、同键重放与重启",
+        "同一 Request 与幂等意图始终收敛到同一 tracking_id/operation，recording fake 证明外部创建或写入不重复",
+        "ACTIVE、DISABLED、EXTERNAL_DELETED 和成功 operation 不被陈旧 queue、重复迁移或旧响应降级",
+        "兼容投影写失败不覆盖 tracking 权威结果，OUTCOME_UNKNOWN/RECOVERY_REQUIRED 不能被新 key 或旧入口绕过",
+        "Targeted compatibility tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-251",
+      "title": "完成持久化 schema 与历史迁移演练",
+      "description": "作为长期用户，我希望跨 Stage 保存的数据可以安全升级、部分失败后重试，并在未知版本时保留原证据。",
+      "acceptanceCriteria": [
+        "演练历史 Request、queue、AB result、TrackingRecord v1、ExternalMapping v1、TrackingOperation v1/v2 和 migration manifest v1",
+        "覆盖首次迁移、PARTIAL 修复重试、COMPLETE 重启、单条损坏、并发首次访问及未知未来 schema fail closed",
+        "纯读取或启动不原地改写 v1 operation；未知/损坏文件不删除、不当成空数据重建且不泄漏内容",
+        "全部迁移纯本地、逐条隔离、可重入且 recording fake 证明不访问 Auto Bangumi、MiKan 或 qBittorrent",
+        "Targeted migration tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-252",
+      "title": "冻结 capability 降级与服务端动作矩阵",
+      "description": "作为用户，我希望任何未证明的版本、认证或状态组合都在服务端安全拒绝外部写入。",
+      "acceptanceCriteria": [
+        "表驱动覆盖 password/API Token、精确 3.1.18/其他或未知版本、VERIFIED/PARTIAL/FAILED probe 的 capability 结果",
+        "交叉覆盖 tracking status、mapping 是否唯一、SUBSCRIPTION/ASSOCIATED_RSS scope 和未解决 operation 的动作允许矩阵",
+        "四个管理 endpoint 各自执行服务端校验；客户端隐藏动作不能绕过 fail closed、read-before-write、revision 或 recovery guard",
+        "所有番剧停用/删除 recording 调用固定 file=false，拒绝 file 输入且本地 Request、tracking、审计和媒体保持不变",
+        "Targeted capability/action matrix tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-253",
+      "title": "建立端到端敏感信息泄漏矩阵",
+      "description": "作为本地部署用户，我希望凭据、私有地址和原始上游数据在所有成功与故障路径中都不可观察。",
+      "acceptanceCriteria": [
+        "使用虚构 canary 覆盖 password、token、Cookie、Authorization、endpoint、完整 RSS/MiKan URL、magnet、外部 ID、原始响应、patch、绝对路径和 traceback",
+        "注入成功、校验/认证失败、timeout、5xx、非 JSON、持久化失败、迁移损坏与写后回查失败路径",
+        "递归断言 canary 不进入 API body/header/URL、storage JSON、审计、日志、异常、OpenAPI、generated client 或测试快照",
+        "执行最小真实 Chromium 可见面检查，证明 canary 不进入 DOM、browser storage、截图或 trace，且不连接真实外部服务",
+        "Targeted security and browser tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-254",
+      "title": "完成发布回退与故障窗口演练",
+      "description": "作为维护者，我需要可操作的升级回退方案，以便故障时保留业务数据和外部写证据。",
+      "acceptanceCriteria": [
+        "编写发布/升级/回退 runbook：停止新写、复制 storage、回退应用、保留未知新版文件、再次前向恢复",
+        "离线临时 storage 演练调用前失败、外部可能已执行、operation 已终态但 record 未更新、queue 投影失败和迁移中断",
+        "回退流程不删除或改写 Request、tracking、operation、manifest、queue、下载任务、目录或媒体",
+        "IN_PROGRESS、OUTCOME_UNKNOWN、RECOVERY_REQUIRED 在回退/前向启动后均不自动重放，可由 recover/VERIFY_EXTERNAL 保守收敛",
+        "Targeted rollback and fault-injection tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-255",
+      "title": "交付版本化前端契约 handoff",
+      "description": "作为后续前端 Agent，我需要按页面用例组织的稳定契约说明和生成类型，以便正确实现审核与追番管理。",
+      "acceptanceCriteria": [
+        "handoff 映射 F-B～F-F 页面用例、endpoint/operationId、generated request/response type、状态和错误",
+        "动作矩阵明确 confirm、idempotency_key、expected_revision、scope、capability、成功/未知结果与恢复顺序",
+        "明确保存确认后只进入待提交，外部提交再次显式确认，真实 MiKan 必选，不绕过 Auto Bangumi，updated_episode 保持 NOT_IMPLEMENTED",
+        "最小 TypeScript 消费测试只导入 generated types；禁止手写 DTO，禁止把 endpoint/凭据/完整 URL/绝对路径放入 URL、store、DOM、截图或 trace",
+        "说明 F-F 必须等待 Stage 32 合入；Stage 33 的 QueueView 兼容挂载不代表正式追番管理完成",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-256",
+      "title": "完成最终门禁文档同步与归档",
+      "description": "作为项目维护者，我希望 B-D 有完整验收证据和干净交接，使后续前端能在冻结契约上继续开发。",
+      "acceptanceCriteria": [
+        "仅在本 story 运行一次完整后端非浏览器、Ruff、compileall、OpenAPI drift、前端 api/typecheck/lint/unit/build 与真实 Chromium 门禁",
+        "同步 README、主 PRD、架构、M01/M09/M10/M11/M12/M13、backlog、future stages、工作目标和后端支撑 PRD",
+        "记录端点生命周期、兼容/迁移、capability、泄漏矩阵、故障回退和前端 handoff 的最终验收结果",
+        "归档 Stage 32 prd/progress，确认 US-247～US-256 全部 passes 且无临时 storage、真实凭据、截图/trace 或 build 产物入库",
+        "确认没有新增管理动作、删除旧端点、实现正式页面或声称已更新集数",
+        "Tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

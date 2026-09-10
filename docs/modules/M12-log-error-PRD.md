@@ -104,3 +104,8 @@ header、原始响应或 RSS URL。`VERIFY_EXTERNAL` 的无匹配/歧义保持 `
 Stage 31 将 capability/校验/认证/明确 4xx 分类为确定失败；timeout、连接中断、5xx、未知响应与写后
 回查失败保持 `VERIFYING_EXTERNAL` 或 `RECOVERY_REQUIRED`，使用固定中文安全消息，不回显 URL、凭据、
 外部 ID、方法、路径、body 或原始响应。恢复只核验原 operation，不创建新幂等 key 或重复写入。
+
+## 13. Stage 32 B-D 泄漏与回退门禁（已完成）
+
+Stage 32 已完成跨 API、持久化 JSON、日志、OpenAPI、生成客户端和 Chromium 可见面的敏感 canary 矩阵。
+错误 envelope 与生产日志均保持递归脱敏；迁移损坏和发布回退保留证据，不把不确定外部结果伪装成失败或自动重放。

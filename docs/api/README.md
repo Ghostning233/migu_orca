@@ -44,6 +44,9 @@ npm run api:check       # 漂移检查：生成结果与入库文件不一致时
   输入是 `docs/api/openapi.json`，输出 `frontend/src/api/generated/api.ts`（入库）。
 - `frontend/src/api/generated/` **只由契约生成**，不手工维护；迁移 feature 不得
   手写重复的 API response interface。
+- `frontend/src/api/generated/contract-consumer.test.ts` 是最小编译级消费 fixture，
+  覆盖草案确认、批量结果、追番详情/动作、capability、nullable 字段和错误 envelope；
+  页面代码应复用这些 generated types，不复制 interface。
 - CI：frontend job 先跑 `npm run api:check`；Python 套件的
   `test_openapi_runtime_consistency.py::test_frontend_generated_client_matches_openapi`
   也执行同一 drift check。

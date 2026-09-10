@@ -66,6 +66,11 @@ from apps.migu_orca_web.api_contract import (
     TrackingSubmitResultDTO,
     TrackingSyncResultDTO,
 )
+from apps.migu_orca_web.endpoint_lifecycle import lifecycle_for
+from shared.management_contract import (
+    MANAGEMENT_ERROR_MESSAGES,
+    management_error_names_for_status,
+)
 
 OPENAPI_VERSION = "3.1.0"
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[3] / "docs" / "api" / "openapi.json"
@@ -269,9 +274,9 @@ _MANAGEMENT_COMMON = {
     "storage_dir": {"type": "string"},
 }
 _MANAGEMENT_ERRORS = {
-    "400": {"data_validation_errors": "请求参数校验失败", "tracking_management_confirmation_required": "管理操作必须显式确认", "invalid_storage_dir": "storage_dir 必须为允许的相对目录"},
+    "400": {"data_validation_errors": "请求参数校验失败", "invalid_storage_dir": "storage_dir 必须为允许的相对目录", **{name: MANAGEMENT_ERROR_MESSAGES[name] for name in management_error_names_for_status(400)}},
     "404": {"tracking_not_found": "未找到该追番记录"},
-    "409": {"tracking_revision_conflict": "追番记录版本已变化，请刷新后重试", "tracking_idempotency_conflict": "同一幂等键已绑定不同的管理操作", "tracking_management_state_conflict": "已有管理操作正在执行，请先恢复"},
+    "409": {**{name: MANAGEMENT_ERROR_MESSAGES[name] for name in management_error_names_for_status(409)}},
 }
 
 
@@ -1699,6 +1704,7 @@ def _operation(entry: dict[str, Any], method: str, path: str) -> dict[str, Any]:
             }
         },
     }
+    op["x-lifecycle"] = lifecycle_for(method, path.replace("{", "<").replace("}", ">"))
     if entry.get("binary"):
         op["responses"] = entry["responses"]
     parameters = list(entry.get("parameters", []))

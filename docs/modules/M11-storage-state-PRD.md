@@ -157,3 +157,8 @@ TrackingRecord、审计、任务或媒体。
 | Q-M11-03 | 用户修改历史需要记录哪些字段？ | 是 | 已确认：`user_action`、`previous_status`、`next_status` 等 |
 | Q-M11-04 | 是否需要 Request 过期和清理策略？ | 否 | 第一版可手动清理；Stage 15 已提供显式删除入口 |
 | Q-M11-05 | 是否需要迁移到 SQLite？ | 否 | 后续扩展 |
+
+## 9.5 Stage 32 B-D 持久化收尾（已完成）
+
+Stage 32 已完成历史 Request、queue、AB result、TrackingRecord/ExternalMapping、operation v1/v2 与 manifest 的本地迁移演练。
+未知 schema 和损坏条目 fail closed、保留原证据；rollback 只复制 storage 并切换应用版本，不删除或重放任何业务数据。

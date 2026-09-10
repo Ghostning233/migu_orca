@@ -239,20 +239,30 @@ API 不接受 `file`，不得删除本地 Request、TrackingRecord、审计、�
 
 正式执行 PRD 为 `docs/MiGuOrca_stage31_ab_write_management_PRD.md`，分支为
 `ralph/stage31-ab-write-management`，US-237～US-246 已完成并归档。四类写动作、operation v2、
-回查恢复、四个管理 API 与生成契约均已交付；Stage 31 不开发前端页面。B-D 的兼容、迁移、安全矩阵
-与最终前端 handoff 保留给 Stage 32。
+回查恢复、四个管理 API 与生成契约均已交付；Stage 31 不开发前端页面。
+
+### Stage 32 已完成：B-D 后端契约固化、兼容迁移与前端交接
+
+Stage 32 执行 PRD 为 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`，分支为
+`ralph/stage32-contract-hardening`，使用为后端预留的 US-247～US-256。它只完成端点生命周期、
+严格 DTO/OpenAPI/生成类型、旧入口兼容与 tracking 权威状态、历史 schema 迁移、capability 降级、
+敏感信息泄漏矩阵、发布回退和版本化前端 handoff。现有旧端点仍有真实前端调用且没有经过完整
+发布周期，因此本阶段不删除旧端点；同时不新增外部管理动作或开发正式追番管理页面。US-247～US-256
+已全部通过，最终门禁和文档已归档；后续 F-F 可在该生成契约 handoff 上单独规划。
 
 ## 10. Gate 1～3 之后的前端体验重构方向
 
 2026-09-07 已完成桌面端前端体验重构的产品方向、混合低保真、组件级交互和视觉方案评审。
 2026-09-08 B-A 已作为 Stage 28 完成并交付，B-B 已作为 Stage 29 完成并交付；2026-09-09 B-C1
-已作为 Stage 30 完成，B-C2 已作为 Stage 31 完成，其余工作包暂不分配正式 Stage 编号：
+已作为 Stage 30 完成，B-C2 已作为 Stage 31 完成；B-D 已作为 Stage 32 完成，其余工作包暂不分配
+正式 Stage 编号：
 
 1. BL-025 后端支撑：B-A 已作为 Stage 28 完成，覆盖 draft revision、可靠保存、单番/批量保存
    确认、36 部上限和 safe-info（见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；B-B 已作为
    Stage 29 完成，覆盖统一追番记录/提交恢复契约（见
    `docs/MiGuOrca_stage29_unified_tracking_PRD.md`）；B-C1 已作为 Stage 30 完成，只处理 Auto Bangumi
-   3.1.18 只读同步与映射；B-C2 已作为 Stage 31 完成，B-D 契约收尾保留给 Stage 32。总体候选 PRD 为
+   3.1.18 只读同步与映射；B-C2 已作为 Stage 31 完成；B-D 已作为 Stage 32 完成（见
+   `docs/MiGuOrca_stage32_contract_hardening_PRD.md`）。总体候选 PRD 为
    `docs/MiGuOrca_frontend_ux_backend_support_PRD.md`。
 2. BL-026 前端分片：四项导航、单番三步、1/12/36 部批量审核、追番方案、追番管理和设置。
    候选 PRD 为 `docs/MiGuOrca_frontend_ux_implementation_PRD.md`。
@@ -267,7 +277,7 @@ Stage 28/Stage 29 的现有功能、OpenAPI 生成客户端和浏览器测试作
 
 ## 11. 未开发事项优先级池
 
-除已完成的 Stage 26～30 和已规划的 Stage 31/Stage 33 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
+除已完成的 Stage 26～32 和已规划的 Stage 33 外，其他事项继续按 `docs/backlog.md` 的触发条件动态排序，允许插入更高优先级修复。
 
 ### 未排期与条件触发事项
 
@@ -318,11 +328,12 @@ Stage 28/Stage 29 的现有功能、OpenAPI 生成客户端和浏览器测试作
 11. Stage 29：统一追番记录与可靠提交恢复（已完成，US-219～US-227；不实现 Auto Bangumi 管理/外部同步，B-C handoff 见上）。
 12. Stage 30：Auto Bangumi 只读能力与外部同步基础（已完成，US-228～US-236；B-C1，只读，不实现外部管理写动作）。
 13. Stage 31：Auto Bangumi 可靠写管理（已完成，US-237～US-246；B-C2，不实现正式页面）。
+14. Stage 32：后端契约固化、兼容迁移与前端交接（已完成，US-247～US-256；B-D，不新增动作或删除旧端点）。
 
 因此，Stage 19 到 Stage 29 的原产品闭环与前后端工程基线已经完成，Stage 26 作为 P0 后端基础
 阶段已交付，Stage 27 作为 P1 前端迁移阶段已交付，Stage 28 作为 BL-025 的 B-A 草案一致性
 阶段已交付，Stage 29 作为 BL-025 的 B-B 统一追番阶段已交付；Stage 30 已完成 B-C1 只读同步，
-Stage 31 已完成 B-C2 可靠写管理；B-D 保留给 Stage 32，BL-026 的 F-A 将在独立前端克隆规划为
-Stage 33。
+Stage 31 已完成 B-C2 可靠写管理；Stage 32 已完成 B-D 契约收尾，BL-026 的 F-A 已在独立前端
+克隆规划为 Stage 33。
 其余前端工作包仍按依赖和真实工作量拆分。
 流式封面代理等未排期方向继续记录在 `docs/optional_features.md`。

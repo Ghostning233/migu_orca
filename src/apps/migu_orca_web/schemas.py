@@ -10,7 +10,7 @@ response DTOs stay in ``api_contract.py`` (which is the Stage 27 contract).
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
 
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_GROUP_ACTIVE,
@@ -576,7 +576,7 @@ class TrackingRevalidatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tracking_id: str
-    expected_revision: int = Field(ge=1)
+    expected_revision: StrictInt = Field(ge=1)
     storage_dir: str | None = None
 
     @field_validator("tracking_id")
@@ -607,8 +607,8 @@ class TrackingSubmitPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tracking_id: str
-    expected_revision: int = Field(ge=1)
-    idempotency_key: str
+    expected_revision: StrictInt = Field(ge=1)
+    idempotency_key: StrictStr
     confirm: bool
     ab_config: RequestAbConfigPayload
     storage_dir: str | None = None
@@ -657,7 +657,7 @@ class TrackingRecoverPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tracking_id: str
-    expected_revision: int = Field(ge=1)
+    expected_revision: StrictInt = Field(ge=1)
     action: str
     confirm: bool = False
     storage_dir: str | None = None
@@ -704,8 +704,8 @@ class _TrackingManagementBasePayload(BaseModel):
 
     tracking_id: str
     target_scope: str
-    expected_revision: int = Field(ge=1)
-    idempotency_key: str
+    expected_revision: StrictInt = Field(ge=1)
+    idempotency_key: StrictStr
     confirm: Literal[True]
     ab_config: AutoBangumiCapabilitiesConfigPayload
     storage_dir: str | None = None

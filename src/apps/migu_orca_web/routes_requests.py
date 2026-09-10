@@ -56,6 +56,7 @@ from apps.migu_orca_web.schemas import (
 from apps.migu_orca_web.serializers import (
     _raise_result_error,
     _sanitize_ab_submit_result,
+    serialize_request_detail,
     serialize_request_safe_info,
 )
 from apps.migu_orca_web.services import (
@@ -209,11 +210,12 @@ class RequestDetailView(GetView):
         config = load_storage_config(_storage_dir(self.request_validator_model.storage_dir))
         request_id = self.request_validator_model.request_id
         request = load_request_snapshot(config, request_id)
-        return {
-            "request": request,
-            "history": _load_history_section(config, request_id),
-            "ab_result": _load_ab_result_section(config, request_id),
-        }
+        return serialize_request_detail(
+            request,
+            history_section=_load_history_section(config, request_id),
+            ab_section=_load_ab_result_section(config, request_id),
+            storage_profile=_storage_profile(config.storage_dir),
+        )
 
 
 @class_route(api_blueprint, "/api/v1/requests", methods=["POST"])

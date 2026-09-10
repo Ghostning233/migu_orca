@@ -97,6 +97,58 @@
 | POST | `/api/v1/tracking/items/<path:tracking_id>/delete-external` | `migu_orca_web_api.TrackingItemDeleteExternalView` | TrackingItemDeleteExternalView |
 | POST | `/api/v1/tracking/items/<path:tracking_id>/refresh` | `migu_orca_web_api.TrackingItemRefreshView` | TrackingItemRefreshView |
 
+## 2.1 端点生命周期（US-247，机器核对基线）
+
+生命周期由 `src/apps/migu_orca_web/endpoint_lifecycle.py` 维护；本表和 OpenAPI 的
+`x-lifecycle` 是它的人工可读与机器可读投影。每行都必须包含 method、OpenAPI path、
+生命周期、替代关系/保留原因和数据权威。`PRIMARY` 是后续前端默认契约，`RECOVERY` 只承担
+明确恢复或本地补救职责，`COMPATIBILITY` 保留旧编排语义且不得降级 TrackingRecord。
+
+| 方法 | OpenAPI path | 生命周期 | 替代关系或保留原因 | 数据权威 |
+| --- | --- | --- | --- | --- |
+| POST | `/api/v1/autobangumi/capabilities` | PRIMARY | 只读能力探测；管理写入时重新探测 | Capability probe |
+| POST | `/api/v1/autobangumi/test-connection` | PRIMARY | 连接诊断，不替代管理写入校验 | Request-scoped probe |
+| POST | `/api/v1/qbittorrent/test-connection` | PRIMARY | 连接诊断 | Request-scoped probe |
+| GET | `/api/v1/preferences` | PRIMARY | 偏好读取 | Preference store |
+| POST | `/api/v1/preferences` | PRIMARY | 偏好保存 | Preference store |
+| GET | `/api/v1/corrections` | PRIMARY | 纠正规则读取 | Correction store |
+| POST | `/api/v1/corrections` | PRIMARY | 纠正规则保存 | Correction store |
+| POST | `/api/v1/mikan/candidates` | PRIMARY | 候选搜索；保存前真实 MiKan 选择 | Request draft |
+| GET | `/api/v1/mikan/posters/<key>` | PRIMARY | 候选海报安全代理 | In-memory poster registry |
+| GET | `/api/v1/requests` | PRIMARY | 订阅方案安全列表 | Request store |
+| POST | `/api/v1/requests` | PRIMARY | 创建订阅草案 | Request draft |
+| GET | `/api/v1/requests/<path:request_id>` | PRIMARY | 订阅方案安全详情 | Request store |
+| GET | `/api/v1/requests/<path:request_id>/safe-info` | PRIMARY | 订阅方案安全详情投影 | Request store |
+| POST | `/api/v1/requests/preview-modify` | PRIMARY | 服务端权威草案修改 | DraftStore |
+| POST | `/api/v1/requests/save-confirm` | PRIMARY | 单番保存确认并 handoff tracking | TrackingRecord |
+| POST | `/api/v1/batches/parse` | PRIMARY | 批量草案解析 | Batch draft |
+| POST | `/api/v1/batches/<batch_id>/save-confirm` | PRIMARY | 批量保存确认并 handoff tracking | TrackingRecord |
+| GET | `/api/v1/tracking/items` | PRIMARY | 统一追番安全列表 | TrackingRecord |
+| GET | `/api/v1/tracking/items/<path:tracking_id>` | PRIMARY | 统一追番安全详情 | TrackingRecord |
+| POST | `/api/v1/tracking/sync` | PRIMARY | 只读外部同步安全投影 | TrackingRecord |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/revalidate` | PRIMARY | 提交前本地复核 | TrackingRecord |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/submit` | PRIMARY | 可靠外部提交 | TrackingRecord + operation |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/retry` | PRIMARY | 明确失败的可靠重试 | TrackingRecord + operation |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/modify` | PRIMARY | 外部方案修改 | TrackingRecord + operation |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/set-enabled` | PRIMARY | 外部方案启停 | TrackingRecord + operation |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/delete-external` | PRIMARY | 外部删除并保留本地数据 | TrackingRecord + operation |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/refresh` | PRIMARY | 关联 RSS 刷新 | TrackingRecord + operation |
+| POST | `/api/v1/tracking/items/<path:tracking_id>/recover` | RECOVERY | 未知结果保守恢复；不得盲目重放 | TrackingRecord + operation |
+| POST | `/api/v1/requests/<path:request_id>/accept` | RECOVERY | 保存后确认失败的 Request 恢复入口 | Request + TrackingRecord |
+| POST | `/api/v1/requests/<path:request_id>/cancel` | RECOVERY | 待确认 Request 的显式取消 | Request store |
+| POST | `/api/v1/requests/<path:request_id>/modify` | RECOVERY | 已保存 Request 的兼容修改入口 | Request store |
+| POST | `/api/v1/requests/<path:request_id>/delete` | RECOVERY | 本地 Request 显式删除入口 | Request store |
+| POST | `/api/v1/requests/<path:request_id>/submit-ab` | COMPATIBILITY | 旧单番提交；改由统一 TrackingRecord/operation 收敛 | TrackingRecord + operation |
+| POST | `/api/v1/requests/preview-save` | COMPATIBILITY | 旧预览保存；由 save-confirm 替代，保持可用 | DraftStore + TrackingRecord |
+| POST | `/api/v1/batches/<batch_id>/accept` | COMPATIBILITY | 旧批量接受；由批量 save-confirm 替代，保持可用 | TrackingRecord + queue projection |
+| GET | `/api/v1/batches/<batch_id>/queue` | COMPATIBILITY | 旧队列读取；保留为兼容投影 | TrackingRecord; queue projection |
+| POST | `/api/v1/batches/<batch_id>/submit` | COMPATIBILITY | 旧批量提交；收敛到统一提交服务 | TrackingRecord + operation |
+| POST | `/api/v1/batches/<batch_id>/retry` | COMPATIBILITY | 旧批量重试；收敛到统一恢复保护 | TrackingRecord + operation |
+| POST | `/api/v1/batches/<batch_id>/recover` | COMPATIBILITY | 旧批量恢复；收敛到统一恢复保护 | TrackingRecord + operation |
+
+所有旧入口继续可调用，不删除、不重定向、不隐藏请求/响应语义。外部提交流程以
+`TrackingRecord` 为唯一权威；旧 queue 与 AB result 只作为兼容投影或迁移证据。
+
 页面路由（非 JSON API，供对照）：`GET /` → 302 `/app/workbench`；`GET /index` →
 302 `/app/workbench`（保留 `request_id`/`batch_id` query）；`GET /Settings` →
 302 `/app/settings`；`GET /settings` → 302 `/app/settings`（保留 `request_id` query）；

@@ -219,10 +219,108 @@ class AbResultSectionDTO(_SnapshotBase):
     error: dict[str, Any] | None = None
 
 
+class _RequestDetailInputDTO(_StrictBase):
+    raw_title: str | None = None
+
+
+class _RequestDetailMatchedBangumiDTO(_StrictBase):
+    title: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    match_score: float | None = None
+
+
+class _RequestDetailRssSourceDTO(_StrictBase):
+    subtitle_group: str | None = None
+    source_type: str | None = None
+    total_seed_count: int | None = None
+    seed_names: list[str] = Field(default_factory=list)
+    valid_seed_count: int | None = None
+    invalid_seed_count: int | None = None
+    valid_seed_names: list[str] = Field(default_factory=list)
+    excluded_seed_names: list[dict[str, str]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
+class _RequestDetailSourceInfoDTO(_StrictBase):
+    matched_bangumi: _RequestDetailMatchedBangumiDTO | None = None
+    rss_sources: list[_RequestDetailRssSourceDTO] = Field(default_factory=list)
+
+
+class _RequestDetailFilterRuleDTO(_StrictBase):
+    must_contain: str | None = None
+    must_not_contain: str | None = None
+    use_regex: bool | None = None
+    case_sensitive: bool | None = None
+
+
+class _RequestDetailConfirmableConfigDTO(_StrictBase):
+    selected_subtitle_group: str | None = None
+    # The UI only needs to know whether a source was selected; the URL itself
+    # is never part of the detail response.
+    selected_rss_url: Literal["SELECTED"] | None = None
+    filter_rule: _RequestDetailFilterRuleDTO | None = None
+    effective_seed_names: list[str] = Field(default_factory=list)
+    expected_folder_name: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class _RequestDetailUserActionDTO(_StrictBase):
+    action: str | None = None
+    reason: str | None = None
+    decided_at: str | None = None
+
+
+class _RequestDetailSnapshotDTO(_StrictBase):
+    """Strict, sanitized Request projection used only by GET detail."""
+
+    request_id: str | None = None
+    status: str | None = None
+    input: _RequestDetailInputDTO | None = None
+    source_info: _RequestDetailSourceInfoDTO | None = None
+    confirmable_config: _RequestDetailConfirmableConfigDTO | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    user_action: _RequestDetailUserActionDTO | None = None
+
+
+class _RequestDetailHistoryEventDTO(_StrictBase):
+    request_id: str | None = None
+    previous_status: str | None = None
+    next_status: str | None = None
+    action: str | None = None
+    timestamp: str | None = None
+
+
+class _RequestDetailHistorySectionDTO(_StrictBase):
+    available: bool = True
+    events: list[_RequestDetailHistoryEventDTO] = Field(default_factory=list)
+    error: dict[str, Any] | None = None
+
+
+class _RequestDetailAbSubmitResultDTO(_StrictBase):
+    success: bool | None = None
+    # External IDs and upstream response/config bodies are deliberately absent.
+    ab_subscription_id: None = None
+    fallback_config: None = None
+    error: dict[str, Any] | None = None
+
+
+class _RequestDetailAbRecordDTO(_StrictBase):
+    request_id: str | None = None
+    recorded_at: str | None = None
+    ab_submit_result: _RequestDetailAbSubmitResultDTO | None = None
+
+
+class _RequestDetailAbResultSectionDTO(_StrictBase):
+    available: bool = True
+    record: _RequestDetailAbRecordDTO | None = None
+    error: dict[str, Any] | None = None
+
+
 class RequestDetailResultDTO(_StrictBase):
-    request: RequestSnapshotDTO
-    history: HistorySectionDTO
-    ab_result: AbResultSectionDTO
+    request: _RequestDetailSnapshotDTO
+    history: _RequestDetailHistorySectionDTO
+    ab_result: _RequestDetailAbResultSectionDTO
 
 
 class RequestCreateResultDTO(_StrictBase):
@@ -741,9 +839,12 @@ class TrackingAvailableActionDTO(_StrictBase):
     never a disabled fake action.
     """
 
-    code: str
+    code: Literal[
+        "REVALIDATE", "SUBMIT", "RETRY", "RECOVER_AUTO", "MARK_SUCCEEDED",
+        "MARK_FAILED", "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
+    ]
     label: str
-    style: str
+    style: Literal["PRIMARY", "SECONDARY", "DANGER"]
     requires_confirmation: bool
 
 
@@ -751,10 +852,28 @@ class TrackingAuditEventDTO(_StrictBase):
     """One safe embedded audit event (Stage 29 PRD §9)."""
 
     event_id: str
-    action: str
+    action: Literal[
+        "TRACKING_CREATED", "TRACKING_BACKFILLED", "PLAN_CHANGE_DETECTED",
+        "REVALIDATION_PASSED", "REVALIDATION_FAILED", "SUBMIT_STARTED",
+        "SUBMIT_SUCCEEDED", "SUBMIT_FAILED", "SUBMIT_OUTCOME_UNKNOWN",
+        "MANAGEMENT_STARTED", "MANAGEMENT_SUCCEEDED", "MANAGEMENT_FAILED",
+        "MANAGEMENT_UNKNOWN", "RESULT_PERSIST_FAILED", "RECOVERY_AUTO_SUCCEEDED",
+        "RECOVERY_AUTO_FAILED", "RECOVERY_NEEDS_MANUAL",
+        "RECOVERY_MANUAL_SUCCEEDED", "RECOVERY_MANUAL_FAILED",
+        "RECOVERY_EXTERNAL_VERIFIED", "COMPAT_QUEUE_UPDATED",
+        "COMPAT_QUEUE_UPDATE_FAILED",
+    ]
     actor: str
-    from_status: str | None = None
-    to_status: str | None = None
+    from_status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ] | None = None
+    to_status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ] | None = None
     tracking_revision: int
     operation_id: str | None = None
     reason_code: str | None = None
@@ -768,10 +887,16 @@ class TrackingRevalidationIssueDTO(_StrictBase):
     ``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.
     """
 
-    code: str
+    code: Literal[
+        "REQUEST_MISSING", "REQUEST_NOT_ACCEPTED", "REQUEST_CHANGED",
+        "TITLE_MISSING", "SEASON_REVIEW_REQUIRED", "MIKAN_SELECTION_MISSING",
+        "SUBTITLE_GROUP_MISSING", "NO_VALID_RESOURCES",
+        "EXTERNAL_ALREADY_LINKED", "OPERATION_IN_PROGRESS",
+        "TRACKING_STATE_INVALID",
+    ]
     field: str | None = None
     message: str
-    recovery_action: str
+    recovery_action: Literal["", "SUBMIT"]
 
 
 class TrackingOperationSummaryDTO(_StrictBase):
@@ -783,8 +908,11 @@ class TrackingOperationSummaryDTO(_StrictBase):
     """
 
     operation_id: str
-    operation: str
-    state: str
+    operation: Literal["SUBMIT", "MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"]
+    state: Literal[
+        "PREPARED", "IN_PROGRESS", "SUCCEEDED", "FAILED",
+        "OUTCOME_UNKNOWN", "RECOVERY_REQUIRED",
+    ]
     attempt: int
     external_result_id: str | None = None
     error_type: str | None = None
@@ -817,9 +945,13 @@ class TrackingItemDTO(_StrictBase):
     season: int | None = None
     subtitle_group: str | None = None
     poster_path: str | None = None
-    status: str
+    status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ]
     status_label: str
-    status_group: str
+    status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
     available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
     valid_resource_count: int = 0
     updated_episode: None = None
@@ -864,9 +996,13 @@ class TrackingDetailResultDTO(_StrictBase):
     season: int | None = None
     subtitle_group: str | None = None
     poster_path: str | None = None
-    status: str
+    status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ]
     status_label: str
-    status_group: str
+    status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
     available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
     valid_resource_count: int = 0
     updated_episode: None = None
@@ -908,7 +1044,11 @@ class TrackingRevalidateResultDTO(_StrictBase):
     checked_revision: int
     next_revision: int
     checked_at: str
-    next_status: str
+    next_status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ]
     issues: list[TrackingRevalidationIssueDTO] = Field(default_factory=list)
     tracking: TrackingItemDTO
 
@@ -928,7 +1068,10 @@ class TrackingSubmitResultDTO(_StrictBase):
     """
 
     tracking_id: str
-    outcome: str
+    outcome: Literal[
+        "ACTIVE", "SUBMIT_FAILED", "VERIFYING_EXTERNAL",
+        "RECOVERY_REQUIRED", "NEEDS_RECONFIRM",
+    ]
     checked_revision: int
     next_revision: int
     checked_at: str
@@ -954,8 +1097,8 @@ class TrackingRecoverResultDTO(_StrictBase):
     """
 
     tracking_id: str
-    action: str
-    outcome: str
+    action: Literal["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"]
+    outcome: Literal["ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED"]
     checked_revision: int
     next_revision: int
     checked_at: str
@@ -968,7 +1111,10 @@ class TrackingManagementResultDTO(_StrictBase):
     """Safe result shared by the four Stage 31 management write routes."""
 
     action: Literal["MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"]
-    management_status: str
+    management_status: Literal[
+        "PREPARED", "IN_PROGRESS", "SUCCEEDED", "FAILED",
+        "OUTCOME_UNKNOWN", "RECOVERY_REQUIRED",
+    ]
     needs_manual: bool
     safe_message: str
     operation_id: str | None = None

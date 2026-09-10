@@ -311,6 +311,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "只读能力探测；管理写入时重新探测",
+          "authority": "Capability probe"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -715,6 +720,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "连接诊断，不替代管理写入校验",
+          "authority": "Request-scoped probe"
         },
         "requestBody": {
           "required": true,
@@ -1766,6 +1776,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "批量草案解析",
+          "authority": "Batch draft"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -1916,6 +1931,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "纠正规则读取",
+          "authority": "Correction store"
+        },
         "parameters": [
           {
             "name": "storage_dir",
@@ -2033,6 +2053,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "纠正规则保存",
+          "authority": "Correction store"
         },
         "requestBody": {
           "required": true,
@@ -2468,6 +2493,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "候选搜索；保存前真实 MiKan 选择",
+          "authority": "Request draft"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -2780,6 +2810,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "偏好读取",
+          "authority": "Preference store"
+        },
         "parameters": [
           {
             "name": "storage_dir",
@@ -3009,6 +3044,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "偏好保存",
+          "authority": "Preference store"
         },
         "requestBody": {
           "required": true,
@@ -3314,6 +3354,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "连接诊断",
+          "authority": "Request-scoped probe"
         },
         "requestBody": {
           "required": true,
@@ -3623,6 +3668,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "订阅方案安全列表",
+          "authority": "Request store"
         },
         "parameters": [
           {
@@ -5004,6 +5054,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "创建订阅草案",
+          "authority": "Request draft"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -5845,6 +5900,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "服务端权威草案修改",
+          "authority": "DraftStore"
         },
         "requestBody": {
           "required": true,
@@ -7124,6 +7184,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧预览保存；由 save-confirm 替代，保持可用",
+          "authority": "DraftStore + TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -7982,6 +8047,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "单番保存确认并 handoff tracking",
+          "authority": "TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -8120,6 +8190,20 @@
                                 "title": "Poster Path"
                               },
                               "status": {
+                                "enum": [
+                                  "PENDING_SUBMIT",
+                                  "REVALIDATING",
+                                  "NEEDS_RECONFIRM",
+                                  "SUBMITTING",
+                                  "VERIFYING_EXTERNAL",
+                                  "ACTIVE",
+                                  "SUBMIT_FAILED",
+                                  "RECOVERY_REQUIRED",
+                                  "UNKNOWN",
+                                  "DISABLED",
+                                  "EXTERNAL_DELETED",
+                                  "EXTERNAL_ONLY"
+                                ],
                                 "title": "Status",
                                 "type": "string"
                               },
@@ -8128,6 +8212,13 @@
                                 "type": "string"
                               },
                               "status_group": {
+                                "enum": [
+                                  "PENDING",
+                                  "PROCESSING",
+                                  "ACTIVE",
+                                  "ATTENTION",
+                                  "INACTIVE"
+                                ],
                                 "title": "Status Group",
                                 "type": "string"
                               },
@@ -8137,6 +8228,18 @@
                                   "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                   "properties": {
                                     "code": {
+                                      "enum": [
+                                        "REVALIDATE",
+                                        "SUBMIT",
+                                        "RETRY",
+                                        "RECOVER_AUTO",
+                                        "MARK_SUCCEEDED",
+                                        "MARK_FAILED",
+                                        "MODIFY",
+                                        "SET_ENABLED",
+                                        "REFRESH_RSS",
+                                        "DELETE_EXTERNAL"
+                                      ],
                                       "title": "Code",
                                       "type": "string"
                                     },
@@ -8145,6 +8248,11 @@
                                       "type": "string"
                                     },
                                     "style": {
+                                      "enum": [
+                                        "PRIMARY",
+                                        "SECONDARY",
+                                        "DANGER"
+                                      ],
                                       "title": "Style",
                                       "type": "string"
                                     },
@@ -8432,6 +8540,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "统一追番安全列表",
+          "authority": "TrackingRecord"
         },
         "parameters": [
           {
@@ -8844,6 +8957,20 @@
                                 "title": "Poster Path"
                               },
                               "status": {
+                                "enum": [
+                                  "PENDING_SUBMIT",
+                                  "REVALIDATING",
+                                  "NEEDS_RECONFIRM",
+                                  "SUBMITTING",
+                                  "VERIFYING_EXTERNAL",
+                                  "ACTIVE",
+                                  "SUBMIT_FAILED",
+                                  "RECOVERY_REQUIRED",
+                                  "UNKNOWN",
+                                  "DISABLED",
+                                  "EXTERNAL_DELETED",
+                                  "EXTERNAL_ONLY"
+                                ],
                                 "title": "Status",
                                 "type": "string"
                               },
@@ -8852,6 +8979,13 @@
                                 "type": "string"
                               },
                               "status_group": {
+                                "enum": [
+                                  "PENDING",
+                                  "PROCESSING",
+                                  "ACTIVE",
+                                  "ATTENTION",
+                                  "INACTIVE"
+                                ],
                                 "title": "Status Group",
                                 "type": "string"
                               },
@@ -8861,6 +8995,18 @@
                                   "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                   "properties": {
                                     "code": {
+                                      "enum": [
+                                        "REVALIDATE",
+                                        "SUBMIT",
+                                        "RETRY",
+                                        "RECOVER_AUTO",
+                                        "MARK_SUCCEEDED",
+                                        "MARK_FAILED",
+                                        "MODIFY",
+                                        "SET_ENABLED",
+                                        "REFRESH_RSS",
+                                        "DELETE_EXTERNAL"
+                                      ],
                                       "title": "Code",
                                       "type": "string"
                                     },
@@ -8869,6 +9015,11 @@
                                       "type": "string"
                                     },
                                     "style": {
+                                      "enum": [
+                                        "PRIMARY",
+                                        "SECONDARY",
+                                        "DANGER"
+                                      ],
                                       "title": "Style",
                                       "type": "string"
                                     },
@@ -9134,6 +9285,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "只读外部同步安全投影",
+          "authority": "TrackingRecord"
         },
         "requestBody": {
           "required": true,
@@ -9653,6 +9809,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧批量接受；由批量 save-confirm 替代，保持可用",
+          "authority": "TrackingRecord + queue projection"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -10035,6 +10196,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧队列读取；保留为兼容投影",
+          "authority": "TrackingRecord; queue projection"
         },
         "parameters": [
           {
@@ -10563,6 +10729,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧批量恢复；收敛到统一恢复保护",
+          "authority": "TrackingRecord + operation"
         },
         "requestBody": {
           "required": true,
@@ -11276,6 +11447,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧批量重试；收敛到统一恢复保护",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -11565,6 +11741,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "批量保存确认并 handoff tracking",
+          "authority": "TrackingRecord"
         },
         "requestBody": {
           "required": true,
@@ -12255,6 +12436,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧批量提交；收敛到统一提交服务",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -12582,6 +12768,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "候选海报安全代理",
+          "authority": "In-memory poster registry"
+        },
         "parameters": [
           {
             "name": "key",
@@ -12620,8 +12811,8 @@
                       "additionalProperties": false,
                       "properties": {
                         "request": {
-                          "additionalProperties": true,
-                          "description": "Typed view of the saved Request snapshot the detail panel renders.\n\nOnly the display fields are typed; the engine may add fields without\nbreaking the boundary (``extra=\"allow\"``). ``mikan_url``/``rss_url``/\n``poster_url`` are declared for schema accuracy but the frontend must\nnever render them (URLs are redacted at display time).",
+                          "additionalProperties": false,
+                          "description": "Strict, sanitized Request projection used only by GET detail.",
                           "properties": {
                             "request_id": {
                               "anyOf": [
@@ -12650,7 +12841,7 @@
                             "input": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "raw_title": {
                                       "anyOf": [
@@ -12665,7 +12856,7 @@
                                       "title": "Raw Title"
                                     }
                                   },
-                                  "title": "RequestInputDTO",
+                                  "title": "_RequestDetailInputDTO",
                                   "type": "object"
                                 },
                                 {
@@ -12677,12 +12868,12 @@
                             "source_info": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "matched_bangumi": {
                                       "anyOf": [
                                         {
-                                          "additionalProperties": true,
+                                          "additionalProperties": false,
                                           "properties": {
                                             "title": {
                                               "anyOf": [
@@ -12697,24 +12888,11 @@
                                               "title": "Title"
                                             },
                                             "aliases": {
-                                              "default": [],
                                               "items": {
                                                 "type": "string"
                                               },
                                               "title": "Aliases",
                                               "type": "array"
-                                            },
-                                            "mikan_url": {
-                                              "anyOf": [
-                                                {
-                                                  "type": "string"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
-                                              "default": null,
-                                              "title": "Mikan Url"
                                             },
                                             "match_score": {
                                               "anyOf": [
@@ -12727,21 +12905,9 @@
                                               ],
                                               "default": null,
                                               "title": "Match Score"
-                                            },
-                                            "poster_url": {
-                                              "anyOf": [
-                                                {
-                                                  "type": "string"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
-                                              "default": null,
-                                              "title": "Poster Url"
                                             }
                                           },
-                                          "title": "MatchedBangumiDTO",
+                                          "title": "_RequestDetailMatchedBangumiDTO",
                                           "type": "object"
                                         },
                                         {
@@ -12751,9 +12917,8 @@
                                       "default": null
                                     },
                                     "rss_sources": {
-                                      "default": [],
                                       "items": {
-                                        "additionalProperties": true,
+                                        "additionalProperties": false,
                                         "properties": {
                                           "subtitle_group": {
                                             "anyOf": [
@@ -12766,18 +12931,6 @@
                                             ],
                                             "default": null,
                                             "title": "Subtitle Group"
-                                          },
-                                          "rss_url": {
-                                            "anyOf": [
-                                              {
-                                                "type": "string"
-                                              },
-                                              {
-                                                "type": "null"
-                                              }
-                                            ],
-                                            "default": null,
-                                            "title": "Rss Url"
                                           },
                                           "source_type": {
                                             "anyOf": [
@@ -12804,7 +12957,6 @@
                                             "title": "Total Seed Count"
                                           },
                                           "seed_names": {
-                                            "default": [],
                                             "items": {
                                               "type": "string"
                                             },
@@ -12836,7 +12988,6 @@
                                             "title": "Invalid Seed Count"
                                           },
                                           "valid_seed_names": {
-                                            "default": [],
                                             "items": {
                                               "type": "string"
                                             },
@@ -12844,16 +12995,16 @@
                                             "type": "array"
                                           },
                                           "excluded_seed_names": {
-                                            "default": [],
                                             "items": {
-                                              "additionalProperties": true,
+                                              "additionalProperties": {
+                                                "type": "string"
+                                              },
                                               "type": "object"
                                             },
                                             "title": "Excluded Seed Names",
                                             "type": "array"
                                           },
                                           "warnings": {
-                                            "default": [],
                                             "items": {
                                               "type": "string"
                                             },
@@ -12861,14 +13012,14 @@
                                             "type": "array"
                                           }
                                         },
-                                        "title": "RssSourceDTO",
+                                        "title": "_RequestDetailRssSourceDTO",
                                         "type": "object"
                                       },
                                       "title": "Rss Sources",
                                       "type": "array"
                                     }
                                   },
-                                  "title": "SourceInfoDTO",
+                                  "title": "_RequestDetailSourceInfoDTO",
                                   "type": "object"
                                 },
                                 {
@@ -12880,7 +13031,7 @@
                             "confirmable_config": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "selected_subtitle_group": {
                                       "anyOf": [
@@ -12897,6 +13048,7 @@
                                     "selected_rss_url": {
                                       "anyOf": [
                                         {
+                                          "const": "SELECTED",
                                           "type": "string"
                                         },
                                         {
@@ -12909,7 +13061,7 @@
                                     "filter_rule": {
                                       "anyOf": [
                                         {
-                                          "additionalProperties": true,
+                                          "additionalProperties": false,
                                           "properties": {
                                             "must_contain": {
                                               "anyOf": [
@@ -12960,7 +13112,7 @@
                                               "title": "Case Sensitive"
                                             }
                                           },
-                                          "title": "FilterRuleDTO",
+                                          "title": "_RequestDetailFilterRuleDTO",
                                           "type": "object"
                                         },
                                         {
@@ -12970,7 +13122,6 @@
                                       "default": null
                                     },
                                     "effective_seed_names": {
-                                      "default": [],
                                       "items": {
                                         "type": "string"
                                       },
@@ -12990,7 +13141,6 @@
                                       "title": "Expected Folder Name"
                                     },
                                     "warnings": {
-                                      "default": [],
                                       "items": {
                                         "type": "string"
                                       },
@@ -12998,7 +13148,7 @@
                                       "type": "array"
                                     }
                                   },
-                                  "title": "ConfirmableConfigDTO",
+                                  "title": "_RequestDetailConfirmableConfigDTO",
                                   "type": "object"
                                 },
                                 {
@@ -13006,19 +13156,6 @@
                                 }
                               ],
                               "default": null
-                            },
-                            "ab_submit_result": {
-                              "anyOf": [
-                                {
-                                  "additionalProperties": true,
-                                  "type": "object"
-                                },
-                                {
-                                  "type": "null"
-                                }
-                              ],
-                              "default": null,
-                              "title": "Ab Submit Result"
                             },
                             "created_at": {
                               "anyOf": [
@@ -13047,7 +13184,7 @@
                             "user_action": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "action": {
                                       "anyOf": [
@@ -13086,7 +13223,7 @@
                                       "title": "Decided At"
                                     }
                                   },
-                                  "title": "UserActionDTO",
+                                  "title": "_RequestDetailUserActionDTO",
                                   "type": "object"
                                 },
                                 {
@@ -13096,11 +13233,11 @@
                               "default": null
                             }
                           },
-                          "title": "RequestSnapshotDTO",
+                          "title": "_RequestDetailSnapshotDTO",
                           "type": "object"
                         },
                         "history": {
-                          "additionalProperties": true,
+                          "additionalProperties": false,
                           "properties": {
                             "available": {
                               "default": true,
@@ -13108,9 +13245,8 @@
                               "type": "boolean"
                             },
                             "events": {
-                              "default": [],
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
                                 "properties": {
                                   "request_id": {
                                     "anyOf": [
@@ -13171,22 +13307,9 @@
                                     ],
                                     "default": null,
                                     "title": "Timestamp"
-                                  },
-                                  "details": {
-                                    "anyOf": [
-                                      {
-                                        "additionalProperties": true,
-                                        "type": "object"
-                                      },
-                                      {
-                                        "type": "null"
-                                      }
-                                    ],
-                                    "default": null,
-                                    "title": "Details"
                                   }
                                 },
-                                "title": "HistoryEventDTO",
+                                "title": "_RequestDetailHistoryEventDTO",
                                 "type": "object"
                               },
                               "title": "Events",
@@ -13206,11 +13329,11 @@
                               "title": "Error"
                             }
                           },
-                          "title": "HistorySectionDTO",
+                          "title": "_RequestDetailHistorySectionDTO",
                           "type": "object"
                         },
                         "ab_result": {
-                          "additionalProperties": true,
+                          "additionalProperties": false,
                           "properties": {
                             "available": {
                               "default": true,
@@ -13220,7 +13343,7 @@
                             "record": {
                               "anyOf": [
                                 {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
                                   "properties": {
                                     "request_id": {
                                       "anyOf": [
@@ -13249,8 +13372,7 @@
                                     "ab_submit_result": {
                                       "anyOf": [
                                         {
-                                          "additionalProperties": true,
-                                          "description": "Lenient copy of the sanitized AB submit result for the Audit section.\n\nThe strict ``AbSubmitResultDTO`` (extra=\"forbid\") whitelists the\nsubmit-ab *response*; records read back from storage may carry extra\nfields, so the detail panel uses this lenient variant.",
+                                          "additionalProperties": false,
                                           "properties": {
                                             "success": {
                                               "anyOf": [
@@ -13265,42 +13387,14 @@
                                               "title": "Success"
                                             },
                                             "ab_subscription_id": {
-                                              "anyOf": [
-                                                {
-                                                  "type": "string"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
                                               "default": null,
-                                              "title": "Ab Subscription Id"
-                                            },
-                                            "ab_response": {
-                                              "anyOf": [
-                                                {
-                                                  "additionalProperties": true,
-                                                  "type": "object"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
-                                              "default": null,
-                                              "title": "Ab Response"
+                                              "title": "Ab Subscription Id",
+                                              "type": "null"
                                             },
                                             "fallback_config": {
-                                              "anyOf": [
-                                                {
-                                                  "additionalProperties": true,
-                                                  "type": "object"
-                                                },
-                                                {
-                                                  "type": "null"
-                                                }
-                                              ],
                                               "default": null,
-                                              "title": "Fallback Config"
+                                              "title": "Fallback Config",
+                                              "type": "null"
                                             },
                                             "error": {
                                               "anyOf": [
@@ -13316,7 +13410,7 @@
                                               "title": "Error"
                                             }
                                           },
-                                          "title": "AbSubmitResultRecordDTO",
+                                          "title": "_RequestDetailAbSubmitResultDTO",
                                           "type": "object"
                                         },
                                         {
@@ -13326,7 +13420,7 @@
                                       "default": null
                                     }
                                   },
-                                  "title": "AbResultRecordDTO",
+                                  "title": "_RequestDetailAbRecordDTO",
                                   "type": "object"
                                 },
                                 {
@@ -13349,7 +13443,7 @@
                               "title": "Error"
                             }
                           },
-                          "title": "AbResultSectionDTO",
+                          "title": "_RequestDetailAbResultSectionDTO",
                           "type": "object"
                         }
                       },
@@ -13372,14 +13466,21 @@
                       "input": null,
                       "source_info": null,
                       "confirmable_config": null,
-                      "ab_submit_result": null,
                       "created_at": null,
                       "updated_at": null,
                       "user_action": null
                     },
                     "history": {
                       "available": true,
-                      "events": [],
+                      "events": [
+                        {
+                          "request_id": null,
+                          "previous_status": null,
+                          "next_status": null,
+                          "action": null,
+                          "timestamp": null
+                        }
+                      ],
                       "error": null
                     },
                     "ab_result": {
@@ -13554,6 +13655,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "订阅方案安全详情",
+          "authority": "Request store"
         },
         "parameters": [
           {
@@ -14893,6 +14999,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "保存后确认失败的 Request 恢复入口",
+          "authority": "Request + TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -16229,6 +16340,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "待确认 Request 的显式取消",
+          "authority": "Request store"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -16432,6 +16548,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "本地 Request 显式删除入口",
+          "authority": "Request store"
         },
         "requestBody": {
           "required": true,
@@ -17715,6 +17836,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "已保存 Request 的兼容修改入口",
+          "authority": "Request store"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -18443,6 +18569,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "订阅方案安全详情投影",
+          "authority": "Request store"
         },
         "parameters": [
           {
@@ -20024,6 +20155,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "COMPATIBILITY",
+          "relation": "旧单番提交；改由统一 TrackingRecord/operation 收敛",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -20173,6 +20309,20 @@
                           "title": "Poster Path"
                         },
                         "status": {
+                          "enum": [
+                            "PENDING_SUBMIT",
+                            "REVALIDATING",
+                            "NEEDS_RECONFIRM",
+                            "SUBMITTING",
+                            "VERIFYING_EXTERNAL",
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "RECOVERY_REQUIRED",
+                            "UNKNOWN",
+                            "DISABLED",
+                            "EXTERNAL_DELETED",
+                            "EXTERNAL_ONLY"
+                          ],
                           "title": "Status",
                           "type": "string"
                         },
@@ -20181,6 +20331,13 @@
                           "type": "string"
                         },
                         "status_group": {
+                          "enum": [
+                            "PENDING",
+                            "PROCESSING",
+                            "ACTIVE",
+                            "ATTENTION",
+                            "INACTIVE"
+                          ],
                           "title": "Status Group",
                           "type": "string"
                         },
@@ -20190,6 +20347,18 @@
                             "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REVALIDATE",
+                                  "SUBMIT",
+                                  "RETRY",
+                                  "RECOVER_AUTO",
+                                  "MARK_SUCCEEDED",
+                                  "MARK_FAILED",
+                                  "MODIFY",
+                                  "SET_ENABLED",
+                                  "REFRESH_RSS",
+                                  "DELETE_EXTERNAL"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -20198,6 +20367,11 @@
                                 "type": "string"
                               },
                               "style": {
+                                "enum": [
+                                  "PRIMARY",
+                                  "SECONDARY",
+                                  "DANGER"
+                                ],
                                 "title": "Style",
                                 "type": "string"
                               },
@@ -20754,10 +20928,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -20833,6 +21022,19 @@
                             "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REQUEST_MISSING",
+                                  "REQUEST_NOT_ACCEPTED",
+                                  "REQUEST_CHANGED",
+                                  "TITLE_MISSING",
+                                  "SEASON_REVIEW_REQUIRED",
+                                  "MIKAN_SELECTION_MISSING",
+                                  "SUBTITLE_GROUP_MISSING",
+                                  "NO_VALID_RESOURCES",
+                                  "EXTERNAL_ALREADY_LINKED",
+                                  "OPERATION_IN_PROGRESS",
+                                  "TRACKING_STATE_INVALID"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -20853,6 +21055,10 @@
                                 "type": "string"
                               },
                               "recovery_action": {
+                                "enum": [
+                                  "",
+                                  "SUBMIT"
+                                ],
                                 "title": "Recovery Action",
                                 "type": "string"
                               }
@@ -20933,6 +21139,30 @@
                                 "type": "string"
                               },
                               "action": {
+                                "enum": [
+                                  "TRACKING_CREATED",
+                                  "TRACKING_BACKFILLED",
+                                  "PLAN_CHANGE_DETECTED",
+                                  "REVALIDATION_PASSED",
+                                  "REVALIDATION_FAILED",
+                                  "SUBMIT_STARTED",
+                                  "SUBMIT_SUCCEEDED",
+                                  "SUBMIT_FAILED",
+                                  "SUBMIT_OUTCOME_UNKNOWN",
+                                  "MANAGEMENT_STARTED",
+                                  "MANAGEMENT_SUCCEEDED",
+                                  "MANAGEMENT_FAILED",
+                                  "MANAGEMENT_UNKNOWN",
+                                  "RESULT_PERSIST_FAILED",
+                                  "RECOVERY_AUTO_SUCCEEDED",
+                                  "RECOVERY_AUTO_FAILED",
+                                  "RECOVERY_NEEDS_MANUAL",
+                                  "RECOVERY_MANUAL_SUCCEEDED",
+                                  "RECOVERY_MANUAL_FAILED",
+                                  "RECOVERY_EXTERNAL_VERIFIED",
+                                  "COMPAT_QUEUE_UPDATED",
+                                  "COMPAT_QUEUE_UPDATE_FAILED"
+                                ],
                                 "title": "Action",
                                 "type": "string"
                               },
@@ -20943,6 +21173,20 @@
                               "from_status": {
                                 "anyOf": [
                                   {
+                                    "enum": [
+                                      "PENDING_SUBMIT",
+                                      "REVALIDATING",
+                                      "NEEDS_RECONFIRM",
+                                      "SUBMITTING",
+                                      "VERIFYING_EXTERNAL",
+                                      "ACTIVE",
+                                      "SUBMIT_FAILED",
+                                      "RECOVERY_REQUIRED",
+                                      "UNKNOWN",
+                                      "DISABLED",
+                                      "EXTERNAL_DELETED",
+                                      "EXTERNAL_ONLY"
+                                    ],
                                     "type": "string"
                                   },
                                   {
@@ -20955,6 +21199,20 @@
                               "to_status": {
                                 "anyOf": [
                                   {
+                                    "enum": [
+                                      "PENDING_SUBMIT",
+                                      "REVALIDATING",
+                                      "NEEDS_RECONFIRM",
+                                      "SUBMITTING",
+                                      "VERIFYING_EXTERNAL",
+                                      "ACTIVE",
+                                      "SUBMIT_FAILED",
+                                      "RECOVERY_REQUIRED",
+                                      "UNKNOWN",
+                                      "DISABLED",
+                                      "EXTERNAL_DELETED",
+                                      "EXTERNAL_ONLY"
+                                    ],
                                     "type": "string"
                                   },
                                   {
@@ -21268,6 +21526,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "统一追番安全详情",
+          "authority": "TrackingRecord"
+        },
         "parameters": [
           {
             "name": "tracking_id",
@@ -21326,6 +21589,14 @@
                           "type": "string"
                         },
                         "management_status": {
+                          "enum": [
+                            "PREPARED",
+                            "IN_PROGRESS",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "OUTCOME_UNKNOWN",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Management Status",
                           "type": "string"
                         },
@@ -21418,6 +21689,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -21426,6 +21711,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -21435,6 +21727,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -21443,6 +21747,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -21529,10 +21838,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -21655,7 +21979,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -21763,7 +22087,7 @@
             }
           },
           "409": {
-            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
+            "description": "tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
             "content": {
               "application/json": {
                 "schema": {
@@ -21807,8 +22131,8 @@
                 },
                 "example": {
                   "ok": false,
-                  "error_type": "tracking_revision_conflict",
-                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_type": "tracking_management_capability_unknown",
+                  "error_message": "当前 Auto Bangumi 管理能力未验证",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -21816,6 +22140,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "外部删除并保留本地数据",
+          "authority": "TrackingRecord + operation"
         },
         "parameters": [
           {
@@ -21949,6 +22278,14 @@
                           "type": "string"
                         },
                         "management_status": {
+                          "enum": [
+                            "PREPARED",
+                            "IN_PROGRESS",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "OUTCOME_UNKNOWN",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Management Status",
                           "type": "string"
                         },
@@ -22041,6 +22378,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -22049,6 +22400,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -22058,6 +22416,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -22066,6 +22436,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -22152,10 +22527,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -22278,7 +22668,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -22386,7 +22776,7 @@
             }
           },
           "409": {
-            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
+            "description": "tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
             "content": {
               "application/json": {
                 "schema": {
@@ -22430,8 +22820,8 @@
                 },
                 "example": {
                   "ok": false,
-                  "error_type": "tracking_revision_conflict",
-                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_type": "tracking_management_capability_unknown",
+                  "error_message": "当前 Auto Bangumi 管理能力未验证",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -22439,6 +22829,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "外部方案修改",
+          "authority": "TrackingRecord + operation"
         },
         "parameters": [
           {
@@ -22572,10 +22967,21 @@
                           "type": "string"
                         },
                         "action": {
+                          "enum": [
+                            "AUTO",
+                            "MARK_SUCCEEDED",
+                            "MARK_FAILED",
+                            "VERIFY_EXTERNAL"
+                          ],
                           "title": "Action",
                           "type": "string"
                         },
                         "outcome": {
+                          "enum": [
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Outcome",
                           "type": "string"
                         },
@@ -22677,6 +23083,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -22685,6 +23105,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -22694,6 +23121,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -22702,6 +23141,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -23050,6 +23494,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "RECOVERY",
+          "relation": "未知结果保守恢复；不得盲目重放",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -23171,6 +23620,14 @@
                           "type": "string"
                         },
                         "management_status": {
+                          "enum": [
+                            "PREPARED",
+                            "IN_PROGRESS",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "OUTCOME_UNKNOWN",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Management Status",
                           "type": "string"
                         },
@@ -23263,6 +23720,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -23271,6 +23742,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -23280,6 +23758,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -23288,6 +23778,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -23374,10 +23869,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -23500,7 +24010,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -23608,7 +24118,7 @@
             }
           },
           "409": {
-            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
+            "description": "tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
             "content": {
               "application/json": {
                 "schema": {
@@ -23652,8 +24162,8 @@
                 },
                 "example": {
                   "ok": false,
-                  "error_type": "tracking_revision_conflict",
-                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_type": "tracking_management_capability_unknown",
+                  "error_message": "当前 Auto Bangumi 管理能力未验证",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -23661,6 +24171,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "关联 RSS 刷新",
+          "authority": "TrackingRecord + operation"
         },
         "parameters": [
           {
@@ -23787,6 +24302,13 @@
                           "type": "string"
                         },
                         "outcome": {
+                          "enum": [
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "VERIFYING_EXTERNAL",
+                            "RECOVERY_REQUIRED",
+                            "NEEDS_RECONFIRM"
+                          ],
                           "title": "Outcome",
                           "type": "string"
                         },
@@ -23820,6 +24342,19 @@
                             "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REQUEST_MISSING",
+                                  "REQUEST_NOT_ACCEPTED",
+                                  "REQUEST_CHANGED",
+                                  "TITLE_MISSING",
+                                  "SEASON_REVIEW_REQUIRED",
+                                  "MIKAN_SELECTION_MISSING",
+                                  "SUBTITLE_GROUP_MISSING",
+                                  "NO_VALID_RESOURCES",
+                                  "EXTERNAL_ALREADY_LINKED",
+                                  "OPERATION_IN_PROGRESS",
+                                  "TRACKING_STATE_INVALID"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -23840,6 +24375,10 @@
                                 "type": "string"
                               },
                               "recovery_action": {
+                                "enum": [
+                                  "",
+                                  "SUBMIT"
+                                ],
                                 "title": "Recovery Action",
                                 "type": "string"
                               }
@@ -23924,6 +24463,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -23932,6 +24485,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -23941,6 +24501,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -23949,6 +24521,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -24302,6 +24879,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "明确失败的可靠重试",
+          "authority": "TrackingRecord + operation"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -24430,6 +25012,20 @@
                           "type": "string"
                         },
                         "next_status": {
+                          "enum": [
+                            "PENDING_SUBMIT",
+                            "REVALIDATING",
+                            "NEEDS_RECONFIRM",
+                            "SUBMITTING",
+                            "VERIFYING_EXTERNAL",
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "RECOVERY_REQUIRED",
+                            "UNKNOWN",
+                            "DISABLED",
+                            "EXTERNAL_DELETED",
+                            "EXTERNAL_ONLY"
+                          ],
                           "title": "Next Status",
                           "type": "string"
                         },
@@ -24439,6 +25035,19 @@
                             "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REQUEST_MISSING",
+                                  "REQUEST_NOT_ACCEPTED",
+                                  "REQUEST_CHANGED",
+                                  "TITLE_MISSING",
+                                  "SEASON_REVIEW_REQUIRED",
+                                  "MIKAN_SELECTION_MISSING",
+                                  "SUBTITLE_GROUP_MISSING",
+                                  "NO_VALID_RESOURCES",
+                                  "EXTERNAL_ALREADY_LINKED",
+                                  "OPERATION_IN_PROGRESS",
+                                  "TRACKING_STATE_INVALID"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -24459,6 +25068,10 @@
                                 "type": "string"
                               },
                               "recovery_action": {
+                                "enum": [
+                                  "",
+                                  "SUBMIT"
+                                ],
                                 "title": "Recovery Action",
                                 "type": "string"
                               }
@@ -24543,6 +25156,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -24551,6 +25178,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -24560,6 +25194,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -24568,6 +25214,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -24922,6 +25573,11 @@
             }
           }
         },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "提交前本地复核",
+          "authority": "TrackingRecord"
+        },
         "requestBody": {
           "required": true,
           "content": {
@@ -24988,6 +25644,14 @@
                           "type": "string"
                         },
                         "management_status": {
+                          "enum": [
+                            "PREPARED",
+                            "IN_PROGRESS",
+                            "SUCCEEDED",
+                            "FAILED",
+                            "OUTCOME_UNKNOWN",
+                            "RECOVERY_REQUIRED"
+                          ],
                           "title": "Management Status",
                           "type": "string"
                         },
@@ -25080,6 +25744,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -25088,6 +25766,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -25097,6 +25782,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -25105,6 +25802,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -25191,10 +25893,25 @@
                                   "type": "string"
                                 },
                                 "operation": {
+                                  "enum": [
+                                    "SUBMIT",
+                                    "MODIFY",
+                                    "SET_ENABLED",
+                                    "DELETE_EXTERNAL",
+                                    "REFRESH_RSS"
+                                  ],
                                   "title": "Operation",
                                   "type": "string"
                                 },
                                 "state": {
+                                  "enum": [
+                                    "PREPARED",
+                                    "IN_PROGRESS",
+                                    "SUCCEEDED",
+                                    "FAILED",
+                                    "OUTCOME_UNKNOWN",
+                                    "RECOVERY_REQUIRED"
+                                  ],
                                   "title": "State",
                                   "type": "string"
                                 },
@@ -25317,7 +26034,7 @@
             }
           },
           "400": {
-            "description": "data_validation_errors: 请求参数校验失败 / tracking_management_confirmation_required: 管理操作必须显式确认 / invalid_storage_dir: storage_dir 必须为允许的相对目录",
+            "description": "data_validation_errors: 请求参数校验失败 / invalid_storage_dir: storage_dir 必须为允许的相对目录 / tracking_management_confirmation_required: 管理操作必须显式确认 / tracking_management_patch_invalid: 管理操作参数无效",
             "content": {
               "application/json": {
                 "schema": {
@@ -25425,7 +26142,7 @@
             }
           },
           "409": {
-            "description": "tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
+            "description": "tracking_management_capability_unknown: 当前 Auto Bangumi 管理能力未验证 / tracking_revision_conflict: 追番记录版本已变化，请刷新后重试 / tracking_idempotency_conflict: 同一幂等键已绑定不同的管理操作 / tracking_management_state_conflict: 已有管理操作正在执行，请先恢复",
             "content": {
               "application/json": {
                 "schema": {
@@ -25469,8 +26186,8 @@
                 },
                 "example": {
                   "ok": false,
-                  "error_type": "tracking_revision_conflict",
-                  "error_message": "追番记录版本已变化，请刷新后重试",
+                  "error_type": "tracking_management_capability_unknown",
+                  "error_message": "当前 Auto Bangumi 管理能力未验证",
                   "error_data": {
                     "failed_step": "示例步骤"
                   }
@@ -25478,6 +26195,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "外部方案启停",
+          "authority": "TrackingRecord + operation"
         },
         "parameters": [
           {
@@ -25610,6 +26332,13 @@
                           "type": "string"
                         },
                         "outcome": {
+                          "enum": [
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "VERIFYING_EXTERNAL",
+                            "RECOVERY_REQUIRED",
+                            "NEEDS_RECONFIRM"
+                          ],
                           "title": "Outcome",
                           "type": "string"
                         },
@@ -25643,6 +26372,19 @@
                             "description": "One structured revalidation issue (Stage 29 PRD §11.5 fixed codes).\n\n``recovery_action`` is a safe code (e.g. ``SUBMIT``) the UI can offer.",
                             "properties": {
                               "code": {
+                                "enum": [
+                                  "REQUEST_MISSING",
+                                  "REQUEST_NOT_ACCEPTED",
+                                  "REQUEST_CHANGED",
+                                  "TITLE_MISSING",
+                                  "SEASON_REVIEW_REQUIRED",
+                                  "MIKAN_SELECTION_MISSING",
+                                  "SUBTITLE_GROUP_MISSING",
+                                  "NO_VALID_RESOURCES",
+                                  "EXTERNAL_ALREADY_LINKED",
+                                  "OPERATION_IN_PROGRESS",
+                                  "TRACKING_STATE_INVALID"
+                                ],
                                 "title": "Code",
                                 "type": "string"
                               },
@@ -25663,6 +26405,10 @@
                                 "type": "string"
                               },
                               "recovery_action": {
+                                "enum": [
+                                  "",
+                                  "SUBMIT"
+                                ],
                                 "title": "Recovery Action",
                                 "type": "string"
                               }
@@ -25747,6 +26493,20 @@
                               "title": "Poster Path"
                             },
                             "status": {
+                              "enum": [
+                                "PENDING_SUBMIT",
+                                "REVALIDATING",
+                                "NEEDS_RECONFIRM",
+                                "SUBMITTING",
+                                "VERIFYING_EXTERNAL",
+                                "ACTIVE",
+                                "SUBMIT_FAILED",
+                                "RECOVERY_REQUIRED",
+                                "UNKNOWN",
+                                "DISABLED",
+                                "EXTERNAL_DELETED",
+                                "EXTERNAL_ONLY"
+                              ],
                               "title": "Status",
                               "type": "string"
                             },
@@ -25755,6 +26515,13 @@
                               "type": "string"
                             },
                             "status_group": {
+                              "enum": [
+                                "PENDING",
+                                "PROCESSING",
+                                "ACTIVE",
+                                "ATTENTION",
+                                "INACTIVE"
+                              ],
                               "title": "Status Group",
                               "type": "string"
                             },
@@ -25764,6 +26531,18 @@
                                 "description": "One server-computed action (Stage 29 PRD §11.4).\n\n``style`` is one of ``PRIMARY | SECONDARY | DANGER``; ``code`` one of the\nfixed §11.4 candidates.  Only currently-executable actions are returned —\nnever a disabled fake action.",
                                 "properties": {
                                   "code": {
+                                    "enum": [
+                                      "REVALIDATE",
+                                      "SUBMIT",
+                                      "RETRY",
+                                      "RECOVER_AUTO",
+                                      "MARK_SUCCEEDED",
+                                      "MARK_FAILED",
+                                      "MODIFY",
+                                      "SET_ENABLED",
+                                      "REFRESH_RSS",
+                                      "DELETE_EXTERNAL"
+                                    ],
                                     "title": "Code",
                                     "type": "string"
                                   },
@@ -25772,6 +26551,11 @@
                                     "type": "string"
                                   },
                                   "style": {
+                                    "enum": [
+                                      "PRIMARY",
+                                      "SECONDARY",
+                                      "DANGER"
+                                    ],
                                     "title": "Style",
                                     "type": "string"
                                   },
@@ -26124,6 +26908,11 @@
               }
             }
           }
+        },
+        "x-lifecycle": {
+          "lifecycle": "PRIMARY",
+          "relation": "可靠外部提交",
+          "authority": "TrackingRecord + operation"
         },
         "requestBody": {
           "required": true,
