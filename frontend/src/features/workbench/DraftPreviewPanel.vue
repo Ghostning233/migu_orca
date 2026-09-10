@@ -32,6 +32,7 @@ import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import FormField from '@/components/layout/FormField.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
+import { useDraftSession, type DraftPatch } from '@/app/composables/useDraftSession'
 
 import {
   collectPreviewEditPatch,
@@ -71,11 +72,19 @@ const notification = useNotificationStore()
 // Component-local draft state: the display snapshot is refreshed after every
 // preview-modify, and the opaque draft_id / draft_revision are kept in memory
 // only (never URL/browser storage/logs).
-const request = ref<RequestSnapshot>(props.request)
-const draftId = ref<string>(props.draftId)
-const draftRevision = ref<number>(props.draftRevision ?? 1)
-
-const applying = ref(false)
+const session = useDraftSession({
+  request: props.request,
+  draftId: props.draftId,
+  draftRevision: props.draftRevision,
+})
+// Keep one render-safe snapshot while the parent processes the invalidation
+// event. The session itself is still cleared immediately and can no longer
+// issue writes; this only prevents a transient Vue render from dereferencing
+// null before the compatibility host removes the panel.
+const draftSnapshot = computed(() => (session.request.value ?? props.request) as RequestSnapshot)
+const draftCapability = session.draftId
+const draftRevisionState = session.draftRevision
+const applying = session.applying
 const saving = ref(false)
 const formError = ref('')
 
@@ -88,29 +97,29 @@ const editCaseSensitive = ref(false)
 const editFolderName = ref('')
 
 function resetEditForm(): void {
-  editGroup.value = request.value.confirmable_config?.selected_subtitle_group ?? ''
-  editMustContain.value = request.value.confirmable_config?.filter_rule?.must_contain ?? ''
-  editMustNotContain.value = request.value.confirmable_config?.filter_rule?.must_not_contain ?? ''
-  editUseRegex.value = request.value.confirmable_config?.filter_rule?.use_regex === true
-  editCaseSensitive.value = request.value.confirmable_config?.filter_rule?.case_sensitive === true
-  editFolderName.value = request.value.confirmable_config?.expected_folder_name ?? ''
+  editGroup.value = draftSnapshot.value.confirmable_config?.selected_subtitle_group ?? ''
+  editMustContain.value = draftSnapshot.value.confirmable_config?.filter_rule?.must_contain ?? ''
+  editMustNotContain.value = draftSnapshot.value.confirmable_config?.filter_rule?.must_not_contain ?? ''
+  editUseRegex.value = draftSnapshot.value.confirmable_config?.filter_rule?.use_regex === true
+  editCaseSensitive.value = draftSnapshot.value.confirmable_config?.filter_rule?.case_sensitive === true
+  editFolderName.value = draftSnapshot.value.confirmable_config?.expected_folder_name ?? ''
 }
 
 resetEditForm()
 
 const groupOptions = computed(() => {
-  const sources = request.value.source_info?.rss_sources ?? []
+  const sources = draftSnapshot.value.source_info?.rss_sources ?? []
   return sources.map((source) => ({
     value: source.subtitle_group ?? '',
     label: source.subtitle_group ?? '未知字幕组',
   }))
 })
 
-const effective = computed(() => effectiveSeeds(request.value))
-const excluded = computed(() => excludedSeeds(request.value))
-const completeGroups = computed(() => completeSeedGroups(request.value))
+const effective = computed(() => effectiveSeeds(draftSnapshot.value))
+const excluded = computed(() => excludedSeeds(draftSnapshot.value))
+const completeGroups = computed(() => completeSeedGroups(draftSnapshot.value))
 const selectedGroupName = computed(
-  () => request.value.confirmable_config?.selected_subtitle_group ?? '未选择字幕组',
+  () => draftSnapshot.value.confirmable_config?.selected_subtitle_group ?? '未选择字幕组',
 )
 
 function currentEditState(): PreviewEditState {
@@ -125,7 +134,7 @@ function currentEditState(): PreviewEditState {
 }
 
 function originalEditState(): PreviewEditState {
-  const config = request.value.confirmable_config
+  const config = draftSnapshot.value.confirmable_config
   return {
     selectedSubtitleGroup: config?.selected_subtitle_group ?? '',
     mustContain: config?.filter_rule?.must_contain ?? '',
@@ -152,6 +161,43 @@ function notifyDraftExpired(): void {
   emit('expired')
 }
 
+function handleModifyFailure(): void {
+  if (session.invalid.value) {
+    notifyDraftExpired()
+    return
+  }
+  formError.value = session.error.value?.message ?? '订阅草案修改失败，请稍后重试。'
+  notification.error('修改失败', '订阅草案修改失败，请稍后重试。')
+  emit('failed')
+}
+
+function handleModifySuccess(result: PreviewModifyResult): PreviewModifyResult {
+  resetEditForm()
+  emit('changed', {
+    request: draftSnapshot.value,
+    draftId: draftCapability.value ?? '',
+    draftRevision: draftRevisionState.value ?? 1,
+  })
+  notification.success('已应用修改', '订阅草案种子展示已重新计算。')
+  return result
+}
+
+async function retryModify(): Promise<void> {
+  formError.value = ''
+  const result = await session.retry()
+  if (result) {
+    handleModifySuccess(result)
+  } else if (session.invalid.value || session.error.value) {
+    handleModifyFailure()
+  }
+}
+
+function resetFailedModify(): void {
+  session.reset()
+  formError.value = ''
+  resetEditForm()
+}
+
 async function applyModify(): Promise<PreviewModifyResult | null> {
   const patch = collectPreviewEditPatch(originalEditState(), currentEditState())
   if (!Object.keys(patch).length) {
@@ -159,48 +205,12 @@ async function applyModify(): Promise<PreviewModifyResult | null> {
     return null
   }
   formError.value = ''
-  applying.value = true
-  try {
-    const result = await api.post<PreviewModifyResult>('/api/v1/requests/preview-modify', {
-      body: {
-        draft_id: draftId.value,
-        base_revision: draftRevision.value,
-        patch,
-        storage_dir: storageQuery().storage_dir ?? null,
-      },
-    })
-    // US-211: the server returns the same draft_id and the bumped revision;
-    // keep both in component memory only.
-    if (result?.draft_id) {
-      draftId.value = result.draft_id
-    }
-    if (typeof result?.draft_revision === 'number') {
-      draftRevision.value = result.draft_revision
-    }
-    if (result?.request) {
-      request.value = result.request
-    }
-    emit('changed', {
-      request: request.value,
-      draftId: draftId.value,
-      draftRevision: draftRevision.value,
-    })
-    resetEditForm()
-    notification.success('已应用修改', '订阅草案种子展示已重新计算。')
-    return result
-  } catch (error) {
-    void error
-    if (isDraftError(error)) {
-      notifyDraftExpired()
-      return null
-    }
-    formError.value = '订阅草案修改失败，请稍后重试。'
-    notification.error('修改失败', '订阅草案修改失败，请稍后重试。')
-    emit('failed')
+  const result = await session.apply(patch as DraftPatch, storageQuery().storage_dir ?? null)
+  if (!result) {
+    handleModifyFailure()
     return null
-  } finally {
-    applying.value = false
   }
+  return handleModifySuccess(result)
 }
 
 async function saveDraft(): Promise<void> {
@@ -219,18 +229,18 @@ async function saveDraft(): Promise<void> {
     }
     const saved = await api.post<PreviewSaveResult>('/api/v1/requests/preview-save', {
       body: {
-        draft_id: draftId.value,
+        draft_id: draftCapability.value ?? '',
         // US-212: the save reserves the draft against the base_revision the
         // server last issued, so a concurrent modify cannot move the revision
         // out from under the persist; on a failed disk write the server keeps
         // this draft/revision alive for a retry.
-        base_revision: draftRevision.value,
+        base_revision: draftRevisionState.value ?? 1,
         storage_dir: storageQuery().storage_dir ?? null,
       },
     })
     // The draft was consumed by the save; clear the in-memory capability so a
     // replay can never reference a stale draft.
-    draftId.value = ''
+    draftCapability.value = ''
     const savedRequestId = saved?.request?.request_id
     if (savedRequestId) {
       emit('saved', savedRequestId)
@@ -259,42 +269,13 @@ async function saveDraft(): Promise<void> {
 async function modifyWithRevision(): Promise<boolean> {
   const patch = collectPreviewEditPatch(originalEditState(), currentEditState())
   if (!Object.keys(patch).length) return true
-  try {
-    const modified = await api.post<PreviewModifyResult>('/api/v1/requests/preview-modify', {
-      body: {
-        draft_id: draftId.value,
-        base_revision: draftRevision.value,
-        patch,
-        storage_dir: storageQuery().storage_dir ?? null,
-      },
-    })
-    if (modified?.draft_id) {
-      draftId.value = modified.draft_id
-    }
-    if (typeof modified?.draft_revision === 'number') {
-      draftRevision.value = modified.draft_revision
-    }
-    if (modified?.request) {
-      request.value = modified.request
-    }
-    emit('changed', {
-      request: request.value,
-      draftId: draftId.value,
-      draftRevision: draftRevision.value,
-    })
-    resetEditForm()
-    return true
-  } catch (error) {
-    void error
-    if (isDraftError(error)) {
-      notifyDraftExpired()
-      return false
-    }
-    formError.value = '订阅草案修改失败，请稍后重试。'
-    notification.error('修改失败', '订阅草案修改失败，请稍后重试。')
-    emit('failed')
+  const modified = await session.apply(patch as DraftPatch, storageQuery().storage_dir ?? null)
+  if (!modified) {
+    handleModifyFailure()
     return false
   }
+  handleModifySuccess(modified)
+  return true
 }
 
 /** Batch helper (US-205): save the draft and return the persisted snapshot.
@@ -315,16 +296,16 @@ async function saveDraftAndReturn(): Promise<RequestSnapshot | null> {
     }
     const saved = await api.post<PreviewSaveResult>('/api/v1/requests/preview-save', {
       body: {
-        draft_id: draftId.value,
+        draft_id: draftCapability.value ?? '',
         // US-212: the save reserves the draft against the base_revision the
         // server last issued, so a concurrent modify cannot move the revision
         // out from under the persist; on a failed disk write the server keeps
         // this draft/revision alive for a retry.
-        base_revision: draftRevision.value,
+        base_revision: draftRevisionState.value ?? 1,
         storage_dir: storageQuery().storage_dir ?? null,
       },
     })
-    draftId.value = ''
+    draftCapability.value = ''
     const savedRequest = saved?.request as RequestSnapshot | undefined
     if (savedRequest?.request_id) {
       emit('saved', savedRequest.request_id)
@@ -346,14 +327,14 @@ async function saveDraftAndReturn(): Promise<RequestSnapshot | null> {
   }
 }
 
-defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
+defineExpose({ request: draftSnapshot, draftId: draftCapability, draftRevision: draftRevisionState, saveDraftAndReturn })
 </script>
 
 <template>
   <PanelSection title="订阅方案详情" class="request-detail-panel draft-preview-panel">
     <div id="request-detail-container" class="request-detail" aria-live="polite" aria-relevant="additions text">
       <h3 class="request-detail-title">
-        {{ request.input?.raw_title || request.source_info?.matched_bangumi?.title || '订阅方案' }}
+        {{ draftSnapshot.input?.raw_title || draftSnapshot.source_info?.matched_bangumi?.title || '订阅方案' }}
       </h3>
 
       <div class="detail-actions" aria-label="订阅方案操作">
@@ -425,6 +406,15 @@ defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
           {{ formError }}
         </p>
 
+        <div v-if="session.canRetry.value" class="detail-form-recovery" role="group" aria-label="修改失败恢复">
+          <BaseButton id="preview-retry-button" type="button" variant="secondary" :loading="applying" @click="retryModify">
+            重试修改
+          </BaseButton>
+          <BaseButton id="preview-reset-button" type="button" variant="secondary" :disabled="applying" @click="resetFailedModify">
+            恢复上次结果
+          </BaseButton>
+        </div>
+
         <div class="detail-form-actions">
           <BaseButton id="preview-apply-button" type="submit" variant="primary" :loading="applying">
             应用修改
@@ -436,13 +426,13 @@ defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
       <section class="detail-section overview-section" aria-label="Overview">
         <h4 class="detail-section-heading">Overview</h4>
         <dl class="detail-grid">
-          <div class="detail-row"><dt>request_id</dt><dd>{{ displayValue(request?.request_id) }}</dd></div>
-          <div class="detail-row"><dt>状态</dt><dd>{{ statusLabel(request?.status) }}</dd></div>
+          <div class="detail-row"><dt>request_id</dt><dd>{{ displayValue(draftSnapshot?.request_id) }}</dd></div>
+          <div class="detail-row"><dt>状态</dt><dd>{{ statusLabel(draftSnapshot?.status) }}</dd></div>
           <div class="detail-row"><dt>保存状态</dt><dd>订阅草案（未保存）</dd></div>
-          <div class="detail-row"><dt>原始标题</dt><dd>{{ displayValue(request?.input?.raw_title) }}</dd></div>
+          <div class="detail-row"><dt>原始标题</dt><dd>{{ displayValue(draftSnapshot?.input?.raw_title) }}</dd></div>
           <div class="detail-row">
             <dt>匹配标题</dt>
-            <dd>{{ displayValue(request?.source_info?.matched_bangumi?.title) }}</dd>
+            <dd>{{ displayValue(draftSnapshot?.source_info?.matched_bangumi?.title) }}</dd>
           </div>
         </dl>
       </section>
@@ -453,15 +443,15 @@ defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
         <dl class="detail-grid">
           <div class="detail-row">
             <dt>字幕组</dt>
-            <dd>{{ displayValue(request?.confirmable_config?.selected_subtitle_group) }}</dd>
+            <dd>{{ displayValue(draftSnapshot?.confirmable_config?.selected_subtitle_group) }}</dd>
           </div>
           <div class="detail-row">
             <dt>RSS 来源</dt>
-            <dd>{{ request?.confirmable_config?.selected_rss_url ? '已选择' : '未选择' }}</dd>
+            <dd>{{ draftSnapshot?.confirmable_config?.selected_rss_url ? '已选择' : '未选择' }}</dd>
           </div>
           <div class="detail-row">
             <dt>匹配番剧标题</dt>
-            <dd>{{ displayValue(request?.source_info?.matched_bangumi?.title) }}</dd>
+            <dd>{{ displayValue(draftSnapshot?.source_info?.matched_bangumi?.title) }}</dd>
           </div>
         </dl>
       </section>
@@ -472,23 +462,23 @@ defineExpose({ request, draftId, draftRevision, saveDraftAndReturn })
         <dl class="detail-grid">
           <div class="detail-row">
             <dt>包含规则</dt>
-            <dd>{{ displayValue(request?.confirmable_config?.filter_rule?.must_contain) }}</dd>
+            <dd>{{ displayValue(draftSnapshot?.confirmable_config?.filter_rule?.must_contain) }}</dd>
           </div>
           <div class="detail-row">
             <dt>排除规则</dt>
-            <dd>{{ displayValue(request?.confirmable_config?.filter_rule?.must_not_contain) }}</dd>
+            <dd>{{ displayValue(draftSnapshot?.confirmable_config?.filter_rule?.must_not_contain) }}</dd>
           </div>
           <div class="detail-row">
             <dt>匹配模式</dt>
-            <dd>{{ request?.confirmable_config?.filter_rule?.use_regex === true ? '正则' : '普通字符' }}</dd>
+            <dd>{{ draftSnapshot?.confirmable_config?.filter_rule?.use_regex === true ? '正则' : '普通字符' }}</dd>
           </div>
           <div class="detail-row">
             <dt>大小写</dt>
-            <dd>{{ request?.confirmable_config?.filter_rule?.case_sensitive === true ? '区分大小写' : '不区分大小写' }}</dd>
+            <dd>{{ draftSnapshot?.confirmable_config?.filter_rule?.case_sensitive === true ? '区分大小写' : '不区分大小写' }}</dd>
           </div>
           <div class="detail-row">
             <dt>folder_name</dt>
-            <dd>{{ displayValue(request?.confirmable_config?.expected_folder_name) }}</dd>
+            <dd>{{ displayValue(draftSnapshot?.confirmable_config?.expected_folder_name) }}</dd>
           </div>
           <div class="detail-row">
             <dt>有效种子数</dt>

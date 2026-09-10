@@ -95,4 +95,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - The shared editor can remain transport-free by accepting the public `RequestSnapshot` and emitting `PreviewPatch`; save and preview-modify orchestration stays in the compatibility/session host.
   - Verification passed: targeted Vitest (3 tests), frontend typecheck, lint, build, and real Chromium workbench suite (20 tests); storage was clean before browser verification.
+
+## 2026-09-11 00:10:00 Asia/Shanghai - US-271
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Routed shared draft preview-modify operations through `useDraftSession`, preserving server-authoritative snapshot/revision updates and request sequencing for both direct apply and save-before-save compatibility flows. Added explicit retry of the failed patch against the last consistent revision and recovery to the last successful result; invalid draft errors still clear the capability and request regeneration.
+- Files changed: `frontend/src/app/composables/useDraftSession.ts`, `frontend/src/app/composables/useDraftSession.test.ts`, `frontend/src/features/workbench/DraftPreviewPanel.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The shared session must be the only preview-modify writer; compatibility save flows can consume its current snapshot/revision while retaining preview-save outside the shared core.
+  - Invalidation clears the session immediately, so a host component needs a render-safe transient fallback until its `expired` event removes the panel.
+  - Verification passed: 24 targeted Vitest tests, frontend typecheck/lint/build, Python compileall and diff check, 20 real Chromium workbench tests, and 1794 backend tests.
+---
 ---

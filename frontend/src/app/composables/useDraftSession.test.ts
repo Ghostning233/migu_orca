@@ -122,4 +122,34 @@ describe('useDraftSession (US-266)', () => {
     expect(failed.canRetry.value).toBe(false)
   })
 
+  it('retries the failed patch against the unchanged last revision', async () => {
+    const patch = { filter_rule: { must_not_contain: 'V2' } } as never
+    vi.mocked(api.post)
+      .mockRejectedValueOnce({
+        type: 'network_error',
+        message: '网络请求失败，请检查网络后重试',
+        status: 0,
+        details: null,
+        cancelled: false,
+        network: true,
+        nonJson: false,
+        httpError: false,
+      })
+      .mockResolvedValueOnce({ request: { ...snapshot, status: 'changed' }, draft_id: 'opaque', draft_revision: 2 })
+    const session = useDraftSession({ request: snapshot, draftId: 'opaque', draftRevision: 1 })
+
+    await session.apply(patch, null)
+    expect(session.request.value).toEqual(snapshot)
+    expect(session.canRetry.value).toBe(true)
+
+    await session.retry()
+
+    expect(api.post).toHaveBeenLastCalledWith('/api/v1/requests/preview-modify', {
+      body: { draft_id: 'opaque', base_revision: 1, patch, storage_dir: null },
+    })
+    expect(session.request.value?.status).toBe('changed')
+    expect(session.draftRevision.value).toBe(2)
+    expect(session.canRetry.value).toBe(false)
+  })
+
 })

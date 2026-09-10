@@ -43,7 +43,7 @@ export interface DraftSession {
   invalid: Ref<boolean>
   canRetry: Readonly<Ref<boolean>>
   setDirty: (dirty: boolean) => void
-  apply: (patch: DraftPatch, storageDir?: string) => Promise<DraftModifyResult | null>
+  apply: (patch: DraftPatch, storageDir?: string | null) => Promise<DraftModifyResult | null>
   retry: () => Promise<DraftModifyResult | null>
   reset: () => void
   invalidate: () => void
@@ -73,7 +73,7 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
 
   // The last attempted patch is request-scoped memory, used only by retry.
   let lastPatch: DraftPatch | null = null
-  let lastStorageDir: string | undefined
+  let lastStorageDir: string | null | undefined
 
   const canRetry = computed(() => retryable.value && !invalid.value && !applying.value)
 
@@ -97,7 +97,7 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
     lastStorageDir = undefined
   }
 
-  async function apply(patch: DraftPatch, storageDir?: string): Promise<DraftModifyResult | null> {
+  async function apply(patch: DraftPatch, storageDir?: string | null): Promise<DraftModifyResult | null> {
     // A second request cannot safely reuse the current base_revision. Reject
     // it while the first request owns the session instead of issuing two CAS
     // writes with the same revision.
@@ -110,12 +110,12 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
     error.value = null
     applying.value = true
     try {
-      const body: PreviewModifyBody = {
+      const body = {
         draft_id: draftId.value,
         base_revision: draftRevision.value,
         patch,
         ...(storageDir === undefined ? {} : { storage_dir: storageDir }),
-      }
+      } as PreviewModifyBody
       const result = await api.post<DraftModifyResult>('/api/v1/requests/preview-modify', { body })
 
       // Only the newest started request may commit. This makes an older
