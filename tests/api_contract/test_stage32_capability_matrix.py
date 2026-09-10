@@ -5,6 +5,7 @@ import pytest
 
 from ab_engine.models.management import AutoBangumiCapabilities
 from tracking_engine.controllers.management_state import (
+    management_action_allowed,
     management_baseline_verified,
     management_capability_allowed,
     management_capability_field,
@@ -81,3 +82,9 @@ def test_scope_and_set_enabled_direction_are_strict() -> None:
     assert management_capability_field("SET_ENABLED", "SUBSCRIPTION", None) is None
     assert not management_capability_allowed(capabilities, "REFRESH_RSS", "SUBSCRIPTION")
     assert not management_capability_allowed(capabilities, "SET_ENABLED", "SUBSCRIPTION")
+
+
+def test_disabled_record_can_only_reenable_or_delete() -> None:
+    assert management_action_allowed("DISABLED", "SET_ENABLED", enabled=True)
+    assert not management_action_allowed("DISABLED", "SET_ENABLED", enabled=False)
+    assert management_action_allowed("DISABLED", "DELETE_EXTERNAL")

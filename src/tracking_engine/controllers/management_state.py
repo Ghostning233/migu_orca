@@ -42,8 +42,18 @@ def management_actions_for_status(status: str) -> frozenset[str]:
     return _ACTIONS_BY_STATUS.get(status, frozenset())
 
 
-def management_action_allowed(status: str, action: str) -> bool:
-    return action in management_actions_for_status(status)
+def management_action_allowed(status: str, action: str, *, enabled: bool | None = None) -> bool:
+    """Return whether the local state permits this action and direction.
+
+    The action projection intentionally omits a direction because it is shown
+    before a request exists.  The write coordinator supplies ``enabled`` and
+    therefore enforces the stricter DISABLED re-enable-only rule.
+    """
+    if action not in management_actions_for_status(status):
+        return False
+    if status == TRACKING_STATUS_DISABLED and action == "SET_ENABLED" and enabled is not None:
+        return enabled is True
+    return True
 
 
 def is_management_action(action: str, actions: Collection[str] = MANAGEMENT_ACTIONS) -> bool:

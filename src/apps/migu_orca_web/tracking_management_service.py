@@ -151,7 +151,7 @@ def run_tracking_management(
                 "created": False,
             }
         raise Stage1Error("tracking_management_state_conflict", "已有管理操作正在执行，请先恢复", "tracking_management")
-    if not management_action_allowed(record.status, operation):
+    if not management_action_allowed(record.status, operation, enabled=enabled):
         raise Stage1Error("tracking_management_state_conflict", "当前追番状态不允许该管理操作", "tracking_management")
     if expected_revision != record.revision:
         raise Stage1Error("tracking_revision_conflict", "追番记录版本已变化，请刷新后重试", "tracking_management", {"expected_revision": expected_revision, "current_revision": record.revision})
