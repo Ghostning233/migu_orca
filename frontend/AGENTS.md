@@ -1,7 +1,21 @@
-# AGENTS.md — frontend (Stage 27, US-197)
+# AGENTS.md — frontend
 
 MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全部走 npm（`npm ci`），
 与后端 `uv` 分离；**不得**混用多个 lockfile（`package-lock.json` 是唯一来源）。
+
+## Stage 34 当前执行边界
+
+- 当前执行 PRD 是 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`，分支固定为
+  `ralph/stage34-shared-review-core`，stories 为 US-266～US-274。
+- Stage 34 只实现 F-B：模式输入、候选集合、draft session、`AnimeDraftEditor`、revision 重算和
+  旧流程薄兼容适配层；不得顺带实现 F-C～F-G。
+- 共享审核核心只消费 generated `createRequest`/`previewModifyRequest` 类型。`preview-save`、
+  单番 `confirmRequestSave` 和批量 `saveConfirmBatchItems` 只能留在或进入阶段明确指定的宿主适配层，
+  不得进入 `AnimeDraftEditor` 或 draft session。
+- `getRequestSafeInfo` 只服务已保存 Request；真实 `SafeInfoDialog` 已延后到 F-E。不得为未保存草案
+  请求、拼接或 mock “全部信息”。
+- 每次 Ralph 最多运行 3 个 stories；完成 US-268、US-271 后必须停下独立审核。普通 story 只跑
+  定向检查，完整前端与 Chromium 门禁只在 US-274 运行。
 
 ## 工程结构与约定
 

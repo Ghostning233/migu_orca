@@ -1,0 +1,29 @@
+# MiGuOrca Ralph Progress - Stage 34
+
+## Codebase Patterns
+
+- 正式执行 PRD：`docs/MiGuOrca_stage34_shared_review_core_PRD.md`；分支：
+  `ralph/stage34-shared-review-core`；stories：US-266～US-274。
+- 实现基线是 Stage 33 合入提交 `9f2e06b`。OpenAPI、generated client、Flask API 和
+  `docs/api/frontend-contract-handoff-v1.md` 是只读契约，不得由前端 story 临时修改。
+- 本阶段只实现 F-B：模式输入、候选列表、draft session、共享 `AnimeDraftEditor`、revision 与
+  兼容适配层；不得顺带开发 F-C～F-G。
+- `AnimeDraftEditor` 只允许 create/preview-modify 契约，绝不调用 preview-save、单番 save-confirm
+  或批量 save-confirm；旧 preview-save/accept 只能暂留在薄兼容适配层。
+- `getRequestSafeInfo` 只适用于已保存 Request，真实 `SafeInfoDialog` 已冻结延后到 F-E；不得为未保存
+  草案拼接、模拟或请求“全部信息”。
+- draft ID、revision、candidate context 只在 route/component-local 内存与单次 POST body，不进入
+  URL、DOM、storage、日志、通知、截图或 trace。
+- 普通失败保留最后一致资源结果和未应用输入；revision conflict 或草案失效则清除失效会话并要求
+  重新生成。旧响应不得覆盖较新 revision/快照。
+- 复用 Stage 33 Token、Base*、PanelSection、FormField、反馈组件和现有领域 helper，不创建 V2
+  平行组件、不手写 DTO。
+- 每轮只完成一个 story；每次 Ralph 严格最多 3 轮。完成 US-268、US-271 时必须停止并等待独立审核。
+- 普通 story 只跑定向 Vitest/typecheck/少量 Chromium；只有 US-274 运行一次完整门禁。UI story
+  必须使用 `dev-browser` skill 在真实 Chromium 验证。
+
+## Stage 34 Handoff
+
+- 待实现。第一开发批次仅允许 US-266～US-268。
+
+---

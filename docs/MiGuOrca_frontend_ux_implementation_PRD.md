@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | F-A 已完成为 Stage 33（US-257～US-265）；F-B～F-G 待评审 |
+| 当前状态 | F-A 已完成为 Stage 33；F-B 已规划为 Stage 34（US-266～US-274）；F-C～F-G 待评审 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-026 |
 | 优先级 | P1；各切片按后端依赖分别解锁 |
@@ -14,8 +14,9 @@
 | 交互基线 | 桌面端前端交互规格 AC-01～AC-25 |
 
 本 PRD 把全面重构拆成可以独立开发、评审、回退和验收的前端切片。F-A 已在 Stage 32 合入后
-冻结为 Stage 33，执行边界见 `docs/MiGuOrca_stage33_frontend_shell_PRD.md`；F-B～F-G 仍需逐包
-评审。实现 Agent 每次只接收一个切片及其已经冻结的 API，不得一边写页面一边设计后端契约。
+冻结为 Stage 33，执行边界见 `docs/MiGuOrca_stage33_frontend_shell_PRD.md`；F-B 已冻结为 Stage 34，
+执行边界见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`；F-C～F-G 仍需逐包评审。实现 Agent
+每次只接收一个切片及其已经冻结的 API，不得一边写页面一边设计后端契约。
 
 ## 2. 产品目标
 
@@ -124,7 +125,7 @@ CandidateCollectionList  真实 MiKan 合集选择
 AnimeDraftEditor         单番和批量共享的详情编辑核心
 SubtitleGroupSelect      字幕组选择和服务端重算状态
 ResourceSummary          有效资源与总集数摘要
-SafeInfoDialog           只消费 safe-info DTO 的全部信息弹窗
+SafeInfoDialog           F-E 在已保存 Request 语境下只消费 safe-info DTO 的全部信息弹窗
 BatchReviewCard          批量摘要和字幕组快捷入口
 TrackingInspector        追番动作与外部状态检查器
 CredentialSessionDialog  当前页面内存凭据和连接引导
@@ -204,7 +205,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 | 前端切片 | 可复用当前 API | 必须等待的新后端能力 |
 | --- | --- | --- |
 | 应用壳层/Token | 无业务依赖 | 无，可先行 |
-| 共享候选与详情 | MiKan candidates、Request preview | draft revision、safe-info |
+| 共享候选与草案详情 | MiKan candidates、Request preview | draft revision（Stage 28 已完成） |
 | 单番添加 | 当前候选生成 | 单番 save-confirm、tracking 建立 |
 | 批量审核 | batch parse、当前逐条基础 | 36 上限、revision、batch save-confirm |
 | 追番方案 | Request list/detail/modify/history | safe-info、tracking 链接/状态 |
@@ -220,7 +221,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 | 实施包 | 范围 | 主要依赖 | 独立 PR 结果 |
 | --- | --- | --- | --- |
 | F-A 壳层与设计系统 | 新路由、四项导航、Token、共享表单/状态/弹窗、兼容重定向 | 无新后端依赖 | 新旧业务页仍可挂载，视觉基线可浏览器验收 |
-| F-B 共享审核核心 | 模式输入、候选列表、AnimeDraftEditor、revision、SafeInfoDialog | B-A 部分能力 | 单番/批量可复用同一详情和重算状态 |
+| F-B 共享审核核心 | 模式输入、候选列表、AnimeDraftEditor、revision；不接 SafeInfo | B-A revision | 单番/批量可复用同一详情和重算状态 |
 | F-C 单番添加 | 三步旅程、保存确认、跳转追番管理 | B-A、B-B tracking 建立 | AC-01～05、15～16 可独立通过 |
 | F-D 批量审核 | 1/12/36、筛选、下一异常、部分成功、离开保护 | B-A、B-B tracking 建立 | AC-06～14、23～25 可独立通过 |
 | F-E 追番方案 | 本地列表/详情、修改、复制再用、历史、管理链接 | B-A safe-info、B-B 状态 | 本地方案职责与外部动作彻底分离 |
@@ -239,6 +240,11 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 > 上表 F-B～F-E 依赖的「B-A 部分能力」与「B-B tracking」现已可用，F-C/F-D 的
 > 「保存确认后跳转追番管理」可以开始接入本地 tracking 列表；B-C2/B-D 已由 Stage 31/32 完成，
 > 但 F-F 仍需等待 F-A/F-B 基线并单独规划，不能使用 mock-only 页面先冒充功能完成。
+
+> 状态注记（2026-09-10）：F-B 已规划为 Stage 34（US-266～US-274），执行 PRD 见
+> `docs/MiGuOrca_stage34_shared_review_core_PRD.md`。Stage 32 handoff 将 `getRequestSafeInfo` 分配给
+> F-E，且端点只读取已保存 Request；因此 Stage 34 不实现或模拟 `SafeInfoDialog`，只交付未保存
+> 草案的共享审核核心和旧流程兼容适配层。
 
 ## 10. PR 与回退边界
 

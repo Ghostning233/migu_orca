@@ -1,0 +1,167 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage34-shared-review-core",
+  "description": "Stage 34（F-B）：抽取单番与批量共用的模式输入、候选集合和服务端权威草案审核核心，可靠处理 revision 与失败恢复，并用薄适配层保持旧保存流程兼容；SafeInfo 延后到 F-E。",
+  "userStories": [
+    {
+      "id": "US-266",
+      "title": "建立草案会话状态与 generated contract 边界",
+      "description": "作为前端维护者，我需要唯一且可测试的草案会话模型，以便单番和批量共享服务端权威 revision、最后一致快照和失败状态。",
+      "acceptanceCriteria": [
+        "建立 draft session/composable，管理公开 Request 快照、opaque draft_id、draft_revision、表单 dirty、请求次序和安全错误状态",
+        "类型只来自 generated createRequest 与 previewModifyRequest；不手写 Request/API DTO",
+        "成功原子替换快照与 revision，旧响应不能覆盖新状态",
+        "draft conflict/expired/evicted/replayed 清除失效会话；普通失败保留最后一致快照并支持 retry/reset 状态",
+        "核心模块不导入或调用 preview-save、confirmRequestSave、saveConfirmBatchItems",
+        "Targeted draft-session tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-267",
+      "title": "实现模式切换与统一输入",
+      "description": "作为添加番剧的用户，我希望在单番和批量之间切换时分别保留输入和编辑位置。",
+      "acceptanceCriteria": [
+        "实现 AnimeModeSwitch 和 AnimeTitleInput，并在 /app/add 默认选择单番模式",
+        "单番使用单行输入，批量使用可自增高多行输入，继续调用现有搜索/解析入口",
+        "两种模式分别保留输入值和光标/选择范围，切换不截断或清空另一模式",
+        "状态只在当前 route/component 内存，不进入 URL、Pinia 持久化或 browser storage",
+        "模式切换支持键盘、明确选中语义和 prefers-reduced-motion",
+        "Targeted mode/input tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-268",
+      "title": "抽取共享候选集合",
+      "description": "作为单番或批量用户，我希望通过同一安全候选列表明确选择真实 MiKan 合集。",
+      "acceptanceCriteria": [
+        "实现 CandidateCollectionList，复用 CandidateCard、季数确认和现有候选纯函数",
+        "覆盖零/一/多候选；即使只有一个候选也不得自动选择",
+        "冲突候选保持禁用，需确认季度的候选只有明确勾选后才可选择",
+        "单番和批量调用方复用同一选择规则，现有 API payload 与 candidate context 生命周期不变",
+        "候选只渲染公开白名单字段，candidate context 不进入 DOM、URL 或 browser storage",
+        "Targeted candidate tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "第一开发批次终点：完成本 story 后停止 Ralph，等待独立审核。"
+    },
+    {
+      "id": "US-269",
+      "title": "抽取字幕组与资源摘要组件",
+      "description": "作为审核草案的用户，我希望单番和批量使用一致的字幕组控件与资源摘要。",
+      "acceptanceCriteria": [
+        "从现有草案详情抽取 SubtitleGroupSelect 与 ResourceSummary",
+        "组件只接收公开状态并发出事件，不自行持有第二份 draft 或调用 API",
+        "资源摘要复用现有 effective/excluded/complete helper，不复制过滤或字幕组业务规则",
+        "完整 URL、RSS、magnet 不进入 DOM；已更新集数固定显示待开发/不可用语义",
+        "Targeted subtitle/resource tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-270",
+      "title": "实现共享 AnimeDraftEditor 结构",
+      "description": "作为单番或批量用户，我需要同一个草案详情编辑器审核字幕组、规则、目录和资源结果。",
+      "acceptanceCriteria": [
+        "AnimeDraftEditor 组合共享表单、SubtitleGroupSelect 和 ResourceSummary，并消费 Stage 33 Token/原语",
+        "普通字段与高级字段层级清楚，单番和批量使用相同 props/events",
+        "编辑器绑定唯一 draft session，不维护第二份字幕组、资源或 revision",
+        "编辑器不显示 SafeInfoDialog，不调用 getRequestSafeInfo 或任何保存/确认端点",
+        "Targeted editor component tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-271",
+      "title": "接入 revision 重算与失败恢复",
+      "description": "作为草案审核用户，我希望字幕组和规则修改以服务端重算结果为准，失败时不会被旧响应覆盖或丢失可恢复输入。",
+      "acceptanceCriteria": [
+        "preview-modify 只发送当前 draft_id、base_revision、最小 patch 和现有安全 storage profile",
+        "成功响应原子更新 Request 快照、字幕组、资源结果和 draft_revision",
+        "同一草案串行写入或使用请求序号拒绝旧响应，重复操作不产生乱序覆盖",
+        "409 conflict/expired/evicted/replayed 清除失效会话并要求重新生成，不静默重放",
+        "普通网络/服务失败保留最后一致资源结果和未应用输入，提供重试与恢复为上次结果",
+        "固定中文错误不渲染 error_data、原始响应或敏感值",
+        "Targeted revision/recovery tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "第二开发批次终点：完成本 story 后停止 Ralph，等待独立审核。"
+    },
+    {
+      "id": "US-272",
+      "title": "接入单番兼容适配层",
+      "description": "作为现有单番用户，我需要在共享核心抽取后仍能沿用当前保存草案流程，直到 F-C 接管保存确认。",
+      "acceptanceCriteria": [
+        "DraftPreviewPanel 收敛为组合 AnimeDraftEditor 的薄兼容适配层",
+        "preview-save 只存在于适配层，AnimeDraftEditor 与 draft session 不导入或调用它",
+        "保存前应用未提交修改并使用最新 revision，成功后一次性清除草案 capability",
+        "现有单番保存、跳转、失效与普通失败行为保持兼容，不接入 confirmRequestSave",
+        "Targeted single compatibility tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-273",
+      "title": "接入批量兼容适配层",
+      "description": "作为现有批量用户，我需要批量卡片复用同一草案核心，同时在 F-D 前保留当前接受流程。",
+      "acceptanceCriteria": [
+        "BatchDraftPreviewPanel 和当前批量卡片复用 AnimeDraftEditor 与同一 draft session",
+        "修改后父卡片、重开详情和共享编辑器观察同一 Request 快照与 revision",
+        "既有 preview-save 到 batch accept 只保留在兼容适配层，不进入共享核心",
+        "不复制表单、字幕组、资源 helper，不提前实现 saveConfirmBatchItems 或新双栏工作台",
+        "单项接受、删除、批量接受和失败重试的现有行为保持兼容",
+        "Targeted batch compatibility tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-274",
+      "title": "完成最终门禁文档归档与后续 handoff",
+      "description": "作为维护者，我需要完整验证共享审核核心并为 F-C、F-D、F-E 留下无歧义的消费边界。",
+      "acceptanceCriteria": [
+        "US-266 至 US-273 的实现、story 状态和独立提交记录完整",
+        "完整前端 api:check、typecheck、lint、unit、build 与完整真实 Chromium 套件通过",
+        "必要后端非浏览器回归、git diff --check 和敏感信息边界检查通过",
+        "OpenAPI、generated client 和后端业务语义无修改，仓库不包含 dist、trace、截图或敏感测试产物",
+        "文档记录 F-C/F-D 移除兼容保存层的 handoff，并明确 SafeInfoDialog/getRequestSafeInfo 仅由 F-E 接入",
+        "Ralph prd/progress 正确归档，工作区状态和设计偏差有记录",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "第三开发批次与 Stage 34 最终终点。"
+    }
+  ]
+}
