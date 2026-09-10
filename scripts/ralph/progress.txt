@@ -29,3 +29,12 @@
 - 下一候选切片为 F-B“共享审核核心”；它只能在 Stage 33 完成后复用本阶段基线。
 
 ---
+## 2026-09-10 19:28:34 CST - US-257
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the production route catalog and reusable query sanitizer for the Stage 33 route matrix. The catalog records `/app/add`, `/app/plans`, `/app/tracking`, and `/app/settings`, their existing Workbench/Requests/Queue/Settings views, parity test coverage, three SPA compatibility paths, and Flask entry mappings. The sanitizer preserves only one non-empty scalar `batch_id` for add/tracking or `request_id` for plans/settings, rejecting arrays, duplicates, empty values, unknown keys, and sensitive query values. No router migration, business page, OpenAPI, or generated client behavior was changed.
+- Files changed: `frontend/src/app/router/catalog.ts`, `frontend/src/app/router/catalog.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep the route/query contract in one production module before US-259 changes the real router and internal navigation.
+  - Treat duplicate query keys as invalid arrays even when one value would otherwise be acceptable; sanitize per field so a valid public identifier survives alongside dropped unknown values.
+  - Validation passed: targeted catalog Vitest (14 tests), Flask route tests (`app_routes_test.py` and `views_test.py`, 202 tests), frontend typecheck, and `git diff --check`. Chromium and full-suite checks were intentionally not run.
+---
