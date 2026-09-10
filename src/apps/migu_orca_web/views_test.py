@@ -415,14 +415,48 @@ def test_get_request_detail_returns_complete_saved_snapshot(tmp_path: Path) -> N
     )
 
     assert response.status_code == 200
-    assert response.get_json() == {
-        "ok": True,
-        "result": {
-            "request": request,
-            "history": {"available": True, "events": [], "error": None},
-            "ab_result": {"available": False, "record": None, "error": None},
-        },
+    payload = response.get_json()
+    assert payload["ok"] is True
+    result = payload["result"]
+    safe_request = result["request"]
+    assert set(safe_request) == {
+        "request_id",
+        "status",
+        "input",
+        "source_info",
+        "confirmable_config",
+        "created_at",
+        "updated_at",
+        "user_action",
     }
+    assert safe_request["request_id"] == request["request_id"]
+    assert safe_request["input"] == {"raw_title": "芙莉莲"}
+    assert set(safe_request["source_info"]["matched_bangumi"]) == {
+        "title",
+        "aliases",
+        "match_score",
+    }
+    assert set(safe_request["source_info"]["rss_sources"][0]) == {
+        "subtitle_group",
+        "source_type",
+        "total_seed_count",
+        "seed_names",
+        "valid_seed_count",
+        "invalid_seed_count",
+        "valid_seed_names",
+        "excluded_seed_names",
+        "warnings",
+    }
+    assert safe_request["confirmable_config"]["selected_rss_url"] == "SELECTED"
+    assert result["history"] == {"available": True, "events": [], "error": None}
+    assert result["ab_result"] == {"available": False, "record": None, "error": None}
+    for forbidden in (
+        "'mikan_url':",
+        "'rss_url':",
+        "'ab_response':",
+        "'fallback_config':",
+    ):
+        assert forbidden not in str(payload)
 
 
 def test_get_request_detail_returns_saved_history_and_ab_result(
@@ -461,15 +495,26 @@ def test_get_request_detail_returns_saved_history_and_ab_result(
     assert payload["ok"] is True
     assert payload["result"]["history"] == {
         "available": True,
-        "events": [event],
+        "events": [
+            {
+                "action": "ACCEPT",
+                "previous_status": "PENDING_CONFIRM",
+                "next_status": "ACCEPTED",
+                "timestamp": event["timestamp"],
+            }
+        ],
         "error": None,
     }
     assert payload["result"]["ab_result"]["available"] is True
     assert payload["result"]["ab_result"]["record"]["request_id"] == "request-1"
-    assert (
-        payload["result"]["ab_result"]["record"]["ab_submit_result"]
-        == request["ab_submit_result"]
-    )
+    assert payload["result"]["ab_result"]["record"]["ab_submit_result"] == {
+        "success": False,
+        "ab_subscription_id": None,
+        "fallback_config": None,
+        "error": None,
+    }
+    assert "'rss_url':" not in str(payload)
+    assert "example.invalid" not in str(payload)
 
 
 def test_get_request_detail_treats_damaged_history_as_nonfatal(
@@ -492,6 +537,7 @@ def test_get_request_detail_treats_damaged_history_as_nonfatal(
     assert payload["result"]["history"]["available"] is False
     assert payload["result"]["history"]["events"] == []
     assert payload["result"]["history"]["error"]["error_type"] == "storage_json_error"
+    assert payload["result"]["history"]["error"]["failed_step"] == "load_status_history"
     assert str(tmp_path) not in str(payload)
 
 

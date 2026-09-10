@@ -688,12 +688,13 @@ def serialize_request_detail(
             "decided_at": _safe_label(raw_user_action.get("decided_at")),
         }
 
-    history_error = None
-    if history_section.get("available") is not True:
-        history_error = {
-            "error_type": "storage_error",
-            "error_message": "状态历史不可用",
-        }
+    # Missing history and a failed history read are distinct loader outcomes.
+    # Keep the already-sanitized loader classification at the public boundary.
+    history_error = (
+        history_section.get("error")
+        if history_section.get("available") is not True
+        else None
+    )
     safe_history = {
         "available": history_section.get("available") is True,
         "events": safe_info["history_summary"],
