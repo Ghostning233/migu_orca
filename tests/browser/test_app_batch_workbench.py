@@ -41,6 +41,10 @@ def _goto_batch(page: Page, live_server_url: str) -> None:
     """Navigate to the SPA workbench and scroll the batch panel into view."""
     _require_dist()
     page.goto(f"{live_server_url}/app/workbench")
+    # US-267 defaults the shared workbench to single mode.  Activate batch
+    # mode before asserting the legacy batch controls used by this suite.
+    page.wait_for_selector("#anime-mode-switch", timeout=5000)
+    page.click("#anime-mode-batch")
     page.wait_for_selector("#batch-parse-form", timeout=5000)
 
 

@@ -292,6 +292,9 @@ class TestKeyboardAndFocus:
         """Opening the batch candidate popover focuses it; Escape closes and
         restores focus to the trigger button (US-207 keyboard accessibility)."""
         _goto(page, live_server_url, "/app/add")
+        page.wait_for_selector("#anime-mode-switch", timeout=5000)
+        page.click("#anime-mode-batch")
+        page.wait_for_selector("#batch-parse-form", timeout=5000)
 
         page.route(
             "**/api/v1/batches/parse",

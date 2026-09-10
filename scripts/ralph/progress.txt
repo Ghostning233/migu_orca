@@ -59,4 +59,9 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Full backend suite: 1780 passed; 14 pre-existing batch-browser failures still target legacy pre-US-267 selectors such as `#batch-parse-form` and `#batch-raw-input`.
 ---
 
+## 2026-09-10 - Stage 34 review after US-268
+- 复核 Ralph 运行产生的批量浏览器失败：旧测试未激活 US-267 新增的批量模式，因而在默认单模式下等待批量控件超时。
+- 仅更新 `tests/browser/test_app_batch_workbench.py` 与 `tests/browser/test_app_responsive_a11y.py` 的模式切换前置步骤；未修改 OpenAPI、generated client、后端或 Stage 34 后续 story。
+- 定向批量浏览器测试、前端 typecheck、相关 Vitest 与 `git diff --check` 已通过。
+
 ---
