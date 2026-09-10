@@ -49,4 +49,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Quality checks passed: frontend typecheck, lint, targeted Vitest (30 tests), build, Python compileall, git diff check, and targeted Chromium mode/input test.
 ---
 
+## 2026-09-10 23:12:00 Asia/Shanghai - US-268
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Extracted CandidateCollectionList as the shared single/batch candidate renderer, preserving explicit selection for zero/one/many candidates, shared season-confirmation and conflict blocking, and public-field-only rendering. Updated both the single workbench and batch candidate popover to use it.
+- Files changed: `frontend/src/features/workbench/CandidateCollectionList.vue`, `frontend/src/features/workbench/CandidateCollectionList.test.ts`, `frontend/src/features/workbench/WorkbenchView.vue`, `frontend/src/features/workbench/BatchCandidatePopover.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Candidate selection policy belongs in the shared list/card boundary; callers should provide only the in-memory confirmation map and handle create payloads/events.
+  - Quality checks passed: compileall, targeted frontend unit tests (23), typecheck, lint, build, and focused candidate/workbench Chromium tests (20).
+  - Full backend suite: 1780 passed; 14 pre-existing batch-browser failures still target legacy pre-US-267 selectors such as `#batch-parse-form` and `#batch-raw-input`.
+---
+
 ---

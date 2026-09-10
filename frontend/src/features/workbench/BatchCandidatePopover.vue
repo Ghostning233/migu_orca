@@ -17,7 +17,7 @@
 // the page) so no focus trap is applied — matching the legacy popover.
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-import CandidateCard from '@/features/workbench/CandidateCard.vue'
+import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
 import type { BatchCandidate } from '@/features/workbench/batchWorkbench'
 
 defineProps<{
@@ -78,18 +78,15 @@ defineExpose({ focusClose: () => closeButton.value?.focus() })
       ×
     </button>
     <p class="field-help">请选择一个真实 MiKan 合集后生成订阅草案。</p>
-    <ul class="candidate-list batch-candidate-list" aria-label="MiKan 候选合集">
-      <CandidateCard
-        v-for="candidate in candidates"
-        :key="candidate.bangumi_id"
-        :candidate="candidate"
-        :query="query"
-        :disabled="disabled"
-        :confirmed-season="confirmedSeasons[candidate.bangumi_id] ?? null"
-        @select="emit('select', candidate)"
-        @update:confirmed-season="(season: number | null) => emit('update:confirmedSeason', candidate.bangumi_id, season)"
-      />
-    </ul>
+    <CandidateCollectionList
+      class="batch-candidate-list"
+      :candidates="candidates"
+      :query="query"
+      :disabled="disabled"
+      :confirmed-seasons="confirmedSeasons"
+      @select="emit('select', $event)"
+      @update:confirmed-season="(bangumiId: string, season: number | null) => emit('update:confirmedSeason', bangumiId, season)"
+    />
   </div>
 </template>
 

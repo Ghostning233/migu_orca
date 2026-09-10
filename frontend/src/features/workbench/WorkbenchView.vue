@@ -32,7 +32,7 @@ import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 
-import CandidateCard from '@/features/workbench/CandidateCard.vue'
+import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
 import DraftPreviewPanel from '@/features/workbench/DraftPreviewPanel.vue'
 import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
 import AnimeModeSwitch, { type AnimeMode } from '@/features/workbench/AnimeModeSwitch.vue'
@@ -248,11 +248,6 @@ function confirmedSeasonFor(candidate: MikanCandidate): number | null {
   return seasonConfirmations.value[key] ?? null
 }
 
-function setConfirmedSeason(candidate: MikanCandidate, season: number | null): void {
-  const key = candidate.bangumi_id
-  seasonConfirmations.value = { ...seasonConfirmations.value, [key]: season }
-}
-
 function onSaved(requestId: string): void {
   draftRequest.value = null
   draftId.value = ''
@@ -400,18 +395,14 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
             </ul>
           </template>
         </section>
-        <ul class="candidate-list" aria-label="MiKan 候选合集">
-          <CandidateCard
-            v-for="candidate in searchResult.candidates"
-            :key="candidate.bangumi_id"
-            :candidate="candidate"
-            :query="searchResult.query"
-            :disabled="searchLoading || draftLoading"
-            :confirmed-season="confirmedSeasonFor(candidate)"
-            @select="generateFromCandidate(candidate)"
-            @update:confirmed-season="(season: number | null) => setConfirmedSeason(candidate, season)"
-          />
-        </ul>
+        <CandidateCollectionList
+          :candidates="searchResult.candidates"
+          :query="searchResult.query"
+          :disabled="searchLoading || draftLoading"
+          :confirmed-seasons="seasonConfirmations"
+          @select="generateFromCandidate"
+          @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
+        />
       </template>
       <EmptyState v-else message="输入番剧标题后搜索候选合集。" />
     </div>
