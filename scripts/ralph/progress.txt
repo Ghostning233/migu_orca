@@ -70,4 +70,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 文件范围：`frontend/src/app/composables/useDraftSession.ts` 及其测试、`frontend/src/features/workbench/WorkbenchView.vue` 及其测试、`frontend/src/features/workbench/BatchWorkbenchView.vue`、本 progress 记录；未进入 US-269，未修改 OpenAPI、generated client、后端或 SafeInfo。
 - 验证通过：指定 5 个 Vitest 文件 36 passed、typecheck、lint、build、`tests/browser/test_app_mode_input.py` 1 passed、`git diff --check`。
 
+## 2026-09-10 - US-266～US-268 follow-up review fix
+- `useDraftSession.reset()` 在 preview-modify 进行中明确 no-op，不递增请求序号、不释放 applying 锁；首个响应仍提交服务端返回的最新 snapshot/revision。`invalidate()` 继续立即清除 capability。
+- 新增回归证明：处理中 reset 后第二次 apply 不调用 API；首个响应更新 revision；请求结束后的普通失败可由 reset 清除 dirty、retry 和 error。
+- 未进入 US-269，未修改其他组件、OpenAPI、generated client 或后端。
+- 验证通过：`useDraftSession.test.ts` 4 passed、typecheck、lint、`git diff --check`。
+
 ---

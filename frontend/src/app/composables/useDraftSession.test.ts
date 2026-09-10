@@ -42,7 +42,7 @@ describe('useDraftSession (US-266)', () => {
     expect(session.draftRevision.value).toBe(2)
   })
 
-  it('clears applying when an in-flight request is invalidated or reset', async () => {
+  it('invalidates immediately but defers reset until the in-flight write finishes', async () => {
     let resolve!: (value: unknown) => void
     vi.mocked(api.post).mockReturnValueOnce(new Promise((done) => { resolve = done }))
     const invalidated = useDraftSession({ request: snapshot, draftId: 'opaque' })
@@ -56,16 +56,37 @@ describe('useDraftSession (US-266)', () => {
     expect(invalidated.applying.value).toBe(false)
 
     let resolveReset!: (value: unknown) => void
+    vi.mocked(api.post).mockClear()
     vi.mocked(api.post).mockReturnValueOnce(new Promise((done) => { resolveReset = done }))
     const reset = useDraftSession({ request: snapshot, draftId: 'opaque' })
     const pendingReset = reset.apply({} as never)
     expect(reset.applying.value).toBe(true)
     reset.reset()
-    expect(reset.applying.value).toBe(false)
-    expect(reset.canRetry.value).toBe(false)
+    expect(reset.applying.value).toBe(true)
+    expect(api.post).toHaveBeenCalledTimes(1)
     resolveReset({ request: snapshot, draft_id: 'opaque', draft_revision: 2 })
     await pendingReset
     expect(reset.applying.value).toBe(false)
+    expect(reset.draftRevision.value).toBe(2)
+
+    vi.mocked(api.post).mockRejectedValueOnce({
+      type: 'network_error',
+      message: '网络请求失败，请检查网络后重试',
+      status: 0,
+      details: null,
+      cancelled: false,
+      network: true,
+      nonJson: false,
+      httpError: false,
+    })
+    await reset.apply({} as never)
+    expect(reset.dirty.value).toBe(true)
+    expect(reset.canRetry.value).toBe(true)
+    expect(reset.error.value).not.toBeNull()
+    reset.reset()
+    expect(reset.dirty.value).toBe(false)
+    expect(reset.canRetry.value).toBe(false)
+    expect(reset.error.value).toBeNull()
   })
 
   it('invalidates the capability for draft conflicts and preserves ordinary failures', async () => {

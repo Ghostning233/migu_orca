@@ -149,8 +149,10 @@ export function useDraftSession(options: DraftSessionOptions): DraftSession {
 
   function reset(): void {
     // Reset means recover the editing surface to the last consistent result;
-    // it does not regenerate or silently replay an invalid draft.
-    if (invalid.value) return
+    // it does not regenerate or silently replay an invalid draft. While a
+    // preview-modify owns the revision lock, reset is deliberately a no-op:
+    // cancelling the local lock would let another apply reuse its base.
+    if (invalid.value || applying.value) return
     requestSequence.value += 1
     dirty.value = false
     applying.value = false
