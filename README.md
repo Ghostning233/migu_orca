@@ -12,6 +12,8 @@ Stage 31「Auto Bangumi 可靠写管理」已完成 B-C2：在精确 3.1.18 pass
 
 Stage 32「后端契约固化、兼容迁移与前端交接」已完成 B-D：冻结 B-A～B-C2 端点生命周期、严格 DTO/OpenAPI/生成类型、旧入口兼容与 tracking 权威状态、历史 schema 迁移、capability 降级、安全泄漏矩阵、发布回退和版本化前端 handoff。US-247～US-256 已全部通过并归档；不新增管理动作、不删除仍有调用方的旧端点、不开发正式追番管理页面。执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`。
 
+Stage 33 已规划为 F-A「前端应用壳层与设计系统」（US-257～US-265）：基于 Stage 32 合入后的生成契约建立“添加番剧 / 追番方案 / 追番管理 / 设置”四项导航、新旧路由安全迁移、语义设计 Token、桌面壳层与共享状态视觉，并无损挂载现有页面。`/app/tracking` 本阶段仍使用现有 `QueueView` 兼容内容，不实现 F-B～F-G 或正式追番管理。执行范围见 `docs/MiGuOrca_stage33_frontend_shell_PRD.md`。
+
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI、静态检查、OpenAPI 漂移检查、真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。

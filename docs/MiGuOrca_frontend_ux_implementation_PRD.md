@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | 待评审；未分配正式 Stage 编号，未授权实现 |
+| 当前状态 | F-A 已规划为 Stage 33（US-257～US-265，待开发）；F-B～F-G 待评审 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-026 |
 | 优先级 | P1；各切片按后端依赖分别解锁 |
@@ -13,8 +13,9 @@
 | 视觉基线 | 视觉方向 V1、设计 Token V1 |
 | 交互基线 | 桌面端前端交互规格 AC-01～AC-25 |
 
-本 PRD 把全面重构拆成可以独立开发、评审、回退和验收的前端切片。正式排期前不锁定 Stage
-编号；实现 Agent 每次只接收一个切片及其已经冻结的 API，不得一边写页面一边设计后端契约。
+本 PRD 把全面重构拆成可以独立开发、评审、回退和验收的前端切片。F-A 已在 Stage 32 合入后
+冻结为 Stage 33，执行边界见 `docs/MiGuOrca_stage33_frontend_shell_PRD.md`；F-B～F-G 仍需逐包
+评审。实现 Agent 每次只接收一个切片及其已经冻结的 API，不得一边写页面一边设计后端契约。
 
 ## 2. 产品目标
 
@@ -228,7 +229,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 
 推荐依赖顺序为 `F-A → F-B → (F-C, F-D, F-E) → F-F → F-G`。F-C、F-D、F-E 在共享核心
 稳定后可由不同执行会话并行，但共享 store/API 类型变更必须先合入基线，不能在三个 PR 中分别
-实现同名组件。F-F 必须等 B-C2/B-D 管理契约冻结；Stage 30 B-C1 只读同步完成不代表写管理能力已就绪，不能使用 mock-only 页面先冒充功能完成。
+实现同名组件。B-C2/B-D 管理契约已由 Stage 31/32 冻结；F-F 仍须等待 F-A/F-B 基线并单独规划，不能使用 mock-only 页面先冒充功能完成。
 
 > 状态注记（2026-09-08）：B-A 已作为 Stage 28 完成（revision、可靠保存、单番/批量 save-confirm、
 > 36 部边界与 safe-info 均已交付，执行 PRD 见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；
@@ -236,8 +237,8 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 > 列表/详情/revalidate/submit/retry/recover 与旧入口收敛，执行 PRD 见
 > `docs/MiGuOrca_stage29_unified_tracking_PRD.md`，B-C handoff 见 future_stages）。
 > 上表 F-B～F-E 依赖的「B-A 部分能力」与「B-B tracking」现已可用，F-C/F-D 的
-> 「保存确认后跳转追番管理」可以开始接入本地 tracking 列表；F-F 仍需等待 B-C2/B-D 的
-> Auto Bangumi 管理契约冻结，不能使用 mock-only 页面先冒充功能完成。
+> 「保存确认后跳转追番管理」可以开始接入本地 tracking 列表；B-C2/B-D 已由 Stage 31/32 完成，
+> 但 F-F 仍需等待 F-A/F-B 基线并单独规划，不能使用 mock-only 页面先冒充功能完成。
 
 ## 10. PR 与回退边界
 

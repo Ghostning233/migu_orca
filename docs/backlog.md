@@ -536,10 +536,12 @@ Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-
 
 ### BL-026: 桌面端前端体验分片重构
 
-- 状态：候选，PRD 已落盘，待 Gate 4 评审
+- 状态：F-A 已规划为 Stage 33，F-B～F-G 待评审
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：21，P1
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_implementation_PRD.md`
+- Stage 33 执行 PRD：`docs/MiGuOrca_stage33_frontend_shell_PRD.md`
+- Stage 33 执行分支：`ralph/stage33-frontend-shell`；Ralph stories 为 US-257～US-265（待开发）
 
 候选范围：
 
