@@ -26,7 +26,7 @@
 // fields) + storage_dir (relative profile). Destructive/irreversible actions
 // go through the shared ConfirmDialog and failures surface fixed Chinese copy
 // only.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
@@ -36,9 +36,9 @@ import EmptyState from '@/components/feedback/EmptyState.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
-import BaseTextarea from '@/components/forms/BaseTextarea.vue'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
+import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
 
 import {
   acceptFeedbackLabel,
@@ -83,8 +83,17 @@ const router = useRouter()
 const notification = useNotificationStore()
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
+const props = withDefaults(defineProps<{ rawInput?: string; hideInput?: boolean }>(), { rawInput: '', hideInput: false })
+const emit = defineEmits<{ (event: 'update:rawInput', value: string): void }>()
+
 // Batch parse state.
-const rawInput = ref('')
+const rawInput = ref(props.rawInput)
+
+watch(() => props.rawInput, (value) => {
+  if (value !== rawInput.value) rawInput.value = value
+})
+
+watch(rawInput, (value) => emit('update:rawInput', value))
 const parseLoading = ref(false)
 const parseError = ref('')
 const parseResult = ref<BatchParseResult | null>(null)
@@ -433,11 +442,11 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
   <PanelSection title="批量工作台" class="batch-workbench-panel">
     <form id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch">
       <label for="batch-raw-input">批量番剧名称</label>
-      <BaseTextarea
+      <AnimeTitleInput
+        v-if="!props.hideInput"
         id="batch-raw-input"
         v-model="rawInput"
-        rows="6"
-        placeholder="萌王S4&#10;路哥S4&#10;杖剑谭S2&#10;邻家天使S2"
+        mode="batch"
         :disabled="parseLoading"
       />
       <p class="field-help" id="batch-parse-help">

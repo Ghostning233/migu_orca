@@ -23,6 +23,7 @@
   必须使用 `dev-browser` skill 在真实 Chromium 验证。
 - 共享草案状态应从 generated `createRequest`/`previewModifyRequest` 类型提取别名；用本地请求序号
   只允许最新 preview-modify 响应提交，失效错误先使 opaque capability 失效，普通错误保留最后一致快照。
+- 模式输入使用 `AnimeModeSwitch` 的 tab 语义与键盘激活；`AnimeTitleInput` 统一单行/批量输入，模式值、输入值和选择范围只保存在工作台组件内存。
 
 ## Stage 34 Handoff
 
@@ -36,6 +37,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The existing transport returns safe `ApiError` objects; draft-session code can classify only stable error types and must not surface raw thrown values.
   - `vue` refs expose generated object snapshots through proxies in tests, so snapshot assertions should use structural equality.
   - Quality checks passed: compileall, 1793 backend tests, 308 frontend unit tests, typecheck, lint, build, API drift check, and git diff check.
+---
+
+## 2026-09-10 23:03:00 Asia/Shanghai - US-267
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the single/batch mode switch and unified title input. `/app/add` now defaults to single search, shows only the active mode, preserves independent input values and cursor selections, normalizes single-line input, auto-grows batch input, and keeps mode state out of URL and browser storage. Existing batch parsing remains on its established API path.
+- Files changed: `frontend/src/features/workbench/AnimeModeSwitch.vue`, `frontend/src/features/workbench/AnimeModeSwitch.test.ts`, `frontend/src/features/workbench/AnimeTitleInput.vue`, `frontend/src/features/workbench/AnimeTitleInput.test.ts`, `frontend/src/features/workbench/WorkbenchView.vue`, `frontend/src/features/workbench/BatchWorkbenchView.vue`, `tests/browser/test_app_mode_input.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The shared batch view can accept a component-local `rawInput` prop/update pair and hide its legacy input, allowing the parent workbench to own the unified input without changing batch API payload construction.
+  - Component refs to `BaseInput`/`BaseTextarea` expose a Vue component proxy; DOM selection and resize logic must resolve the proxy `$el` before using native input APIs.
+  - Quality checks passed: frontend typecheck, lint, targeted Vitest (30 tests), build, Python compileall, git diff check, and targeted Chromium mode/input test.
 ---
 
 ---

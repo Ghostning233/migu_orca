@@ -18,7 +18,7 @@
 // candidate is ever auto-selected; parser hints are never treated as real
 // season evidence (only the explicit confirmation checkbox or the server's
 // one-time candidate_context can do that).
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
@@ -35,6 +35,8 @@ import PanelSection from '@/components/layout/PanelSection.vue'
 import CandidateCard from '@/features/workbench/CandidateCard.vue'
 import DraftPreviewPanel from '@/features/workbench/DraftPreviewPanel.vue'
 import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
+import AnimeModeSwitch, { type AnimeMode } from '@/features/workbench/AnimeModeSwitch.vue'
+import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
 import {
   buildCandidateCreatePayload,
   buildFallbackCreatePayload,
@@ -59,6 +61,14 @@ const notification = useNotificationStore()
 
 // Search state.
 const query = ref('')
+const batchQuery = ref('')
+const mode = ref<AnimeMode>('single')
+const singleInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
+const batchInput = ref<InstanceType<typeof AnimeTitleInput> | null>(null)
+const selections = ref<Record<AnimeMode, { start: number; end: number }>>({
+  single: { start: 0, end: 0 },
+  batch: { start: 0, end: 0 },
+})
 const searchLoading = ref(false)
 const searchError = ref('')
 const searchResult = ref<CandidateSearchResult | null>(null)
@@ -76,6 +86,22 @@ const draftRevision = ref(1)
 const draftLoading = ref(false)
 
 const hasResults = computed(() => (searchResult.value?.candidates?.length ?? 0) > 0)
+
+async function changeMode(nextMode: AnimeMode): Promise<void> {
+  if (nextMode === mode.value || searchLoading.value || draftLoading.value) return
+  const currentInput = mode.value === 'single' ? singleInput.value : batchInput.value
+  if (currentInput) selections.value[mode.value] = currentInput.selection()
+  mode.value = nextMode
+  // A result belongs to the mode that produced it; never present it as the
+  // result of the newly selected mode.
+  searchResult.value = null
+  searchError.value = ''
+  await nextTick()
+  const nextInput = nextMode === 'single' ? singleInput.value : batchInput.value
+  nextInput?.focus()
+  const selection = selections.value[nextMode]
+  nextInput?.restoreSelection(selection.start, selection.end)
+}
 
 function parseSummaryRows(): Array<[string, string]> {
   const parse = searchResult.value?.parse_result
@@ -269,14 +295,15 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
 
   <PanelSection title="创建订阅方案" class="workbench-panel">
     <!-- ── single search ──────────────────────────────────────────── -->
-    <form id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
+    <AnimeModeSwitch :model-value="mode" :disabled="searchLoading || draftLoading" @update:model-value="changeMode" />
+
+    <form v-if="mode === 'single'" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
       <label for="mikan-candidate-query">番剧标题</label>
-      <BaseInput
+      <AnimeTitleInput
+        ref="singleInput"
         id="mikan-candidate-query"
         v-model="query"
-        type="text"
-        autocomplete="off"
-        placeholder="例如：葬送的芙莉莲"
+        mode="single"
         :disabled="searchLoading"
       />
       <p class="field-help" id="mikan-candidate-help">
@@ -292,44 +319,46 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       </div>
     </form>
 
-    <!-- ── direct fallback ────────────────────────────────────────── -->
-    <CheckboxRow
-      id="mikan-fallback-enabled"
-      v-model:checked="fallbackEnabled"
-      label="搜索无结果时使用直连合集"
-      help="可选：勾选后可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或订阅方案 JSON。"
-    />
-    <form
-      v-if="fallbackEnabled"
-      id="mikan-fallback-form"
-      class="candidate-fallback-form"
-      @submit.prevent="generateFromFallback"
-    >
-      <label for="mikan-fallback-bangumi">MiKan 合集 URL 或 ID</label>
-      <BaseInput
-        id="mikan-fallback-bangumi"
-        v-model="fallbackValue"
-        type="text"
-        autocomplete="off"
-        placeholder="mikan.example/Home/Bangumi/2353 或 2353"
-        :disabled="fallbackLoading"
+    <!-- ── direct fallback (single mode only) ────────────────────── -->
+    <template v-if="mode === 'single'">
+      <CheckboxRow
+        id="mikan-fallback-enabled"
+        v-model:checked="fallbackEnabled"
+        label="搜索无结果时使用直连合集"
+        help="可选：勾选后可粘贴 MiKan 合集 URL 或数字 ID 直接生成订阅草案；仅用于本次生成，不写入浏览器存储、URL、history 或订阅方案 JSON。"
       />
-      <p class="field-help" id="mikan-fallback-help">
-        仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
-      </p>
-      <p v-if="fallbackError" id="mikan-fallback-error" class="field-error" role="alert">
-        {{ fallbackError }}
-      </p>
-      <div class="notification-actions">
-        <BaseButton id="mikan-fallback-generate" type="submit" variant="secondary" :loading="fallbackLoading">
-          使用直连合集生成
-        </BaseButton>
-      </div>
-    </form>
+      <form
+        v-if="fallbackEnabled"
+        id="mikan-fallback-form"
+        class="candidate-fallback-form"
+        @submit.prevent="generateFromFallback"
+      >
+        <label for="mikan-fallback-bangumi">MiKan 合集 URL 或 ID</label>
+        <BaseInput
+          id="mikan-fallback-bangumi"
+          v-model="fallbackValue"
+          type="text"
+          autocomplete="off"
+          placeholder="mikan.example/Home/Bangumi/2353 或 2353"
+          :disabled="fallbackLoading"
+        />
+        <p class="field-help" id="mikan-fallback-help">
+          仅接受数字 ID 或同源 HTTP(S) /Home/Bangumi/&lt;id&gt; URL；生成成功后清空。
+        </p>
+        <p v-if="fallbackError" id="mikan-fallback-error" class="field-error" role="alert">
+          {{ fallbackError }}
+        </p>
+        <div class="notification-actions">
+          <BaseButton id="mikan-fallback-generate" type="submit" variant="secondary" :loading="fallbackLoading">
+            使用直连合集生成
+          </BaseButton>
+        </div>
+      </form>
+    </template>
   </PanelSection>
 
   <!-- ── search results ──────────────────────────────────────────── -->
-  <PanelSection title="搜索结果" class="search-results-panel">
+  <PanelSection v-if="mode === 'single'" title="搜索结果" class="search-results-panel">
     <div
       id="mikan-candidate-search-result"
       class="candidate-list-wrapper"
@@ -403,7 +432,12 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   <LoadingState v-if="draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />
 
   <!-- ── batch workbench (US-205) ────────────────────────────────── -->
-  <BatchWorkbenchView class="batch-workbench-section" />
+  <template v-if="mode === 'batch'">
+    <label for="batch-raw-input">批量番剧名称</label>
+    <AnimeTitleInput ref="batchInput" id="batch-raw-input" v-model="batchQuery" mode="batch" />
+    <p class="field-help" id="batch-raw-input-help">每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。</p>
+    <BatchWorkbenchView class="batch-workbench-section" v-model:raw-input="batchQuery" hide-input />
+  </template>
 </template>
 
 <style scoped>
