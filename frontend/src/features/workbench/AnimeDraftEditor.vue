@@ -165,6 +165,7 @@ defineExpose({ patch, dirty })
           <BaseButton :id="`${idPrefix}-apply-button`" type="submit" variant="primary" :loading="applying" :disabled="disabled || !dirty">应用修改</BaseButton>
         </div>
       </form>
+      <slot name="review-note" />
 
       <section class="detail-section overview-section" aria-label="Overview">
         <h4 class="detail-section-heading">Overview</h4>
