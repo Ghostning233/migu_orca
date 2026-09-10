@@ -540,21 +540,42 @@ class TestAppRequestDetailSensitive:
         selected_source = request["source_info"]["rss_sources"][0]
         selected_source.update(
             {
-                "rss_url": "https://stage32-artifact-endpoint.invalid/rss.xml",
-                "raw_response_body": "stage32-artifact-raw-body",
-                "token": "stage32-artifact-token",
-                "cookie": "stage32-artifact-cookie",
-                "magnet": "stage32-artifact-magnet",
+                "rss_url": "https://stage32-d32-rss.invalid/rss.xml",
+                "raw_response_body": "stage32-d32-raw-response",
+                "token": "stage32-d32-token",
+                "cookie": "stage32-d32-cookie",
+                "authorization": "stage32-d32-authorization",
+                "password": "stage32-d32-password",
+                "endpoint": "stage32-d32-endpoint.invalid",
+                "magnet": "stage32-d32-magnet",
+                "external_id": "stage32-d32-external-id",
+                "patch": "stage32-d32-patch-body",
+                "traceback": "stage32-d32-traceback",
+                "absolute_path": "/stage32/d32/private/path",
             }
+        )
+        request["source_info"]["matched_bangumi"]["mikan_url"] = (
+            "https://stage32-d32-mikan.invalid/Home/Bangumi/32032"
+        )
+        request["confirmable_config"]["selected_rss_url"] = (
+            "https://stage32-d32-rss.invalid/rss.xml"
         )
         save_request_snapshot(load_storage_config(storage_dir), request)
         set_storage_preferences(page, storage_dir)
         canaries = (
-            "stage32-artifact-endpoint.invalid",
-            "stage32-artifact-raw-body",
-            "stage32-artifact-token",
-            "stage32-artifact-cookie",
-            "stage32-artifact-magnet",
+            "stage32-d32-password",
+            "stage32-d32-token",
+            "stage32-d32-cookie",
+            "stage32-d32-authorization",
+            "stage32-d32-endpoint.invalid",
+            "stage32-d32-rss.invalid/rss.xml",
+            "stage32-d32-mikan.invalid/Home/Bangumi/32032",
+            "stage32-d32-magnet",
+            "stage32-d32-external-id",
+            "stage32-d32-raw-response",
+            "stage32-d32-patch-body",
+            "stage32-d32-traceback",
+            "/stage32/d32/private/path",
         )
         screenshot_path = tmp_path / "request-detail.png"
         trace_path = tmp_path / "request-detail-trace.zip"
@@ -586,16 +607,26 @@ class TestAppRequestDetailSensitive:
                 """async () => {
                     const response = await fetch(
                         '/api/v1/requests/req-stage32-artifacts/safe-info?storage_dir=storage'
-                    )
-                    return await response.text()
-                }"""
+            )
+            return await response.text()
+            }"""
+            )
+            dom = page.locator("body")
+            observable_texts = (
+                safe_info,
+                dom.inner_text(),
+                dom.text_content() or "",
+                dom.evaluate("element => element.innerHTML"),
+                dom.aria_snapshot(),
             )
             for canary in canaries:
-                assert canary not in safe_info
+                assert all(canary not in text for text in observable_texts)
             page.screenshot(path=str(screenshot_path), full_page=True)
         finally:
             page.context.tracing.stop(path=str(trace_path))
 
+        # The DOM/accessible-text assertions above are the primary screenshot
+        # safety proof; the binary scan is only an additional artifact check.
         screenshot_bytes = screenshot_path.read_bytes()
         for canary in canaries:
             assert canary.encode() not in screenshot_bytes
