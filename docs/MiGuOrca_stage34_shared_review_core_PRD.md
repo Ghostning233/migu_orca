@@ -7,7 +7,7 @@
 | Stage | 34 |
 | 工作包 | F-B：共享审核核心 |
 | Backlog | BL-026 |
-| 状态 | 已规划，待开发 |
+| 状态 | 已完成并归档 |
 | 目标分支 | `ralph/stage34-shared-review-core` |
 | Ralph stories | US-266～US-274 |
 | 实时基线 | `origin/main` 合并提交 `9f2e06b`（Stage 33 已合入） |
@@ -15,7 +15,7 @@
 
 ## 2. 背景与阶段判断
 
-Stage 33 已交付四项导航、语义 Token、共享 UI 原语和现有页面的兼容挂载。当前
+Stage 33 已交付四项导航、语义 Token、共享 UI 原语和现有页面的兼容挂载。Stage 34 已完成
 `DraftPreviewPanel` 已被单番与批量复用，但仍同时承担草案展示、表单状态、
 `preview-modify`、`preview-save` 和通知；`BatchDraftPreviewPanel` 又依赖其暴露的保存方法。
 这使 F-C 单番保存确认和 F-D 批量保存确认无法在不触碰旧保存语义的情况下复用审核界面。
@@ -232,3 +232,19 @@ git diff --check
 5. 未修改 OpenAPI/generated client/后端业务，未实现或伪造 SafeInfo、F-C～F-G 页面。
 6. Stage 34 合入并稳定后，再分别评审 F-C 单番添加、F-D 批量审核和 F-E 追番方案；不预先锁定
    它们的 Stage 编号或并行方式。
+
+### 10.1 归档证据与后续消费边界
+
+- US-266～US-274 均已通过并保留独立提交；Ralph 状态归档于
+  `scripts/ralph/archive/2026-09-11-stage34-shared-review-core/`。
+- 最终门禁通过：compileall、Ruff、1,636 个非浏览器后端测试、OpenAPI drift、前端 typecheck/lint、
+  325 个 Vitest 单元测试、生产构建、完整真实 Chromium 套件和 `git diff --check`。
+- Stage 34 未修改 OpenAPI、generated client 或后端业务语义；安全边界检查确认 draft capability、
+  revision、candidate context、敏感配置和原始响应体不进入 URL、DOM、browser storage、日志、截图
+  或 trace。
+- F-C 应以 `AnimeDraftEditor`/`useDraftSession` 的公开事件和服务端权威 snapshot/revision 为基础，
+  接管单番保存确认后删除 `DraftPreviewPanel` 的 `preview-save` 兼容路径。
+- F-D 应复用同一编辑器/会话边界，接管批量保存确认和部分成功流程后删除
+  `BatchDraftPreviewPanel` 的 `preview-save`/accept 兼容路径。
+- F-E 独占已保存 Request 语境下的 `SafeInfoDialog`/`getRequestSafeInfo`；不得从未保存草案拼接或
+  模拟“全部信息”。Stage 34 不实现 F-C～F-G 页面。

@@ -12,7 +12,7 @@ Stage 31「Auto Bangumi 可靠写管理」已完成 B-C2：在精确 3.1.18 pass
 
 Stage 32「后端契约固化、兼容迁移与前端交接」已完成 B-D：冻结 B-A～B-C2 端点生命周期、严格 DTO/OpenAPI/生成类型、旧入口兼容与 tracking 权威状态、历史 schema 迁移、capability 降级、安全泄漏矩阵、发布回退和版本化前端 handoff。US-247～US-256 已全部通过并归档；不新增管理动作、不删除仍有调用方的旧端点、不开发正式追番管理页面。执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`。
 
-Stage 33 已完成 F-A「前端应用壳层与设计系统」（US-257～US-265）：基于 Stage 32 合入后的生成契约交付“添加番剧 / 追番方案 / 追番管理 / 设置”四项导航、新旧路由安全迁移、语义设计 Token、桌面壳层、共享状态视觉及现有页面兼容挂载。`/app/tracking` 仍使用现有 `QueueView` 兼容内容，不代表正式追番管理。当前 Stage 34 已规划 F-B「前端共享审核核心」（US-266～US-274）；真实 `SafeInfoDialog` 延后到 F-E。执行边界见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`。
+Stage 33 已完成 F-A「前端应用壳层与设计系统」（US-257～US-265）：基于 Stage 32 合入后的生成契约交付“添加番剧 / 追番方案 / 追番管理 / 设置”四项导航、新旧路由安全迁移、语义设计 Token、桌面壳层、共享状态视觉及现有页面兼容挂载。`/app/tracking` 仍使用现有 `QueueView` 兼容内容，不代表正式追番管理。Stage 34 已完成 F-B「前端共享审核核心」（US-266～US-274）：单番/批量共享模式输入、候选集合、服务端权威草案编辑器、revision 失败恢复和薄兼容适配层；旧保存/接受流程暂留在适配层，F-C/F-D 分别接管后移除，真实 `SafeInfoDialog`/`getRequestSafeInfo` 仅由 F-E 接入。执行范围与 handoff 见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`。
 
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 

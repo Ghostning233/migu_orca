@@ -33,6 +33,7 @@
   B-C1 已完成并交付为[Stage 30：Auto Bangumi 只读能力与外部同步基础](MiGuOrca_stage30_ab_read_sync_PRD.md)，
   B-C2 已完成并交付为[Stage 31：Auto Bangumi 可靠写管理](MiGuOrca_stage31_ab_write_management_PRD.md)，
   B-D 已完成为[Stage 32：后端契约固化、兼容迁移与前端交接](MiGuOrca_stage32_contract_hardening_PRD.md)，
+  F-B 已完成为[Stage 34：前端共享审核核心](MiGuOrca_stage34_shared_review_core_PRD.md)，
   F-A 已完成为[Stage 33：前端应用壳层与设计系统](MiGuOrca_stage33_frontend_shell_PRD.md)，
   F-B 已规划为[Stage 34：前端共享审核核心](MiGuOrca_stage34_shared_review_core_PRD.md)，
   其余工作包仍按依赖独立评审。

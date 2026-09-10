@@ -125,5 +125,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Batch compatibility hosts should own only batch actions plus preview-save/accept transport; shared editor rendering and preview-modify state belong to `AnimeDraftEditor` and `useDraftSession`.
   - A named editor slot keeps compatibility-specific guidance inside the shared detail container without adding a second editor implementation or changing the single-item copy.
-  - Verification passed: frontend typecheck, lint, targeted unit tests (10), build, compileall, diff check, and real Chromium batch suite (13 tests).
+- Verification passed: frontend typecheck, lint, targeted unit tests (10), build, compileall, diff check, and real Chromium batch suite (13 tests).
+---
+
+## 2026-09-11 00:45:00 Asia/Shanghai - US-274
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Completed the Stage 34 F-B closeout, synchronized the README, main PRD, future stages, backlog, frontend work goals, M13 module PRD, documentation index, and Stage 34 PRD with the delivered shared review core and explicit F-C/F-D/F-E handoff boundaries. Marked US-274 passing and recorded the archive location.
+- Files changed: README.md, docs/README.md, docs/MiGuOrca_main_PRD.md, docs/MiGuOrca_future_stages.md, docs/MiGuOrca_stage34_shared_review_core_PRD.md, docs/backlog.md, docs/frontend-ux-refactor-work-goals.md, docs/modules/M13-web-ui-PRD.md, tests/browser/test_app_mode_input.py, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Stage closeout must update the user-facing status sources together: README, main/future PRDs, backlog, frontend work goals, M13 module record, docs index, execution PRD, and Ralph state.
+  - The shared core handoff is explicit: F-C/F-D own removal of the single/batch compatibility save paths, while F-E alone may use SafeInfo for saved Requests.
+  - Final verification passed: compileall, Ruff, 1,636 non-browser backend tests, API drift check, typecheck, lint, 325 frontend unit tests, build, 158 Chromium tests, and git diff check.
 ---
