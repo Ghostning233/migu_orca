@@ -56,3 +56,22 @@ router.afterEach((to) => {
   const title = typeof to.meta.title === 'string' ? to.meta.title : 'MiGuOrca'
   document.title = `${title} · MiGuOrca`
 })
+
+router.beforeEach((to) => {
+  if (typeof to.name !== 'string' || !(to.name in routeCatalog)) return true
+
+  const route = to.name as AppRouteKey
+  const sanitized = routeLocation(route, to.query).query
+  const currentKeys = Object.keys(to.query)
+  const sanitizedKeys = Object.keys(sanitized)
+  const queryMatches =
+    currentKeys.length === sanitizedKeys.length &&
+    sanitizedKeys.every((key) => {
+      const current = to.query[key]
+      const expected = sanitized[key]
+      return typeof current === 'string' && current === expected
+    })
+
+  if (queryMatches) return true
+  return { path: to.path, query: sanitized, replace: true }
+})

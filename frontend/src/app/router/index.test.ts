@@ -32,4 +32,12 @@ describe('Stage 33 application router (US-259)', () => {
 
     expect(router.currentRoute.value.fullPath).toBe(expected)
   })
+
+  it('sanitizes query values on direct visits to canonical routes', async () => {
+    await router.replace(
+      '/add?batch_id=batch-direct&token=drop-me&endpoint=secret.example.invalid',
+    )
+
+    expect(router.currentRoute.value.fullPath).toBe('/add?batch_id=batch-direct')
+  })
 })

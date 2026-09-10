@@ -27,6 +27,10 @@
   `/add` query 白名单为空的结论错误，且迁移前断言不可作为长期 drift guard。
 - 不迁移旧 clone 的 Claude/K3 runner、Chromium 动态库 symlink、重复 `.gitignore` 或网络失败记录。
 - 下一候选切片为 F-B“共享审核核心”；它只能在 Stage 33 完成后复用本阶段基线。
+- Canonical Vue routes must sanitize their own incoming query on direct visits as well as
+  legacy redirects; otherwise unknown or sensitive values remain in the browser URL.
+- Desktop accessibility coverage can model 200% zoom with a 2x document scale at a
+  1280px viewport, while checking all public shell navigation targets remain visible.
 
 ---
 ## 2026-09-10 19:28:34 CST - US-257
@@ -91,4 +95,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - QueueView renders its submit form only after a queue item loads; parity tests must provide a safe mocked queue response when asserting submit controls.
   - Existing feature unit/browser suites already own business behavior; shell parity should assert route mounting and distinctive entry controls without duplicating domain logic.
   - Validation passed: frontend typecheck, lint, 304 unit tests, production build, feature-parity Chromium tests (5), existing feature Chromium regression set (119), compileall, and full Python suite (1776 passed).
+---
+## 2026-09-10 20:33:58 CST - US-264
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Extended the real-Chromium responsive/accessibility matrix to 1440 and 1920 desktop widths, added 200%-equivalent route reachability checks, verified keyboard access to all four public navigation targets, and added a shell-level query-canary check across URL, DOM, browser storage, and history. Fixed the production router to sanitize query parameters on direct visits to canonical routes, not only compatibility redirects.
+- Files changed: `frontend/src/app/router/index.ts`, `frontend/src/app/router/index.test.ts`, `tests/browser/test_app_responsive_a11y.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Canonical route guards must reapply the route catalog sanitizer because users can enter new paths directly without passing through a legacy redirect.
+  - Validation passed: 36 targeted Chromium tests, frontend lint, 305 frontend unit tests, typecheck, production build, Python compileall, and `git diff --check`. Full cross-project/browser gates remain reserved for US-265.
 ---

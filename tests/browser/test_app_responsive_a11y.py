@@ -86,7 +86,9 @@ class TestCrossFeatureResponsive:
             ("/app/settings", "#settings-heading"),
         ],
     )
-    @pytest.mark.parametrize("viewport", [(360, 800), (768, 1024), (1280, 900)])
+    @pytest.mark.parametrize(
+        "viewport", [(360, 800), (768, 1024), (1280, 900), (1440, 900), (1920, 1080)]
+    )
     def test_routes_no_horizontal_overflow(
         self,
         page: Page,
@@ -164,6 +166,68 @@ class TestCrossFeatureResponsive:
         status = page.locator(".batch-queue-status")
         assert "batch-queue-status-" in (status.get_attribute("class") or "")
 
+    @pytest.mark.parametrize(
+        "path, selector",
+        [
+            ("/app/add", "#workbench-heading"),
+            ("/app/plans", "#request-list-container"),
+            ("/app/tracking", "#batch-queue-list"),
+            ("/app/settings", "#settings-heading"),
+        ],
+    )
+    def test_desktop_200_percent_equivalent_keeps_route_content_reachable(
+        self,
+        page: Page,
+        live_server_url: str,
+        path: str,
+        selector: str,
+    ) -> None:
+        """A 2x page scale models the desktop 200% effective CSS viewport."""
+        page.set_viewport_size({"width": 1280, "height": 900})
+        _goto(page, live_server_url, path)
+        page.evaluate("() => { document.documentElement.style.zoom = '2' }")
+        expect(page.locator(selector).first).to_be_visible()
+        _no_horizontal_overflow(page, 1280)
+
+        # The shell remains usable at the reduced effective width: every
+        # public navigation target is still visible and keyboard reachable.
+        for label, _selector in _nav_targets():
+            link = page.get_by_role("link", name=label, exact=True)
+            expect(link).to_be_visible()
+            box = link.bounding_box()
+            assert box is not None and box["x"] >= 0 and box["x"] + box["width"] <= 1280
+
+    def test_public_shell_drops_sensitive_query_canaries(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """Shell navigation never exposes unknown or sensitive query values."""
+        canaries = (
+            "shell-token-canary",
+            "shell-cookie-canary",
+            "shell-endpoint-canary.invalid",
+        )
+        page.goto(
+            f"{live_server_url}/app/add?batch_id=batch-public"
+            f"&token={canaries[0]}&cookie={canaries[1]}"
+            f"&endpoint={canaries[2]}"
+        )
+        page.wait_for_selector(".app-title")
+
+        assert page.url.endswith("/app/add?batch_id=batch-public")
+        visible = page.locator("body").inner_text()
+        browser_storage = page.evaluate(
+            """() => ({
+              local: JSON.stringify(localStorage),
+              session: JSON.stringify(sessionStorage),
+              history: JSON.stringify(window.history.state),
+            })"""
+        )
+        for canary in canaries:
+            assert canary not in visible
+            assert canary not in browser_storage["local"]
+            assert canary not in browser_storage["session"]
+            assert canary not in browser_storage["history"]
+
 
 class TestKeyboardAndFocus:
     """AC: 键盘导航、焦点恢复和 skip link."""
@@ -198,6 +262,29 @@ class TestKeyboardAndFocus:
             page.get_by_role("link", name=label, exact=True).click()
             main = page.locator("main#app-main")
             expect(main).to_have_attribute("tabindex", "-1")
+
+    def test_keyboard_can_reach_every_public_navigation_target(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """The skip link and all four route links are in the keyboard path."""
+        _goto(page, live_server_url, "/app/add")
+        page.keyboard.press("Tab")
+        assert page.locator("#skip-link").evaluate(
+            "el => el === document.activeElement"
+        )
+
+        focused_labels: list[str] = []
+        for _ in range(12):
+            page.keyboard.press("Tab")
+            label = page.evaluate(
+                """() => document.activeElement?.getAttribute('aria-label') ||
+                document.activeElement?.textContent?.trim() || ''"""
+            )
+            for expected in ("添加番剧", "追番方案", "追番管理", "设置"):
+                if expected in label and expected not in focused_labels:
+                    focused_labels.append(expected)
+
+        assert focused_labels == ["添加番剧", "追番方案", "追番管理", "设置"]
 
     def test_batch_popover_escape_restores_focus_to_trigger(
         self, page: Page, live_server_url: str
