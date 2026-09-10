@@ -23,6 +23,16 @@
   --color-danger-emphasis: #a63c36;
   --color-focus-ring: #b85237;
 
+  /* Feedback semantics. Components must consume these roles instead of
+     creating a second status palette in scoped styles. */
+  --color-feedback-success-surface: #edf8f0;
+  --color-feedback-success-border: #abd3b6;
+  --color-feedback-success-text: #1f5f34;
+  --color-feedback-error-surface: #fff3f1;
+  --color-feedback-error-border: #e3bbb4;
+  --color-feedback-error-text: #8d2f20;
+  --color-feedback-scrim: rgb(23 48 68 / 45%);
+
   /* Shared interactive control states. Keep form primitives on this small
      semantic surface instead of introducing component-specific colours. */
   --color-control-surface: var(--color-surface-raised);
@@ -54,6 +64,7 @@
   --space-6: 1.5rem;
   --space-8: 2rem;
   --size-control-min: 2.5rem;
+  --size-status-min: 3.5rem;
   --size-shell-header: 4.5rem;
   --size-content-max: 94.5rem;
 

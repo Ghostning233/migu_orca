@@ -35,21 +35,21 @@ function retry(): void {
 
 <style scoped>
 .error-boundary {
-  border: 1px solid var(--color-danger);
-  border-radius: 8px;
-  padding: 1.25rem;
-  margin: 1rem 0;
-  background: var(--color-bg-muted);
+  border: 1px solid var(--color-feedback-error-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  margin: var(--space-4) 0;
+  background: var(--color-feedback-error-surface);
 }
 
 .error-boundary-title {
-  margin: 0 0 0.5rem;
-  color: var(--color-danger);
-  font-size: 1.1rem;
+  margin: 0 0 var(--space-2);
+  color: var(--color-feedback-error-text);
+  font-size: var(--font-size-lg);
 }
 
 .error-boundary-message {
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--space-3);
   color: var(--color-text-muted);
 }
 </style>

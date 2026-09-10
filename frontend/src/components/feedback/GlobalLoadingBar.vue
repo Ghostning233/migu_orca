@@ -22,11 +22,11 @@ const { isLoading } = storeToRefs(loadingStore)
 .global-loading-bar {
   position: sticky;
   top: 0;
-  z-index: 40;
-  padding: 0.25rem 1.25rem;
-  background: var(--color-accent);
-  color: #ffffff;
-  font-size: 0.8125rem;
+  z-index: var(--z-sticky);
+  padding: var(--space-1) var(--space-5);
+  background: var(--color-action-primary);
+  color: var(--color-text-inverse);
+  font-size: var(--font-size-xs);
   text-align: center;
 }
 

@@ -74,3 +74,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Ralph must not classify route assertion failures as pre-existing when the failing tests are direct consumers of the current Stage 33 paths.
   - Targeted rerun passed: all five previously failing Chromium tests; archive pollution from the Ralph launcher was discarded and Stage 33 progress was restored before this review entry.
 ---
+## 2026-09-10 20:24:00 CST - US-262
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: unified feedback tokens and accessible system-state styling across ConfirmDialog, StatusAlert, LoadingState, EmptyState, ErrorState, ErrorBoundary, GlobalLoadingBar, and GlobalNotification; corrected global error notifications to use assertive live announcements while preserving focus trapping, recovery actions, and existing component APIs.
+- Files changed: `frontend/src/components/feedback/{ConfirmDialog,StatusAlert,LoadingState,EmptyState,ErrorState,ErrorBoundary,GlobalLoadingBar,GlobalNotification}.vue`, `frontend/src/styles/tokens.css`, `scripts/ralph/prd.json`.
+- **Learnings for future iterations:**
+  - Patterns discovered: feedback surfaces use dedicated semantic success/error/scrim tokens in `tokens.css`; component styles should consume those roles rather than legacy compatibility aliases.
+  - Gotchas encountered: full Python tests still contain three stale pre-Stage-33 redirect expectations for `/app/workbench`; the current route contract intentionally redirects root and `/index` to `/app/add` and filters `request_id` there.
+  - Useful context: frontend typecheck, lint, 304 unit tests, production build, compileall, and all 138 Chromium browser tests passed; full Python suite was 1771 passed and 3 failed only on the stale redirect assertions.
+---

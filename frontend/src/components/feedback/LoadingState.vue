@@ -17,21 +17,21 @@ defineProps<{
 .loading-state {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  background: var(--color-bg-muted);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
+  gap: var(--space-3);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
   color: var(--color-text-muted);
   min-height: 120px;
-  padding: 16px;
+  padding: var(--space-4);
   justify-content: center;
 }
 
 .loading-spinner {
-  width: 1rem;
-  height: 1rem;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
+  width: var(--space-4);
+  height: var(--space-4);
+  border: 2px solid var(--color-border-subtle);
+  border-top-color: var(--color-action-primary);
   border-radius: 50%;
   animation: loading-spin 0.8s linear infinite;
 }

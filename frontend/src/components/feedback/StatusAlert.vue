@@ -32,9 +32,9 @@ defineProps<{
 
 <style scoped>
 .status-alert {
-  border-radius: 6px;
-  min-height: 56px;
-  padding: 0.875rem 1rem;
+  border-radius: var(--radius-md);
+  min-height: var(--size-status-min);
+  padding: var(--space-3) var(--space-4);
   display: grid;
   gap: 0.25rem;
   align-content: center;
@@ -50,26 +50,26 @@ defineProps<{
 }
 
 .status-alert-empty {
-  background: var(--color-bg-muted);
-  border: 1px dashed var(--color-border);
+  background: var(--color-surface-subtle);
+  border: 1px dashed var(--color-border-subtle);
   color: var(--color-text-muted);
 }
 
 .status-alert-info {
-  background: var(--color-bg-muted);
-  border: 1px solid var(--color-border);
-  color: var(--color-text);
+  background: var(--color-surface-subtle);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-primary);
 }
 
 .status-alert-success {
-  background: #edf8f0;
-  border: 1px solid #abd3b6;
-  color: #1f5f34;
+  background: var(--color-feedback-success-surface);
+  border: 1px solid var(--color-feedback-success-border);
+  color: var(--color-feedback-success-text);
 }
 
 .status-alert-error {
-  background: #fff3f1;
-  border: 1px solid #e3bbb4;
-  color: #8d2f20;
+  background: var(--color-feedback-error-surface);
+  border: 1px solid var(--color-feedback-error-border);
+  color: var(--color-feedback-error-text);
 }
 </style>

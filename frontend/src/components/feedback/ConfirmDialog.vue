@@ -120,34 +120,34 @@ defineExpose({ confirm })
 .confirm-dialog-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 100;
+  z-index: var(--z-overlay);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
-  padding: 1rem;
+  background: var(--color-feedback-scrim);
+  padding: var(--space-4);
 }
 
 .confirm-dialog {
-  background: var(--color-bg);
+  background: var(--color-surface-raised);
   color: var(--color-text);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.2);
-  padding: 1.25rem 1.5rem;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-dialog);
+  padding: var(--space-5) var(--space-6);
   max-width: 420px;
   width: 100%;
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-3);
 }
 
 .confirm-dialog-danger .confirm-dialog-title {
-  color: var(--color-danger);
+  color: var(--color-danger-emphasis);
 }
 
 .confirm-dialog-title {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--font-size-lg);
 }
 
 .confirm-dialog-message {
@@ -159,7 +159,7 @@ defineExpose({ confirm })
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 0.5rem;
+  gap: var(--space-2);
 }
 
 @media (max-width: 480px) {
