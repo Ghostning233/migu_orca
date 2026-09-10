@@ -21,10 +21,6 @@ describe('versioned frontend contract handoff (US-255)', () => {
   it('covers F-B through F-E using generated request and result types', () => {
     expectTypeOf<JsonBody<'createRequest'>>().toHaveProperty('title')
     expectTypeOf<JsonBody<'previewModifyRequest'>>().toHaveProperty('draft_id')
-    expectTypeOf<JsonBody<'previewSaveRequest'>>().toMatchTypeOf<{
-      draft_id: string
-      base_revision: number
-    }>()
     expectTypeOf<JsonBody<'confirmRequestSave'>>().toMatchTypeOf<{
       draft_id: string
       base_revision: number

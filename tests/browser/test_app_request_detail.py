@@ -536,40 +536,74 @@ class TestAppRequestDetailSensitive:
     ) -> None:
         """US-253: actual screenshot/trace artifacts do not retain canaries."""
         _require_dist()
-        create_saved_request(storage_dir, "葬送的芙莉莲", "req-stage32-artifacts")
+        request = create_saved_request(storage_dir, "葬送的芙莉莲", "req-stage32-artifacts")
+        selected_source = request["source_info"]["rss_sources"][0]
+        selected_source.update(
+            {
+                "rss_url": "https://stage32-artifact-endpoint.invalid/rss.xml",
+                "raw_response_body": "stage32-artifact-raw-body",
+                "token": "stage32-artifact-token",
+                "cookie": "stage32-artifact-cookie",
+                "magnet": "stage32-artifact-magnet",
+            }
+        )
+        save_request_snapshot(load_storage_config(storage_dir), request)
         set_storage_preferences(page, storage_dir)
-        canary = "stage32-artifact-canary"
+        canaries = (
+            "stage32-artifact-endpoint.invalid",
+            "stage32-artifact-raw-body",
+            "stage32-artifact-token",
+            "stage32-artifact-cookie",
+            "stage32-artifact-magnet",
+        )
         screenshot_path = tmp_path / "request-detail.png"
         trace_path = tmp_path / "request-detail-trace.zip"
 
-        def _poisoned_detail(route: Any, request: Any) -> None:
+        def _safe_request_list(route: Any, _request: Any) -> None:
+            # Keep the list prerequisite deterministic and non-sensitive; the
+            # safe-info request below still goes through the real Flask serializer.
             route.fulfill(
-                status=502,
+                status=200,
                 content_type="application/json",
                 body=(
-                    '{"ok": false, "error_type": "mikan_http_failed", '
-                    f'"error_message": "{canary}"}}'
+                    '{"ok":true,"result":{"requests":[{"request_id":'
+                    '"req-stage32-artifacts","status":"PENDING_CONFIRM",'
+                    '"bangumi_title":"葬送的芙莉莲",'
+                    '"candidate_subtitle_groups":[],"selected_subtitle_group":null,'
+                    '"effective_seed_count":0,"expected_folder_name":null,'
+                    '"warnings":[]}]}}'
                 ),
             )
 
-        page.route("**/api/v1/requests/req-stage32-artifacts**", _poisoned_detail)
-        page.goto(
-            f"{live_server_url}/app/requests?request_id=req-stage32-artifacts"
-        )
-        page.wait_for_selector("#request-detail-container .error-state", timeout=5000)
-        # Start tracing after the mocked raw response has been processed:
-        # Playwright records route.fulfill arguments verbatim, so starting it
-        # earlier would test the fixture's canary rather than the safe page.
+        page.route("**/api/v1/requests?storage_dir=storage", _safe_request_list)
+        # Trace from before navigation so the assertion covers the real Flask
+        # response path, including backend sanitization of the saved fixture.
         page.context.tracing.start(screenshots=True, snapshots=True, sources=False)
         try:
+            page.goto(f"{live_server_url}/app/requests")
+            page.wait_for_selector("#request-list-container", timeout=5000)
+            safe_info = page.evaluate(
+                """async () => {
+                    const response = await fetch(
+                        '/api/v1/requests/req-stage32-artifacts/safe-info?storage_dir=storage'
+                    )
+                    return await response.text()
+                }"""
+            )
+            for canary in canaries:
+                assert canary not in safe_info
             page.screenshot(path=str(screenshot_path), full_page=True)
         finally:
             page.context.tracing.stop(path=str(trace_path))
 
-        assert canary.encode() not in screenshot_path.read_bytes()
+        screenshot_bytes = screenshot_path.read_bytes()
+        for canary in canaries:
+            assert canary.encode() not in screenshot_bytes
         with zipfile.ZipFile(trace_path) as trace:
             for member in trace.infolist():
-                assert canary.encode() not in trace.read(member)
+                artifact = trace.read(member)
+                for canary in canaries:
+                    assert canary.encode() not in artifact
 
 
 class TestAppRequestDetailResponsiveA11y:

@@ -20399,6 +20399,20 @@
                           "title": "Poster Path"
                         },
                         "status": {
+                          "enum": [
+                            "PENDING_SUBMIT",
+                            "REVALIDATING",
+                            "NEEDS_RECONFIRM",
+                            "SUBMITTING",
+                            "VERIFYING_EXTERNAL",
+                            "ACTIVE",
+                            "SUBMIT_FAILED",
+                            "RECOVERY_REQUIRED",
+                            "UNKNOWN",
+                            "DISABLED",
+                            "EXTERNAL_DELETED",
+                            "EXTERNAL_ONLY"
+                          ],
                           "title": "Status",
                           "type": "string"
                         },
@@ -20407,6 +20421,13 @@
                           "type": "string"
                         },
                         "status_group": {
+                          "enum": [
+                            "PENDING",
+                            "PROCESSING",
+                            "ACTIVE",
+                            "ATTENTION",
+                            "INACTIVE"
+                          ],
                           "title": "Status Group",
                           "type": "string"
                         },

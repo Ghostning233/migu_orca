@@ -898,9 +898,13 @@ class TrackingDetailResultDTO(_StrictBase):
     season: int | None = None
     subtitle_group: str | None = None
     poster_path: str | None = None
-    status: str
+    status: Literal[
+        "PENDING_SUBMIT", "REVALIDATING", "NEEDS_RECONFIRM", "SUBMITTING",
+        "VERIFYING_EXTERNAL", "ACTIVE", "SUBMIT_FAILED", "RECOVERY_REQUIRED",
+        "UNKNOWN", "DISABLED", "EXTERNAL_DELETED", "EXTERNAL_ONLY",
+    ]
     status_label: str
-    status_group: str
+    status_group: Literal["PENDING", "PROCESSING", "ACTIVE", "ATTENTION", "INACTIVE"]
     available_actions: list[TrackingAvailableActionDTO] = Field(default_factory=list)
     valid_resource_count: int = 0
     updated_episode: None = None

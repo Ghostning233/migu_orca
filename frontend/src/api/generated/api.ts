@@ -11339,12 +11339,18 @@ export interface operations {
                              * @default null
                              */
                             poster_path: string | null;
-                            /** Status */
-                            status: string;
+                            /**
+                             * Status
+                             * @enum {string}
+                             */
+                            status: "PENDING_SUBMIT" | "REVALIDATING" | "NEEDS_RECONFIRM" | "SUBMITTING" | "VERIFYING_EXTERNAL" | "ACTIVE" | "SUBMIT_FAILED" | "RECOVERY_REQUIRED" | "UNKNOWN" | "DISABLED" | "EXTERNAL_DELETED" | "EXTERNAL_ONLY";
                             /** Status Label */
                             status_label: string;
-                            /** Status Group */
-                            status_group: string;
+                            /**
+                             * Status Group
+                             * @enum {string}
+                             */
+                            status_group: "PENDING" | "PROCESSING" | "ACTIVE" | "ATTENTION" | "INACTIVE";
                             /** Available Actions */
                             available_actions?: {
                                 /**
