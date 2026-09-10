@@ -63,7 +63,10 @@ describe('useDraftSession (US-266)', () => {
     expect(reset.applying.value).toBe(true)
     reset.reset()
     expect(reset.applying.value).toBe(true)
+    const duplicate = await reset.apply({} as never)
+    expect(duplicate).toBeNull()
     expect(api.post).toHaveBeenCalledTimes(1)
+    expect(reset.applying.value).toBe(true)
     resolveReset({ request: snapshot, draft_id: 'opaque', draft_revision: 2 })
     await pendingReset
     expect(reset.applying.value).toBe(false)
