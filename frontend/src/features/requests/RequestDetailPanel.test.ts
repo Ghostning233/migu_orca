@@ -48,14 +48,11 @@ function detailFixture(overrides: Partial<Record<string, unknown>> = {}): Detail
         matched_bangumi: {
           title: '葬送的芙莉莲',
           aliases: [],
-          mikan_url: 'https://example.invalid/bangumi/frieren',
           match_score: 1,
-          poster_url: null,
         },
         rss_sources: [
           {
             subtitle_group: '喵萌奶茶屋',
-            rss_url: 'https://example.invalid/rss/moe.xml',
             source_type: 'mikan',
             total_seed_count: 2,
             seed_names: ['[喵萌] 芙莉莲 01.mkv', '[喵萌] 芙莉莲 SP.mkv'],
@@ -63,7 +60,7 @@ function detailFixture(overrides: Partial<Record<string, unknown>> = {}): Detail
             invalid_seed_count: 1,
             valid_seed_names: ['[喵萌] 芙莉莲 01.mkv'],
             excluded_seed_names: [
-              { name: '[喵萌] 芙莉莲 SP.mkv', reason: '命中排除规则：SP', rule: 'must_not_contain' },
+              { name: '[喵萌] 芙莉莲 SP.mkv', reason: '命中排除规则：SP' },
             ],
             warnings: [],
           },
@@ -71,7 +68,7 @@ function detailFixture(overrides: Partial<Record<string, unknown>> = {}): Detail
       },
       confirmable_config: {
         selected_subtitle_group: '喵萌奶茶屋',
-        selected_rss_url: 'https://example.invalid/rss/moe.xml',
+        selected_rss_url: 'SELECTED',
         filter_rule: {
           must_contain: '',
           must_not_contain: '',
@@ -82,7 +79,6 @@ function detailFixture(overrides: Partial<Record<string, unknown>> = {}): Detail
         expected_folder_name: '葬送的芙莉莲',
         warnings: [],
       },
-      ab_submit_result: null,
       created_at: '2026-08-31T00:00:00+00:00',
       updated_at: '2026-08-31T00:00:00+00:00',
       user_action: null,

@@ -1,7 +1,7 @@
 # 前端契约 handoff v1
 
-版本：`v1`（Stage 32 B-D）  
-来源：`docs/api/openapi.json` → `frontend/src/api/generated/api.ts`  
+版本：`v1`（Stage 32 B-D）
+来源：`docs/api/openapi.json` → `frontend/src/api/generated/api.ts`
 范围：F-B～F-F 的页面边界；本文不实现正式页面。
 
 ## 使用规则

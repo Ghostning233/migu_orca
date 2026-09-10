@@ -700,9 +700,10 @@ def serialize_request_detail(
         "error": history_error,
     }
 
-    ab_error = None
-    if ab_section.get("available") is not True:
-        ab_error = {"error_type": "storage_error", "error_message": "提交结果不可用"}
+    # ``ab_result_not_found`` is a normal empty state, not a storage failure.
+    # Read/parse failures already carry a sanitized public classification from
+    # the loader; preserve it instead of manufacturing storage_error here.
+    ab_error = ab_section.get("error") if ab_section.get("available") is not True else None
     safe_ab = safe_info["ab_status"]
     safe_ab_result = {
         "available": ab_section.get("available") is True,
