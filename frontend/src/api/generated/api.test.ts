@@ -178,6 +178,17 @@ describe('generated API client (US-198)', () => {
       operations['previewModifyRequest']['requestBody']
     >['content']['application/json']['patch']
     expectTypeOf<PreviewPatch>().toEqualTypeOf<GeneratedPreviewPatch>()
+    expectTypeOf<PreviewPatch>().toMatchTypeOf<{
+      selected_subtitle_group?: string | null
+      filter_rule?: {
+        must_contain?: string
+        must_not_contain?: string
+        use_regex?: boolean
+        case_sensitive?: boolean
+      }
+      expected_folder_name?: string
+    }>()
+    expectTypeOf<PreviewPatch['selected_subtitle_group']>().toEqualTypeOf<string | null | undefined>()
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {

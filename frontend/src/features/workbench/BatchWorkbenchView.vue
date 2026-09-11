@@ -426,6 +426,12 @@ function onDraftDeleted(itemId: string): void {
 }
 
 function onDraftExpired(itemId: string): void {
+  const nextSelected = new Set(selectedItemIds.value)
+  nextSelected.delete(itemId)
+  selectedItemIds.value = nextSelected
+  const nextFeedback = { ...acceptFeedback.value }
+  delete nextFeedback[itemId]
+  acceptFeedback.value = nextFeedback
   items.value = items.value.map((current) => {
     if (current.item_id !== itemId) return current
     const hasCandidates = (current.candidates?.length ?? 0) > 0

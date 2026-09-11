@@ -297,12 +297,22 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
           draft_id: 'draft-expired',
         })],
       }))
+      .mockResolvedValueOnce(acceptResult({
+        items: [{ item_id: 'item-expired', status: 'unacceptable', reason: '旧失败反馈' }],
+      }))
       .mockRejectedValueOnce({ type: 'draft_expired', message: 'draft expired' })
     const { wrapper } = await mountBatch()
 
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
+    await wrapper.find('.batch-draft-card input[type="checkbox"]').setValue(true)
+    await wrapper.find('#batch-accept-submit').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-card-reason').text()).toContain('旧失败反馈')
+    expect((wrapper.find('.batch-draft-card input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
     await wrapper.find('.batch-card-expand').trigger('click')
     await wrapper.find('#batch-preview-must-contain').setValue('新目录')
     await wrapper.find('#batch-preview-apply-button').trigger('click')
@@ -312,6 +322,8 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     expect(wrapper.find('.batch-card-status').text()).toContain('找到候选')
     expect(wrapper.find('#request-detail-container').exists()).toBe(false)
     expect(wrapper.find('.batch-card-expand').text()).toContain('查看候选')
+    expect((wrapper.find('.batch-draft-card input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
+    expect(wrapper.find('.batch-card-reason').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('已删除批量卡片')
   })
 })

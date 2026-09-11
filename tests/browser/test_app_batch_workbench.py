@@ -530,10 +530,35 @@ class TestAppBatchCandidateAndDraft:
                 }, ensure_ascii=False),
             ),
         )
+        page.route(
+            "**/api/v1/batches/batch-spa/accept*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_accept_result(
+                    [{
+                        "item_id": "item-expired",
+                        "request_id": "req-batch-expired",
+                        "title": "咒术回战",
+                        "status": "unacceptable",
+                        "reason": "旧失败反馈",
+                        "error_type": None,
+                        "queued": False,
+                    }],
+                    [],
+                ),
+            ),
+        )
         _goto_batch(page, live_server_url)
         page.fill("#batch-raw-input", "萌王S4")
         page.click("#batch-parse-submit")
         card = page.locator(".batch-draft-card", has_text="萌王S4")
+        card.locator(".batch-card-checkbox-row").check()
+        page.click("#batch-accept-submit")
+        page.wait_for_selector(".confirm-dialog", timeout=5000)
+        page.locator(".confirm-dialog .primary-button").click()
+        expect(card.locator(".batch-card-reason")).to_contain_text("旧失败反馈")
+        expect(card.locator(".batch-card-checkbox-row")).to_be_checked()
         card.locator(".batch-card-expand").click()
         page.locator("#batch-preview-must-contain").fill("新目录")
         page.locator("#batch-preview-apply-button").click()
@@ -542,6 +567,8 @@ class TestAppBatchCandidateAndDraft:
         expect(page.locator(".batch-card-status")).to_contain_text("找到候选")
         expect(page.locator("#request-detail-container")).to_have_count(0)
         expect(page.locator(".batch-card-expand")).to_contain_text("查看候选")
+        expect(card.locator(".batch-card-checkbox-row")).not_to_be_checked()
+        expect(card.locator(".batch-card-reason")).to_have_count(0)
         expect(page.locator(".global-notification")).to_contain_text("订阅草案已失效")
         assert "已删除批量卡片" not in page.locator("body").inner_text()
 
