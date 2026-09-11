@@ -1200,14 +1200,28 @@ export interface operations {
                      *         "raw_input": "示例",
                      *         "items": [
                      *           {
+                     *             "item_id": null,
+                     *             "raw_title": null,
+                     *             "status": null,
+                     *             "queue_status": null,
                      *             "canonical_title_candidates": [],
+                     *             "season_hint": null,
                      *             "search_queries": [],
+                     *             "confidence": null,
+                     *             "needs_user_review": null,
+                     *             "source": null,
+                     *             "parse_result": null,
                      *             "attempted_queries": [],
                      *             "candidates": [],
+                     *             "applied_preferences": null,
                      *             "preference_hits": [],
                      *             "preference_warnings": [],
                      *             "review_hints": [],
-                     *             "enhanced_search_queries": []
+                     *             "enhanced_search_queries": [],
+                     *             "preview_request": null,
+                     *             "draft_id": null,
+                     *             "draft_revision": null,
+                     *             "error": null
                      *           }
                      *         ]
                      *       }
@@ -1871,8 +1885,13 @@ export interface operations {
                      *             "bangumi_id": "示例",
                      *             "title": "示例",
                      *             "mikan_url": "示例",
+                     *             "poster_url": null,
                      *             "source_query": "示例",
-                     *             "aliases": []
+                     *             "aliases": [],
+                     *             "recommendation": null,
+                     *             "total_episodes": null,
+                     *             "season_evidence": null,
+                     *             "candidate_context": null
                      *           }
                      *         ],
                      *         "error": null
@@ -2812,7 +2831,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -3478,7 +3507,15 @@ export interface operations {
                     draft_id: string;
                     /** @description 客户端最后观察到的草案 revision（US-211，compare-and-swap）。 */
                     base_revision: number;
-                    /** @description 允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。 */
+                    /**
+                     * @description 允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。
+                     * @example {
+                     *       "filter_rule": {
+                     *         "use_regex": false,
+                     *         "case_sensitive": false
+                     *       }
+                     *     }
+                     */
                     patch: {
                         selected_subtitle_group?: string | null;
                         filter_rule?: {
@@ -3505,7 +3542,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -3896,7 +3943,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -4494,7 +4551,17 @@ export interface operations {
                      *       "ok": true,
                      *       "result": {
                      *         "outcome": "示例",
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -4916,6 +4983,11 @@ export interface operations {
                      *         "items": [
                      *           {
                      *             "tracking_id": "示例",
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "season": null,
+                     *             "subtitle_group": null,
+                     *             "poster_path": null,
                      *             "status": "示例",
                      *             "status_label": "示例",
                      *             "status_group": "示例",
@@ -4928,8 +5000,11 @@ export interface operations {
                      *               }
                      *             ],
                      *             "valid_resource_count": 0,
+                     *             "updated_episode": null,
                      *             "updated_episode_status": "NOT_IMPLEMENTED",
-                     *             "revision": 1
+                     *             "total_episodes": null,
+                     *             "revision": 1,
+                     *             "updated_at": null
                      *           }
                      *         ],
                      *         "summary": {
@@ -5214,6 +5289,11 @@ export interface operations {
                      *         "items": [
                      *           {
                      *             "tracking_id": "示例",
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "season": null,
+                     *             "subtitle_group": null,
+                     *             "poster_path": null,
                      *             "status": "示例",
                      *             "status_label": "示例",
                      *             "status_group": "示例",
@@ -5226,8 +5306,11 @@ export interface operations {
                      *               }
                      *             ],
                      *             "valid_resource_count": 0,
+                     *             "updated_episode": null,
                      *             "updated_episode_status": "NOT_IMPLEMENTED",
-                     *             "revision": 1
+                     *             "total_episodes": null,
+                     *             "revision": 1,
+                     *             "updated_at": null
                      *           }
                      *         ]
                      *       }
@@ -5524,7 +5607,9 @@ export interface operations {
                  * @example {
                  *       "items": [
                  *         {
-                 *           "item_id": "示例"
+                 *           "item_id": "示例",
+                 *           "request_id": null,
+                 *           "title": null
                  *         }
                  *       ],
                  *       "item_ids": []
@@ -5556,10 +5641,23 @@ export interface operations {
                      *       "result": {
                      *         "batch_id": "示例",
                      *         "queue": {
+                     *           "queue_id": null,
+                     *           "batch_id": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
                      *           "items": []
                      *         },
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "status": null,
+                     *             "reason": null,
+                     *             "error_type": null,
+                     *             "queued": null,
+                     *             "attempts": null
+                     *           }
                      *         ],
                      *         "summary": {}
                      *       }
@@ -5970,10 +6068,23 @@ export interface operations {
                      *       "result": {
                      *         "batch_id": "示例",
                      *         "queue": {
+                     *           "queue_id": null,
+                     *           "batch_id": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
                      *           "items": []
                      *         },
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "status": null,
+                     *             "reason": null,
+                     *             "error_type": null,
+                     *             "queued": null,
+                     *             "attempts": null
+                     *           }
                      *         ],
                      *         "summary": {}
                      *       }
@@ -6258,10 +6369,23 @@ export interface operations {
                      *       "result": {
                      *         "batch_id": "示例",
                      *         "queue": {
+                     *           "queue_id": null,
+                     *           "batch_id": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
                      *           "items": []
                      *         },
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "status": null,
+                     *             "reason": null,
+                     *             "error_type": null,
+                     *             "queued": null,
+                     *             "attempts": null
+                     *           }
                      *         ],
                      *         "summary": {}
                      *       }
@@ -6663,7 +6787,13 @@ export interface operations {
                      *         "results": [
                      *           {
                      *             "item_id": "示例",
-                     *             "outcome": "示例"
+                     *             "outcome": "示例",
+                     *             "request_id": null,
+                     *             "status": null,
+                     *             "error_type": null,
+                     *             "error_message": null,
+                     *             "tracking_id": null,
+                     *             "tracking_ready": null
                      *           }
                      *         ],
                      *         "summary": {}
@@ -6815,10 +6945,23 @@ export interface operations {
                      *       "result": {
                      *         "batch_id": "示例",
                      *         "queue": {
+                     *           "queue_id": null,
+                     *           "batch_id": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
                      *           "items": []
                      *         },
                      *         "items": [
-                     *           {}
+                     *           {
+                     *             "item_id": null,
+                     *             "request_id": null,
+                     *             "title": null,
+                     *             "status": null,
+                     *             "reason": null,
+                     *             "error_type": null,
+                     *             "queued": null,
+                     *             "attempts": null
+                     *           }
                      *         ],
                      *         "summary": {}
                      *       }
@@ -7326,15 +7469,33 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "history": {
                      *           "available": true,
                      *           "events": [
-                     *             {}
-                     *           ]
+                     *             {
+                     *               "request_id": null,
+                     *               "previous_status": null,
+                     *               "next_status": null,
+                     *               "action": null,
+                     *               "timestamp": null
+                     *             }
+                     *           ],
+                     *           "error": null
                      *         },
                      *         "ab_result": {
-                     *           "available": true
+                     *           "available": true,
+                     *           "record": null,
+                     *           "error": null
                      *         }
                      *       }
                      *     }
@@ -7735,7 +7896,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -8352,7 +8523,11 @@ export interface operations {
         /** @description 取消订阅方案 */
         requestBody: {
             content: {
-                /** @example {} */
+                /**
+                 * @example {
+                 *       "cancel_reason": null
+                 *     }
+                 */
                 "application/json": {
                     cancel_reason?: string;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
@@ -8371,7 +8546,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -9141,7 +9326,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -9740,15 +9935,23 @@ export interface operations {
                      *         "safe_info": {
                      *           "request_id": "示例",
                      *           "status": "示例",
+                     *           "raw_title": null,
+                     *           "title": null,
                      *           "aliases": [],
+                     *           "season": null,
+                     *           "season_raw": null,
+                     *           "season_evidence": null,
+                     *           "mikan_collection": null,
                      *           "subtitle_groups": [
                      *             {
+                     *               "subtitle_group": null,
                      *               "total_resource_count": 0,
                      *               "valid_resource_count": 0,
                      *               "invalid_resource_count": 0,
                      *               "warnings": []
                      *             }
                      *           ],
+                     *           "selected_subtitle_group": null,
                      *           "filter_rule": {
                      *             "must_contain": "",
                      *             "must_not_contain": "",
@@ -9756,6 +9959,7 @@ export interface operations {
                      *             "case_sensitive": false
                      *           },
                      *           "resources": {
+                     *             "selected_subtitle_group": null,
                      *             "valid_resource_count": 0,
                      *             "invalid_resource_count": 0,
                      *             "complete_resource_count": 0,
@@ -9767,10 +9971,20 @@ export interface operations {
                      *               }
                      *             ]
                      *           },
+                     *           "folder_name": null,
+                     *           "storage_profile": null,
+                     *           "total_episodes": null,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
                      *           "history_summary": [
-                     *             {}
-                     *           ]
+                     *             {
+                     *               "action": null,
+                     *               "previous_status": null,
+                     *               "next_status": null,
+                     *               "timestamp": null
+                     *             }
+                     *           ],
+                     *           "ab_status": null
                      *         }
                      *       }
                      *     }
@@ -10167,7 +10381,17 @@ export interface operations {
                      * @example {
                      *       "ok": true,
                      *       "result": {
-                     *         "request": {},
+                     *         "request": {
+                     *           "request_id": null,
+                     *           "status": null,
+                     *           "input": null,
+                     *           "source_info": null,
+                     *           "confirmable_config": null,
+                     *           "ab_submit_result": null,
+                     *           "created_at": null,
+                     *           "updated_at": null,
+                     *           "user_action": null
+                     *         },
                      *         "summary": {
                      *           "request_id": "示例",
                      *           "status": "示例",
@@ -10186,7 +10410,9 @@ export interface operations {
                      *         "ab_submit_result": {
                      *           "success": true,
                      *           "ab_subscription_id": "示例",
-                     *           "ab_response": {}
+                     *           "ab_response": {},
+                     *           "fallback_config": null,
+                     *           "error": null
                      *         },
                      *         "saved_ab_result": null
                      *       }
@@ -10981,6 +11207,7 @@ export interface operations {
                      *         "revalidation_issues": [
                      *           {
                      *             "code": "示例",
+                     *             "field": null,
                      *             "message": "示例",
                      *             "recovery_action": "示例"
                      *           }
@@ -10991,7 +11218,12 @@ export interface operations {
                      *             "event_id": "示例",
                      *             "action": "示例",
                      *             "actor": "示例",
+                     *             "from_status": null,
+                     *             "to_status": null,
                      *             "tracking_revision": 1,
+                     *             "operation_id": null,
+                     *             "reason_code": null,
+                     *             "safe_message": null,
                      *             "created_at": "示例"
                      *           }
                      *         ],
@@ -11630,6 +11862,11 @@ export interface operations {
                      *         "operation_id": null,
                      *         "tracking": {
                      *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
@@ -11642,8 +11879,11 @@ export interface operations {
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "revision": 1
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
                      *         },
                      *         "operation": null
                      *       }
@@ -11979,6 +12219,11 @@ export interface operations {
                      *         "operation_id": null,
                      *         "tracking": {
                      *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
@@ -11991,8 +12236,11 @@ export interface operations {
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "revision": 1
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
                      *         },
                      *         "operation": null
                      *       }
@@ -12332,6 +12580,11 @@ export interface operations {
                      *         "needs_manual": false,
                      *         "tracking": {
                      *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
@@ -12344,8 +12597,11 @@ export interface operations {
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "revision": 1
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
                      *         }
                      *       }
                      *     }
@@ -12699,6 +12955,11 @@ export interface operations {
                      *         "operation_id": null,
                      *         "tracking": {
                      *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
@@ -12711,8 +12972,11 @@ export interface operations {
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "revision": 1
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
                      *         },
                      *         "operation": null
                      *       }
@@ -13050,12 +13314,18 @@ export interface operations {
                      *         "issues": [
                      *           {
                      *             "code": "示例",
+                     *             "field": null,
                      *             "message": "示例",
                      *             "recovery_action": "示例"
                      *           }
                      *         ],
                      *         "tracking": {
                      *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
@@ -13068,8 +13338,11 @@ export interface operations {
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "revision": 1
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
                      *         }
                      *       }
                      *     }
@@ -13417,12 +13690,18 @@ export interface operations {
                      *         "issues": [
                      *           {
                      *             "code": "示例",
+                     *             "field": null,
                      *             "message": "示例",
                      *             "recovery_action": "示例"
                      *           }
                      *         ],
                      *         "tracking": {
                      *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
@@ -13435,8 +13714,11 @@ export interface operations {
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "revision": 1
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
                      *         }
                      *       }
                      *     }
@@ -13798,6 +14080,11 @@ export interface operations {
                      *         "operation_id": null,
                      *         "tracking": {
                      *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
@@ -13810,8 +14097,11 @@ export interface operations {
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "revision": 1
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
                      *         },
                      *         "operation": null
                      *       }
@@ -14149,12 +14439,18 @@ export interface operations {
                      *         "issues": [
                      *           {
                      *             "code": "示例",
+                     *             "field": null,
                      *             "message": "示例",
                      *             "recovery_action": "示例"
                      *           }
                      *         ],
                      *         "tracking": {
                      *           "tracking_id": "示例",
+                     *           "request_id": null,
+                     *           "title": null,
+                     *           "season": null,
+                     *           "subtitle_group": null,
+                     *           "poster_path": null,
                      *           "status": "示例",
                      *           "status_label": "示例",
                      *           "status_group": "示例",
@@ -14167,8 +14463,11 @@ export interface operations {
                      *             }
                      *           ],
                      *           "valid_resource_count": 0,
+                     *           "updated_episode": null,
                      *           "updated_episode_status": "NOT_IMPLEMENTED",
-                     *           "revision": 1
+                     *           "total_episodes": null,
+                     *           "revision": 1,
+                     *           "updated_at": null
                      *         }
                      *       }
                      *     }

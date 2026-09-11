@@ -141,4 +141,8 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 修复批量草案失效时误触发删除卡片的问题：清理失效草案状态、关闭详情并保留原始条目与候选；手动删除语义不变。
 - OpenAPI 生成器将 `storage_dir` 公开请求字段统一生成为可空类型；PreviewPatch 直接派生自 generated `previewModifyRequest`，移除适配层类型逃逸。
 - Stage 34 已完成并归档；未开发 F-C～F-G、SafeInfo 或正式保存确认页面。
+
+## 2026-09-12 - Stage 34 final review fix
+- 批量草案失效时同步清除条目的选择状态与接受失败反馈，重新生成草案不会继承旧 UI 状态。
+- 恢复非目标端点原有 OpenAPI 示例，仅为 preview-modify patch 提供符合 schema 的局部示例，并保留 `selected_subtitle_group` nullable 契约与 generated 类型断言。
 ---

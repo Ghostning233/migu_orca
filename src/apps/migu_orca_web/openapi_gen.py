@@ -205,13 +205,13 @@ def _example_from_schema(schema: dict[str, Any]) -> dict[str, Any]:
     for key, prop in properties.items():
         if key in {"storage_dir"} or prop.get("x-request-scoped"):
             continue
-        value = _example_value(prop, required=key in required)
-        if key in required or value is not None:
-            examples[key] = value
+        examples[key] = _example_value(prop, required=key in required)
     return examples
 
 
 def _example_value(prop: dict[str, Any], *, required: bool) -> Any:
+    if "example" in prop:
+        return prop["example"]
     if "const" in prop:
         return prop["const"]
     if "default" in prop:
@@ -231,15 +231,11 @@ def _example_value(prop: dict[str, Any], *, required: bool) -> Any:
     if prop_type == "object":
         sub = prop.get("properties")
         if sub:
-            example: dict[str, Any] = {}
-            required_keys = set(prop.get("required", []))
-            for key, item in sub.items():
-                if key == "storage_dir" or item.get("x-request-scoped"):
-                    continue
-                value = _example_value(item, required=key in required_keys)
-                if key in required_keys or value is not None:
-                    example[key] = value
-            return example
+            return {
+                key: _example_value(item, required=key in prop.get("required", []))
+                for key, item in sub.items()
+                if key != "storage_dir" and not item.get("x-request-scoped")
+            }
         return {}
     # anyOf (e.g. optional dict fields) — use the first non-null variant.
     any_of = prop.get("anyOf")
@@ -478,6 +474,7 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                     "type": "object",
                     "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
                     "additionalProperties": False,
+                    "example": {"filter_rule": {"use_regex": False, "case_sensitive": False}},
                     "properties": {
                         "selected_subtitle_group": {"type": ["string", "null"]},
                         "filter_rule": {

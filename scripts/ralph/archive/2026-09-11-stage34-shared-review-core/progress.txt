@@ -141,4 +141,7 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - Stage 34（US-266～US-274）已完成并归档。批量草案失效仅清理草案状态并保留条目/候选，手动删除仍单独移除卡片。
 - OpenAPI `storage_dir` 可空契约与 generated client 已同步；PreviewPatch 直接消费 generated `previewModifyRequest` 类型。
 - 未开发 F-C～F-G、SafeInfo 或正式保存确认页面。
+
+## 2026-09-12 - Stage 34 final review fix
+- 批量草案失效时清除对应选择状态与接受失败反馈；非目标端点示例保持原样，仅 preview-modify patch 使用符合 schema 的局部示例，并保留 nullable 类型断言。
 ---
