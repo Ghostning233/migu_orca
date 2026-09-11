@@ -6,6 +6,7 @@ import type {
   operations,
   paths,
 } from '@/api/generated/api'
+import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 
 // US-198: the frontend TypeScript client is generated from
 // docs/api/openapi.json by openapi-typescript (locked in package.json).
@@ -161,7 +162,7 @@ describe('generated API client (US-198)', () => {
     >['content']['application/json']
     expectTypeOf<SubmitAbBody>().toMatchTypeOf<{
       ab_config: { auth_mode: 'password' | 'api_token'; fallback_enabled: boolean }
-      storage_dir?: string
+      storage_dir?: string | null
     }>()
     // Credential fields are present (the transport must never persist them).
     expectTypeOf<SubmitAbBody['ab_config']>().toMatchTypeOf<{
@@ -170,6 +171,13 @@ describe('generated API client (US-198)', () => {
       password?: string
       token?: string
     }>()
+  })
+
+  it('derives preview patch consumers from the generated request contract', () => {
+    type GeneratedPreviewPatch = NonNullable<
+      operations['previewModifyRequest']['requestBody']
+    >['content']['application/json']['patch']
+    expectTypeOf<PreviewPatch>().toEqualTypeOf<GeneratedPreviewPatch>()
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {

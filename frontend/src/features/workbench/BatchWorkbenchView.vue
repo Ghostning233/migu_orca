@@ -425,6 +425,21 @@ function onDraftDeleted(itemId: string): void {
   notification.info('已删除批量卡片', '当前批量卡片已从本批结果中移除。')
 }
 
+function onDraftExpired(itemId: string): void {
+  items.value = items.value.map((current) => {
+    if (current.item_id !== itemId) return current
+    const hasCandidates = (current.candidates?.length ?? 0) > 0
+    return {
+      ...current,
+      status: hasCandidates ? 'FOUND' : 'EMPTY',
+      preview_request: null,
+      draft_id: null,
+      draft_revision: null,
+    }
+  })
+  detailItemId.value = null
+}
+
 onMounted(() => {
   const fromQuery = typeof route.query.batch_id === 'string' ? route.query.batch_id : ''
   if (fromQuery) {
@@ -643,6 +658,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
       :item="detailItem"
       @accepted="onAccepted"
       @deleted="onDraftDeleted"
+      @expired="onDraftExpired"
       @draft-changed="onDraftChanged"
     />
 

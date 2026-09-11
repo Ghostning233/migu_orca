@@ -5,7 +5,7 @@ import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
-import { useDraftSession, type DraftPatch } from '@/app/composables/useDraftSession'
+import { useDraftSession } from '@/app/composables/useDraftSession'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
@@ -23,6 +23,7 @@ const props = defineProps<{ item: BatchItem }>()
 const emit = defineEmits<{
   (e: 'accepted', item: BatchItem, savedRequest: RequestSnapshot): void
   (e: 'deleted', itemId: string): void
+  (e: 'expired', itemId: string): void
   (e: 'draft-changed', itemId: string, state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void
 }>()
 
@@ -37,7 +38,7 @@ const draftSnapshot = computed(() => (session.request.value ?? initialRequest.va
 
 function notifyDraftExpired(): void {
   notification.error('订阅草案已失效', '请重新生成订阅草案后再试。')
-  emit('deleted', props.item.item_id ?? '')
+  emit('expired', props.item.item_id ?? '')
 }
 
 function handleFailure(): void {
@@ -60,7 +61,7 @@ function handleChanged(): void {
 
 async function applyModify(patch: PreviewPatch): Promise<void> {
   formError.value = ''
-  const result = await session.apply(patch as DraftPatch, storageQuery().storage_dir ?? null)
+  const result = await session.apply(patch, storageQuery().storage_dir ?? null)
   if (result) handleChanged()
   else handleFailure()
 }
@@ -87,7 +88,7 @@ async function saveDraftAndAccept(): Promise<void> {
   formError.value = ''
   try {
     if (editor.value?.dirty) {
-      const modified = await session.apply(editor.value.patch as DraftPatch, storageQuery().storage_dir ?? null)
+      const modified = await session.apply(editor.value.patch, storageQuery().storage_dir ?? null)
       if (!modified) { handleFailure(); return }
       handleChanged()
     }

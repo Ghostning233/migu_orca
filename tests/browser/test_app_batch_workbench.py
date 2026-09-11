@@ -493,6 +493,58 @@ class TestAppBatchCandidateAndDraft:
         assert "路哥S4" in page.locator("#batch-parse-result").inner_text()
         assert "萌王S4" not in page.locator("#batch-parse-result").inner_text()
 
+    def test_expired_batch_draft_keeps_card_and_returns_to_candidates(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        preview = _preview_request("咒术回战", "req-batch-expired")
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(
+                    [_batch_item(
+                        "item-expired",
+                        "萌王S4",
+                        status="DRAFT",
+                        candidates=[_candidate(
+                            bangumi_id="42",
+                            title="关于我转生变成史莱姆这档事 第四季",
+                            mikan_url="https://mikan.example/Home/Bangumi/42",
+                        )],
+                        preview_request=preview,
+                    )]
+                ),
+            ),
+        )
+        page.route(
+            "**/api/v1/requests/preview-modify",
+            lambda route: route.fulfill(
+                status=409,
+                content_type="application/json",
+                body=json.dumps({
+                    "ok": False,
+                    "error_type": "draft_revision_conflict",
+                    "error_message": "草案已被更新，请基于最新版本重试",
+                    "error_data": {"field": "base_revision"},
+                }, ensure_ascii=False),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+        card = page.locator(".batch-draft-card", has_text="萌王S4")
+        card.locator(".batch-card-expand").click()
+        page.locator("#batch-preview-must-contain").fill("新目录")
+        page.locator("#batch-preview-apply-button").click()
+
+        expect(page.locator(".batch-draft-card")).to_have_count(1)
+        expect(page.locator(".batch-card-status")).to_contain_text("找到候选")
+        expect(page.locator("#request-detail-container")).to_have_count(0)
+        expect(page.locator(".batch-card-expand")).to_contain_text("查看候选")
+        expect(page.locator(".global-notification")).to_contain_text("订阅草案已失效")
+        assert "已删除批量卡片" not in page.locator("body").inner_text()
+
     def test_expanded_draft_ignores_sensitive_fields(
         self, page: Page, live_server_url: str
     ) -> None:

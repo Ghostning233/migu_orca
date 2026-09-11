@@ -8,7 +8,7 @@ import { useNotificationStore } from '@/app/stores/notification'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
-import { useDraftSession, type DraftPatch } from '@/app/composables/useDraftSession'
+import { useDraftSession } from '@/app/composables/useDraftSession'
 import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
@@ -58,7 +58,7 @@ function handleChanged(): void {
 
 async function applyModify(patch: PreviewPatch): Promise<void> {
   formError.value = ''
-  const result = await session.apply(patch as DraftPatch, storageQuery().storage_dir ?? null)
+  const result = await session.apply(patch, storageQuery().storage_dir ?? null)
   if (result) handleChanged()
   else handleFailure()
 }
@@ -83,7 +83,7 @@ async function saveDraft(): Promise<RequestSnapshot | null> {
     // Keep the legacy save contract: persist exactly what the user reviewed.
     // The shared editor exposes only its minimal patch, never a full Request.
     if (editor.value?.dirty) {
-      const modified = await session.apply(editor.value.patch as DraftPatch, storageQuery().storage_dir ?? null)
+      const modified = await session.apply(editor.value.patch, storageQuery().storage_dir ?? null)
       if (!modified) {
         handleFailure()
         return null

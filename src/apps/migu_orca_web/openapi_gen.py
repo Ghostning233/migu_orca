@@ -245,6 +245,21 @@ def _example_value(prop: dict[str, Any], *, required: bool) -> Any:
     return "示例" if required else None
 
 
+def _make_storage_dir_nullable(value: Any) -> None:
+    """Keep the generated request contract aligned with the nullable input."""
+    if isinstance(value, dict):
+        properties = value.get("properties")
+        if isinstance(properties, dict) and isinstance(properties.get("storage_dir"), dict):
+            storage_dir = properties["storage_dir"]
+            if storage_dir.get("type") == "string":
+                storage_dir["type"] = ["string", "null"]
+        for child in value.values():
+            _make_storage_dir_nullable(child)
+    elif isinstance(value, list):
+        for child in value:
+            _make_storage_dir_nullable(child)
+
+
 # ---------------------------------------------------------------------------
 # Endpoint schema registry
 # ---------------------------------------------------------------------------
@@ -294,7 +309,6 @@ def _management_endpoint(operation_id: str, summary: str, *, extra: dict[str, An
         "success": TrackingManagementResultDTO,
         "errors": _MANAGEMENT_ERRORS,
     }
-
 _ENDPOINTS: dict[str, dict[str, Any]] = {
     "POST /api/v1/tracking/items/<path:tracking_id>/modify": _management_endpoint(
         "modifyTrackingItem", "修改外部追番方案",
@@ -457,6 +471,21 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
                 "patch": {
                     "type": "object",
                     "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
+                    "additionalProperties": False,
+                    "properties": {
+                        "selected_subtitle_group": {"type": "string"},
+                        "filter_rule": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "must_contain": {"type": "string"},
+                                "must_not_contain": {"type": "string"},
+                                "use_regex": {"type": "boolean"},
+                                "case_sensitive": {"type": "boolean"},
+                            },
+                        },
+                        "expected_folder_name": {"type": "string"},
+                    },
                 },
                 "storage_dir": {"type": "string", "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"},
             },
@@ -1632,7 +1661,7 @@ def _build_openapi() -> dict[str, Any]:
     ordered_paths = dict(
         sorted(paths.items(), key=lambda item: _path_sort_key(item[0]))
     )
-    return {
+    document = {
         "openapi": OPENAPI_VERSION,
         "info": {
             "title": "MiGuOrca Web API",
@@ -1655,6 +1684,8 @@ def _build_openapi() -> dict[str, Any]:
             }
         },
     }
+    _make_storage_dir_nullable(document)
+    return document
 
 
 def _path_sort_key(path: str) -> tuple[int, str]:

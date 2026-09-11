@@ -1181,7 +1181,7 @@ export interface operations {
                         timeout_seconds?: number;
                     };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -1764,7 +1764,7 @@ export interface operations {
                     /** @description 非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。 */
                     correction: Record<string, never>;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -2288,7 +2288,7 @@ export interface operations {
                     /** @description 非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。 */
                     preferences: Record<string, never>;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -3494,7 +3494,16 @@ export interface operations {
                 /**
                  * @example {
                  *       "base_revision": 1,
-                 *       "patch": {}
+                 *       "patch": {
+                 *         "selected_subtitle_group": null,
+                 *         "filter_rule": {
+                 *           "must_contain": null,
+                 *           "must_not_contain": null,
+                 *           "use_regex": false,
+                 *           "case_sensitive": false
+                 *         },
+                 *         "expected_folder_name": null
+                 *       }
                  *     }
                  */
                 "application/json": {
@@ -3503,9 +3512,18 @@ export interface operations {
                     /** @description 客户端最后观察到的草案 revision（US-211，compare-and-swap）。 */
                     base_revision: number;
                     /** @description 允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。 */
-                    patch: Record<string, never>;
+                    patch: {
+                        selected_subtitle_group?: string;
+                        filter_rule?: {
+                            must_contain?: string;
+                            must_not_contain?: string;
+                            use_regex?: boolean;
+                            case_sensitive?: boolean;
+                        };
+                        expected_folder_name?: string;
+                    };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -3906,7 +3924,7 @@ export interface operations {
                     /** @description 客户端最后观察到的草案 revision（US-212，预留校验；不匹配返回 409 draft_revision_conflict）。 */
                     base_revision: number;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -4513,7 +4531,7 @@ export interface operations {
                     /** @description 一次明确客户端操作生成的 opaque 幂等键（US-213/214，request-scoped；重试必须复用，键只绑定一个 operation/fingerprint）。 */
                     idempotency_key: string;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -5215,7 +5233,7 @@ export interface operations {
                         token?: string;
                         fallback_enabled: boolean;
                     };
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                     /** @constant */
                     confirm: true;
                 };
@@ -5602,7 +5620,7 @@ export interface operations {
                     /** @description 可选：只接受指定卡片（缺省接受全部）。 */
                     item_ids?: string[];
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -6029,7 +6047,7 @@ export interface operations {
                     action: "auto" | "succeeded" | "failed";
                     confirm?: boolean;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -6330,7 +6348,7 @@ export interface operations {
                     };
                     confirm: boolean;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -6746,7 +6764,7 @@ export interface operations {
                     /** @description 可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。 */
                     item_ids?: string[];
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -6906,7 +6924,7 @@ export interface operations {
                     /** @description 显式用户确认。 */
                     confirm: boolean;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -7859,7 +7877,7 @@ export interface operations {
                 /** @example {} */
                 "application/json": {
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -8509,7 +8527,7 @@ export interface operations {
                 "application/json": {
                     cancel_reason?: string;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -9154,7 +9172,7 @@ export interface operations {
                 /** @example {} */
                 "application/json": {
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -9289,7 +9307,7 @@ export interface operations {
                     /** @description 允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。 */
                     patch: Record<string, never>;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -10344,7 +10362,7 @@ export interface operations {
                         fallback_enabled: boolean;
                     };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -11818,7 +11836,7 @@ export interface operations {
                         token?: string;
                         fallback_enabled: boolean;
                     };
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -12174,7 +12192,7 @@ export interface operations {
                         token?: string;
                         fallback_enabled: boolean;
                     };
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                     patch: Record<string, never>;
                 };
             };
@@ -12523,7 +12541,7 @@ export interface operations {
                     /** @description 人工动作必须为 true；AUTO 忽略该字段。 */
                     confirm?: boolean;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                     /** @description 仅 VERIFY_EXTERNAL 使用；连接配置只在本次请求内存中存在。 */
                     ab_config?: {
                         /** @enum {string} */
@@ -12911,7 +12929,7 @@ export interface operations {
                         token?: string;
                         fallback_enabled: boolean;
                     };
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -13268,7 +13286,7 @@ export interface operations {
                         fallback_enabled: boolean;
                     };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -13644,7 +13662,7 @@ export interface operations {
                     /** @description 客户端最后观察到的追番记录 revision（revision-aware 复核）。 */
                     expected_revision: number;
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };
@@ -14035,7 +14053,7 @@ export interface operations {
                         token?: string;
                         fallback_enabled: boolean;
                     };
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                     enabled: boolean;
                 };
             };
@@ -14393,7 +14411,7 @@ export interface operations {
                         fallback_enabled: boolean;
                     };
                     /** @description 存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。 */
-                    storage_dir?: string;
+                    storage_dir?: string | null;
                 };
             };
         };

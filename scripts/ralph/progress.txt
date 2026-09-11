@@ -28,7 +28,7 @@
 
 ## Stage 34 Handoff
 
-- US-266 已完成；第一开发批次仍仅允许 US-267～US-268。
+- Stage 34（US-266～US-274）已完成并归档；后续 F-C～F-G 不属于本阶段。
 
 ## 2026-09-10 22:56:00 Asia/Shanghai - US-266
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -135,5 +135,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Stage closeout must update the user-facing status sources together: README, main/future PRDs, backlog, frontend work goals, M13 module record, docs index, execution PRD, and Ralph state.
   - The shared core handoff is explicit: F-C/F-D own removal of the single/batch compatibility save paths, while F-E alone may use SafeInfo for saved Requests.
-  - Final verification passed: compileall, Ruff, 1,636 non-browser backend tests, API drift check, typecheck, lint, 325 frontend unit tests, build, 158 Chromium tests, and git diff check.
+- Final verification passed: compileall, Ruff, 1,636 non-browser backend tests, API drift check, typecheck, lint, 325 frontend unit tests, build, 158 Chromium tests, and git diff check.
+
+## 2026-09-12 - Stage 34 independent review closeout
+- 修复批量草案失效时误触发删除卡片的问题：清理失效草案状态、关闭详情并保留原始条目与候选；手动删除语义不变。
+- OpenAPI 生成器将 `storage_dir` 公开请求字段统一生成为可空类型；PreviewPatch 直接派生自 generated `previewModifyRequest`，移除适配层类型逃逸。
+- Stage 34 已完成并归档；未开发 F-C～F-G、SafeInfo 或正式保存确认页面。
 ---

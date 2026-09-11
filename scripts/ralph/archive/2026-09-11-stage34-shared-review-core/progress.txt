@@ -135,5 +135,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Stage closeout must update the user-facing status sources together: README, main/future PRDs, backlog, frontend work goals, M13 module record, docs index, execution PRD, and Ralph state.
   - The shared core handoff is explicit: F-C/F-D own removal of the single/batch compatibility save paths, while F-E alone may use SafeInfo for saved Requests.
-  - Final verification passed: compileall, Ruff, 1,636 non-browser backend tests, API drift check, typecheck, lint, 325 frontend unit tests, build, 158 Chromium tests, and git diff check.
+- Final verification passed: compileall, Ruff, 1,636 non-browser backend tests, API drift check, typecheck, lint, 325 frontend unit tests, build, 158 Chromium tests, and git diff check.
+
+## 2026-09-12 - Stage 34 independent review closeout
+- Stage 34（US-266～US-274）已完成并归档。批量草案失效仅清理草案状态并保留条目/候选，手动删除仍单独移除卡片。
+- OpenAPI `storage_dir` 可空契约与 generated client 已同步；PreviewPatch 直接消费 generated `previewModifyRequest` 类型。
+- 未开发 F-C～F-G、SafeInfo 或正式保存确认页面。
 ---

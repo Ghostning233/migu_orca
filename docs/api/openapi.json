@@ -1807,7 +1807,10 @@
                     }
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -2074,7 +2077,10 @@
                     "description": "非敏感标题修正对象（raw_title/canonical_title/season_hint/bangumi_metadata/query_correction）。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -3065,7 +3071,10 @@
                     "description": "非敏感偏好对象（version/subtitle_groups/filter_defaults/naming/search）。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -5930,17 +5939,56 @@
                   },
                   "patch": {
                     "type": "object",
-                    "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。"
+                    "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。",
+                    "additionalProperties": false,
+                    "properties": {
+                      "selected_subtitle_group": {
+                        "type": "string"
+                      },
+                      "filter_rule": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "must_contain": {
+                            "type": "string"
+                          },
+                          "must_not_contain": {
+                            "type": "string"
+                          },
+                          "use_regex": {
+                            "type": "boolean"
+                          },
+                          "case_sensitive": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      "expected_folder_name": {
+                        "type": "string"
+                      }
+                    }
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
               },
               "example": {
                 "base_revision": 1,
-                "patch": {}
+                "patch": {
+                  "selected_subtitle_group": null,
+                  "filter_rule": {
+                    "must_contain": null,
+                    "must_not_contain": null,
+                    "use_regex": false,
+                    "case_sensitive": false
+                  },
+                  "expected_folder_name": null
+                }
               }
             }
           },
@@ -7211,7 +7259,10 @@
                     "description": "客户端最后观察到的草案 revision（US-212，预留校验；不匹配返回 409 draft_revision_conflict）。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -8081,7 +8132,10 @@
                     "x-request-scoped": true
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -9341,7 +9395,10 @@
                     ]
                   },
                   "storage_dir": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "confirm": {
                     "const": true
@@ -9853,7 +9910,10 @@
                     "description": "可选：只接受指定卡片（缺省接受全部）。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -10762,7 +10822,10 @@
                     "type": "boolean"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -11507,7 +11570,10 @@
                     "type": "boolean"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -11801,7 +11867,10 @@
                     "description": "可选：只处理选中 item_id（保持输入顺序）；缺省处理全部 items。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -12494,7 +12563,10 @@
                     "description": "显式用户确认。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -15012,7 +15084,10 @@
                 "type": "object",
                 "properties": {
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -16356,7 +16431,10 @@
                     "type": "string"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -16562,7 +16640,10 @@
                 "type": "object",
                 "properties": {
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -17856,7 +17937,10 @@
                     "description": "允许的修改补丁：selected_subtitle_group/filter_rule/expected_folder_name。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -20207,7 +20291,10 @@
                     ]
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -22227,7 +22314,10 @@
                     ]
                   },
                   "storage_dir": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 }
               },
@@ -22917,7 +23007,10 @@
                     ]
                   },
                   "storage_dir": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "patch": {
                     "type": "object",
@@ -23530,7 +23623,10 @@
                     "description": "人工动作必须为 true；AUTO 忽略该字段。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   },
                   "ab_config": {
@@ -24257,7 +24353,10 @@
                     ]
                   },
                   "storage_dir": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 }
               },
@@ -24950,7 +25049,10 @@
                     ]
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -25594,7 +25696,10 @@
                     "description": "客户端最后观察到的追番记录 revision（revision-aware 复核）。"
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
@@ -26283,7 +26388,10 @@
                     ]
                   },
                   "storage_dir": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "enabled": {
                     "type": "boolean"
@@ -26980,7 +27088,10 @@
                     ]
                   },
                   "storage_dir": {
-                    "type": "string",
+                    "type": [
+                      "string",
+                      "null"
+                    ],
                     "description": "存储目录（US-193 起为服务端允许根目录下的相对目录 profile）。"
                   }
                 }
