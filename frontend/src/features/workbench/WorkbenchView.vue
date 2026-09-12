@@ -19,7 +19,6 @@
 // season evidence (only the explicit confirmation checkbox or the server's
 // one-time candidate_context can do that).
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
@@ -33,7 +32,7 @@ import LoadingState from '@/components/feedback/LoadingState.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 
 import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
-import DraftPreviewPanel from '@/features/workbench/DraftPreviewPanel.vue'
+import SingleAnimeReviewPanel from '@/features/workbench/SingleAnimeReviewPanel.vue'
 import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
 import AnimeModeSwitch, { type AnimeMode } from '@/features/workbench/AnimeModeSwitch.vue'
 import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
@@ -50,13 +49,11 @@ import {
 import { displayValue } from '@/features/requests/requestDetail'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
-import { routeLocation } from '@/app/router/catalog'
 
 type CreateRequestResult = NonNullable<
   operations['createRequest']['responses']['200']['content']['application/json']['result']
 >
 
-const router = useRouter()
 const notification = useNotificationStore()
 
 // Search state.
@@ -267,39 +264,34 @@ function confirmedSeasonFor(candidate: MikanCandidate): number | null {
   return seasonConfirmations.value[key] ?? null
 }
 
-function onSaved(requestId: string): void {
-  draftRequest.value = null
-  draftId.value = ''
-  draftRevision.value = 1
-  seasonConfirmations.value = {}
-  notification.success('保存成功', `已保存订阅草案 ${requestId}`)
-  void router.push(routeLocation('plans', { request_id: requestId }))
-}
-
-function onDraftExpired(): void {
-  draftRequest.value = null
-  draftId.value = ''
-  draftRevision.value = 1
-}
-
-// US-212: a generic operation failure (e.g. a disk-write error on save) must
-// keep the draft panel open — the server releases the reservation on a failed
-// persist, so the same draft/revision can be retried without re-searching.
-// Only ``expired`` (the server reports the draft is truly gone) clears state.
-function onDraftOperationFailed(): void {
-  // The shared panel already surfaced the sanitized error notification.
-}
-
 function onDraftChanged(state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void {
   draftRequest.value = state.request
   draftId.value = state.draftId
   draftRevision.value = state.draftRevision
 }
 
+function discardDraft(destination: 'candidates' | 'input'): void {
+  draftRequest.value = null
+  draftId.value = ''
+  draftRevision.value = 1
+  seasonConfirmations.value = {}
+  if (destination === 'input') {
+    searchResult.value = null
+    lastSearchQuery.value = ''
+    searchError.value = ''
+  }
+  void nextTick(() => singleInput.value?.focus())
+}
+
 onMounted(() => {
   // The workbench has no persisted state; the storage profile comes from
   // Settings localStorage (relative only). Nothing to preload here.
-  void nextTick(() => singleInput.value?.focus())
+  // The application shell keeps the skip link as the first keyboard stop on
+  // a direct page load. Standalone mounts (including focused component tests)
+  // still receive the convenient title-input focus.
+  if (!document.getElementById('app-main')) {
+    void nextTick(() => singleInput.value?.focus())
+  }
 })
 
 defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
@@ -373,7 +365,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   </PanelSection>
 
   <!-- ── search results ──────────────────────────────────────────── -->
-  <PanelSection v-if="mode === 'single'" title="搜索结果" class="search-results-panel">
+  <PanelSection v-if="mode === 'single' && !draftRequest" title="搜索结果" class="search-results-panel">
     <div
       id="mikan-candidate-search-result"
       class="candidate-list-wrapper"
@@ -432,16 +424,14 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   </PanelSection>
 
   <!-- ── draft preview ───────────────────────────────────────────── -->
-  <DraftPreviewPanel
+  <SingleAnimeReviewPanel
     v-if="mode === 'single' && draftRequest && draftId"
     :key="draftId"
     :request="draftRequest"
     :draft-id="draftId"
     :draft-revision="draftRevision"
-    @saved="onSaved"
-    @expired="onDraftExpired"
-    @failed="onDraftOperationFailed"
     @changed="onDraftChanged"
+    @discard="discardDraft"
   />
   <LoadingState v-if="mode === 'single' && draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />
 

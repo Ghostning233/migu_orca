@@ -8,6 +8,8 @@ Started: Sat Sep 12 09:03:14 CST 2026
 - Request-scoped journey capabilities and idempotency keys stay in component/composable memory; safe UI errors use fixed messages and allowlisted details only.
 - Shared workflow state should be API-free; transport orchestration belongs in the later host story so single-anime and batch compatibility paths cannot accidentally share side effects.
 - Single-anime search hosts invalidate candidate results as soon as the title changes, and apply result focus only after loading has been released so the loading rerender cannot steal focus.
+- The single-anime review host owns the in-memory draft session and step navigation; save/confirm transport stays outside the shared editor until its dedicated story.
+- The application shell owns the first direct-load keyboard stop (skip link); feature views only autofocus when mounted outside the shell.
 
 ## 2026-09-12 09:08:00 Asia/Shanghai - US-275
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -17,6 +19,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The journey core must remain transport-free; later stories can attach generated endpoint calls without introducing a second state owner.
   - A saved-confirm failure must explicitly transition to saved-pending-confirm; entering that state clears both draft capability and the save idempotency key.
 - Verification passed: frontend typecheck, lint, 331 unit tests, build, Python compileall, and 1795 backend tests.
+---
+
+## 2026-09-12 09:23:00 Asia/Shanghai - US-277
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the single-anime review step using the shared AnimeDraftEditor and useDraftSession snapshot/revision flow. Added review summary, safe save-confirm blocking reasons, preview-modify retry/reset behavior, explicit candidate/search navigation, and ConfirmDialog-protected draft discard. Kept save/confirm and external actions out of this story and preserved batch mode.
+- Files changed: frontend/src/features/workbench/SingleAnimeReviewPanel.vue, frontend/src/features/workbench/WorkbenchView.vue, frontend/src/features/workbench/WorkbenchView.test.ts, tests/browser/test_app_workbench.py, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Single-mode review should be mounted as a dedicated host around the shared editor so later save-confirm transport can be added without creating a second editing state owner.
+  - Direct `/app/add` loads must leave the shell skip link as the first tab stop; feature-level autofocus is limited to standalone mounts.
+- Verification passed: frontend api/typecheck, lint, 334 unit tests, build, 65 targeted Chromium tests, Python compileall, 1795 backend tests, and git diff --check.
 ---
 
 ## 2026-09-12 09:13:00 Asia/Shanghai - US-276

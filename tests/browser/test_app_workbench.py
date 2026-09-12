@@ -480,7 +480,7 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         # The editable preview form is offered; no saved-request actions.
         detail = page.locator("#request-detail-container")
         assert "订阅草案（未保存）" in detail.inner_text()
-        expect(detail.locator("button:has-text('保存草案')")).to_be_visible()
+        expect(detail.locator("#single-review-save-button")).to_be_disabled()
         expect(detail.locator(".detail-actions button:has-text('确认')")).to_have_count(0)
         # The draft_id never enters the URL or DOM.
         assert "request_id=" not in page.url
@@ -661,17 +661,9 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         page.locator(".candidate-card button:has-text('选择此合集')").click()
         page.wait_for_selector("#detail-preview-edit-form", timeout=5000)
 
-        # Save through the real preview-save backend (draft consumed once).
-        page.locator("#request-detail-container button:has-text('保存草案')").click()
-        page.wait_for_url("**/app/plans?request_id=req-wb-save", timeout=5000)
-
-        saved_path = storage_dir / "requests" / "req-wb-save.json"
-        assert saved_path.exists()
-        saved_json = json.loads(saved_path.read_text(encoding="utf-8"))
-        assert saved_json["status"] == "PENDING_CONFIRM"
-        # The workbench navigated to the saved-request list/detail.
-        expect(page.locator("#request-list-container")).to_be_visible()
-        expect(page.locator("#request-detail-container .overview-section")).to_be_visible()
+        # The review step intentionally leaves save-confirm to the next story.
+        expect(page.locator("#single-review-save-button")).to_be_disabled()
+        assert not (storage_dir / "requests").exists()
 
     def test_generation_failure_preserves_candidates_and_shows_sanitized_error(
         self, page: Page, live_server_url: str, storage_dir: Path

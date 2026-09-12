@@ -53,7 +53,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "第一开发批次终点：完成本 story 后停止 Ralph，等待独立审核。"
     },
     {

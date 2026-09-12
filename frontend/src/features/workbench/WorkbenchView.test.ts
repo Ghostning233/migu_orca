@@ -357,9 +357,31 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     // The draft preview panel mounts with the display snapshot.
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
     expect(wrapper.find('.preview-mode-note').text()).toContain('订阅草案（未保存）')
-    expect(wrapper.find('#draft-save-button').exists()).toBe(true)
+    expect(wrapper.find('#single-review-save-button').exists()).toBe(true)
     // The draft_id never enters the DOM.
     expect(wrapper.text()).not.toContain('opaque-draft-token')
+  })
+
+  it('protects review navigation and restores candidates after confirmed discard', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult()).mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#single-review-back-candidates').trigger('click')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(true)
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    expect(wrapper.find('#single-anime-review-step').exists()).toBe(true)
+
+    await wrapper.find('#single-review-back-candidates').trigger('click')
+    await wrapper.find('.confirm-dialog .danger-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#single-anime-review-step').exists()).toBe(false)
+    expect(wrapper.find('.candidate-card').exists()).toBe(true)
   })
 
   it('isolates batch mode from the single draft panel and keeps the draft in memory', async () => {
@@ -511,15 +533,9 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(wrapper.text()).not.toContain('draft_revision_conflict')
   })
 
-  it('COMPATIBILITY: saves the draft through preview-save and routes to the saved request', async () => {
-    apiPost
-      .mockResolvedValueOnce(candidateResult())
-      .mockResolvedValueOnce(createDraftResult())
-      .mockResolvedValueOnce({
-        request: previewSnapshot(),
-        summary: {},
-      })
-    const { wrapper, router } = await mountWorkbench()
+  it('keeps save-confirm unavailable during the review-only step', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult()).mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
 
     await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
     await wrapper.find('#mikan-candidate-search-submit').trigger('click')
@@ -527,31 +543,16 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await wrapper.find('.candidate-select').trigger('click')
     await flushPromises()
 
-    await wrapper.find('#draft-save-button').trigger('click')
-    await flushPromises()
-
-    expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/preview-save', {
-      // US-212: the save reserves the draft against the last-observed revision.
-      body: { draft_id: 'opaque-draft-token', base_revision: 1, storage_dir: null },
-    })
-    expect(router.currentRoute.value.path).toBe('/plans')
-    expect(router.currentRoute.value.query.request_id).toBe('req-draft-1')
+    expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeDefined()
+    expect(apiPost).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps the draft panel open when a save fails (US-212 retryable)', async () => {
+  it('keeps the review panel open while save-confirm belongs to the next step', async () => {
     apiPost
       .mockResolvedValueOnce(candidateResult())
       .mockResolvedValueOnce(createDraftResult())
-      // A disk-write failure (storage_error 500): the server releases the
-      // reservation, so the panel must stay open for a retry — never force a
-      // re-search.
-      .mockRejectedValueOnce({
-        type: 'storage_error',
-        message: '保存订阅方案 JSON 失败',
-        status: 500,
-        details: { failed_step: 'save_request_snapshot', details: { request_id: 'req-draft-1' } },
-      })
-    const { wrapper, router } = await mountWorkbench()
+
+    const { wrapper } = await mountWorkbench()
 
     await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
     await wrapper.find('#mikan-candidate-search-submit').trigger('click')
@@ -559,16 +560,9 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await wrapper.find('.candidate-select').trigger('click')
     await flushPromises()
 
-    await wrapper.find('#draft-save-button').trigger('click')
-    await flushPromises()
-
-    const { useNotificationStore } = await import('@/app/stores/notification')
-    const notification = useNotificationStore()
-    expect(notification.current?.title).toBe('保存失败')
-    // The draft panel (and its draft_id/revision) is preserved for retry.
+    expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeDefined()
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
-    expect(wrapper.find('#draft-save-button').exists()).toBe(true)
-    expect(router.currentRoute.value.path).toBe('/add')
+    expect(apiPost).toHaveBeenCalledTimes(2)
   })
 
   it('shows a safe error and keeps the search state when generation fails', async () => {
