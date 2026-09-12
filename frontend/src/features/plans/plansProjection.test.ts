@@ -62,7 +62,28 @@ describe('plans projection (US-295)', () => {
     const row = projectPlanRows([request()], [tracking()])[0]!
     expect(row.tracking?.trackingId).toBe('tracking-a')
     expect(row.tracking?.statusLabel).toBe('追番中')
+    expect(row.tracking).not.toHaveProperty('item')
+    expect(row.trackingUnavailable).toBe(false)
     expect(planTrackingLabel(row)).toBe('追番中')
+  })
+
+  it('marks ambiguous or invalid associations unavailable, while pure missing stays not linked', () => {
+    const legalAndInvalid = projectPlanRows([request()], [tracking(), tracking({ tracking_id: '/private/path' })])[0]!
+    expect(legalAndInvalid.tracking).toBeNull()
+    expect(legalAndInvalid.trackingUnavailable).toBe(true)
+    expect(planTrackingLabel(legalAndInvalid)).toBe(TRACKING_UNAVAILABLE_LABEL)
+
+    const legalAndExternalOnly = projectPlanRows(
+      [request()],
+      [tracking(), tracking({ status: 'EXTERNAL_ONLY', tracking_id: 'external-only' })],
+    )[0]!
+    expect(legalAndExternalOnly.tracking).toBeNull()
+    expect(legalAndExternalOnly.trackingUnavailable).toBe(true)
+
+    const pureMissing = projectPlanRows([request()], [tracking({ request_id: 'another-request' })])[0]!
+    expect(pureMissing.tracking).toBeNull()
+    expect(pureMissing.trackingUnavailable).toBe(false)
+    expect(planTrackingLabel(pureMissing)).toBe(TRACKING_NOT_LINKED_LABEL)
   })
 
   it('drops duplicate, missing, external-only, and invalid tracking associations', () => {
@@ -78,7 +99,9 @@ describe('plans projection (US-295)', () => {
     )
     expect(rows[0]!.tracking).toBeNull()
     expect(rows[1]!.tracking).toBeNull()
-    expect(planTrackingLabel(rows[1]!)).toBe(TRACKING_NOT_LINKED_LABEL)
+    expect(rows[0]!.trackingUnavailable).toBe(true)
+    expect(rows[1]!.trackingUnavailable).toBe(true)
+    expect(planTrackingLabel(rows[1]!)).toBe(TRACKING_UNAVAILABLE_LABEL)
     expect(joinTrackingItems([tracking({ status_label: '' })]).get('req-a')?.statusLabel).toBe(
       '追番中',
     )
@@ -107,6 +130,8 @@ describe('plans projection (US-295)', () => {
     expect(filterPlanRows(rows, '芙莉莲', '')).toHaveLength(1)
     expect(filterPlanRows(rows, '喵萌', '')).toHaveLength(1)
     expect(filterPlanRows(rows, 'private-looking-id', '')).toHaveLength(0)
+    expect(filterPlanRows(rows, '葬送的芙莉莲', '')).toHaveLength(1)
+    expect(filterPlanRows(projectPlanRows([request({ expected_folder_name: '仅目录名称' })]), '仅目录名称', '')).toHaveLength(0)
     expect(filterPlanRows(rows, '', 'ACCEPTED')).toHaveLength(0)
   })
 

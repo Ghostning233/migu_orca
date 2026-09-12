@@ -139,14 +139,18 @@ async function loadTracking(): Promise<void> {
 }
 
 function syncSelectionToLoadedRequests(): void {
-  const queryId = typeof route.query.request_id === 'string' ? route.query.request_id : ''
+  const rawQueryId = route.query.request_id
+  const queryId = typeof rawQueryId === 'string' && rawQueryId.trim() ? rawQueryId : ''
   const exists = queryId && loadedRequests.value.some((summary) => summary.request_id === queryId)
   if (exists) {
     selectedRequestId.value = queryId
     return
   }
   selectedRequestId.value = ''
-  if (queryId) void router.push(routeLocation('plans'))
+  // Invalid, duplicated, or unknown public identifiers are sanitized without
+  // adding a history entry.  A valid identifier is only selected once it is
+  // confirmed by the loaded Request summaries.
+  if (rawQueryId !== undefined) void router.replace(routeLocation('plans'))
 }
 
 function selectRequest(requestId: string | null | undefined): void {
@@ -155,7 +159,7 @@ function selectRequest(requestId: string | null | undefined): void {
   if (id) {
     void router.push(routeLocation('plans', { request_id: id }))
   } else {
-    void router.push(routeLocation('plans'))
+    void router.replace(routeLocation('plans'))
   }
 }
 
@@ -175,7 +179,7 @@ function onDetailDeleted(requestId: string): void {
   // Clear the URL selection and drop the deleted item from the loaded list.
   loadedRequests.value = loadedRequests.value.filter((summary) => summary.request_id !== requestId)
   selectedRequestId.value = ''
-  void router.push(routeLocation('plans'))
+  void router.replace(routeLocation('plans'))
   void loadList()
 }
 
@@ -189,10 +193,18 @@ onMounted(() => {
 watch(
   () => route.query.request_id,
   (value) => {
-    const nextId = typeof value === 'string' ? value : ''
+    const nextId = typeof value === 'string' && value.trim() ? value : ''
+    if (typeof value !== 'string' || !value.trim()) {
+      selectedRequestId.value = ''
+      if (value !== undefined) void router.replace(routeLocation('plans'))
+      return
+    }
     selectedRequestId.value = loadedRequests.value.some((summary) => summary.request_id === nextId)
       ? nextId
       : ''
+    if (!selectedRequestId.value && !loading.value) {
+      void router.replace(routeLocation('plans'))
+    }
   },
 )
 </script>
@@ -241,8 +253,8 @@ watch(
               <span class="plan-list-field">字幕组：{{ row.request.selected_subtitle_group || '未设置' }}</span>
               <span class="plan-list-field">方案状态：{{ planRequestStatusLabel(row) }}</span>
               <span class="plan-list-field">修改时间：{{ row.request.updated_at || '未设置' }}</span>
-              <span class="plan-list-tracking" :class="{ 'is-unavailable': trackingFailed }" role="status">
-                追番状态：{{ trackingFailed ? TRACKING_UNAVAILABLE_LABEL : planTrackingLabel(row) }}
+              <span class="plan-list-tracking" :class="{ 'is-unavailable': trackingFailed || row.trackingUnavailable, 'is-loading': trackingLoading }" role="status">
+                追番状态：{{ trackingLoading ? '正在读取追番状态...' : trackingFailed ? TRACKING_UNAVAILABLE_LABEL : planTrackingLabel(row) }}
               </span>
             </button>
           </li>

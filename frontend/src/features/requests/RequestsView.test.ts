@@ -126,7 +126,7 @@ function mockApiGet() {
   })
 }
 
-async function mountRequests(query: Record<string, string> = {}) {
+async function mountRequests(query: Record<string, string | string[]> = {}) {
   const router = createRouter({
     history: createMemoryHistory('/app/'),
     routes: [
@@ -352,6 +352,78 @@ describe('RequestsView selection (US-296)', () => {
     await wrapper.find('.request-list-item').trigger('click')
     await flushPromises()
     expect(router.currentRoute.value.query.request_id).toBeUndefined()
+  })
+
+  it('replaces an unknown request_id query instead of retaining it', async () => {
+    const { router } = await mountRequests({ request_id: 'missing-request' })
+    await flushPromises()
+    expect(router.currentRoute.value.query.request_id).toBeUndefined()
+  })
+
+  it('replaces duplicated request_id query values', async () => {
+    const { router } = await mountRequests({ request_id: ['req-a', 'req-b'] })
+    await flushPromises()
+    expect(router.currentRoute.value.query.request_id).toBeUndefined()
+  })
+
+  it('shows tracking loading explicitly and then resolves pure missing as not linked', async () => {
+    let resolveTracking: ((value: unknown) => void) | undefined
+    apiGet.mockImplementation((path: string) => {
+      if (path === '/api/v1/requests') return Promise.resolve(LIST_RESULT)
+      if (path === '/api/v1/tracking/items') {
+        return new Promise((resolve) => {
+          resolveTracking = resolve
+        })
+      }
+      return Promise.resolve({})
+    })
+    const { wrapper } = await mountRequests()
+    expect(wrapper.find('.plan-list-tracking').text()).toContain('正在读取追番状态')
+
+    resolveTracking?.({ items: [] })
+    await flushPromises()
+    expect(wrapper.find('.plan-list-tracking').text()).toContain('未进入追番管理')
+  })
+
+  it('shows tracking failure and restores the real status after retry', async () => {
+    let trackingAttempts = 0
+    apiGet.mockImplementation((path: string) => {
+      if (path === '/api/v1/requests') return Promise.resolve(LIST_RESULT)
+      if (path === '/api/v1/tracking/items') {
+        trackingAttempts += 1
+        return trackingAttempts === 1
+          ? Promise.reject(new Error('tracking unavailable'))
+          : Promise.resolve({
+              items: [
+                {
+                  tracking_id: 'tracking-a',
+                  request_id: 'req-a',
+                  title: '葬送的芙莉莲',
+                  season: 1,
+                  subtitle_group: '喵萌奶茶屋',
+                  poster_path: null,
+                  status: 'ACTIVE',
+                  status_label: '追番中',
+                  status_group: 'ACTIVE',
+                  valid_resource_count: 1,
+                  updated_episode: null,
+                  updated_episode_status: 'NOT_IMPLEMENTED',
+                  total_episodes: null,
+                  revision: 1,
+                  updated_at: null,
+                },
+              ],
+            })
+      }
+      return Promise.resolve({})
+    })
+    const { wrapper } = await mountRequests()
+    await flushPromises()
+    expect(wrapper.find('.plan-list-tracking').text()).toContain('追番状态暂不可用')
+
+    await wrapper.find('.plans-tracking-error .secondary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.plan-list-tracking').text()).toContain('追番中')
   })
 
 })

@@ -99,4 +99,3 @@ class TestAppPlansStage37:
         page.wait_for_selector(".plans-tracking-error", timeout=5000)
         expect(page.locator(".request-list-item")).to_have_count(1)
         expect(page.locator(".plans-tracking-error")).to_contain_text("追番状态暂不可用")
-

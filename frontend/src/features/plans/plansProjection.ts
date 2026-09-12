@@ -25,7 +25,6 @@ export type TrackingItem = TrackingListResult['items'][number]
 
 /** The one safe tracking association rendered alongside a Request summary. */
 export interface PlanTrackingAssociation {
-  item: TrackingItem
   status: string
   statusLabel: string
   trackingId: string
@@ -35,6 +34,8 @@ export interface PlanTrackingAssociation {
 export interface PlanRow {
   request: RequestSummary
   tracking: PlanTrackingAssociation | null
+  /** True when tracking data for this request is present but unsafe to link. */
+  trackingUnavailable: boolean
 }
 
 export const PLAN_SORT_MODES = ['default', 'title_asc'] as const
@@ -77,16 +78,16 @@ export function trackingStatusLabel(item: TrackingItem): string {
 /**
  * Build a unique request_id → tracking item index.
  *
- * A request is linked only when exactly one eligible item has a non-empty,
- * exactly equal request_id.  Duplicate eligible items intentionally remove the
- * association instead of picking one or deriving an id from another field.
+ * Group every item with a non-empty request_id before checking eligibility. A
+ * duplicate where one item is invalid or EXTERNAL_ONLY is still ambiguous and
+ * must not accidentally produce a navigable association.
  */
 export function joinTrackingItems(
   items: readonly TrackingItem[],
-): Map<string, PlanTrackingAssociation> {
+): Map<string, PlanTrackingAssociation | null> {
   const grouped = new Map<string, TrackingItem[]>()
   for (const item of items) {
-    if (!isLinkableTrackingItem(item) || typeof item.request_id !== 'string' || !item.request_id.trim()) {
+    if (typeof item.request_id !== 'string' || !item.request_id.trim()) {
       continue
     }
     const group = grouped.get(item.request_id) ?? []
@@ -94,12 +95,14 @@ export function joinTrackingItems(
     grouped.set(item.request_id, group)
   }
 
-  const associations = new Map<string, PlanTrackingAssociation>()
+  const associations = new Map<string, PlanTrackingAssociation | null>()
   for (const [requestId, matches] of grouped) {
     const item = matches.length === 1 ? matches[0] : undefined
-    if (!item) continue
+    if (!item || !isLinkableTrackingItem(item)) {
+      associations.set(requestId, null)
+      continue
+    }
     associations.set(requestId, {
-      item,
       status: item.status,
       statusLabel: trackingStatusLabel(item),
       trackingId: item.tracking_id,
@@ -114,10 +117,15 @@ export function projectPlanRows(
   trackingItems: readonly TrackingItem[] = [],
 ): PlanRow[] {
   const associations = joinTrackingItems(trackingItems)
-  return requests.map((request) => ({
-    request,
-    tracking: request.request_id ? associations.get(request.request_id) ?? null : null,
-  }))
+  return requests.map((request) => {
+    const requestId = request.request_id
+    const tracking = requestId ? associations.get(requestId) ?? null : null
+    return {
+      request,
+      tracking,
+      trackingUnavailable: Boolean(requestId && associations.has(requestId) && !tracking),
+    }
+  })
 }
 
 /** Parse only a valid persisted ISO timestamp; invalid values sort last. */
@@ -150,7 +158,7 @@ export function planSearchableText(row: PlanRow): string {
   const groups = summary.candidate_subtitle_groups
     .map((group) => group.subtitle_group ?? '')
     .join(' ')
-  return [summary.bangumi_title, summary.selected_subtitle_group, summary.expected_folder_name, groups]
+  return [summary.bangumi_title, summary.selected_subtitle_group, groups]
     .filter((value): value is string => typeof value === 'string')
     .join(' ')
     .toLocaleLowerCase()
@@ -182,7 +190,9 @@ export function buildPlanRows(
 
 /** Fixed status label for a row with no safe unique tracking association. */
 export function planTrackingLabel(row: PlanRow): string {
-  return row.tracking?.statusLabel ?? TRACKING_NOT_LINKED_LABEL
+  return row.trackingUnavailable
+    ? TRACKING_UNAVAILABLE_LABEL
+    : row.tracking?.statusLabel ?? TRACKING_NOT_LINKED_LABEL
 }
 
 /** Public request status label; kept here so consumers need no API details. */

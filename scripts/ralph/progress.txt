@@ -46,4 +46,11 @@ Thread: https://codex.openai.com/threads/current
 - **Learnings for future iterations:**
   - /app/plans 当前路由仍由 RequestsView 承载，详情组件自身保留 request-detail-container，外层使用 plans-detail-container 避免重复 id。
   - tracking 列表失败时清空 tracking 投影并保持 Request 列表可用，固定显示“追番状态暂不可用”与局部重试。
+
+## [2026-09-12 22:50:00 CST] - US-294～US-296 审核修复
+Thread: https://codex.openai.com/threads/current
+- 修复 plansProjection tracking 关联：先按所有非空精确 request_id 分组，再要求唯一且可链接；合法+非法、合法+EXTERNAL_ONLY、重复及非法 tracking_id 均安全降级。
+- PlanRow/关联仅投影 trackingId/status/statusLabel，并区分纯缺失“未进入追番管理”和歧义/无效“追番状态暂不可用”；RequestsView 在 tracking loading 期间显示明确加载态，失败重试成功后恢复真实状态。
+- plansProjection 搜索限定标题/字幕组；RequestsView 使用 router.replace 清理不存在、重复数组及非法 request_id query；同步更新冻结语义的 Chromium 断言并删除 Stage37 测试 EOF 空行。
+- 定向验证：相关 Vitest 24 passed；frontend typecheck/lint/build passed；真实 Chromium `test_app_plans_stage37.py test_app_requests.py` 19 passed；`git diff --check` passed。
 ---

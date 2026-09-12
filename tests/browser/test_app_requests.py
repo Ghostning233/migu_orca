@@ -99,7 +99,7 @@ class TestAppRequestsSearchFilterSort:
         page.wait_for_timeout(300)
         expect(page.locator("#request-list-count")).to_contain_text("显示 2 / 3")
 
-    def test_search_by_request_id(
+    def test_search_does_not_include_request_id(
         self, page: Page, live_server_url: str, storage_with_requests: Path
     ) -> None:
         set_storage_preferences(page, storage_with_requests)
@@ -107,7 +107,7 @@ class TestAppRequestsSearchFilterSort:
 
         page.fill("#request-list-search", "req-a")
         page.wait_for_timeout(300)
-        expect(page.locator("#request-list-count")).to_contain_text("显示 1 / 3")
+        expect(page.locator("#request-list-count")).to_contain_text("显示 0 / 3")
 
     def test_status_filter_options_include_business_labels(
         self, page: Page, live_server_url: str, storage_with_requests: Path
@@ -134,7 +134,7 @@ class TestAppRequestsSearchFilterSort:
         ]
         assert "default" in values
         assert "title_asc" in values
-        assert "request_id_asc" in values
+        assert "request_id_asc" not in values
 
     def test_no_match_shows_empty_state_and_clears(
         self, page: Page, live_server_url: str, storage_with_requests: Path
@@ -154,7 +154,7 @@ class TestAppRequestsSearchFilterSort:
 
 
 class TestAppRequestsSelection:
-    """AC: request_id 可复制和刷新恢复，storage 只使用相对 profile."""
+    """AC: 公开 request_id 深链和刷新恢复，storage 只使用相对 profile."""
 
     def test_clicking_item_pushes_request_id_query(
         self, page: Page, live_server_url: str, storage_with_requests: Path
@@ -177,15 +177,32 @@ class TestAppRequestsSelection:
         selected = page.locator(".request-list-item.is-selected")
         expect(selected).to_have_attribute("data-request-id", "req-c")
 
-    def test_copy_request_id_button_uses_public_identifier(
+    def test_request_id_is_not_a_copy_action(
         self, page: Page, live_server_url: str, storage_with_requests: Path
     ) -> None:
         set_storage_preferences(page, storage_with_requests)
         _goto_requests(page, live_server_url)
 
-        copy_btn = page.locator(".copy-request-id").first
-        expect(copy_btn).to_be_visible()
-        expect(copy_btn).to_contain_text("复制")
+        expect(page.locator(".copy-request-id")).to_have_count(0)
+
+    def test_unknown_request_id_query_is_cleared_without_selection(
+        self, page: Page, live_server_url: str, storage_with_requests: Path
+    ) -> None:
+        set_storage_preferences(page, storage_with_requests)
+        _goto_requests(page, live_server_url, query="?request_id=missing-request")
+
+        page.wait_for_function("() => !window.location.search")
+        assert "request_id" not in page.url
+        expect(page.locator(".request-list-item.is-selected")).to_have_count(0)
+
+    def test_duplicate_request_id_query_is_cleared(
+        self, page: Page, live_server_url: str, storage_with_requests: Path
+    ) -> None:
+        set_storage_preferences(page, storage_with_requests)
+        _goto_requests(page, live_server_url, query="?request_id=req-a&request_id=req-b")
+
+        page.wait_for_function("() => !window.location.search")
+        assert "request_id" not in page.url
 
     def test_no_absolute_paths_in_url_or_storage(
         self, page: Page, live_server_url: str, storage_with_requests: Path
