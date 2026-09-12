@@ -1,0 +1,146 @@
+# Ralph Progress Log
+Started: Sat Sep 12 22:00:00 CST 2026
+---
+
+## Codebase Patterns
+
+- Stage 37 只完成 F-E 追番方案；F-F 独占正式 tracking 管理和所有外部动作，F-G 独占设置与发布收尾。
+- 每个 Ralph 迭代只完成一个 story；每次最多运行 3 个 stories，完成 US-296、US-299、US-302 后停止并独立审核。
+- 普通 story 只运行定向检查；完整前端、后端非浏览器和真实 Chromium 门禁只在 US-302 运行一次。
+- 前端 API 类型从 `frontend/src/api/generated/api.ts` 提取；除 US-294 的 RequestSummaryDTO `season`/`updated_at` 补口与候选字幕组去 URL 收紧外，不改 OpenAPI 或后端语义。
+- `/app/plans` 只组合 `listRequests`、`getRequestDetail`、`modifyRequest`、`getRequestSafeInfo` 与只读 `listTrackingItems`。
+- tracking 关联只按非空公开 `request_id` 精确匹配；不得推导 tracking ID，不读取 available actions，不调用同步、提交、恢复或管理端点。
+- `AnimeDraftEditor` 保持受控展示层；saved Request transport 不进入 `useDraftSession`，draft revision 行为不得回归。
+- SafeInfo 只来自 `getRequestSafeInfo`；已更新集数保持“待开发”，不得根据资源或 RSS 猜测。
+- 复制再用只允许一次性内存白名单 handoff；刷新失效，用户仍必须显式选择真实 MiKan 合集并生成新草案。
+- 完整 URL、RSS、magnet、endpoint、凭据、Cookie、Authorization、原始响应、capability、幂等键和绝对路径不得进入 DOM、URL、storage、日志、通知、trace 或 screenshot。
+
+## [2026-09-12 22:30:00 CST] - US-294
+Thread: https://codex.openai.com/threads/current
+- 为 RequestSummaryDTO 增加可空 season/updated_at，并将候选字幕组收紧为无 URL 的严格资源计数摘要。
+- 同步 request serializer/controller、OpenAPI、generated TypeScript、endpoint inventory 与契约断言。
+- 定向验证：request controller/API DTO/golden/openapi consistency 48 passed；frontend api:check passed。
+- **Learnings for future iterations:**
+  - Request 列表摘要由 request_controller.summarize_request 直接构造，OpenAPI 变更后必须运行 openapi_gen 与 frontend api:generate。
+  - updated_at 仅接受可解析 ISO 时间文本，候选计数字段统一使用 resource 命名且不包含 rss_url。
+---
+
+## [2026-09-12 22:32:00 CST] - US-295
+Thread: https://codex.openai.com/threads/current
+- 新增 API-free plansProjection 纯函数层，投影 generated Request/Tracking 列表类型。
+- 实现合法 updated_at 稳定倒序、标题/字幕组公开字段搜索、Request 状态筛选及唯一 request_id tracking 关联。
+- 对重复/缺失/EXTERNAL_ONLY/非法 tracking_id 固定安全降级，不读取 tracking available_actions。
+- 定向验证：plansProjection Vitest 5 passed；frontend typecheck passed。
+- **Learnings for future iterations:**
+  - 方案行只持有 generated Request summary 与可空 tracking association；tracking 状态标签优先服务端 status_label，未知值固定中文降级。
+  - 稳定排序需要显式保留原索引，Date.parse 无效或缺失项统一置后。
+---
+
+## [2026-09-12 22:38:00 CST] - US-296
+Thread: https://codex.openai.com/threads/current
+- 将 /app/plans 方案页重构为列表—详情双栏布局；列表展示标题、季度、字幕组、方案状态、修改时间和安全 tracking 状态。
+- 接入 listRequests 与只读 listTrackingItems(sort=updated_at) 的独立加载、失败、重试；合法公开 request_id query 可恢复选择，非法/不存在选择安全清除。
+- 移除 request_id 复制与技术化搜索，增加 Plans projection 的组件接入与状态/空态/未选择态。
+- 新增定向真实 Chromium 测试覆盖双栏字段、无复制按钮、tracking 局部失败；同步更新 RequestsView 单测。
+- 定向验证：RequestsView + plansProjection Vitest 19 passed；typecheck/lint/build passed；真实 Chromium 2 passed；git diff --check passed。
+- **Learnings for future iterations:**
+  - /app/plans 当前路由仍由 RequestsView 承载，详情组件自身保留 request-detail-container，外层使用 plans-detail-container 避免重复 id。
+  - tracking 列表失败时清空 tracking 投影并保持 Request 列表可用，固定显示“追番状态暂不可用”与局部重试。
+
+## [2026-09-12 22:50:00 CST] - US-294～US-296 审核修复
+Thread: https://codex.openai.com/threads/current
+- 修复 plansProjection tracking 关联：先按所有非空精确 request_id 分组，再要求唯一且可链接；合法+非法、合法+EXTERNAL_ONLY、重复及非法 tracking_id 均安全降级。
+- PlanRow/关联仅投影 trackingId/status/statusLabel，并区分纯缺失“未进入追番管理”和歧义/无效“追番状态暂不可用”；RequestsView 在 tracking loading 期间显示明确加载态，失败重试成功后恢复真实状态。
+- plansProjection 搜索限定标题/字幕组；RequestsView 使用 router.replace 清理不存在、重复数组及非法 request_id query；同步更新冻结语义的 Chromium 断言并删除 Stage37 测试 EOF 空行。
+- 定向验证：相关 Vitest 24 passed；frontend typecheck/lint/build passed；真实 Chromium `test_app_plans_stage37.py test_app_requests.py` 19 passed；`git diff --check` passed。
+---
+
+## [2026-09-12 22:58:00 CST] - US-297
+Thread: https://codex.openai.com/threads/current
+- 新增 SafeInfoDialog，仅调用 generated getRequestSafeInfo，按白名单展示标题/别名/季度证据/MiKan 合集公开编号、字幕组过滤、资源/脱敏文件名、总集数、历史及 AB 安全状态。
+- updated_episode_status 固定呈现“已更新集数：待开发”；错误文案固定中文，不显示原始异常。
+- 使用共享 useFocusTrap 实现 Teleport 弹窗 Escape/遮罩/关闭焦点恢复，使用请求序列丢弃关闭或切换后的旧响应；详情入口仅打开弹窗，不从详情快照拼装数据。
+- 定向验证：SafeInfoDialog Vitest 2 passed；typecheck/lint/build passed；真实 Chromium 1 passed。
+- **Learnings for future iterations:**
+  - Teleport 弹窗组件单测应从 document.body 断言内容，wrapper 只持有 Teleport 占位。
+  - Chromium 必须在 UI 改动后重新 build frontend/dist；旧哈希 dist 会掩盖新组件。
+---
+
+## [2026-09-12 23:00:00 CST] - US-298
+Thread: https://codex.openai.com/threads/current
+- AnimeDraftEditor 增加显式 mode（draft/saved）、标题/表单/应用文案 props，saved 模式复用同一受控字段和最小 apply patch。
+- saved 模式不引入 API、useDraftSession、previewModifyRequest、draft_id 或 base_revision；原有 draft dirty/reset/retry 逻辑保持不变。
+- 定向验证：AnimeDraftEditor Vitest 5 passed；typecheck/lint/build passed；真实 Chromium 方案回归 2 passed。
+- **Learnings for future iterations:**
+  - saved transport 应由 RequestDetailPanel 宿主接管，编辑器只发与 generated patch 兼容的 apply 事件。
+---
+
+## [2026-09-12 23:09:00 CST] - US-299
+Thread: https://codex.openai.com/threads/current
+- RequestDetailPanel 删除独立修改字段状态与表单，接入 AnimeDraftEditor saved 模式；只提交最小 patch 到 generated modifyRequest，成功后回查 getRequestDetail 并刷新方案列表，失败保留输入并支持重试/恢复。
+- 详情错误摘要改为固定中文；保留安全基本信息、updated_at、历史、SafeInfoDialog 入口及本地 accept/cancel/delete 兼容动作，不读取 available_actions 或任何外部管理动作。
+- tracking 入口仅消费 Plans projection 传入的唯一精确 tracking_id；新增/更新定向单测与 Chromium 旅程，覆盖修改、空 patch、清空字段、失败保留输入和追番导航。
+- 定向验证：RequestDetailPanel + AnimeDraftEditor Vitest 26 passed；typecheck/lint/build passed；真实 Chromium 修改类 4 passed、Plans 唯一 tracking 导航 1 passed；git diff --check passed。
+- **Learnings for future iterations:**
+  - saved 编辑器高级字段位于折叠 details，浏览器验证需显式展开后再操作。
+
+## [2026-09-12 23:35:00 CST] - US-297～US-299 审核修复
+Thread: https://codex.openai.com/threads/current
+- ACCEPTED 详情移除 Auto Bangumi/Settings 外部提交入口；仅保留本地方案修改、删除及只读历史展示。
+- saved 修改使用 generated PreviewPatch 窄适配；失败保留输入并支持重试/服务端快照恢复，网络/超时/非 JSON/5xx 结果先回查，已生效收敛、未生效才允许重试、回查失败不重复写。
+- 详情接收列表 tracking loading/不可用/未关联/唯一链接状态；删除后将焦点移至下一合法行或方案列表容器。SafeInfo 补齐季度原文、字幕组警告、资源字幕组、AB 三态及卸载 focus trap 清理。
+- 定向验证：相关 Vitest 55 passed；frontend typecheck/lint/build passed；真实 Chromium `test_app_safe_info_stage37.py test_app_request_detail.py test_app_plans_stage37.py` 28 passed；`git diff --check` passed。
+
+## [2026-09-12 23:47:00 CST] - US-297～US-299 第二轮审核修复
+Thread: https://codex.openai.com/threads/current
+- 详情回查改用无副作用快照读取；未知修改结果在确认前保留用户输入并锁定提交，只有成功收敛或主动恢复才更新服务端快照。
+- accept/cancel/delete 增加内存 unknown 状态与仅 GET 的重新确认入口，回查失败时锁定冲突写动作，确认未生效后才解除锁定。
+- SafeInfo 展示公开外部订阅编号、历史动作中文标签；Escape 复用统一 close 路径，及时清理 focus trap 与请求序号。
+- 定向验证：相关 Vitest 58 passed；frontend typecheck/lint/build passed；Chromium 首轮 27 passed、1 个过早断言后单例通过；git diff --check 待提交后复核。
+
+## [2026-09-12 23:56:00 CST] - US-297～US-299 第三轮审核修复
+Thread: https://codex.openai.com/threads/current
+- 未确认修改结果期间锁定全部本地写入口；重试/恢复 GET 互斥，明确成功后的详情回查必须匹配 patch 才收敛。
+- 补充 unknown 修改输入保持、动作锁定、并发回查、成功回查不匹配及 SafeInfo 快速 requestId 切换回归。
+- 定向验证：相关 Vitest 63 passed；frontend typecheck/lint/build passed；Chromium 失败用例修正 mock 后单例通过。
+---
+
+## [2026-09-13 00:05:00 CST] - US-300
+Thread: https://codex.openai.com/threads/current
+- 新增 `reuseHandoff` 一次性 SPA 内存白名单，仅保留公开标题、合法 MiKan bangumi_id 与用户可编辑配置建议；不含 request_id、URL、资源、历史、tracking、capability 或幂等键，也不接触浏览器存储/URL/history/Pinia。
+- SafeInfo 成功加载后提供“复制再用”，导航 `/app/add`；添加页消费并清除 handoff，预填标题但不自动搜索/生成，要求用户重新搜索并选择真实合集。
+- 新草案生成后才显示“应用复制方案建议”，由用户显式载入受控编辑器字段；不会自动创建、保存确认或外部提交。
+- 定向验证：reuseHandoff/SafeInfoDialog/WorkbenchView/AnimeDraftEditor Vitest 42 passed；typecheck/lint/build passed；真实 Chromium handoff 单次消费与显式搜索 1 passed；git diff --check passed。
+- **Learnings for future iterations:**
+  - 复制再用的 handoff 必须由 SafeInfo 成功响应直接构造，导航只传递模块内存状态；草案建议必须在新 draft 存在后通过单独用户动作应用。
+---
+
+## [2026-09-13 00:15:00 CST] - US-301
+Thread: https://codex.openai.com/threads/current
+- 依据运行时引用搜索确认旧复制按钮、详情独立修改表单及 ACCEPTED Settings/Auto Bangumi 外部提交入口均未被 Plans 旅程调用；旧 `/app/requests`、`/app/workbench` 与 `/index`/`/settings` 仍安全重定向。
+- 保留并验证列表当前行 aria-current、键盘 Tab/Enter/Space/Escape、焦点恢复、200% 等效缩放、reduced-motion 文本反馈及四路由响应式布局；新增 SafeInfo 未知敏感字段浏览器可观测面回归。
+- 定向验证：responsive/a11y Chromium 36 passed；SafeInfo、RequestDetail 敏感边界与旧路由定向 Chromium 9 passed；新增敏感字段回归 1 passed；git diff --check passed。
+- **Learnings for future iterations:**
+  - 旧入口重定向属于兼容契约，删除前需用 `git grep` 与 Flask/Router 回归证明其仍只保留公开 query；未知 SafeInfo 字段必须不能进入浏览器可观测面。
+---
+
+## [2026-09-13 00:30:00 CST] - US-302
+Thread: https://codex.openai.com/threads/current
+- 完成 Stage 37 最终文档收敛：Stage PRD、README、前端体验工作目标和 backlog 均标记 F-E/Stage 37 已完成，记录宽松列表—详情、SafeInfo、复制再用与 tracking 导航的实现偏差为无阻断偏差。
+- 归档最终 `scripts/ralph/prd.json` 与 `progress.txt`；明确 F-F 独占正式 tracking 管理/同步/复核/外部动作，F-G 独占设置与发布收尾，不进入下一 Stage。
+- 完整门禁：frontend `api:check`、typecheck、lint、Vitest 407、production build；Python compileall、Ruff、非浏览器 pytest 1636 passed/171 deselected；真实 Chromium 完整套件 171 passed；`git diff --check` 通过。
+- 构建产物仅用于门禁，未提交 dist、trace、screenshot、credential 或本地 storage artifact。
+- **Learnings for future iterations:**
+  - 最终门禁应保留前端与 Python 独立计数，并在同一干净工作区核对 generated drift、浏览器套件与归档状态；完整门禁只在 closeout story 执行。
+
+## [2026-09-13 08:00:00 CST] - Stage 37 最终审核收尾
+Thread: https://codex.openai.com/threads/current
+- README、主/前端/future/module/backlog 文档统一标记 F-E Stage 37（US-294～US-302）已完成并归档，F-F～F-G 继续待评审。
+- 增加真实 Chromium 的方案列表/详情三视口检查与 200% 修改、SafeInfo、复制再用旅程；canary 同步检查 console 且不生成 trace/screenshot 产物。
+- 定向验证：Stage37 plans/SafeInfo/responsive Chromium 45 passed；frontend typecheck/lint passed。
+
+## [2026-09-13 08:20:00 CST] - Stage 37 复审补充
+Thread: https://codex.openai.com/threads/current
+- `docs/frontend-ux-refactor-work-goals.md` 状态已收敛；200% 代表性 Chromium 旅程补齐实际修改、成功回查详情及新目录断言。
+- 复审定向验证：新增 200% 用例通过；`ruff check` 与 `git diff --check` 待提交后复核。
+---

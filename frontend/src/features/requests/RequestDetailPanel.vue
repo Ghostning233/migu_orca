@@ -6,7 +6,7 @@
 // Audit sections and the status-dependent management actions:
 //
 // - PENDING_CONFIRM → 确认 (accept) / 取消 (cancel) / 修改 (modify),
-// - ACCEPTED       → 去 Settings 提交 Auto Bangumi / 修改 / 删除 (delete),
+// - ACCEPTED       → 本地修改 / 删除 (delete),
 // - CANCELLED      → 不可操作 note.
 //
 // All destructive/irreversible actions go through the shared ConfirmDialog;
@@ -19,9 +19,10 @@
 // rendered; URL-looking values are redacted at display time and the request
 // snapshot's raw URLs (rss_url / mikan_url / poster_url) are never rendered.
 // No value here is persisted, logged or put into the URL.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
-import { api } from '@/api/client'
+import { api, toApiError } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { routeLocation } from '@/app/router/catalog'
 import { useNotificationStore } from '@/app/stores/notification'
@@ -29,12 +30,11 @@ import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
-import BaseInput from '@/components/forms/BaseInput.vue'
-import BaseSelect from '@/components/forms/BaseSelect.vue'
 import BaseTextarea from '@/components/forms/BaseTextarea.vue'
-import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 import FormField from '@/components/layout/FormField.vue'
+import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
+import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 
 import {
   actionLabel,
@@ -47,15 +47,36 @@ import {
   type RequestDetailResult,
   type RequestDetailSnapshot,
 } from '@/features/requests/requestDetail'
+import SafeInfoDialog from '@/features/requests/SafeInfoDialog.vue'
 import { statusLabel as detailStatusLabel } from '@/features/requests/requestsList'
 import { storageQuery } from '@/features/requests/requestStorage'
 
 type ActionResult = NonNullable<
   operations['acceptRequest']['responses']['200']['content']['application/json']['result']
 >
+type ModifyResult = NonNullable<
+  operations['modifyRequest']['responses']['200']['content']['application/json']['result']
+>
+type ModifyRequestBodyContract = NonNullable<
+  operations['modifyRequest']['requestBody']
+>['content']['application/json']
+/** Generated saved-modify patch is historical Record<string, never>; adapt it
+ * to the generated preview whitelist without accepting arbitrary keys. */
+type ModifyRequestBody = Omit<ModifyRequestBodyContract, 'patch'> & { patch: PreviewPatch }
+type AcceptRequestBody = NonNullable<
+  operations['acceptRequest']['requestBody']
+>['content']['application/json']
+type CancelRequestBody = NonNullable<
+  operations['cancelRequest']['requestBody']
+>['content']['application/json']
+type LocalActionBody = AcceptRequestBody | CancelRequestBody
+type TrackingStatus = 'loading' | 'failed' | 'unavailable' | 'not_linked' | 'linked'
 
 const props = defineProps<{
   requestId: string
+  trackingId?: string | null
+  trackingStatus?: TrackingStatus
+  trackingStatusLabel?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -64,29 +85,25 @@ const emit = defineEmits<{
 }>()
 
 const notification = useNotificationStore()
+const router = useRouter()
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
 const loading = ref(false)
 const loadFailed = ref(false)
 const detail = ref<RequestDetailResult | null>(null)
+const lastLoadError = ref<ReturnType<typeof toApiError> | null>(null)
 const actionInFlight = ref(false)
+const safeInfoOpen = ref(false)
 
 // Inline form visibility (legacy hidden toggles).
 const cancelFormOpen = ref(false)
 const modifyFormOpen = ref(false)
 
-// Modify form state (initialized from the snapshot when the panel loads).
-const modifyGroup = ref('')
-const modifyMustContain = ref('')
-const modifyMustNotContain = ref('')
-const modifyUseRegex = ref(false)
-const modifyCaseSensitive = ref(false)
-const modifyFolderName = ref('')
-// Explicit "clear this field" flags (legacy appendClearControl behavior).
-const modifyClearMustContain = ref(false)
-const modifyClearMustNotContain = ref(false)
-const modifyClearFolderName = ref(false)
 const modifyError = ref('')
+const modifyEditor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
+const lastModifyPatch = ref<PreviewPatch | null>(null)
+const modifyResultUnknown = ref(false)
+const actionUnknown = ref<'accept' | 'cancel' | 'delete' | null>(null)
 
 const cancelReason = ref('')
 
@@ -94,14 +111,7 @@ const request = computed<RequestDetailSnapshot | null>(() => detail.value?.reque
 const isAccepted = computed(() => request.value?.status === 'ACCEPTED')
 const isPending = computed(() => request.value?.status === 'PENDING_CONFIRM')
 const isCancelled = computed(() => request.value?.status === 'CANCELLED')
-
-const groupOptions = computed(() => {
-  const sources = request.value?.source_info?.rss_sources ?? []
-  return sources.map((source) => ({
-    value: source.subtitle_group ?? '',
-    label: source.subtitle_group ?? '未知字幕组',
-  }))
-})
+const effectiveTrackingStatus = computed(() => props.trackingStatus ?? 'not_linked')
 
 const effective = computed(() => (request.value ? effectiveSeeds(request.value) : []))
 const excluded = computed(() => (request.value ? excludedSeeds(request.value) : []))
@@ -112,54 +122,61 @@ const selectedGroupName = computed(
   () => request.value?.confirmable_config?.selected_subtitle_group ?? '未选择字幕组',
 )
 
-async function loadDetail(): Promise<void> {
-  if (!props.requestId) return
-  loading.value = true
-  loadFailed.value = false
+function reuseRequest(): void {
+  safeInfoOpen.value = false
+  void router.push(routeLocation('add'))
+}
+
+interface LoadDetailOptions {
+  closeForms?: boolean
+}
+
+type DetailFetch =
+  | { result: RequestDetailResult; error: null }
+  | { result: null; error: ReturnType<typeof toApiError> }
+
+async function fetchDetailSnapshot(): Promise<DetailFetch> {
   try {
     const result = await api.get<RequestDetailResult>('/api/v1/requests/{request_id}', {
       path: { request_id: props.requestId },
       query: storageQuery(),
     })
-    detail.value = result
-    resetModifyForm()
-    cancelFormOpen.value = false
-    modifyFormOpen.value = false
-    cancelReason.value = ''
+    return { result, error: null }
   } catch (error) {
-    void error
-    detail.value = null
-    loadFailed.value = true
-    notification.error('订阅方案详情加载失败', '请确认 request_id 是否存在。')
-  } finally {
-    loading.value = false
+    return { result: null, error: toApiError(error) }
   }
 }
 
-function resetModifyForm(): void {
-  const snapshot = request.value
-  modifyGroup.value = snapshot?.confirmable_config?.selected_subtitle_group ?? ''
-  modifyMustContain.value = snapshot?.confirmable_config?.filter_rule?.must_contain ?? ''
-  modifyMustNotContain.value = snapshot?.confirmable_config?.filter_rule?.must_not_contain ?? ''
-  modifyUseRegex.value = snapshot?.confirmable_config?.filter_rule?.use_regex === true
-  modifyCaseSensitive.value = snapshot?.confirmable_config?.filter_rule?.case_sensitive === true
-  modifyFolderName.value = snapshot?.confirmable_config?.expected_folder_name ?? ''
-  modifyClearMustContain.value = false
-  modifyClearMustNotContain.value = false
-  modifyClearFolderName.value = false
-  modifyError.value = ''
+function commitDetail(result: RequestDetailResult): void {
+  detail.value = result
+  lastLoadError.value = null
 }
 
-function copyRequestId(): void {
-  const id = props.requestId
-  if (!id) return
-  navigator.clipboard
-    .writeText(id)
-    .then(() => notification.success('已复制 request_id', id))
-    .catch(() => notification.error('复制失败', '无法访问剪贴板，请手动选择复制。'))
+async function loadDetail(options: LoadDetailOptions = {}): Promise<boolean> {
+  if (!props.requestId) return false
+  loading.value = true
+  loadFailed.value = false
+  const fetched = await fetchDetailSnapshot()
+  if (fetched.result) {
+    commitDetail(fetched.result)
+    if (options.closeForms !== false) {
+      cancelFormOpen.value = false
+      modifyFormOpen.value = false
+      cancelReason.value = ''
+    }
+    loading.value = false
+    return true
+  }
+  lastLoadError.value = fetched.error
+  detail.value = null
+  loadFailed.value = true
+  notification.error('订阅方案详情加载失败', '请确认 request_id 是否存在。')
+  loading.value = false
+  return false
 }
 
 async function confirmAccept(): Promise<void> {
+  if (actionUnknown.value || modifyResultUnknown.value) return
   const ok = await confirmDialog.value?.confirm({
     title: '确认订阅方案',
     message: '确认接受此订阅方案？',
@@ -171,17 +188,20 @@ async function confirmAccept(): Promise<void> {
 }
 
 function toggleCancelForm(): void {
+  if (actionUnknown.value || modifyResultUnknown.value) return
   cancelFormOpen.value = !cancelFormOpen.value
 }
 
 function toggleModifyForm(): void {
+  if (actionUnknown.value || modifyResultUnknown.value) return
   modifyFormOpen.value = !modifyFormOpen.value
   if (modifyFormOpen.value) {
-    resetModifyForm()
+    modifyError.value = ''
   }
 }
 
 async function confirmCancel(): Promise<void> {
+  if (actionUnknown.value || modifyResultUnknown.value) return
   const reason = cancelReason.value.trim()
   const ok = await confirmDialog.value?.confirm({
     title: '取消订阅方案',
@@ -193,102 +213,220 @@ async function confirmCancel(): Promise<void> {
   await performAction('cancel', { cancel_reason: reason || undefined })
 }
 
-interface FilterRulePatch {
-  must_contain?: string
-  must_not_contain?: string
-  use_regex?: boolean
-  case_sensitive?: boolean
-}
-
-interface ModifyPatch {
-  selected_subtitle_group?: string
-  filter_rule?: FilterRulePatch
-  expected_folder_name?: string
-}
-
-/** Structural view of the snapshot config the modify form edits. */
-interface ModifyConfig {
-  selected_subtitle_group: string
-  filter_rule: {
-    must_contain: string
-    must_not_contain: string
-    use_regex: boolean
-    case_sensitive: boolean
-  }
-  expected_folder_name: string
-}
-
-function currentModifyConfig(): ModifyConfig {
-  const config = request.value?.confirmable_config
-  return {
-    selected_subtitle_group: config?.selected_subtitle_group ?? '',
-    filter_rule: {
-      must_contain: config?.filter_rule?.must_contain ?? '',
-      must_not_contain: config?.filter_rule?.must_not_contain ?? '',
-      use_regex: config?.filter_rule?.use_regex === true,
-      case_sensitive: config?.filter_rule?.case_sensitive === true,
-    },
-    expected_folder_name: config?.expected_folder_name ?? '',
-  }
-}
-
-function buildModifyPatch(): ModifyPatch | null {
-  const snapshot = request.value
-  if (!snapshot) return null
-  const config = currentModifyConfig()
-  const originalGroup = config.selected_subtitle_group
-  const originalMustContain = config.filter_rule.must_contain
-  const originalMustNotContain = config.filter_rule.must_not_contain
-  const originalUseRegex = config.filter_rule.use_regex
-  const originalCaseSensitive = config.filter_rule.case_sensitive
-  const originalFolderName = config.expected_folder_name
-
-  const patch: ModifyPatch = {}
-  if (modifyGroup.value !== originalGroup) {
-    patch.selected_subtitle_group = modifyGroup.value
-  }
-
-  const mcChanged = modifyClearMustContain.value || modifyMustContain.value.trim() !== originalMustContain
-  const mncChanged = modifyClearMustNotContain.value || modifyMustNotContain.value.trim() !== originalMustNotContain
-  const filterChanged =
-    mcChanged ||
-    mncChanged ||
-    modifyUseRegex.value !== originalUseRegex ||
-    modifyCaseSensitive.value !== originalCaseSensitive
-  if (filterChanged) {
-    patch.filter_rule = {}
-    if (mcChanged) {
-      patch.filter_rule.must_contain = modifyClearMustContain.value ? '' : modifyMustContain.value.trim()
-    }
-    if (mncChanged) {
-      patch.filter_rule.must_not_contain = modifyClearMustNotContain.value ? '' : modifyMustNotContain.value.trim()
-    }
-    patch.filter_rule.use_regex = modifyUseRegex.value
-    patch.filter_rule.case_sensitive = modifyCaseSensitive.value
-  }
-
-  const fnChanged = modifyClearFolderName.value || modifyFolderName.value.trim() !== originalFolderName
-  if (fnChanged) {
-    patch.expected_folder_name = modifyClearFolderName.value ? '' : modifyFolderName.value.trim()
-  }
-
+function submitModify(patch: PreviewPatch): void {
+  if (modifyResultUnknown.value || actionUnknown.value) return
   if (!Object.keys(patch).length) {
-    return {}
-  }
-  return patch
-}
-
-async function submitModify(): Promise<void> {
-  const patch = buildModifyPatch()
-  if (!patch || !Object.keys(patch).length) {
     modifyError.value = '请至少修改或清空一个字段。'
     return
   }
   modifyError.value = ''
-  await performAction('modify', { patch })
+  modifyResultUnknown.value = false
+  lastModifyPatch.value = patch
+  void performModify(patch)
+}
+
+function modifyPatchApplied(patch: PreviewPatch, snapshot: RequestDetailResult): boolean {
+  const config = snapshot.request?.confirmable_config
+  if (!config) return false
+  if (patch.selected_subtitle_group !== undefined && patch.selected_subtitle_group !== config.selected_subtitle_group) return false
+  if (patch.expected_folder_name !== undefined && patch.expected_folder_name !== config.expected_folder_name) return false
+  if (patch.filter_rule) {
+    const rule = config.filter_rule
+    if (!rule) return false
+    for (const key of ['must_contain', 'must_not_contain', 'use_regex', 'case_sensitive'] as const) {
+      if (patch.filter_rule[key] !== undefined && patch.filter_rule[key] !== rule[key]) return false
+    }
+  }
+  return true
+}
+
+function isUncertainWrite(error: unknown): boolean {
+  const apiError = toApiError(error)
+  const raw = error && typeof error === 'object' ? error as {
+    type?: unknown
+    status?: unknown
+    network?: unknown
+    cancelled?: unknown
+    nonJson?: unknown
+  } : {}
+  const type = typeof apiError.type === 'string' ? apiError.type : raw.type
+  return apiError.network || apiError.cancelled || apiError.nonJson
+    || apiError.status >= 500
+    || raw.network === true || raw.cancelled === true || raw.nonJson === true
+    || (typeof raw.status === 'number' && raw.status >= 500)
+    || type === 'network_error' || type === 'request_cancelled' || type === 'server_error'
+    || type === 'upstream_timeout' || type === 'upstream_unavailable'
+}
+
+type ModifyCheck =
+  | { state: 'applied' | 'not_applied'; snapshot: RequestDetailResult }
+  | { state: 'unknown' }
+
+async function recheckModify(patch: PreviewPatch): Promise<ModifyCheck> {
+  const fetched = await fetchDetailSnapshot()
+  if (!fetched.result) {
+    lastLoadError.value = fetched.error
+    return { state: 'unknown' }
+  }
+  return {
+    state: modifyPatchApplied(patch, fetched.result) ? 'applied' : 'not_applied',
+    snapshot: fetched.result,
+  }
+}
+
+async function recoverModify(): Promise<void> {
+  if (actionInFlight.value) return
+  actionInFlight.value = true
+  try {
+    const fetched = await fetchDetailSnapshot()
+    if (fetched.result) {
+      commitDetail(fetched.result)
+      modifyError.value = ''
+      modifyResultUnknown.value = false
+      modifyEditor.value?.reset()
+    } else {
+      lastLoadError.value = fetched.error
+      modifyError.value = '结果暂无法确认，请重新确认结果。'
+      modifyResultUnknown.value = true
+    }
+  } finally {
+    actionInFlight.value = false
+  }
+}
+
+function commitModifySuccess(snapshot: RequestDetailResult): void {
+  commitDetail(snapshot)
+  modifyResultUnknown.value = false
+  modifyFormOpen.value = false
+  lastModifyPatch.value = null
+  notification.success('修改成功', `订阅方案 ${props.requestId}`)
+  emit('changed')
+}
+
+async function retryModify(): Promise<void> {
+  if (actionInFlight.value) return
+  const patch = lastModifyPatch.value
+  if (!patch) return
+  if (modifyResultUnknown.value) {
+    actionInFlight.value = true
+    try {
+      const result = await recheckModify(patch)
+      if (result.state === 'applied') {
+        commitModifySuccess(result.snapshot)
+      } else if (result.state === 'not_applied') {
+        modifyResultUnknown.value = false
+        modifyError.value = '修改未生效，请重试。'
+      } else {
+        modifyError.value = '结果暂无法确认，请重新确认结果。'
+      }
+    } finally {
+      actionInFlight.value = false
+    }
+    return
+  }
+  void performModify(patch)
+}
+
+async function performModify(patch: PreviewPatch): Promise<void> {
+  actionInFlight.value = true
+  modifyError.value = ''
+  try {
+    const body: ModifyRequestBody = {
+      patch,
+      storage_dir: storageQuery().storage_dir ?? null,
+    }
+    await api.post<ModifyResult>('/api/v1/requests/{request_id}/modify', {
+      path: { request_id: props.requestId },
+      query: storageQuery(),
+      body,
+    })
+    const fetched = await fetchDetailSnapshot()
+    if (!fetched.result) {
+      lastLoadError.value = fetched.error
+      modifyError.value = '结果暂无法确认，请重新确认结果。'
+      modifyResultUnknown.value = true
+      return
+    }
+    if (!modifyPatchApplied(patch, fetched.result)) {
+      modifyResultUnknown.value = false
+      modifyError.value = '修改未生效，请重试。'
+      return
+    }
+    commitModifySuccess(fetched.result)
+  } catch (error) {
+    if (isUncertainWrite(error)) {
+      const result = await recheckModify(patch)
+      if (result.state === 'applied') {
+        commitModifySuccess(result.snapshot)
+      } else if (result.state === 'not_applied') {
+        modifyResultUnknown.value = false
+        modifyError.value = '修改未生效，请重试。'
+      } else {
+        modifyResultUnknown.value = true
+        modifyError.value = '结果暂无法确认，请重新确认结果。'
+      }
+    } else {
+      modifyResultUnknown.value = false
+      modifyError.value = '修改失败，请稍后重试。'
+    }
+  } finally {
+    actionInFlight.value = false
+  }
+}
+
+type ActionCheck =
+  | { state: 'applied' | 'not_applied'; snapshot?: RequestDetailResult }
+  | { state: 'unknown' }
+
+async function recheckAction(action: 'accept' | 'cancel' | 'delete'): Promise<ActionCheck> {
+  const fetched = await fetchDetailSnapshot()
+  if (!fetched.result) {
+    lastLoadError.value = fetched.error
+    if (action === 'delete' && fetched.error.status === 404) return { state: 'applied' }
+    return { state: 'unknown' }
+  }
+  if (action === 'delete') return { state: 'not_applied', snapshot: fetched.result }
+  const expectedStatus = action === 'accept' ? 'ACCEPTED' : 'CANCELLED'
+  return {
+    state: fetched.result.request?.status === expectedStatus ? 'applied' : 'not_applied',
+    snapshot: fetched.result,
+  }
+}
+
+function actionSuccessMessage(action: 'accept' | 'cancel' | 'delete'): string {
+  return action === 'accept' ? '确认成功' : action === 'cancel' ? '取消成功' : '删除成功'
+}
+
+function commitActionSuccess(action: 'accept' | 'cancel', snapshot: RequestDetailResult): void {
+  commitDetail(snapshot)
+  actionUnknown.value = null
+  cancelFormOpen.value = false
+  notification.success(actionSuccessMessage(action), `订阅方案 ${props.requestId}`)
+  emit('changed')
+}
+
+async function recheckPendingAction(): Promise<void> {
+  const action = actionUnknown.value
+  if (!action) return
+  actionInFlight.value = true
+  const checked = await recheckAction(action)
+  if (checked.state === 'applied') {
+    actionUnknown.value = null
+    if (action === 'delete') {
+      notification.success('删除成功', `已删除订阅方案 ${props.requestId}`)
+      emit('deleted', props.requestId)
+    } else if (checked.snapshot) {
+      commitActionSuccess(action, checked.snapshot)
+    }
+  } else if (checked.state === 'not_applied') {
+    actionUnknown.value = null
+    notification.error('操作未生效', '操作未生效，请确认后重新发起。')
+  }
+  actionInFlight.value = false
 }
 
 async function confirmDelete(): Promise<void> {
+  if (actionUnknown.value || modifyResultUnknown.value) return
   const ok = await confirmDialog.value?.confirm({
     title: '删除订阅方案',
     message: '确认删除此订阅方案？此操作不可恢复。',
@@ -303,42 +441,72 @@ async function confirmDelete(): Promise<void> {
       query: storageQuery(),
       body: { storage_dir: storageQuery().storage_dir ?? null },
     })
-    notification.success('删除成功', `已删除订阅方案 ${props.requestId}`)
-    emit('deleted', props.requestId)
+    const checked = await recheckAction('delete')
+    if (checked.state === 'applied') {
+      notification.success('删除成功', `已删除订阅方案 ${props.requestId}`)
+      emit('deleted', props.requestId)
+    } else if (checked.state === 'not_applied') {
+      notification.error('操作未生效', '删除未生效，请确认后重新发起。')
+    } else {
+      actionUnknown.value = 'delete'
+      notification.error('结果暂无法确认', '操作结果暂无法确认，请重新确认结果。')
+    }
   } catch (error) {
-    void error
-    notification.error('删除失败', '删除订阅方案失败，请稍后重试。')
+    if (isUncertainWrite(error)) {
+      const checked = await recheckAction('delete')
+      if (checked.state === 'applied') {
+        notification.success('删除成功', `已删除订阅方案 ${props.requestId}`)
+        emit('deleted', props.requestId)
+      } else if (checked.state === 'not_applied') {
+        notification.error('操作未生效', '删除未生效，请确认后重新发起。')
+      } else {
+        actionUnknown.value = 'delete'
+        notification.error('结果暂无法确认', '操作结果暂无法确认，请重新确认结果。')
+      }
+    } else {
+      void error
+      notification.error('删除失败', '删除订阅方案失败，请稍后重试。')
+    }
   } finally {
     actionInFlight.value = false
   }
 }
 
-async function performAction(action: 'accept' | 'cancel' | 'modify', body: Record<string, unknown>): Promise<void> {
+async function performAction(action: 'accept' | 'cancel', body: LocalActionBody): Promise<void> {
+  if (actionUnknown.value || modifyResultUnknown.value) return
   actionInFlight.value = true
   try {
-    await api.post<ActionResult>(`/api/v1/requests/{request_id}/${action}`, {
+    const options = {
       path: { request_id: props.requestId },
       query: storageQuery(),
       body: { ...body, storage_dir: storageQuery().storage_dir ?? null },
-    })
-    const titles: Record<string, string> = {
-      accept: '确认成功',
-      cancel: '取消成功',
-      modify: '修改成功',
     }
-    notification.success(titles[action] ?? '操作成功', `订阅方案 ${props.requestId}`)
-    // Refresh through GET detail so the panel only consumes the safe
-    // server-authoritative projection, then refresh the list.
-    cancelFormOpen.value = false
-    modifyFormOpen.value = false
-    emit('changed')
-    void loadDetail()
+    await api.post<ActionResult>(`/api/v1/requests/{request_id}/${action}`, options)
+    const checked = await recheckAction(action)
+    if (checked.state === 'applied' && checked.snapshot) {
+      commitActionSuccess(action, checked.snapshot)
+    } else if (checked.state === 'not_applied') {
+      notification.error('操作未生效', '操作未生效，请确认后重新发起。')
+    } else {
+      actionUnknown.value = action
+      notification.error('结果暂无法确认', '操作结果暂无法确认，请重新确认结果。')
+    }
   } catch (error) {
-    void error
+    if (isUncertainWrite(error)) {
+      const checked = await recheckAction(action)
+      if (checked.state === 'applied' && checked.snapshot) {
+        commitActionSuccess(action, checked.snapshot)
+      } else if (checked.state === 'not_applied') {
+        notification.error('操作未生效', '操作未生效，请确认后重新发起。')
+      } else {
+        actionUnknown.value = action
+        notification.error('结果暂无法确认', '操作结果暂无法确认，请重新确认结果。')
+      }
+      return
+    }
     const messages: Record<string, string> = {
       accept: '确认失败，请稍后重试。',
       cancel: '取消失败，请稍后重试。',
-      modify: '修改失败，请稍后重试。',
     }
     notification.error('操作失败', messages[action] ?? '操作失败，请稍后重试。')
   } finally {
@@ -352,29 +520,20 @@ onMounted(() => {
   void loadDetail()
 })
 
-// Legacy `appendClearControl`: checking a "clear" box clears and disables the
-// paired input so the patch sends an explicit empty value.
-watch(modifyClearMustContain, (clear) => {
-  if (clear) modifyMustContain.value = ''
-})
-watch(modifyClearMustNotContain, (clear) => {
-  if (clear) modifyMustNotContain.value = ''
-})
-watch(modifyClearFolderName, (clear) => {
-  if (clear) modifyFolderName.value = ''
-})
 </script>
 <template>
   <PanelSection v-if="!loading && !loadFailed && detail" title="订阅方案详情" class="request-detail-panel">
     <template #actions>
-      <button
-        type="button"
-        class="copy-request-id secondary-button"
-        aria-label="复制 request_id"
-        @click="copyRequestId"
-      >
-        复制 request_id
-      </button>
+      <BaseButton id="detail-safe-info-button" :disabled="actionInFlight" @click="safeInfoOpen = true">全部信息</BaseButton>
+      <RouterLink
+        v-if="props.trackingId && effectiveTrackingStatus === 'linked'"
+        id="detail-tracking-entry"
+        class="base-button secondary-button"
+        :to="routeLocation('tracking', { tracking_id: props.trackingId })"
+      >前往追番管理</RouterLink>
+      <span v-else-if="effectiveTrackingStatus === 'loading'" class="field-help">追番状态：正在读取追番状态...</span>
+      <span v-else-if="effectiveTrackingStatus === 'failed' || effectiveTrackingStatus === 'unavailable'" class="field-help">追番状态：追番状态暂不可用</span>
+      <span v-else class="field-help">追番状态：{{ props.trackingStatusLabel || '未进入追番管理' }}</span>
     </template>
 
     <div id="request-detail-container" class="request-detail" aria-live="polite" aria-relevant="additions text">
@@ -383,32 +542,25 @@ watch(modifyClearFolderName, (clear) => {
       <!-- ── actions ─────────────────────────────────────────────── -->
       <div class="detail-actions" aria-label="订阅方案操作">
         <template v-if="isPending">
-          <BaseButton id="detail-accept-button" variant="primary" :loading="actionInFlight" @click="confirmAccept">
+          <BaseButton id="detail-accept-button" variant="primary" :loading="actionInFlight" :disabled="Boolean(actionUnknown) || modifyResultUnknown" @click="confirmAccept">
             确认
           </BaseButton>
-          <BaseButton id="detail-cancel-toggle" :disabled="actionInFlight" @click="toggleCancelForm">
+          <BaseButton id="detail-cancel-toggle" :disabled="actionInFlight || Boolean(actionUnknown) || modifyResultUnknown" @click="toggleCancelForm">
             取消
           </BaseButton>
-          <BaseButton id="detail-modify-toggle" :disabled="actionInFlight" @click="toggleModifyForm">
+          <BaseButton id="detail-modify-toggle" :disabled="actionInFlight || Boolean(actionUnknown) || modifyResultUnknown" @click="toggleModifyForm">
             修改
           </BaseButton>
         </template>
 
         <template v-else-if="isAccepted">
           <p class="field-help">
-            此订阅方案已{{ detailStatusLabel(request?.status) }}，可提交到 Auto Bangumi。
+            此订阅方案已{{ detailStatusLabel(request?.status) }}，可进行本地方案修改或删除。
           </p>
-          <RouterLink
-            id="detail-ab-submit-entry"
-            class="base-button secondary-button"
-            :to="routeLocation('settings', { request_id: props.requestId })"
-          >
-            去 Settings 提交 Auto Bangumi
-          </RouterLink>
-          <BaseButton id="detail-accepted-modify-toggle" :disabled="actionInFlight" @click="toggleModifyForm">
+          <BaseButton id="detail-accepted-modify-toggle" :disabled="actionInFlight || Boolean(actionUnknown) || modifyResultUnknown" @click="toggleModifyForm">
             修改
           </BaseButton>
-          <BaseButton id="detail-delete-button" variant="danger" :disabled="actionInFlight" @click="confirmDelete">
+          <BaseButton id="detail-delete-button" variant="danger" :disabled="actionInFlight || Boolean(actionUnknown) || modifyResultUnknown" @click="confirmDelete">
             删除
           </BaseButton>
         </template>
@@ -416,6 +568,13 @@ watch(modifyClearFolderName, (clear) => {
         <template v-else-if="isCancelled">
           <p class="field-help">此订阅方案已{{ detailStatusLabel(request?.status) }}，不可操作。</p>
         </template>
+      </div>
+
+      <div v-if="actionUnknown" class="detail-action-recovery" role="alert">
+        <span class="field-error">结果暂无法确认</span>
+        <BaseButton id="detail-action-recheck-button" type="button" variant="secondary" :loading="actionInFlight" @click="recheckPendingAction">
+          重新确认结果
+        </BaseButton>
       </div>
 
       <!-- ── inline cancel form ──────────────────────────────────── -->
@@ -435,7 +594,7 @@ watch(modifyClearFolderName, (clear) => {
           />
         </FormField>
         <div class="detail-form-actions">
-          <BaseButton id="detail-cancel-submit" type="submit" variant="danger" :loading="actionInFlight">
+          <BaseButton id="detail-cancel-submit" type="submit" variant="danger" :loading="actionInFlight" :disabled="Boolean(actionUnknown) || modifyResultUnknown">
             提交取消
           </BaseButton>
           <BaseButton type="button" :disabled="actionInFlight" @click="cancelFormOpen = false">
@@ -444,90 +603,27 @@ watch(modifyClearFolderName, (clear) => {
         </div>
       </form>
 
-      <!-- ── inline modify form ──────────────────────────────────── -->
-      <form
-        v-if="modifyFormOpen"
-        id="detail-modify-form"
-        class="detail-inline-form"
-        @submit.prevent="submitModify"
-      >
-        <h4 class="detail-form-heading">修改订阅方案</h4>
-
-        <FormField label="字幕组" inputId="modify-subtitle-group">
-          <BaseSelect
-            id="modify-subtitle-group"
-            v-model="modifyGroup"
-            label="字幕组"
-            :options="groupOptions"
-          />
-        </FormField>
-
-        <FormField label="包含规则" inputId="modify-must-contain">
-          <BaseInput
-            id="modify-must-contain"
-            v-model="modifyMustContain"
-            type="text"
-            placeholder="如 1080p（默认按字面匹配）"
-            :disabled="modifyClearMustContain"
-          />
-        </FormField>
-        <CheckboxRow
-          id="modify-clear-must-contain"
-          v-model:checked="modifyClearMustContain"
-          label="清空包含规则"
-        />
-
-        <FormField label="排除规则" inputId="modify-must-not-contain">
-          <BaseInput
-            id="modify-must-not-contain"
-            v-model="modifyMustNotContain"
-            type="text"
-            placeholder="如 [v2]（默认按字面匹配）"
-            :disabled="modifyClearMustNotContain"
-          />
-        </FormField>
-        <CheckboxRow
-          id="modify-clear-must-not-contain"
-          v-model:checked="modifyClearMustNotContain"
-          label="清空排除规则"
-        />
-
-        <div class="filter-options">
-          <CheckboxRow id="modify-filter-use-regex" v-model:checked="modifyUseRegex" label="使用正则" />
-          <CheckboxRow
-            id="modify-filter-case-sensitive"
-            v-model:checked="modifyCaseSensitive"
-            label="大小写敏感"
-          />
-        </div>
-        <p class="field-help" id="modify-filter-help">
-          默认按字面文本匹配且不区分大小写；勾选「使用正则」后按正则匹配，勾选「大小写敏感」后区分大小写。
-        </p>
-
-        <FormField label="folder_name" inputId="modify-folder-name">
-          <BaseInput
-            id="modify-folder-name"
-            v-model="modifyFolderName"
-            type="text"
-            placeholder="期望存储目录名"
-            :disabled="modifyClearFolderName"
-          />
-        </FormField>
-        <CheckboxRow id="modify-clear-folder-name" v-model:checked="modifyClearFolderName" label="清空 folder_name" />
-
-        <p v-if="modifyError" id="detail-modify-error" class="field-error" role="alert">
-          {{ modifyError }}
-        </p>
-
-        <div class="detail-form-actions">
-          <BaseButton id="detail-modify-submit" type="submit" variant="primary" :loading="actionInFlight">
-            提交修改
-          </BaseButton>
-          <BaseButton type="button" :disabled="actionInFlight" @click="modifyFormOpen = false">
-            取消
-          </BaseButton>
-        </div>
-      </form>
+      <AnimeDraftEditor
+        v-if="modifyFormOpen && request"
+        ref="modifyEditor"
+        :request="request"
+        mode="saved"
+        heading="修改订阅方案"
+        form-heading="编辑已保存方案"
+        apply-label="保存方案修改"
+        id-prefix="modify"
+        container-id="detail-modify-editor"
+        form-id="detail-modify-form"
+        :applying="actionInFlight"
+        :error="modifyError"
+        :can-retry="Boolean(modifyError)"
+        :retry-label="modifyResultUnknown ? '重新确认结果' : '重试修改'"
+        :disabled="Boolean(actionUnknown) || modifyResultUnknown"
+        @apply="submitModify"
+        @empty-apply="submitModify({})"
+        @retry="retryModify"
+        @reset="recoverModify"
+      />
 
       <!-- ── Overview ────────────────────────────────────────────── -->
       <section class="detail-section overview-section" aria-label="Overview">
@@ -535,6 +631,7 @@ watch(modifyClearFolderName, (clear) => {
         <dl class="detail-grid">
           <div class="detail-row"><dt>request_id</dt><dd>{{ displayValue(request?.request_id) }}</dd></div>
           <div class="detail-row"><dt>状态</dt><dd>{{ detailStatusLabel(request?.status) }}</dd></div>
+          <div class="detail-row"><dt>修改时间</dt><dd>{{ displayValue(request?.updated_at) }}</dd></div>
           <div class="detail-row"><dt>保存状态</dt><dd>已保存</dd></div>
           <div class="detail-row"><dt>原始标题</dt><dd>{{ displayValue(request?.input?.raw_title) }}</dd></div>
           <div class="detail-row">
@@ -646,7 +743,7 @@ watch(modifyClearFolderName, (clear) => {
         <div class="audit-group">
           <h5 class="audit-heading">状态历史</h5>
           <template v-if="detail.history?.error">
-            <p class="muted-text">{{ String(detail.history.error.error_message ?? '状态历史不可用。') }}</p>
+            <p class="muted-text">状态历史暂不可用。</p>
           </template>
           <template v-else-if="detail.history?.events?.length">
             <table class="history-table">
@@ -669,7 +766,7 @@ watch(modifyClearFolderName, (clear) => {
         <div class="audit-group">
           <h5 class="audit-heading">Auto Bangumi 结果</h5>
           <template v-if="detail.ab_result?.error">
-            <p class="muted-text">{{ String(detail.ab_result.error.error_message ?? '提交结果不可用。') }}</p>
+            <p class="muted-text">提交结果暂不可用。</p>
           </template>
           <template v-else-if="detail.ab_result?.record?.ab_submit_result">
             <dl class="detail-grid">
@@ -702,6 +799,7 @@ watch(modifyClearFolderName, (clear) => {
     </div>
 
     <ConfirmDialog ref="confirmDialog" />
+    <SafeInfoDialog :open="safeInfoOpen" :request-id="props.requestId" @close="safeInfoOpen = false" @reuse="reuseRequest" />
   </PanelSection>
 
   <PanelSection v-else title="订阅方案详情" class="request-detail-panel">

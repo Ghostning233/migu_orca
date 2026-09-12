@@ -66,13 +66,29 @@ class ApiErrorEnvelope(_StrictBase):
 # ---------------------------------------------------------------------------
 
 
+class RequestSubtitleGroupSummaryDTO(_StrictBase):
+    """Strict public summary for one candidate subtitle group.
+
+    Request list consumers only need the group label and resource counts.  In
+    particular, RSS URLs and any other source metadata are deliberately not
+    part of this DTO.
+    """
+
+    subtitle_group: str | None
+    total_resource_count: int
+    valid_resource_count: int
+    invalid_resource_count: int
+
+
 class RequestSummaryDTO(_StrictBase):
     """Public ``summary`` shape produced by ``summarize_request``."""
 
     request_id: str | None
     status: str | None
     bangumi_title: str | None
-    candidate_subtitle_groups: list[dict[str, Any]]
+    season: int | None
+    updated_at: str | None
+    candidate_subtitle_groups: list[RequestSubtitleGroupSummaryDTO]
     selected_subtitle_group: str | None
     effective_seed_count: int
     expected_folder_name: str | None

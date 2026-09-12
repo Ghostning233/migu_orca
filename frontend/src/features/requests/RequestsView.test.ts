@@ -6,6 +6,7 @@ import { nextTick } from 'vue'
 
 import { api } from '@/api/client'
 import RequestsView from '@/features/requests/RequestsView.vue'
+import RequestDetailPanel from '@/features/requests/RequestDetailPanel.vue'
 import type { operations } from '@/api/generated/api'
 
 // US-202: Requests list migration. The view loads summaries through the shared
@@ -126,7 +127,7 @@ function mockApiGet() {
   })
 }
 
-async function mountRequests(query: Record<string, string> = {}) {
+async function mountRequests(query: Record<string, string | string[]> = {}) {
   const router = createRouter({
     history: createMemoryHistory('/app/'),
     routes: [
@@ -252,6 +253,15 @@ describe('RequestsView search/filter/sort (US-202)', () => {
     expect(items[0]!.text()).toContain('葬送的芙莉莲')
   })
 
+  it('does not search by technical request_id', async () => {
+    const { wrapper } = await mountRequests()
+    await nextTick()
+
+    await wrapper.find('#request-list-search').setValue('req-a')
+    await nextTick()
+    expect(wrapper.find('#request-list-count').text()).toContain('显示 0 / 3')
+  })
+
   it('filters by status code', async () => {
     const { wrapper } = await mountRequests()
     await nextTick()
@@ -299,7 +309,7 @@ describe('RequestsView search/filter/sort (US-202)', () => {
   })
 })
 
-describe('RequestsView selection & copy (US-202)', () => {
+describe('RequestsView selection (US-296)', () => {
   beforeEach(() => {
     localStorage.clear()
     apiGet.mockReset()
@@ -345,35 +355,94 @@ describe('RequestsView selection & copy (US-202)', () => {
     expect(router.currentRoute.value.query.request_id).toBeUndefined()
   })
 
-  it('copies request_id to the clipboard and shows a notification', async () => {
-    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
-    const { wrapper } = await mountRequests()
-    await nextTick()
-
-    await wrapper.find('.copy-request-id').trigger('click')
-    await nextTick()
-
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('req-a')
-    // The notification store drives the shell's aria-live region; assert the
-    // store state so the message copy is covered without mounting the shell.
-    const { useNotificationStore } = await import('@/app/stores/notification')
-    const notification = useNotificationStore()
-    expect(notification.current?.kind).toBe('success')
-    expect(notification.current?.title).toBe('已复制 request_id')
-    expect(notification.current?.message).toBe('req-a')
+  it('replaces an unknown request_id query instead of retaining it', async () => {
+    const { router } = await mountRequests({ request_id: 'missing-request' })
+    await flushPromises()
+    expect(router.currentRoute.value.query.request_id).toBeUndefined()
   })
 
-  it('shows a safe error notification when clipboard write fails', async () => {
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+  it('replaces duplicated request_id query values', async () => {
+    const { router } = await mountRequests({ request_id: ['req-a', 'req-b'] })
+    await flushPromises()
+    expect(router.currentRoute.value.query.request_id).toBeUndefined()
+  })
+
+  it('moves focus to the next valid row after deletion without selecting it', async () => {
+    const { wrapper, router } = await mountRequests({ request_id: 'req-a' })
+    await nextTick()
+    let removed = false
+    apiGet.mockImplementation((path: string) => {
+      if (path === '/api/v1/requests') {
+        return Promise.resolve(removed ? { requests: LIST_RESULT.requests.slice(1) } : LIST_RESULT)
+      }
+      if (path === '/api/v1/requests/{request_id}') return Promise.resolve(detailResult('req-a'))
+      return Promise.resolve({})
+    })
+    removed = true
+    await wrapper.findComponent(RequestDetailPanel).vm.$emit('deleted', 'req-a')
+    await flushPromises()
+    expect((document.activeElement as HTMLElement).dataset.requestId).toBe('req-b')
+    expect(router.currentRoute.value.query.request_id).toBeUndefined()
+  })
+
+  it('shows tracking loading explicitly and then resolves pure missing as not linked', async () => {
+    let resolveTracking: ((value: unknown) => void) | undefined
+    apiGet.mockImplementation((path: string) => {
+      if (path === '/api/v1/requests') return Promise.resolve(LIST_RESULT)
+      if (path === '/api/v1/tracking/items') {
+        return new Promise((resolve) => {
+          resolveTracking = resolve
+        })
+      }
+      return Promise.resolve({})
     })
     const { wrapper } = await mountRequests()
-    await nextTick()
+    expect(wrapper.find('.plan-list-tracking').text()).toContain('正在读取追番状态')
 
-    await wrapper.find('.copy-request-id').trigger('click')
-    await nextTick()
-
-    // No raw error text leaks into the DOM.
-    expect(wrapper.text()).not.toContain('denied')
+    resolveTracking?.({ items: [] })
+    await flushPromises()
+    expect(wrapper.find('.plan-list-tracking').text()).toContain('未进入追番管理')
   })
+
+  it('shows tracking failure and restores the real status after retry', async () => {
+    let trackingAttempts = 0
+    apiGet.mockImplementation((path: string) => {
+      if (path === '/api/v1/requests') return Promise.resolve(LIST_RESULT)
+      if (path === '/api/v1/tracking/items') {
+        trackingAttempts += 1
+        return trackingAttempts === 1
+          ? Promise.reject(new Error('tracking unavailable'))
+          : Promise.resolve({
+              items: [
+                {
+                  tracking_id: 'tracking-a',
+                  request_id: 'req-a',
+                  title: '葬送的芙莉莲',
+                  season: 1,
+                  subtitle_group: '喵萌奶茶屋',
+                  poster_path: null,
+                  status: 'ACTIVE',
+                  status_label: '追番中',
+                  status_group: 'ACTIVE',
+                  valid_resource_count: 1,
+                  updated_episode: null,
+                  updated_episode_status: 'NOT_IMPLEMENTED',
+                  total_episodes: null,
+                  revision: 1,
+                  updated_at: null,
+                },
+              ],
+            })
+      }
+      return Promise.resolve({})
+    })
+    const { wrapper } = await mountRequests()
+    await flushPromises()
+    expect(wrapper.find('.plan-list-tracking').text()).toContain('追番状态暂不可用')
+
+    await wrapper.find('.plans-tracking-error .secondary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.plan-list-tracking').text()).toContain('追番中')
+  })
+
 })

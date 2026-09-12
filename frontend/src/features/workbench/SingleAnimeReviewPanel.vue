@@ -23,11 +23,13 @@ import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import { effectiveSeeds, type RequestSnapshot } from '@/features/requests/requestDetail'
 import { storageQuery } from '@/features/requests/requestStorage'
 import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
+import type { ReuseSuggestion } from '@/features/requests/reuseHandoff'
 
 const props = defineProps<{
   request: RequestSnapshot
   draftId: string
   draftRevision?: number
+  reuseSuggestion?: ReuseSuggestion | null
 }>()
 
 const emit = defineEmits<{
@@ -44,6 +46,7 @@ const draftSnapshot = computed(() => (session.request.value ?? props.request) as
 const formError = ref('')
 const navigationLoading = ref(false)
 const dirty = ref(false)
+const reuseSuggestionApplied = ref(false)
 const journey = useSingleAnimeJourney()
 const confirmLoading = ref(false)
 const confirmError = ref('')
@@ -257,6 +260,12 @@ function resetFailedModify(): void {
   formError.value = ''
 }
 
+function applyReuseSuggestion(): void {
+  if (!props.reuseSuggestion) return
+  editor.value?.applySuggestion(props.reuseSuggestion)
+  reuseSuggestionApplied.value = true
+}
+
 async function retryTrackingLocation(): Promise<void> {
   const requestId = journey.state.requestId
   if (!requestId || confirmLoading.value || !['verification_pending', 'confirmed_pending_tracking'].includes(journey.state.phase)) return
@@ -308,6 +317,15 @@ defineExpose({ session, editor, leaveGuard })
         <p class="field-help">已选择 MiKan 合集，请核对字幕组、筛选规则和有效资源后再继续。</p>
       </div>
       <div class="review-navigation" aria-label="审核步骤导航">
+        <BaseButton
+          v-if="reuseSuggestion && journey.state.phase === 'review'"
+          id="single-review-apply-reuse-suggestion"
+          variant="secondary"
+          :disabled="navigationLoading || session.applying.value"
+          @click="applyReuseSuggestion"
+        >
+          {{ reuseSuggestionApplied ? '已载入复制方案建议' : '应用复制方案建议' }}
+        </BaseButton>
         <BaseButton id="single-review-back-candidates" variant="secondary" :disabled="navigationLoading || session.applying.value" @click="leave('candidates')">重新选择合集</BaseButton>
         <BaseButton id="single-review-edit-search" variant="secondary" :disabled="navigationLoading || session.applying.value" @click="leave('input')">修改搜索</BaseButton>
       </div>

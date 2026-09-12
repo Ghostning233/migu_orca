@@ -1,0 +1,170 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage37-plans-safe-info",
+  "description": "Stage 37（F-E）：把 /app/plans 重构为本地追番方案列表—详情，接入真实 SafeInfo、共享 saved Request 编辑、精确 tracking 链接与一次性复制再用，同时与外部追番管理严格分离。",
+  "userStories": [
+    {
+      "id": "US-294",
+      "title": "补齐并收紧 Request 列表安全展示契约",
+      "description": "作为前端消费者，我需要列表摘要直接提供季度和修改时间，并只返回无 URL 的候选字幕组摘要，以便无需 N+1 请求即可安全构建方案列表。",
+      "acceptanceCriteria": [
+        "RequestSummaryDTO 追加可空 season 与 updated_at，既有端点、状态码和业务语义不变",
+        "serializer 仅从已保存 Request 的现有公开字段确定性构造两字段，缺失返回 null，不读取文件 mtime、绝对路径或 tracking/外部状态",
+        "candidate_subtitle_groups 改为严格公开 DTO，只保留字幕组名称与资源计数并删除 rss_url 等 URL/未知字段；现有前端无 URL 消费者",
+        "严格 Python schema、OpenAPI 示例、generated TypeScript 与 runtime/golden/consumer contract tests 同步",
+        "新增字段不会泄漏 URL、RSS、magnet、endpoint、凭据、原始响应或绝对路径",
+        "Targeted Request DTO/serializer/OpenAPI contract tests pass",
+        "API drift check passes",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-295",
+      "title": "建立追番方案列表投影与状态核心",
+      "description": "作为前端维护者，我需要 generated 类型驱动且 API-free 的方案列表核心，以便排序、筛选和 tracking 关联不会散落在组件中。",
+      "acceptanceCriteria": [
+        "类型仅从 generated listRequests 与 listTrackingItems 结果提取，不手写 API DTO",
+        "默认按合法 updated_at 倒序，缺失或无效时间稳定置后并保留服务端相对顺序",
+        "标题搜索与 Request 方案状态筛选为派生状态，tracking 状态不冒充方案状态",
+        "tracking 只按非空完全相等 request_id 建立唯一关联；重复、缺失、EXTERNAL_ONLY 或无效 tracking_id 均安全降级且不推导 ID",
+        "定义列表、tracking 独立加载/错误、选择仍存在和安全中文状态映射",
+        "Targeted plan projection/sort/filter/join tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-296",
+      "title": "实现宽松列表详情页面骨架",
+      "description": "作为用户，我希望在追番方案页用清晰的列表—详情结构查找并选择已保存方案，而不是面对技术化兼容列表。",
+      "acceptanceCriteria": [
+        "/app/plans 使用约 34%～40% 列表和 60%～66% 详情的桌面布局，可在窄桌面与 200% 缩放下纵向排列",
+        "列表展示标题、季度、字幕组、方案状态、修改时间和安全 tracking 状态，不显示 request_id 复制按钮或外部动作",
+        "接入 listRequests 与只读 listTrackingItems(sort=updated_at)，两者加载/错误/重试独立，tracking 失败不阻断方案列表和详情",
+        "公开 request_id query 可恢复合法选择；非法/不存在值不回显，刷新/筛选不暗换当前项",
+        "覆盖加载、无方案、筛选无结果、列表失败、tracking 局部失败与未选择详情状态",
+        "Targeted PlansView component tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-297",
+      "title": "实现真实 SafeInfoDialog",
+      "description": "作为用户，我希望在已保存方案上查看完整但安全的信息，以便核对合集、字幕组、过滤、资源和历史。",
+      "acceptanceCriteria": [
+        "弹窗只消费 generated getRequestSafeInfo，不能从 Request detail、tracking 或草案拼装替代 DTO",
+        "逐字段展示标题/别名、季度证据、真实 MiKan 合集标题与公开编号、字幕组/过滤、相对存储摘要、安全目录、资源/脱敏文件名、总集数、Request 状态、历史与安全 AB 状态",
+        "updated_episode_status=NOT_IMPLEMENTED 始终展示已更新集数待开发，不用资源数、RSS 或文件名猜测",
+        "打开、快速切换、关闭和重试具备请求代际保护，旧响应不能覆盖当前方案且错误仅显示固定中文文案",
+        "共享弹窗具备语义标题、焦点圈定、Escape/遮罩关闭、关闭后焦点恢复和 reduced-motion 行为",
+        "Targeted SafeInfoDialog component tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-298",
+      "title": "扩展共享编辑器的 saved Request 模式",
+      "description": "作为维护者，我希望草案和已保存方案共享同一套可编辑字段组件，同时保持各自的状态和 transport 语义。",
+      "acceptanceCriteria": [
+        "AnimeDraftEditor 通过明确 mode/能力/文案 props 或 slots 支持 draft 与 saved Request，不复制字段表单",
+        "saved 模式展示用户语言标题与操作文案，保留字幕组、包含/排除、正则、大小写和安全目录名字段",
+        "组件仍是受控展示层；saved transport 不进入 useDraftSession，saved 模式不伪造 draft revision 或调用 previewModifyRequest",
+        "现有单番/批量 draft 模式的 dirty、apply、retry、reset、revision 和资源摘要行为保持不变",
+        "saved 模式产出与 generated modifyRequest body 兼容的最小 patch，空 patch 不提交",
+        "Targeted AnimeDraftEditor draft/saved mode tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-299",
+      "title": "接入方案详情修改与本地生命周期",
+      "description": "作为用户，我希望在方案详情中安全查看历史、修改本地方案并前往已关联的追番项。",
+      "acceptanceCriteria": [
+        "RequestDetailPanel 使用共享 AnimeDraftEditor saved 模式并删除独立修改表单，详情以 getRequestDetail 服务端快照为权威",
+        "修改只调用 generated modifyRequest 允许字段；进行中锁冲突动作，成功后回查详情并刷新列表，失败保留输入且可重试或恢复服务端值",
+        "详情展示安全基本信息、updated_at、历史摘要和真实 SafeInfoDialog 入口，不渲染完整 URL、原始响应或绝对路径",
+        "只有唯一精确 tracking 关联时显示前往追番管理并导航真实 tracking_id；不读取 available_actions、不推导 ID",
+        "既有 accept/cancel/delete 如保留只作为按状态显示且需确认的本地方案兼容动作，文案不得暗示已修改外部订阅",
+        "/app/plans 不调用 sync/revalidate/submit/retry/recover 或任何 Auto Bangumi 管理端点",
+        "Targeted RequestDetailPanel modify/history/local-action tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "已完成共享 saved 编辑器接入、generated modifyRequest 回查、固定安全错误文案与唯一 tracking 导航；定向 Vitest/typecheck/lint 及真实 Chromium 验证通过。"
+    },
+    {
+      "id": "US-300",
+      "title": "实现复制再用内存 handoff",
+      "description": "作为用户，我希望把已有方案作为新方案的安全起点，同时仍由我重新确认真实 MiKan 合集和新草案。",
+      "acceptanceCriteria": [
+        "复制再用只从成功的 safe-info 建立一次性内存 handoff，字段限公开标题、真实 MiKan bangumi_id 和用户可编辑配置建议",
+        "handoff 不含 request_id、Request snapshot、URL、资源明细、历史、tracking、candidate/draft capability 或幂等键，不写 URL/history state/localStorage/sessionStorage/持久化 Pinia",
+        "/app/add 一次性消费并清理 handoff，显示安全来源摘要；刷新或 SPA 重启后失效并提示重新选择",
+        "用户必须显式发起真实搜索、选择真实 MiKan 合集并生成新服务端草案，导航本身不调用 create/save-confirm/accept 或外部提交",
+        "配置建议仅在新草案生成后由用户显式应用；字幕组不匹配时保留服务端草案并给出安全核对提示",
+        "Targeted reuse handoff and add-journey tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "新增 SafeInfo 白名单一次性内存 handoff；/app/add 只消费一次、预填标题并要求显式搜索/选合集/生成草案，配置建议需生成后显式应用。定向 Vitest、typecheck/lint/build 与 Chromium 验证通过。"
+    },
+    {
+      "id": "US-301",
+      "title": "完成安全可访问性与兼容收敛",
+      "description": "作为桌面端用户，我希望追番方案旅程在不同视口、键盘操作和失败场景下均可完成且不会泄漏敏感信息。",
+      "acceptanceCriteria": [
+        "1280x720、1440x900、1920x1080 与 200% 缩放可完成筛选、选择、修改、全部信息、复制再用和管理跳转，关键操作无不可达或重叠",
+        "当前行不只依赖颜色并提供 aria-current 等价语义；Tab/Enter/Space/Escape、焦点进入/恢复、状态播报和 reduced-motion 正确",
+        "列表/详情/SafeInfo/复制并发切换均丢弃旧响应或旧 handoff，不出现跨方案快照混用",
+        "敏感注入测试确认完整 URL、RSS、magnet、endpoint、凭据、Cookie、Authorization、原始响应、capability、幂等键和绝对路径不进入 DOM/URL/storage/console/trace/screenshot",
+        "删除无调用的旧方案 UI/独立表单前提供引用搜索与 bundle 证据，/app/requests 等旧入口继续安全重定向",
+        "Targeted plans security/accessibility/compatibility tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "完成跨功能 responsive/a11y 与敏感字段收敛；保留旧入口安全重定向，确认无旧复制/独立详情表单/Settings 外部提交运行时引用。定向 Chromium 与前端检查通过。"
+    },
+    {
+      "id": "US-302",
+      "title": "完成最终门禁文档归档与后续 handoff",
+      "description": "作为维护者，我需要完整验证 F-E、记录设计偏差并为 F-F/F-G 留下无歧义边界。",
+      "acceptanceCriteria": [
+        "US-294 至 US-301 的验收证据逐项映射，所有 story 状态、提交历史和工作区状态一致",
+        "完整 api:check、typecheck、lint、Vitest、production build、Python compileall、Ruff 与非浏览器 pytest 通过",
+        "按 dev-browser skill 运行完整真实 Chromium 套件，并覆盖 plans 列表详情、SafeInfo、修改、复制、旧路由、视口/200% 与敏感信息",
+        "对照 frontend UX 规格记录宽松列表、详情层级和状态表达的实现偏差；无偏差也明确记录",
+        "文档同步 Stage 37 状态并归档 prd.json/progress.txt，archive 内容与最终 story 状态一致",
+        "handoff 明确 F-F 独占正式 tracking/凭据/外部动作，F-G 独占设置与发布收尾，不顺带开发下一 Stage",
+        "No dist, trace, screenshot, credential or local storage artifact is committed",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Stage 37 完成归档；US-294～US-302 全部通过。前端/后端完整门禁与 171 项真实 Chromium 套件通过，F-F/F-G handoff 已记录，未提交 dist/trace/screenshot/凭据/本地 storage。"
+    }
+  ]
+}

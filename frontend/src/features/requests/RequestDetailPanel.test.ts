@@ -25,7 +25,7 @@ vi.mock('@/api/client', () => ({
   },
   toApiError: (error: unknown) =>
     error && typeof error === 'object' && 'type' in error
-      ? (error as { type: string; message: string })
+      ? (error as { type: string; message: string; status?: number; network?: boolean; cancelled?: boolean; nonJson?: boolean })
       : { type: 'request_error', message: '请求失败，请重试' },
   isApiError: () => false,
   apiRequest: vi.fn(),
@@ -99,7 +99,12 @@ function acceptedFixture(): DetailResult {
   })
 }
 
-async function mountPanel(requestId = 'req-a', options: { stubsTeleport?: boolean } = {}) {
+async function mountPanel(requestId = 'req-a', options: {
+  stubsTeleport?: boolean
+  trackingId?: string | null
+  trackingStatus?: 'loading' | 'failed' | 'unavailable' | 'not_linked' | 'linked'
+  trackingStatusLabel?: string | null
+} = {}) {
   const router = createRouter({
     history: createMemoryHistory('/app/'),
     routes: [
@@ -113,13 +118,23 @@ async function mountPanel(requestId = 'req-a', options: { stubsTeleport?: boolea
         name: 'settings',
         component: { template: '<p>settings</p>' },
       },
+      {
+        path: '/tracking',
+        name: 'tracking',
+        component: { template: '<p>tracking</p>' },
+      },
     ],
   })
   await router.push({ path: '/plans', query: { request_id: requestId } })
   await router.isReady()
 
   const wrapper = mount(RequestDetailPanel, {
-    props: { requestId },
+    props: {
+      requestId,
+      trackingId: options.trackingId,
+      trackingStatus: options.trackingStatus,
+      trackingStatusLabel: options.trackingStatusLabel,
+    },
     attachTo: document.body,
     global: {
       plugins: [createPinia(), router],
@@ -189,6 +204,24 @@ describe('RequestDetailPanel load (US-203)', () => {
     await nextTick()
     await nextTick()
     expect(wrapper.find('.overview-section').text()).toContain('req-a')
+  })
+
+  it('renders only the safe tracking state passed from the plans list', async () => {
+    const { wrapper } = await mountPanel('req-a', { trackingStatus: 'loading' })
+    await nextTick()
+    expect(wrapper.text()).toContain('追番状态：正在读取追番状态')
+    expect(wrapper.find('#detail-tracking-entry').exists()).toBe(false)
+
+    await wrapper.setProps({ trackingStatus: 'unavailable', trackingId: null })
+    expect(wrapper.text()).toContain('追番状态：追番状态暂不可用')
+    expect(wrapper.find('#detail-tracking-entry').exists()).toBe(false)
+
+    await wrapper.setProps({ trackingStatus: 'not_linked', trackingStatusLabel: null })
+    expect(wrapper.text()).toContain('追番状态：未进入追番管理')
+
+    await wrapper.setProps({ trackingStatus: 'linked', trackingId: 'tracking-a', trackingStatusLabel: '追番中' })
+    expect(wrapper.find('#detail-tracking-entry').exists()).toBe(true)
+    expect(wrapper.find('#detail-tracking-entry').attributes('href')).toBe('/app/tracking?tracking_id=tracking-a')
   })
 })
 
@@ -306,13 +339,13 @@ describe('RequestDetailPanel actions (US-203)', () => {
     expect(wrapper.find('#detail-ab-submit-entry').exists()).toBe(false)
   })
 
-  it('shows modify/delete/AB entry for ACCEPTED and no accept/cancel', async () => {
+  it('shows local modify/delete for ACCEPTED and no external entry', async () => {
     apiGet.mockResolvedValue(acceptedFixture())
     const { wrapper } = await mountPanel()
     await nextTick()
 
     expect(wrapper.find('#detail-delete-button').exists()).toBe(true)
-    expect(wrapper.find('#detail-ab-submit-entry').exists()).toBe(true)
+    expect(wrapper.find('#detail-ab-submit-entry').exists()).toBe(false)
     expect(wrapper.find('#detail-accept-button').exists()).toBe(false)
     expect(wrapper.find('#detail-cancel-toggle').exists()).toBe(false)
   })
@@ -403,6 +436,7 @@ describe('RequestDetailPanel actions (US-203)', () => {
       filename: 'req-a.json',
       deleted: true,
     })
+    apiGet.mockRejectedValueOnce({ type: 'not_found', status: 404, message: 'not found' })
 
     await wrapper.find('#detail-delete-button').trigger('click')
     await nextTick()
@@ -447,11 +481,11 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await wrapper.find('#detail-modify-toggle').trigger('click')
     await nextTick()
     expect(wrapper.find('#detail-modify-form').exists()).toBe(true)
-    await wrapper.find('#detail-modify-submit').trigger('click')
+    await wrapper.find('#detail-modify-form').trigger('submit')
     await nextTick()
 
     expect(apiPost).not.toHaveBeenCalled()
-    expect(wrapper.find('#detail-modify-error').text()).toContain('请至少修改或清空一个字段')
+    expect(wrapper.find('#detail-modify-editor .field-error').text()).toContain('请至少修改或清空一个字段')
   })
 
   it('modify sends a patch for changed fields only', async () => {
@@ -459,13 +493,20 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await nextTick()
 
     apiPost.mockResolvedValue({ request: detailFixture().request })
-    apiGet.mockResolvedValue(detailFixture())
+    apiGet.mockResolvedValue(detailFixture({ request: {
+      ...detailFixture().request,
+      confirmable_config: {
+        ...detailFixture().request.confirmable_config,
+        expected_folder_name: '新目录名',
+        filter_rule: { ...detailFixture().request.confirmable_config?.filter_rule, use_regex: true },
+      },
+    } }))
 
     await wrapper.find('#detail-modify-toggle').trigger('click')
     await nextTick()
     await wrapper.find('#modify-folder-name').setValue('新目录名')
-    await wrapper.find('#modify-filter-use-regex').setValue(true)
-    await wrapper.find('#detail-modify-submit').trigger('click')
+    await wrapper.find('#modify-use-regex').setValue(true)
+    await wrapper.find('#detail-modify-form').trigger('submit')
     await flushPromises()
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/{request_id}/modify', {
@@ -479,9 +520,248 @@ describe('RequestDetailPanel actions (US-203)', () => {
         storage_dir: null,
       },
     })
+    expect(wrapper.find('#detail-modify-form').exists()).toBe(false)
+  })
+
+  it('keeps input when a successful modify POST is not reflected by the detail GET', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('服务端未采用目录')
+    apiPost.mockResolvedValueOnce({ request: detailFixture().request })
+    apiGet.mockResolvedValueOnce(detailFixture())
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('#detail-modify-editor .field-error').text()).toContain('修改未生效，请重试')
+    expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '服务端未采用目录')
+    expect(wrapper.find('#detail-modify-form').exists()).toBe(true)
+  })
+
+  it('keeps input and exposes retry/recovery after a definite modify failure', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('用户当前输入')
+    apiPost.mockRejectedValueOnce({ type: 'validation_error', message: '拒绝修改' })
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('#detail-modify-editor .field-error').text()).toContain('修改失败，请稍后重试')
+    expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '用户当前输入')
+
+    apiPost.mockResolvedValueOnce({ request: detailFixture().request })
+    apiGet.mockResolvedValue(detailFixture({ request: {
+      ...detailFixture().request,
+      confirmable_config: { ...detailFixture().request.confirmable_config, expected_folder_name: '用户当前输入' },
+    } }))
+    await wrapper.find('#modify-retry-button').trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('#detail-modify-form').exists()).toBe(false)
+  })
+
+  it('reconciles an uncertain modify that already took effect without a second write', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('已生效目录')
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockResolvedValue(detailFixture({ request: {
+      ...detailFixture().request,
+      confirmable_config: { ...detailFixture().request.confirmable_config, expected_folder_name: '已生效目录' },
+    } }))
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('#detail-modify-form').exists()).toBe(false)
+  })
+
+  it('allows retry only when an uncertain modify is confirmed not applied', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('未生效目录')
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockResolvedValue(detailFixture())
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.field-error').text()).toContain('修改未生效，请重试')
+    expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '未生效目录')
+    apiPost.mockResolvedValueOnce({ request: detailFixture().request })
+    await wrapper.find('#modify-retry-button').trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not repeat a write when uncertain modify recheck fails', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('结果未知目录')
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.field-error').text()).toContain('结果暂无法确认')
+    expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '结果未知目录')
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    await wrapper.find('#modify-retry-button').trigger('click')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.field-error').text()).not.toContain('raw backend error')
+  })
+
+  it('locks local actions while an uncertain modify result is unverified', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('待核验目录')
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('#modify-folder-name').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#detail-accept-button').attributes('disabled')).toBeDefined()
+    await wrapper.find('#detail-accept-button').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('locks delete while an uncertain modify result is unverified', async () => {
+    apiGet.mockResolvedValue(acceptedFixture())
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-accepted-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('待核验目录')
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    await wrapper.find('#detail-delete-button').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes concurrent modify recovery GETs', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('待核验目录')
+    apiPost.mockRejectedValueOnce({ type: 'validation_error', message: '拒绝修改' })
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+
+    let resolveRecovery!: (value: DetailResult) => void
+    apiGet.mockReturnValueOnce(new Promise((resolve) => { resolveRecovery = resolve }) as never)
+    await wrapper.find('#modify-reset-button').trigger('click')
+    await wrapper.find('#modify-reset-button').trigger('click')
+    expect(apiGet).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('#modify-reset-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#detail-accept-button').attributes('disabled')).toBeDefined()
+    resolveRecovery(detailFixture())
+    await flushPromises()
+  })
+
+  it('recovers the editor from the latest server snapshot without using the DOM as a patch source', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('过时输入')
+    apiPost.mockRejectedValueOnce({ type: 'validation_error', message: '拒绝修改' })
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    apiGet.mockResolvedValue(detailFixture({ request: {
+      ...detailFixture().request,
+      confirmable_config: { ...detailFixture().request.confirmable_config, expected_folder_name: '服务端最新目录' },
+    } }))
+
+    await wrapper.find('#modify-reset-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '服务端最新目录')
+  })
+
+  it('locks an accept action after an uncertain recheck failure and rechecks with GET only', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-accept-button').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#detail-action-recheck-button').exists()).toBe(true)
+    expect(wrapper.find('#detail-accept-button').attributes('disabled')).toBeDefined()
+    await wrapper.find('#detail-accept-button').trigger('click')
+    expect(apiPost).toHaveBeenCalledTimes(1)
+
+    apiGet.mockResolvedValueOnce(detailFixture({ request: { ...detailFixture().request, status: 'ACCEPTED' } }))
+    const getCount = apiGet.mock.calls.length
+    await wrapper.find('#detail-action-recheck-button').trigger('click')
+    await flushPromises()
+    expect(apiGet.mock.calls.length).toBe(getCount + 1)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('#detail-action-recheck-button').exists()).toBe(false)
+  })
+
+  it('locks delete after an uncertain recheck failure and confirms deletion with GET only', async () => {
+    apiGet.mockResolvedValue(acceptedFixture())
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-delete-button').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .danger-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#detail-action-recheck-button').exists()).toBe(true)
+    await wrapper.find('#detail-delete-button').trigger('click')
+    expect(apiPost).toHaveBeenCalledTimes(1)
+
+    apiGet.mockRejectedValueOnce({ type: 'not_found', status: 404, message: 'not found' })
+    const getCount = apiGet.mock.calls.length
+    await wrapper.find('#detail-action-recheck-button').trigger('click')
+    await flushPromises()
+    expect(apiGet.mock.calls.length).toBe(getCount + 1)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('deleted')?.[0]).toEqual(['req-a'])
   })
 
   it('clear-field checkboxes send explicit empty values', async () => {
+    const savedConfig = detailFixture().request.confirmable_config
+    apiGet.mockResolvedValue(detailFixture({
+      request: {
+        ...detailFixture().request,
+        confirmable_config: {
+          ...savedConfig,
+          filter_rule: {
+            ...savedConfig?.filter_rule,
+            must_contain: '1080p',
+          },
+          expected_folder_name: '旧目录名',
+        },
+      },
+    }))
     const { wrapper } = await mountPanel()
     await nextTick()
 
@@ -492,7 +772,7 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await nextTick()
     await wrapper.find('#modify-clear-must-contain').setValue(true)
     await wrapper.find('#modify-clear-folder-name').setValue(true)
-    await wrapper.find('#detail-modify-submit').trigger('click')
+    await wrapper.find('#detail-modify-form').trigger('submit')
     await flushPromises()
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/{request_id}/modify', {
@@ -512,27 +792,12 @@ describe('RequestDetailPanel actions (US-203)', () => {
     })
   })
 
-  it('copy request_id uses the clipboard and notifies', async () => {
-    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
-    const { wrapper } = await mountPanel()
-    await nextTick()
-
-    await wrapper.find('.copy-request-id').trigger('click')
-    await nextTick()
-
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('req-a')
-    const { useNotificationStore } = await import('@/app/stores/notification')
-    const notification = useNotificationStore()
-    expect(notification.current?.title).toBe('已复制 request_id')
-  })
-
-  it('AB submit entry links to Settings with the request_id', async () => {
+  it('does not offer an Auto Bangumi submission entry for ACCEPTED', async () => {
     apiGet.mockResolvedValue(acceptedFixture())
     const { wrapper } = await mountPanel()
     await nextTick()
 
-    const link = wrapper.find('#detail-ab-submit-entry')
-    expect(link.exists()).toBe(true)
-    expect(link.attributes('href')).toBe('/app/settings?request_id=req-a')
+    expect(wrapper.find('#detail-ab-submit-entry').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('去 Settings 提交 Auto Bangumi')
   })
 })

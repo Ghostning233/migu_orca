@@ -17,7 +17,8 @@
   Token 均已冻结；后端 B-A、B-B、B-C1（Stage 30）、B-C2（Stage 31）已完成，
   B-D 已完成为 Stage 32；F-A 已作为 Stage 33 完成（US-257～US-265），F-B 已作为
   Stage 34 完成（US-266～US-274）并归档；Stage 35 完成（US-275～US-283）并归档；Stage 36
-  已规划 F-D（US-284～US-293），F-E～F-G 继续按依赖独立评审。
+  完成 F-D（US-284～US-293）并归档；Stage 37 已完成 F-E（US-294～US-302）并归档；F-F～F-G
+  继续按依赖独立评审。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
@@ -37,12 +38,13 @@
   F-B 已完成为[Stage 34：前端共享审核核心](MiGuOrca_stage34_shared_review_core_PRD.md)，
   F-A 已完成为[Stage 33：前端应用壳层与设计系统](MiGuOrca_stage33_frontend_shell_PRD.md)，
   F-C 已完成为[Stage 35：单番添加完整旅程](MiGuOrca_stage35_single_anime_journey_PRD.md)，
-  F-D 已规划为[Stage 36：批量审核完整旅程](MiGuOrca_stage36_batch_review_journey_PRD.md)，
+  F-D 已完成为[Stage 36：批量审核完整旅程](MiGuOrca_stage36_batch_review_journey_PRD.md)，
+  F-E 已完成并归档为[Stage 37：追番方案与安全信息](MiGuOrca_stage37_plans_safe_info_PRD.md)，
   其余工作包仍按依赖独立评审。
 
-截至 2026-09-12，最近完成阶段为 Stage 35「单番添加完整旅程」，已完成并归档；当前已规划
-Stage 36「批量审核完整旅程」。真实 `SafeInfoDialog` 仍延后到 F-E；F-F 正式追番管理和 F-G
-设置/发布收尾继续独立评审。
+截至 2026-09-13，最近完成阶段为 Stage 37「追番方案与安全信息」，已完成并归档。Stage 37 接入真实
+`SafeInfoDialog`，但不实现 F-F 正式追番管理
+或 F-G 设置/发布收尾。
 
 ## Stage PRD
 
@@ -62,7 +64,8 @@ Stage 36「批量审核完整旅程」。真实 `SafeInfoDialog` 仍延后到 F-
 - Stage 33：[前端应用壳层与设计系统](MiGuOrca_stage33_frontend_shell_PRD.md)（F-A，US-257～US-265 已完成并归档；不实现 F-B～F-G）
 - Stage 34：[前端共享审核核心](MiGuOrca_stage34_shared_review_core_PRD.md)（F-B，US-266～US-274 已完成并归档；SafeInfo 延后到 F-E）
 - Stage 35：[单番添加完整旅程](MiGuOrca_stage35_single_anime_journey_PRD.md)（F-C，US-275～US-283 已完成并归档；不实现 F-D～F-G）
-- Stage 36：[批量审核完整旅程](MiGuOrca_stage36_batch_review_journey_PRD.md)（F-D，US-284～US-293 已规划；不实现 F-E～F-G）
+- Stage 36：[批量审核完整旅程](MiGuOrca_stage36_batch_review_journey_PRD.md)（F-D，US-284～US-293 已完成并归档；不实现 F-E～F-G）
+- Stage 37：[追番方案与安全信息](MiGuOrca_stage37_plans_safe_info_PRD.md)（F-E，US-294～US-302 已完成并归档；不实现 F-F～F-G）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 

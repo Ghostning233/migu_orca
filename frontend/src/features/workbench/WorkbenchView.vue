@@ -49,6 +49,7 @@ import {
 import { displayValue } from '@/features/requests/requestDetail'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
+import { consumeReuseHandoff, type ReuseSuggestion } from '@/features/requests/reuseHandoff'
 
 type CreateRequestResult = NonNullable<
   operations['createRequest']['responses']['200']['content']['application/json']['result']
@@ -82,6 +83,8 @@ const draftRequest = ref<RequestSnapshot | null>(null)
 const draftId = ref('')
 const draftRevision = ref(1)
 const draftLoading = ref(false)
+const reuseSuggestion = ref<ReuseSuggestion | null>(null)
+const reuseSource = ref<{ title: string; mikanBangumiId: string } | null>(null)
 // Track per-candidate season confirmation in memory (never persisted).
 const seasonConfirmations = ref<Record<string, number | null>>({})
 
@@ -282,6 +285,8 @@ function discardDraft(destination: 'candidates' | 'input'): void {
   draftId.value = ''
   draftRevision.value = 1
   seasonConfirmations.value = {}
+  reuseSuggestion.value = null
+  reuseSource.value = null
   if (destination === 'input') {
     searchResult.value = null
     lastSearchQuery.value = ''
@@ -291,6 +296,12 @@ function discardDraft(destination: 'candidates' | 'input'): void {
 }
 
 onMounted(() => {
+  const handoff = consumeReuseHandoff()
+  if (handoff) {
+    query.value = handoff.title
+    reuseSuggestion.value = handoff.suggestion
+    reuseSource.value = { title: handoff.title, mikanBangumiId: handoff.mikanBangumiId }
+  }
   // The workbench has no persisted state; the storage profile comes from
   // Settings localStorage (relative only). Nothing to preload here.
   // The real application shell enters this view at /app/add; focus the first
@@ -320,6 +331,9 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
       />
       <p class="field-help" id="mikan-candidate-help">
         输入番剧标题，从真实 MiKan 搜索候选合集。候选不会自动选择，需手动点击「选择此合集」生成订阅草案。
+      </p>
+      <p v-if="reuseSource" id="reuse-handoff-summary" class="field-help" role="status">
+        已载入复制方案起点：{{ reuseSource.title }}（公开合集编号 {{ reuseSource.mikanBangumiId }}）。请重新搜索并选择真实合集。
       </p>
       <p v-if="searchError" id="mikan-candidate-search-error" class="field-error" role="alert">
         {{ searchError }}
@@ -437,6 +451,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     :request="draftRequest"
     :draft-id="draftId"
     :draft-revision="draftRevision"
+    :reuse-suggestion="reuseSuggestion"
     @changed="onDraftChanged"
     @discard="discardDraft"
   />

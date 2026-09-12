@@ -3480,9 +3480,64 @@
                                 ],
                                 "title": "Bangumi Title"
                               },
+                              "season": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Season"
+                              },
+                              "updated_at": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "title": "Updated At"
+                              },
                               "candidate_subtitle_groups": {
                                 "items": {
-                                  "additionalProperties": true,
+                                  "additionalProperties": false,
+                                  "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                  "properties": {
+                                    "subtitle_group": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "null"
+                                        }
+                                      ],
+                                      "title": "Subtitle Group"
+                                    },
+                                    "total_resource_count": {
+                                      "title": "Total Resource Count",
+                                      "type": "integer"
+                                    },
+                                    "valid_resource_count": {
+                                      "title": "Valid Resource Count",
+                                      "type": "integer"
+                                    },
+                                    "invalid_resource_count": {
+                                      "title": "Invalid Resource Count",
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "subtitle_group",
+                                    "total_resource_count",
+                                    "valid_resource_count",
+                                    "invalid_resource_count"
+                                  ],
+                                  "title": "RequestSubtitleGroupSummaryDTO",
                                   "type": "object"
                                 },
                                 "title": "Candidate Subtitle Groups",
@@ -3526,6 +3581,8 @@
                               "request_id",
                               "status",
                               "bangumi_title",
+                              "season",
+                              "updated_at",
                               "candidate_subtitle_groups",
                               "selected_subtitle_group",
                               "effective_seed_count",
@@ -3555,8 +3612,15 @@
                         "request_id": "示例",
                         "status": "示例",
                         "bangumi_title": "示例",
+                        "season": 1,
+                        "updated_at": "示例",
                         "candidate_subtitle_groups": [
-                          {}
+                          {
+                            "subtitle_group": "示例",
+                            "total_resource_count": 1,
+                            "valid_resource_count": 1,
+                            "invalid_resource_count": 1
+                          }
                         ],
                         "selected_subtitle_group": "示例",
                         "effective_seed_count": 1,
@@ -4235,9 +4299,64 @@
                               ],
                               "title": "Bangumi Title"
                             },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Season"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Updated At"
+                            },
                             "candidate_subtitle_groups": {
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
+                                "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group",
+                                  "total_resource_count",
+                                  "valid_resource_count",
+                                  "invalid_resource_count"
+                                ],
+                                "title": "RequestSubtitleGroupSummaryDTO",
                                 "type": "object"
                               },
                               "title": "Candidate Subtitle Groups",
@@ -4281,6 +4400,8 @@
                             "request_id",
                             "status",
                             "bangumi_title",
+                            "season",
+                            "updated_at",
                             "candidate_subtitle_groups",
                             "selected_subtitle_group",
                             "effective_seed_count",
@@ -4830,8 +4951,15 @@
                       "request_id": "示例",
                       "status": "示例",
                       "bangumi_title": "示例",
+                      "season": 1,
+                      "updated_at": "示例",
                       "candidate_subtitle_groups": [
-                        {}
+                        {
+                          "subtitle_group": "示例",
+                          "total_resource_count": 1,
+                          "valid_resource_count": 1,
+                          "invalid_resource_count": 1
+                        }
                       ],
                       "selected_subtitle_group": "示例",
                       "effective_seed_count": 1,
@@ -5679,9 +5807,64 @@
                               ],
                               "title": "Bangumi Title"
                             },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Season"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Updated At"
+                            },
                             "candidate_subtitle_groups": {
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
+                                "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group",
+                                  "total_resource_count",
+                                  "valid_resource_count",
+                                  "invalid_resource_count"
+                                ],
+                                "title": "RequestSubtitleGroupSummaryDTO",
                                 "type": "object"
                               },
                               "title": "Candidate Subtitle Groups",
@@ -5725,6 +5908,8 @@
                             "request_id",
                             "status",
                             "bangumi_title",
+                            "season",
+                            "updated_at",
                             "candidate_subtitle_groups",
                             "selected_subtitle_group",
                             "effective_seed_count",
@@ -5786,8 +5971,15 @@
                       "request_id": "示例",
                       "status": "示例",
                       "bangumi_title": "示例",
+                      "season": 1,
+                      "updated_at": "示例",
                       "candidate_subtitle_groups": [
-                        {}
+                        {
+                          "subtitle_group": "示例",
+                          "total_resource_count": 1,
+                          "valid_resource_count": 1,
+                          "invalid_resource_count": 1
+                        }
                       ],
                       "selected_subtitle_group": "示例",
                       "effective_seed_count": 1,
@@ -6543,9 +6735,64 @@
                               ],
                               "title": "Bangumi Title"
                             },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Season"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Updated At"
+                            },
                             "candidate_subtitle_groups": {
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
+                                "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group",
+                                  "total_resource_count",
+                                  "valid_resource_count",
+                                  "invalid_resource_count"
+                                ],
+                                "title": "RequestSubtitleGroupSummaryDTO",
                                 "type": "object"
                               },
                               "title": "Candidate Subtitle Groups",
@@ -6589,6 +6836,8 @@
                             "request_id",
                             "status",
                             "bangumi_title",
+                            "season",
+                            "updated_at",
                             "candidate_subtitle_groups",
                             "selected_subtitle_group",
                             "effective_seed_count",
@@ -7114,8 +7363,15 @@
                       "request_id": "示例",
                       "status": "示例",
                       "bangumi_title": "示例",
+                      "season": 1,
+                      "updated_at": "示例",
                       "candidate_subtitle_groups": [
-                        {}
+                        {
+                          "subtitle_group": "示例",
+                          "total_resource_count": 1,
+                          "valid_resource_count": 1,
+                          "invalid_resource_count": 1
+                        }
                       ],
                       "selected_subtitle_group": "示例",
                       "effective_seed_count": 1,
@@ -7827,9 +8083,64 @@
                               ],
                               "title": "Bangumi Title"
                             },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Season"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Updated At"
+                            },
                             "candidate_subtitle_groups": {
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
+                                "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group",
+                                  "total_resource_count",
+                                  "valid_resource_count",
+                                  "invalid_resource_count"
+                                ],
+                                "title": "RequestSubtitleGroupSummaryDTO",
                                 "type": "object"
                               },
                               "title": "Candidate Subtitle Groups",
@@ -7873,6 +8184,8 @@
                             "request_id",
                             "status",
                             "bangumi_title",
+                            "season",
+                            "updated_at",
                             "candidate_subtitle_groups",
                             "selected_subtitle_group",
                             "effective_seed_count",
@@ -7972,8 +8285,15 @@
                       "request_id": "示例",
                       "status": "示例",
                       "bangumi_title": "示例",
+                      "season": 1,
+                      "updated_at": "示例",
                       "candidate_subtitle_groups": [
-                        {}
+                        {
+                          "subtitle_group": "示例",
+                          "total_resource_count": 1,
+                          "valid_resource_count": 1,
+                          "invalid_resource_count": 1
+                        }
                       ],
                       "selected_subtitle_group": "示例",
                       "effective_seed_count": 1,
@@ -14302,9 +14622,64 @@
                               ],
                               "title": "Bangumi Title"
                             },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Season"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Updated At"
+                            },
                             "candidate_subtitle_groups": {
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
+                                "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group",
+                                  "total_resource_count",
+                                  "valid_resource_count",
+                                  "invalid_resource_count"
+                                ],
+                                "title": "RequestSubtitleGroupSummaryDTO",
                                 "type": "object"
                               },
                               "title": "Candidate Subtitle Groups",
@@ -14348,6 +14723,8 @@
                             "request_id",
                             "status",
                             "bangumi_title",
+                            "season",
+                            "updated_at",
                             "candidate_subtitle_groups",
                             "selected_subtitle_group",
                             "effective_seed_count",
@@ -14897,8 +15274,15 @@
                       "request_id": "示例",
                       "status": "示例",
                       "bangumi_title": "示例",
+                      "season": 1,
+                      "updated_at": "示例",
                       "candidate_subtitle_groups": [
-                        {}
+                        {
+                          "subtitle_group": "示例",
+                          "total_resource_count": 1,
+                          "valid_resource_count": 1,
+                          "invalid_resource_count": 1
+                        }
                       ],
                       "selected_subtitle_group": "示例",
                       "effective_seed_count": 1,
@@ -15646,9 +16030,64 @@
                               ],
                               "title": "Bangumi Title"
                             },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Season"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Updated At"
+                            },
                             "candidate_subtitle_groups": {
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
+                                "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group",
+                                  "total_resource_count",
+                                  "valid_resource_count",
+                                  "invalid_resource_count"
+                                ],
+                                "title": "RequestSubtitleGroupSummaryDTO",
                                 "type": "object"
                               },
                               "title": "Candidate Subtitle Groups",
@@ -15692,6 +16131,8 @@
                             "request_id",
                             "status",
                             "bangumi_title",
+                            "season",
+                            "updated_at",
                             "candidate_subtitle_groups",
                             "selected_subtitle_group",
                             "effective_seed_count",
@@ -16241,8 +16682,15 @@
                       "request_id": "示例",
                       "status": "示例",
                       "bangumi_title": "示例",
+                      "season": 1,
+                      "updated_at": "示例",
                       "candidate_subtitle_groups": [
-                        {}
+                        {
+                          "subtitle_group": "示例",
+                          "total_resource_count": 1,
+                          "valid_resource_count": 1,
+                          "invalid_resource_count": 1
+                        }
                       ],
                       "selected_subtitle_group": "示例",
                       "effective_seed_count": 1,
@@ -17202,9 +17650,64 @@
                               ],
                               "title": "Bangumi Title"
                             },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Season"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Updated At"
+                            },
                             "candidate_subtitle_groups": {
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
+                                "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group",
+                                  "total_resource_count",
+                                  "valid_resource_count",
+                                  "invalid_resource_count"
+                                ],
+                                "title": "RequestSubtitleGroupSummaryDTO",
                                 "type": "object"
                               },
                               "title": "Candidate Subtitle Groups",
@@ -17248,6 +17751,8 @@
                             "request_id",
                             "status",
                             "bangumi_title",
+                            "season",
+                            "updated_at",
                             "candidate_subtitle_groups",
                             "selected_subtitle_group",
                             "effective_seed_count",
@@ -17797,8 +18302,15 @@
                       "request_id": "示例",
                       "status": "示例",
                       "bangumi_title": "示例",
+                      "season": 1,
+                      "updated_at": "示例",
                       "candidate_subtitle_groups": [
-                        {}
+                        {
+                          "subtitle_group": "示例",
+                          "total_resource_count": 1,
+                          "valid_resource_count": 1,
+                          "invalid_resource_count": 1
+                        }
                       ],
                       "selected_subtitle_group": "示例",
                       "effective_seed_count": 1,
@@ -19227,9 +19739,64 @@
                               ],
                               "title": "Bangumi Title"
                             },
+                            "season": {
+                              "anyOf": [
+                                {
+                                  "type": "integer"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Season"
+                            },
+                            "updated_at": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "title": "Updated At"
+                            },
                             "candidate_subtitle_groups": {
                               "items": {
-                                "additionalProperties": true,
+                                "additionalProperties": false,
+                                "description": "Strict public summary for one candidate subtitle group.\n\nRequest list consumers only need the group label and resource counts.  In\nparticular, RSS URLs and any other source metadata are deliberately not\npart of this DTO.",
+                                "properties": {
+                                  "subtitle_group": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ],
+                                    "title": "Subtitle Group"
+                                  },
+                                  "total_resource_count": {
+                                    "title": "Total Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "valid_resource_count": {
+                                    "title": "Valid Resource Count",
+                                    "type": "integer"
+                                  },
+                                  "invalid_resource_count": {
+                                    "title": "Invalid Resource Count",
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "subtitle_group",
+                                  "total_resource_count",
+                                  "valid_resource_count",
+                                  "invalid_resource_count"
+                                ],
+                                "title": "RequestSubtitleGroupSummaryDTO",
                                 "type": "object"
                               },
                               "title": "Candidate Subtitle Groups",
@@ -19273,6 +19840,8 @@
                             "request_id",
                             "status",
                             "bangumi_title",
+                            "season",
+                            "updated_at",
                             "candidate_subtitle_groups",
                             "selected_subtitle_group",
                             "effective_seed_count",
@@ -19895,8 +20464,15 @@
                       "request_id": "示例",
                       "status": "示例",
                       "bangumi_title": "示例",
+                      "season": 1,
+                      "updated_at": "示例",
                       "candidate_subtitle_groups": [
-                        {}
+                        {
+                          "subtitle_group": "示例",
+                          "total_resource_count": 1,
+                          "valid_resource_count": 1,
+                          "invalid_resource_count": 1
+                        }
                       ],
                       "selected_subtitle_group": "示例",
                       "effective_seed_count": 1,

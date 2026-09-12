@@ -19,6 +19,8 @@ function summary(overrides: Partial<RequestSummary> = {}): RequestSummary {
     request_id: 'req-a',
     status: 'PENDING_CONFIRM',
     bangumi_title: '葬送的芙莉莲',
+    season: null,
+    updated_at: '2026-08-31T00:00:00+00:00',
     candidate_subtitle_groups: [],
     selected_subtitle_group: '喵萌奶茶屋',
     effective_seed_count: 5,
