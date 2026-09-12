@@ -183,7 +183,9 @@ async function retrySavedConfirmation(): Promise<void> {
     })
     const located = await locateTracking(requestId)
     if (located !== 'found') {
-      journey.finishVerificationPending()
+      // The accept response was explicit and successful; only location is
+      // pending, so this state must never reopen accept recovery.
+      journey.finishTracking()
       trackingLocationState.value = located
       acceptError.value = '方案已确认，但暂未定位到追番记录。可稍后重试定位。'
       return
