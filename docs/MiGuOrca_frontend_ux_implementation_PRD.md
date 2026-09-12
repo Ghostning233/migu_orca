@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | F-A～F-D 已完成为 Stage 33～36（US-257～US-293）；F-E 已规划为 Stage 37（US-294～US-302）；F-F～F-G 待评审 |
+| 当前状态 | F-A～F-E 已完成为 Stage 33～37（US-257～US-302）；F-F～F-G 待评审 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-026 |
 | 优先级 | P1；各切片按后端依赖分别解锁 |
@@ -253,7 +253,7 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 > （US-284～US-293），执行 PRD 见 `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`；它接管
 > `saveConfirmBatchItems`、部分成功和批量兼容层退出，但未接 `SafeInfoDialog` 或正式 tracking 管理动作。
 
-> 状态注记（2026-09-12）：F-D 已完成并合入 Stage 36。F-E 已规划为 Stage 37（US-294～US-302），
+> 状态注记（2026-09-13）：F-D 已完成并合入 Stage 36，F-E 已完成并归档为 Stage 37（US-294～US-302），
 > 执行 PRD 见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md`；它接管已保存 Request 的真实 SafeInfo、
 > 列表—详情、共享修改、复制再用和只读 tracking 链接，但不接任何外部管理动作。
 

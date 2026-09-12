@@ -151,6 +151,8 @@ def test_safe_info_ignores_sensitive_unknown_fields_in_browser_observables(
     set_storage_preferences(page, storage_dir)
     canary = "stage37-us301-secret-endpoint-token"
     injected = {**_safe_info(), "ignored_sensitive": canary, "raw_response_body": canary}
+    console_messages: list[str] = []
+    page.on("console", lambda message: console_messages.append(message.text))
 
     def safe_info_route(route: Any, request: Any) -> None:
         if request.method == "GET" and "/safe-info" in request.url:
@@ -177,3 +179,4 @@ def test_safe_info_ignores_sensitive_unknown_fields_in_browser_observables(
         })"""
     )
     assert all(canary not in value for value in state.values())
+    assert all(canary not in message for message in console_messages)

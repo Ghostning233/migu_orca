@@ -500,8 +500,8 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 > 当前 `ralph.sh` 只支持 `amp`、`claude`、`codex` 三种执行工具，不包含 DSH 或 provider 配置。项目保留的轻量定制是可通过 `--model`、`--claude-model` 或 `RALPH_MODEL` 指定模型；模型参数会传给 Claude 和 Codex，Amp 分支不使用该参数。
 
-- 当前 Ralph 状态快照：Stage 37 已规划；US-294～US-302 均待开发
-- 当前执行阶段：Stage 37，追番方案与安全信息（F-E）
+- 当前 Ralph 状态快照：Stage 37 已完成并归档；US-294～US-302 均已完成
+- 当前执行阶段：Stage 37，追番方案与安全信息（F-E，已完成，当前无待执行 story）
 - 最近完成阶段：Stage 36，批量审核完整旅程（F-D）
 - 前一完成阶段：Stage 35，单番添加完整旅程（F-C）
 - 前一完成阶段：Stage 34，前端共享审核核心（F-B）
@@ -540,7 +540,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - Stage 34 执行：`docs/MiGuOrca_stage34_shared_review_core_PRD.md`；执行分支 `ralph/stage34-shared-review-core`，Ralph stories 为 US-266～US-274（已全部完成并归档）
 - Stage 35 执行：`docs/MiGuOrca_stage35_single_anime_journey_PRD.md`；执行分支 `ralph/stage35-single-anime-journey`，Ralph stories 为 US-275～US-283（已全部完成并归档）
 - Stage 36 执行：`docs/MiGuOrca_stage36_batch_review_journey_PRD.md`；执行分支 `ralph/stage36-batch-review-journey`，Ralph stories 为 US-284～US-293（已全部完成并归档）
-- Stage 37 执行：`docs/MiGuOrca_stage37_plans_safe_info_PRD.md`；执行分支 `ralph/stage37-plans-safe-info`，Ralph stories 为 US-294～US-302（待开发；每 3 个 stories 停止并独立审核）
+- Stage 37 执行：`docs/MiGuOrca_stage37_plans_safe_info_PRD.md`；执行分支 `ralph/stage37-plans-safe-info`，Ralph stories 为 US-294～US-302（已全部完成并归档）
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude，可指定模型）：`./scripts/ralph/ralph.sh --tool claude --model claude-model-id 7`

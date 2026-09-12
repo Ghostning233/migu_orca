@@ -132,4 +132,10 @@ Thread: https://codex.openai.com/threads/current
 - 构建产物仅用于门禁，未提交 dist、trace、screenshot、credential 或本地 storage artifact。
 - **Learnings for future iterations:**
   - 最终门禁应保留前端与 Python 独立计数，并在同一干净工作区核对 generated drift、浏览器套件与归档状态；完整门禁只在 closeout story 执行。
+
+## [2026-09-13 08:00:00 CST] - Stage 37 最终审核收尾
+Thread: https://codex.openai.com/threads/current
+- README、主/前端/future/module/backlog 文档统一标记 F-E Stage 37（US-294～US-302）已完成并归档，F-F～F-G 继续待评审。
+- 增加真实 Chromium 的方案列表/详情三视口检查与 200% 修改、SafeInfo、复制再用旅程；canary 同步检查 console 且不生成 trace/screenshot 产物。
+- 定向验证：Stage37 plans/SafeInfo/responsive Chromium 45 passed；frontend typecheck/lint passed。
 ---

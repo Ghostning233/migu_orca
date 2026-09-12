@@ -549,7 +549,7 @@ Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-
 - Stage 36 执行 PRD：`docs/MiGuOrca_stage36_batch_review_journey_PRD.md`
 - Stage 36 执行分支：`ralph/stage36-batch-review-journey`；Ralph stories 为 US-284～US-293（已完成并归档）
 - Stage 37 执行 PRD：`docs/MiGuOrca_stage37_plans_safe_info_PRD.md`
-- Stage 37 执行分支：`ralph/stage37-plans-safe-info`；Ralph stories 为 US-294～US-302（已规划，待开发）
+- Stage 37 执行分支：`ralph/stage37-plans-safe-info`；Ralph stories 为 US-294～US-302（已完成并归档）
 
 候选范围：
 
