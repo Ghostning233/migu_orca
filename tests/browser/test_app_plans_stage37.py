@@ -87,6 +87,8 @@ class TestAppPlansStage37:
         page.locator(".request-list-item").click()
         page.wait_for_url("**/app/plans?request_id=req-stage37", timeout=5000)
         expect(page.locator("#request-detail-container")).to_be_visible()
+        page.locator("#detail-tracking-entry").click()
+        page.wait_for_url("**/app/tracking?tracking_id=tracking-stage37", timeout=5000)
 
     def test_tracking_failure_keeps_plan_list_usable(
         self, page: Page, live_server_url: str, storage_dir: Path

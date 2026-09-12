@@ -274,6 +274,7 @@ watch(
         v-else
         :key="selectedRequestId"
         :request-id="selectedRequestId"
+        :tracking-id="selectedRow.tracking?.trackingId ?? null"
         @changed="onDetailChanged"
         @deleted="onDetailDeleted"
       />

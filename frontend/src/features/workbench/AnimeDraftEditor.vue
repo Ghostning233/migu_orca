@@ -25,12 +25,13 @@ import {
   displayValue,
   effectiveSeeds,
   excludedSeeds,
+  type RequestDetailSnapshot,
   type RequestSnapshot,
 } from '@/features/requests/requestDetail'
 import { statusLabel } from '@/features/requests/requestsList'
 
 const props = defineProps<{
-  request: RequestSnapshot
+  request: RequestSnapshot | RequestDetailSnapshot
   mode?: 'draft' | 'saved'
   heading?: string
   formHeading?: string
@@ -49,6 +50,7 @@ const emit = defineEmits<{
   (e: 'dirty-change', dirty: boolean): void
   (e: 'retry'): void
   (e: 'reset'): void
+  (e: 'empty-apply'): void
 }>()
 
 const idPrefix = computed(() => props.idPrefix ?? 'anime-draft')
@@ -63,8 +65,11 @@ const editMustNotContain = ref('')
 const editUseRegex = ref(false)
 const editCaseSensitive = ref(false)
 const editFolderName = ref('')
+const clearMustContain = ref(false)
+const clearMustNotContain = ref(false)
+const clearFolderName = ref(false)
 
-function stateFromRequest(request: RequestSnapshot): PreviewEditState {
+function stateFromRequest(request: RequestSnapshot | RequestDetailSnapshot): PreviewEditState {
   const config = request.confirmable_config
   return {
     selectedSubtitleGroup: config?.selected_subtitle_group ?? '',
@@ -84,17 +89,20 @@ function resetForm(): void {
   editUseRegex.value = state.useRegex
   editCaseSensitive.value = state.caseSensitive
   editFolderName.value = state.expectedFolderName
+  clearMustContain.value = false
+  clearMustNotContain.value = false
+  clearFolderName.value = false
   emit('dirty-change', false)
 }
 
 function currentState(): PreviewEditState {
   return {
     selectedSubtitleGroup: editGroup.value,
-    mustContain: editMustContain.value.trim(),
-    mustNotContain: editMustNotContain.value.trim(),
+    mustContain: clearMustContain.value ? '' : editMustContain.value.trim(),
+    mustNotContain: clearMustNotContain.value ? '' : editMustNotContain.value.trim(),
     useRegex: editUseRegex.value,
     caseSensitive: editCaseSensitive.value,
-    expectedFolderName: editFolderName.value.trim(),
+    expectedFolderName: clearFolderName.value ? '' : editFolderName.value.trim(),
   }
 }
 
@@ -104,6 +112,9 @@ const dirty = computed(() => Object.keys(patch.value).length > 0)
 
 watch(dirty, (value) => emit('dirty-change', value), { immediate: true })
 watch(() => props.request, resetForm, { deep: true })
+watch(clearMustContain, (clear) => { if (clear) editMustContain.value = '' })
+watch(clearMustNotContain, (clear) => { if (clear) editMustNotContain.value = '' })
+watch(clearFolderName, (clear) => { if (clear) editFolderName.value = '' })
 
 const groupOptions = computed(() =>
   (props.request.source_info?.rss_sources ?? []).map((source) => ({
@@ -122,7 +133,10 @@ const selectedGroupName = computed(
 resetForm()
 
 function apply(): void {
-  if (!dirty.value) return
+  if (!dirty.value) {
+    emit('empty-apply')
+    return
+  }
   emit('apply', patch.value)
 }
 
@@ -148,11 +162,13 @@ defineExpose({ patch, dirty, reset: resetForm })
           />
         </FormField>
         <FormField label="包含规则" :inputId="`${idPrefix}-must-contain`">
-          <BaseInput :id="`${idPrefix}-must-contain`" v-model="editMustContain" type="text" placeholder="如 1080p（默认按字面匹配）" :disabled="disabled" />
+          <BaseInput :id="`${idPrefix}-must-contain`" v-model="editMustContain" type="text" placeholder="如 1080p（默认按字面匹配）" :disabled="disabled || clearMustContain" />
         </FormField>
+        <CheckboxRow v-if="editorMode === 'saved'" :id="`${idPrefix}-clear-must-contain`" v-model:checked="clearMustContain" label="清空包含规则" :disabled="disabled" />
         <FormField label="排除规则" :inputId="`${idPrefix}-must-not-contain`">
-          <BaseInput :id="`${idPrefix}-must-not-contain`" v-model="editMustNotContain" type="text" placeholder="如 [v2]（默认按字面匹配）" :disabled="disabled" />
+          <BaseInput :id="`${idPrefix}-must-not-contain`" v-model="editMustNotContain" type="text" placeholder="如 [v2]（默认按字面匹配）" :disabled="disabled || clearMustNotContain" />
         </FormField>
+        <CheckboxRow v-if="editorMode === 'saved'" :id="`${idPrefix}-clear-must-not-contain`" v-model:checked="clearMustNotContain" label="清空排除规则" :disabled="disabled" />
         <details class="advanced-settings">
           <summary>高级筛选设置</summary>
           <div class="filter-options">
@@ -161,7 +177,8 @@ defineExpose({ patch, dirty, reset: resetForm })
           </div>
           <p class="field-help">默认按字面文本匹配且不区分大小写。</p>
           <FormField label="存储目录名" :inputId="`${idPrefix}-folder-name`">
-            <BaseInput :id="`${idPrefix}-folder-name`" v-model="editFolderName" type="text" placeholder="期望存储目录名" :disabled="disabled" />
+            <BaseInput :id="`${idPrefix}-folder-name`" v-model="editFolderName" type="text" placeholder="期望存储目录名" :disabled="disabled || clearFolderName" />
+            <CheckboxRow v-if="editorMode === 'saved'" :id="`${idPrefix}-clear-folder-name`" v-model:checked="clearFolderName" label="清空目录名" :disabled="disabled" />
           </FormField>
         </details>
         <p v-if="error" class="field-error" role="alert">{{ error }}</p>

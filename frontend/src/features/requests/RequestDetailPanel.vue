@@ -19,7 +19,7 @@
 // rendered; URL-looking values are redacted at display time and the request
 // snapshot's raw URLs (rss_url / mikan_url / poster_url) are never rendered.
 // No value here is persisted, logged or put into the URL.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
@@ -29,12 +29,10 @@ import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
-import BaseInput from '@/components/forms/BaseInput.vue'
-import BaseSelect from '@/components/forms/BaseSelect.vue'
 import BaseTextarea from '@/components/forms/BaseTextarea.vue'
-import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 import FormField from '@/components/layout/FormField.vue'
+import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 
 import {
   actionLabel,
@@ -54,9 +52,13 @@ import { storageQuery } from '@/features/requests/requestStorage'
 type ActionResult = NonNullable<
   operations['acceptRequest']['responses']['200']['content']['application/json']['result']
 >
+type ModifyResult = NonNullable<
+  operations['modifyRequest']['responses']['200']['content']['application/json']['result']
+>
 
 const props = defineProps<{
   requestId: string
+  trackingId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -77,18 +79,8 @@ const safeInfoOpen = ref(false)
 const cancelFormOpen = ref(false)
 const modifyFormOpen = ref(false)
 
-// Modify form state (initialized from the snapshot when the panel loads).
-const modifyGroup = ref('')
-const modifyMustContain = ref('')
-const modifyMustNotContain = ref('')
-const modifyUseRegex = ref(false)
-const modifyCaseSensitive = ref(false)
-const modifyFolderName = ref('')
-// Explicit "clear this field" flags (legacy appendClearControl behavior).
-const modifyClearMustContain = ref(false)
-const modifyClearMustNotContain = ref(false)
-const modifyClearFolderName = ref(false)
 const modifyError = ref('')
+const modifyEditor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
 
 const cancelReason = ref('')
 
@@ -96,14 +88,6 @@ const request = computed<RequestDetailSnapshot | null>(() => detail.value?.reque
 const isAccepted = computed(() => request.value?.status === 'ACCEPTED')
 const isPending = computed(() => request.value?.status === 'PENDING_CONFIRM')
 const isCancelled = computed(() => request.value?.status === 'CANCELLED')
-
-const groupOptions = computed(() => {
-  const sources = request.value?.source_info?.rss_sources ?? []
-  return sources.map((source) => ({
-    value: source.subtitle_group ?? '',
-    label: source.subtitle_group ?? '未知字幕组',
-  }))
-})
 
 const effective = computed(() => (request.value ? effectiveSeeds(request.value) : []))
 const excluded = computed(() => (request.value ? excludedSeeds(request.value) : []))
@@ -124,7 +108,6 @@ async function loadDetail(): Promise<void> {
       query: storageQuery(),
     })
     detail.value = result
-    resetModifyForm()
     cancelFormOpen.value = false
     modifyFormOpen.value = false
     cancelReason.value = ''
@@ -136,29 +119,6 @@ async function loadDetail(): Promise<void> {
   } finally {
     loading.value = false
   }
-}
-
-function resetModifyForm(): void {
-  const snapshot = request.value
-  modifyGroup.value = snapshot?.confirmable_config?.selected_subtitle_group ?? ''
-  modifyMustContain.value = snapshot?.confirmable_config?.filter_rule?.must_contain ?? ''
-  modifyMustNotContain.value = snapshot?.confirmable_config?.filter_rule?.must_not_contain ?? ''
-  modifyUseRegex.value = snapshot?.confirmable_config?.filter_rule?.use_regex === true
-  modifyCaseSensitive.value = snapshot?.confirmable_config?.filter_rule?.case_sensitive === true
-  modifyFolderName.value = snapshot?.confirmable_config?.expected_folder_name ?? ''
-  modifyClearMustContain.value = false
-  modifyClearMustNotContain.value = false
-  modifyClearFolderName.value = false
-  modifyError.value = ''
-}
-
-function copyRequestId(): void {
-  const id = props.requestId
-  if (!id) return
-  navigator.clipboard
-    .writeText(id)
-    .then(() => notification.success('已复制 request_id', id))
-    .catch(() => notification.error('复制失败', '无法访问剪贴板，请手动选择复制。'))
 }
 
 async function confirmAccept(): Promise<void> {
@@ -179,7 +139,7 @@ function toggleCancelForm(): void {
 function toggleModifyForm(): void {
   modifyFormOpen.value = !modifyFormOpen.value
   if (modifyFormOpen.value) {
-    resetModifyForm()
+    modifyError.value = ''
   }
 }
 
@@ -195,99 +155,18 @@ async function confirmCancel(): Promise<void> {
   await performAction('cancel', { cancel_reason: reason || undefined })
 }
 
-interface FilterRulePatch {
-  must_contain?: string
-  must_not_contain?: string
-  use_regex?: boolean
-  case_sensitive?: boolean
-}
-
-interface ModifyPatch {
-  selected_subtitle_group?: string
-  filter_rule?: FilterRulePatch
-  expected_folder_name?: string
-}
-
-/** Structural view of the snapshot config the modify form edits. */
-interface ModifyConfig {
-  selected_subtitle_group: string
-  filter_rule: {
-    must_contain: string
-    must_not_contain: string
-    use_regex: boolean
-    case_sensitive: boolean
-  }
-  expected_folder_name: string
-}
-
-function currentModifyConfig(): ModifyConfig {
-  const config = request.value?.confirmable_config
-  return {
-    selected_subtitle_group: config?.selected_subtitle_group ?? '',
-    filter_rule: {
-      must_contain: config?.filter_rule?.must_contain ?? '',
-      must_not_contain: config?.filter_rule?.must_not_contain ?? '',
-      use_regex: config?.filter_rule?.use_regex === true,
-      case_sensitive: config?.filter_rule?.case_sensitive === true,
-    },
-    expected_folder_name: config?.expected_folder_name ?? '',
-  }
-}
-
-function buildModifyPatch(): ModifyPatch | null {
-  const snapshot = request.value
-  if (!snapshot) return null
-  const config = currentModifyConfig()
-  const originalGroup = config.selected_subtitle_group
-  const originalMustContain = config.filter_rule.must_contain
-  const originalMustNotContain = config.filter_rule.must_not_contain
-  const originalUseRegex = config.filter_rule.use_regex
-  const originalCaseSensitive = config.filter_rule.case_sensitive
-  const originalFolderName = config.expected_folder_name
-
-  const patch: ModifyPatch = {}
-  if (modifyGroup.value !== originalGroup) {
-    patch.selected_subtitle_group = modifyGroup.value
-  }
-
-  const mcChanged = modifyClearMustContain.value || modifyMustContain.value.trim() !== originalMustContain
-  const mncChanged = modifyClearMustNotContain.value || modifyMustNotContain.value.trim() !== originalMustNotContain
-  const filterChanged =
-    mcChanged ||
-    mncChanged ||
-    modifyUseRegex.value !== originalUseRegex ||
-    modifyCaseSensitive.value !== originalCaseSensitive
-  if (filterChanged) {
-    patch.filter_rule = {}
-    if (mcChanged) {
-      patch.filter_rule.must_contain = modifyClearMustContain.value ? '' : modifyMustContain.value.trim()
-    }
-    if (mncChanged) {
-      patch.filter_rule.must_not_contain = modifyClearMustNotContain.value ? '' : modifyMustNotContain.value.trim()
-    }
-    patch.filter_rule.use_regex = modifyUseRegex.value
-    patch.filter_rule.case_sensitive = modifyCaseSensitive.value
-  }
-
-  const fnChanged = modifyClearFolderName.value || modifyFolderName.value.trim() !== originalFolderName
-  if (fnChanged) {
-    patch.expected_folder_name = modifyClearFolderName.value ? '' : modifyFolderName.value.trim()
-  }
-
+function submitModify(patch: Record<string, unknown>): void {
   if (!Object.keys(patch).length) {
-    return {}
-  }
-  return patch
-}
-
-async function submitModify(): Promise<void> {
-  const patch = buildModifyPatch()
-  if (!patch || !Object.keys(patch).length) {
     modifyError.value = '请至少修改或清空一个字段。'
     return
   }
   modifyError.value = ''
-  await performAction('modify', { patch })
+  void performAction('modify', { patch })
+}
+
+function resetModifyEditor(): void {
+  modifyError.value = ''
+  modifyEditor.value?.reset()
 }
 
 async function confirmDelete(): Promise<void> {
@@ -318,11 +197,16 @@ async function confirmDelete(): Promise<void> {
 async function performAction(action: 'accept' | 'cancel' | 'modify', body: Record<string, unknown>): Promise<void> {
   actionInFlight.value = true
   try {
-    await api.post<ActionResult>(`/api/v1/requests/{request_id}/${action}`, {
+    const options = {
       path: { request_id: props.requestId },
       query: storageQuery(),
       body: { ...body, storage_dir: storageQuery().storage_dir ?? null },
-    })
+    }
+    if (action === 'modify') {
+      await api.post<ModifyResult>('/api/v1/requests/{request_id}/modify', options)
+    } else {
+      await api.post<ActionResult>(`/api/v1/requests/{request_id}/${action}`, options)
+    }
     const titles: Record<string, string> = {
       accept: '确认成功',
       cancel: '取消成功',
@@ -354,29 +238,18 @@ onMounted(() => {
   void loadDetail()
 })
 
-// Legacy `appendClearControl`: checking a "clear" box clears and disables the
-// paired input so the patch sends an explicit empty value.
-watch(modifyClearMustContain, (clear) => {
-  if (clear) modifyMustContain.value = ''
-})
-watch(modifyClearMustNotContain, (clear) => {
-  if (clear) modifyMustNotContain.value = ''
-})
-watch(modifyClearFolderName, (clear) => {
-  if (clear) modifyFolderName.value = ''
-})
 </script>
 <template>
   <PanelSection v-if="!loading && !loadFailed && detail" title="订阅方案详情" class="request-detail-panel">
     <template #actions>
-      <button
-        type="button"
-        class="copy-request-id secondary-button"
-        aria-label="复制 request_id"
-        @click="copyRequestId"
-      >
-        复制 request_id
-      </button>
+      <BaseButton id="detail-safe-info-button" :disabled="actionInFlight" @click="safeInfoOpen = true">全部信息</BaseButton>
+      <RouterLink
+        v-if="props.trackingId"
+        id="detail-tracking-entry"
+        class="base-button secondary-button"
+        :to="routeLocation('tracking', { tracking_id: props.trackingId })"
+      >前往追番管理</RouterLink>
+      <span v-else class="field-help">未进入追番管理</span>
     </template>
 
     <div id="request-detail-container" class="request-detail" aria-live="polite" aria-relevant="additions text">
@@ -384,9 +257,6 @@ watch(modifyClearFolderName, (clear) => {
 
       <!-- ── actions ─────────────────────────────────────────────── -->
       <div class="detail-actions" aria-label="订阅方案操作">
-        <BaseButton id="detail-safe-info-button" :disabled="actionInFlight" @click="safeInfoOpen = true">
-          全部信息
-        </BaseButton>
         <template v-if="isPending">
           <BaseButton id="detail-accept-button" variant="primary" :loading="actionInFlight" @click="confirmAccept">
             确认
@@ -449,90 +319,24 @@ watch(modifyClearFolderName, (clear) => {
         </div>
       </form>
 
-      <!-- ── inline modify form ──────────────────────────────────── -->
-      <form
-        v-if="modifyFormOpen"
-        id="detail-modify-form"
-        class="detail-inline-form"
-        @submit.prevent="submitModify"
-      >
-        <h4 class="detail-form-heading">修改订阅方案</h4>
-
-        <FormField label="字幕组" inputId="modify-subtitle-group">
-          <BaseSelect
-            id="modify-subtitle-group"
-            v-model="modifyGroup"
-            label="字幕组"
-            :options="groupOptions"
-          />
-        </FormField>
-
-        <FormField label="包含规则" inputId="modify-must-contain">
-          <BaseInput
-            id="modify-must-contain"
-            v-model="modifyMustContain"
-            type="text"
-            placeholder="如 1080p（默认按字面匹配）"
-            :disabled="modifyClearMustContain"
-          />
-        </FormField>
-        <CheckboxRow
-          id="modify-clear-must-contain"
-          v-model:checked="modifyClearMustContain"
-          label="清空包含规则"
-        />
-
-        <FormField label="排除规则" inputId="modify-must-not-contain">
-          <BaseInput
-            id="modify-must-not-contain"
-            v-model="modifyMustNotContain"
-            type="text"
-            placeholder="如 [v2]（默认按字面匹配）"
-            :disabled="modifyClearMustNotContain"
-          />
-        </FormField>
-        <CheckboxRow
-          id="modify-clear-must-not-contain"
-          v-model:checked="modifyClearMustNotContain"
-          label="清空排除规则"
-        />
-
-        <div class="filter-options">
-          <CheckboxRow id="modify-filter-use-regex" v-model:checked="modifyUseRegex" label="使用正则" />
-          <CheckboxRow
-            id="modify-filter-case-sensitive"
-            v-model:checked="modifyCaseSensitive"
-            label="大小写敏感"
-          />
-        </div>
-        <p class="field-help" id="modify-filter-help">
-          默认按字面文本匹配且不区分大小写；勾选「使用正则」后按正则匹配，勾选「大小写敏感」后区分大小写。
-        </p>
-
-        <FormField label="folder_name" inputId="modify-folder-name">
-          <BaseInput
-            id="modify-folder-name"
-            v-model="modifyFolderName"
-            type="text"
-            placeholder="期望存储目录名"
-            :disabled="modifyClearFolderName"
-          />
-        </FormField>
-        <CheckboxRow id="modify-clear-folder-name" v-model:checked="modifyClearFolderName" label="清空 folder_name" />
-
-        <p v-if="modifyError" id="detail-modify-error" class="field-error" role="alert">
-          {{ modifyError }}
-        </p>
-
-        <div class="detail-form-actions">
-          <BaseButton id="detail-modify-submit" type="submit" variant="primary" :loading="actionInFlight">
-            提交修改
-          </BaseButton>
-          <BaseButton type="button" :disabled="actionInFlight" @click="modifyFormOpen = false">
-            取消
-          </BaseButton>
-        </div>
-      </form>
+      <AnimeDraftEditor
+        v-if="modifyFormOpen && request"
+        ref="modifyEditor"
+        :request="request"
+        mode="saved"
+        heading="修改订阅方案"
+        form-heading="编辑已保存方案"
+        apply-label="保存方案修改"
+        id-prefix="modify"
+        container-id="detail-modify-editor"
+        form-id="detail-modify-form"
+        :applying="actionInFlight"
+        :error="modifyError"
+        :can-retry="Boolean(modifyError)"
+        @apply="submitModify"
+        @empty-apply="submitModify({})"
+        @reset="resetModifyEditor"
+      />
 
       <!-- ── Overview ────────────────────────────────────────────── -->
       <section class="detail-section overview-section" aria-label="Overview">
@@ -540,6 +344,7 @@ watch(modifyClearFolderName, (clear) => {
         <dl class="detail-grid">
           <div class="detail-row"><dt>request_id</dt><dd>{{ displayValue(request?.request_id) }}</dd></div>
           <div class="detail-row"><dt>状态</dt><dd>{{ detailStatusLabel(request?.status) }}</dd></div>
+          <div class="detail-row"><dt>修改时间</dt><dd>{{ displayValue(request?.updated_at) }}</dd></div>
           <div class="detail-row"><dt>保存状态</dt><dd>已保存</dd></div>
           <div class="detail-row"><dt>原始标题</dt><dd>{{ displayValue(request?.input?.raw_title) }}</dd></div>
           <div class="detail-row">
@@ -651,7 +456,7 @@ watch(modifyClearFolderName, (clear) => {
         <div class="audit-group">
           <h5 class="audit-heading">状态历史</h5>
           <template v-if="detail.history?.error">
-            <p class="muted-text">{{ String(detail.history.error.error_message ?? '状态历史不可用。') }}</p>
+            <p class="muted-text">状态历史暂不可用。</p>
           </template>
           <template v-else-if="detail.history?.events?.length">
             <table class="history-table">
@@ -674,7 +479,7 @@ watch(modifyClearFolderName, (clear) => {
         <div class="audit-group">
           <h5 class="audit-heading">Auto Bangumi 结果</h5>
           <template v-if="detail.ab_result?.error">
-            <p class="muted-text">{{ String(detail.ab_result.error.error_message ?? '提交结果不可用。') }}</p>
+            <p class="muted-text">提交结果暂不可用。</p>
           </template>
           <template v-else-if="detail.ab_result?.record?.ab_submit_result">
             <dl class="detail-grid">

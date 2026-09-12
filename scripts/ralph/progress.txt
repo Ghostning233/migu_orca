@@ -74,3 +74,13 @@ Thread: https://codex.openai.com/threads/current
 - **Learnings for future iterations:**
   - saved transport 应由 RequestDetailPanel 宿主接管，编辑器只发与 generated patch 兼容的 apply 事件。
 ---
+
+## [2026-09-12 23:09:00 CST] - US-299
+Thread: https://codex.openai.com/threads/current
+- RequestDetailPanel 删除独立修改字段状态与表单，接入 AnimeDraftEditor saved 模式；只提交最小 patch 到 generated modifyRequest，成功后回查 getRequestDetail 并刷新方案列表，失败保留输入并支持重试/恢复。
+- 详情错误摘要改为固定中文；保留安全基本信息、updated_at、历史、SafeInfoDialog 入口及本地 accept/cancel/delete 兼容动作，不读取 available_actions 或任何外部管理动作。
+- tracking 入口仅消费 Plans projection 传入的唯一精确 tracking_id；新增/更新定向单测与 Chromium 旅程，覆盖修改、空 patch、清空字段、失败保留输入和追番导航。
+- 定向验证：RequestDetailPanel + AnimeDraftEditor Vitest 26 passed；typecheck/lint/build passed；真实 Chromium 修改类 4 passed、Plans 唯一 tracking 导航 1 passed；git diff --check passed。
+- **Learnings for future iterations:**
+  - saved 编辑器高级字段位于折叠 details，浏览器验证需显式展开后再操作。
+---

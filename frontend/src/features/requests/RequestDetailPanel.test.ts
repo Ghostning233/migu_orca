@@ -447,11 +447,11 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await wrapper.find('#detail-modify-toggle').trigger('click')
     await nextTick()
     expect(wrapper.find('#detail-modify-form').exists()).toBe(true)
-    await wrapper.find('#detail-modify-submit').trigger('click')
+    await wrapper.find('#detail-modify-form').trigger('submit')
     await nextTick()
 
     expect(apiPost).not.toHaveBeenCalled()
-    expect(wrapper.find('#detail-modify-error').text()).toContain('请至少修改或清空一个字段')
+    expect(wrapper.find('#detail-modify-editor .field-error').text()).toContain('请至少修改或清空一个字段')
   })
 
   it('modify sends a patch for changed fields only', async () => {
@@ -464,8 +464,8 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await wrapper.find('#detail-modify-toggle').trigger('click')
     await nextTick()
     await wrapper.find('#modify-folder-name').setValue('新目录名')
-    await wrapper.find('#modify-filter-use-regex').setValue(true)
-    await wrapper.find('#detail-modify-submit').trigger('click')
+    await wrapper.find('#modify-use-regex').setValue(true)
+    await wrapper.find('#detail-modify-form').trigger('submit')
     await flushPromises()
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/{request_id}/modify', {
@@ -482,6 +482,20 @@ describe('RequestDetailPanel actions (US-203)', () => {
   })
 
   it('clear-field checkboxes send explicit empty values', async () => {
+    const savedConfig = detailFixture().request.confirmable_config
+    apiGet.mockResolvedValue(detailFixture({
+      request: {
+        ...detailFixture().request,
+        confirmable_config: {
+          ...savedConfig,
+          filter_rule: {
+            ...savedConfig?.filter_rule,
+            must_contain: '1080p',
+          },
+          expected_folder_name: '旧目录名',
+        },
+      },
+    }))
     const { wrapper } = await mountPanel()
     await nextTick()
 
@@ -492,7 +506,7 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await nextTick()
     await wrapper.find('#modify-clear-must-contain').setValue(true)
     await wrapper.find('#modify-clear-folder-name').setValue(true)
-    await wrapper.find('#detail-modify-submit').trigger('click')
+    await wrapper.find('#detail-modify-form').trigger('submit')
     await flushPromises()
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/{request_id}/modify', {
@@ -510,20 +524,6 @@ describe('RequestDetailPanel actions (US-203)', () => {
         storage_dir: null,
       },
     })
-  })
-
-  it('copy request_id uses the clipboard and notifies', async () => {
-    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
-    const { wrapper } = await mountPanel()
-    await nextTick()
-
-    await wrapper.find('.copy-request-id').trigger('click')
-    await nextTick()
-
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('req-a')
-    const { useNotificationStore } = await import('@/app/stores/notification')
-    const notification = useNotificationStore()
-    expect(notification.current?.title).toBe('已复制 request_id')
   })
 
   it('AB submit entry links to Settings with the request_id', async () => {

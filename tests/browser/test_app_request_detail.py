@@ -307,8 +307,9 @@ class TestAppRequestDetailModify:
         assert page.locator("#modify-must-not-contain").count() >= 1
         assert page.locator("#modify-folder-name").count() >= 1
 
+        form.locator("details.advanced-settings").evaluate("el => el.open = true")
         page.locator("#modify-folder-name").fill("自定义目录名")
-        page.locator("#detail-modify-submit").click()
+        page.locator("#modify-apply-button").click()
         page.wait_for_selector(".global-notification", timeout=5000)
 
         notif = page.locator(".global-notification")
@@ -325,15 +326,21 @@ class TestAppRequestDetailModify:
         _open_detail(page, live_server_url, "req-mod-empty")
 
         page.locator("#detail-modify-toggle").click()
-        page.locator("#detail-modify-submit").click()
-        page.wait_for_selector("#detail-modify-error", timeout=5000)
+        expect(page.locator("#modify-apply-button")).to_be_disabled()
+        page.locator("#detail-modify-form").evaluate("form => form.requestSubmit()")
+        page.wait_for_selector("#detail-modify-editor .field-error", timeout=5000)
 
-        assert "请至少修改或清空一个字段" in page.locator("#detail-modify-error").inner_text()
+        assert "请至少修改或清空一个字段" in page.locator("#detail-modify-editor .field-error").inner_text()
 
     def test_modify_clear_fields_sends_explicit_empty_values(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
-        create_saved_request(storage_dir, "葬送的芙莉莲", "req-mod-clear")
+        request = create_saved_request(storage_dir, "葬送的芙莉莲", "req-mod-clear")
+        request["confirmable_config"]["filter_rule"].update(
+            {"must_contain": "1080p", "must_not_contain": "v2"}
+        )
+        request["confirmable_config"]["expected_folder_name"] = "旧目录名"
+        save_request_snapshot(load_storage_config(storage_dir), request)
         set_storage_preferences(page, storage_dir)
         _open_detail(page, live_server_url, "req-mod-clear")
 
@@ -365,10 +372,11 @@ class TestAppRequestDetailModify:
 
         page.route("**/api/v1/requests/req-mod-clear/modify**", handle_modify)
         page.locator("#detail-modify-toggle").click()
+        page.locator("#detail-modify-form details.advanced-settings").evaluate("el => el.open = true")
         page.locator("#modify-clear-must-contain").check()
         page.locator("#modify-clear-must-not-contain").check()
         page.locator("#modify-clear-folder-name").check()
-        page.locator("#detail-modify-submit").click()
+        page.locator("#modify-apply-button").click()
         page.wait_for_selector(".global-notification", timeout=5000)
 
         assert captured["payload"]["patch"]["filter_rule"] == {
@@ -402,8 +410,9 @@ class TestAppRequestDetailModify:
         _open_detail(page, live_server_url, "req-mod-fail")
 
         page.locator("#detail-modify-toggle").click()
+        page.locator("#detail-modify-form details.advanced-settings").evaluate("el => el.open = true")
         page.locator("#modify-folder-name").fill("失败后仍保留")
-        page.locator("#detail-modify-submit").click()
+        page.locator("#modify-apply-button").click()
         page.wait_for_selector(".global-notification", timeout=5000)
 
         expect(page.locator(".global-notification")).to_contain_text("操作失败")
