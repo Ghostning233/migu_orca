@@ -255,7 +255,7 @@ Stage 32 执行 PRD 为 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`，分�
 2026-09-07 已完成桌面端前端体验重构的产品方向、混合低保真、组件级交互和视觉方案评审。
 2026-09-08 B-A 已作为 Stage 28 完成并交付，B-B 已作为 Stage 29 完成并交付；2026-09-09 B-C1
 已作为 Stage 30 完成，B-C2 已作为 Stage 31 完成；B-D 已作为 Stage 32 完成，F-A 已作为
-Stage 33 完成，F-B 已完成为 Stage 34，F-C 已规划为 Stage 35，其余工作包暂不分配正式 Stage 编号：
+Stage 33 完成，F-B 已完成为 Stage 34，F-C 已完成为 Stage 35，其余工作包暂不分配正式 Stage 编号：
 
 1. BL-025 后端支撑：B-A 已作为 Stage 28 完成，覆盖 draft revision、可靠保存、单番/批量保存
    确认、36 部上限和 safe-info（见 `docs/MiGuOrca_stage28_draft_consistency_PRD.md`）；B-B 已作为
@@ -266,7 +266,7 @@ Stage 33 完成，F-B 已完成为 Stage 34，F-C 已规划为 Stage 35，其余
    `docs/MiGuOrca_frontend_ux_backend_support_PRD.md`。
 2. BL-026 前端分片：F-A 已完成为 Stage 33（US-257～US-265），只实现四项导航、壳层、Token、
    共享状态与现有页面兼容挂载，执行 PRD 为 `docs/MiGuOrca_stage33_frontend_shell_PRD.md`；
-   F-B 共享审核核心已完成为 Stage 34；F-C 单番三步、原子保存确认和 tracking 只读 handoff 已规划
+   F-B 共享审核核心已完成为 Stage 34；F-C 单番三步、原子保存确认和 tracking 只读 handoff 已完成
    为 Stage 35；1/12/36 部批量审核、追番方案、正式追番管理和设置收尾继续作为 F-D～F-G 评审。
 
 后端按 B-A～B-D、前端按 F-A～F-G 表达依赖。B-A 已按 9 个单次迭代 story（US-210～US-218）作为
@@ -281,7 +281,7 @@ Stage 28～32 的现有功能、OpenAPI 生成客户端和浏览器测试作为 
 
 ## 11. 未开发事项优先级池
 
-除已完成的 Stage 26～34 和已规划的 Stage 35 外，其他事项继续按 `docs/backlog.md` 的触发条件动态
+除已完成的 Stage 26～35 外，其他事项继续按 `docs/backlog.md` 的触发条件动态
 排序，允许插入更高优先级修复。
 
 ### 未排期与条件触发事项
@@ -336,7 +336,7 @@ Stage 28～32 的现有功能、OpenAPI 生成客户端和浏览器测试作为 
 14. Stage 32：后端契约固化、兼容迁移与前端交接（已完成，US-247～US-256；B-D，不新增动作或删除旧端点）。
 15. Stage 33：前端应用壳层与设计系统（已完成，US-257～US-265；F-A，不实现新业务页面）。
 16. Stage 34：前端共享审核核心（已完成，US-266～US-274；F-B，SafeInfo 延后到 F-E）。
-17. Stage 35：单番添加完整旅程（已规划，US-275～US-283；F-C，不实现 F-D～F-G）。
+17. Stage 35：单番添加完整旅程（已完成，US-275～US-283；F-C，不实现 F-D～F-G）。
 
 因此，Stage 19 到 Stage 29 的原产品闭环与前后端工程基线已经完成，Stage 26 作为 P0 后端基础
 阶段已交付，Stage 27 作为 P1 前端迁移阶段已交付，Stage 28 作为 BL-025 的 B-A 草案一致性
@@ -346,7 +346,7 @@ Stage 31 已完成 B-C2 可靠写管理；Stage 32 已完成 B-D 契约收尾，
 `ralph/stage34-shared-review-core`，并已归档到
 `scripts/ralph/archive/2026-09-11-stage34-shared-review-core/`。
 其余前端工作包仍按依赖和真实工作量拆分。F-B 共享审核核心已完成（US-266～US-274）；F-C 已
-规划为 Stage 35（US-275～US-283），接管单番保存确认后移除 `DraftPreviewPanel` 兼容保存，并
+完成为 Stage 35（US-275～US-283），接管单番保存确认后移除 `DraftPreviewPanel` 兼容保存，并
 提供不含正式管理动作的 tracking 只读 handoff。F-D 接管批量保存确认后移除
 `BatchDraftPreviewPanel` 兼容接受；F-E 在已保存 Request 语境下独占真实 `SafeInfoDialog`/
 `getRequestSafeInfo`。F-F 正式追番管理仍须单独规划，并复用 Stage 32 最终 generated contract。

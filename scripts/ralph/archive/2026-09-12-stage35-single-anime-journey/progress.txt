@@ -14,6 +14,7 @@ Started: Sat Sep 12 09:03:14 CST 2026
 - Saved-confirm recovery must treat accept status conflicts as possibly completed: verify the read-only tracking list by the saved request_id before allowing any further action.
 - Public handoff routes must sanitize mutually exclusive identifiers before mounting a feature; tracking detail renders only generated top-level safe summary fields and keeps batch queue mounting unchanged when no tracking identifier is present.
 - Route-local leave guards should register browser unload protection only while mounted and make their router callback inactive on unmount, so feature capabilities cannot leak into later routes.
+- Route-level component tests that can mount the batch-compatible QueueView must install a fresh Pinia alongside the test router, even when the tested route normally selects a different branch.
 
 ## 2026-09-12 09:08:00 Asia/Shanghai - US-275
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -93,4 +94,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The legacy preview-save adapter is no longer part of the single-anime route; preview-save references in the workbench feature are batch-only and must remain for batch compatibility.
   - Verification baseline: focused workbench/batch unit tests and all Chromium/backend tests pass; the full frontend unit suite still has two pre-existing TrackingView mounts without Pinia.
 - Verification passed: frontend API check, typecheck, lint, production build, focused workbench/batch unit tests (35), full Chromium suite (160), Python compileall, full backend pytest (1796), and git diff --check. Full frontend unit suite remains at 339 passed / 2 pre-existing failures.
+---
+
+## 2026-09-12 10:02:00 Asia/Shanghai - US-283
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Completed the Stage 35 F-C final gate, synchronized project/status documentation, corrected the TrackingView unit fixture so the complete frontend suite runs with the QueueView Pinia dependency, and prepared the Ralph PRD/progress archive and F-D/F-E/F-F handoff boundaries.
+- Files changed: frontend/src/features/tracking/TrackingView.test.ts, README.md, docs/README.md, docs/MiGuOrca_main_PRD.md, docs/MiGuOrca_future_stages.md, docs/MiGuOrca_stage35_single_anime_journey_PRD.md, docs/backlog.md, docs/frontend-ux-refactor-work-goals.md, docs/modules/M13-web-ui-PRD.md, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Final Stage closeout must update the user-facing status sources together and archive both Ralph state files under a dated stage directory.
+  - F-D reuses the shared review core for batch save-confirm, F-E alone owns SafeInfo, and F-F alone may add formal tracking management actions.
+- Verification passed: compileall, Ruff, 1,636 non-browser backend tests, frontend API check, typecheck, lint, 341 unit tests, production build, 160 real Chromium tests, and git diff check.
 ---

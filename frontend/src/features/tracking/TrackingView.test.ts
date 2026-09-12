@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -45,7 +46,7 @@ async function mountTracking(query: Record<string, string>) {
   })
   await router.push({ path: '/tracking', query })
   await router.isReady()
-  const wrapper = mount(TrackingView, { global: { plugins: [router] } })
+  const wrapper = mount(TrackingView, { global: { plugins: [createPinia(), router] } })
   await flushPromises()
   return wrapper
 }

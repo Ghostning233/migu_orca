@@ -166,7 +166,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "第三开发批次与 Stage 35 最终终点。"
     }
   ]

@@ -7,7 +7,7 @@
 | Stage | 35 |
 | 工作包 | F-C：单番添加 |
 | Backlog | BL-026 |
-| 状态 | 已规划，待开发 |
+| 状态 | 已完成并归档 |
 | 目标分支 | `ralph/stage35-single-anime-journey` |
 | Ralph stories | US-275～US-283 |
 | 实时基线 | `origin/main` 合并提交 `cee2452`（Stage 34 已合入） |
@@ -251,4 +251,15 @@ git diff --check
 5. `WorkbenchView` 不再依赖单番 preview-save；批量兼容适配层与 QueueView batch 模式无回归。
 6. 未修改 OpenAPI/generated/后端语义，未实现 SafeInfo、F-D、F-E 或 F-F 管理动作。
 7. 完整门禁、真实 Chromium、安全检查、文档和 Ralph 归档全部完成，工作区干净。
-8. Stage 35 合入稳定后，优先评审 F-D 批量审核；F-E 可独立评审，F-F/F-G 继续后置。
+8. Stage 35 已完成并归档。后续优先评审 F-D 批量审核；F-D 继续复用共享审核核心并独占批量保存确认，
+   F-E 独占已保存 Request 语境下的 SafeInfo，F-F 才实现正式 tracking 管理动作；F-G 继续后置。
+
+## 11. 最终门禁与交付记录
+
+- US-275～US-283 均已通过并分别提交；Ralph 状态归档于
+  `scripts/ralph/archive/2026-09-12-stage35-single-anime-journey/`。
+- 前端 API drift check、typecheck、lint、341 个 unit tests、production build 和真实 Chromium 160 tests
+  通过；后端 compileall、Ruff、非浏览器 pytest 1,636 tests 与 `git diff --check` 通过。
+- 复核确认未修改 OpenAPI、generated client 或后端业务语义；未产生应提交的 dist、trace、截图或敏感测试产物。
+- 设计边界：F-D 复用 `AnimeDraftEditor`/`useDraftSession` 并接管批量保存确认；F-E 独占
+  `SafeInfoDialog`/`getRequestSafeInfo`；F-F 才能实现正式 tracking 列表、筛选、同步、提交与管理动作。
