@@ -1,125 +1,24 @@
 # Ralph Progress Log
-Started: Sat Sep 12 09:03:14 CST 2026
+Started: Sat Sep 12 2026 Asia/Shanghai
 ---
 
 ## Codebase Patterns
 
-- Frontend API boundary types must be conditional aliases derived from `operations` in `api/generated/api.ts`; feature state models must not recreate API DTOs.
-- Request-scoped journey capabilities and idempotency keys stay in component/composable memory; safe UI errors use fixed messages and allowlisted details only.
-- Shared workflow state should be API-free; transport orchestration belongs in the later host story so single-anime and batch compatibility paths cannot accidentally share side effects.
-- Single-anime search hosts invalidate candidate results as soon as the title changes, and apply result focus only after loading has been released so the loading rerender cannot steal focus.
-- The single-anime review host owns the in-memory draft session and step navigation; save/confirm transport stays outside the shared editor until its dedicated story.
-- The application shell owns the first direct-load keyboard stop (skip link); feature views only autofocus when mounted outside the shell.
-- Atomic single-anime save-confirm hosts submit only generated capability fields plus a request-scoped idempotency key; the shared draft session is invalidated immediately after a confirmed handoff.
-- Saved-confirm recovery must treat accept status conflicts as possibly completed: verify the read-only tracking list by the saved request_id before allowing any further action.
-- Public handoff routes must sanitize mutually exclusive identifiers before mounting a feature; tracking detail renders only generated top-level safe summary fields and keeps batch queue mounting unchanged when no tracking identifier is present.
-- Route-local leave guards should register browser unload protection only while mounted and make their router callback inactive on unmount, so feature capabilities cannot leak into later routes.
-- Route-level component tests that can mount the batch-compatible QueueView must install a fresh Pinia alongside the test router, even when the tested route normally selects a different branch.
+- Stage 36 只实现 F-D 批量审核；F-E 独占已保存 Request 的 SafeInfoDialog/getRequestSafeInfo，F-F 独占正式 tracking 管理，F-G 独占设置与发布收尾。
+- 当前基线是 origin/main c260a86；Stage 35 已合入，单番 confirmRequestSave 与 tracking 只读 handoff 不得回归。
+- 批量当前仍由 BatchWorkbenchView + BatchDraftPreviewPanel 执行 preview-save → acceptBatchItems；Stage 36 完成后必须由 generated saveConfirmBatchItems 单次替代，并删除无调用兼容组件。
+- Batch save-confirm 每条只提交 item_id/draft_id/base_revision/idempotency_key；成功响应提供 request_id/tracking_id，save_confirm_failed 也提供公开 request_id 供 acceptRequest 恢复。
+- 批量条目以 item_id 为唯一身份；输入顺序、冻结审核顺序、当前详情和批量勾选是不同状态，不得用数组位置或 DOM 状态推导。
+- AnimeDraftEditor/useDraftSession 是单番和批量唯一草案编辑核心；卡片快捷编辑与右侧详情必须共享同一服务端权威快照/revision。
+- 未保存 batch 现场不跨刷新持久化；candidate_context、draft_id、revision、幂等键与未应用编辑只存在 route-local 内存。
+- 效果图是布局与层级方向，不逐像素复制；Stage 36 不实现或模拟“全部信息”按钮。
+- 每个 Ralph 迭代只完成一个 story；最多连续运行 3 个 stories，完成 US-286、US-289、US-292 后停止独立审核。
+- 普通 story 只跑定向检查；完整前端、后端非浏览器与 Chromium 门禁只在 US-293 运行一次，无代码变化不得重复全量执行。
 
-## 2026-09-12 09:08:00 Asia/Shanghai - US-275
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added the API-free `useSingleAnimeJourney` state model covering input, candidates, review, confirming, saved-pending-confirm, confirmed-pending-tracking, and complete states. Added legal transition checks, operation blocking, discard semantics, idempotency-key lifecycle, generated-contract type aliases, and safe error projection with fixed messages and allowlisted fields. Added focused journey-state tests.
-- Files changed: `frontend/src/app/composables/useSingleAnimeJourney.ts`, `frontend/src/app/composables/useSingleAnimeJourney.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - The journey core must remain transport-free; later stories can attach generated endpoint calls without introducing a second state owner.
-  - A saved-confirm failure must explicitly transition to saved-pending-confirm; entering that state clears both draft capability and the save idempotency key.
-- Verification passed: frontend typecheck, lint, 331 unit tests, build, Python compileall, and 1795 backend tests.
+## Current Status
+
+- US-284～US-293 均未开始，passes=false。
+- 当前分支：ralph/stage36-batch-review-journey。
+- 当前执行 PRD：docs/MiGuOrca_stage36_batch_review_journey_PRD.md。
+- 规划阶段不修改 OpenAPI、generated client、Flask API 或生产业务代码。
 ---
-
-## 2026-09-12 09:23:00 Asia/Shanghai - US-277
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added the single-anime review step using the shared AnimeDraftEditor and useDraftSession snapshot/revision flow. Added review summary, safe save-confirm blocking reasons, preview-modify retry/reset behavior, explicit candidate/search navigation, and ConfirmDialog-protected draft discard. Kept save/confirm and external actions out of this story and preserved batch mode.
-- Files changed: frontend/src/features/workbench/SingleAnimeReviewPanel.vue, frontend/src/features/workbench/WorkbenchView.vue, frontend/src/features/workbench/WorkbenchView.test.ts, tests/browser/test_app_workbench.py, scripts/ralph/prd.json, scripts/ralph/progress.txt.
-- **Learnings for future iterations:**
-  - Single-mode review should be mounted as a dedicated host around the shared editor so later save-confirm transport can be added without creating a second editing state owner.
-  - Direct `/app/add` loads must leave the shell skip link as the first tab stop; feature-level autofocus is limited to standalone mounts.
-- Verification passed: frontend api/typecheck, lint, 334 unit tests, build, 65 targeted Chromium tests, Python compileall, 1795 backend tests, and git diff --check.
----
-
-## 2026-09-12 09:13:00 Asia/Shanghai - US-276
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Completed the single-anime input/candidate journey at the workbench host: initial title-input focus, duplicate-search protection, safe input/search summary, stale candidate invalidation when the title is edited, post-search focus on the first candidate, and preserved explicit candidate/season-confirmation behavior. Batch mode remains unchanged.
-- Files changed: `frontend/src/features/workbench/WorkbenchView.vue`, `frontend/src/features/workbench/WorkbenchView.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
-- **Learnings for future iterations:**
-  - Candidate focus must run after `searchLoading` is cleared and the resulting rerender completes; focusing earlier is lost when the submit button unlocks.
-  - Search results and season confirmations are tied to the exact trimmed input that produced them; editing the input keeps the text but clears the old result and one-time confirmation state.
-- Verification passed: frontend api:check, typecheck, lint, 333 unit tests, build, and 21 targeted Chromium browser tests.
----
-
-## 2026-09-12 09:31:00 Asia/Shanghai - US-278
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Connected the single-anime review host to generated `confirmRequestSave` with a capability-only payload, relative storage profile, in-memory idempotency key reuse, safe fixed-error rendering, and success handoff consumption. Extended journey transitions for retryable failures and `save_confirm_failed` recovery, and updated focused unit/browser coverage.
-- Files changed: frontend/src/app/composables/useSingleAnimeJourney.ts, frontend/src/app/composables/useSingleAnimeJourney.test.ts, frontend/src/features/workbench/SingleAnimeReviewPanel.vue, frontend/src/features/workbench/WorkbenchView.test.ts, tests/browser/test_app_workbench.py, scripts/ralph/prd.json, scripts/ralph/progress.txt.
-- **Learnings for future iterations:**
-  - The save-confirm host must read the latest draft capability and revision from `useDraftSession`; the generated endpoint does not accept or need a Request snapshot.
-  - Save-confirm success is a local handoff boundary: consume the draft session and wait for the later tracking story instead of calling accept or external subscription APIs.
-- Verification passed: frontend api check, typecheck, lint, 336 unit tests, build, 20 targeted Chromium tests, Python compileall, 1795 backend tests, and git diff --check.
-
-## 2026-09-12 09:36:00 Asia/Shanghai - US-279
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added saved-confirm failure recovery in the single-anime review host. Allowlisted saved request details transition to a retry-only state, clear the draft capability and save idempotency key, call generated acceptRequest exactly once per in-flight operation, and verify the resulting tracking record through listTrackingItems using the saved request_id. Status conflicts perform read-only verification before any possible retry; tracking lookup failures remain recoverable without repeating accept or save-confirm. Added fixed safe recovery copy and focused component coverage.
-- Files changed: frontend/src/features/workbench/SingleAnimeReviewPanel.vue, frontend/src/features/workbench/WorkbenchView.test.ts, scripts/ralph/prd.json, scripts/ralph/progress.txt.
-- **Learnings for future iterations:**
-  - The accept endpoint needs the request_id as a path parameter and only receives the relative storage profile in its body.
-  - A tracking_id returned by any other response must not be inferred or trusted for handoff; match the safe tracking list projection by request_id.
-- Verification passed: frontend typecheck, lint, 336 unit tests, build, 20 targeted Chromium tests, Python compileall, full backend pytest, and git diff --check.
----
-
-## 2026-09-12 09:46:00 Asia/Shanghai - US-280
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added the tracking handoff route with mutually exclusive `tracking_id`/`batch_id` query sanitization. A `tracking_id` loads the generated read-only tracking detail endpoint, focuses the target, supports refresh/error recovery, and renders only title, status, valid resource count, total episodes, and the fixed not-yet-implemented updated-episode field. Existing `/app/tracking` and legacy `/app/queue` batch queue behavior remains intact. Successful saved-confirm tracking lookup now replaces the route with the server-matched tracking identifier.
-- Files changed: frontend/src/app/router/catalog.ts, frontend/src/app/router/catalog.test.ts, frontend/src/app/router/index.ts, frontend/src/features/tracking/TrackingView.vue, frontend/src/features/tracking/TrackingView.test.ts, frontend/src/features/workbench/SingleAnimeReviewPanel.vue, tests/browser/test_app_queue.py, scripts/ralph/prd.json, scripts/ralph/progress.txt.
-- **Learnings for future iterations:**
-  - The public tracking route needs a strict one-of query boundary: both identifiers or arrays must be discarded before feature mounting.
-  - The tracking handoff view must be a read-only wrapper around the existing queue route; no identifier means the established batch queue surface, while `tracking_id` alone mounts detail.
-  - Browser assertions for route URLs are more reliable with `page.url.endswith(...)` than a glob passed to `expect(page).to_have_url(...)` in this suite.
-- Verification passed: frontend api check, typecheck, lint, 339 unit tests, build, targeted compatibility Chromium tests (31), full Chromium suite (160), Python compileall, 1796 backend tests, and git diff --check.
----
----
-
-## 2026-09-12 09:53:00 Asia/Shanghai - US-281
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Added route-local single-anime leave protection for unsafe review work, including native beforeunload warnings and an in-app ConfirmDialog for router navigation. Confirmed departure invalidates the draft capability and journey state; cancel keeps the current draft and focus. Saved-confirm recovery and pure search results remain warning-free. Added focused composable coverage for unload blocking, navigation cancellation, approval, cleanup, and inactive guards.
-- Files changed: frontend/src/app/composables/useLeaveGuard.ts, frontend/src/app/composables/useLeaveGuard.test.ts, frontend/src/features/workbench/SingleAnimeReviewPanel.vue, scripts/ralph/prd.json, scripts/ralph/progress.txt.
-- **Learnings for future iterations:**
-  - Feature-owned router guards need an active flag cleared during unmount because Vue Router does not remove registered guards; this prevents stale route-local capability state from blocking later navigation.
-  - The shared ConfirmDialog already puts its cancel action first in the focus trap, matching the leave-protection requirement that “留在此页” receives default focus.
-- Verification: frontend API contract check, typecheck, lint, production build, full Chromium suite (160 passed), Python compileall, full backend pytest (1796 passed), and git diff --check passed. Full frontend unit run has two unrelated pre-existing TrackingView fixture failures because those tests mount QueueView without Pinia; the focused US-281/workbench suite passes.
----
-## 2026-09-12 09:58:00 Asia/Shanghai - US-282
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Removed the unreferenced single-anime `DraftPreviewPanel` compatibility adapter, eliminating its legacy `preview-save` path. Updated workbench comments to identify `SingleAnimeReviewPanel` as the atomic single-anime host and kept `BatchDraftPreviewPanel`'s preview-save flow unchanged. A source audit confirms single-anime workbench code has no `preview-save`/`previewSaveRequest` references.
-- Files changed: frontend/src/features/workbench/DraftPreviewPanel.vue (deleted), frontend/src/features/workbench/WorkbenchView.vue, frontend/src/features/workbench/BatchWorkbenchView.vue, scripts/ralph/prd.json, scripts/ralph/progress.txt.
-- **Learnings for future iterations:**
-  - The legacy preview-save adapter is no longer part of the single-anime route; preview-save references in the workbench feature are batch-only and must remain for batch compatibility.
-  - Verification baseline: focused workbench/batch unit tests and all Chromium/backend tests pass; the full frontend unit suite still has two pre-existing TrackingView mounts without Pinia.
-- Verification passed: frontend API check, typecheck, lint, production build, focused workbench/batch unit tests (35), full Chromium suite (160), Python compileall, full backend pytest (1796), and git diff --check. Full frontend unit suite remains at 339 passed / 2 pre-existing failures.
----
-
-## 2026-09-12 10:02:00 Asia/Shanghai - US-283
-Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
-- What was implemented: Completed the Stage 35 F-C final gate, synchronized project/status documentation, corrected the TrackingView unit fixture so the complete frontend suite runs with the QueueView Pinia dependency, and prepared the Ralph PRD/progress archive and F-D/F-E/F-F handoff boundaries.
-- Files changed: frontend/src/features/tracking/TrackingView.test.ts, README.md, docs/README.md, docs/MiGuOrca_main_PRD.md, docs/MiGuOrca_future_stages.md, docs/MiGuOrca_stage35_single_anime_journey_PRD.md, docs/backlog.md, docs/frontend-ux-refactor-work-goals.md, docs/modules/M13-web-ui-PRD.md, scripts/ralph/prd.json, scripts/ralph/progress.txt.
-- **Learnings for future iterations:**
-  - Final Stage closeout must update the user-facing status sources together and archive both Ralph state files under a dated stage directory.
-  - F-D reuses the shared review core for batch save-confirm, F-E alone owns SafeInfo, and F-F alone may add formal tracking management actions.
-- Verification passed: compileall, Ruff, 1,636 non-browser backend tests, frontend API check, typecheck, lint, 341 unit tests, production build, 160 real Chromium tests, and git diff check.
----
-
-## 2026-09-12 - Stage 35 independent review fix
-- 正常 confirmRequestSave 成功严格消费完整 handoff，通过 `router.replace` 进入 handoff 提供的 tracking_id；定位失败保留 TrackingView 的“重试定位”，不重复 save-confirm/accept。
-- 为草案失效、revision conflict、replayed 与 idempotency conflict 保留独立恢复路径：失效草案清理并返回候选，冲突幂等键清除后生成新操作键。
-- 搜索成功后折叠为摘要并提供修改搜索，空输入禁用搜索；TrackingView 增加请求序列保护，旧响应不得覆盖快速切换后的详情。
-- 删除误建的 `2026-09-12-stage34-shared-review-core` 归档；未开发 F-D～F-G，未修改 OpenAPI、generated client 或后端语义。
-
-## 2026-09-12 - Stage 35 阻断审核修复
-- 严格校验 `save_confirm_failed` 的固定 outcome、request_id 与 retry_action；进入保存确认失败恢复态后立即失效旧草案并禁用继续编辑。
-- accept 的不确定结果统一先执行只读 tracking 核验，区分已找到、核验成功但未找到、核验失败；后两者只提供重试定位或无定位追番管理，不重复 accept/save-confirm。
-- 修正确认后 tracking 定位状态文案、详情加载后的焦点时序与单番壳层初始焦点，并更新真实 Chromium 的保存跳转、空搜索和不存在请求文件隔离验证。
-- 验证通过：前端 typecheck、lint、定向 Vitest（31 passed）、build，以及 Chromium 定向用例（3 passed）；`git diff --check` 通过。未修改后端、OpenAPI/generated client、批量流程或 F-D～F-G。
-- 后续审核修正：accept 核验成功但暂未找到 tracking 时保留 `saved_pending_confirm` 并允许明确重试 accept；核验失败切换为仅重试定位；明确 accept 失败不伪造已确认。handoff 拒绝空白 request/tracking ID，恢复态隐藏未保存草案提示；真实 `/app/add` shell 入口在渲染后聚焦单番输入。保存跳转 Chromium 用例等待详情响应，并只检查 requests 下不存在 JSON 文件。
-- 本轮验证：前端 typecheck、lint、定向 Vitest（31 passed）、build；Chromium `focuses_single or save_draft` 为 2 passed；`.migu_orca/storage` 不存在，`git diff --check` 通过。
-- 最终恢复态修正：增加独立 `verification_pending`，未知 accept 响应的 tracking 核验失败只能再次核验；核验未找到才回到 `saved_pending_confirm`，仅明确成功且定位失败进入 `confirmed_pending_tracking`。未知结果覆盖网络、超时、非 JSON、5xx 与状态冲突，明确失败保持待确认态。handoff/list tracking 标识复用公开路由标识规则并校验 `CONFIRMED` 语义。
-- 本轮验证：typecheck、lint、定向 Vitest（32 passed）、build；Chromium `focuses_single or save_draft` 为 2 passed；`.migu_orca/storage` 不存在，`git diff --check` 通过。
-- 最终阻断修复：明确 accept 成功后的定位未找到/失败统一进入 `confirmed_pending_tracking`，只显示重试定位和无定位管理；`verification_pending` 仅表示未知 accept 响应的首次核验失败，二次核验未找到后才恢复 `saved_pending_confirm`。补充两组组件状态测试。
-- 本轮验证：定向 Vitest（32 passed）、TrackingView（2 passed）、build；Chromium `focuses_single or save_draft`（2 passed），`.migu_orca/storage` 不存在，`git diff --check` 通过。
