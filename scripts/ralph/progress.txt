@@ -65,3 +65,12 @@ Thread: https://codex.openai.com/threads/current
   - Teleport 弹窗组件单测应从 document.body 断言内容，wrapper 只持有 Teleport 占位。
   - Chromium 必须在 UI 改动后重新 build frontend/dist；旧哈希 dist 会掩盖新组件。
 ---
+
+## [2026-09-12 23:00:00 CST] - US-298
+Thread: https://codex.openai.com/threads/current
+- AnimeDraftEditor 增加显式 mode（draft/saved）、标题/表单/应用文案 props，saved 模式复用同一受控字段和最小 apply patch。
+- saved 模式不引入 API、useDraftSession、previewModifyRequest、draft_id 或 base_revision；原有 draft dirty/reset/retry 逻辑保持不变。
+- 定向验证：AnimeDraftEditor Vitest 5 passed；typecheck/lint/build passed；真实 Chromium 方案回归 2 passed。
+- **Learnings for future iterations:**
+  - saved transport 应由 RequestDetailPanel 宿主接管，编辑器只发与 generated patch 兼容的 apply 事件。
+---

@@ -31,6 +31,10 @@ import { statusLabel } from '@/features/requests/requestsList'
 
 const props = defineProps<{
   request: RequestSnapshot
+  mode?: 'draft' | 'saved'
+  heading?: string
+  formHeading?: string
+  applyLabel?: string
   applying?: boolean
   error?: string
   disabled?: boolean
@@ -48,6 +52,10 @@ const emit = defineEmits<{
 }>()
 
 const idPrefix = computed(() => props.idPrefix ?? 'anime-draft')
+const editorMode = computed(() => props.mode ?? 'draft')
+const panelHeading = computed(() => props.heading ?? '订阅方案详情')
+const formHeading = computed(() => props.formHeading ?? (editorMode.value === 'saved' ? '编辑已保存方案' : '编辑订阅草案'))
+const applyLabel = computed(() => props.applyLabel ?? (editorMode.value === 'saved' ? '保存方案修改' : '应用修改'))
 
 const editGroup = ref('')
 const editMustContain = ref('')
@@ -122,14 +130,14 @@ defineExpose({ patch, dirty, reset: resetForm })
 </script>
 
 <template>
-  <PanelSection title="订阅方案详情" class="anime-draft-editor">
+  <PanelSection :title="panelHeading" class="anime-draft-editor" :data-mode="editorMode">
     <div :id="props.containerId ?? 'anime-draft-editor'" class="request-detail" aria-live="polite" aria-relevant="additions text">
       <h3 class="request-detail-title">
         {{ request.input?.raw_title || request.source_info?.matched_bangumi?.title || '订阅方案' }}
       </h3>
 
       <form :id="props.formId" class="detail-inline-form" @submit.prevent="apply">
-        <h4 class="detail-form-heading">编辑订阅草案</h4>
+        <h4 class="detail-form-heading">{{ formHeading }}</h4>
         <FormField :label="'字幕组'" :inputId="`${idPrefix}-subtitle-group`">
           <SubtitleGroupSelect
             v-model="editGroup"
@@ -162,7 +170,7 @@ defineExpose({ patch, dirty, reset: resetForm })
           <BaseButton :id="`${idPrefix}-reset-button`" type="button" variant="secondary" :disabled="applying" @click="$emit('reset')">恢复上次结果</BaseButton>
         </div>
         <div class="detail-form-actions">
-          <BaseButton :id="`${idPrefix}-apply-button`" type="submit" variant="primary" :loading="applying" :disabled="disabled || !dirty">应用修改</BaseButton>
+          <BaseButton :id="`${idPrefix}-apply-button`" type="submit" variant="primary" :loading="applying" :disabled="disabled || !dirty">{{ applyLabel }}</BaseButton>
         </div>
       </form>
       <slot name="review-note" />

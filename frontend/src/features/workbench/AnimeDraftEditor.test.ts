@@ -65,4 +65,20 @@ describe('AnimeDraftEditor', () => {
     expect(wrapper.find('#anime-draft-must-not-contain').element).toHaveProperty('value', '')
     expect(wrapper.emitted('dirty-change')?.at(-1)).toEqual([false])
   })
+
+  it('supports saved mode with the same controlled fields and no draft transport', async () => {
+    const wrapper = mount(AnimeDraftEditor, {
+      props: { request, mode: 'saved', idPrefix: 'saved-plan' },
+    })
+
+    expect(wrapper.find('[data-mode="saved"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('编辑已保存方案')
+    expect(wrapper.text()).toContain('保存方案修改')
+    await wrapper.find('#saved-plan-folder-name').setValue('新目录')
+    await wrapper.find('form').trigger('submit')
+
+    expect(wrapper.emitted('apply')).toEqual([[{ expected_folder_name: '新目录' }]])
+    expect(wrapper.emitted('apply')?.[0]?.[0]).not.toHaveProperty('draft_id')
+    expect(wrapper.emitted('apply')?.[0]?.[0]).not.toHaveProperty('base_revision')
+  })
 })
