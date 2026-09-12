@@ -11,12 +11,12 @@
 //   - each FOUND card opens the shared candidate popover (reuses
 //     CandidateCard); choosing a candidate generates a server-authoritative
 //     draft (POST /api/v1/requests save_request=false) into the card;
-//   - DRAFT cards open BatchDraftPreviewPanel (preview-modify / preview-save)
-//     plus a batch-specific 接受当前批量草案 / 删除当前批量卡片
+//   - DRAFT cards open BatchDraftPreviewPanel (preview-modify) plus a
+//     batch-specific 加入批量确认 / 删除当前批量卡片 action row;
 //     action row;
 //   - the accept toolbar offers select-all, a live selected count, 批量接受
-//     (selected) and 全接受 (all reviewable cards), each through the shared
-//     POST /api/v1/batches/{batch_id}/accept endpoint;
+//     (selected) and 全接受 (all reviewable cards), through generated atomic
+//     POST /api/v1/batches/{batch_id}/save-confirm;
 //   - batch_id is pushed into the URL so a refresh restores the queue (the
 //     queue panel itself lands in US-206).
 //
@@ -43,9 +43,8 @@ import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
 import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
 
 import {
-  acceptFeedbackLabel,
-  acceptOutcomeAccepted,
-  batchAcceptNotification,
+  batchSaveConfirmErrorLabel,
+  batchSaveConfirmSucceeded,
   batchCardNeedsReview,
   batchCardPreferenceSummary,
   batchCardRequest,
@@ -55,23 +54,20 @@ import {
   batchEpisodeProgressText,
   batchItemCount,
   batchStatusLabel,
-  buildBatchAcceptPayload,
+  buildBatchSaveConfirmPayload,
   buildBatchCandidateCreatePayload,
   buildBatchParsePayload,
   canAcceptBatchCard,
   canChooseBatchCandidate,
   canExpandBatchCard,
-  collectBatchAcceptDescriptors,
   orderBatchItemsForReview,
   nextBatchException,
-  postBatchAccept,
-  queueStatusLabel,
   validateBatchRawInput,
-  type BatchAcceptResult,
+  type BatchSaveConfirmDescriptor,
+  type BatchSaveConfirmResult,
   type BatchCandidate,
   type BatchItem,
   type BatchParseResult,
-  type QueueItem,
 } from '@/features/workbench/batchWorkbench'
 import BatchCandidatePopover from '@/features/workbench/BatchCandidatePopover.vue'
 import BatchDraftPreviewPanel from '@/features/workbench/BatchDraftPreviewPanel.vue'
@@ -113,7 +109,12 @@ const inputItemOrder = ref<Map<string, number>>(new Map())
 // Selection / accept state.
 const selectedItemIds = ref<Set<string>>(new Set())
 const acceptInFlight = ref(false)
-const acceptFeedback = ref<Record<string, { status: string; reason: string }>>({})
+const acceptFeedback = ref<Record<string, string>>({})
+// Save-confirm keys are deliberately route-local and survive only explicit
+// retries of the same operation.
+const saveKeys = new Map<string, string>()
+const savingItemIds = ref<Set<string>>(new Set())
+const saveSummary = ref<Record<string, number>>({})
 
 // Candidate popover state (component memory only).
 const activeCandidateItemId = ref<string | null>(null)
@@ -158,9 +159,6 @@ const cardElements = new Map<string, HTMLElement>()
 const temporarilyShownItemId = ref<string | null>(null)
 const focusAnnouncement = ref('')
 const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus.value}\u0000${exceptionsOnly.value}`)
-
-// Queue state (read-only snapshot after accept; full queue panel is US-206).
-const queueItems = ref<QueueItem[]>([])
 
 const selectable = computed(() => items.value.filter(canAcceptBatchCard))
 const selectedCount = computed(
@@ -286,10 +284,6 @@ function goToNextException(): void {
   focusCard(next.item_id)
 }
 
-function batchQueueStatusText(): string {
-  return `队列中 ${queueItems.value.length} 项`
-}
-
 function syncBatchIdToUrl(batchIdValue: string): void {
   if (batchIdValue) {
     void router.replace(routeLocation('add', { batch_id: batchIdValue }))
@@ -305,7 +299,6 @@ async function parseBatch(): Promise<void> {
     parseResult.value = null
     items.value = []
     batchId.value = ''
-    queueItems.value = []
     notification.error('校验失败', validationError)
     return
   }
@@ -332,15 +325,16 @@ async function parseBatch(): Promise<void> {
     currentItemId.value = items.value[0]?.item_id ?? null
     detailItemId.value = currentItemId.value
     acceptFeedback.value = {}
+    saveKeys.clear()
+    saveSummary.value = {}
+    savingItemIds.value = new Set()
     seasonConfirmations.value = {}
-    queueItems.value = []
     notification.success('批量搜索完成', `已返回 ${items.value.length} 个条目的候选搜索状态。`)
   } catch (error) {
     void error
     parseResult.value = null
     items.value = []
     batchId.value = ''
-    queueItems.value = []
     parseError.value = '批量草案获取失败。请稍后重试。'
     notification.error('批量草案获取失败', '批量草案获取失败。请稍后重试。')
   } finally {
@@ -489,32 +483,34 @@ function deleteBatchCard(itemId: string): void {
   items.value = items.value.filter((item) => item.item_id !== itemId)
 }
 
-function applyAcceptResult(result: BatchAcceptResult, savedRequests: Map<string, RequestSnapshot>): void {
-  const outcomeCounts: Record<string, number> = {}
-  const feedback: Record<string, { status: string; reason: string }> = {}
+function newSaveKey(): string {
+  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `batch-save-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
+  const feedback: Record<string, string> = {}
   const nextItems = items.value.map((row) => {
     let updated = row
-    for (const item of result.items ?? []) {
+    for (const item of result.results ?? []) {
       if (item.item_id !== row.item_id) continue
-      outcomeCounts[item.status ?? ''] = (outcomeCounts[item.status ?? ''] ?? 0) + 1
-      if (acceptOutcomeAccepted(item)) {
-        const savedRequest =
-          savedRequests.get(row.item_id ?? '') ?? (row.preview_request as RequestSnapshot | null) ?? {}
+      if (batchSaveConfirmSucceeded(item)) {
         updated = {
           ...row,
-          status: 'ACCEPTED',
-          preview_request: { ...(savedRequest as RequestSnapshot), status: 'ACCEPTED' },
-          // The draft was consumed by preview-save before accept; a consumed
-          // draft must never be re-referenced (draft_id or revision).
+          status: 'CONFIRMED',
           draft_id: null,
           draft_revision: null,
-          queue_status: item.status === 'accepted' ? 'READY_TO_SUBMIT' : row.queue_status ?? null,
+          queue_status: item.tracking_ready === true ? 'TRACKING_READY' : 'CONFIRMED',
         }
         const selected = new Set(selectedItemIds.value)
         selected.delete(row.item_id ?? '')
         selectedItemIds.value = selected
       } else {
-        feedback[row.item_id ?? ''] = { status: item.status ?? '', reason: item.reason ?? '接受失败' }
+        feedback[row.item_id ?? ''] = batchSaveConfirmErrorLabel(item)
+        if (item.error_type === 'save_confirm_failed') {
+          updated = { ...row, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null }
+        }
       }
     }
     return updated
@@ -522,53 +518,41 @@ function applyAcceptResult(result: BatchAcceptResult, savedRequests: Map<string,
   items.value = nextItems
   acceptFeedback.value = { ...acceptFeedback.value, ...feedback }
 
-  // Sync the authoritative queue statuses onto matching accepted cards.
-  const queue = result.queue
-  const queueList = queue?.items ?? []
-  if (queueList.length) {
-    items.value = items.value.map((row) => {
-      if (row.status !== 'ACCEPTED') return row
-      const qItem = queueList.find((entry) => entry.item_id === row.item_id)
-      return qItem ? { ...row, queue_status: qItem.status ?? null } : row
-    })
-    queueItems.value = queueList as QueueItem[]
-  }
 }
 
-async function submitBatchAccept(rows: BatchItem[], options: { single?: boolean; itemIds?: string[] }): Promise<void> {
+async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | null): Promise<void> {
   if (!batchId.value) {
-    notification.error('接受失败', '缺少批次标识，请重新获取批量草案。')
+    notification.error('保存确认失败', '缺少批次标识，请重新获取批量草案。')
     return
   }
   acceptInFlight.value = true
+  savingItemIds.value = new Set(rows.map((row) => row.item_id ?? '').filter(Boolean))
   try {
-    const descriptors = collectBatchAcceptDescriptors(rows).sort(
-      (left, right) =>
-        (inputItemOrder.value.get(left.item_id) ?? Number.MAX_SAFE_INTEGER) -
-        (inputItemOrder.value.get(right.item_id) ?? Number.MAX_SAFE_INTEGER),
-    )
-    if (!descriptors.length) {
-      notification.error('接受失败', '没有可接受的批量卡片。')
+    const descriptors: BatchSaveConfirmDescriptor[] = rows.map((row) => {
+      const itemId = row.item_id ?? ''
+      const key = saveKeys.get(itemId) ?? newSaveKey()
+      saveKeys.set(itemId, key)
+      return { item_id: itemId, draft_id: row.draft_id ?? '', base_revision: row.draft_revision ?? 1, idempotency_key: key }
+    })
+    if (!descriptors.length || descriptors.some((item) => !item.draft_id)) {
+      notification.error('保存确认失败', '没有可确认的批量草案。')
       return
     }
-    const payload = buildBatchAcceptPayload(descriptors, options.itemIds ?? null, currentStorageDir())
-    const result = await postBatchAccept(batchId.value, payload)
-    const savedRequests = new Map<string, RequestSnapshot>()
-    for (const row of rows) {
-      const saved = batchCardRequest(row)
-      if (saved?.request_id) {
-        savedRequests.set(row.item_id ?? '', saved)
-      }
-    }
-    applyAcceptResult(result, savedRequests)
-    const outcomeCounts = result.summary ?? {}
-    const notif = batchAcceptNotification(outcomeCounts, options.single === true)
-    notification.show(notif.kind, notif.title, notif.message)
+    const result = await api.post<BatchSaveConfirmResult>(`/api/v1/batches/{batch_id}/save-confirm`, {
+      path: { batch_id: batchId.value },
+      body: buildBatchSaveConfirmPayload(descriptors, itemIds, currentStorageDir()),
+    })
+    saveSummary.value = result.summary ?? {}
+    applySaveConfirmResult(result)
+    const confirmed = result.summary?.confirmed ?? 0
+    const failed = result.summary?.failed ?? 0
+    notification.show(failed && !confirmed ? 'error' : 'success', '批量保存确认完成', `已确认 ${confirmed} 项${failed ? `；${failed} 项需处理` : ''}。`)
   } catch (error) {
     void error
-    notification.error('接受失败', '批量接受失败。请稍后重试。')
+    notification.error('保存确认失败', '批量保存确认响应未知，请使用相同操作重试。')
   } finally {
     acceptInFlight.value = false
+    savingItemIds.value = new Set()
   }
 }
 
@@ -576,33 +560,28 @@ async function confirmBatchAcceptSelected(): Promise<void> {
   const rows = items.value.filter((item) => selectedItemIds.value.has(item.item_id ?? '') && canAcceptBatchCard(item))
   if (!rows.length || acceptInFlight.value) return
   const ok = await confirmDialog.value?.confirm({
-    title: '批量接受',
-    message: `确认接受选中的 ${rows.length} 个批量卡片？`,
-    confirmLabel: '确认接受',
+    title: '批量保存确认',
+    message: `确认保存并确认选中的 ${rows.length} 个批量草案？`,
+    confirmLabel: '保存并确认',
   })
   if (!ok) return
-  await submitBatchAccept(rows, { itemIds: rows.map((row) => row.item_id ?? '') })
+  await submitBatchSaveConfirm(rows, rows.map((row) => row.item_id ?? ''))
 }
 
 async function confirmBatchAcceptAll(): Promise<void> {
   const rows = selectable.value
   if (!rows.length || acceptInFlight.value) return
   const ok = await confirmDialog.value?.confirm({
-    title: '全接受',
-    message: '确认接受全部批量卡片？',
-    confirmLabel: '确认接受',
+    title: '批量保存确认',
+    message: '确认保存并确认全部可确认的批量草案？',
+    confirmLabel: '保存并确认',
   })
   if (!ok) return
-  // Legacy parity: accept-all sends every card (including FOUND/EMPTY/FAILED
-  // ones) so the server returns a per-card unacceptable reason for the cards
-  // that cannot be accepted; item_ids is omitted to preserve batch order.
-  await submitBatchAccept(items.value, {})
+  await submitBatchSaveConfirm(rows, null)
 }
 
-async function onAccepted(item: BatchItem, savedRequest: RequestSnapshot): Promise<void> {
-  // Single-card accept from the draft panel (preview already saved).
-  const row = { ...item, preview_request: savedRequest, status: 'DRAFT' }
-  await submitBatchAccept([row], { single: true })
+function selectForBatch(itemId: string): void {
+  toggleItemSelection(itemId, true)
 }
 
 function onDraftChanged(
@@ -663,7 +642,7 @@ onMounted(() => {
   }
 })
 
-defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, deleteBatchCard })
+defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, deleteBatchCard })
 </script>
 
 <template>
@@ -715,7 +694,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                 状态
                 <select id="batch-review-status" v-model="reviewStatus">
                   <option value="">全部状态</option>
-                  <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'ACCEPTED']" :key="status" :value="status">
+                  <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'SAVED_PENDING_CONFIRM', 'CONFIRMED']" :key="status" :value="status">
                     {{ batchStatusLabel(status) }}
                   </option>
                 </select>
@@ -767,7 +746,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                 @update:checked="(value: boolean) => toggleItemSelection(item.item_id ?? '', value)"
               />
               <button
-                v-if="String(item.status ?? '') !== 'ACCEPTED'"
+                v-if="!['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))"
                 type="button"
                 class="icon-button batch-card-delete"
                 :aria-label="`删除 ${item.raw_title ?? '批量条目'}`"
@@ -790,12 +769,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
 
               <div class="batch-card-status-row">
                 <span class="batch-status batch-card-status">{{ batchStatusLabel(item.status) }}</span>
-                <span
-                  v-if="item.queue_status"
-                  class="batch-status batch-card-queue-status"
-                >
-                  {{ queueStatusLabel(typeof item.queue_status === 'string' ? item.queue_status : null) }}
-                </span>
                 <span v-if="batchCardNeedsReview(item)" class="batch-status batch-card-review-status">
                   需人工核对
                 </span>
@@ -821,7 +794,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                 <BaseButton
                   v-if="draftSessions.get(item.item_id ?? '')?.canRetry.value"
                   variant="secondary"
-                  :disabled="acceptInFlight"
+                  :disabled="savingItemIds.has(item.item_id ?? '')"
                   @click.stop="retryCardSubtitleGroup(item)"
                 >重试修改</BaseButton>
               </div>
@@ -835,7 +808,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                 {{ displayValue(item.error?.error_message) || '搜索失败。可重新获取批量草案后重试。' }}
               </p>
               <p
-                v-if="String(item.status ?? '') !== 'ACCEPTED' && !canAcceptBatchCard(item)"
+                v-if="!['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? '')) && !canAcceptBatchCard(item)"
                 class="batch-card-selection-help"
               >
                 当前条目需先生成可审核草案，暂不可加入批量确认。
@@ -849,7 +822,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               </p>
 
               <div v-if="acceptFeedback[item.item_id ?? '']" class="batch-card-reason">
-                {{ acceptFeedbackLabel(acceptFeedback[item.item_id ?? '']?.status) }}{{ acceptFeedback[item.item_id ?? '']?.reason }}
+                {{ acceptFeedback[item.item_id ?? ''] }}
               </div>
 
               <div class="batch-card-actions">
@@ -859,7 +832,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                   :aria-expanded="activeCandidateItemId === item.item_id ? 'true' : 'false'"
                   :aria-controls="'batch-candidate-choices'"
                   :aria-label="`${activeCandidateItemId === item.item_id ? '收起候选' : '查看候选'}：${item.raw_title ?? '批量条目'}`"
-                  :disabled="acceptInFlight"
+                  :disabled="savingItemIds.has(item.item_id ?? '')"
                   @click.stop
                   @click="openCandidateChoices(item, $event.currentTarget as HTMLElement)"
                 >
@@ -905,7 +878,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                 :item="detailItem"
                 :session="ensureDraftSession(detailItem) ?? undefined"
                 :shared-error="draftApplyErrors[detailItem.item_id ?? '']"
-                @accepted="onAccepted"
+                @select-for-batch="selectForBatch"
                 @deleted="onDraftDeleted"
                 @expired="onDraftExpired"
                 @draft-changed="onDraftChanged"
@@ -946,7 +919,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
             @update:checked="setAllSelected"
           />
           <span id="batch-accept-selected-count" class="batch-selected-count">
-            已选择 {{ selectedCount }} 项
+            已选择 {{ selectedCount }} 项；可确认 {{ selectable.length }} 项；{{ saveSummary.failed ?? 0 }} 项失败
           </span>
           <div class="notification-actions batch-accept-actions">
             <BaseButton
@@ -956,7 +929,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               :loading="acceptInFlight"
               @click="confirmBatchAcceptSelected"
             >
-              批量接受
+              保存并确认 {{ selectedCount }} 部
             </BaseButton>
             <BaseButton
               id="batch-accept-all"
@@ -965,17 +938,11 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               :loading="acceptInFlight"
               @click="confirmBatchAcceptAll"
             >
-              全接受
+              保存并确认全部
             </BaseButton>
           </div>
         </div>
 
-        <div v-if="batchId" class="batch-queue-summary" aria-live="polite">
-          <p class="field-help" id="batch-queue-context">
-            批次标识：{{ batchId }}。已接受卡片进入提交前队列，可在「提交队列」查看与提交。
-          </p>
-          <p id="batch-queue-count" class="request-list-count">{{ batchQueueStatusText() }}</p>
-        </div>
       </template>
     </div>
 

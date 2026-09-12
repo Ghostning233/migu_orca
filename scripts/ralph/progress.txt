@@ -69,7 +69,8 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - What was implemented: Moved batch draft-session ownership into the route-local batch workbench and injected the same session into the shared AnimeDraftEditor detail panel. Added card-level subtitle-group quick editing through generated preview-modify with per-item applying/error/retry state, pending selection retention, revision-safe snapshot updates, and safe shared error display.
 - Files changed: frontend/src/features/workbench/BatchWorkbenchView.vue, frontend/src/features/workbench/BatchDraftPreviewPanel.vue, scripts/ralph/prd.json, scripts/ralph/progress.txt.
 - **Learnings for future iterations:**
-  - Keep one `useDraftSession` per batch item in the workbench; pass it to every editing surface so card shortcuts and detail forms share CAS revision, dirty, retry, and invalidation state.
+   - Keep one `useDraftSession` per batch item in the workbench; pass it to every editing surface so card shortcuts and detail forms share CAS revision, dirty, retry, and invalidation state.
+   - US-290 uses generated save-confirm descriptors with route-local keys; old preview-save/accept UI assertions need migration.
   - Preserve a card shortcut's pending value separately from the server snapshot until preview-modify succeeds; this keeps failed edits visible without treating them as authoritative resources.
   - Verification passed: frontend typecheck/lint/unit (357 passed)/build, Chromium browser suite (161 passed), Python compileall, full pytest (1797 passed), and git diff --check.
 ---

@@ -15,7 +15,10 @@ import {
   batchItemIsException,
   batchItemMatchesReviewFilters,
   batchStatusLabel,
+  batchSaveConfirmErrorLabel,
+  batchSaveConfirmSucceeded,
   buildBatchAcceptPayload,
+  buildBatchSaveConfirmPayload,
   buildBatchCandidateCreatePayload,
   buildBatchParsePayload,
   canAcceptBatchCard,
@@ -29,6 +32,25 @@ import {
   validateBatchRawInput,
   type BatchItem,
 } from '@/features/workbench/batchWorkbench'
+
+describe('batch save-confirm contract (US-290)', () => {
+  it('sends only generated capability descriptors and relative storage profile', () => {
+    expect(buildBatchSaveConfirmPayload([
+      { item_id: 'item-2', draft_id: 'draft-2', base_revision: 4, idempotency_key: 'key-2' },
+    ], ['item-2'], 'profile')).toEqual({
+      items: [{ item_id: 'item-2', draft_id: 'draft-2', base_revision: 4, idempotency_key: 'key-2' }],
+      item_ids: ['item-2'],
+      storage_dir: 'profile',
+    })
+  })
+
+  it('recognizes confirmed results and maps only stable errors to safe copy', () => {
+    expect(batchSaveConfirmSucceeded({ outcome: 'CONFIRMED', status: null } as never)).toBe(true)
+    expect(batchSaveConfirmSucceeded({ outcome: 'failed', status: 'FAILED' } as never)).toBe(false)
+    expect(batchSaveConfirmErrorLabel({ outcome: 'failed', error_type: 'save_confirm_failed' } as never)).toContain('确认未完成')
+    expect(batchSaveConfirmErrorLabel({ outcome: 'failed', error_type: 'private_backend_detail' } as never)).toBe('保存确认失败，请重试。')
+  })
+})
 
 vi.mock('@/api/client', () => ({
   api: {

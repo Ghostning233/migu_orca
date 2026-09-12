@@ -20,6 +20,7 @@
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
+import type { SaveConfirmBatchItemsBody, SaveConfirmBatchItemsResult } from '@/app/composables/useBatchReviewJourney'
 
 /** Public batch parse result produced by `POST /api/v1/batches/parse`. */
 export type BatchParseResult = NonNullable<
@@ -36,6 +37,8 @@ export type BatchCandidate = NonNullable<BatchItem['candidates']>[number]
 export type BatchAcceptResult = NonNullable<
   operations['acceptBatchItems']['responses']['200']['content']['application/json']['result']
 >
+export type BatchSaveConfirmResult = SaveConfirmBatchItemsResult
+export type BatchSaveConfirmItem = BatchSaveConfirmResult['results'][number]
 
 /** Public submit-result item (submit/retry/recover share the accept shape). */
 export type BatchSubmitResult = NonNullable<
@@ -60,6 +63,8 @@ export const BATCH_STATUS_LABELS: Record<string, string> = {
   DRAFT: '草案',
   READY: '待接受',
   ACCEPTED: '已接受',
+  CONFIRMED: '已确认待提交',
+  SAVED_PENDING_CONFIRM: '已保存待确认',
 }
 
 /** Chinese label for a batch status; unknown codes render as-is. */
@@ -315,6 +320,41 @@ export interface BatchAcceptDescriptor {
   item_id: string
   request_id: string | null
   title: string
+}
+
+export interface BatchSaveConfirmDescriptor {
+  item_id: string
+  draft_id: string
+  base_revision: number
+  idempotency_key: string
+}
+
+/** Build the generated save-confirm body; capabilities never leave this payload. */
+export function buildBatchSaveConfirmPayload(
+  descriptors: readonly BatchSaveConfirmDescriptor[],
+  itemIds: readonly string[] | null,
+  storageDir: string | null,
+): SaveConfirmBatchItemsBody {
+  return {
+    items: descriptors.map((item) => ({ ...item })),
+    ...(itemIds ? { item_ids: [...itemIds] } : {}),
+    storage_dir: storageDir || null,
+  }
+}
+
+export function batchSaveConfirmSucceeded(item: BatchSaveConfirmItem): boolean {
+  return item.outcome.toUpperCase() === 'CONFIRMED' || item.status?.toUpperCase() === 'CONFIRMED'
+}
+
+export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {
+  const labels: Record<string, string> = {
+    draft_expired: '订阅草案已失效，请重新生成。',
+    draft_revision_conflict: '草案已更新，请基于最新版本重试。',
+    idempotency_conflict: '本次操作与已有操作冲突，请重新开始。',
+    save_confirm_failed: '订阅方案已保存，但确认未完成。可重试确认。',
+    draft_reserved: '订阅草案正在处理中，请稍后重试。',
+  }
+  return labels[item.error_type ?? ''] ?? '保存确认失败，请重试。'
 }
 
 /** Collect the accept descriptors for the given cards (saved or preview). */
