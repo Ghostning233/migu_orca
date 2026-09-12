@@ -1,0 +1,24 @@
+# Ralph Progress Log
+Started: Sat Sep 12 2026 Asia/Shanghai
+---
+
+## Codebase Patterns
+
+- Stage 36 只实现 F-D 批量审核；F-E 独占已保存 Request 的 SafeInfoDialog/getRequestSafeInfo，F-F 独占正式 tracking 管理，F-G 独占设置与发布收尾。
+- 当前基线是 origin/main c260a86；Stage 35 已合入，单番 confirmRequestSave 与 tracking 只读 handoff 不得回归。
+- 批量当前仍由 BatchWorkbenchView + BatchDraftPreviewPanel 执行 preview-save → acceptBatchItems；Stage 36 完成后必须由 generated saveConfirmBatchItems 单次替代，并删除无调用兼容组件。
+- Batch save-confirm 每条只提交 item_id/draft_id/base_revision/idempotency_key；成功响应提供 request_id/tracking_id，save_confirm_failed 也提供公开 request_id 供 acceptRequest 恢复。
+- 批量条目以 item_id 为唯一身份；输入顺序、冻结审核顺序、当前详情和批量勾选是不同状态，不得用数组位置或 DOM 状态推导。
+- AnimeDraftEditor/useDraftSession 是单番和批量唯一草案编辑核心；卡片快捷编辑与右侧详情必须共享同一服务端权威快照/revision。
+- 未保存 batch 现场不跨刷新持久化；candidate_context、draft_id、revision、幂等键与未应用编辑只存在 route-local 内存。
+- 效果图是布局与层级方向，不逐像素复制；Stage 36 不实现或模拟“全部信息”按钮。
+- 每个 Ralph 迭代只完成一个 story；最多连续运行 3 个 stories，完成 US-286、US-289、US-292 后停止独立审核。
+- 普通 story 只跑定向检查；完整前端、后端非浏览器与 Chromium 门禁只在 US-293 运行一次，无代码变化不得重复全量执行。
+
+## Current Status
+
+- US-284～US-293 均未开始，passes=false。
+- 当前分支：ralph/stage36-batch-review-journey。
+- 当前执行 PRD：docs/MiGuOrca_stage36_batch_review_journey_PRD.md。
+- 规划阶段不修改 OpenAPI、generated client、Flask API 或生产业务代码。
+---

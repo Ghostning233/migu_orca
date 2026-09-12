@@ -3,20 +3,21 @@
 MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全部走 npm（`npm ci`），
 与后端 `uv` 分离；**不得**混用多个 lockfile（`package-lock.json` 是唯一来源）。
 
-## Stage 35 当前执行边界
+## Stage 36 当前执行边界
 
-- 当前执行 PRD 是 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md`，分支固定为
-  `ralph/stage35-single-anime-journey`，stories 为 US-275～US-283。
-- Stage 35 只实现 F-C：单番输入、人工选择真实 MiKan 合集、共享审核、原子保存确认和 tracking
-  只读 handoff；不得顺带实现 F-D～F-G。
-- 第三步必须复用 Stage 34 `AnimeDraftEditor`/`useDraftSession`。单番保存只调用 generated
-  `confirmRequestSave`，不得连续调用 `preview-save → accept`；批量兼容路径保持不变。
-- `save_confirm_failed` 只允许对已保存 Request 调用 `acceptRequest`，成功后通过只读 tracking list
-  精确解析服务端 tracking ID；不得推导 ID、重复保存或重复确认。
-- `/app/tracking?tracking_id=...` 在本阶段只显示真实安全摘要，不渲染 `safe_info` 或管理动作。
-  `getRequestSafeInfo`/`SafeInfoDialog` 仍归 F-E，正式 tracking 管理动作归 F-F。
-- 每次 Ralph 最多运行 3 个 stories；完成 US-277、US-280 后必须停下独立审核。普通 story 只跑
-  定向检查，完整前端与 Chromium 门禁只在 US-283 运行。
+- 当前执行 PRD 是 `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`，分支固定为
+  `ralph/stage36-batch-review-journey`，stories 为 US-284～US-293。
+- Stage 36 只实现 F-D：1/12/36 部批量双栏审核、异常优先、筛选/下一异常、共享 revision 编辑、
+  原子批量保存确认、部分成功和离开保护；不得顺带实现 F-E～F-G。
+- 批量详情必须复用 `AnimeDraftEditor`/`useDraftSession`。保存确认只调用 generated
+  `saveConfirmBatchItems`，不得连续调用 `preview-save → acceptBatchItems`；完成后删除无调用的
+  `BatchDraftPreviewPanel` 兼容路径。
+- 逐项 `save_confirm_failed` 只允许对公开已保存 Request 调用 `acceptRequest`，随后通过只读 tracking
+  list 精确解析服务端 tracking ID；不得推导 ID、重复保存或重复确认。
+- `getRequestSafeInfo`/`SafeInfoDialog` 仍归 F-E，正式 tracking 列表与管理动作归 F-F；效果图中的
+  “全部信息”不在本阶段实现或模拟。
+- 每次 Ralph 最多运行 3 个 stories；完成 US-286、US-289、US-292 后必须停下独立审核。普通 story
+  只跑定向检查，完整前端、后端非浏览器与 Chromium 门禁只在 US-293 运行。
 
 ## 工程结构与约定
 
@@ -225,7 +226,7 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 保存草案成功后面板 `@saved` 由工作台 `routeLocation('plans', ...)` 跳转到
   已保存 Request 列表/详情（US-203 面板）。
 
-## 批量工作台（US-205）
+## 批量工作台（US-205 基线，Stage 36 正在接管）
 
 - 批量工作台在 `features/workbench/BatchWorkbenchView.vue`（挂在 `/app/add` 的
   `WorkbenchView.vue` 底部，`<BatchWorkbenchView class="batch-workbench-section">`）。
@@ -234,20 +235,18 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `canExpandBatchCard`/`canAcceptBatchCard`/`collectBatchAcceptDescriptors`/
   `buildBatchAcceptPayload`/`postBatchAccept`/`batchAcceptNotification`/
   `queueStatusLabel`/`queueItemSummary` 等），feature 与 Vitest 共用，不复制第二套。
-- 批量卡片复用共享组件：FOUND 卡片的候选浮层是
+- Stage 35 合入时的兼容基线仍复用共享组件：FOUND 卡片的候选浮层是
   `BatchCandidatePopover.vue`（内部复用 `CandidateCard`，`role="dialog"`，Escape/
   关闭后焦点回触发器）；DRAFT 卡片的详情面板是 `BatchDraftPreviewPanel.vue`（复用
-  `DraftPreviewPanel` + 批量专属「接受当前批量草案 / 删除当前批量卡片」动作行）。
-  **不要为批量再造第二套候选卡片或草案详情实现。**
-- 批量接受统一走 `POST /api/v1/batches/{batch_id}/accept`（US-146：单卡接受与批量接受
+  `AnimeDraftEditor` + 批量专属旧接受动作）。Stage 36 必须把结果改为左卡右详情，继续复用
+  `CandidateCollectionList`、`AnimeDraftEditor` 和 `useDraftSession`，不得再造第二套候选或表单；
+  F-D 完成后删除无调用的 `BatchDraftPreviewPanel`。
+- 下述 `POST /api/v1/batches/{batch_id}/accept` 是 Stage 20/27 的兼容基线（US-146：单卡接受与批量接受
   同端点）。「批量接受」只发选中的 reviewable 卡片并带 `item_ids`；「全接受」按 legacy
   parity 发送**所有卡片**（含 FOUND/EMPTY/FAILED，不带 `item_ids`），让服务端对不可
-  接受的卡片返回中文 reason（`unacceptable`）。accept payload 只含公开字段
-  （item_id/request_id/title）+ `storage_dir`（相对 profile）。
-- 批量接受前若卡片仍持有未保存草案，先经 `DraftPreviewPanel.saveDraftAndReturn()` 走
-  preview-save（一次性消费 draft_id）再 accept；成功后的卡片置 `status: ACCEPTED`、
-  `draft_id: null`（已消费的 draft 绝不重复引用）、`queue_status` 从 accept 响应的
-  queue 同步。
+  接受的卡片返回中文 reason（`unacceptable`）。Stage 36 新流程不得调用该端点或先
+  preview-save；必须单次调用 generated `saveConfirmBatchItems`，并以返回的真实 tracking handoff
+  表示待提交。旧 accept/queue 路由仍保留给历史兼容调用方。
 - `batch_id` 是公开标识符，可进 URL query（`routeLocation('add', { batch_id })`）供
   提交队列刷新恢复；批量卡片本身服务端不持久化，刷新后
   不恢复卡片（与旧 `/index` parity）。`candidate_context`/`draft_id` 仍只在组件内存。

@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | F-A/F-B 已完成为 Stage 33/34；F-C 已规划为 Stage 35（US-275～US-283）；F-D～F-G 待评审 |
+| 当前状态 | F-A～F-C 已完成为 Stage 33～35；F-D 已规划为 Stage 36（US-284～US-293）；F-E～F-G 待评审 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-026 |
 | 优先级 | P1；各切片按后端依赖分别解锁 |
@@ -15,8 +15,9 @@
 
 本 PRD 把全面重构拆成可以独立开发、评审、回退和验收的前端切片。F-A 已在 Stage 32 合入后
 冻结为 Stage 33，执行边界见 `docs/MiGuOrca_stage33_frontend_shell_PRD.md`；F-B 已冻结为 Stage 34，
-执行边界见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`；F-C 已冻结为 Stage 35，执行边界见
-`docs/MiGuOrca_stage35_single_anime_journey_PRD.md`；F-D～F-G 仍需逐包评审。实现 Agent
+执行边界见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`；F-C 已完成为 Stage 35，F-D 已冻结为
+Stage 36，执行边界分别见 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md` 与
+`docs/MiGuOrca_stage36_batch_review_journey_PRD.md`；F-E～F-G 仍需逐包评审。实现 Agent
 每次只接收一个切片及其已经冻结的 API，不得一边写页面一边设计后端契约。
 
 ## 2. 产品目标
@@ -247,9 +248,9 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 > F-E，且端点只读取已保存 Request；因此 Stage 34 不实现或模拟 `SafeInfoDialog`，只交付未保存
 > 草案的共享审核核心和旧流程兼容适配层。
 
-> 状态注记（2026-09-12）：F-B 已完成并合入。F-C 已规划为 Stage 35（US-275～US-283），执行
-> PRD 见 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md`；它接管单番 `confirmRequestSave`、确认
-> 失败恢复和 tracking 只读 handoff，但不接 `SafeInfoDialog` 或正式 tracking 管理动作。
+> 状态注记（2026-09-12）：F-B/F-C 已分别完成并合入 Stage 34/35。F-D 已规划为 Stage 36
+> （US-284～US-293），执行 PRD 见 `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`；它接管
+> `saveConfirmBatchItems`、部分成功和批量兼容层退出，但不接 `SafeInfoDialog` 或正式 tracking 管理动作。
 
 ## 10. PR 与回退边界
 

@@ -1,0 +1,190 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage36-batch-review-journey",
+  "description": "Stage 36（F-D）：把批量模式收敛为 1/12/36 部左卡右详情的异常优先审核工作台，接入 generated 批量原子 save-confirm、部分成功和逐项恢复，并退出 preview-save → accept 兼容链路。",
+  "userStories": [
+    {
+      "id": "US-284",
+      "title": "冻结批量旅程状态与 generated 契约边界",
+      "description": "作为前端维护者，我需要唯一且可测试的批量审核状态模型，以便顺序、选择、草案、保存结果和恢复不会形成平行状态。",
+      "acceptanceCriteria": [
+        "建立 API-free 批量状态/reducer，以 item_id 管理输入顺序、冻结审核顺序、当前项、勾选意图、逐项草案与终态结果",
+        "覆盖解析、候选、草案、重算中/失败、保存中、已确认、已保存待确认和响应未知状态及合法迁移",
+        "类型只从 generated parseBatchTitles、createRequest、previewModifyRequest、saveConfirmBatchItems、acceptRequest、listTrackingItems 提取，不手写 API DTO",
+        "定义逐项幂等键生命周期、能力消费规则与只识别稳定 error_type/白名单字段的安全错误映射",
+        "本 story 不调用 API、不修改共享 AnimeDraftEditor、不改变现有批量 UI",
+        "Targeted batch state/reducer tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-285",
+      "title": "实现批量容量校验与工作台进入状态",
+      "description": "作为批量用户，我希望输入在 1～36 部边界内得到明确校验，并在解析后进入稳定的连续审核现场。",
+      "acceptanceCriteria": [
+        "按规范化非空行计数，0 部和超过 36 部在调用 parseBatchTitles 前阻断并显示实际数量与上限，输入原文不被改写",
+        "解析期间保留输入、禁用重复提交并展示总进度；单条失败不使整批失败且只显示安全错误",
+        "初次结果按阻断异常、其他需核对、正常分组，同组保持输入顺序并冻结审核顺序",
+        "1 部自动成为当前项；12/36 部进入连续审核且不分页，批量现场不写 browser storage",
+        "不访问真实 MiKan、Auto Bangumi 或 qBittorrent",
+        "Targeted batch input/capacity tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-286",
+      "title": "实现左卡右详情与选中勾选分离",
+      "description": "作为批量审核用户，我希望在持续双栏中浏览卡片并查看共享详情，同时不会混淆当前项和本次批量选择。",
+      "acceptanceCriteria": [
+        "批量结果改为左侧约 34%～38% 紧凑卡片、右侧约 62%～66% 持续详情和固定操作区；窄桌面/200% 缩放可安全纵向排列",
+        "FOUND 当前项在右侧复用 CandidateCollectionList，DRAFT 当前项复用 AnimeDraftEditor/useDraftSession，不复制候选或表单",
+        "点击卡片主体只切换当前详情，复选框只改变批量勾选；视觉和读屏语义明确区分",
+        "阻断项不可新增勾选并就地说明；全选正常项只作用于当前可见可确认结果且文案说明范围",
+        "1 部卡片不异常拉伸，12/36 部列表连续滚动且详情持续可见",
+        "Targeted two-column/selection tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": false,
+      "notes": "第一开发批次终点：完成本 story 后停止 Ralph，等待独立审核。"
+    },
+    {
+      "id": "US-287",
+      "title": "实现稳定排序搜索与筛选恢复",
+      "description": "作为需要审核长列表的用户，我希望快速过滤异常，同时选择、勾选和滚动上下文不丢失。",
+      "acceptanceCriteria": [
+        "提供标题搜索、状态筛选、只看异常、清除条件和显式重新按异常排序，条件可叠加",
+        "筛选只改变可见性，不删除条目、清空勾选或改变冻结顺序；顶部完整总数和当前结果数同时正确",
+        "条目从异常修复为正常时只更新状态/计数且不自动跳位，显式重排才改变顺序",
+        "当前项被筛选隐藏时右侧保持该详情并提示未在结果中，清除筛选后仍选中",
+        "清除筛选恢复对应条件的记录滚动位置，36 部无分页",
+        "Targeted ordering/filter tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-288",
+      "title": "实现下一异常与键盘焦点行为",
+      "description": "作为键盘用户，我希望循环定位下一条异常并保持可预测焦点，而无需在长列表中手工寻找。",
+      "acceptanceCriteria": [
+        "下一异常从当前项之后查找并在末尾循环；无异常时禁用且说明原因",
+        "目标被筛选隐藏时先临时显示，再滚动、选中并聚焦可见卡片，不把焦点送到隐藏元素",
+        "卡片列表方向键改变当前项，Enter 激活主要处理，Space 只在复选框聚焦时改变勾选",
+        "Tab/Shift+Tab 按筛选、卡片控件、详情字段和固定操作栏的视觉顺序可达，状态变化适度 aria-live",
+        "prefers-reduced-motion 下不执行非必要滚动动画或高亮动画，静态定位仍明确",
+        "Targeted next-exception/keyboard tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-289",
+      "title": "实现卡片详情共享重算与逐项隔离",
+      "description": "作为批量审核用户，我希望从卡片或详情修改字幕组时看到同一份权威结果，并且一条失败不锁住整批。",
+      "acceptanceCriteria": [
+        "卡片字幕组快捷选择与右侧 AnimeDraftEditor 复用同一条目 useDraftSession 快照、revision、dirty 和错误状态",
+        "修改只发送 generated previewModifyRequest capability；每条独立 applying，其他条目仍可查看、编辑和确认",
+        "快速连续修改只应用最新服务端 revision，旧响应丢弃；字幕组、有效资源、资源集合和审核状态原子更新",
+        "重算失败保留未生效选择并标明资源来自上次有效结果，提供重试与恢复最后一致值",
+        "重算中/失败/零资源条目不可计入保存确认 N，但既有勾选意图按 PRD 保留",
+        "Targeted revision/race/recovery tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "第二开发批次终点：完成本 story 后停止 Ralph，等待独立审核。"
+    },
+    {
+      "id": "US-290",
+      "title": "接入批量原子保存确认与部分成功",
+      "description": "作为批量用户，我希望一次保存并确认选中的正常项目，成功项进入待提交，失败项仍能原位处理。",
+      "acceptanceCriteria": [
+        "固定操作栏显示总数、结果数、已选、可确认、需处理、重算中和失败数，主按钮为保存并确认 N 部且 N 只计当前可确认勾选项",
+        "只调用 generated saveConfirmBatchItems；每条 descriptor 仅含 item_id、draft_id、base_revision、内存 idempotency_key，另含 item_ids 与相对 storage profile",
+        "一次明确操作为参与条目生成键；整批响应未知重试复用相同条目、能力和键，禁止自动生成新键盲重试",
+        "发送时只锁参与条目并防重复触发；未参与条目仍可操作，页面显示逐项等待/完成状态",
+        "按 item_id 应用部分成功：成功项消费 draft/清除勾选并变为真实已确认待提交摘要，失败项原位保留，焦点到第一失败",
+        "成功项不调用 acceptBatchItems、旧 queue、Auto Bangumi 或 qBittorrent，也不能再次保存确认",
+        "Targeted batch save-confirm/idempotency/partial-success tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-291",
+      "title": "实现已保存确认失败与 tracking 定位恢复",
+      "description": "作为部分项目保存成功但确认失败的用户，我希望只重试确认并定位真实待提交记录，而不重复保存。",
+      "acceptanceCriteria": [
+        "只对白名单合法 save_confirm_failed 且公开 request_id 进入已保存待确认状态，立即废止该条 draft 与保存幂等键",
+        "重试只调用 generated acceptRequest；重复点击和并发请求被阻止，不得再次调用 saveConfirmBatchItems 处理该条",
+        "accept 成功后通过 listTrackingItems 安全投影按 request_id 精确匹配 tracking_id，复用 Stage 35 安全 helper 且不得推导 ID",
+        "accept 响应未知或可能已完成的状态冲突先执行只读 tracking 核验；核验失败不得盲目重复确认",
+        "确认成功但定位失败时保留已确认终态，只允许重试定位或打开无定位追番管理",
+        "正常成功项提供逐项真实 tracking 只读入口；不实现 tracking 列表、safe-info 或管理动作",
+        "Targeted saved-confirm/tracking recovery tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": false,
+      "notes": ""
+    },
+    {
+      "id": "US-292",
+      "title": "完成离开保护安全回归与旧批量链路退出",
+      "description": "作为维护者，我需要保护不可恢复的批量现场，并确保新批量流程只有原子保存确认这一条实现。",
+      "acceptanceCriteria": [
+        "已有候选、草案、勾选、未应用编辑或进行中操作触发应用内确认和 beforeunload；取消保持现场，确认离开清理 route-local capability",
+        "只剩已确认摘要时不误触发保护；仍有未保存项目时继续保护，页面明确刷新后不恢复现场",
+        "删除无调用的 BatchDraftPreviewPanel 及其 previewSaveRequest/acceptBatchItems 新流程引用；旧 /app/queue batch_id 兼容保持",
+        "引用搜索、测试和 bundle 证明批量新流程只有 saveConfirmBatchItems，单番 confirmRequestSave 不回归",
+        "candidate context、draft、revision、幂等键、完整 URL/RSS/magnet、endpoint、凭据、原始响应和绝对路径不进入 URL、DOM、storage、日志、通知、截图或 trace",
+        "1/12/36、200% 缩放、键盘、焦点、reduced-motion 和多视口定向回归通过",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": false,
+      "notes": "第三开发批次终点：完成本 story 后停止 Ralph，等待独立审核。"
+    },
+    {
+      "id": "US-293",
+      "title": "完成最终门禁文档归档与后续 handoff",
+      "description": "作为维护者，我需要完整验证 F-D、记录效果图偏差，并为 F-E、F-F、F-G 留下无歧义边界。",
+      "acceptanceCriteria": [
+        "US-284 至 US-292 的实现、story 状态、独立提交与三次阶段审核记录完整",
+        "AC-06～AC-14、AC-23～AC-25 均映射到通过的 Vitest/真实 Chromium 或明确人工视觉证据",
+        "完整前端 api:check、typecheck、lint、unit、build，后端 compileall/ruff/non-browser pytest 与完整真实 Chromium 套件通过",
+        "对照 batch-review-12-v2.png 和 batch-partial-success-v1.png 记录布局/状态偏差；明确全部信息仍归 F-E",
+        "OpenAPI、generated client 和后端业务语义无修改，仓库无 dist、trace、截图或敏感测试产物",
+        "文档记录 F-E 追番方案/SafeInfo、F-F 正式 tracking 管理、F-G 设置发布收尾边界",
+        "Ralph prd/progress 正确归档，工作区状态与剩余风险有记录",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 10,
+      "passes": false,
+      "notes": "第四开发批次与 Stage 36 最终终点。"
+    }
+  ]
+}
