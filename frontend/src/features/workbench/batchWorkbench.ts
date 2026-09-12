@@ -60,6 +60,7 @@ export const BATCH_STATUS_LABELS: Record<string, string> = {
   ACCEPTED: '已接受',
   CONFIRMED: '已确认待提交',
   SAVED_PENDING_CONFIRM: '已保存待确认',
+  RESPONSE_UNKNOWN: '结果待核验',
 }
 
 /** Chinese label for a batch status; unknown codes render as-is. */
@@ -265,7 +266,7 @@ export function canChooseBatchCandidate(item: BatchItem): boolean {
   return String(item.status ?? '') === 'FOUND' && (item.candidates?.length ?? 0) > 0
 }
 
-/** True when a batch card is in the explicit "candidate choices" popover. */
+/** True when a batch card is the active right-hand candidate detail. */
 export function isCandidateActive(item: BatchItem, activeItemId: string | null): boolean {
   return activeItemId !== null && item.item_id === activeItemId
 }
@@ -331,7 +332,8 @@ export function buildBatchSaveConfirmPayload(
 }
 
 export function batchSaveConfirmSucceeded(item: BatchSaveConfirmItem): boolean {
-  return String(item.outcome ?? '').toUpperCase() === 'CONFIRMED' || item.status?.toUpperCase() === 'CONFIRMED' || item.status?.toUpperCase() === 'ACCEPTED'
+  return String(item.outcome ?? '').toUpperCase() === 'CONFIRMED' && isPublicRouteIdentifier(item.request_id) &&
+    (!item.tracking_id || isPublicRouteIdentifier(item.tracking_id))
 }
 
 export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {

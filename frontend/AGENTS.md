@@ -310,5 +310,5 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   （部署换哈希后不会 pin 旧资源）。改 `routes_app.py` 后同步
   `src/apps/migu_orca_web/app_routes_test.py` 的缓存头断言。
 - 浏览器收敛测试文件：`tests/browser/test_app_responsive_a11y.py`（22 例）——
-  四路由 × 三视口无横向溢出、skip link、popover 焦点、状态文本、reduced-motion、
+  四路由 × 三视口无横向溢出、skip link、右侧候选详情焦点、状态文本、reduced-motion、
   vendor chunk、无 sourcemap、缓存头。它**不重复**各 feature 的业务断言。

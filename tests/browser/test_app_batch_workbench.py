@@ -199,12 +199,13 @@ def _accept_route_handler(accepted_ids: set[str], *, batch_id: str = "batch-spa"
                 results.append(
                     {
                         "item_id": item_id,
-                        "request_id": request_id,
+                        "request_id": request_id or f"req-{item_id}",
                         "title": title,
-                        "status": "accepted",
-                        "reason": None,
+                        "status": "CONFIRMED",
+                        "outcome": "CONFIRMED",
+                        "tracking_id": f"tracking-{item_id}",
+                        "tracking_ready": True,
                         "error_type": None,
-                        "queued": True,
                     }
                 )
                 queue_items.append(_queue_item(item_id, request_id, title, batch_id=batch_id))
@@ -279,7 +280,7 @@ class TestAppBatchParse:
         expect(empty.locator(".batch-card-status")).to_contain_text("未找到候选")
         expect(failed.locator(".batch-card-status")).to_contain_text("搜索失败")
         expect(failed.locator(".batch-candidate-feedback")).to_contain_text(
-            "MiKan 候选搜索暂时不可用"
+            "搜索失败。可重新获取批量草案后重试。"
         )
         # The raw error_type never leaks into the DOM.
         body_text = page.locator("body").inner_text()
@@ -635,12 +636,12 @@ class TestAppBatchAccept:
         self._setup_two_drafts(page, live_server_url)
 
         expect(page.locator("#batch-accept-toolbar")).to_be_visible()
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 0 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 0 项")
         expect(page.locator("#batch-accept-submit")).to_be_disabled()
 
         first = page.locator(".batch-draft-card", has_text="萌王S4")
         first.locator(".batch-card-checkbox-row").check()
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 1 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
         expect(page.locator("#batch-accept-submit")).to_be_enabled()
 
         page.click("#batch-accept-submit")
@@ -724,15 +725,15 @@ class TestAppBatchAccept:
 
         expect(page.locator(".batch-card-checkbox-row")).to_have_count(3)
         page.check("#batch-select-all-checkbox")
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 2 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 2 项")
 
         page.uncheck("#batch-select-all-checkbox")
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 0 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 0 项")
 
         page.check("#batch-select-all-checkbox")
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
         first_card.locator(".batch-card-checkbox-row").uncheck()
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 1 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
         expect(page.locator("#batch-select-all-checkbox")).not_to_be_checked()
 
     def test_accept_failure_preserves_cards_with_safe_error(
@@ -760,7 +761,7 @@ class TestAppBatchAccept:
         page.locator(".confirm-dialog .primary-button").click()
         page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
 
-        expect(page.locator(".global-notification")).to_contain_text("保存确认响应未知")
+        expect(page.locator(".global-notification")).to_contain_text("保存确认失败")
         # Cards stay reviewable after a failed accept.
         expect(page.locator(".batch-draft-card", has_text="萌王S4").locator(".batch-card-status")).to_contain_text("草案")
         # The raw error_type never reaches the DOM.

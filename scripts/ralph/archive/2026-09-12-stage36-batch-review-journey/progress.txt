@@ -112,3 +112,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - F-E owns saved-Request SafeInfo, F-F owns formal tracking management, and F-G owns settings/release closeout; F-D must not expand into those scopes.
 - Verification passed: frontend api:check, typecheck, lint, 355 Vitest tests, build; Python compileall, Ruff, 1,636 non-browser pytest tests; real Chromium 161 tests; `git diff --check`.
 ---
+
+## 2026-09-12 - Stage 36 independent review correction
+- 生产批量工作台接入响应式 `useBatchReviewJourney`：journey 负责当前项、冻结审核顺序和勾选意图；每项 `useDraftSession` 负责 draft capability、revision、dirty/applying/error/invalid；组件以 API 白名单快照渲染，不再使用 reducer-only 测试冒充生产状态。
+- 统一 `itemConfirmability` 作为卡片勾选、详情加入、全选、已选计数和 save-confirm 发送前的资格闸门，覆盖脏编辑、重算中、修改失败、无有效资源、非法草案版本及响应待核验。
+- 批量响应未知时冻结完整 item 顺序、draft/revision、幂等键、item_ids 和 storage profile，请求重试复用同一 body；已知草案失效消费 capability 并回到候选，成功项消费 session/key/选择并保留安全 handoff。
+- 真实 Chromium 定向验证覆盖右侧候选、紧凑双栏/操作栏、批量安全错误和可见范围选择；前端单元 27 passed，Chromium 两个 Stage 36 文件 50 passed。
+---

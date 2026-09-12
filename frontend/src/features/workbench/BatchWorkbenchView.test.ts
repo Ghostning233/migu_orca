@@ -397,6 +397,39 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     expect(wrapper.find('#batch-detail-delete').exists()).toBe(true)
   })
 
+  it('blocks a dirty draft from detail selection and save-confirm', async () => {
+    apiPost.mockResolvedValue(parseResult({
+      items: [batchItem({ item_id: 'item-dirty', status: 'DRAFT', preview_request: previewRequest('req-dirty'), draft_id: 'draft-dirty' })],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-card-expand').trigger('click')
+    await wrapper.find('#batch-preview-must-contain').setValue('未应用修改')
+    await nextTick()
+
+    expect(wrapper.find('#batch-detail-accept').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.batch-card-checkbox-row').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('有尚未应用的编辑')
+    expect(apiPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('blocks a draft with no effective resources', async () => {
+    const request = previewRequest('req-empty-seeds')
+    request.confirmable_config.effective_seed_names = []
+    apiPost.mockResolvedValue(parseResult({
+      items: [batchItem({ item_id: 'item-empty-seeds', status: 'DRAFT', preview_request: request, draft_id: 'draft-empty-seeds' })],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.batch-card-checkbox-row').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('没有有效资源')
+  })
+
   it('keeps the batch card and candidates when its draft expires', async () => {
     apiPost
       .mockResolvedValueOnce(parseResult({
@@ -424,18 +457,12 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
     expect(wrapper.find('.batch-card-reason').text()).toContain('订阅草案已失效')
-    expect((wrapper.find('.batch-draft-card input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
-    await wrapper.find('.batch-card-expand').trigger('click')
-    await wrapper.find('#batch-preview-must-contain').setValue('新目录')
-    await wrapper.find('#batch-preview-apply-button').trigger('click')
-    await flushPromises()
-
     expect(wrapper.findAll('.batch-draft-card')).toHaveLength(1)
     expect(wrapper.find('.batch-card-status').text()).toContain('找到候选')
     expect(wrapper.find('#request-detail-container').exists()).toBe(false)
     expect(wrapper.find('.batch-card-expand').text()).toContain('查看候选')
     expect((wrapper.find('.batch-draft-card input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false)
-    expect(wrapper.find('.batch-card-reason').exists()).toBe(false)
+    expect(wrapper.find('#batch-detail-pane').text()).toContain('候选合集')
     expect(wrapper.text()).not.toContain('已删除批量卡片')
   })
 })
@@ -474,11 +501,11 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-parse-submit').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选择 0 项')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选且可确认 0 项')
     const firstCard = wrapper.find('.batch-draft-card[data-item-id="item-1"]')
     await firstCard.find('input[type=checkbox]').setValue(true)
     await nextTick()
-    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选择 1 项')
+    expect(wrapper.find('#batch-accept-selected-count').text()).toContain('已选且可确认 1 项')
 
     await wrapper.find('#batch-accept-submit').trigger('click')
     await nextTick()
@@ -550,10 +577,59 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     const { useNotificationStore } = await import('@/app/stores/notification')
     const notification = useNotificationStore()
     expect(notification.current?.title).toBe('保存确认失败')
-    expect(notification.current?.message).toBe('批量保存确认响应未知，请使用相同操作重试。')
+    expect(notification.current?.message).toBe('保存确认失败，请根据条目提示处理。')
     // The raw server error never reaches the DOM.
     expect(wrapper.text()).not.toContain('ab_connection_failed')
     expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('草案')
+  })
+
+  it('retries an unknown batch response with the exact frozen request body', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: reviewableItems().slice(0, 1) }))
+      .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-1', request_id: 'req-1', outcome: 'CONFIRMED', status: 'CONFIRMED', error_type: null }],
+        summary: { requested: 1, confirmed: 1, failed: 0 },
+      }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+
+    const first = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-expand').attributes('disabled')).toBeDefined()
+    await wrapper.find('#batch-retry-frozen-operation').trigger('click')
+    await flushPromises()
+    const saveCalls = apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    expect(saveCalls).toHaveLength(2)
+    expect(saveCalls[1]?.[1]).toEqual(first?.[1])
+  })
+
+  it('keeps hidden selections while selecting the visible filtered item', async () => {
+    apiPost.mockResolvedValue(parseResult({
+      items: [
+        batchItem({ item_id: 'item-a', raw_title: '甲', status: 'DRAFT', preview_request: previewRequest('req-a'), draft_id: 'draft-a' }),
+        batchItem({ item_id: 'item-b', raw_title: '乙', status: 'DRAFT', preview_request: previewRequest('req-b'), draft_id: 'draft-b' }),
+      ],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('甲\n乙')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').setValue(true)
+    await wrapper.find('#batch-review-search').setValue('乙')
+    await nextTick()
+    await wrapper.find('#batch-select-all-checkbox').setValue(true)
+    await nextTick()
+    await wrapper.find('#batch-review-clear').trigger('click')
+    await nextTick()
+    expect((wrapper.find('.batch-draft-card[data-item-id="item-a"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.find('.batch-draft-card[data-item-id="item-b"] input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
   })
 
   it('recovers a saved-but-unconfirmed card with accept and read-only tracking lookup', async () => {

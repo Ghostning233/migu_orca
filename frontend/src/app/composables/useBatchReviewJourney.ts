@@ -5,6 +5,7 @@
  * deliberately separate pieces of state. Capabilities and idempotency keys
  * remain in this route-local object and are never serialised by this module.
  */
+import { shallowRef } from 'vue'
 import type { operations } from '@/api/generated/api'
 
 type JsonBody<Operation extends keyof operations> = NonNullable<
@@ -101,6 +102,8 @@ export type BatchReviewAction =
   | { type: 'save_response_unknown'; itemIds: readonly string[]; error?: unknown }
   | { type: 'retry_saved_confirm'; itemId: string }
   | { type: 'consume_confirmed'; itemId: string }
+  | { type: 'remove_item'; itemId: string }
+  | { type: 'clear_route' }
 
 const SAFE_ERROR_TYPES = new Set([
   'draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict',
@@ -245,23 +248,38 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
     }
     case 'retry_saved_confirm': return state.items[action.itemId]?.phase === 'saved_pending_confirm' ? updateItem(state, action.itemId, { error: null }) : state
     case 'consume_confirmed': return state.items[action.itemId]?.phase === 'confirmed' ? updateItem(state, action.itemId, { draftId: null, idempotencyKey: null }) : state
+    case 'remove_item': {
+      if (!state.items[action.itemId]) return state
+      const items = { ...state.items }
+      delete items[action.itemId]
+      const inputOrder = state.inputOrder.filter((itemId) => itemId !== action.itemId)
+      const reviewOrder = state.reviewOrder.filter((itemId) => itemId !== action.itemId)
+      return {
+        ...state,
+        inputOrder,
+        reviewOrder,
+        currentItemId: state.currentItemId === action.itemId ? reviewOrder[0] ?? null : state.currentItemId,
+        items,
+      }
+    }
+    case 'clear_route': return createBatchReviewState()
   }
 }
 
 export interface BatchReviewJourney { state: BatchReviewState; dispatch: (action: BatchReviewAction) => void; newIdempotencyKey: (itemId: string) => string | null }
 
 export function useBatchReviewJourney(rawInput = ''): BatchReviewJourney {
-  let state = createBatchReviewState(rawInput)
+  const stateRef = shallowRef(createBatchReviewState(rawInput))
   return {
-    get state() { return state },
-    dispatch(action) { state = reduceBatchReview(state, action) },
+    get state() { return stateRef.value },
+    dispatch(action) { stateRef.value = reduceBatchReview(stateRef.value, action) },
     newIdempotencyKey(itemId) {
-      const item = state.items[itemId]
+      const item = stateRef.value.items[itemId]
       if (!batchItemCanConfirm(item)) return null
       if (!item) return null
       if (item.idempotencyKey) return item.idempotencyKey
       const key = randomKey()
-      state = updateItem(state, itemId, { idempotencyKey: key })
+      stateRef.value = updateItem(stateRef.value, itemId, { idempotencyKey: key })
       return key
     },
   }
