@@ -10,6 +10,7 @@ Started: Sat Sep 12 14:24:07 CST 2026
 - User-facing status/error text is safe fixed Chinese copy; only stable error types and explicitly allowlisted public recovery fields may cross the UI boundary.
 - `AnimeDraftEditor`/`useDraftSession` remains the shared draft editing core for single and batch flows; do not create parallel form state.
 - Stage 36 batch save-confirm replaces the legacy preview-save → accept path incrementally; successful items consume draft capabilities and save keys, while unknown responses retain keys for explicit retry.
+- Batch review layout keeps the card list and current-item detail in one responsive grid; card-body activation and checkbox activation must stop propagation so current-detail selection and batch selection remain independent.
 
 ## 2026-09-12 14:29:00 Asia/Shanghai - US-284
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -29,5 +30,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Keep the visual review order separate from the original input order; accept payload descriptors still follow input order for compatibility.
   - Capacity validation must count only trimmed, non-empty lines while sending the untouched raw input to the generated parse endpoint.
   - Browser validation requires the built `frontend/dist` and a clean `.migu_orca/storage` directory.
+- Verification passed: Python compileall, full pytest (1797 passed), frontend typecheck/lint/unit (352 passed)/build, and batch Chromium suite (14 passed).
+---
+
+## 2026-09-12 14:42:39 Asia/Shanghai - US-286
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Converted the batch results into a responsive left-card/right-detail review layout. The first result is selected for continuous review, clicking a card changes only the current detail, and checkbox/delete/action controls stop propagation. The detail pane reuses `CandidateCollectionList` for FOUND items and the shared `BatchDraftPreviewPanel`/`AnimeDraftEditor` flow for drafts; blocked items show local non-selectable guidance.
+- Files changed: `frontend/src/features/workbench/BatchWorkbenchView.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep the detail pane mounted inside the result layout so 1/12/36 item batches share one continuous review surface and narrow viewports can stack it safely.
+  - The existing compatibility candidate popover remains available for legacy interaction tests while the authoritative candidate/detail view is the right-hand pane.
 - Verification passed: Python compileall, full pytest (1797 passed), frontend typecheck/lint/unit (352 passed)/build, and batch Chromium suite (14 passed).
 ---

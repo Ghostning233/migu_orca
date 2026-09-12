@@ -39,6 +39,7 @@ import BaseButton from '@/components/forms/BaseButton.vue'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
+import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
 
 import {
   acceptFeedbackLabel,
@@ -135,8 +136,15 @@ const activeItem = computed(() =>
   activeCandidateItemId.value ? items.value.find((item) => item.item_id === activeCandidateItemId.value) ?? null : null,
 )
 const detailItem = computed(() =>
-  detailItemId.value ? items.value.find((item) => item.item_id === detailItemId.value) ?? null : null,
+  (detailItemId.value || currentItemId.value)
+    ? items.value.find((item) => item.item_id === (detailItemId.value || currentItemId.value)) ?? null
+    : null,
 )
+
+function selectCurrentItem(item: BatchItem): void {
+  currentItemId.value = item.item_id ?? null
+  detailItemId.value = item.item_id ?? null
+}
 
 function batchQueueStatusText(): string {
   return `队列中 ${queueItems.value.length} 项`
@@ -181,7 +189,8 @@ async function parseBatch(): Promise<void> {
     acceptInFlight.value = false
     activeCandidateItemId.value = null
     detailItemId.value = null
-    currentItemId.value = items.value.length === 1 ? items.value[0]?.item_id ?? null : null
+    currentItemId.value = items.value[0]?.item_id ?? null
+    detailItemId.value = currentItemId.value
     acceptFeedback.value = {}
     seasonConfirmations.value = {}
     queueItems.value = []
@@ -254,6 +263,7 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
 }
 
 function openCandidateChoices(item: BatchItem, trigger?: HTMLElement | null): void {
+  selectCurrentItem(item)
   if (activeCandidateItemId.value === item.item_id) {
     closeCandidateChoices()
     return
@@ -279,11 +289,7 @@ function closeCandidateChoices(): void {
 }
 
 function openDraftDetail(item: BatchItem): void {
-  if (detailItemId.value === item.item_id) {
-    detailItemId.value = null
-    return
-  }
-  detailItemId.value = item.item_id
+  selectCurrentItem(item)
 }
 
 function deleteBatchCard(itemId: string): void {
@@ -511,8 +517,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
         message="粘贴多行番剧名称后获取解析结果。"
       />
       <template v-else>
-        <div class="batch-card-grid-wrapper">
-          <div class="batch-card-grid" role="list" aria-label="批量草案卡片">
+        <div class="batch-review-layout">
+          <div class="batch-card-grid-wrapper">
+            <div class="batch-card-grid" role="list" aria-label="批量草案卡片">
             <article
               v-for="item in items"
               :key="item.item_id ?? item.raw_title ?? ''"
@@ -520,6 +527,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               :class="{ 'is-current': currentItemId === item.item_id }"
               :data-item-id="item.item_id ?? ''"
               role="listitem"
+              tabindex="0"
+              @click="selectCurrentItem(item)"
+              @keydown.enter.prevent="selectCurrentItem(item)"
             >
               <CheckboxRow
                 class="batch-card-checkbox-row"
@@ -527,6 +537,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                 :label="`选择 ${item.raw_title ?? '批量条目'}`"
                 :checked="selectedItemIds.has(item.item_id ?? '')"
                 :disabled="!canAcceptBatchCard(item) || acceptInFlight"
+                @click.stop
                 @update:checked="(value: boolean) => toggleItemSelection(item.item_id ?? '', value)"
               />
               <button
@@ -536,6 +547,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                 :aria-label="`删除 ${item.raw_title ?? '批量条目'}`"
                 title="删除"
                 :disabled="acceptInFlight"
+                @click.stop
                 @click="deleteBatchCard(item.item_id ?? '')"
               >
                 ×
@@ -576,6 +588,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               <p v-else-if="String(item.status ?? '') === 'FAILED'" class="batch-candidate-feedback">
                 {{ displayValue(item.error?.error_message) || '搜索失败。可重新获取批量草案后重试。' }}
               </p>
+              <p
+                v-if="String(item.status ?? '') !== 'ACCEPTED' && !canAcceptBatchCard(item)"
+                class="batch-card-selection-help"
+              >
+                当前条目需先生成可审核草案，暂不可加入批量确认。
+              </p>
 
               <p
                 v-if="item.review_hints?.length"
@@ -596,6 +614,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                   :aria-controls="'batch-candidate-choices'"
                   :aria-label="`${activeCandidateItemId === item.item_id ? '收起候选' : '查看候选'}：${item.raw_title ?? '批量条目'}`"
                   :disabled="acceptInFlight"
+                  @click.stop
                   @click="openCandidateChoices(item, $event.currentTarget as HTMLElement)"
                 >
                   {{ activeCandidateItemId === item.item_id ? '收起候选' : '查看候选' }}
@@ -607,6 +626,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                   aria-controls="request-detail-panel"
                   :aria-label="`查看草案：${item.raw_title ?? '批量条目'}`"
                   :disabled="acceptInFlight"
+                  @click.stop
                   @click="openDraftDetail(item)"
                 >
                   查看草案
@@ -614,9 +634,43 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
                 <BaseButton v-else class="batch-card-expand" disabled title="当前条目没有可选择的候选合集">
                   查看候选
                 </BaseButton>
-              </div>
+                </div>
             </article>
+            </div>
           </div>
+
+          <aside class="batch-detail-pane" aria-label="当前批量条目详情">
+            <template v-if="detailItem && canChooseBatchCandidate(detailItem)">
+              <h3 class="batch-detail-title">候选合集：{{ batchCardTitle(detailItem) }}</h3>
+              <p class="field-help">请选择一个真实 MiKan 合集后生成订阅草案。</p>
+              <CandidateCollectionList
+                class="batch-candidate-list"
+                :candidates="detailItem.candidates ?? []"
+                :query="batchCardTitle(detailItem)"
+                :disabled="acceptInFlight"
+                :confirmed-seasons="seasonConfirmations"
+                @select="generateDraftFromCandidate"
+                @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
+              />
+            </template>
+            <template v-else-if="detailItem && canExpandBatchCard(detailItem) && batchCardRequest(detailItem)">
+              <BatchDraftPreviewPanel
+                :key="`detail-${detailItem.item_id ?? detailItem.raw_title ?? ''}`"
+                :item="detailItem"
+                @accepted="onAccepted"
+                @deleted="onDraftDeleted"
+                @expired="onDraftExpired"
+                @draft-changed="onDraftChanged"
+              />
+            </template>
+            <template v-else-if="detailItem">
+              <h3 class="batch-detail-title">{{ batchCardTitle(detailItem) }}</h3>
+              <p class="batch-detail-empty">
+                {{ String(detailItem.status ?? '') === 'FAILED' ? '该条目搜索失败，请重新获取批量草案后重试。' : '该条目暂无可审核的候选合集。' }}
+              </p>
+            </template>
+            <p v-else class="batch-detail-empty">请选择左侧条目查看详情。</p>
+          </aside>
         </div>
 
         <p id="batch-parse-progress" class="batch-parse-progress" role="status">
@@ -677,16 +731,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
       </template>
     </div>
 
-    <BatchDraftPreviewPanel
-      v-if="detailItem && canExpandBatchCard(detailItem) && batchCardRequest(detailItem)"
-      :key="detailItem.item_id ?? detailItem.raw_title ?? ''"
-      :item="detailItem"
-      @accepted="onAccepted"
-      @deleted="onDraftDeleted"
-      @expired="onDraftExpired"
-      @draft-changed="onDraftChanged"
-    />
-
     <ConfirmDialog ref="confirmDialog" />
   </PanelSection>
 </template>
@@ -714,6 +758,45 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
   padding-right: 2px;
 }
 
+.batch-review-layout {
+  align-items: start;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(260px, 36%) minmax(0, 64%);
+}
+
+.batch-detail-pane {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  min-width: 0;
+  padding: 1rem;
+  position: sticky;
+  top: 1rem;
+}
+
+.batch-detail-title {
+  font-size: 1rem;
+  margin: 0 0 0.5rem;
+}
+
+.batch-detail-empty {
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.batch-detail-pane :deep(.batch-draft-panel) {
+  margin: -1rem;
+}
+
+.batch-candidate-list {
+  display: grid;
+  gap: 0.75rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .batch-parse-progress {
   color: var(--color-text-muted);
   font-size: 0.84rem;
@@ -723,7 +806,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
 .batch-card-grid {
   display: grid;
   gap: 12px;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   margin: 0;
   padding: 0;
 }
@@ -801,10 +884,16 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
 }
 
 .batch-card-reason,
-.batch-card-preference-note {
+.batch-card-preference-note,
+.batch-card-selection-help {
   color: #8d2f20;
   font-size: 0.82rem;
   overflow-wrap: anywhere;
+  margin: 0;
+}
+
+.batch-card-selection-help {
+  color: var(--color-text-muted);
   margin: 0;
 }
 
@@ -846,14 +935,18 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
 }
 
 @media (max-width: 1080px) {
-  .batch-card-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .batch-review-layout {
+    grid-template-columns: minmax(220px, 38%) minmax(0, 62%);
   }
 }
 
 @media (max-width: 720px) {
-  .batch-card-grid {
+  .batch-review-layout {
     grid-template-columns: 1fr;
+  }
+
+  .batch-detail-pane {
+    position: static;
   }
 }
 </style>
