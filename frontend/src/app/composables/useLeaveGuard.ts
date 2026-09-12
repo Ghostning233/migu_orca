@@ -29,7 +29,9 @@ export function useLeaveGuard(options: LeaveGuardOptions): { active: Ref<boolean
   }
 
   router.beforeEach(async (to, from) => {
-    if (!active.value || to.fullPath === from.fullPath || !options.shouldGuard()) return true
+    // Query-only updates (for example, syncing a public batch context id) do
+    // not leave the owning review surface and must not discard its memory.
+    if (!active.value || to.path === from.path || !options.shouldGuard()) return true
     const confirmed = await options.confirm()
     if (!confirmed) return false
     options.cleanup()

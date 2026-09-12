@@ -11,7 +11,7 @@
 //   - each FOUND card opens the shared candidate popover (reuses
 //     CandidateCard); choosing a candidate generates a server-authoritative
 //     draft (POST /api/v1/requests save_request=false) into the card;
-//   - DRAFT cards open BatchDraftPreviewPanel (preview-modify) plus a
+//   - DRAFT cards open the shared AnimeDraftEditor (preview-modify) plus a
 //     batch-specific 加入批量确认 / 删除当前批量卡片 action row;
 //     action row;
 //   - the accept toolbar offers select-all, a live selected count, 批量接受
@@ -30,6 +30,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api, toApiError } from '@/api/client'
+import { useLeaveGuard } from '@/app/composables/useLeaveGuard'
 import { useDraftSession, type DraftSession } from '@/app/composables/useDraftSession'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
@@ -40,6 +41,7 @@ import BaseButton from '@/components/forms/BaseButton.vue'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
+import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
 
 import {
@@ -71,7 +73,6 @@ import {
   type BatchParseResult,
 } from '@/features/workbench/batchWorkbench'
 import BatchCandidatePopover from '@/features/workbench/BatchCandidatePopover.vue'
-import BatchDraftPreviewPanel from '@/features/workbench/BatchDraftPreviewPanel.vue'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
@@ -144,6 +145,7 @@ const detailItemId = ref<string | null>(null)
 const draftSessions = new Map<string, DraftSession>()
 const draftApplyErrors = ref<Record<string, string>>({})
 const pendingCardSubtitleGroups = ref<Record<string, string>>({})
+const detailEditor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
 
 function ensureDraftSession(item: BatchItem): DraftSession | null {
   const itemId = item.item_id
@@ -158,6 +160,29 @@ function ensureDraftSession(item: BatchItem): DraftSession | null {
   })
   draftSessions.set(itemId, session)
   return session
+}
+
+function hasUnsafeBatchWork(): boolean {
+  return Boolean(
+    parseLoading.value ||
+    acceptInFlight.value ||
+    savingItemIds.value.size > 0 ||
+    recoveryLoadingItemIds.value.size > 0 ||
+    selectedItemIds.value.size > 0 ||
+    items.value.some((item) => {
+      if (['CONFIRMED', 'SAVED_PENDING_CONFIRM'].includes(String(item.status ?? ''))) return false
+      const session = draftSessions.get(item.item_id ?? '')
+      return Boolean(canChooseBatchCandidate(item) || session?.draftId.value || session?.dirty.value || session?.applying.value)
+    }),
+  )
+}
+
+function clearBatchRouteLocalState(): void {
+  for (const session of draftSessions.values()) session.invalidate()
+  draftSessions.clear()
+  saveKeys.clear()
+  selectedItemIds.value = new Set()
+  pendingCardSubtitleGroups.value = {}
 }
 
 // Review filters affect visibility only. The parsed order remains frozen until
@@ -737,6 +762,71 @@ function onDraftExpired(itemId: string): void {
   detailItemId.value = null
 }
 
+async function applyDetailModify(patch: PreviewPatch): Promise<void> {
+  const item = detailItem.value
+  if (!item) return
+  const session = ensureDraftSession(item)
+  if (!session) return
+  draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '' }
+  const result = await session.apply(patch, storageQuery().storage_dir ?? null)
+  if (result?.request) {
+    onDraftChanged(item.item_id ?? '', {
+      request: result.request as RequestSnapshot,
+      draftId: session.draftId.value ?? item.draft_id ?? '',
+      draftRevision: session.draftRevision.value ?? item.draft_revision ?? 1,
+    })
+    notification.success('已应用修改', '订阅草案资源已重新计算。')
+    return
+  }
+  if (session.invalid.value) {
+    onDraftExpired(item.item_id ?? '')
+    return
+  }
+  draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '订阅草案修改失败，请稍后重试。' }
+  notification.error('修改失败', '订阅草案修改失败，请稍后重试。')
+}
+
+async function retryDetailModify(): Promise<void> {
+  const item = detailItem.value
+  const session = item ? draftSessions.get(item.item_id ?? '') : null
+  if (!item || !session) return
+  const result = await session.retry()
+  if (result?.request) {
+    onDraftChanged(item.item_id ?? '', {
+      request: result.request as RequestSnapshot,
+      draftId: session.draftId.value ?? item.draft_id ?? '',
+      draftRevision: session.draftRevision.value ?? item.draft_revision ?? 1,
+    })
+    notification.success('已恢复修改', '订阅草案资源已重新计算。')
+  } else if (session.invalid.value) {
+    onDraftExpired(item.item_id ?? '')
+  }
+}
+
+function resetDetailModify(): void {
+  const item = detailItem.value
+  const session = item ? draftSessions.get(item.item_id ?? '') : null
+  if (!session) return
+  detailEditor.value?.reset()
+  session.reset()
+  draftApplyErrors.value = { ...draftApplyErrors.value, [item?.item_id ?? '']: '' }
+}
+
+useLeaveGuard({
+  shouldGuard: hasUnsafeBatchWork,
+  confirm: async () => {
+    const confirmed = await confirmDialog.value?.confirm({
+      title: '离开批量审核',
+      message: '离开批量审核将清理当前批量现场和未保存编辑，是否继续？',
+      confirmLabel: '确认离开',
+      cancelLabel: '留在此页',
+      danger: true,
+    })
+    return confirmed === true
+  },
+  cleanup: clearBatchRouteLocalState,
+})
+
 onMounted(() => {
   const fromQuery = typeof route.query.batch_id === 'string' ? route.query.batch_id : ''
   if (fromQuery) {
@@ -1003,16 +1093,32 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
               />
             </template>
             <template v-else-if="detailItem && canExpandBatchCard(detailItem) && batchCardRequest(detailItem)">
-              <BatchDraftPreviewPanel
-                :key="`detail-${detailItem.item_id ?? detailItem.raw_title ?? ''}`"
-                :item="detailItem"
-                :session="ensureDraftSession(detailItem) ?? undefined"
-                :shared-error="draftApplyErrors[detailItem.item_id ?? '']"
-                @select-for-batch="selectForBatch"
-                @deleted="onDraftDeleted"
-                @expired="onDraftExpired"
-                @draft-changed="onDraftChanged"
-              />
+              <div class="batch-draft-panel">
+                <AnimeDraftEditor
+                  ref="detailEditor"
+                  :key="`detail-${detailItem.item_id ?? detailItem.raw_title ?? ''}`"
+                  :request="(ensureDraftSession(detailItem)?.request.value ?? batchCardRequest(detailItem)) as RequestSnapshot"
+                  id-prefix="batch-preview"
+                  form-id="detail-preview-edit-form"
+                  container-id="request-detail-container"
+                  :applying="ensureDraftSession(detailItem)?.applying.value ?? false"
+                  :error="draftApplyErrors[detailItem.item_id ?? '']"
+                  :can-retry="ensureDraftSession(detailItem)?.canRetry.value ?? false"
+                  :disabled="ensureDraftSession(detailItem)?.applying.value ?? false"
+                  @apply="applyDetailModify"
+                  @dirty-change="(dirty: boolean) => ensureDraftSession(detailItem!)?.setDirty(dirty)"
+                  @retry="retryDetailModify"
+                  @reset="resetDetailModify"
+                >
+                  <template #review-note>
+                    <p class="field-help preview-mode-note">订阅草案（未保存）：可编辑下方订阅方案；点击「应用修改」重新计算资源，然后在固定操作栏统一保存并确认。</p>
+                  </template>
+                </AnimeDraftEditor>
+                <div class="batch-draft-actions" aria-label="批量卡片操作">
+                  <BaseButton id="batch-detail-accept" variant="primary" :disabled="ensureDraftSession(detailItem)?.applying.value ?? false" @click="selectForBatch(detailItem.item_id ?? '')">加入批量确认</BaseButton>
+                  <BaseButton id="batch-detail-delete" variant="danger" :disabled="ensureDraftSession(detailItem)?.applying.value ?? false" @click="onDraftDeleted(detailItem.item_id ?? '')">删除当前批量卡片</BaseButton>
+                </div>
+              </div>
             </template>
             <template v-else-if="detailItem">
               <h3 class="batch-detail-title">{{ batchCardTitle(detailItem) }}</h3>

@@ -36,9 +36,6 @@ const apiPost = vi.mocked(api.post)
 type ParseResult = NonNullable<
   operations['parseBatchTitles']['responses']['200']['content']['application/json']['result']
 >
-type AcceptResult = NonNullable<
-  operations['acceptBatchItems']['responses']['200']['content']['application/json']['result']
->
 type SaveConfirmResult = NonNullable<
   operations['saveConfirmBatchItems']['responses']['200']['content']['application/json']['result']
 >
@@ -100,22 +97,6 @@ function parseResult(overrides: Partial<Record<string, unknown>> = {}): ParseRes
     batch_id: 'batch-1',
     raw_input: '萌王S4',
     items: [batchItem()],
-    ...overrides,
-  } as never
-}
-
-function acceptResult(overrides: Partial<Record<string, unknown>> = {}): AcceptResult {
-  return {
-    batch_id: 'batch-1',
-    queue: {
-      queue_id: 'queue-1',
-      batch_id: 'batch-1',
-      created_at: '2026-08-31T00:00:00+00:00',
-      updated_at: '2026-08-31T00:00:00+00:00',
-      items: [],
-    },
-    items: [],
-    summary: { accepted: 0, already_accepted: 0, unacceptable: 0, failed: 0 },
     ...overrides,
   } as never
 }
@@ -428,8 +409,9 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
           draft_id: 'draft-expired',
         })],
       }))
-      .mockResolvedValueOnce(acceptResult({
-        items: [{ item_id: 'item-expired', status: 'unacceptable', reason: '旧失败反馈' }],
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-expired', status: 'FAILED', error_type: 'draft_expired' }],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
       }))
       .mockRejectedValueOnce({ type: 'draft_expired', message: 'draft expired' })
     const { wrapper } = await mountBatch()
@@ -442,7 +424,7 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     await nextTick()
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
-    expect(wrapper.find('.batch-card-reason').text()).toContain('旧失败反馈')
+    expect(wrapper.find('.batch-card-reason').text()).toContain('订阅草案已失效')
     expect((wrapper.find('.batch-draft-card input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
     await wrapper.find('.batch-card-expand').trigger('click')
     await wrapper.find('#batch-preview-must-contain').setValue('新目录')
@@ -478,13 +460,13 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: reviewableItems() }))
       .mockResolvedValueOnce(
-        acceptResult({
-          items: [
-            { item_id: 'item-1', request_id: 'req-1', title: 't', status: 'accepted', reason: null, error_type: null, queued: true },
-            { item_id: 'item-3', request_id: null, title: 't', status: 'unacceptable', reason: '卡片缺少订阅草案，无法接受', error_type: null, queued: false },
+        saveConfirmResult({
+          results: [
+            { item_id: 'item-1', request_id: 'req-1', status: 'CONFIRMED', outcome: 'CONFIRMED', error_type: null },
+            { item_id: 'item-3', request_id: null, status: 'FAILED', error_type: 'draft_expired' },
           ],
           queue: { queue_id: 'queue-1', batch_id: 'batch-1', created_at: '', updated_at: '', items: [queueItem('item-1', 'req-1')] },
-          summary: { accepted: 1, already_accepted: 0, unacceptable: 1, failed: 0 },
+          summary: { requested: 2, confirmed: 1, failed: 1 },
         }),
       )
     const { wrapper } = await mountBatch()

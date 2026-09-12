@@ -10,7 +10,7 @@ from playwright.sync_api import Page, expect
 
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from shared.models import EntryRequest
-from tests.browser.conftest import issue_draft_id, save_preview_handler, set_storage_preferences
+from tests.browser.conftest import issue_draft_id, set_storage_preferences
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -95,9 +95,8 @@ def _batch_item(
         "error": error,
     }
     if preview_request is not None:
-        # US-194/211: a card with a preview_request needs a server-authoritative
-        # draft_id + draft_revision so the real preview-modify/preview-save
-        # backend accepts it (issue returns revision=1).
+        # A card with a preview_request needs a server-authoritative draft_id
+        # and draft_revision so preview-modify accepts it.
         item["draft_id"] = issue_draft_id(preview_request)
         item["draft_revision"] = 1
     return item
@@ -629,8 +628,6 @@ class TestAppBatchAccept:
         self, page: Page, live_server_url: str
     ) -> None:
         accept_calls: list[dict[str, Any]] = []
-        page.route("**/api/v1/requests/preview-save", save_preview_handler())
-
         def _accept(route: Any, request: Any) -> None:
             accept_calls.append(json.loads(request.post_data or "{}"))
             _accept_route_handler({"item-1"})(route, request)
@@ -668,8 +665,6 @@ class TestAppBatchAccept:
         self, page: Page, live_server_url: str
     ) -> None:
         accept_calls: list[dict[str, Any]] = []
-        page.route("**/api/v1/requests/preview-save", save_preview_handler())
-
         def _accept(route: Any, request: Any) -> None:
             accept_calls.append(json.loads(request.post_data or "{}"))
             _accept_route_handler({"item-1"})(route, request)
@@ -744,8 +739,6 @@ class TestAppBatchAccept:
     def test_accept_failure_preserves_cards_with_safe_error(
         self, page: Page, live_server_url: str
     ) -> None:
-        page.route("**/api/v1/requests/preview-save", save_preview_handler())
-
         def _fail(route: Any, request: Any) -> None:
             route.fulfill(
                 status=400,

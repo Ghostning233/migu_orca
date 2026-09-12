@@ -12,6 +12,7 @@ Started: Sat Sep 12 14:24:07 CST 2026
 - Stage 36 batch save-confirm replaces the legacy preview-save → accept path incrementally; successful items consume draft capabilities and save keys, while unknown responses retain keys for explicit retry.
 - Batch review layout keeps the card list and current-item detail in one responsive grid; card-body activation and checkbox activation must stop propagation so current-detail selection and batch selection remain independent.
 - Keyboard navigation should operate on derived visible cards, while exception targeting may temporarily add a filtered card; focus restoration must use reduced-motion-safe scrolling and remain safe in jsdom.
+- Route-local leave guards should ignore same-path query synchronization, while still protecting navigation to another route and cleaning in-memory capabilities only after explicit confirmation.
 
 ## 2026-09-12 14:29:00 Asia/Shanghai - US-284
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -82,6 +83,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Batch save-confirm result items carry the authoritative public `request_id`/`tracking_id`; preserve those on the card because draft capabilities must be consumed after persistence.
   - Tracking recovery must use the generated list projection and exact request-id matching; never derive a tracking id or retry accept after an uncertain response without a read-only check.
-  - Existing batch browser fixtures still targeted the retired `/accept` endpoint; keep them aligned with the generated `/save-confirm` contract when extending the journey.
+- Existing batch browser fixtures still targeted the retired `/accept` endpoint; keep them aligned with the generated `/save-confirm` contract when extending the journey.
 - Verification passed: frontend typecheck, lint, unit tests (360 passed), production build, Python compileall, full pytest including real Chromium (1797 passed), and batch Chromium suite (14 passed).
+---
+
+## 2026-09-12 15:43:58 Asia/Shanghai - US-292
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Removed the unused batch `BatchDraftPreviewPanel` compatibility wrapper and its legacy batch accept/preview-save helper paths. The batch detail now renders the shared `AnimeDraftEditor` directly against the workbench-owned `useDraftSession`, preserving apply/retry/reset, batch selection, deletion, expiry recovery, and generated `saveConfirmBatchItems` as the only new batch save path. Added batch route leave protection for candidates, selections, draft capabilities, dirty edits, and in-flight operations, with confirmed navigation cleanup; same-path query updates no longer trigger the guard.
+- Files changed: `frontend/src/features/workbench/BatchWorkbenchView.vue`, `frontend/src/features/workbench/BatchDraftPreviewPanel.vue` (deleted), `frontend/src/features/workbench/batchWorkbench.ts`, `frontend/src/features/workbench/BatchWorkbenchView.test.ts`, `frontend/src/features/workbench/batchWorkbench.test.ts`, `frontend/src/app/composables/useLeaveGuard.ts`, `tests/browser/test_app_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Query-only URL synchronization is part of the current SPA surface and must not invoke a route-local discard confirmation; compare route paths in shared leave guards.
+  - The batch workbench should own the shared editor/session directly so save-confirm cleanup and leave protection can inspect the same in-memory capabilities.
+  - Verification passed: frontend typecheck, lint, unit tests (355 passed), production build, targeted Chromium batch/accessibility tests (50 passed), Python compileall, full pytest (1797 passed), and `git diff --check`.
 ---
