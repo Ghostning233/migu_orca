@@ -5,11 +5,9 @@
  * unit tests. They mirror the legacy `app.js` batch flow
  * (batchStatusLabel / buildBatchParsePayload / batchCardTitle /
  * batchCardPreferenceSummary / batchCardSeedSummary / canExpandBatchCard /
- * batchCardRequest / renderBatchCandidateChoices / resolveBatchAcceptDescriptors
- * / applyBatchAcceptResult / showBatchAcceptNotification / batchQueueStatusLabel
+ * batchCardRequest / renderBatchCandidateChoices / batchQueueStatusLabel
  * / batchQueueItemSummary / batchQueueSummaryMessage / recordUserCorrection) so
- * the old `/index` batch tab and the new `/app/add` batch section stay
- * parity for the same API result.
+ * the `/app/add` batch section stays consistent with the generated API result.
  *
  * Security boundary: these helpers operate on the generated OpenAPI batch
  * types only (public parse items, candidate whitelists and sanitized queue
@@ -17,9 +15,10 @@
  * and they actively redact URL-looking values at display time. No value here
  * is ever persisted or logged.
  */
-import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
+import { isPublicRouteIdentifier } from '@/app/router/catalog'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
+import type { SaveConfirmBatchItemsBody, SaveConfirmBatchItemsResult, TrackingItemsResult } from '@/app/composables/useBatchReviewJourney'
 
 /** Public batch parse result produced by `POST /api/v1/batches/parse`. */
 export type BatchParseResult = NonNullable<
@@ -32,10 +31,9 @@ export type BatchItem = NonNullable<BatchParseResult['items']>[number]
 /** The typed Mikan candidate inside a batch card (strict whitelist). */
 export type BatchCandidate = NonNullable<BatchItem['candidates']>[number]
 
-/** Public accept-result item produced by `POST /api/v1/batches/{id}/accept`. */
-export type BatchAcceptResult = NonNullable<
-  operations['acceptBatchItems']['responses']['200']['content']['application/json']['result']
->
+export type BatchSaveConfirmResult = SaveConfirmBatchItemsResult
+export type BatchSaveConfirmItem = BatchSaveConfirmResult['results'][number]
+export type BatchTrackingItem = TrackingItemsResult['items'][number]
 
 /** Public submit-result item (submit/retry/recover share the accept shape). */
 export type BatchSubmitResult = NonNullable<
@@ -60,6 +58,9 @@ export const BATCH_STATUS_LABELS: Record<string, string> = {
   DRAFT: '草案',
   READY: '待接受',
   ACCEPTED: '已接受',
+  CONFIRMED: '已确认待提交',
+  SAVED_PENDING_CONFIRM: '已保存待确认',
+  RESPONSE_UNKNOWN: '结果待核验',
 }
 
 /** Chinese label for a batch status; unknown codes render as-is. */
@@ -202,8 +203,12 @@ export function queueItemSummary(item: QueueItem): string {
 
 /** Validate the batch raw input before calling the parse API. */
 export function validateBatchRawInput(rawInput: string): string | null {
-  if (!rawInput.trim()) {
-    return '批量获取前必须输入至少一个番剧名称。'
+  const count = batchItemCount(rawInput)
+  if (count === 0) {
+    return '批量获取前必须输入至少一个番剧名称；当前为 0 部，请输入 1～36 部后再获取。'
+  }
+  if (count > 36) {
+    return `批量输入包含 ${count} 部番剧，超过单批上限 36 部；请减少后再获取。`
   }
   return null
 }
@@ -211,6 +216,44 @@ export function validateBatchRawInput(rawInput: string): string | null {
 /** Count the non-empty lines of a batch input (used in the loading message). */
 export function batchItemCount(rawInput: string): number {
   return rawInput.split(/\r?\n/).filter((line) => line.trim()).length
+}
+
+/** Keep blocking failures first, then review items, then normal items. */
+export function orderBatchItemsForReview(items: BatchItem[]): BatchItem[] {
+  const groups: BatchItem[][] = [[], [], []]
+  for (const item of items) {
+    const status = String(item.status ?? '')
+    const group = status === 'FAILED' || status === 'EMPTY' ? 0 : item.needs_user_review === true ? 1 : 2
+    groups[group]!.push(item)
+  }
+  return groups.flat()
+}
+
+/** Whether a batch item is an exception that should be surfaced for review. */
+export function batchItemIsException(item: BatchItem): boolean {
+  return String(item.status ?? '') === 'FAILED' || String(item.status ?? '') === 'EMPTY' || batchCardNeedsReview(item)
+}
+
+/** Find the next exception after the current item, wrapping at the end. */
+export function nextBatchException(items: BatchItem[], currentItemId: string | null): BatchItem | null {
+  const exceptions = items.filter(batchItemIsException)
+  if (!exceptions.length) return null
+  const currentIndex = items.findIndex((item) => item.item_id === currentItemId)
+  const start = currentIndex < 0 ? 0 : currentIndex + 1
+  return exceptions.find((item) => items.indexOf(item) >= start) ?? exceptions[0] ?? null
+}
+
+/** Match one item against the additive workbench search/filter controls. */
+export function batchItemMatchesReviewFilters(
+  item: BatchItem,
+  filters: { query: string; status: string; exceptionsOnly: boolean },
+): boolean {
+  const query = filters.query.trim().toLocaleLowerCase()
+  const title = `${item.raw_title ?? ''} ${batchCardTitle(item)}`.toLocaleLowerCase()
+  if (query && !title.includes(query)) return false
+  if (filters.status && String(item.status ?? '') !== filters.status) return false
+  if (filters.exceptionsOnly && !batchItemIsException(item)) return false
+  return true
 }
 
 /** Build the batch parse request payload (only user input + storage context). */
@@ -223,7 +266,7 @@ export function canChooseBatchCandidate(item: BatchItem): boolean {
   return String(item.status ?? '') === 'FOUND' && (item.candidates?.length ?? 0) > 0
 }
 
-/** True when a batch card is in the explicit "candidate choices" popover. */
+/** True when a batch card is the active right-hand candidate detail. */
 export function isCandidateActive(item: BatchItem, activeItemId: string | null): boolean {
   return activeItemId !== null && item.item_id === activeItemId
 }
@@ -268,84 +311,55 @@ export function buildBatchCandidateCreatePayload(
   return payload
 }
 
-/** One descriptor for the batch accept endpoint (public fields only). */
-export interface BatchAcceptDescriptor {
+export interface BatchSaveConfirmDescriptor {
   item_id: string
-  request_id: string | null
-  title: string
+  draft_id: string
+  base_revision: number
+  idempotency_key: string
 }
 
-/** Collect the accept descriptors for the given cards (saved or preview). */
-export function collectBatchAcceptDescriptors(items: readonly BatchItem[]): BatchAcceptDescriptor[] {
-  return items.map((item) => ({
-    item_id: item.item_id ?? '',
-    request_id: (item.preview_request as RequestSnapshot | null)?.request_id ?? null,
-    title: batchCardTitle(item),
-  }))
-}
-
-/** Build the batch accept payload (item_ids omitted for accept-all). */
-export function buildBatchAcceptPayload(
-  descriptors: readonly BatchAcceptDescriptor[],
+/** Build the generated save-confirm body; capabilities never leave this payload. */
+export function buildBatchSaveConfirmPayload(
+  descriptors: readonly BatchSaveConfirmDescriptor[],
   itemIds: readonly string[] | null,
   storageDir: string | null,
-): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
-    items: descriptors.map(({ item_id, request_id, title }) => ({ item_id, request_id, title })),
+): SaveConfirmBatchItemsBody {
+  return {
+    items: descriptors.map((item) => ({ ...item })),
+    ...(itemIds ? { item_ids: [...itemIds] } : {}),
     storage_dir: storageDir || null,
   }
-  if (itemIds) {
-    payload.item_ids = [...itemIds]
-  }
-  return payload
 }
 
-/** Post the batch accept request through the shared transport. */
-export async function postBatchAccept(
-  batchId: string,
-  payload: Record<string, unknown>,
-): Promise<BatchAcceptResult> {
-  return api.post<BatchAcceptResult>(`/api/v1/batches/{batch_id}/accept`, {
-    path: { batch_id: batchId },
-    body: payload,
-  })
+export function batchSaveConfirmSucceeded(item: BatchSaveConfirmItem): boolean {
+  return String(item.outcome ?? '').toUpperCase() === 'CONFIRMED' && isPublicRouteIdentifier(item.request_id) &&
+    (!item.tracking_id || isPublicRouteIdentifier(item.tracking_id))
 }
 
-/** True when an accept result item was accepted (or already accepted). */
-export function acceptOutcomeAccepted(item: { status?: string | null }): boolean {
-  return item.status === 'accepted' || item.status === 'already_accepted'
+export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {
+  const labels: Record<string, string> = {
+    draft_expired: '订阅草案已失效，请重新生成。',
+    draft_revision_conflict: '草案已更新，请基于最新版本重试。',
+    idempotency_conflict: '本次操作与已有操作冲突，请重新开始。',
+    save_confirm_failed: '订阅方案已保存，但确认未完成。可重试确认。',
+    draft_reserved: '订阅草案正在处理中，请稍后重试。',
+  }
+  return labels[item.error_type ?? ''] ?? '保存确认失败，请重试。'
 }
 
-/** Chinese label for an accept-feedback status code. */
-export function acceptFeedbackLabel(status: string | null | undefined): string {
-  return String(status ?? '') === 'failed' ? '接受失败：' : '无法接受：'
+export function batchSaveConfirmRecoveryAllowed(item: BatchSaveConfirmItem): boolean {
+  return item.error_type === 'save_confirm_failed' &&
+    String(item.outcome ?? '').toUpperCase() === 'FAILED' &&
+    isPublicRouteIdentifier(item.request_id)
 }
 
-/** Build the batch accept notification copy (legacy showBatchAcceptNotification). */
-export function batchAcceptNotification(summary: Record<string, number | undefined>, isSingle: boolean): { kind: 'success' | 'error'; title: string; message: string } {
-  const accepted = summary.accepted ?? 0
-  const already = summary.already_accepted ?? 0
-  const bad = (summary.unacceptable ?? 0) + (summary.failed ?? 0)
-  let message = `已接受 ${accepted} 项`
-  if (already) {
-    message += `；已确认跳过 ${already} 项`
-  }
-  if (bad) {
-    message += `；${bad} 项无法接受`
-  }
-  if (isSingle) {
-    if (bad > 0 && accepted === 0) {
-      return { kind: 'error', title: '接受失败', message }
-    }
-    return { kind: 'success', title: '接受成功', message: '当前批量卡片已标记为已接受并待提交，其他卡片保持不变。' }
-  }
-  if (bad > 0 && accepted === 0) {
-    return { kind: 'error', title: '批量接受失败', message }
-  }
-  if (bad > 0) {
-    return { kind: 'success', title: '批量接受完成', message }
-  }
-  return { kind: 'success', title: '批量接受成功', message }
+/** Locate a public tracking row only by the confirmed request identity. */
+export function findBatchTrackingItem(result: TrackingItemsResult, requestId: string): BatchTrackingItem | null {
+  if (!isPublicRouteIdentifier(requestId) || !Array.isArray(result.items)) return null
+  const match = result.items.find((item) => item.request_id === requestId)
+  return match && isPublicRouteIdentifier(match.request_id) && match.request_id === requestId && isPublicRouteIdentifier(match.tracking_id)
+    ? match
+    : null
 }
 
 /** Build the batch submit summary message (legacy batchQueueSummaryMessage). */

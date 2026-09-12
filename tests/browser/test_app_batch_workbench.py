@@ -10,7 +10,7 @@ from playwright.sync_api import Page, expect
 
 from apps.migu_orca_entry.controllers.entry_controller import generate_request
 from shared.models import EntryRequest
-from tests.browser.conftest import issue_draft_id, save_preview_handler, set_storage_preferences
+from tests.browser.conftest import issue_draft_id, set_storage_preferences
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -95,9 +95,8 @@ def _batch_item(
         "error": error,
     }
     if preview_request is not None:
-        # US-194/211: a card with a preview_request needs a server-authoritative
-        # draft_id + draft_revision so the real preview-modify/preview-save
-        # backend accepts it (issue returns revision=1).
+        # A card with a preview_request needs a server-authoritative draft_id
+        # and draft_revision so preview-modify accepts it.
         item["draft_id"] = issue_draft_id(preview_request)
         item["draft_revision"] = 1
     return item
@@ -148,6 +147,19 @@ def _batch_accept_result(items: list[dict[str, Any]], queue_items: list[dict[str
         status = item.get("status", "accepted")
         if status in summary:
             summary[status] += 1
+    results = []
+    for item in items:
+        outcome = str(item.get("outcome") or ("CONFIRMED" if item.get("status") == "CONFIRMED" else "failed"))
+        results.append({
+            "item_id": item.get("item_id"),
+            "outcome": outcome,
+            "request_id": item.get("request_id"),
+            "status": item.get("status") if outcome == "CONFIRMED" else None,
+            "error_type": item.get("error_type") or (None if outcome == "CONFIRMED" else "batch_error"),
+            "error_message": None,
+            "tracking_id": item.get("tracking_id"),
+            "tracking_ready": item.get("tracking_ready"),
+        })
     return json.dumps(
         {
             "ok": True,
@@ -160,7 +172,7 @@ def _batch_accept_result(items: list[dict[str, Any]], queue_items: list[dict[str
                     "updated_at": "2026-08-19T00:00:00+00:00",
                     "items": queue_items,
                 },
-                "items": items,
+                "results": results,
                 "summary": summary,
             },
         },
@@ -200,12 +212,13 @@ def _accept_route_handler(accepted_ids: set[str], *, batch_id: str = "batch-spa"
                 results.append(
                     {
                         "item_id": item_id,
-                        "request_id": request_id,
+                        "request_id": request_id or f"req-{item_id}",
                         "title": title,
-                        "status": "accepted",
-                        "reason": None,
+                        "status": "CONFIRMED",
+                        "outcome": "CONFIRMED",
+                        "tracking_id": f"tracking-{item_id}",
+                        "tracking_ready": True,
                         "error_type": None,
-                        "queued": True,
                     }
                 )
                 queue_items.append(_queue_item(item_id, request_id, title, batch_id=batch_id))
@@ -280,7 +293,7 @@ class TestAppBatchParse:
         expect(empty.locator(".batch-card-status")).to_contain_text("未找到候选")
         expect(failed.locator(".batch-card-status")).to_contain_text("搜索失败")
         expect(failed.locator(".batch-candidate-feedback")).to_contain_text(
-            "MiKan 候选搜索暂时不可用"
+            "搜索失败。可重新获取批量草案后重试。"
         )
         # The raw error_type never leaks into the DOM.
         body_text = page.locator("body").inner_text()
@@ -335,11 +348,45 @@ class TestAppBatchParse:
         overflow = page.evaluate("() => document.body.scrollWidth > window.innerWidth")
         assert overflow is False
 
+    @pytest.mark.parametrize("count,zoom", [(12, 1), (36, 2)])
+    def test_populated_batch_layout_scrolls_without_horizontal_overflow(
+        self, page: Page, live_server_url: str, count: int, zoom: int
+    ) -> None:
+        items = [
+            _batch_item(
+                f"item-{index}",
+                f"番剧 {index}",
+                status="DRAFT",
+                preview_request=_preview_request(f"番剧 {index}", f"req-{index}"),
+            )
+            for index in range(count)
+        ]
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(items),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.set_viewport_size({"width": 1280, "height": 900})
+        if zoom == 2:
+            page.evaluate("() => { document.documentElement.style.zoom = '2' }")
+        page.fill("#batch-raw-input", "\n".join(f"番剧 {index}" for index in range(count)))
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(count)
+        assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
+        expect(page.locator("#batch-accept-toolbar")).to_be_visible()
+        page.locator(".batch-draft-card").last.scroll_into_view_if_needed()
+        expect(page.locator(".batch-draft-card").last).to_be_visible()
+        expect(page.locator("#batch-accept-all")).to_be_visible()
+
 
 class TestAppBatchCandidateAndDraft:
-    """AC: 候选浮层、季数确认、草案详情与删除."""
+    """AC: 右侧候选、季数确认、草案详情与删除."""
 
-    def test_found_card_opens_candidate_popover_and_generates_draft(
+    def test_found_card_selects_right_detail_candidate_and_generates_draft(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         captured: list[dict[str, Any]] = []
@@ -393,9 +440,8 @@ class TestAppBatchCandidateAndDraft:
         expect(card.locator(".batch-card-expand")).to_contain_text("查看候选")
         card.locator(".batch-card-expand").click()
 
-        choices = page.locator("#batch-candidate-choices")
+        choices = page.locator("#batch-detail-pane")
         expect(choices).to_be_visible()
-        expect(choices).to_have_attribute("role", "dialog")
         choices.locator(".candidate-select").click()
         page.wait_for_selector(".batch-draft-card .batch-card-status", timeout=5000)
 
@@ -442,7 +488,7 @@ class TestAppBatchCandidateAndDraft:
 
         card = page.locator(".batch-draft-card", has_text="芙莉莲S4")
         card.locator(".batch-card-expand").click()
-        choices = page.locator("#batch-candidate-choices")
+        choices = page.locator("#batch-detail-pane")
         confirmation = choices.locator(".candidate-season-confirmation input")
         choose = choices.locator(".candidate-select")
         expect(confirmation).not_to_be_checked()
@@ -531,14 +577,14 @@ class TestAppBatchCandidateAndDraft:
             ),
         )
         page.route(
-            "**/api/v1/batches/batch-spa/accept*",
+            "**/api/v1/batches/batch-spa/save-confirm*",
             lambda route: route.fulfill(
                 status=200,
                 content_type="application/json",
                 body=_batch_accept_result(
                     [{
                         "item_id": "item-expired",
-                        "request_id": "req-batch-expired",
+                        "request_id": None,
                         "title": "咒术回战",
                         "status": "unacceptable",
                         "reason": "旧失败反馈",
@@ -557,20 +603,9 @@ class TestAppBatchCandidateAndDraft:
         page.click("#batch-accept-submit")
         page.wait_for_selector(".confirm-dialog", timeout=5000)
         page.locator(".confirm-dialog .primary-button").click()
-        expect(card.locator(".batch-card-reason")).to_contain_text("旧失败反馈")
+        expect(card.locator(".batch-card-reason")).to_contain_text("保存确认失败，请重试。")
+        expect(card.locator(".batch-card-status")).to_contain_text("草案")
         expect(card.locator(".batch-card-checkbox-row")).to_be_checked()
-        card.locator(".batch-card-expand").click()
-        page.locator("#batch-preview-must-contain").fill("新目录")
-        page.locator("#batch-preview-apply-button").click()
-
-        expect(page.locator(".batch-draft-card")).to_have_count(1)
-        expect(page.locator(".batch-card-status")).to_contain_text("找到候选")
-        expect(page.locator("#request-detail-container")).to_have_count(0)
-        expect(page.locator(".batch-card-expand")).to_contain_text("查看候选")
-        expect(card.locator(".batch-card-checkbox-row")).not_to_be_checked()
-        expect(card.locator(".batch-card-reason")).to_have_count(0)
-        expect(page.locator(".global-notification")).to_contain_text("订阅草案已失效")
-        assert "已删除批量卡片" not in page.locator("body").inner_text()
 
     def test_expanded_draft_ignores_sensitive_fields(
         self, page: Page, live_server_url: str
@@ -640,22 +675,20 @@ class TestAppBatchAccept:
         self, page: Page, live_server_url: str
     ) -> None:
         accept_calls: list[dict[str, Any]] = []
-        page.route("**/api/v1/requests/preview-save", save_preview_handler())
-
         def _accept(route: Any, request: Any) -> None:
             accept_calls.append(json.loads(request.post_data or "{}"))
             _accept_route_handler({"item-1"})(route, request)
 
-        page.route("**/api/v1/batches/batch-spa/accept*", _accept)
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
         self._setup_two_drafts(page, live_server_url)
 
         expect(page.locator("#batch-accept-toolbar")).to_be_visible()
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 0 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 0 项")
         expect(page.locator("#batch-accept-submit")).to_be_disabled()
 
         first = page.locator(".batch-draft-card", has_text="萌王S4")
         first.locator(".batch-card-checkbox-row").check()
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 1 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
         expect(page.locator("#batch-accept-submit")).to_be_enabled()
 
         page.click("#batch-accept-submit")
@@ -663,29 +696,27 @@ class TestAppBatchAccept:
         page.locator(".confirm-dialog .primary-button").click()
         page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
 
-        expect(page.locator(".global-notification")).to_contain_text("批量接受成功")
+        expect(page.locator(".global-notification")).to_contain_text("批量保存确认完成")
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
         second_card = page.locator(".batch-draft-card", has_text="路哥S4")
-        expect(first_card.locator(".batch-card-status")).to_contain_text("已接受")
-        expect(first_card.locator(".batch-card-queue-status")).to_contain_text("待提交")
+        expect(first_card.locator(".batch-card-status")).to_contain_text("已确认待提交")
         expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
 
         payload = accept_calls[-1]
         assert payload["item_ids"] == ["item-1"]
         assert [item["item_id"] for item in payload["items"]] == ["item-1"]
+        assert payload["items"][0]["draft_id"]
         assert payload["storage_dir"] is None
 
     def test_accept_all_accepts_reviewable_and_shows_failed_reason(
         self, page: Page, live_server_url: str
     ) -> None:
         accept_calls: list[dict[str, Any]] = []
-        page.route("**/api/v1/requests/preview-save", save_preview_handler())
-
         def _accept(route: Any, request: Any) -> None:
             accept_calls.append(json.loads(request.post_data or "{}"))
             _accept_route_handler({"item-1"})(route, request)
 
-        page.route("**/api/v1/batches/batch-spa/accept*", _accept)
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
         page.route(
             "**/api/v1/batches/parse",
             lambda route: route.fulfill(
@@ -710,16 +741,13 @@ class TestAppBatchAccept:
 
         ok_card = page.locator(".batch-draft-card", has_text="萌王S4")
         fail_card = page.locator(".batch-draft-card", has_text="路哥S4")
-        expect(ok_card.locator(".batch-card-status")).to_contain_text("已接受")
+        expect(ok_card.locator(".batch-card-status")).to_contain_text("已确认待提交")
         expect(fail_card.locator(".batch-card-status")).to_contain_text("搜索失败")
-        expect(fail_card.locator(".batch-card-reason")).to_contain_text(
-            "无法接受：卡片缺少订阅草案，无法接受"
-        )
-        expect(page.locator(".global-notification")).to_contain_text("批量接受完成")
+        expect(page.locator(".global-notification")).to_contain_text("批量保存确认完成")
 
         payload = accept_calls[-1]
         assert "item_ids" not in payload
-        assert [item["item_id"] for item in payload["items"]] == ["item-1", "item-fail"]
+        assert [item["item_id"] for item in payload["items"]] == ["item-1"]
 
     def test_accept_all_selects_all_reviewable_and_unchecks_single(
         self, page: Page, live_server_url: str
@@ -744,22 +772,20 @@ class TestAppBatchAccept:
 
         expect(page.locator(".batch-card-checkbox-row")).to_have_count(3)
         page.check("#batch-select-all-checkbox")
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 2 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 2 项")
 
         page.uncheck("#batch-select-all-checkbox")
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 0 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 0 项")
 
         page.check("#batch-select-all-checkbox")
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
         first_card.locator(".batch-card-checkbox-row").uncheck()
-        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选择 1 项")
+        expect(page.locator("#batch-accept-selected-count")).to_contain_text("已选且可确认 1 项")
         expect(page.locator("#batch-select-all-checkbox")).not_to_be_checked()
 
     def test_accept_failure_preserves_cards_with_safe_error(
         self, page: Page, live_server_url: str
     ) -> None:
-        page.route("**/api/v1/requests/preview-save", save_preview_handler())
-
         def _fail(route: Any, request: Any) -> None:
             route.fulfill(
                 status=400,
@@ -774,7 +800,7 @@ class TestAppBatchAccept:
                 ),
             )
 
-        page.route("**/api/v1/batches/batch-spa/accept*", _fail)
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _fail)
         self._setup_two_drafts(page, live_server_url)
 
         page.click("#batch-accept-all")
@@ -782,13 +808,77 @@ class TestAppBatchAccept:
         page.locator(".confirm-dialog .primary-button").click()
         page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
 
-        expect(page.locator(".global-notification")).to_contain_text("接受失败")
+        expect(page.locator(".global-notification")).to_contain_text("保存确认失败")
         # Cards stay reviewable after a failed accept.
         expect(page.locator(".batch-draft-card", has_text="萌王S4").locator(".batch-card-status")).to_contain_text("草案")
         # The raw error_type never reaches the DOM.
         body_text = page.locator("body").inner_text()
         assert "batch_accept_failed" not in body_text
         assert "服务器内部错误" not in body_text
+
+    def test_saved_confirm_recovery_uses_accept_and_tracking_only(self, page: Page, live_server_url: str) -> None:
+        batch_calls: list[dict[str, Any]] = []
+        accept_calls: list[dict[str, Any]] = []
+        accept_urls: list[str] = []
+        tracking_calls: list[str] = []
+        preview = _preview_request("萌王S4", "req-saved")
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([_batch_item("item-saved", "萌王S4", status="DRAFT", preview_request=preview)]),
+            ),
+        )
+
+        def save_confirm(route: Any, request: Any) -> None:
+            batch_calls.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_accept_result([{
+                    "item_id": "item-saved",
+                    "outcome": "failed",
+                    "request_id": "req-saved",
+                    "status": None,
+                    "error_type": "save_confirm_failed",
+                    "tracking_id": None,
+                    "tracking_ready": None,
+                }], []),
+            )
+
+        def accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            accept_urls.append(request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {"request": {"request_id": "req-saved"}}}))
+
+        def tracking(route: Any, request: Any) -> None:
+            tracking_calls.append(request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "ok": True,
+                "result": {"items": [{"request_id": "req-saved", "tracking_id": "tracking-real"}], "summary": {}},
+            }))
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", save_confirm)
+        page.route("**/api/v1/requests/req-saved/accept", accept)
+        page.route("**/api/v1/tracking/items*", tracking)
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+        card = page.locator(".batch-draft-card", has_text="萌王S4")
+        card.locator(".batch-card-checkbox-row").check()
+        page.click("#batch-accept-submit")
+        page.locator(".confirm-dialog .primary-button").click()
+        expect(card.locator("#batch-retry-accept-item-saved")).to_be_visible()
+        page.click("#batch-retry-accept-item-saved")
+        expect(card.locator(".batch-card-status")).to_contain_text("已确认待提交")
+        expect(card.locator("#batch-open-tracking-item-saved")).to_be_visible()
+
+        assert len(batch_calls) == 1
+        assert len(accept_calls) == 1
+        assert "/api/v1/requests/req-saved/accept" in accept_urls[0]
+        assert len(tracking_calls) == 1
+        assert "retry_action" not in json.dumps(batch_calls[0])
 
 
 class TestAppBatchSensitiveBoundary:

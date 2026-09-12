@@ -1,0 +1,162 @@
+# Ralph Progress Log
+Started: Sat Sep 12 14:24:07 CST 2026
+---
+
+## 2026-09-12 - Stage 36 independent review fix
+- 右侧 `CandidateCollectionList` 成为 FOUND 候选的唯一选择入口，移除旧候选浮层及并行焦点流程；选择始终绑定当前 detail item。
+- 逐项 save-confirm 幂等键按 draft capability 指纹管理：未知 transport 响应仅在同一能力上复用，编辑/新草案/成功/失效/删除后清理或轮换；成功 accept 后仅允许 tracking 定位恢复。
+- 收紧 `save_confirm_failed` 恢复条件、可见范围全选、部分失败首项聚焦和固定安全错误文案；Stage 35 两个 archive 文件精确恢复为 `origin/main` 版本。
+- 定向验证：BatchWorkbench/useBatchReviewJourney Vitest 23 passed，批量 Chromium 14 passed，前端 build/typecheck 通过，`.migu_orca/storage` 不存在，`git diff --check` 通过。
+
+## Codebase Patterns
+
+- Batch items use `item_id` as identity; input order, frozen review order, current detail, and selection are independent state.
+- Route-local draft capabilities, revisions, idempotency keys, candidate context, and unsaved edits stay in memory and must not enter browser storage, URLs, logs, or traces.
+- Frontend state cores are API-free and extract request/result types from `frontend/src/api/generated/api.ts`; transport hosts attach generated API calls later.
+- User-facing status/error text is safe fixed Chinese copy; only stable error types and explicitly allowlisted public recovery fields may cross the UI boundary.
+- `AnimeDraftEditor`/`useDraftSession` remains the shared draft editing core for single and batch flows; do not create parallel form state.
+- Stage 36 batch save-confirm replaces the legacy preview-save → accept path incrementally; successful items consume draft capabilities and save keys, while unknown responses retain keys for explicit retry.
+- Batch review layout keeps the card list and current-item detail in one responsive grid; card-body activation and checkbox activation must stop propagation so current-detail selection and batch selection remain independent.
+- Keyboard navigation should operate on derived visible cards, while exception targeting may temporarily add a filtered card; focus restoration must use reduced-motion-safe scrolling and remain safe in jsdom.
+- Route-local leave guards should ignore same-path query synchronization, while still protecting navigation to another route and cleaning in-memory capabilities only after explicit confirmation.
+
+## 2026-09-12 14:29:00 Asia/Shanghai - US-284
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the API-free `useBatchReviewJourney` state core and reducer. It tracks item-id identity, original/frozen review ordering, current detail selection, checkbox intent, per-item draft/revision state, applying/saving/recovery phases, idempotency-key lifecycle, partial save outcomes, unknown responses, and confirmed handoff consumption. Added generated-contract type aliases, legal phase transition checks, and safe allowlisted error projection.
+- Files changed: `frontend/src/app/composables/useBatchReviewJourney.ts`, `frontend/src/app/composables/useBatchReviewJourney.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`, plus the pre-existing Stage 36 archive state-file changes.
+- **Learnings for future iterations:**
+  - Keep batch reducer state transport-free; later UI stories should attach generated calls without introducing another state owner.
+  - Selection must remain usable independently from current detail, and response-unknown save states must retain the same per-item idempotency key for explicit retry.
+- Verification passed: targeted Vitest (4 passed), frontend typecheck, lint, production build, Python compileall, and `git diff --check`.
+---
+
+## 2026-09-12 14:37:25 Asia/Shanghai - US-285
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added normalized non-empty-line capacity validation for 1–36 batch entries, preserving the original textarea value and blocking parse API calls for 0 or over-limit input. Added visible parse progress/count copy, deterministic exception-first review ordering with stable within-group order, and automatic current-card marking for a single parsed item.
+- Files changed: `frontend/src/features/workbench/batchWorkbench.ts`, `frontend/src/features/workbench/BatchWorkbenchView.vue`, `frontend/src/features/workbench/batchWorkbench.test.ts`, `frontend/src/features/workbench/BatchWorkbenchView.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep the visual review order separate from the original input order; accept payload descriptors still follow input order for compatibility.
+  - Capacity validation must count only trimmed, non-empty lines while sending the untouched raw input to the generated parse endpoint.
+  - Browser validation requires the built `frontend/dist` and a clean `.migu_orca/storage` directory.
+- Verification passed: Python compileall, full pytest (1797 passed), frontend typecheck/lint/unit (352 passed)/build, and batch Chromium suite (14 passed).
+---
+
+## 2026-09-12 14:50:30 Asia/Shanghai - US-287
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added additive title search, status filtering, exception-only filtering, clear controls, visible/total counts, explicit exception-first resorting, hidden-current-detail guidance, and per-filter list scroll restoration to the batch review workbench. Filtering remains derived visibility, so frozen order, selection, and current detail persist.
+- Files changed: `frontend/src/features/workbench/batchWorkbench.ts`, `frontend/src/features/workbench/batchWorkbench.test.ts`, `frontend/src/features/workbench/BatchWorkbenchView.vue`, `frontend/src/features/workbench/BatchWorkbenchView.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep batch filters as derived visibility over the frozen item list; only explicit user sorting should mutate review order.
+  - Preserve the current detail independently when its card is filtered out, and retain list scroll positions keyed by the complete filter combination.
+  - Verification passed: frontend typecheck/lint/unit (35 targeted tests)/build, Chromium browser suite (161 passed), Python compileall, full pytest (1797 passed), and `git diff --check`.
+---
+
+## 2026-09-12 14:42:39 Asia/Shanghai - US-286
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Converted the batch results into a responsive left-card/right-detail review layout. The first result is selected for continuous review, clicking a card changes only the current detail, and checkbox/delete/action controls stop propagation. The detail pane reuses `CandidateCollectionList` for FOUND items and the shared `BatchDraftPreviewPanel`/`AnimeDraftEditor` flow for drafts; blocked items show local non-selectable guidance.
+- Files changed: `frontend/src/features/workbench/BatchWorkbenchView.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep the detail pane mounted inside the result layout so 1/12/36 item batches share one continuous review surface and narrow viewports can stack it safely.
+  - The existing compatibility candidate popover remains available for legacy interaction tests while the authoritative candidate/detail view is the right-hand pane.
+- Verification passed: Python compileall, full pytest (1797 passed), frontend typecheck/lint/unit (352 passed)/build, and batch Chromium suite (14 passed).
+---
+
+## 2026-09-12 14:56:00 Asia/Shanghai - US-288
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added next-exception navigation with wraparound, temporary reveal for filtered targets, polite focus announcements, arrow-key card navigation, Enter primary activation, and reduced-motion-aware card focusing. Added targeted reducer/helper and workbench interaction coverage.
+- Files changed: frontend/src/features/workbench/batchWorkbench.ts, frontend/src/features/workbench/BatchWorkbenchView.vue, frontend/src/features/workbench/BatchWorkbenchView.test.ts, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Keep keyboard navigation derived from visible/frozen item collections so filters never mutate review identity or selection.
+  - DOM focus helpers need guards for browser APIs absent in jsdom (matchMedia, scrollIntoView) while preserving real Chromium behavior.
+- Verification passed: frontend typecheck/lint/targeted unit (37 passed)/build, Chromium browser suite (161 passed), Python compileall, full pytest (1797 passed), and git diff --check.
+---
+
+## 2026-09-12 15:04:00 Asia/Shanghai - US-289
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Moved batch draft-session ownership into the route-local batch workbench and injected the same session into the shared AnimeDraftEditor detail panel. Added card-level subtitle-group quick editing through generated preview-modify with per-item applying/error/retry state, pending selection retention, revision-safe snapshot updates, and safe shared error display.
+- Files changed: frontend/src/features/workbench/BatchWorkbenchView.vue, frontend/src/features/workbench/BatchDraftPreviewPanel.vue, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+   - Keep one `useDraftSession` per batch item in the workbench; pass it to every editing surface so card shortcuts and detail forms share CAS revision, dirty, retry, and invalidation state.
+   - US-290 uses generated save-confirm descriptors with route-local keys; old preview-save/accept UI assertions need migration.
+  - Preserve a card shortcut's pending value separately from the server snapshot until preview-modify succeeds; this keeps failed edits visible without treating them as authoritative resources.
+- Verification passed: frontend typecheck/lint/unit (357 passed)/build, Chromium browser suite (161 passed), Python compileall, full pytest (1797 passed), and git diff --check.
+---
+
+## 2026-09-12 15:29:00 Asia/Shanghai - US-291
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added per-card saved-but-unconfirmed recovery for valid `save_confirm_failed` outcomes, using only public `request_id` data. Recovery retries call generated `acceptRequest` exactly once per explicit action, verify uncertain outcomes through read-only `listTrackingItems`, match tracking records by exact `request_id`, and expose safe retry-location/open-tracking actions without repeating batch save-confirm.
+- Files changed: `frontend/src/features/workbench/BatchWorkbenchView.vue`, `frontend/src/features/workbench/batchWorkbench.ts`, `frontend/src/features/workbench/BatchWorkbenchView.test.ts`, `tests/browser/test_app_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch save-confirm result items carry the authoritative public `request_id`/`tracking_id`; preserve those on the card because draft capabilities must be consumed after persistence.
+  - Tracking recovery must use the generated list projection and exact request-id matching; never derive a tracking id or retry accept after an uncertain response without a read-only check.
+- Existing batch browser fixtures still targeted the retired `/accept` endpoint; keep them aligned with the generated `/save-confirm` contract when extending the journey.
+- Verification passed: frontend typecheck, lint, unit tests (360 passed), production build, Python compileall, full pytest including real Chromium (1797 passed), and batch Chromium suite (14 passed).
+---
+
+## 2026-09-12 15:43:58 Asia/Shanghai - US-292
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Removed the unused batch `BatchDraftPreviewPanel` compatibility wrapper and its legacy batch accept/preview-save helper paths. The batch detail now renders the shared `AnimeDraftEditor` directly against the workbench-owned `useDraftSession`, preserving apply/retry/reset, batch selection, deletion, expiry recovery, and generated `saveConfirmBatchItems` as the only new batch save path. Added batch route leave protection for candidates, selections, draft capabilities, dirty edits, and in-flight operations, with confirmed navigation cleanup; same-path query updates no longer trigger the guard.
+- Files changed: `frontend/src/features/workbench/BatchWorkbenchView.vue`, `frontend/src/features/workbench/BatchDraftPreviewPanel.vue` (deleted), `frontend/src/features/workbench/batchWorkbench.ts`, `frontend/src/features/workbench/BatchWorkbenchView.test.ts`, `frontend/src/features/workbench/batchWorkbench.test.ts`, `frontend/src/app/composables/useLeaveGuard.ts`, `tests/browser/test_app_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Query-only URL synchronization is part of the current SPA surface and must not invoke a route-local discard confirmation; compare route paths in shared leave guards.
+  - The batch workbench should own the shared editor/session directly so save-confirm cleanup and leave protection can inspect the same in-memory capabilities.
+- Verification passed: frontend typecheck, lint, unit tests (355 passed), production build, targeted Chromium batch/accessibility tests (50 passed), Python compileall, full pytest (1797 passed), and `git diff --check`.
+---
+
+## 2026-09-12 15:51:00 Asia/Shanghai - US-293
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Completed the Stage 36 final gate and handoff documentation. Recorded all story completion, AC evidence mapping, visual-direction deviations, security/contract boundaries, Ralph archive location, and the F-E/F-F/F-G follow-up ownership.
+- Files changed: `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`, `docs/MiGuOrca_main_PRD.md`, `docs/backlog.md`, `docs/frontend-ux-refactor-work-goals.md`, `docs/modules/M13-web-ui-PRD.md`, `README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Stage closeout must synchronize the stage PRD, main PRD, backlog, UX goals, M13 module status, README, and archived Ralph state.
+  - F-E owns saved-Request SafeInfo, F-F owns formal tracking management, and F-G owns settings/release closeout; F-D must not expand into those scopes.
+- Verification passed: frontend api:check, typecheck, lint, 355 Vitest tests, build; Python compileall, Ruff, 1,636 non-browser pytest tests; real Chromium 161 tests; `git diff --check`.
+---
+
+## 2026-09-12 - Stage 36 independent review correction
+- 生产批量工作台接入响应式 `useBatchReviewJourney`：journey 负责当前项、冻结审核顺序和勾选意图；每项 `useDraftSession` 负责 draft capability、revision、dirty/applying/error/invalid；组件以 API 白名单快照渲染，不再使用 reducer-only 测试冒充生产状态。
+- 统一 `itemConfirmability` 作为卡片勾选、详情加入、全选、已选计数和 save-confirm 发送前的资格闸门，覆盖脏编辑、重算中、修改失败、无有效资源、非法草案版本及响应待核验。
+- 批量响应未知时冻结完整 item 顺序、draft/revision、幂等键、item_ids 和 storage profile，请求重试复用同一 body；已知草案失效消费 capability 并回到候选，成功项消费 session/key/选择并保留安全 handoff。
+- 真实 Chromium 定向验证覆盖右侧候选、紧凑双栏/操作栏、批量安全错误和可见范围选择；前端单元 27 passed，Chromium 两个 Stage 36 文件 50 passed。
+---
+
+## 2026-09-12 - Stage 36 state-consistency review correction
+- 确定性 save-confirm 结果统一正规化为安全错误，再结束参与条目的 `saving` 与 journey busy；缺失、重复、未知或部分 results 不再遗留保存中状态。`save_confirm_failed` 仅在 `SAVED_CONFIRM_FAILED`、合法公开 request_id 和 `ACCEPT_SAVED_REQUEST` 同时满足时进入恢复态。
+- 草案失效使用 `invalidate_draft` 回到候选/阻断并保留原条目；成功、saved-pending、普通失败和冻结操作重试均同步组件快照、journey phase、session、选择与幂等键。`response_unknown` 重试复用冻结的完整请求体。
+- 解析在保存发送或结果待核验期间被明确阻断；草案生成与保存分别使用逐项生成锁和参与项保存锁，未参与条目仍可操作。apply failed 的 retry/reset 进入显式状态转换。
+- 验证：`api:check`、typecheck、lint、build 均通过；定向 Vitest 3 文件 48 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 50 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---
+
+## 2026-09-12 - Stage 36 batch contract and frozen-operation correction
+- 批量 HTTP 200 逐项结果按生成 DTO 解析：`save_confirm_failed` 仅接受 `error_type=save_confirm_failed`、`outcome=failed` 和合法公开 `request_id`，不读取批量 DTO 不存在的 `retry_action`；单番 409 恢复结构仍由独立错误解析处理。
+- 删除组件侧第二份 save key，实际请求 descriptor、journey 条目和 response-unknown 冻结重试共用 journey 持有的唯一幂等键。结果集合缺失、重复、未知 item_id 或字段畸形时不应用部分结果，保留原操作并仅允许相同 body 重试；确定性草案失效回到候选并消费旧 capability。
+- 补齐 saved-confirm/tracking 的 journey 同步，并将保存/响应未知期间的批量输入与解析按钮置为禁用；浏览器 mock 同步到真实 `results` DTO 结构。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 3 文件 48 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 50 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---
+
+## 2026-09-12 - Stage 36 deterministic retry and result-semantics correction
+- 确定性保存失败回到可重试 draft：释放旧幂等键并清除安全错误，下一次用户明确保存才生成新 key；response_unknown 仍冻结原 key 和完整请求体。409/type=conflict 保持确定性失败，不进入相同操作重试。
+- 严格校验批量 200 结果集合及逐项 outcome/公开标识/错误字段；未知 outcome、缺失或非法身份、失败缺 error_type、成功缺 request_id 等均不应用部分结果，继续 response_unknown。冻结重试返回草案失效类结果时同步回到候选并允许重新生成。
+- 补齐 accept/tracking 的 journey phase 同步：核验失败进入 response_unknown、未找到回到 saved_pending_confirm、定位成功进入 confirmed；新增 12 部/36 部真实内容布局及 200% 等效缩放 Chromium 覆盖。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 53 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 52 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---
+
+## 2026-09-12 - Stage 36 final result and recovery correction
+- 批量 failed 结果不再依赖易漂移的前端错误类型白名单：只要求受限非空 error_type，普通失败安全映射为固定文案；`save_confirm_failed` 仍严格要求合法公开 request_id；支持契约内 `SKIPPED/duplicate_item`，结构畸形才进入 response_unknown。
+- 新增 invalid_request_status、unexpected_error、未知 error_type、非法恢复 ID 和 malformed outcome 覆盖；补齐 response_unknown accept 后 tracking failed/not_found/found 的组件状态测试，确认 batch save-confirm 不会重复调用。
+- 新增真实 Chromium saved-confirm 恢复场景，验证无 retry_action、只调用一次 batch save-confirm、随后按公开 request_id 调用 accept 与 tracking 查询；保留 12/36 部及 200% 等效缩放布局测试。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 58 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 53 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---
+
+## 2026-09-12 - Stage 36 final tracking verification correction
+- `invalid_request_status` 的 accept 恢复现在先按当前公开 request_id 只读核验 tracking；匹配到真实记录才进入 confirmed，核验失败进入 response_unknown 仅允许重试定位，明确未找到保留 saved_pending_confirm，禁止盲目再次 accept。
+- 批量 200 结果补齐 status/tracking_ready 类型及 confirmed 字段一致性校验；移除不可达的 SKIPPED 分支，发送前拒绝重复 participant，未知 error_type 的合法 failed 统一安全降级而不泄漏服务端内容。
+- 补充 409 恢复、其他 request_id 不匹配、tracking 查询失败、saved-confirm 真实 DTO 及幂等键/冻结 body 组件与 Chromium 覆盖。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 58 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 53 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---
+
+## 2026-09-12 - Stage 36 result branch exclusivity correction
+- `validateBatchSaveResult` 现在强制区分 CONFIRMED 与 FAILED：成功要求公开 request_id、合法 tracking_id、空错误字段；失败要求受限非空 error_type 且 status/tracking_id/tracking_ready 全为空。未知但结构合法的失败仍安全降级为确定性普通失败，分支矛盾才冻结操作。
+- 补充 accept `invalid_request_status` 后 tracking failed/not_found/found 组件覆盖，并确认恢复过程中 batch save-confirm 只调用一次；同步修正浏览器 DTO mock 的 FAILED nullable 字段。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 60 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 53 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---

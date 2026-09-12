@@ -1,50 +1,54 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import {
-  acceptFeedbackLabel,
-  acceptOutcomeAccepted,
-  batchAcceptNotification,
   batchCandidateSelectionIsBlocked,
   batchCardNeedsReview,
   batchCardPreferenceSummary,
   batchCardSeedSummary,
   batchCardTitle,
   batchItemCount,
+  batchItemIsException,
+  batchItemMatchesReviewFilters,
   batchStatusLabel,
-  buildBatchAcceptPayload,
+  batchSaveConfirmErrorLabel,
+  batchSaveConfirmRecoveryAllowed,
+  batchSaveConfirmSucceeded,
+  buildBatchSaveConfirmPayload,
   buildBatchCandidateCreatePayload,
   buildBatchParsePayload,
   canAcceptBatchCard,
   canChooseBatchCandidate,
   canExpandBatchCard,
-  collectBatchAcceptDescriptors,
-  postBatchAccept,
   queueItemSummary,
   queueStatusLabel,
+  orderBatchItemsForReview,
   validateBatchRawInput,
   type BatchItem,
 } from '@/features/workbench/batchWorkbench'
 
-vi.mock('@/api/client', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-    put: vi.fn(),
-    patch: vi.fn(),
-    delete: vi.fn(),
-    poster: vi.fn(),
-  },
-  toApiError: (error: unknown) =>
-    error && typeof error === 'object' && 'type' in error
-      ? (error as { type: string; message: string })
-      : { type: 'request_error', message: '请求失败，请重试' },
-  isApiError: () => false,
-  apiRequest: vi.fn(),
-}))
+describe('batch save-confirm contract (US-290)', () => {
+  it('sends only generated capability descriptors and relative storage profile', () => {
+    expect(buildBatchSaveConfirmPayload([
+      { item_id: 'item-2', draft_id: 'draft-2', base_revision: 4, idempotency_key: 'key-2' },
+    ], ['item-2'], 'profile')).toEqual({
+      items: [{ item_id: 'item-2', draft_id: 'draft-2', base_revision: 4, idempotency_key: 'key-2' }],
+      item_ids: ['item-2'],
+      storage_dir: 'profile',
+    })
+  })
 
-const apiPost = vi.mocked(api.post)
+  it('recognizes confirmed results and maps only stable errors to safe copy', () => {
+    expect(batchSaveConfirmSucceeded({ outcome: 'CONFIRMED', request_id: 'req-ok', tracking_id: null, status: null } as never)).toBe(true)
+    expect(batchSaveConfirmSucceeded({ outcome: 'CONFIRMED', request_id: null, tracking_id: null, status: 'CONFIRMED' } as never)).toBe(false)
+    expect(batchSaveConfirmSucceeded({ outcome: 'failed', status: 'FAILED' } as never)).toBe(false)
+    expect(batchSaveConfirmErrorLabel({ outcome: 'failed', error_type: 'save_confirm_failed' } as never)).toContain('确认未完成')
+    expect(batchSaveConfirmErrorLabel({ outcome: 'failed', error_type: 'private_backend_detail' } as never)).toBe('保存确认失败，请重试。')
+    expect(batchSaveConfirmRecoveryAllowed({ outcome: 'failed', error_type: 'save_confirm_failed', request_id: 'req-saved' } as never)).toBe(true)
+    expect(batchSaveConfirmRecoveryAllowed({ outcome: 'SAVED_CONFIRM_FAILED', error_type: 'save_confirm_failed', request_id: 'req-saved' } as never)).toBe(false)
+    expect(batchSaveConfirmRecoveryAllowed({ outcome: 'failed', error_type: 'save_confirm_failed', request_id: 'https://private.invalid' } as never)).toBe(false)
+  })
+})
 
 type ParseResult = NonNullable<
   operations['parseBatchTitles']['responses']['200']['content']['application/json']['result']
@@ -102,10 +106,6 @@ function parseResult(overrides: Partial<Record<string, unknown>> = {}): ParseRes
 }
 
 describe('batchWorkbench helpers (US-205)', () => {
-  beforeEach(() => {
-    apiPost.mockReset()
-  })
-
   it('maps batch status codes to Chinese labels', () => {
     expect(batchStatusLabel('FOUND')).toBe('找到候选')
     expect(batchStatusLabel('EMPTY')).toBe('未找到候选')
@@ -116,10 +116,33 @@ describe('batchWorkbench helpers (US-205)', () => {
   })
 
   it('validates the batch raw input before calling the API', () => {
-    expect(validateBatchRawInput('')).toBe('批量获取前必须输入至少一个番剧名称。')
-    expect(validateBatchRawInput('   ')).toBe('批量获取前必须输入至少一个番剧名称。')
+    expect(validateBatchRawInput('')).toContain('0 部')
+    expect(validateBatchRawInput('   ')).toContain('0 部')
     expect(validateBatchRawInput('萌王S4')).toBeNull()
     expect(batchItemCount('萌王S4\n\n路哥S4')).toBe(2)
+    expect(validateBatchRawInput(Array.from({ length: 37 }, (_, index) => `番剧${index}`).join('\n'))).toContain('37 部')
+    expect(validateBatchRawInput(Array.from({ length: 36 }, (_, index) => `番剧${index}`).join('\n'))).toBeNull()
+  })
+
+  it('orders blocking and review items first while preserving each input group order', () => {
+    const ordered = orderBatchItemsForReview([
+      batchItem({ item_id: 'normal-1', status: 'FOUND' }),
+      batchItem({ item_id: 'review', status: 'FOUND', needs_user_review: true }),
+      batchItem({ item_id: 'failed', status: 'FAILED' }),
+      batchItem({ item_id: 'empty', status: 'EMPTY' }),
+      batchItem({ item_id: 'normal-2', status: 'DRAFT' }),
+    ])
+    expect(ordered.map((item) => item.item_id)).toEqual(['failed', 'empty', 'review', 'normal-1', 'normal-2'])
+  })
+
+  it('matches additive title, status, and exception filters without changing item identity', () => {
+    const failed = batchItem({ item_id: 'failed', status: 'FAILED', raw_title: '路哥' })
+    const normal = batchItem({ item_id: 'normal', status: 'DRAFT', raw_title: '萌王' })
+    expect(batchItemIsException(failed)).toBe(true)
+    expect(batchItemIsException(normal)).toBe(false)
+    expect(batchItemMatchesReviewFilters(failed, { query: '路', status: 'FAILED', exceptionsOnly: true })).toBe(true)
+    expect(batchItemMatchesReviewFilters(normal, { query: '路', status: '', exceptionsOnly: false })).toBe(false)
+    expect(batchItemMatchesReviewFilters(failed, { query: '', status: 'DRAFT', exceptionsOnly: true })).toBe(false)
   })
 
   it('builds the parse payload with only input + storage context', () => {
@@ -191,61 +214,6 @@ describe('batchWorkbench helpers (US-205)', () => {
     )
     expect(queueItemSummary({ last_error: '连接失败' } as never)).toBe('错误：连接失败')
     expect(queueItemSummary({} as never)).toBe('尚无结果摘要')
-  })
-
-  it('collects public accept descriptors from saved/preview requests', () => {
-    const descriptors = collectBatchAcceptDescriptors([
-      batchItem({ status: 'DRAFT', preview_request: previewRequest('req-a') }),
-      batchItem({ item_id: 'item-2', preview_request: null }),
-    ])
-    expect(descriptors).toEqual([
-      { item_id: 'item-1', request_id: 'req-a', title: '关于我转生变成史莱姆这档事 第四季' },
-      { item_id: 'item-2', request_id: null, title: '关于我转生变成史莱姆这档事 第四季' },
-    ])
-  })
-
-  it('builds the accept payload with optional item_ids', () => {
-    const descriptors = [{ item_id: 'item-1', request_id: 'req-1', title: '标题' }]
-    expect(buildBatchAcceptPayload(descriptors, ['item-1'], 'storage')).toEqual({
-      items: [{ item_id: 'item-1', request_id: 'req-1', title: '标题' }],
-      storage_dir: 'storage',
-      item_ids: ['item-1'],
-    })
-    expect(buildBatchAcceptPayload(descriptors, null, null)).toEqual({
-      items: [{ item_id: 'item-1', request_id: 'req-1', title: '标题' }],
-      storage_dir: null,
-    })
-  })
-
-  it('posts the accept request through the shared transport', async () => {
-    apiPost.mockResolvedValue({ batch_id: 'batch-1', queue: { items: [] }, items: [], summary: {} })
-    await postBatchAccept('batch-1', { items: [] })
-    expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/{batch_id}/accept', {
-      path: { batch_id: 'batch-1' },
-      body: { items: [] },
-    })
-  })
-
-  it('classifies accept outcomes and feedback labels', () => {
-    expect(acceptOutcomeAccepted({ status: 'accepted' })).toBe(true)
-    expect(acceptOutcomeAccepted({ status: 'already_accepted' })).toBe(true)
-    expect(acceptOutcomeAccepted({ status: 'unacceptable' })).toBe(false)
-    expect(acceptFeedbackLabel('failed')).toBe('接受失败：')
-    expect(acceptFeedbackLabel('unacceptable')).toBe('无法接受：')
-  })
-
-  it('builds the accept notification copy (single and batch)', () => {
-    expect(batchAcceptNotification({ accepted: 1, already_accepted: 0, unacceptable: 0, failed: 0 }, false)).toEqual({
-      kind: 'success',
-      title: '批量接受成功',
-      message: '已接受 1 项',
-    })
-    expect(
-      batchAcceptNotification({ accepted: 0, already_accepted: 0, unacceptable: 1, failed: 0 }, true),
-    ).toMatchObject({ kind: 'error', title: '接受失败' })
-    expect(
-      batchAcceptNotification({ accepted: 1, already_accepted: 0, unacceptable: 1, failed: 0 }, false),
-    ).toMatchObject({ kind: 'success', title: '批量接受完成' })
   })
 
   it('blocks candidate selection for conflicts and unconfirmed seasons', () => {
