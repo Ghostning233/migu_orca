@@ -23,6 +23,7 @@ import {
   postBatchAccept,
   queueItemSummary,
   queueStatusLabel,
+  orderBatchItemsForReview,
   validateBatchRawInput,
   type BatchItem,
 } from '@/features/workbench/batchWorkbench'
@@ -116,10 +117,23 @@ describe('batchWorkbench helpers (US-205)', () => {
   })
 
   it('validates the batch raw input before calling the API', () => {
-    expect(validateBatchRawInput('')).toBe('批量获取前必须输入至少一个番剧名称。')
-    expect(validateBatchRawInput('   ')).toBe('批量获取前必须输入至少一个番剧名称。')
+    expect(validateBatchRawInput('')).toContain('0 部')
+    expect(validateBatchRawInput('   ')).toContain('0 部')
     expect(validateBatchRawInput('萌王S4')).toBeNull()
     expect(batchItemCount('萌王S4\n\n路哥S4')).toBe(2)
+    expect(validateBatchRawInput(Array.from({ length: 37 }, (_, index) => `番剧${index}`).join('\n'))).toContain('37 部')
+    expect(validateBatchRawInput(Array.from({ length: 36 }, (_, index) => `番剧${index}`).join('\n'))).toBeNull()
+  })
+
+  it('orders blocking and review items first while preserving each input group order', () => {
+    const ordered = orderBatchItemsForReview([
+      batchItem({ item_id: 'normal-1', status: 'FOUND' }),
+      batchItem({ item_id: 'review', status: 'FOUND', needs_user_review: true }),
+      batchItem({ item_id: 'failed', status: 'FAILED' }),
+      batchItem({ item_id: 'empty', status: 'EMPTY' }),
+      batchItem({ item_id: 'normal-2', status: 'DRAFT' }),
+    ])
+    expect(ordered.map((item) => item.item_id)).toEqual(['failed', 'empty', 'review', 'normal-1', 'normal-2'])
   })
 
   it('builds the parse payload with only input + storage context', () => {

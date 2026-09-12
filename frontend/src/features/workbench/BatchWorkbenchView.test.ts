@@ -168,7 +168,19 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     await nextTick()
 
     expect(apiPost).not.toHaveBeenCalled()
-    expect(wrapper.find('#batch-parse-error').text()).toContain('批量获取前必须输入至少一个番剧名称')
+    expect(wrapper.find('#batch-parse-error').text()).toContain('0 部')
+  })
+
+  it('blocks batches above 36 normalized non-empty lines without changing the raw input', async () => {
+    const { wrapper } = await mountBatch()
+    const rawInput = Array.from({ length: 37 }, (_, index) => `番剧${index}`).join('\n')
+    await wrapper.find('#batch-raw-input').setValue(rawInput)
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await nextTick()
+
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.find('#batch-parse-error').text()).toContain('37 部')
+    expect((wrapper.find('#batch-raw-input').element as HTMLTextAreaElement).value).toBe(rawInput)
   })
 
   it('parses multi-line input into independent cards with statuses', async () => {
@@ -192,11 +204,22 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     })
     const cards = wrapper.findAll('.batch-draft-card')
     expect(cards).toHaveLength(3)
-    expect(cards[0]!.text()).toContain('找到候选')
-    expect(cards[1]!.text()).toContain('未找到候选')
-    expect(cards[2]!.text()).toContain('搜索失败')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-found"]').text()).toContain('找到候选')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-empty"]').text()).toContain('未找到候选')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-failed"]').text()).toContain('搜索失败')
     // The raw error_type never reaches the DOM.
     expect(wrapper.text()).not.toContain('mikan_http_failed')
+  })
+
+  it('shows completion progress and marks a single parsed item current', async () => {
+    apiPost.mockResolvedValue(parseResult())
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#batch-parse-progress').text()).toContain('1 / 1 部')
+    expect(wrapper.find('.batch-draft-card').classes()).toContain('is-current')
   })
 
   it('shows a loading message with the item count and a safe error on failure', async () => {

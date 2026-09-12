@@ -202,8 +202,12 @@ export function queueItemSummary(item: QueueItem): string {
 
 /** Validate the batch raw input before calling the parse API. */
 export function validateBatchRawInput(rawInput: string): string | null {
-  if (!rawInput.trim()) {
-    return '批量获取前必须输入至少一个番剧名称。'
+  const count = batchItemCount(rawInput)
+  if (count === 0) {
+    return '批量获取前必须输入至少一个番剧名称；当前为 0 部，请输入 1～36 部后再获取。'
+  }
+  if (count > 36) {
+    return `批量输入包含 ${count} 部番剧，超过单批上限 36 部；请减少后再获取。`
   }
   return null
 }
@@ -211,6 +215,17 @@ export function validateBatchRawInput(rawInput: string): string | null {
 /** Count the non-empty lines of a batch input (used in the loading message). */
 export function batchItemCount(rawInput: string): number {
   return rawInput.split(/\r?\n/).filter((line) => line.trim()).length
+}
+
+/** Keep blocking failures first, then review items, then normal items. */
+export function orderBatchItemsForReview(items: BatchItem[]): BatchItem[] {
+  const groups: BatchItem[][] = [[], [], []]
+  for (const item of items) {
+    const status = String(item.status ?? '')
+    const group = status === 'FAILED' || status === 'EMPTY' ? 0 : item.needs_user_review === true ? 1 : 2
+    groups[group]!.push(item)
+  }
+  return groups.flat()
 }
 
 /** Build the batch parse request payload (only user input + storage context). */

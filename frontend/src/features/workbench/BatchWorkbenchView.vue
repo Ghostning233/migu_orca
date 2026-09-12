@@ -59,6 +59,7 @@ import {
   canChooseBatchCandidate,
   canExpandBatchCard,
   collectBatchAcceptDescriptors,
+  orderBatchItemsForReview,
   postBatchAccept,
   queueStatusLabel,
   validateBatchRawInput,
@@ -100,6 +101,9 @@ const parseResult = ref<BatchParseResult | null>(null)
 const items = ref<BatchItem[]>([])
 const batchId = ref('')
 const loadingMessage = ref('')
+const parseCount = ref(0)
+const currentItemId = ref<string | null>(null)
+const inputItemOrder = ref<Map<string, number>>(new Map())
 
 // Selection / accept state.
 const selectedItemIds = ref<Set<string>>(new Set())
@@ -160,18 +164,24 @@ async function parseBatch(): Promise<void> {
   parseError.value = ''
   parseLoading.value = true
   const count = batchItemCount(rawInput.value)
-  loadingMessage.value = `正在搜索 ${count} 个批量条目的 MiKan 候选`
+  parseCount.value = count
+  loadingMessage.value = `正在搜索 ${count} 个批量条目的 MiKan 候选（解析进度：0 / ${count} 部）`
   try {
     const payload = buildBatchParsePayload(rawInput.value, currentStorageDir())
     const result = await api.post<BatchParseResult>('/api/v1/batches/parse', { body: payload })
     parseResult.value = result
-    items.value = result.items ?? []
+    const parsedItems = result.items ?? []
+    inputItemOrder.value = new Map(
+      parsedItems.map((item, index) => [item.item_id ?? '', index]),
+    )
+    items.value = orderBatchItemsForReview(parsedItems)
     batchId.value = result.batch_id ?? ''
     syncBatchIdToUrl(batchId.value)
     selectedItemIds.value = new Set()
     acceptInFlight.value = false
     activeCandidateItemId.value = null
     detailItemId.value = null
+    currentItemId.value = items.value.length === 1 ? items.value[0]?.item_id ?? null : null
     acceptFeedback.value = {}
     seasonConfirmations.value = {}
     queueItems.value = []
@@ -345,7 +355,11 @@ async function submitBatchAccept(rows: BatchItem[], options: { single?: boolean;
   }
   acceptInFlight.value = true
   try {
-    const descriptors = collectBatchAcceptDescriptors(rows)
+    const descriptors = collectBatchAcceptDescriptors(rows).sort(
+      (left, right) =>
+        (inputItemOrder.value.get(left.item_id) ?? Number.MAX_SAFE_INTEGER) -
+        (inputItemOrder.value.get(right.item_id) ?? Number.MAX_SAFE_INTEGER),
+    )
     if (!descriptors.length) {
       notification.error('接受失败', '没有可接受的批量卡片。')
       return
@@ -503,6 +517,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               v-for="item in items"
               :key="item.item_id ?? item.raw_title ?? ''"
               class="batch-draft-card"
+              :class="{ 'is-current': currentItemId === item.item_id }"
               :data-item-id="item.item_id ?? ''"
               role="listitem"
             >
@@ -604,6 +619,10 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
           </div>
         </div>
 
+        <p id="batch-parse-progress" class="batch-parse-progress" role="status">
+          解析完成：{{ items.length }} / {{ parseCount }} 部；异常条目已置顶，条目顺序已固定。
+        </p>
+
         <BatchCandidatePopover
           v-if="activeItem && canChooseBatchCandidate(activeItem)"
           :title="batchCardTitle(activeItem)"
@@ -695,6 +714,12 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
   padding-right: 2px;
 }
 
+.batch-parse-progress {
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  margin: 0;
+}
+
 .batch-card-grid {
   display: grid;
   gap: 12px;
@@ -712,6 +737,11 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
   min-width: 0;
   padding: 10px;
   position: relative;
+}
+
+.batch-draft-card.is-current {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent);
 }
 
 .batch-card-poster {

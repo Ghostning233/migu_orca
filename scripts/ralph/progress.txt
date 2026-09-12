@@ -20,3 +20,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Selection must remain usable independently from current detail, and response-unknown save states must retain the same per-item idempotency key for explicit retry.
 - Verification passed: targeted Vitest (4 passed), frontend typecheck, lint, production build, Python compileall, and `git diff --check`.
 ---
+
+## 2026-09-12 14:37:25 Asia/Shanghai - US-285
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added normalized non-empty-line capacity validation for 1–36 batch entries, preserving the original textarea value and blocking parse API calls for 0 or over-limit input. Added visible parse progress/count copy, deterministic exception-first review ordering with stable within-group order, and automatic current-card marking for a single parsed item.
+- Files changed: `frontend/src/features/workbench/batchWorkbench.ts`, `frontend/src/features/workbench/BatchWorkbenchView.vue`, `frontend/src/features/workbench/batchWorkbench.test.ts`, `frontend/src/features/workbench/BatchWorkbenchView.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep the visual review order separate from the original input order; accept payload descriptors still follow input order for compatibility.
+  - Capacity validation must count only trimmed, non-empty lines while sending the untouched raw input to the generated parse endpoint.
+  - Browser validation requires the built `frontend/dist` and a clean `.migu_orca/storage` directory.
+- Verification passed: Python compileall, full pytest (1797 passed), frontend typecheck/lint/unit (352 passed)/build, and batch Chromium suite (14 passed).
+---
