@@ -24,3 +24,14 @@ Thread: https://codex.openai.com/threads/current
   - Request 列表摘要由 request_controller.summarize_request 直接构造，OpenAPI 变更后必须运行 openapi_gen 与 frontend api:generate。
   - updated_at 仅接受可解析 ISO 时间文本，候选计数字段统一使用 resource 命名且不包含 rss_url。
 ---
+
+## [2026-09-12 22:32:00 CST] - US-295
+Thread: https://codex.openai.com/threads/current
+- 新增 API-free plansProjection 纯函数层，投影 generated Request/Tracking 列表类型。
+- 实现合法 updated_at 稳定倒序、标题/字幕组公开字段搜索、Request 状态筛选及唯一 request_id tracking 关联。
+- 对重复/缺失/EXTERNAL_ONLY/非法 tracking_id 固定安全降级，不读取 tracking available_actions。
+- 定向验证：plansProjection Vitest 5 passed；frontend typecheck passed。
+- **Learnings for future iterations:**
+  - 方案行只持有 generated Request summary 与可空 tracking association；tracking 状态标签优先服务端 status_label，未知值固定中文降级。
+  - 稳定排序需要显式保留原索引，Date.parse 无效或缺失项统一置后。
+---
