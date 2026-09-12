@@ -24,13 +24,14 @@ vi.mock('@/api/client', () => ({
   },
   toApiError: (error: unknown) =>
     error && typeof error === 'object' && 'type' in error
-      ? (error as { type: string; message: string })
+      ? (error as { type: string; message: string; details?: Record<string, unknown> })
       : { type: 'request_error', message: '请求失败，请重试' },
   isApiError: () => false,
   apiRequest: vi.fn(),
 }))
 
 const apiPost = vi.mocked(api.post)
+const apiGet = vi.mocked(api.get)
 
 type CandidateResult = NonNullable<
   operations['searchMikanCandidates']['responses']['200']['content']['application/json']['result']
@@ -151,6 +152,7 @@ describe('WorkbenchView single search (US-204)', () => {
   beforeEach(() => {
     localStorage.clear()
     apiPost.mockReset()
+    apiGet.mockReset()
   })
 
   it('shows the empty search state and validates the query before calling the API', async () => {
@@ -593,6 +595,47 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
     expect(apiPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers a saved-but-unconfirmed request with accept and locates tracking safely', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockRejectedValueOnce({
+        type: 'save_confirm_failed',
+        message: '不要渲染此服务端消息',
+        details: { details: { request_id: 'saved-request-1', retry_action: 'ACCEPT_SAVED_REQUEST', secret: 'hidden' } },
+      })
+      .mockResolvedValueOnce({ request: { request_id: 'saved-request-1' } } as never)
+    apiGet.mockResolvedValueOnce({
+      items: [
+        { tracking_id: 'tracking-from-server', request_id: 'saved-request-1' },
+        { tracking_id: 'wrong-item', request_id: 'another-request' },
+      ],
+    } as never)
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+    await wrapper.find('#single-review-save-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#single-review-retry-accept').exists()).toBe(true)
+    expect(wrapper.text()).toContain('不会重复保存')
+    expect(wrapper.text()).not.toContain('不要渲染此服务端消息')
+
+    await wrapper.find('#single-review-retry-accept').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenLastCalledWith('/api/v1/requests/{request_id}/accept', expect.objectContaining({
+      path: { request_id: 'saved-request-1' },
+      body: { storage_dir: null },
+    }))
+    expect(apiGet).toHaveBeenCalledWith('/api/v1/tracking/items', { query: {} })
+    expect(wrapper.find('#single-review-tracking-success').text()).toContain('已定位')
   })
 
   it('shows a safe error and keeps the search state when generation fails', async () => {

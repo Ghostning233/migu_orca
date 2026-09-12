@@ -11,6 +11,7 @@ Started: Sat Sep 12 09:03:14 CST 2026
 - The single-anime review host owns the in-memory draft session and step navigation; save/confirm transport stays outside the shared editor until its dedicated story.
 - The application shell owns the first direct-load keyboard stop (skip link); feature views only autofocus when mounted outside the shell.
 - Atomic single-anime save-confirm hosts submit only generated capability fields plus a request-scoped idempotency key; the shared draft session is invalidated immediately after a confirmed handoff.
+- Saved-confirm recovery must treat accept status conflicts as possibly completed: verify the read-only tracking list by the saved request_id before allowing any further action.
 
 ## 2026-09-12 09:08:00 Asia/Shanghai - US-275
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -50,4 +51,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The save-confirm host must read the latest draft capability and revision from `useDraftSession`; the generated endpoint does not accept or need a Request snapshot.
   - Save-confirm success is a local handoff boundary: consume the draft session and wait for the later tracking story instead of calling accept or external subscription APIs.
 - Verification passed: frontend api check, typecheck, lint, 336 unit tests, build, 20 targeted Chromium tests, Python compileall, 1795 backend tests, and git diff --check.
+
+## 2026-09-12 09:36:00 Asia/Shanghai - US-279
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added saved-confirm failure recovery in the single-anime review host. Allowlisted saved request details transition to a retry-only state, clear the draft capability and save idempotency key, call generated acceptRequest exactly once per in-flight operation, and verify the resulting tracking record through listTrackingItems using the saved request_id. Status conflicts perform read-only verification before any possible retry; tracking lookup failures remain recoverable without repeating accept or save-confirm. Added fixed safe recovery copy and focused component coverage.
+- Files changed: frontend/src/features/workbench/SingleAnimeReviewPanel.vue, frontend/src/features/workbench/WorkbenchView.test.ts, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - The accept endpoint needs the request_id as a path parameter and only receives the relative storage profile in its body.
+  - A tracking_id returned by any other response must not be inferred or trusted for handoff; match the safe tracking list projection by request_id.
+- Verification passed: frontend typecheck, lint, 336 unit tests, build, 20 targeted Chromium tests, Python compileall, full backend pytest, and git diff --check.
+---
 ---

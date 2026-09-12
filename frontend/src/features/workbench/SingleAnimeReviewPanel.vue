@@ -5,7 +5,13 @@ import { computed, ref } from 'vue'
 
 import { api, toApiError } from '@/api/client'
 import { useDraftSession } from '@/app/composables/useDraftSession'
-import { useSingleAnimeJourney, type ConfirmRequestSaveBody, type ConfirmRequestSaveResult } from '@/app/composables/useSingleAnimeJourney'
+import {
+  useSingleAnimeJourney,
+  type AcceptRequestResult,
+  type ConfirmRequestSaveBody,
+  type ConfirmRequestSaveResult,
+  type TrackingItemsResult,
+} from '@/app/composables/useSingleAnimeJourney'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
@@ -38,6 +44,8 @@ const journey = useSingleAnimeJourney()
 const confirmLoading = ref(false)
 const confirmError = ref('')
 const confirmedRequestId = ref<string | null>(null)
+const acceptError = ref('')
+const trackingLocated = ref(false)
 
 journey.setCandidates(1)
 journey.transition('candidates')
@@ -65,6 +73,25 @@ function requestIdFrom(result: ConfirmRequestSaveResult): string | null {
   return typeof requestId === 'string' && requestId.length <= 128 ? requestId : null
 }
 
+function isAcceptStatusConflict(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' &&
+    ((error as { type?: unknown }).type === 'invalid_request_status' ||
+      (error as { type?: unknown }).type === 'conflict'))
+}
+
+async function locateTracking(requestId: string): Promise<boolean> {
+  try {
+    const result = await api.get<TrackingItemsResult>('/api/v1/tracking/items', { query: storageQuery() })
+    const item = result.items.find((candidate) => candidate.request_id === requestId)
+    if (!item || typeof item.tracking_id !== 'string' || !item.tracking_id) return false
+    journey.finishTracking(item.tracking_id)
+    trackingLocated.value = true
+    return true
+  } catch {
+    return false
+  }
+}
+
 async function saveAndConfirm(): Promise<void> {
   const key = journey.newConfirmOperation()
   const draft = session.draftId.value
@@ -90,6 +117,33 @@ async function saveAndConfirm(): Promise<void> {
     const safeError = toApiError(cause)
     journey.fail(safeError)
     confirmError.value = journey.state.error?.message ?? '保存并确认失败，请重试。'
+  } finally {
+    confirmLoading.value = false
+  }
+}
+
+async function retrySavedConfirmation(): Promise<void> {
+  const requestId = journey.state.requestId
+  if (!requestId || !journey.begin('accepting')) return
+  confirmLoading.value = true
+  acceptError.value = ''
+  trackingLocated.value = false
+  try {
+    await api.post<AcceptRequestResult>(`/api/v1/requests/{request_id}/accept`, {
+      path: { request_id: requestId },
+      body: { storage_dir: storageQuery().storage_dir ?? null },
+    })
+    if (!(await locateTracking(requestId))) {
+      journey.finishTracking()
+      acceptError.value = '方案已确认，但暂未定位到追番记录。可稍后重试定位。'
+      return
+    }
+  } catch (cause) {
+    // A status conflict may mean the first accept reached the server. Verify
+    // the read-only tracking projection before ever attempting accept again.
+    if (isAcceptStatusConflict(cause) && await locateTracking(requestId)) return
+    journey.fail(toApiError(cause))
+    acceptError.value = '确认未完成，请稍后重试。'
   } finally {
     confirmLoading.value = false
   }
@@ -169,9 +223,13 @@ defineExpose({ session, editor })
     <div id="request-detail-container">
       <p class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
       <div class="review-confirmation-block" aria-live="polite">
-        <BaseButton id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
-        <p v-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已确认，正在准备后续定位。</p>
+        <BaseButton v-if="journey.state.phase !== 'saved_pending_confirm'" id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
+        <BaseButton v-else id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>
+        <p v-if="trackingLocated" id="single-review-tracking-success" class="field-help" role="status">订阅方案已确认，并已定位到追番记录。</p>
+        <p v-else-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已确认，正在准备后续定位。</p>
+        <p v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-accept-recovery" class="field-help" role="status">订阅方案已保存但确认未完成，可直接重试确认；不会重复保存。</p>
         <p v-else-if="confirmError" id="single-review-save-error" class="field-error" role="alert">{{ confirmError }}</p>
+        <p v-if="acceptError" id="single-review-accept-error" class="field-error" role="alert">{{ acceptError }}</p>
         <p v-else id="single-review-save-blockers" class="field-help">保存并确认{{ blockingReasons.length ? `暂不可用：${blockingReasons.join('；')}` : '可用' }}。</p>
       </div>
 
