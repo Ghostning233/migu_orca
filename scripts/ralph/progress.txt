@@ -85,3 +85,12 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The shared ConfirmDialog already puts its cancel action first in the focus trap, matching the leave-protection requirement that “留在此页” receives default focus.
 - Verification: frontend API contract check, typecheck, lint, production build, full Chromium suite (160 passed), Python compileall, full backend pytest (1796 passed), and git diff --check passed. Full frontend unit run has two unrelated pre-existing TrackingView fixture failures because those tests mount QueueView without Pinia; the focused US-281/workbench suite passes.
 ---
+## 2026-09-12 09:58:00 Asia/Shanghai - US-282
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Removed the unreferenced single-anime `DraftPreviewPanel` compatibility adapter, eliminating its legacy `preview-save` path. Updated workbench comments to identify `SingleAnimeReviewPanel` as the atomic single-anime host and kept `BatchDraftPreviewPanel`'s preview-save flow unchanged. A source audit confirms single-anime workbench code has no `preview-save`/`previewSaveRequest` references.
+- Files changed: frontend/src/features/workbench/DraftPreviewPanel.vue (deleted), frontend/src/features/workbench/WorkbenchView.vue, frontend/src/features/workbench/BatchWorkbenchView.vue, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - The legacy preview-save adapter is no longer part of the single-anime route; preview-save references in the workbench feature are batch-only and must remain for batch compatibility.
+  - Verification baseline: focused workbench/batch unit tests and all Chromium/backend tests pass; the full frontend unit suite still has two pre-existing TrackingView mounts without Pinia.
+- Verification passed: frontend API check, typecheck, lint, production build, focused workbench/batch unit tests (35), full Chromium suite (160), Python compileall, full backend pytest (1796), and git diff --check. Full frontend unit suite remains at 339 passed / 2 pre-existing failures.
+---

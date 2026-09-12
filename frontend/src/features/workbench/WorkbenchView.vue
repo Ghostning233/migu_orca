@@ -11,7 +11,7 @@
 //      URL/ID form; both paths generate an unsaved server-authoritative draft
 //      (save_request=false) through POST /api/v1/requests;
 //   3. 订阅草案 preview — the returned draft_id + display snapshot render in
-//      DraftPreviewPanel (editable preview-modify + one-shot preview-save).
+//      SingleAnimeReviewPanel (editable preview-modify + atomic save-confirm).
 //
 // Security boundary (US-194): candidate context and draft_id exist only in
 // component memory — never in URL, browser storage, history or logs. No

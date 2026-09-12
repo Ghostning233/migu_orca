@@ -11,8 +11,8 @@
 //   - each FOUND card opens the shared candidate popover (reuses
 //     CandidateCard); choosing a candidate generates a server-authoritative
 //     draft (POST /api/v1/requests save_request=false) into the card;
-//   - DRAFT cards open the shared DraftPreviewPanel (preview-modify /
-//     preview-save) plus a batch-specific 接受当前批量草案 / 删除当前批量卡片
+//   - DRAFT cards open BatchDraftPreviewPanel (preview-modify / preview-save)
+//     plus a batch-specific 接受当前批量草案 / 删除当前批量卡片
 //     action row;
 //   - the accept toolbar offers select-all, a live selected count, 批量接受
 //     (selected) and 全接受 (all reviewable cards), each through the shared
