@@ -1,0 +1,148 @@
+# MiGuOrca Ralph Progress - Stage 34
+
+## Codebase Patterns
+
+- 正式执行 PRD：`docs/MiGuOrca_stage34_shared_review_core_PRD.md`；分支：
+  `ralph/stage34-shared-review-core`；stories：US-266～US-274。
+- 实现基线是 Stage 33 合入提交 `9f2e06b`。OpenAPI、generated client、Flask API 和
+  `docs/api/frontend-contract-handoff-v1.md` 是只读契约，不得由前端 story 临时修改。
+- 本阶段只实现 F-B：模式输入、候选列表、draft session、共享 `AnimeDraftEditor`、revision 与
+  兼容适配层；不得顺带开发 F-C～F-G。
+- `AnimeDraftEditor` 只允许 create/preview-modify 契约，绝不调用 preview-save、单番 save-confirm
+  或批量 save-confirm；旧 preview-save/accept 只能暂留在薄兼容适配层。
+- `getRequestSafeInfo` 只适用于已保存 Request，真实 `SafeInfoDialog` 已冻结延后到 F-E；不得为未保存
+  草案拼接、模拟或请求“全部信息”。
+- draft ID、revision、candidate context 只在 route/component-local 内存与单次 POST body，不进入
+  URL、DOM、storage、日志、通知、截图或 trace。
+- 普通失败保留最后一致资源结果和未应用输入；revision conflict 或草案失效则清除失效会话并要求
+  重新生成。旧响应不得覆盖较新 revision/快照。
+- 复用 Stage 33 Token、Base*、PanelSection、FormField、反馈组件和现有领域 helper，不创建 V2
+  平行组件、不手写 DTO。
+- 每轮只完成一个 story；每次 Ralph 严格最多 3 轮。完成 US-268、US-271 时必须停止并等待独立审核。
+- 普通 story 只跑定向 Vitest/typecheck/少量 Chromium；只有 US-274 运行一次完整门禁。UI story
+  必须使用 `dev-browser` skill 在真实 Chromium 验证。
+- 共享草案状态应从 generated `createRequest`/`previewModifyRequest` 类型提取别名；用本地请求序号
+  只允许最新 preview-modify 响应提交，失效错误先使 opaque capability 失效，普通错误保留最后一致快照。
+- 模式输入使用 `AnimeModeSwitch` 的 tab 语义与键盘激活；`AnimeTitleInput` 统一单行/批量输入，模式值、输入值和选择范围只保存在工作台组件内存。
+- 共享审核展示组件使用受控 props/事件边界；资源摘要只消费 `requestDetail` 的公开 helper 投影，绝不接收完整 Request 或敏感源字段。
+
+## Stage 34 Handoff
+
+- Stage 34（US-266～US-274）已完成并归档；后续 F-C～F-G 不属于本阶段。
+
+## 2026-09-10 22:56:00 Asia/Shanghai - US-266
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the component-local `useDraftSession` state machine with generated create/preview-modify contract aliases, atomic successful updates, latest-request sequencing, safe error normalization, invalid-draft invalidation, dirty tracking, retry, and reset behavior. Added focused tests for success, out-of-order responses, conflicts, and ordinary failures.
+- Files changed: `frontend/src/app/composables/useDraftSession.ts`, `frontend/src/app/composables/useDraftSession.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The existing transport returns safe `ApiError` objects; draft-session code can classify only stable error types and must not surface raw thrown values.
+  - `vue` refs expose generated object snapshots through proxies in tests, so snapshot assertions should use structural equality.
+  - Quality checks passed: compileall, 1793 backend tests, 308 frontend unit tests, typecheck, lint, build, API drift check, and git diff check.
+---
+
+
+
+## 2026-09-10 23:03:00 Asia/Shanghai - US-267
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the single/batch mode switch and unified title input. `/app/add` now defaults to single search, shows only the active mode, preserves independent input values and cursor selections, normalizes single-line input, auto-grows batch input, and keeps mode state out of URL and browser storage. Existing batch parsing remains on its established API path.
+- Files changed: `frontend/src/features/workbench/AnimeModeSwitch.vue`, `frontend/src/features/workbench/AnimeModeSwitch.test.ts`, `frontend/src/features/workbench/AnimeTitleInput.vue`, `frontend/src/features/workbench/AnimeTitleInput.test.ts`, `frontend/src/features/workbench/WorkbenchView.vue`, `frontend/src/features/workbench/BatchWorkbenchView.vue`, `tests/browser/test_app_mode_input.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The shared batch view can accept a component-local `rawInput` prop/update pair and hide its legacy input, allowing the parent workbench to own the unified input without changing batch API payload construction.
+  - Component refs to `BaseInput`/`BaseTextarea` expose a Vue component proxy; DOM selection and resize logic must resolve the proxy `$el` before using native input APIs.
+  - Quality checks passed: frontend typecheck, lint, targeted Vitest (30 tests), build, Python compileall, git diff check, and targeted Chromium mode/input test.
+---
+
+## 2026-09-10 23:12:00 Asia/Shanghai - US-268
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Extracted CandidateCollectionList as the shared single/batch candidate renderer, preserving explicit selection for zero/one/many candidates, shared season-confirmation and conflict blocking, and public-field-only rendering. Updated both the single workbench and batch candidate popover to use it.
+- Files changed: `frontend/src/features/workbench/CandidateCollectionList.vue`, `frontend/src/features/workbench/CandidateCollectionList.test.ts`, `frontend/src/features/workbench/WorkbenchView.vue`, `frontend/src/features/workbench/BatchCandidatePopover.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Candidate selection policy belongs in the shared list/card boundary; callers should provide only the in-memory confirmation map and handle create payloads/events.
+  - Quality checks passed: compileall, targeted frontend unit tests (23), typecheck, lint, build, and focused candidate/workbench Chromium tests (20).
+  - Full backend suite: 1780 passed; 14 pre-existing batch-browser failures still target legacy pre-US-267 selectors such as `#batch-parse-form` and `#batch-raw-input`.
+---
+
+## 2026-09-10 - Stage 34 review after US-268
+- 复核 Ralph 运行产生的批量浏览器失败：旧测试未激活 US-267 新增的批量模式，因而在默认单模式下等待批量控件超时。
+- 仅更新 `tests/browser/test_app_batch_workbench.py` 与 `tests/browser/test_app_responsive_a11y.py` 的模式切换前置步骤；未修改 OpenAPI、generated client、后端或 Stage 34 后续 story。
+- 定向批量浏览器测试、前端 typecheck、相关 Vitest 与 `git diff --check` 已通过。
+
+## 2026-09-10 - US-266～US-268 review fix
+- 修复 `useDraftSession` 的 applying/retry 生命周期：reset、invalidate、失效错误和旧请求结束均不会遗留 `applying=true`；成功、reset、invalidate 会清除 retry 能力，普通失败才允许 retry；并行 apply 在首个 revision 写入完成前明确拒绝。
+- 修复 US-267 模式隔离：批量模式不渲染单番 `DraftPreviewPanel` 或其 loading，切回单番仍保留 component-local 草案；批量输入由一份正确关联的 label/help 管理，并验证切换后的输入光标/选择范围恢复。
+- 文件范围：`frontend/src/app/composables/useDraftSession.ts` 及其测试、`frontend/src/features/workbench/WorkbenchView.vue` 及其测试、`frontend/src/features/workbench/BatchWorkbenchView.vue`、本 progress 记录；未进入 US-269，未修改 OpenAPI、generated client、后端或 SafeInfo。
+- 验证通过：指定 5 个 Vitest 文件 36 passed、typecheck、lint、build、`tests/browser/test_app_mode_input.py` 1 passed、`git diff --check`。
+
+## 2026-09-10 - US-266～US-268 follow-up review fix
+- `useDraftSession.reset()` 在 preview-modify 进行中明确 no-op，不递增请求序号、不释放 applying 锁；首个响应仍提交服务端返回的最新 snapshot/revision。`invalidate()` 继续立即清除 capability。
+- 新增回归证明：处理中 reset 后第二次 apply 不调用 API；首个响应更新 revision；请求结束后的普通失败可由 reset 清除 dirty、retry 和 error。
+- 未进入 US-269，未修改其他组件、OpenAPI、generated client 或后端。
+- 验证通过：`useDraftSession.test.ts` 4 passed、typecheck、lint、`git diff --check`。
+
+---
+
+## 2026-09-10 23:54:00 Asia/Shanghai - US-269
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Extracted controlled `SubtitleGroupSelect` and public-data-only `ResourceSummary` components from the draft detail panel. The summary reuses existing effective/excluded/complete helper projections, shows the fixed “已更新集数：待开发 / 不可用” state, and redacts URL/magnet-like seed values before DOM rendering.
+- Files changed: `frontend/src/features/workbench/SubtitleGroupSelect.vue`, `frontend/src/features/workbench/SubtitleGroupSelect.test.ts`, `frontend/src/features/workbench/ResourceSummary.vue`, `frontend/src/features/workbench/ResourceSummary.test.ts`, `frontend/src/features/workbench/DraftPreviewPanel.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Shared review display components should receive helper-derived public projections and emit only controlled field updates; draft/session ownership stays in the parent.
+  - Verification passed: compileall, targeted Vitest (23 tests), frontend typecheck, lint, build, `test_app_workbench.py` Chromium suite (20 tests), and git diff check.
+---
+
+## 2026-09-11 00:00:00 Asia/Shanghai - US-270
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the controlled shared `AnimeDraftEditor` structure for single and batch draft review. It composes the shared subtitle-group selector and resource summary, renders common overview/source/filter/resource sections, supports progressive advanced settings, emits only a minimal preview patch and dirty state, and keeps request/session ownership in the parent.
+- Files changed: `frontend/src/features/workbench/AnimeDraftEditor.vue`, `frontend/src/features/workbench/AnimeDraftEditor.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The shared editor can remain transport-free by accepting the public `RequestSnapshot` and emitting `PreviewPatch`; save and preview-modify orchestration stays in the compatibility/session host.
+  - Verification passed: targeted Vitest (3 tests), frontend typecheck, lint, build, and real Chromium workbench suite (20 tests); storage was clean before browser verification.
+
+## 2026-09-11 00:10:00 Asia/Shanghai - US-271
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Routed shared draft preview-modify operations through `useDraftSession`, preserving server-authoritative snapshot/revision updates and request sequencing for both direct apply and save-before-save compatibility flows. Added explicit retry of the failed patch against the last consistent revision and recovery to the last successful result; invalid draft errors still clear the capability and request regeneration.
+- Files changed: `frontend/src/app/composables/useDraftSession.ts`, `frontend/src/app/composables/useDraftSession.test.ts`, `frontend/src/features/workbench/DraftPreviewPanel.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - The shared session must be the only preview-modify writer; compatibility save flows can consume its current snapshot/revision while retaining preview-save outside the shared core.
+- Invalidation clears the session immediately, so a host component needs a render-safe transient fallback until its `expired` event removes the panel.
+- Verification passed: 24 targeted Vitest tests, frontend typecheck/lint/build, Python compileall and diff check, 20 real Chromium workbench tests, and 1794 backend tests.
+---
+
+## 2026-09-11 00:18:30 Asia/Shanghai - US-272
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Reduced DraftPreviewPanel to a single-item compatibility adapter around the shared AnimeDraftEditor. Preview-modify remains revision-aware through useDraftSession, while preview-save stays exclusively in the adapter; pending editor patches are applied before save, and legacy saved/expired/failed/changed events and DOM selectors remain compatible.
+- Files changed: frontend/src/features/workbench/DraftPreviewPanel.vue, frontend/src/features/workbench/AnimeDraftEditor.vue, frontend/src/features/workbench/SubtitleGroupSelect.vue, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+- Compatibility hosts may expose only minimal editor patch state to preserve save-before-save behavior; the shared editor still owns transient controls and public review rendering.
+- Legacy browser selectors can be preserved through configurable IDs on shared components while keeping the default shared-editor IDs stable.
+- Verification passed: frontend typecheck, lint, targeted Vitest (22), build, compileall, diff check, and real Chromium workbench tests (20).
+---
+
+## 2026-09-11 00:25:30 Asia/Shanghai - US-273
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Replaced the batch detail panel's nested single-item compatibility host with a batch-local `useDraftSession` adapter that composes `AnimeDraftEditor` directly. Batch preview-modify remains revision-aware and server-authoritative; pending editor patches are applied before the legacy preview-save, and batch accept/delete events and public card snapshot synchronization remain compatible.
+- Files changed: `frontend/src/features/workbench/BatchDraftPreviewPanel.vue`, `frontend/src/features/workbench/AnimeDraftEditor.vue`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch compatibility hosts should own only batch actions plus preview-save/accept transport; shared editor rendering and preview-modify state belong to `AnimeDraftEditor` and `useDraftSession`.
+  - A named editor slot keeps compatibility-specific guidance inside the shared detail container without adding a second editor implementation or changing the single-item copy.
+- Verification passed: frontend typecheck, lint, targeted unit tests (10), build, compileall, diff check, and real Chromium batch suite (13 tests).
+---
+
+## 2026-09-11 00:45:00 Asia/Shanghai - US-274
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Completed the Stage 34 F-B closeout, synchronized the README, main PRD, future stages, backlog, frontend work goals, M13 module PRD, documentation index, and Stage 34 PRD with the delivered shared review core and explicit F-C/F-D/F-E handoff boundaries. Marked US-274 passing and recorded the archive location.
+- Files changed: README.md, docs/README.md, docs/MiGuOrca_main_PRD.md, docs/MiGuOrca_future_stages.md, docs/MiGuOrca_stage34_shared_review_core_PRD.md, docs/backlog.md, docs/frontend-ux-refactor-work-goals.md, docs/modules/M13-web-ui-PRD.md, tests/browser/test_app_mode_input.py, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Stage closeout must update the user-facing status sources together: README, main/future PRDs, backlog, frontend work goals, M13 module record, docs index, execution PRD, and Ralph state.
+  - The shared core handoff is explicit: F-C/F-D own removal of the single/batch compatibility save paths, while F-E alone may use SafeInfo for saved Requests.
+- Final verification passed: compileall, Ruff, 1,636 non-browser backend tests, API drift check, typecheck, lint, 325 frontend unit tests, build, 158 Chromium tests, and git diff check.
+
+## 2026-09-12 - Stage 34 independent review closeout
+- 修复批量草案失效时误触发删除卡片的问题：清理失效草案状态、关闭详情并保留原始条目与候选；手动删除语义不变。
+- OpenAPI 生成器将 `storage_dir` 公开请求字段统一生成为可空类型；PreviewPatch 直接派生自 generated `previewModifyRequest`，移除适配层类型逃逸。
+- Stage 34 已完成并归档；未开发 F-C～F-G、SafeInfo 或正式保存确认页面。
+
+## 2026-09-12 - Stage 34 final review fix
+- 批量草案失效时同步清除条目的选择状态与接受失败反馈，重新生成草案不会继承旧 UI 状态。
+- 恢复非目标端点原有 OpenAPI 示例，仅为 preview-modify patch 提供符合 schema 的局部示例，并保留 `selected_subtitle_group` nullable 契约与 generated 类型断言。
+---

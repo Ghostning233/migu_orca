@@ -26,7 +26,7 @@
 // fields) + storage_dir (relative profile). Destructive/irreversible actions
 // go through the shared ConfirmDialog and failures surface fixed Chinese copy
 // only.
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
@@ -36,9 +36,9 @@ import EmptyState from '@/components/feedback/EmptyState.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
-import BaseTextarea from '@/components/forms/BaseTextarea.vue'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
+import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
 
 import {
   acceptFeedbackLabel,
@@ -83,8 +83,17 @@ const router = useRouter()
 const notification = useNotificationStore()
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
+const props = withDefaults(defineProps<{ rawInput?: string; hideInput?: boolean }>(), { rawInput: '', hideInput: false })
+const emit = defineEmits<{ (event: 'update:rawInput', value: string): void }>()
+
 // Batch parse state.
-const rawInput = ref('')
+const rawInput = ref(props.rawInput)
+
+watch(() => props.rawInput, (value) => {
+  if (value !== rawInput.value) rawInput.value = value
+})
+
+watch(rawInput, (value) => emit('update:rawInput', value))
 const parseLoading = ref(false)
 const parseError = ref('')
 const parseResult = ref<BatchParseResult | null>(null)
@@ -416,6 +425,27 @@ function onDraftDeleted(itemId: string): void {
   notification.info('已删除批量卡片', '当前批量卡片已从本批结果中移除。')
 }
 
+function onDraftExpired(itemId: string): void {
+  const nextSelected = new Set(selectedItemIds.value)
+  nextSelected.delete(itemId)
+  selectedItemIds.value = nextSelected
+  const nextFeedback = { ...acceptFeedback.value }
+  delete nextFeedback[itemId]
+  acceptFeedback.value = nextFeedback
+  items.value = items.value.map((current) => {
+    if (current.item_id !== itemId) return current
+    const hasCandidates = (current.candidates?.length ?? 0) > 0
+    return {
+      ...current,
+      status: hasCandidates ? 'FOUND' : 'EMPTY',
+      preview_request: null,
+      draft_id: null,
+      draft_revision: null,
+    }
+  })
+  detailItemId.value = null
+}
+
 onMounted(() => {
   const fromQuery = typeof route.query.batch_id === 'string' ? route.query.batch_id : ''
   if (fromQuery) {
@@ -432,15 +462,15 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
 <template>
   <PanelSection title="批量工作台" class="batch-workbench-panel">
     <form id="batch-parse-form" class="batch-parse-form" @submit.prevent="parseBatch">
-      <label for="batch-raw-input">批量番剧名称</label>
-      <BaseTextarea
+      <label v-if="!props.hideInput" for="batch-raw-input">批量番剧名称</label>
+      <AnimeTitleInput
+        v-if="!props.hideInput"
         id="batch-raw-input"
         v-model="rawInput"
-        rows="6"
-        placeholder="萌王S4&#10;路哥S4&#10;杖剑谭S2&#10;邻家天使S2"
+        mode="batch"
         :disabled="parseLoading"
       />
-      <p class="field-help" id="batch-parse-help">
+      <p v-if="!props.hideInput" class="field-help" id="batch-parse-help">
         每行一个番剧简称或不完整标题；系统会逐项解析并搜索候选合集，结果需人工审核。
       </p>
       <p v-if="parseError" id="batch-parse-error" class="field-error" role="alert">
@@ -634,6 +664,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
       :item="detailItem"
       @accepted="onAccepted"
       @deleted="onDraftDeleted"
+      @expired="onDraftExpired"
       @draft-changed="onDraftChanged"
     />
 

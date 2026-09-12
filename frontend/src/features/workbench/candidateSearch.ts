@@ -103,16 +103,10 @@ export interface PreviewEditState {
   expectedFolderName: string
 }
 
-export interface PreviewPatch {
-  selected_subtitle_group?: string
-  filter_rule?: {
-    must_contain?: string
-    must_not_contain?: string
-    use_regex?: boolean
-    case_sensitive?: boolean
-  }
-  expected_folder_name?: string
-}
+/** Preview-modify patch, kept in lockstep with the generated API contract. */
+export type PreviewPatch = NonNullable<
+  operations['previewModifyRequest']['requestBody']
+>['content']['application/json']['patch']
 
 /** Build a modify patch from the preview-edit form state (legacy helper). */
 export function collectPreviewEditPatch(original: PreviewEditState, current: PreviewEditState): PreviewPatch {

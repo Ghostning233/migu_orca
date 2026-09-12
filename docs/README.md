@@ -15,8 +15,8 @@
 
 - 前端体验全面重构的 Gate 1～3 已完成，产品方向、低保真骨架、交互规格、视觉方向和设计
   Token 均已冻结；后端 B-A、B-B、B-C1（Stage 30）、B-C2（Stage 31）已完成，
-  B-D 已完成为 Stage 32；F-A 已作为 Stage 33 完成（US-257～US-265），
-  F-B～F-G 继续按依赖独立评审。
+  B-D 已完成为 Stage 32；F-A 已作为 Stage 33 完成（US-257～US-265），F-B 已作为
+  Stage 34 完成（US-266～US-274）并归档，F-C～F-G 继续按依赖独立评审。
   工作目标、候选 Stage、设计决策门和 Agent 协作顺序见
   [前端体验重构：工作目标与协作流程](frontend-ux-refactor-work-goals.md)。
 - 页面体验设计与视觉评审已经作为独立工作完成。后续必须先完成后端支撑和前端分片 PRD、
@@ -33,10 +33,12 @@
   B-C1 已完成并交付为[Stage 30：Auto Bangumi 只读能力与外部同步基础](MiGuOrca_stage30_ab_read_sync_PRD.md)，
   B-C2 已完成并交付为[Stage 31：Auto Bangumi 可靠写管理](MiGuOrca_stage31_ab_write_management_PRD.md)，
   B-D 已完成为[Stage 32：后端契约固化、兼容迁移与前端交接](MiGuOrca_stage32_contract_hardening_PRD.md)，
+  F-B 已完成为[Stage 34：前端共享审核核心](MiGuOrca_stage34_shared_review_core_PRD.md)，
   F-A 已完成为[Stage 33：前端应用壳层与设计系统](MiGuOrca_stage33_frontend_shell_PRD.md)，
   其余工作包仍按依赖独立评审。
 
-截至 2026-09-10，最近完成阶段为 Stage 33「前端应用壳层与设计系统」；Stage 33 只建立壳层、路由、Token、共享状态和现有页面兼容挂载，不实现正式追番管理页面。
+截至 2026-09-12，最近完成阶段为 Stage 34「前端共享审核核心」，已完成并归档；Stage 34
+不实现真实 `SafeInfoDialog`，该能力延后到 F-E。
 
 ## Stage PRD
 
@@ -54,6 +56,7 @@
 - Stage 31：[Auto Bangumi 可靠写管理](MiGuOrca_stage31_ab_write_management_PRD.md)（B-C2，US-237～US-246 已完成；不开发正式页面）
 - Stage 32：[后端契约固化、兼容迁移与前端交接](MiGuOrca_stage32_contract_hardening_PRD.md)（B-D，US-247～US-256 已完成并归档；不新增动作、不删旧端点、不开发页面）
 - Stage 33：[前端应用壳层与设计系统](MiGuOrca_stage33_frontend_shell_PRD.md)（F-A，US-257～US-265 已完成并归档；不实现 F-B～F-G）
+- Stage 34：[前端共享审核核心](MiGuOrca_stage34_shared_review_core_PRD.md)（F-B，US-266～US-274 已完成并归档；SafeInfo 延后到 F-E）
 
 Stage PRD 记录单一阶段的范围、非目标、决策和验收结果。已完成阶段的 Ralph 执行快照位于 `../scripts/ralph/archive/`。
 
