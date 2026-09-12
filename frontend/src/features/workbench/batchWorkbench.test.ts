@@ -38,7 +38,8 @@ describe('batch save-confirm contract (US-290)', () => {
   })
 
   it('recognizes confirmed results and maps only stable errors to safe copy', () => {
-    expect(batchSaveConfirmSucceeded({ outcome: 'CONFIRMED', status: null } as never)).toBe(true)
+    expect(batchSaveConfirmSucceeded({ outcome: 'CONFIRMED', request_id: 'req-ok', tracking_id: null, status: null } as never)).toBe(true)
+    expect(batchSaveConfirmSucceeded({ outcome: 'CONFIRMED', request_id: null, tracking_id: null, status: 'CONFIRMED' } as never)).toBe(false)
     expect(batchSaveConfirmSucceeded({ outcome: 'failed', status: 'FAILED' } as never)).toBe(false)
     expect(batchSaveConfirmErrorLabel({ outcome: 'failed', error_type: 'save_confirm_failed' } as never)).toContain('确认未完成')
     expect(batchSaveConfirmErrorLabel({ outcome: 'failed', error_type: 'private_backend_detail' } as never)).toBe('保存确认失败，请重试。')

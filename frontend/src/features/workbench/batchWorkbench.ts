@@ -348,8 +348,10 @@ export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {
 }
 
 export function batchSaveConfirmRecoveryAllowed(item: BatchSaveConfirmItem): boolean {
+  const source = item as unknown as Record<string, unknown>
   return item.error_type === 'save_confirm_failed' &&
-    String(item.outcome ?? '').toUpperCase() === 'FAILED' &&
+    String(item.outcome ?? '').toUpperCase() === 'SAVED_CONFIRM_FAILED' &&
+    source.retry_action === 'ACCEPT_SAVED_REQUEST' &&
     isPublicRouteIdentifier(item.request_id)
 }
 

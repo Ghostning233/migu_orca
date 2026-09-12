@@ -7,6 +7,7 @@
  */
 import { shallowRef } from 'vue'
 import type { operations } from '@/api/generated/api'
+import { isPublicRouteIdentifier } from '@/app/router/catalog'
 
 type JsonBody<Operation extends keyof operations> = NonNullable<
   operations[Operation]['requestBody']
@@ -96,6 +97,8 @@ export type BatchReviewAction =
   | { type: 'apply_succeeded'; itemId: string; draftId?: string; revision?: number }
   | { type: 'apply_failed'; itemId: string; error: unknown }
   | { type: 'retry_apply'; itemId: string }
+  | { type: 'reset_apply'; itemId: string }
+  | { type: 'invalidate_draft'; itemId: string }
   | { type: 'begin_save'; itemIds: readonly string[] }
   | { type: 'save_succeeded'; itemId: string; result: BatchSaveResultItem }
   | { type: 'save_failed'; itemId: string; error: unknown }
@@ -126,9 +129,9 @@ const BATCH_PHASE_TRANSITIONS: Record<BatchItemPhase, readonly BatchItemPhase[]>
   blocked: ['candidates'],
   candidates: ['draft', 'blocked'],
   draft: ['applying', 'saving', 'blocked'],
-  applying: ['draft', 'apply_failed', 'blocked'],
-  apply_failed: ['applying', 'draft'],
-  saving: ['confirmed', 'saved_pending_confirm', 'draft', 'response_unknown'],
+  applying: ['draft', 'apply_failed', 'candidates', 'blocked'],
+  apply_failed: ['applying', 'draft', 'candidates', 'blocked'],
+  saving: ['confirmed', 'saved_pending_confirm', 'draft', 'candidates', 'blocked', 'response_unknown'],
   confirmed: [],
   saved_pending_confirm: [],
   response_unknown: ['confirmed', 'saved_pending_confirm', 'draft', 'response_unknown'],
@@ -169,6 +172,21 @@ export function toSafeBatchError(error: unknown): SafeBatchError {
     ...(requestId ? { requestId } : {}),
     ...(retryAction ? { retryAction } : {}),
   }
+}
+
+/** Convert a generated 200 result item to the same safe error shape. */
+export function toSafeBatchResultError(result: BatchSaveResultItem): SafeBatchError {
+  const source = result as unknown as Record<string, unknown>
+  const errorType = typeof source.error_type === 'string' ? source.error_type : ''
+  const outcome = typeof source.outcome === 'string' ? source.outcome.toUpperCase() : ''
+  const requestId = typeof source.request_id === 'string' && isPublicRouteIdentifier(source.request_id)
+    ? source.request_id : undefined
+  const retryAction = source.retry_action === 'ACCEPT_SAVED_REQUEST' ? source.retry_action : undefined
+  if (errorType === 'save_confirm_failed' && outcome === 'SAVED_CONFIRM_FAILED' && requestId && retryAction) {
+    return { type: errorType, message: SAFE_MESSAGES[errorType]!, requestId, retryAction }
+  }
+  const safeType = SAFE_ERROR_TYPES.has(errorType) ? errorType : 'batch_error'
+  return { type: safeType, message: SAFE_MESSAGES[safeType] ?? '操作失败，请重新尝试。' }
 }
 
 function randomKey(): string {
@@ -222,6 +240,13 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
     case 'apply_succeeded': return updateItem(state, action.itemId, { phase: 'draft', dirty: false, error: null, ...(action.draftId ? { draftId: action.draftId } : {}), ...(action.revision === undefined ? {} : { draftRevision: action.revision }) })
     case 'apply_failed': return updateItem(state, action.itemId, { phase: 'apply_failed', error: toSafeBatchError(action.error) })
     case 'retry_apply': return state.items[action.itemId]?.phase === 'apply_failed' ? updateItem(state, action.itemId, { phase: 'applying', error: null }) : state
+    case 'reset_apply': return state.items[action.itemId]?.phase === 'apply_failed' ? updateItem(state, action.itemId, { phase: 'draft', error: null, dirty: false }) : state
+    case 'invalidate_draft': {
+      const item = state.items[action.itemId]
+      if (!item) return state
+      const phase: BatchItemPhase = item.source?.candidates?.length ? 'candidates' : 'blocked'
+      return updateItem(state, action.itemId, { phase, selected: false, draftId: null, draftRevision: null, dirty: false, idempotencyKey: null, error: null })
+    }
     case 'begin_save': {
       if (state.busy || action.itemIds.some((id) => !batchItemCanConfirm(state.items[id]))) return state
       const items = { ...state.items }
@@ -236,9 +261,19 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
       return { ...next, busy: Object.values(next.items).some((item) => item.phase === 'saving') ? 'saving' : null }
     }
     case 'save_failed': {
-      const error = toSafeBatchError(action.error)
+      const source = action.error && typeof action.error === 'object' ? action.error as Record<string, unknown> : {}
+      const error = typeof source.error_type === 'string'
+        ? toSafeBatchResultError(action.error as BatchSaveResultItem)
+        : toSafeBatchError(action.error)
       const saved = error.type === 'save_confirm_failed' && Boolean(error.requestId && error.retryAction)
-      const next = updateItem(state, action.itemId, { phase: saved ? 'saved_pending_confirm' : 'draft', ...(saved ? { selected: false, draftId: null, draftRevision: null, dirty: false, idempotencyKey: null, requestId: error.requestId } : {}), error })
+      const expired = ['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict'].includes(error.type)
+      const item = state.items[action.itemId]
+      const next = updateItem(state, action.itemId, {
+        phase: saved ? 'saved_pending_confirm' : expired ? (item?.source?.candidates?.length ? 'candidates' : 'blocked') : 'draft',
+        ...(saved || expired ? { selected: false, draftId: null, draftRevision: null, dirty: false, idempotencyKey: null } : {}),
+        ...(saved ? { requestId: error.requestId } : {}),
+        error,
+      })
       return { ...next, busy: Object.values(next.items).some((item) => item.phase === 'saving') ? 'saving' : null }
     }
     case 'save_response_unknown': {
@@ -266,13 +301,18 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
   }
 }
 
-export interface BatchReviewJourney { state: BatchReviewState; dispatch: (action: BatchReviewAction) => void; newIdempotencyKey: (itemId: string) => string | null }
+export interface BatchReviewJourney { state: BatchReviewState; dispatch: (action: BatchReviewAction) => boolean; newIdempotencyKey: (itemId: string) => string | null }
 
 export function useBatchReviewJourney(rawInput = ''): BatchReviewJourney {
   const stateRef = shallowRef(createBatchReviewState(rawInput))
   return {
     get state() { return stateRef.value },
-    dispatch(action) { stateRef.value = reduceBatchReview(stateRef.value, action) },
+    dispatch(action) {
+      const next = reduceBatchReview(stateRef.value, action)
+      if (next === stateRef.value) return false
+      stateRef.value = next
+      return true
+    },
     newIdempotencyKey(itemId) {
       const item = stateRef.value.items[itemId]
       if (!batchItemCanConfirm(item)) return null

@@ -119,3 +119,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 批量响应未知时冻结完整 item 顺序、draft/revision、幂等键、item_ids 和 storage profile，请求重试复用同一 body；已知草案失效消费 capability 并回到候选，成功项消费 session/key/选择并保留安全 handoff。
 - 真实 Chromium 定向验证覆盖右侧候选、紧凑双栏/操作栏、批量安全错误和可见范围选择；前端单元 27 passed，Chromium 两个 Stage 36 文件 50 passed。
 ---
+
+## 2026-09-12 - Stage 36 state-consistency review correction
+- 确定性 save-confirm 结果统一正规化为安全错误，再结束参与条目的 `saving` 与 journey busy；缺失、重复、未知或部分 results 不再遗留保存中状态。`save_confirm_failed` 仅在 `SAVED_CONFIRM_FAILED`、合法公开 request_id 和 `ACCEPT_SAVED_REQUEST` 同时满足时进入恢复态。
+- 草案失效使用 `invalidate_draft` 回到候选/阻断并保留原条目；成功、saved-pending、普通失败和冻结操作重试均同步组件快照、journey phase、session、选择与幂等键。`response_unknown` 重试复用冻结的完整请求体。
+- 解析在保存发送或结果待核验期间被明确阻断；草案生成与保存分别使用逐项生成锁和参与项保存锁，未参与条目仍可操作。apply failed 的 retry/reset 进入显式状态转换。
+- 验证：`api:check`、typecheck、lint、build 均通过；定向 Vitest 3 文件 48 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 50 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---

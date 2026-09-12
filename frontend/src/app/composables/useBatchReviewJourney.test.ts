@@ -6,6 +6,7 @@ import {
   createBatchReviewState,
   reduceBatchReview,
   toSafeBatchError,
+  toSafeBatchResultError,
   type BatchParseItem,
   type ParseBatchTitlesResult,
 } from './useBatchReviewJourney'
@@ -110,5 +111,39 @@ describe('useBatchReviewJourney', () => {
     expect(state.items.a!.idempotencyKey).toBeNull()
     state = reduceBatchReview(state, { type: 'begin_save', itemIds: ['a'] })
     expect(state.items.a!.idempotencyKey).not.toBe(firstKey)
+  })
+
+  it('ends saving on deterministic result errors and returns expired drafts to candidates', () => {
+    let state = reduceBatchReview(createBatchReviewState(), { type: 'parse_succeeded', result: parsed([
+      item('expired', 'DRAFT', { candidates: [{}], preview_request: {}, draft_id: 'draft-expired', draft_revision: 1 }),
+      item('saved', 'DRAFT', { preview_request: {}, draft_id: 'draft-saved', draft_revision: 1 }),
+    ]) })
+    state = reduceBatchReview(state, { type: 'set_selected', itemId: 'saved', selected: true })
+    state = reduceBatchReview(state, { type: 'begin_save', itemIds: ['expired', 'saved'] })
+    expect(state.busy).toBe('saving')
+    state = reduceBatchReview(state, { type: 'save_failed', itemId: 'expired', error: { error_type: 'draft_expired', outcome: 'FAILED' } })
+    expect(state.items.expired?.phase).toBe('candidates')
+    expect(state.items.expired?.draftId).toBeNull()
+    state = reduceBatchReview(state, { type: 'save_failed', itemId: 'saved', error: {
+      error_type: 'save_confirm_failed', outcome: 'SAVED_CONFIRM_FAILED', request_id: 'req-saved', retry_action: 'ACCEPT_SAVED_REQUEST',
+    } })
+    expect(state.busy).toBeNull()
+    expect(state.items.saved?.phase).toBe('saved_pending_confirm')
+    expect(state.items.saved?.selected).toBe(false)
+    expect(toSafeBatchResultError({ error_type: 'save_confirm_failed', outcome: 'SAVED_CONFIRM_FAILED', request_id: 'req-saved', retry_action: 'ACCEPT_SAVED_REQUEST' } as never)).toMatchObject({
+      type: 'save_confirm_failed', requestId: 'req-saved', retryAction: 'ACCEPT_SAVED_REQUEST',
+    })
+  })
+
+  it('has explicit apply retry and reset transitions', () => {
+    let state = reduceBatchReview(createBatchReviewState(), { type: 'parse_succeeded', result: parsed([item('a', 'DRAFT', { preview_request: {}, draft_id: 'draft-a', draft_revision: 1 })]) })
+    state = reduceBatchReview(state, { type: 'begin_apply', itemId: 'a' })
+    state = reduceBatchReview(state, { type: 'apply_failed', itemId: 'a', error: { type: 'network_error' } })
+    state = reduceBatchReview(state, { type: 'retry_apply', itemId: 'a' })
+    expect(state.items.a?.phase).toBe('applying')
+    state = reduceBatchReview(state, { type: 'apply_failed', itemId: 'a', error: { type: 'network_error' } })
+    state = reduceBatchReview(state, { type: 'reset_apply', itemId: 'a' })
+    expect(state.items.a?.phase).toBe('draft')
+    expect(state.items.a?.error).toBeNull()
   })
 })
