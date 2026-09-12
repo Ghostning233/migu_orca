@@ -20,7 +20,7 @@
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
-import type { SaveConfirmBatchItemsBody, SaveConfirmBatchItemsResult } from '@/app/composables/useBatchReviewJourney'
+import type { SaveConfirmBatchItemsBody, SaveConfirmBatchItemsResult, TrackingItemsResult } from '@/app/composables/useBatchReviewJourney'
 
 /** Public batch parse result produced by `POST /api/v1/batches/parse`. */
 export type BatchParseResult = NonNullable<
@@ -39,6 +39,7 @@ export type BatchAcceptResult = NonNullable<
 >
 export type BatchSaveConfirmResult = SaveConfirmBatchItemsResult
 export type BatchSaveConfirmItem = BatchSaveConfirmResult['results'][number]
+export type BatchTrackingItem = TrackingItemsResult['items'][number]
 
 /** Public submit-result item (submit/retry/recover share the accept shape). */
 export type BatchSubmitResult = NonNullable<
@@ -343,7 +344,7 @@ export function buildBatchSaveConfirmPayload(
 }
 
 export function batchSaveConfirmSucceeded(item: BatchSaveConfirmItem): boolean {
-  return item.outcome.toUpperCase() === 'CONFIRMED' || item.status?.toUpperCase() === 'CONFIRMED'
+  return String(item.outcome ?? '').toUpperCase() === 'CONFIRMED' || item.status?.toUpperCase() === 'CONFIRMED' || item.status?.toUpperCase() === 'ACCEPTED'
 }
 
 export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {
@@ -355,6 +356,13 @@ export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {
     draft_reserved: '订阅草案正在处理中，请稍后重试。',
   }
   return labels[item.error_type ?? ''] ?? '保存确认失败，请重试。'
+}
+
+/** Locate a public tracking row only by the confirmed request identity. */
+export function findBatchTrackingItem(result: TrackingItemsResult, requestId: string): BatchTrackingItem | null {
+  if (!requestId || !Array.isArray(result.items)) return null
+  const match = result.items.find((item) => item.request_id === requestId)
+  return match && match.request_id === requestId && match.tracking_id ? match : null
 }
 
 /** Collect the accept descriptors for the given cards (saved or preview). */

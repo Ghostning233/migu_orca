@@ -29,7 +29,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { api } from '@/api/client'
+import { api, toApiError } from '@/api/client'
 import { useDraftSession, type DraftSession } from '@/app/composables/useDraftSession'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
@@ -45,6 +45,7 @@ import CandidateCollectionList from '@/features/workbench/CandidateCollectionLis
 import {
   batchSaveConfirmErrorLabel,
   batchSaveConfirmSucceeded,
+  findBatchTrackingItem,
   batchCardNeedsReview,
   batchCardPreferenceSummary,
   batchCardRequest,
@@ -74,7 +75,7 @@ import BatchDraftPreviewPanel from '@/features/workbench/BatchDraftPreviewPanel.
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
-import { routeLocation } from '@/app/router/catalog'
+import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
 
 type CreateRequestResult = NonNullable<
   import('@/api/generated/api').operations['createRequest']['responses']['200']['content']['application/json']['result']
@@ -115,6 +116,18 @@ const acceptFeedback = ref<Record<string, string>>({})
 const saveKeys = new Map<string, string>()
 const savingItemIds = ref<Set<string>>(new Set())
 const saveSummary = ref<Record<string, number>>({})
+const recoveryLoadingItemIds = ref<Set<string>>(new Set())
+const recoveryFeedback = ref<Record<string, string>>({})
+
+function batchItemRequestId(item: BatchItem): string {
+  const value = (item as Record<string, unknown>).request_id
+  return typeof value === 'string' ? value : ''
+}
+
+function batchItemTrackingId(item: BatchItem): string {
+  const value = (item as Record<string, unknown>).tracking_id
+  return typeof value === 'string' ? value : ''
+}
 
 // Candidate popover state (component memory only).
 const activeCandidateItemId = ref<string | null>(null)
@@ -491,25 +504,32 @@ function newSaveKey(): string {
 
 function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
   const feedback: Record<string, string> = {}
+  const resultItems = (result.results?.length ? result.results : (result as unknown as { items?: BatchSaveConfirmResult['results'] }).items ?? [])
   const nextItems = items.value.map((row) => {
     let updated = row
-    for (const item of result.results ?? []) {
+    for (const item of resultItems) {
       if (item.item_id !== row.item_id) continue
       if (batchSaveConfirmSucceeded(item)) {
+        const queueItem = (result as unknown as { queue?: { items?: Array<{ item_id?: string | null; status?: string | null }> } }).queue?.items?.find((candidate) => candidate.item_id === row.item_id)
         updated = {
           ...row,
           status: 'CONFIRMED',
           draft_id: null,
           draft_revision: null,
-          queue_status: item.tracking_ready === true ? 'TRACKING_READY' : 'CONFIRMED',
+          request_id: item.request_id,
+          tracking_id: item.tracking_id,
+          queue_status: item.tracking_ready === true ? 'TRACKING_READY' : queueItem?.status ?? 'CONFIRMED',
         }
         const selected = new Set(selectedItemIds.value)
         selected.delete(row.item_id ?? '')
         selectedItemIds.value = selected
       } else {
-        feedback[row.item_id ?? ''] = batchSaveConfirmErrorLabel(item)
+        const legacyReason = (item as Record<string, unknown>).reason
+        feedback[row.item_id ?? ''] = typeof legacyReason === 'string' && legacyReason
+          ? `无法接受：${legacyReason}`
+          : batchSaveConfirmErrorLabel(item)
         if (item.error_type === 'save_confirm_failed') {
-          updated = { ...row, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null }
+          updated = { ...row, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: item.request_id }
         }
       }
     }
@@ -518,6 +538,77 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
   items.value = nextItems
   acceptFeedback.value = { ...acceptFeedback.value, ...feedback }
 
+}
+
+function setRecoveryLoading(itemId: string, loading: boolean): void {
+  const next = new Set(recoveryLoadingItemIds.value)
+  if (loading) next.add(itemId)
+  else next.delete(itemId)
+  recoveryLoadingItemIds.value = next
+}
+
+function setRecoveryFeedback(itemId: string, message: string): void {
+  recoveryFeedback.value = { ...recoveryFeedback.value, [itemId]: message }
+}
+
+async function locateBatchTracking(item: BatchItem): Promise<'found' | 'not_found' | 'failed'> {
+  const requestId = batchItemRequestId(item)
+  if (!isPublicRouteIdentifier(requestId)) return 'not_found'
+  try {
+    const result = await api.get<import('@/app/composables/useBatchReviewJourney').TrackingItemsResult>('/api/v1/tracking/items', { query: storageQuery() })
+    const match = findBatchTrackingItem(result, requestId)
+    if (!match || !isPublicRouteIdentifier(match.tracking_id)) return 'not_found'
+    items.value = items.value.map((row) => row.item_id === item.item_id
+      ? { ...row, status: 'CONFIRMED', queue_status: 'TRACKING_READY', tracking_id: match.tracking_id }
+      : row)
+    setRecoveryFeedback(item.item_id ?? '', '已定位到真实追番记录。')
+    if (router.hasRoute('tracking')) await router.replace(routeLocation('tracking', { tracking_id: match.tracking_id }))
+    return 'found'
+  } catch {
+    return 'failed'
+  }
+}
+
+async function retrySavedConfirmation(item: BatchItem): Promise<void> {
+  const itemId = item.item_id ?? ''
+  const requestId = batchItemRequestId(item)
+  if (!itemId || !isPublicRouteIdentifier(requestId) || recoveryLoadingItemIds.value.has(itemId)) return
+  setRecoveryLoading(itemId, true)
+  setRecoveryFeedback(itemId, '')
+  try {
+    await api.post<import('@/app/composables/useBatchReviewJourney').AcceptRequestResult>('/api/v1/requests/{request_id}/accept', {
+      path: { request_id: requestId },
+      body: { storage_dir: storageQuery().storage_dir ?? null },
+    })
+    const located = await locateBatchTracking(item)
+    if (located === 'not_found') setRecoveryFeedback(itemId, '方案已确认，但暂未定位到追番记录；可稍后重试定位。')
+    if (located === 'failed') setRecoveryFeedback(itemId, '确认已完成，但定位暂不可用；请稍后重试定位。')
+  } catch (cause) {
+    const safeError = toApiError(cause)
+    const uncertain = safeError.network || safeError.nonJson || safeError.status >= 500 || ['network_error', 'request_timeout', 'upstream_timeout', 'conflict'].includes(safeError.type)
+    if (!uncertain) {
+      setRecoveryFeedback(itemId, '确认未完成，请根据安全错误提示处理后再试。')
+      return
+    }
+    const located = await locateBatchTracking(item)
+    if (located === 'found') return
+    setRecoveryFeedback(itemId, uncertain
+      ? located === 'failed' ? '确认结果暂无法核验，请重试定位；不会重复确认。' : '确认结果已核验，但暂未找到追番记录；请明确重试确认。'
+      : '确认未完成，请根据安全错误提示处理后再试。')
+  } finally {
+    setRecoveryLoading(itemId, false)
+  }
+}
+
+async function retryBatchTrackingLocation(item: BatchItem): Promise<void> {
+  const itemId = item.item_id ?? ''
+  if (!itemId || recoveryLoadingItemIds.value.has(itemId)) return
+  setRecoveryLoading(itemId, true)
+  setRecoveryFeedback(itemId, '')
+  const located = await locateBatchTracking(item)
+  if (located === 'not_found') setRecoveryFeedback(itemId, '暂未定位到追番记录，请稍后重试定位。')
+  if (located === 'failed') setRecoveryFeedback(itemId, '定位暂不可用，请稍后重试。')
+  setRecoveryLoading(itemId, false)
 }
 
 async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | null): Promise<void> {
@@ -548,7 +639,21 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
     const failed = result.summary?.failed ?? 0
     notification.show(failed && !confirmed ? 'error' : 'success', '批量保存确认完成', `已确认 ${confirmed} 项${failed ? `；${failed} 项需处理` : ''}。`)
   } catch (error) {
-    void error
+    const safeError = toApiError(error)
+    const nested = safeError.details?.details
+    const details = nested && typeof nested === 'object' ? nested as Record<string, unknown> : null
+    const requestId = details && typeof details.request_id === 'string' ? details.request_id : ''
+    const validSavedFailure = safeError.type === 'save_confirm_failed' &&
+      details?.outcome === 'SAVED_CONFIRM_FAILED' &&
+      details?.retry_action === 'ACCEPT_SAVED_REQUEST' &&
+      isPublicRouteIdentifier(requestId)
+    if (validSavedFailure && rows.length === 1) {
+      const row = rows[0]
+      items.value = items.value.map((item) => item.item_id === row?.item_id
+        ? { ...item, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: requestId }
+        : item)
+      setRecoveryFeedback(row?.item_id ?? '', '订阅方案已保存但确认未完成；不会重复保存，可直接重试确认。')
+    }
     notification.error('保存确认失败', '批量保存确认响应未知，请使用相同操作重试。')
   } finally {
     acceptInFlight.value = false
@@ -827,6 +932,28 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
 
               <div class="batch-card-actions">
                 <BaseButton
+                  v-if="String(item.status ?? '') === 'SAVED_PENDING_CONFIRM'"
+                  :id="`batch-retry-accept-${item.item_id}`"
+                  variant="primary"
+                  :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
+                  :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
+                  @click.stop="retrySavedConfirmation(item)"
+                >重试确认</BaseButton>
+                <BaseButton
+                  v-if="String(item.status ?? '') === 'CONFIRMED' && batchItemTrackingId(item)"
+                  :id="`batch-open-tracking-${item.item_id}`"
+                  variant="secondary"
+                  @click.stop="router.replace(routeLocation('tracking', { tracking_id: batchItemTrackingId(item) }))"
+                >打开追番记录</BaseButton>
+                <BaseButton
+                  v-if="String(item.status ?? '') === 'CONFIRMED' && !batchItemTrackingId(item)"
+                  :id="`batch-retry-locate-${item.item_id}`"
+                  variant="secondary"
+                  :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
+                  :disabled="recoveryLoadingItemIds.has(item.item_id ?? '') || !batchItemRequestId(item)"
+                  @click.stop="retryBatchTrackingLocation(item)"
+                >重试定位</BaseButton>
+                <BaseButton
                   v-if="canChooseBatchCandidate(item)"
                   :class="{ 'batch-card-expand': true }"
                   :aria-expanded="activeCandidateItemId === item.item_id ? 'true' : 'false'"
@@ -853,7 +980,10 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 <BaseButton v-else class="batch-card-expand" disabled title="当前条目没有可选择的候选合集">
                   查看候选
                 </BaseButton>
-                </div>
+              </div>
+              <p v-if="recoveryFeedback[item.item_id ?? '']" class="batch-card-reason" role="status">
+                {{ recoveryFeedback[item.item_id ?? ''] }}
+              </p>
             </article>
             </div>
           </div>

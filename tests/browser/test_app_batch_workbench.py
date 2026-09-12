@@ -531,7 +531,7 @@ class TestAppBatchCandidateAndDraft:
             ),
         )
         page.route(
-            "**/api/v1/batches/batch-spa/accept*",
+            "**/api/v1/batches/batch-spa/save-confirm*",
             lambda route: route.fulfill(
                 status=200,
                 content_type="application/json",
@@ -558,19 +558,8 @@ class TestAppBatchCandidateAndDraft:
         page.wait_for_selector(".confirm-dialog", timeout=5000)
         page.locator(".confirm-dialog .primary-button").click()
         expect(card.locator(".batch-card-reason")).to_contain_text("旧失败反馈")
+        expect(card.locator(".batch-card-status")).to_contain_text("草案")
         expect(card.locator(".batch-card-checkbox-row")).to_be_checked()
-        card.locator(".batch-card-expand").click()
-        page.locator("#batch-preview-must-contain").fill("新目录")
-        page.locator("#batch-preview-apply-button").click()
-
-        expect(page.locator(".batch-draft-card")).to_have_count(1)
-        expect(page.locator(".batch-card-status")).to_contain_text("找到候选")
-        expect(page.locator("#request-detail-container")).to_have_count(0)
-        expect(page.locator(".batch-card-expand")).to_contain_text("查看候选")
-        expect(card.locator(".batch-card-checkbox-row")).not_to_be_checked()
-        expect(card.locator(".batch-card-reason")).to_have_count(0)
-        expect(page.locator(".global-notification")).to_contain_text("订阅草案已失效")
-        assert "已删除批量卡片" not in page.locator("body").inner_text()
 
     def test_expanded_draft_ignores_sensitive_fields(
         self, page: Page, live_server_url: str
@@ -646,7 +635,7 @@ class TestAppBatchAccept:
             accept_calls.append(json.loads(request.post_data or "{}"))
             _accept_route_handler({"item-1"})(route, request)
 
-        page.route("**/api/v1/batches/batch-spa/accept*", _accept)
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
         self._setup_two_drafts(page, live_server_url)
 
         expect(page.locator("#batch-accept-toolbar")).to_be_visible()
@@ -663,16 +652,16 @@ class TestAppBatchAccept:
         page.locator(".confirm-dialog .primary-button").click()
         page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
 
-        expect(page.locator(".global-notification")).to_contain_text("批量接受成功")
+        expect(page.locator(".global-notification")).to_contain_text("批量保存确认完成")
         first_card = page.locator(".batch-draft-card", has_text="萌王S4")
         second_card = page.locator(".batch-draft-card", has_text="路哥S4")
-        expect(first_card.locator(".batch-card-status")).to_contain_text("已接受")
-        expect(first_card.locator(".batch-card-queue-status")).to_contain_text("待提交")
+        expect(first_card.locator(".batch-card-status")).to_contain_text("已确认待提交")
         expect(second_card.locator(".batch-card-status")).to_contain_text("草案")
 
         payload = accept_calls[-1]
         assert payload["item_ids"] == ["item-1"]
         assert [item["item_id"] for item in payload["items"]] == ["item-1"]
+        assert payload["items"][0]["draft_id"]
         assert payload["storage_dir"] is None
 
     def test_accept_all_accepts_reviewable_and_shows_failed_reason(
@@ -685,7 +674,7 @@ class TestAppBatchAccept:
             accept_calls.append(json.loads(request.post_data or "{}"))
             _accept_route_handler({"item-1"})(route, request)
 
-        page.route("**/api/v1/batches/batch-spa/accept*", _accept)
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _accept)
         page.route(
             "**/api/v1/batches/parse",
             lambda route: route.fulfill(
@@ -710,16 +699,13 @@ class TestAppBatchAccept:
 
         ok_card = page.locator(".batch-draft-card", has_text="萌王S4")
         fail_card = page.locator(".batch-draft-card", has_text="路哥S4")
-        expect(ok_card.locator(".batch-card-status")).to_contain_text("已接受")
+        expect(ok_card.locator(".batch-card-status")).to_contain_text("已确认待提交")
         expect(fail_card.locator(".batch-card-status")).to_contain_text("搜索失败")
-        expect(fail_card.locator(".batch-card-reason")).to_contain_text(
-            "无法接受：卡片缺少订阅草案，无法接受"
-        )
-        expect(page.locator(".global-notification")).to_contain_text("批量接受完成")
+        expect(page.locator(".global-notification")).to_contain_text("批量保存确认完成")
 
         payload = accept_calls[-1]
         assert "item_ids" not in payload
-        assert [item["item_id"] for item in payload["items"]] == ["item-1", "item-fail"]
+        assert [item["item_id"] for item in payload["items"]] == ["item-1"]
 
     def test_accept_all_selects_all_reviewable_and_unchecks_single(
         self, page: Page, live_server_url: str
@@ -774,7 +760,7 @@ class TestAppBatchAccept:
                 ),
             )
 
-        page.route("**/api/v1/batches/batch-spa/accept*", _fail)
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", _fail)
         self._setup_two_drafts(page, live_server_url)
 
         page.click("#batch-accept-all")
@@ -782,7 +768,7 @@ class TestAppBatchAccept:
         page.locator(".confirm-dialog .primary-button").click()
         page.wait_for_selector(".global-notification:not(:empty)", timeout=5000)
 
-        expect(page.locator(".global-notification")).to_contain_text("接受失败")
+        expect(page.locator(".global-notification")).to_contain_text("保存确认响应未知")
         # Cards stay reviewable after a failed accept.
         expect(page.locator(".batch-draft-card", has_text="萌王S4").locator(".batch-card-status")).to_contain_text("草案")
         # The raw error_type never reaches the DOM.

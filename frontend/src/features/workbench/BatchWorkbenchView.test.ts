@@ -39,6 +39,9 @@ type ParseResult = NonNullable<
 type AcceptResult = NonNullable<
   operations['acceptBatchItems']['responses']['200']['content']['application/json']['result']
 >
+type SaveConfirmResult = NonNullable<
+  operations['saveConfirmBatchItems']['responses']['200']['content']['application/json']['result']
+>
 
 function batchItem(overrides: Record<string, unknown> = {}) {
   return {
@@ -113,6 +116,15 @@ function acceptResult(overrides: Partial<Record<string, unknown>> = {}): AcceptR
     },
     items: [],
     summary: { accepted: 0, already_accepted: 0, unacceptable: 0, failed: 0 },
+    ...overrides,
+  } as never
+}
+
+function saveConfirmResult(overrides: Partial<Record<string, unknown>> = {}): SaveConfirmResult {
+  return {
+    batch_id: 'batch-1',
+    results: [],
+    summary: { requested: 0, confirmed: 0, failed: 0 },
     ...overrides,
   } as never
 }
@@ -451,12 +463,13 @@ describe('BatchWorkbenchView accept (US-205)', () => {
   beforeEach(() => {
     localStorage.clear()
     apiPost.mockReset()
+    vi.mocked(api.get).mockReset()
   })
 
   function reviewableItems() {
     return [
-      batchItem({ item_id: 'item-1', status: 'DRAFT', preview_request: previewRequest('req-1') }),
-      batchItem({ item_id: 'item-2', status: 'DRAFT', preview_request: previewRequest('req-2') }),
+      batchItem({ item_id: 'item-1', status: 'DRAFT', preview_request: previewRequest('req-1'), draft_id: 'draft-1', draft_revision: 1 }),
+      batchItem({ item_id: 'item-2', status: 'DRAFT', preview_request: previewRequest('req-2'), draft_id: 'draft-2', draft_revision: 1 }),
       batchItem({ item_id: 'item-3', status: 'FAILED' }),
     ]
   }
@@ -489,46 +502,33 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('#batch-accept-submit').trigger('click')
     await nextTick()
     // ConfirmDialog (teleport stub renders inline) must be confirmed.
-    expect(wrapper.find('.confirm-dialog').text()).toContain('确认接受选中的 1 个批量卡片')
+    expect(wrapper.find('.confirm-dialog').text()).toContain('确认保存并确认选中的 1 个批量草案')
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
 
-    expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/{batch_id}/accept', {
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/{batch_id}/save-confirm', {
       path: { batch_id: 'batch-1' },
       body: {
         items: [
-          { item_id: 'item-1', request_id: 'req-1', title: '关于我转生变成史莱姆这档事 第四季' },
+          { item_id: 'item-1', draft_id: 'draft-1', base_revision: 1, idempotency_key: expect.any(String) },
         ],
         storage_dir: null,
         item_ids: ['item-1'],
       },
     })
-    // Accepted card shows 已接受 + queue status; the unacceptable card shows a Chinese reason.
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('已接受')
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-queue-status').text()).toContain('待提交')
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-3"] .batch-card-reason').text()).toContain(
-      '无法接受：卡片缺少订阅草案，无法接受',
-    )
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('已确认待提交')
   })
 
   it('accepts all reviewable cards when item_ids is omitted', async () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: reviewableItems() }))
       .mockResolvedValueOnce(
-        acceptResult({
-          items: [
-            { item_id: 'item-1', request_id: 'req-1', title: 't', status: 'accepted', reason: null, error_type: null, queued: true },
-            { item_id: 'item-2', request_id: 'req-2', title: 't', status: 'accepted', reason: null, error_type: null, queued: true },
-            { item_id: 'item-3', request_id: null, title: 't', status: 'unacceptable', reason: '卡片缺少订阅草案，无法接受', error_type: null, queued: false },
+        saveConfirmResult({
+          results: [
+            { item_id: 'item-1', outcome: 'CONFIRMED', request_id: 'req-1', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'track-1', tracking_ready: true },
+            { item_id: 'item-2', outcome: 'CONFIRMED', request_id: 'req-2', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: 'track-2', tracking_ready: true },
           ],
-          queue: {
-            queue_id: 'queue-1',
-            batch_id: 'batch-1',
-            created_at: '',
-            updated_at: '',
-            items: [queueItem('item-1', 'req-1'), queueItem('item-2', 'req-2')],
-          },
-          summary: { accepted: 2, already_accepted: 0, unacceptable: 1, failed: 0 },
+          summary: { requested: 2, confirmed: 2, failed: 0 },
         }),
       )
     const { wrapper } = await mountBatch()
@@ -542,20 +542,13 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
 
-    const acceptCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/accept')
+    const acceptCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
     expect(acceptCall).toBeDefined()
     const body = acceptCall![1]!.body as Record<string, unknown>
     expect(body.item_ids).toBeUndefined()
-    // Legacy parity: accept-all sends every card so the server returns the
-    // unacceptable reason for non-reviewable cards.
-    expect((body.items as Array<{ item_id: string }>).map((i) => i.item_id)).toEqual(['item-1', 'item-2', 'item-3'])
-    // The FAILED card shows the server-provided unacceptable reason.
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-3"] .batch-card-reason').text()).toContain(
-      '无法接受：卡片缺少订阅草案，无法接受',
-    )
-    // Accepted cards show 已接受 + queue status.
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('已接受')
-    expect(wrapper.find('.batch-draft-card[data-item-id="item-2"] .batch-card-status').text()).toContain('已接受')
+    expect((body.items as Array<{ item_id: string }>).map((i) => i.item_id)).toEqual(['item-1', 'item-2'])
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('已确认待提交')
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-2"] .batch-card-status').text()).toContain('已确认待提交')
   })
 
   it('shows a safe Chinese error when the accept request fails', async () => {
@@ -575,11 +568,46 @@ describe('BatchWorkbenchView accept (US-205)', () => {
 
     const { useNotificationStore } = await import('@/app/stores/notification')
     const notification = useNotificationStore()
-    expect(notification.current?.title).toBe('接受失败')
-    expect(notification.current?.message).toBe('批量接受失败。请稍后重试。')
+    expect(notification.current?.title).toBe('保存确认失败')
+    expect(notification.current?.message).toBe('批量保存确认响应未知，请使用相同操作重试。')
     // The raw server error never reaches the DOM.
     expect(wrapper.text()).not.toContain('ab_connection_failed')
     expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('草案')
+  })
+
+  it('recovers a saved-but-unconfirmed card with accept and read-only tracking lookup', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [reviewableItems()[0]] }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-1', outcome: 'FAILED', request_id: 'saved-request-1', status: null, error_type: 'save_confirm_failed', error_message: null, tracking_id: null, tracking_ready: null }],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }))
+      .mockResolvedValueOnce({ request: { request_id: 'saved-request-1' } } as never)
+    vi.mocked(api.get).mockResolvedValueOnce({
+      items: [{ tracking_id: 'tracking-1', request_id: 'saved-request-1' }],
+      summary: { total: 1, pending: 1, processing: 0, active: 0, needs_attention: 0, unreadable: 0 },
+    } as never)
+    const { wrapper } = await mountBatch()
+
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-draft-card input[type=checkbox]').setValue(true)
+    await wrapper.find('#batch-accept-submit').trigger('click')
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#batch-retry-accept-item-1').exists()).toBe(true)
+    await wrapper.find('#batch-retry-accept-item-1').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenLastCalledWith('/api/v1/requests/{request_id}/accept', {
+      path: { request_id: 'saved-request-1' },
+      body: { storage_dir: null },
+    })
+    expect(wrapper.find('.batch-card-status').text()).toContain('已确认待提交')
+    expect(wrapper.find('#batch-open-tracking-item-1').exists()).toBe(true)
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')).toHaveLength(1)
   })
 
   it('deletes a card and unselects it', async () => {

@@ -72,5 +72,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
    - Keep one `useDraftSession` per batch item in the workbench; pass it to every editing surface so card shortcuts and detail forms share CAS revision, dirty, retry, and invalidation state.
    - US-290 uses generated save-confirm descriptors with route-local keys; old preview-save/accept UI assertions need migration.
   - Preserve a card shortcut's pending value separately from the server snapshot until preview-modify succeeds; this keeps failed edits visible without treating them as authoritative resources.
-  - Verification passed: frontend typecheck/lint/unit (357 passed)/build, Chromium browser suite (161 passed), Python compileall, full pytest (1797 passed), and git diff --check.
+- Verification passed: frontend typecheck/lint/unit (357 passed)/build, Chromium browser suite (161 passed), Python compileall, full pytest (1797 passed), and git diff --check.
+---
+
+## 2026-09-12 15:29:00 Asia/Shanghai - US-291
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added per-card saved-but-unconfirmed recovery for valid `save_confirm_failed` outcomes, using only public `request_id` data. Recovery retries call generated `acceptRequest` exactly once per explicit action, verify uncertain outcomes through read-only `listTrackingItems`, match tracking records by exact `request_id`, and expose safe retry-location/open-tracking actions without repeating batch save-confirm.
+- Files changed: `frontend/src/features/workbench/BatchWorkbenchView.vue`, `frontend/src/features/workbench/batchWorkbench.ts`, `frontend/src/features/workbench/BatchWorkbenchView.test.ts`, `tests/browser/test_app_batch_workbench.py`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Batch save-confirm result items carry the authoritative public `request_id`/`tracking_id`; preserve those on the card because draft capabilities must be consumed after persistence.
+  - Tracking recovery must use the generated list projection and exact request-id matching; never derive a tracking id or retry accept after an uncertain response without a read-only check.
+  - Existing batch browser fixtures still targeted the retired `/accept` endpoint; keep them aligned with the generated `/save-confirm` contract when extending the journey.
+- Verification passed: frontend typecheck, lint, unit tests (360 passed), production build, Python compileall, full pytest including real Chromium (1797 passed), and batch Chromium suite (14 passed).
 ---
