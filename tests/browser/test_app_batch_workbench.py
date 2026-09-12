@@ -816,6 +816,70 @@ class TestAppBatchAccept:
         assert "batch_accept_failed" not in body_text
         assert "服务器内部错误" not in body_text
 
+    def test_saved_confirm_recovery_uses_accept_and_tracking_only(self, page: Page, live_server_url: str) -> None:
+        batch_calls: list[dict[str, Any]] = []
+        accept_calls: list[dict[str, Any]] = []
+        accept_urls: list[str] = []
+        tracking_calls: list[str] = []
+        preview = _preview_request("萌王S4", "req-saved")
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result([_batch_item("item-saved", "萌王S4", status="DRAFT", preview_request=preview)]),
+            ),
+        )
+
+        def save_confirm(route: Any, request: Any) -> None:
+            batch_calls.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_accept_result([{
+                    "item_id": "item-saved",
+                    "outcome": "failed",
+                    "request_id": "req-saved",
+                    "status": None,
+                    "error_type": "save_confirm_failed",
+                    "tracking_id": None,
+                    "tracking_ready": None,
+                }], []),
+            )
+
+        def accept(route: Any, request: Any) -> None:
+            accept_calls.append(json.loads(request.post_data or "{}"))
+            accept_urls.append(request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {"request": {"request_id": "req-saved"}}}))
+
+        def tracking(route: Any, request: Any) -> None:
+            tracking_calls.append(request.url)
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({
+                "ok": True,
+                "result": {"items": [{"request_id": "req-saved", "tracking_id": "tracking-real"}], "summary": {}},
+            }))
+
+        page.route("**/api/v1/batches/batch-spa/save-confirm*", save_confirm)
+        page.route("**/api/v1/requests/req-saved/accept", accept)
+        page.route("**/api/v1/tracking/items*", tracking)
+        _goto_batch(page, live_server_url)
+        page.fill("#batch-raw-input", "萌王S4")
+        page.click("#batch-parse-submit")
+        card = page.locator(".batch-draft-card", has_text="萌王S4")
+        card.locator(".batch-card-checkbox-row").check()
+        page.click("#batch-accept-submit")
+        page.locator(".confirm-dialog .primary-button").click()
+        expect(card.locator("#batch-retry-accept-item-saved")).to_be_visible()
+        page.click("#batch-retry-accept-item-saved")
+        expect(card.locator(".batch-card-status")).to_contain_text("已确认待提交")
+        expect(card.locator("#batch-open-tracking-item-saved")).to_be_visible()
+
+        assert len(batch_calls) == 1
+        assert len(accept_calls) == 1
+        assert "/api/v1/requests/req-saved/accept" in accept_urls[0]
+        assert len(tracking_calls) == 1
+        assert "retry_action" not in json.dumps(batch_calls[0])
+
 
 class TestAppBatchSensitiveBoundary:
     """AC: 批量解析/候选/接受全程不泄漏敏感值."""

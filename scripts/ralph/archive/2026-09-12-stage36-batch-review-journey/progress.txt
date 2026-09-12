@@ -140,3 +140,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 补齐 accept/tracking 的 journey phase 同步：核验失败进入 response_unknown、未找到回到 saved_pending_confirm、定位成功进入 confirmed；新增 12 部/36 部真实内容布局及 200% 等效缩放 Chromium 覆盖。
 - 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 53 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 52 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
 ---
+
+## 2026-09-12 - Stage 36 final result and recovery correction
+- 批量 failed 结果不再依赖易漂移的前端错误类型白名单：只要求受限非空 error_type，普通失败安全映射为固定文案；`save_confirm_failed` 仍严格要求合法公开 request_id；支持契约内 `SKIPPED/duplicate_item`，结构畸形才进入 response_unknown。
+- 新增 invalid_request_status、unexpected_error、未知 error_type、非法恢复 ID 和 malformed outcome 覆盖；补齐 response_unknown accept 后 tracking failed/not_found/found 的组件状态测试，确认 batch save-confirm 不会重复调用。
+- 新增真实 Chromium saved-confirm 恢复场景，验证无 retry_action、只调用一次 batch save-confirm、随后按公开 request_id 调用 accept 与 tracking 查询；保留 12/36 部及 200% 等效缩放布局测试。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 58 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 53 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---

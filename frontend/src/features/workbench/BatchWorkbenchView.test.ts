@@ -670,6 +670,27 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     expect(wrapper.text()).not.toContain('private.invalid')
   })
 
+  it.each(['invalid_request_status', 'unexpected_error', 'backend_new_error'])('treats deterministic failed %s as safe retryable failure', async (errorType) => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: reviewableItems().slice(0, 1) }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-1', outcome: 'failed', request_id: null, status: 'FAILED', error_type: errorType, error_message: 'poisoned server detail', tracking_id: null, tracking_ready: null }],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-card-status').text()).toContain('草案')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('poisoned server detail')
+    expect(wrapper.text()).not.toContain(errorType)
+  })
+
   it('retries an unknown batch response with the exact frozen request body', async () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: reviewableItems().slice(0, 1) }))
@@ -787,6 +808,68 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     })
     expect(wrapper.find('.batch-card-status').text()).toContain('已确认待提交')
     expect(wrapper.find('#batch-open-tracking-item-1').exists()).toBe(true)
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')).toHaveLength(1)
+  })
+
+  it('keeps accept unknown in response_unknown until a later tracking lookup finds it', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [reviewableItems()[0]] }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-1', outcome: 'failed', request_id: 'saved-request-unknown', status: null, error_type: 'save_confirm_failed', error_message: '固定安全错误', tracking_id: null, tracking_ready: null }],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }))
+      .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'private accept error' })
+    vi.mocked(api.get)
+      .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'private lookup error' })
+      .mockResolvedValueOnce({ items: [{ request_id: 'saved-request-unknown', tracking_id: 'tracking-found' }] } as never)
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-draft-card input[type=checkbox]').setValue(true)
+    await wrapper.find('#batch-accept-submit').trigger('click')
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-retry-accept-item-1').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
+    expect(wrapper.find('#batch-retry-locate-item-1').exists()).toBe(true)
+    expect(wrapper.find('#batch-retry-accept-item-1').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('private accept error')
+    await wrapper.find('#batch-retry-locate-item-1').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-card-status').text()).toContain('已确认待提交')
+    expect(wrapper.find('#batch-open-tracking-item-1').exists()).toBe(true)
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')).toHaveLength(1)
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/{request_id}/accept')).toHaveLength(1)
+  })
+
+  it('returns an unknown accept to saved_pending_confirm when lookup is not_found', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [reviewableItems()[0]] }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-1', outcome: 'failed', request_id: 'saved-request-missing', status: null, error_type: 'save_confirm_failed', error_message: null, tracking_id: null, tracking_ready: null }],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }))
+      .mockRejectedValueOnce({ network: true, type: 'network_error' })
+    vi.mocked(api.get)
+      .mockRejectedValueOnce({ network: true, type: 'network_error' })
+      .mockResolvedValueOnce({ items: [] } as never)
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.batch-draft-card input[type=checkbox]').setValue(true)
+    await wrapper.find('#batch-accept-submit').trigger('click')
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-retry-accept-item-1').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-retry-locate-item-1').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-card-status').text()).toContain('已保存待确认')
+    expect(wrapper.find('#batch-retry-accept-item-1').exists()).toBe(true)
     expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')).toHaveLength(1)
   })
 

@@ -141,10 +141,6 @@ type FrozenBatchSaveOperation = {
 const saveOperation = ref<FrozenBatchSaveOperation | null>(null)
 const recoveryLoadingItemIds = ref<Set<string>>(new Set())
 const recoveryFeedback = ref<Record<string, string>>({})
-const BATCH_RESULT_ERROR_TYPES = new Set([
-  'draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict',
-  'draft_reserved', 'save_confirm_failed', 'idempotency_conflict', 'batch_error', 'storage_error',
-])
 
 function batchItemRequestId(item: BatchItem): string {
   const value = (item as Record<string, unknown>).request_id
@@ -593,20 +589,20 @@ function validateBatchSaveResult(
     if (typeof itemId !== 'string' || !itemId || !expected.has(itemId) || seen.has(itemId)) return null
     if (typeof outcome !== 'string' || !outcome.trim()) return null
     const normalizedOutcome = outcome.toUpperCase()
-    if (normalizedOutcome !== 'CONFIRMED' && normalizedOutcome !== 'FAILED') return null
+    if (normalizedOutcome !== 'CONFIRMED' && normalizedOutcome !== 'FAILED' && normalizedOutcome !== 'SKIPPED') return null
     if (row.request_id !== null && typeof row.request_id !== 'string') return null
     if (row.tracking_id !== null && typeof row.tracking_id !== 'string') return null
     if (row.error_type !== null && typeof row.error_type !== 'string') return null
     if (row.error_message !== null && typeof row.error_message !== 'string') return null
     if (normalizedOutcome === 'CONFIRMED' && (!batchSaveConfirmSucceeded(row as BatchSaveConfirmResult['results'][number]) || row.error_type !== null)) return null
-    if (normalizedOutcome === 'FAILED') {
-      if (typeof row.error_type !== 'string' || !row.error_type.trim()) return null
-      if (!BATCH_RESULT_ERROR_TYPES.has(row.error_type)) return null
+    if (normalizedOutcome === 'FAILED' || normalizedOutcome === 'SKIPPED') {
+      if (typeof row.error_type !== 'string' || !row.error_type.trim() || row.error_type.length > 128) return null
       if (row.error_type === 'save_confirm_failed') {
         if (!isPublicRouteIdentifier(row.request_id)) return null
       } else if (row.request_id !== null) {
         return null
       }
+      if (normalizedOutcome === 'SKIPPED' && row.error_type !== 'duplicate_item') return null
     }
     seen.add(itemId)
     rows.push(row as BatchSaveConfirmResult['results'][number])
