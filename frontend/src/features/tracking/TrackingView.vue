@@ -22,33 +22,42 @@ const detail = ref<TrackingDetail | null>(null)
 const loading = ref(false)
 const failed = ref(false)
 const heading = ref<HTMLElement | null>(null)
+let loadSequence = 0
 
 function readTrackingId(): string {
   return typeof route.query.tracking_id === 'string' ? route.query.tracking_id : ''
 }
 
 async function loadDetail(): Promise<void> {
+  const sequence = ++loadSequence
+  const requestedTrackingId = trackingId.value
   if (!trackingId.value) {
     detail.value = null
     failed.value = false
+    loading.value = false
     return
   }
   loading.value = true
   failed.value = false
   try {
-    detail.value = await api.get<TrackingDetail>('/api/v1/tracking/items/{tracking_id}', {
+    const nextDetail = await api.get<TrackingDetail>('/api/v1/tracking/items/{tracking_id}', {
       path: { tracking_id: trackingId.value },
       query: storageQuery(),
     })
+    if (sequence !== loadSequence || requestedTrackingId !== trackingId.value) return
+    detail.value = nextDetail
     await nextTick()
-    heading.value?.focus({ preventScroll: true })
+    if (sequence === loadSequence && requestedTrackingId === trackingId.value) {
+      heading.value?.focus({ preventScroll: true })
+    }
   } catch (error) {
+    if (sequence !== loadSequence || requestedTrackingId !== trackingId.value) return
     detail.value = null
     failed.value = true
     // The detail endpoint's raw error is never part of the tracking handoff UI.
     void error
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 

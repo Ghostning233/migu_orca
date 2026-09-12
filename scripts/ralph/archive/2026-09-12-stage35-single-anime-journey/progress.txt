@@ -105,3 +105,9 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - F-D reuses the shared review core for batch save-confirm, F-E alone owns SafeInfo, and F-F alone may add formal tracking management actions.
 - Verification passed: compileall, Ruff, 1,636 non-browser backend tests, frontend API check, typecheck, lint, 341 unit tests, production build, 160 real Chromium tests, and git diff check.
 ---
+
+## 2026-09-12 - Stage 35 independent review fix
+- 正常 confirmRequestSave 成功严格消费完整 handoff，通过 `router.replace` 进入 handoff 提供的 tracking_id；定位失败保留 TrackingView 的“重试定位”，不重复 save-confirm/accept。
+- 为草案失效、revision conflict、replayed 与 idempotency conflict 保留独立恢复路径：失效草案清理并返回候选，冲突幂等键清除后生成新操作键。
+- 搜索成功后折叠为摘要并提供修改搜索，空输入禁用搜索；TrackingView 增加请求序列保护，旧响应不得覆盖快速切换后的详情。
+- 删除误建的 `2026-09-12-stage34-shared-review-core` 归档；未开发 F-D～F-G，未修改 OpenAPI、generated client 或后端语义。

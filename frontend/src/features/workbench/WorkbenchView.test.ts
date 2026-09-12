@@ -132,6 +132,7 @@ async function mountWorkbench() {
       { path: '/add', name: 'add', component: WorkbenchView },
       { path: '/plans', name: 'plans', component: { template: '<p>requests</p>' } },
       { path: '/settings', name: 'settings', component: { template: '<p>settings</p>' } },
+      { path: '/tracking', name: 'tracking', component: { template: '<p>tracking</p>' } },
     ],
   })
   await router.push({ path: '/add' })
@@ -155,15 +156,12 @@ describe('WorkbenchView single search (US-204)', () => {
     apiGet.mockReset()
   })
 
-  it('shows the empty search state and validates the query before calling the API', async () => {
+  it('disables search for empty input before calling the API', async () => {
     const { wrapper } = await mountWorkbench()
 
     expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('输入番剧标题后搜索候选合集')
-    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
-    await nextTick()
-
+    expect(wrapper.find('#mikan-candidate-search-submit').attributes('disabled')).toBeDefined()
     expect(apiPost).not.toHaveBeenCalled()
-    expect(wrapper.find('#mikan-candidate-search-error').text()).toContain('搜索 MiKan 候选前必须填写番剧标题')
   })
 
   it('focuses the title input on entry and moves focus to the first candidate', async () => {
@@ -272,6 +270,8 @@ describe('WorkbenchView single search (US-204)', () => {
     await flushPromises()
     expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
 
+    await wrapper.find('#mikan-edit-search').trigger('click')
+    await nextTick()
     await wrapper.find('#mikan-candidate-query').setValue('无职转生')
     await nextTick()
 
@@ -556,9 +556,13 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
       .mockResolvedValueOnce({
         outcome: 'CONFIRMED',
         request: { request_id: 'req-confirmed' },
-        handoff: { request_id: 'req-confirmed' },
+        handoff: {
+          request_id: 'req-confirmed', status: 'CONFIRMED', next_action: 'TRACKING',
+          tracking_id: 'tracking-confirmed', tracking_status: 'PENDING_SUBMIT',
+          tracking_ready: true, safe_message: null,
+        },
       } as never)
-    const { wrapper } = await mountWorkbench()
+    const { wrapper, router } = await mountWorkbench()
 
     await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
     await wrapper.find('#mikan-candidate-search-submit').trigger('click')
@@ -577,6 +581,9 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(saveCall?.[1]?.body).toHaveProperty('idempotency_key')
     expect(saveCall?.[1]?.body).not.toHaveProperty('request')
     expect(wrapper.find('#single-review-save-success').text()).toContain('已确认')
+    expect(router.currentRoute.value.name).toBe('tracking')
+    expect(router.currentRoute.value.query).toEqual({ tracking_id: 'tracking-confirmed' })
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/save-confirm')).toHaveLength(1)
   })
 
   it('keeps the review panel open after entering the save-confirm host', async () => {

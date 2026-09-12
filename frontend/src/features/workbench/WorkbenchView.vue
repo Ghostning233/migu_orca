@@ -87,6 +87,13 @@ const seasonConfirmations = ref<Record<string, number | null>>({})
 
 const hasResults = computed(() => (searchResult.value?.candidates?.length ?? 0) > 0)
 
+function editSearch(): void {
+  searchResult.value = null
+  lastSearchQuery.value = ''
+  searchError.value = ''
+  void nextTick(() => singleInput.value?.focus())
+}
+
 watch(query, (value) => {
   const normalized = value.trim()
   if (!searchResult.value || normalized === lastSearchQuery.value) return
@@ -304,7 +311,8 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     <!-- ── single search ──────────────────────────────────────────── -->
     <AnimeModeSwitch :model-value="mode" :disabled="searchLoading || draftLoading" @update:model-value="changeMode" />
 
-    <form v-if="mode === 'single'" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
+    <form v-if="mode === 'single' && !hasResults" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
+      <p class="step-label">步骤 1 · 输入番剧</p>
       <label for="mikan-candidate-query">番剧标题</label>
       <AnimeTitleInput
         ref="singleInput"
@@ -320,14 +328,14 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         {{ searchError }}
       </p>
       <div class="notification-actions">
-        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading">
+        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="searchLoading || !query.trim()">
           搜索候选
         </BaseButton>
       </div>
     </form>
 
     <!-- ── direct fallback (single mode only) ────────────────────── -->
-    <template v-if="mode === 'single'">
+    <template v-if="mode === 'single' && !hasResults">
       <CheckboxRow
         id="mikan-fallback-enabled"
         v-model:checked="fallbackEnabled"
@@ -385,9 +393,11 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         message="未找到候选合集。可调整番剧标题后重试，或勾选「搜索无结果时使用直连合集」直接生成订阅草案。"
       />
       <template v-else-if="searchResult && hasResults">
+        <p class="step-label">步骤 2 · 选择候选合集</p>
         <p class="candidate-search-summary" role="status">
           已搜索「{{ searchResult.query }}」，请选择要审核的 MiKan 合集。
         </p>
+        <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
         <section v-if="parseSummaryRows().length" class="title-parse-summary" aria-label="标题解析摘要">
           <h3 class="detail-section-heading">标题解析摘要</h3>
           <dl class="detail-grid">

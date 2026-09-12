@@ -135,7 +135,7 @@ def _register_generation_capture(
 class TestAppWorkbenchSingleSearch:
     """AC: 单个搜索迁移——loading、候选卡片、空状态、失败重试与旧页 parity."""
 
-    def test_empty_search_validates_before_calling_api(
+    def test_empty_search_is_disabled_before_calling_api(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         calls: list[str] = []
@@ -146,10 +146,7 @@ class TestAppWorkbenchSingleSearch:
         set_storage_preferences(page, storage_dir)
         _goto_workbench(page, live_server_url)
 
-        page.click("#mikan-candidate-search-submit")
-        expect(page.locator("#mikan-candidate-search-error")).to_contain_text(
-            "搜索 MiKan 候选前必须填写番剧标题"
-        )
+        expect(page.locator("#mikan-candidate-search-submit")).to_be_disabled()
         assert calls == []
 
     def test_search_success_renders_candidate_cards(
@@ -652,6 +649,30 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         preview = _preview_request("葬送的芙莉莲", "req-wb-save")
         captured: list[dict[str, Any]] = []
         _register_generation_capture(page, captured, body=preview_result_json(preview))
+        page.route(
+            "**/api/v1/requests/save-confirm",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "ok": True,
+                    "result": {
+                        "outcome": "CONFIRMED",
+                        "request": {"request_id": "req-wb-save"},
+                        "summary": {"request_id": "req-wb-save", "status": "ACCEPTED"},
+                        "handoff": {
+                            "request_id": "req-wb-save",
+                            "status": "CONFIRMED",
+                            "next_action": "TRACKING",
+                            "tracking_id": "tracking-wb-save",
+                            "tracking_status": "PENDING_SUBMIT",
+                            "tracking_ready": True,
+                            "safe_message": None,
+                        },
+                    },
+                }, ensure_ascii=False),
+            ),
+        )
 
         set_storage_preferences(page, storage_dir)
         _goto_workbench(page, live_server_url)
@@ -663,6 +684,9 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
 
         # The review step owns the atomic save-confirm action.
         expect(page.locator("#single-review-save-button")).to_be_enabled()
+        page.locator("#single-review-save-button").click()
+        page.wait_for_url("**/app/tracking?tracking_id=tracking-wb-save")
+        assert page.url.endswith("/app/tracking?tracking_id=tracking-wb-save")
         assert not (storage_dir / "requests").exists()
 
     def test_generation_failure_preserves_candidates_and_shows_sanitized_error(
@@ -712,8 +736,10 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         expect(page.locator(".global-notification")).to_contain_text(
             "生成失败", timeout=5000
         )
-        # Candidate list and the search input are preserved for retry.
+        # Candidate list is preserved; the collapsed search summary exposes
+        # an explicit edit action before the input is shown again.
         expect(page.locator(".candidate-card")).to_have_count(1)
+        page.locator("#mikan-edit-search").click()
         assert page.locator("#mikan-candidate-query").input_value() == "芙莉莲"
 
 

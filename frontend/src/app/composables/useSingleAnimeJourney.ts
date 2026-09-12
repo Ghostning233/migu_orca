@@ -202,6 +202,9 @@ export function useSingleAnimeJourney(): SingleAnimeJourney {
     finishTracking(trackingId) { snapshot = { ...snapshot, busy: null, trackingId: trackingId ?? snapshot.trackingId, phase: trackingId ? 'complete' : 'confirmed_pending_tracking' } },
     fail(error) {
       const safeError = toSafeJourneyError(error)
+      const clearsConfirmKey = safeError.type === 'idempotency_conflict' ||
+        safeError.type === 'draft_expired' || safeError.type === 'draft_evicted' ||
+        safeError.type === 'draft_replayed' || safeError.type === 'draft_revision_conflict'
       if (safeError.type === 'save_confirm_failed' && safeError.requestId && safeError.retryAction === 'ACCEPT_SAVED_REQUEST') {
         snapshot = {
           ...snapshot,
@@ -216,7 +219,13 @@ export function useSingleAnimeJourney(): SingleAnimeJourney {
         }
         return
       }
-      snapshot = { ...snapshot, phase: snapshot.phase === 'confirming' ? 'review' : snapshot.phase, busy: null, error: safeError }
+      snapshot = {
+        ...snapshot,
+        phase: snapshot.phase === 'confirming' ? 'review' : snapshot.phase,
+        busy: null,
+        error: safeError,
+        ...(clearsConfirmKey ? { idempotencyKey: null } : {}),
+      }
     },
     discard() { snapshot = { ...snapshot, phase: 'input', title: '', candidateCount: 0, selectedCandidate: false, draftId: null, draftRevision: null, dirty: false, busy: null, idempotencyKey: null, requestId: null, trackingId: null, error: null } },
     newConfirmOperation() {

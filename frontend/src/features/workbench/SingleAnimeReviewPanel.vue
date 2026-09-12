@@ -98,11 +98,16 @@ const blockingReasons = computed(() => {
 
 const saveButtonDisabled = computed(() => !journey.canConfirm() || confirmLoading.value || blockingReasons.value.length > 0)
 
-function requestIdFrom(result: ConfirmRequestSaveResult): string | null {
+function handoffFrom(result: ConfirmRequestSaveResult): NonNullable<ConfirmRequestSaveResult['handoff']> | null {
   const handoff = result.handoff
-  if (handoff && typeof handoff.request_id === 'string' && handoff.request_id.length <= 128) return handoff.request_id
-  const requestId = result.request?.request_id
-  return typeof requestId === 'string' && requestId.length <= 128 ? requestId : null
+  if (!handoff) return null
+  if (typeof handoff.request_id !== 'string' || handoff.request_id.length > 128) return null
+  if (typeof handoff.status !== 'string' || typeof handoff.next_action !== 'string') return null
+  if (typeof handoff.tracking_id !== 'string' || handoff.tracking_id.length > 128) return null
+  if (typeof handoff.tracking_ready !== 'boolean') return null
+  if (handoff.tracking_status !== null && typeof handoff.tracking_status !== 'string') return null
+  if (handoff.safe_message !== null && typeof handoff.safe_message !== 'string') return null
+  return handoff
 }
 
 function isAcceptStatusConflict(error: unknown): boolean {
@@ -143,15 +148,20 @@ async function saveAndConfirm(): Promise<void> {
   }
   try {
     const result = await api.post<ConfirmRequestSaveResult>('/api/v1/requests/save-confirm', { body })
-    const requestId = requestIdFrom(result)
-    if (!requestId) throw { type: 'request_error' }
-    confirmedRequestId.value = requestId
-    journey.finishConfirm({ requestId })
+    const handoff = handoffFrom(result)
+    if (!handoff) throw { type: 'request_error' }
+    confirmedRequestId.value = handoff.request_id
+    journey.finishConfirm({ requestId: handoff.request_id })
     session.invalidate()
+    await router.replace(routeLocation('tracking', { tracking_id: handoff.tracking_id }))
   } catch (cause) {
     const safeError = toApiError(cause)
     journey.fail(safeError)
     confirmError.value = journey.state.error?.message ?? '保存并确认失败，请重试。'
+    if (['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict'].includes(safeError.type)) {
+      session.invalidate()
+      emit('discard', 'candidates')
+    }
   } finally {
     confirmLoading.value = false
   }
