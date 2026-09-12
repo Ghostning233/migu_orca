@@ -169,7 +169,7 @@ async function loadDetail(options: LoadDetailOptions = {}): Promise<boolean> {
 }
 
 async function confirmAccept(): Promise<void> {
-  if (actionUnknown.value) return
+  if (actionUnknown.value || modifyResultUnknown.value) return
   const ok = await confirmDialog.value?.confirm({
     title: '确认订阅方案',
     message: '确认接受此订阅方案？',
@@ -181,10 +181,12 @@ async function confirmAccept(): Promise<void> {
 }
 
 function toggleCancelForm(): void {
+  if (actionUnknown.value || modifyResultUnknown.value) return
   cancelFormOpen.value = !cancelFormOpen.value
 }
 
 function toggleModifyForm(): void {
+  if (actionUnknown.value || modifyResultUnknown.value) return
   modifyFormOpen.value = !modifyFormOpen.value
   if (modifyFormOpen.value) {
     modifyError.value = ''
@@ -192,7 +194,7 @@ function toggleModifyForm(): void {
 }
 
 async function confirmCancel(): Promise<void> {
-  if (actionUnknown.value) return
+  if (actionUnknown.value || modifyResultUnknown.value) return
   const reason = cancelReason.value.trim()
   const ok = await confirmDialog.value?.confirm({
     title: '取消订阅方案',
@@ -266,16 +268,22 @@ async function recheckModify(patch: PreviewPatch): Promise<ModifyCheck> {
 }
 
 async function recoverModify(): Promise<void> {
-  const fetched = await fetchDetailSnapshot()
-  if (fetched.result) {
-    commitDetail(fetched.result)
-    modifyError.value = ''
-    modifyResultUnknown.value = false
-    modifyEditor.value?.reset()
-  } else {
-    lastLoadError.value = fetched.error
-    modifyError.value = '结果暂无法确认，请重新确认结果。'
-    modifyResultUnknown.value = true
+  if (actionInFlight.value) return
+  actionInFlight.value = true
+  try {
+    const fetched = await fetchDetailSnapshot()
+    if (fetched.result) {
+      commitDetail(fetched.result)
+      modifyError.value = ''
+      modifyResultUnknown.value = false
+      modifyEditor.value?.reset()
+    } else {
+      lastLoadError.value = fetched.error
+      modifyError.value = '结果暂无法确认，请重新确认结果。'
+      modifyResultUnknown.value = true
+    }
+  } finally {
+    actionInFlight.value = false
   }
 }
 
@@ -289,17 +297,23 @@ function commitModifySuccess(snapshot: RequestDetailResult): void {
 }
 
 async function retryModify(): Promise<void> {
+  if (actionInFlight.value) return
   const patch = lastModifyPatch.value
   if (!patch) return
   if (modifyResultUnknown.value) {
-    const result = await recheckModify(patch)
-    if (result.state === 'applied') {
-      commitModifySuccess(result.snapshot)
-    } else if (result.state === 'not_applied') {
-      modifyResultUnknown.value = false
-      modifyError.value = '修改未生效，请重试。'
-    } else {
-      modifyError.value = '结果暂无法确认，请重新确认结果。'
+    actionInFlight.value = true
+    try {
+      const result = await recheckModify(patch)
+      if (result.state === 'applied') {
+        commitModifySuccess(result.snapshot)
+      } else if (result.state === 'not_applied') {
+        modifyResultUnknown.value = false
+        modifyError.value = '修改未生效，请重试。'
+      } else {
+        modifyError.value = '结果暂无法确认，请重新确认结果。'
+      }
+    } finally {
+      actionInFlight.value = false
     }
     return
   }
@@ -324,6 +338,11 @@ async function performModify(patch: PreviewPatch): Promise<void> {
       lastLoadError.value = fetched.error
       modifyError.value = '结果暂无法确认，请重新确认结果。'
       modifyResultUnknown.value = true
+      return
+    }
+    if (!modifyPatchApplied(patch, fetched.result)) {
+      modifyResultUnknown.value = false
+      modifyError.value = '修改未生效，请重试。'
       return
     }
     commitModifySuccess(fetched.result)
@@ -400,7 +419,7 @@ async function recheckPendingAction(): Promise<void> {
 }
 
 async function confirmDelete(): Promise<void> {
-  if (actionUnknown.value) return
+  if (actionUnknown.value || modifyResultUnknown.value) return
   const ok = await confirmDialog.value?.confirm({
     title: '删除订阅方案',
     message: '确认删除此订阅方案？此操作不可恢复。',
@@ -447,7 +466,7 @@ async function confirmDelete(): Promise<void> {
 }
 
 async function performAction(action: 'accept' | 'cancel', body: LocalActionBody): Promise<void> {
-  if (actionUnknown.value) return
+  if (actionUnknown.value || modifyResultUnknown.value) return
   actionInFlight.value = true
   try {
     const options = {
@@ -516,13 +535,13 @@ onMounted(() => {
       <!-- ── actions ─────────────────────────────────────────────── -->
       <div class="detail-actions" aria-label="订阅方案操作">
         <template v-if="isPending">
-          <BaseButton id="detail-accept-button" variant="primary" :loading="actionInFlight" :disabled="Boolean(actionUnknown)" @click="confirmAccept">
+          <BaseButton id="detail-accept-button" variant="primary" :loading="actionInFlight" :disabled="Boolean(actionUnknown) || modifyResultUnknown" @click="confirmAccept">
             确认
           </BaseButton>
-          <BaseButton id="detail-cancel-toggle" :disabled="actionInFlight || Boolean(actionUnknown)" @click="toggleCancelForm">
+          <BaseButton id="detail-cancel-toggle" :disabled="actionInFlight || Boolean(actionUnknown) || modifyResultUnknown" @click="toggleCancelForm">
             取消
           </BaseButton>
-          <BaseButton id="detail-modify-toggle" :disabled="actionInFlight || Boolean(actionUnknown)" @click="toggleModifyForm">
+          <BaseButton id="detail-modify-toggle" :disabled="actionInFlight || Boolean(actionUnknown) || modifyResultUnknown" @click="toggleModifyForm">
             修改
           </BaseButton>
         </template>
@@ -531,10 +550,10 @@ onMounted(() => {
           <p class="field-help">
             此订阅方案已{{ detailStatusLabel(request?.status) }}，可进行本地方案修改或删除。
           </p>
-          <BaseButton id="detail-accepted-modify-toggle" :disabled="actionInFlight || Boolean(actionUnknown)" @click="toggleModifyForm">
+          <BaseButton id="detail-accepted-modify-toggle" :disabled="actionInFlight || Boolean(actionUnknown) || modifyResultUnknown" @click="toggleModifyForm">
             修改
           </BaseButton>
-          <BaseButton id="detail-delete-button" variant="danger" :disabled="actionInFlight || Boolean(actionUnknown)" @click="confirmDelete">
+          <BaseButton id="detail-delete-button" variant="danger" :disabled="actionInFlight || Boolean(actionUnknown) || modifyResultUnknown" @click="confirmDelete">
             删除
           </BaseButton>
         </template>
@@ -568,7 +587,7 @@ onMounted(() => {
           />
         </FormField>
         <div class="detail-form-actions">
-          <BaseButton id="detail-cancel-submit" type="submit" variant="danger" :loading="actionInFlight" :disabled="Boolean(actionUnknown)">
+          <BaseButton id="detail-cancel-submit" type="submit" variant="danger" :loading="actionInFlight" :disabled="Boolean(actionUnknown) || modifyResultUnknown">
             提交取消
           </BaseButton>
           <BaseButton type="button" :disabled="actionInFlight" @click="cancelFormOpen = false">

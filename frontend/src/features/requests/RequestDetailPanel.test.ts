@@ -493,7 +493,14 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await nextTick()
 
     apiPost.mockResolvedValue({ request: detailFixture().request })
-    apiGet.mockResolvedValue(detailFixture())
+    apiGet.mockResolvedValue(detailFixture({ request: {
+      ...detailFixture().request,
+      confirmable_config: {
+        ...detailFixture().request.confirmable_config,
+        expected_folder_name: '新目录名',
+        filter_rule: { ...detailFixture().request.confirmable_config?.filter_rule, use_regex: true },
+      },
+    } }))
 
     await wrapper.find('#detail-modify-toggle').trigger('click')
     await nextTick()
@@ -513,6 +520,23 @@ describe('RequestDetailPanel actions (US-203)', () => {
         storage_dir: null,
       },
     })
+    expect(wrapper.find('#detail-modify-form').exists()).toBe(false)
+  })
+
+  it('keeps input when a successful modify POST is not reflected by the detail GET', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('服务端未采用目录')
+    apiPost.mockResolvedValueOnce({ request: detailFixture().request })
+    apiGet.mockResolvedValueOnce(detailFixture())
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('#detail-modify-editor .field-error').text()).toContain('修改未生效，请重试')
+    expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '服务端未采用目录')
+    expect(wrapper.find('#detail-modify-form').exists()).toBe(true)
   })
 
   it('keeps input and exposes retry/recovery after a definite modify failure', async () => {
@@ -596,6 +620,64 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await flushPromises()
     expect(apiPost).toHaveBeenCalledTimes(1)
     expect(wrapper.find('.field-error').text()).not.toContain('raw backend error')
+  })
+
+  it('locks local actions while an uncertain modify result is unverified', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('待核验目录')
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('#modify-folder-name').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#detail-accept-button').attributes('disabled')).toBeDefined()
+    await wrapper.find('#detail-accept-button').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('locks delete while an uncertain modify result is unverified', async () => {
+    apiGet.mockResolvedValue(acceptedFixture())
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-accepted-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('待核验目录')
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    await wrapper.find('#detail-delete-button').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes concurrent modify recovery GETs', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    await wrapper.find('#detail-modify-toggle').trigger('click')
+    await nextTick()
+    await wrapper.find('#modify-folder-name').setValue('待核验目录')
+    apiPost.mockRejectedValueOnce({ type: 'validation_error', message: '拒绝修改' })
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+
+    let resolveRecovery!: (value: DetailResult) => void
+    apiGet.mockReturnValueOnce(new Promise((resolve) => { resolveRecovery = resolve }) as never)
+    await wrapper.find('#modify-reset-button').trigger('click')
+    await wrapper.find('#modify-reset-button').trigger('click')
+    expect(apiGet).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('#modify-reset-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#detail-accept-button').attributes('disabled')).toBeDefined()
+    resolveRecovery(detailFixture())
+    await flushPromises()
   })
 
   it('recovers the editor from the latest server snapshot without using the DOM as a patch source', async () => {

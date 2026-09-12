@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import zipfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -333,6 +334,11 @@ class TestAppRequestDetailModify:
         save_request_snapshot(load_storage_config(storage_dir), request)
         set_storage_preferences(page, storage_dir)
         _open_detail(page, live_server_url, "req-mod-clear")
+        updated_request = deepcopy(request)
+        updated_request["confirmable_config"]["filter_rule"].update(
+            {"must_contain": "", "must_not_contain": ""}
+        )
+        updated_request["confirmable_config"]["expected_folder_name"] = ""
 
         captured: dict[str, Any] = {}
 
@@ -360,14 +366,30 @@ class TestAppRequestDetailModify:
             else:
                 route.continue_()
 
+        def handle_detail(route: Any, request: Any) -> None:
+            if request.method == "GET":
+                route.fulfill(
+                    json={
+                        "ok": True,
+                        "result": {
+                            "request": updated_request,
+                            "history": {"available": True, "events": [], "error": None},
+                            "ab_result": {"available": False, "record": None, "error": None},
+                        },
+                    }
+                )
+            else:
+                route.continue_()
+
         page.route("**/api/v1/requests/req-mod-clear/modify**", handle_modify)
+        page.route("**/api/v1/requests/req-mod-clear?*", handle_detail)
         page.locator("#detail-modify-toggle").click()
         page.locator("#detail-modify-form details.advanced-settings").evaluate("el => el.open = true")
         page.locator("#modify-clear-must-contain").check()
         page.locator("#modify-clear-must-not-contain").check()
         page.locator("#modify-clear-folder-name").check()
         page.locator("#modify-apply-button").click()
-        page.wait_for_selector(".global-notification", timeout=5000)
+        expect(page.locator(".global-notification")).to_contain_text("修改成功", timeout=5000)
 
         assert captured["payload"]["patch"]["filter_rule"] == {
             "must_contain": "",

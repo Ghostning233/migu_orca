@@ -140,4 +140,20 @@ describe('SafeInfoDialog (US-297)', () => {
     expect(document.body.textContent).toContain('全部信息加载失败')
     expect(document.body.textContent).not.toContain('sensitive raw response')
   })
+
+  it('discards an older response after a fast requestId switch', async () => {
+    let resolveOld!: (value: unknown) => void
+    apiGet.mockReturnValueOnce(new Promise((resolve) => { resolveOld = resolve }) as never)
+    apiGet.mockResolvedValueOnce({ safe_info: safeInfo('新请求') } as never)
+    const wrapper = mount(SafeInfoDialog, {
+      attachTo: document.body,
+      props: { open: true, requestId: 'request-old' },
+    })
+    await wrapper.setProps({ requestId: 'request-new' })
+    await flushPromises()
+    expect(document.body.textContent).toContain('新请求')
+    resolveOld({ safe_info: safeInfo('旧请求') })
+    await flushPromises()
+    expect(document.body.textContent).not.toContain('旧请求')
+  })
 })

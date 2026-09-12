@@ -97,4 +97,10 @@ Thread: https://codex.openai.com/threads/current
 - accept/cancel/delete 增加内存 unknown 状态与仅 GET 的重新确认入口，回查失败时锁定冲突写动作，确认未生效后才解除锁定。
 - SafeInfo 展示公开外部订阅编号、历史动作中文标签；Escape 复用统一 close 路径，及时清理 focus trap 与请求序号。
 - 定向验证：相关 Vitest 58 passed；frontend typecheck/lint/build passed；Chromium 首轮 27 passed、1 个过早断言后单例通过；git diff --check 待提交后复核。
+
+## [2026-09-12 23:56:00 CST] - US-297～US-299 第三轮审核修复
+Thread: https://codex.openai.com/threads/current
+- 未确认修改结果期间锁定全部本地写入口；重试/恢复 GET 互斥，明确成功后的详情回查必须匹配 patch 才收敛。
+- 补充 unknown 修改输入保持、动作锁定、并发回查、成功回查不匹配及 SafeInfo 快速 requestId 切换回归。
+- 定向验证：相关 Vitest 63 passed；frontend typecheck/lint/build passed；Chromium 失败用例修正 mock 后单例通过。
 ---
