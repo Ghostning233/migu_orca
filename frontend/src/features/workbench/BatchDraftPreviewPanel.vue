@@ -5,7 +5,7 @@ import { computed, ref } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
-import { useDraftSession } from '@/app/composables/useDraftSession'
+import { useDraftSession, type DraftSession } from '@/app/composables/useDraftSession'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
@@ -19,7 +19,7 @@ type PreviewSaveResult = NonNullable<
   operations['previewSaveRequest']['responses']['200']['content']['application/json']['result']
 >
 
-const props = defineProps<{ item: BatchItem }>()
+const props = defineProps<{ item: BatchItem; session?: DraftSession; sharedError?: string }>()
 const emit = defineEmits<{
   (e: 'accepted', item: BatchItem, savedRequest: RequestSnapshot): void
   (e: 'deleted', itemId: string): void
@@ -33,8 +33,13 @@ const editor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
 const accepting = ref(false)
 const formError = ref('')
 const initialRequest = computed(() => props.item.preview_request as RequestSnapshot)
-const session = useDraftSession({ request: initialRequest.value, draftId: props.item.draft_id ?? '', draftRevision: props.item.draft_revision ?? 1 })
+const localSession = useDraftSession({ request: initialRequest.value, draftId: props.item.draft_id ?? '', draftRevision: props.item.draft_revision ?? 1 })
+// BatchWorkbenchView owns the session when this panel is used in the batch
+// flow. Keeping a local fallback preserves the component's compatibility use
+// in existing tests and makes the editor reusable in isolation.
+const session = props.session ?? localSession
 const draftSnapshot = computed(() => (session.request.value ?? initialRequest.value) as RequestSnapshot)
+const displayError = computed(() => formError.value || props.sharedError || '')
 
 function notifyDraftExpired(): void {
   notification.error('订阅草案已失效', '请重新生成订阅草案后再试。')
@@ -124,7 +129,7 @@ defineExpose({ acceptCurrentDraft: saveDraftAndAccept })
       form-id="detail-preview-edit-form"
       container-id="request-detail-container"
       :applying="session.applying.value"
-      :error="formError"
+      :error="displayError"
       :can-retry="session.canRetry.value"
       :disabled="accepting"
       @apply="applyModify"

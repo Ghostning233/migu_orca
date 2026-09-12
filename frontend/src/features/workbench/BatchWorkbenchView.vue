@@ -30,6 +30,7 @@ import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
+import { useDraftSession, type DraftSession } from '@/app/composables/useDraftSession'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import EmptyState from '@/components/feedback/EmptyState.vue'
@@ -75,6 +76,7 @@ import {
 import BatchCandidatePopover from '@/features/workbench/BatchCandidatePopover.vue'
 import BatchDraftPreviewPanel from '@/features/workbench/BatchDraftPreviewPanel.vue'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
+import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
 import { routeLocation } from '@/app/router/catalog'
 
@@ -122,6 +124,27 @@ const candidateTrigger = ref<HTMLButtonElement | null>(null)
 
 // Draft detail state.
 const detailItemId = ref<string | null>(null)
+// One route-local session per draft item. The card shortcut and the detail
+// editor both use this map, so snapshots, revisions, dirty state and errors
+// cannot diverge between the two surfaces.
+const draftSessions = new Map<string, DraftSession>()
+const draftApplyErrors = ref<Record<string, string>>({})
+const pendingCardSubtitleGroups = ref<Record<string, string>>({})
+
+function ensureDraftSession(item: BatchItem): DraftSession | null {
+  const itemId = item.item_id
+  const request = batchCardRequest(item)
+  if (!itemId || !request || !item.draft_id) return null
+  const existing = draftSessions.get(itemId)
+  if (existing && existing.draftId.value === item.draft_id) return existing
+  const session = useDraftSession({
+    request,
+    draftId: item.draft_id,
+    draftRevision: item.draft_revision ?? 1,
+  })
+  draftSessions.set(itemId, session)
+  return session
+}
 
 // Review filters affect visibility only. The parsed order remains frozen until
 // the user explicitly asks for exception-first sorting.
@@ -369,6 +392,7 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
         ? { ...current, status: 'DRAFT', preview_request: request, draft_id: draftId, draft_revision: draftRevision }
         : current,
     )
+    ensureDraftSession({ ...item, preview_request: request, draft_id: draftId, draft_revision: draftRevision })
     activeCandidateItemId.value = null
     notification.success('订阅草案已生成', '已根据所选 MiKan 合集生成当前批量条目的订阅草案。')
   } catch (error) {
@@ -376,6 +400,46 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
     notification.error('生成订阅草案失败', '从 MiKan 合集生成订阅草案失败。请重试。')
   } finally {
     acceptInFlight.value = false
+  }
+}
+
+function subtitleGroupOptions(item: BatchItem): Array<{ value: string; label: string }> {
+  return ((batchCardRequest(item)?.source_info?.rss_sources ?? []) as Array<{ subtitle_group?: string | null }>)
+    .map((source) => ({ value: source.subtitle_group ?? '', label: source.subtitle_group ?? '未知字幕组' }))
+    .filter((option) => option.value)
+}
+
+async function applyCardSubtitleGroup(item: BatchItem, value: string): Promise<void> {
+  const session = ensureDraftSession(item)
+  if (!session || !value || session.applying.value || session.invalid.value) return
+  const patch: PreviewPatch = { selected_subtitle_group: value }
+  pendingCardSubtitleGroups.value = { ...pendingCardSubtitleGroups.value, [item.item_id ?? '']: value }
+  draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '' }
+  const result = await session.apply(patch, storageQuery().storage_dir ?? null)
+  if (result?.request) {
+    onDraftChanged(item.item_id ?? '', {
+      request: result.request as RequestSnapshot,
+      draftId: session.draftId.value ?? item.draft_id ?? '',
+      draftRevision: session.draftRevision.value ?? item.draft_revision ?? 1,
+    })
+    notification.success('已应用字幕组修改', '订阅草案资源已重新计算。')
+  } else {
+    draftApplyErrors.value = { ...draftApplyErrors.value, [item.item_id ?? '']: '修改失败，可重试或恢复上次结果。' }
+    notification.error('修改失败', '订阅草案修改失败，请稍后重试。')
+  }
+}
+
+async function retryCardSubtitleGroup(item: BatchItem): Promise<void> {
+  const session = draftSessions.get(item.item_id ?? '')
+  if (!session || session.applying.value || !session.canRetry.value) return
+  const result = await session.retry()
+  if (result?.request) {
+    onDraftChanged(item.item_id ?? '', {
+      request: result.request as RequestSnapshot,
+      draftId: session.draftId.value ?? item.draft_id ?? '',
+      draftRevision: session.draftRevision.value ?? item.draft_revision ?? 1,
+    })
+    notification.success('已恢复修改', '订阅草案资源已重新计算。')
   }
 }
 
@@ -555,6 +619,10 @@ function onDraftChanged(
         }
       : current,
   )
+  draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '' }
+  const pending = { ...pendingCardSubtitleGroups.value }
+  delete pending[itemId]
+  pendingCardSubtitleGroups.value = pending
 }
 
 function onDraftDeleted(itemId: string): void {
@@ -580,6 +648,8 @@ function onDraftExpired(itemId: string): void {
       draft_revision: null,
     }
   })
+  draftSessions.delete(itemId)
+  draftApplyErrors.value = { ...draftApplyErrors.value, [itemId]: '订阅草案已失效，请重新生成。' }
   detailItemId.value = null
 }
 
@@ -735,6 +805,26 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               <div class="batch-card-raw-title">输入：{{ displayValue(item.raw_title) }}</div>
               <div class="batch-card-source">候选来源：{{ canChooseBatchCandidate(item) || batchCardRequest(item) ? 'MiKan 候选搜索' : 'MiKan 候选搜索' }}</div>
               <div class="batch-card-preference">{{ batchCardPreferenceSummary(item) }}</div>
+              <div v-if="canExpandBatchCard(item) && batchCardRequest(item)" class="batch-card-subtitle-group" @click.stop>
+                <label :for="`batch-card-subtitle-${item.item_id}`">字幕组快捷修改</label>
+                <select
+                  :id="`batch-card-subtitle-${item.item_id}`"
+                  :value="pendingCardSubtitleGroups[item.item_id ?? ''] ?? batchCardRequest(item)?.confirmable_config?.selected_subtitle_group ?? ''"
+                  :disabled="acceptInFlight || draftSessions.get(item.item_id ?? '')?.applying.value"
+                  @change="applyCardSubtitleGroup(item, ($event.target as HTMLSelectElement).value)"
+                >
+                  <option value="">保持当前选择</option>
+                  <option v-for="option in subtitleGroupOptions(item)" :key="option.value" :value="option.value">{{ option.label }}</option>
+                </select>
+                <p v-if="draftApplyErrors[item.item_id ?? '']" class="batch-card-reason">{{ draftApplyErrors[item.item_id ?? ''] }}</p>
+                <p v-if="draftSessions.get(item.item_id ?? '')?.applying.value" class="field-help" aria-live="polite">正在重新计算资源...</p>
+                <BaseButton
+                  v-if="draftSessions.get(item.item_id ?? '')?.canRetry.value"
+                  variant="secondary"
+                  :disabled="acceptInFlight"
+                  @click.stop="retryCardSubtitleGroup(item)"
+                >重试修改</BaseButton>
+              </div>
               <div class="batch-card-seeds">有效种子数：{{ batchCardSeedSummary(item) }}</div>
               <div class="batch-card-progress">{{ batchEpisodeProgressText(undefined) }}</div>
 
@@ -813,6 +903,8 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               <BatchDraftPreviewPanel
                 :key="`detail-${detailItem.item_id ?? detailItem.raw_title ?? ''}`"
                 :item="detailItem"
+                :session="ensureDraftSession(detailItem) ?? undefined"
+                :shared-error="draftApplyErrors[detailItem.item_id ?? '']"
                 @accepted="onAccepted"
                 @deleted="onDraftDeleted"
                 @expired="onDraftExpired"
