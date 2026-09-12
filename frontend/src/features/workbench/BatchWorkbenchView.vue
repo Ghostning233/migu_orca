@@ -26,7 +26,7 @@
 // fields) + storage_dir (relative profile). Destructive/irreversible actions
 // go through the shared ConfirmDialog and failures surface fixed Chinese copy
 // only.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
@@ -50,6 +50,7 @@ import {
   batchCardRequest,
   batchCardSeedSummary,
   batchCardTitle,
+  batchItemMatchesReviewFilters,
   batchEpisodeProgressText,
   batchItemCount,
   batchStatusLabel,
@@ -121,6 +122,16 @@ const candidateTrigger = ref<HTMLButtonElement | null>(null)
 // Draft detail state.
 const detailItemId = ref<string | null>(null)
 
+// Review filters affect visibility only. The parsed order remains frozen until
+// the user explicitly asks for exception-first sorting.
+const reviewQuery = ref('')
+const reviewStatus = ref('')
+const exceptionsOnly = ref(false)
+const exceptionSorted = ref(false)
+const reviewList = ref<HTMLElement | null>(null)
+const reviewScrollPositions = new Map<string, number>()
+const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus.value}\u0000${exceptionsOnly.value}`)
+
 // Queue state (read-only snapshot after accept; full queue panel is US-206).
 const queueItems = ref<QueueItem[]>([])
 
@@ -140,6 +151,41 @@ const detailItem = computed(() =>
     ? items.value.find((item) => item.item_id === (detailItemId.value || currentItemId.value)) ?? null
     : null,
 )
+const visibleItems = computed(() => items.value.filter((item) => batchItemMatchesReviewFilters(item, {
+  query: reviewQuery.value,
+  status: reviewStatus.value,
+  exceptionsOnly: exceptionsOnly.value,
+})))
+
+function saveReviewScrollPosition(): void {
+  if (reviewList.value) reviewScrollPositions.set(reviewFilterKey.value, reviewList.value.scrollTop)
+}
+
+async function restoreReviewScrollPosition(): Promise<void> {
+  await nextTick()
+  if (reviewList.value) reviewList.value.scrollTop = reviewScrollPositions.get(reviewFilterKey.value) ?? 0
+}
+
+watch([reviewQuery, reviewStatus, exceptionsOnly], (_values, oldValues) => {
+  if (reviewList.value) {
+    const [query, status, exceptions] = oldValues
+    reviewScrollPositions.set(`${query}\u0000${status}\u0000${exceptions}`, reviewList.value.scrollTop)
+  }
+  void restoreReviewScrollPosition()
+})
+
+function clearReviewFilters(): void {
+  reviewQuery.value = ''
+  reviewStatus.value = ''
+  exceptionsOnly.value = false
+}
+
+function sortExceptionsFirst(): void {
+  saveReviewScrollPosition()
+  items.value = orderBatchItemsForReview(items.value)
+  exceptionSorted.value = true
+  void restoreReviewScrollPosition()
+}
 
 function selectCurrentItem(item: BatchItem): void {
   currentItemId.value = item.item_id ?? null
@@ -518,10 +564,36 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
       />
       <template v-else>
         <div class="batch-review-layout">
-          <div class="batch-card-grid-wrapper">
+          <div ref="reviewList" class="batch-card-grid-wrapper">
+            <div class="batch-review-filters" aria-label="批量结果筛选">
+              <label class="batch-review-search">
+                标题搜索
+                <input id="batch-review-search" v-model="reviewQuery" type="search" placeholder="搜索标题" />
+              </label>
+              <label>
+                状态
+                <select id="batch-review-status" v-model="reviewStatus">
+                  <option value="">全部状态</option>
+                  <option v-for="status in ['FAILED', 'EMPTY', 'FOUND', 'DRAFT', 'ACCEPTED']" :key="status" :value="status">
+                    {{ batchStatusLabel(status) }}
+                  </option>
+                </select>
+              </label>
+              <CheckboxRow id="batch-review-exceptions" label="只看异常" :checked="exceptionsOnly" @update:checked="(value: boolean) => (exceptionsOnly = value)" />
+              <BaseButton id="batch-review-clear" variant="secondary" :disabled="!reviewQuery && !reviewStatus && !exceptionsOnly" @click="clearReviewFilters">
+                清除条件
+              </BaseButton>
+              <BaseButton id="batch-review-sort-exceptions" variant="secondary" @click="sortExceptionsFirst">
+                按异常排序
+              </BaseButton>
+            </div>
+            <p class="batch-review-count" role="status">共 {{ items.length }} 部，当前显示 {{ visibleItems.length }} 部{{ exceptionSorted ? '；已按异常排序' : '' }}</p>
+            <p v-if="detailItem && !visibleItems.some((item) => item.item_id === detailItem?.item_id)" class="batch-filter-hidden" role="status">
+              当前条目已被筛选隐藏，详情仍保持显示。
+            </p>
             <div class="batch-card-grid" role="list" aria-label="批量草案卡片">
             <article
-              v-for="item in items"
+              v-for="item in visibleItems"
               :key="item.item_id ?? item.raw_title ?? ''"
               class="batch-draft-card"
               :class="{ 'is-current': currentItemId === item.item_id }"
@@ -756,6 +828,51 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
   max-height: 640px;
   overflow-y: auto;
   padding-right: 2px;
+}
+
+.batch-review-filters {
+  align-items: end;
+  background: var(--color-bg);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  padding: 0 0 0.75rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.batch-review-filters label {
+  color: var(--color-text-muted);
+  display: grid;
+  font-size: 0.78rem;
+  gap: 0.2rem;
+}
+
+.batch-review-filters input,
+.batch-review-filters select {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text);
+  min-height: 2rem;
+  padding: 0.25rem 0.5rem;
+}
+
+.batch-review-filters :deep(.checkbox-row) {
+  align-self: end;
+  min-height: 2rem;
+}
+
+.batch-review-count,
+.batch-filter-hidden {
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+  margin: 0 0 0.75rem;
+}
+
+.batch-filter-hidden {
+  color: #8a5a13;
 }
 
 .batch-review-layout {

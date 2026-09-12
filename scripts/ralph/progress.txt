@@ -33,6 +33,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - Verification passed: Python compileall, full pytest (1797 passed), frontend typecheck/lint/unit (352 passed)/build, and batch Chromium suite (14 passed).
 ---
 
+## 2026-09-12 14:50:30 Asia/Shanghai - US-287
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added additive title search, status filtering, exception-only filtering, clear controls, visible/total counts, explicit exception-first resorting, hidden-current-detail guidance, and per-filter list scroll restoration to the batch review workbench. Filtering remains derived visibility, so frozen order, selection, and current detail persist.
+- Files changed: `frontend/src/features/workbench/batchWorkbench.ts`, `frontend/src/features/workbench/batchWorkbench.test.ts`, `frontend/src/features/workbench/BatchWorkbenchView.vue`, `frontend/src/features/workbench/BatchWorkbenchView.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Keep batch filters as derived visibility over the frozen item list; only explicit user sorting should mutate review order.
+  - Preserve the current detail independently when its card is filtered out, and retain list scroll positions keyed by the complete filter combination.
+  - Verification passed: frontend typecheck/lint/unit (35 targeted tests)/build, Chromium browser suite (161 passed), Python compileall, full pytest (1797 passed), and `git diff --check`.
+---
+
 ## 2026-09-12 14:42:39 Asia/Shanghai - US-286
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - What was implemented: Converted the batch results into a responsive left-card/right-detail review layout. The first result is selected for continuous review, clicking a card changes only the current detail, and checkbox/delete/action controls stop propagation. The detail pane reuses `CandidateCollectionList` for FOUND items and the shared `BatchDraftPreviewPanel`/`AnimeDraftEditor` flow for drafts; blocked items show local non-selectable guidance.

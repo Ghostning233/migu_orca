@@ -228,6 +228,24 @@ export function orderBatchItemsForReview(items: BatchItem[]): BatchItem[] {
   return groups.flat()
 }
 
+/** Whether a batch item is an exception that should be surfaced for review. */
+export function batchItemIsException(item: BatchItem): boolean {
+  return String(item.status ?? '') === 'FAILED' || String(item.status ?? '') === 'EMPTY' || batchCardNeedsReview(item)
+}
+
+/** Match one item against the additive workbench search/filter controls. */
+export function batchItemMatchesReviewFilters(
+  item: BatchItem,
+  filters: { query: string; status: string; exceptionsOnly: boolean },
+): boolean {
+  const query = filters.query.trim().toLocaleLowerCase()
+  const title = `${item.raw_title ?? ''} ${batchCardTitle(item)}`.toLocaleLowerCase()
+  if (query && !title.includes(query)) return false
+  if (filters.status && String(item.status ?? '') !== filters.status) return false
+  if (filters.exceptionsOnly && !batchItemIsException(item)) return false
+  return true
+}
+
 /** Build the batch parse request payload (only user input + storage context). */
 export function buildBatchParsePayload(rawInput: string, storageDir: string | null): Record<string, unknown> {
   return { raw_input: rawInput, storage_dir: storageDir || null }

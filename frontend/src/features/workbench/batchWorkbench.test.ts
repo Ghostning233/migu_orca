@@ -12,6 +12,8 @@ import {
   batchCardSeedSummary,
   batchCardTitle,
   batchItemCount,
+  batchItemIsException,
+  batchItemMatchesReviewFilters,
   batchStatusLabel,
   buildBatchAcceptPayload,
   buildBatchCandidateCreatePayload,
@@ -134,6 +136,16 @@ describe('batchWorkbench helpers (US-205)', () => {
       batchItem({ item_id: 'normal-2', status: 'DRAFT' }),
     ])
     expect(ordered.map((item) => item.item_id)).toEqual(['failed', 'empty', 'review', 'normal-1', 'normal-2'])
+  })
+
+  it('matches additive title, status, and exception filters without changing item identity', () => {
+    const failed = batchItem({ item_id: 'failed', status: 'FAILED', raw_title: '路哥' })
+    const normal = batchItem({ item_id: 'normal', status: 'DRAFT', raw_title: '萌王' })
+    expect(batchItemIsException(failed)).toBe(true)
+    expect(batchItemIsException(normal)).toBe(false)
+    expect(batchItemMatchesReviewFilters(failed, { query: '路', status: 'FAILED', exceptionsOnly: true })).toBe(true)
+    expect(batchItemMatchesReviewFilters(normal, { query: '路', status: '', exceptionsOnly: false })).toBe(false)
+    expect(batchItemMatchesReviewFilters(failed, { query: '', status: 'DRAFT', exceptionsOnly: true })).toBe(false)
   })
 
   it('builds the parse payload with only input + storage context', () => {

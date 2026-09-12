@@ -222,6 +222,50 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     expect(wrapper.find('.batch-draft-card').classes()).toContain('is-current')
   })
 
+  it('filters visibility without clearing selection or the current detail', async () => {
+    apiPost.mockResolvedValue(parseResult({
+      items: [
+        batchItem({ item_id: 'item-found', raw_title: '萌王', status: 'FOUND', candidates: [{ bangumi_id: '42' }] }),
+        batchItem({ item_id: 'item-failed', raw_title: '路哥', canonical_title_candidates: [], status: 'FAILED' }),
+      ],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王\n路哥')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    const failedCard = wrapper.find('.batch-draft-card[data-item-id="item-failed"]')
+    await failedCard.trigger('click')
+    await wrapper.find('#batch-review-search').setValue('萌王')
+    await nextTick()
+
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(1)
+    expect(wrapper.find('.batch-draft-card').attributes('data-item-id')).toBe('item-found')
+    expect(wrapper.find('.batch-filter-hidden').text()).toContain('当前条目已被筛选隐藏')
+    expect(wrapper.find('.batch-detail-title').text()).toContain('路哥')
+    expect(wrapper.find('.batch-review-count').text()).toContain('共 2 部，当前显示 1 部')
+
+    await wrapper.find('#batch-review-clear').trigger('click')
+    await nextTick()
+    expect(wrapper.findAll('.batch-draft-card')).toHaveLength(2)
+  })
+
+  it('sorts exceptions only when explicitly requested', async () => {
+    apiPost.mockResolvedValue(parseResult({
+      items: [
+        batchItem({ item_id: 'item-normal', status: 'FOUND', raw_title: '正常' }),
+        batchItem({ item_id: 'item-failed', status: 'FAILED', raw_title: '异常' }),
+      ],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('正常\n异常')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.batch-draft-card')[0]?.attributes('data-item-id')).toBe('item-failed')
+    await wrapper.find('#batch-review-sort-exceptions').trigger('click')
+    expect(wrapper.find('.batch-review-count').text()).toContain('已按异常排序')
+  })
+
   it('shows a loading message with the item count and a safe error on failure', async () => {
     apiPost.mockRejectedValue({ type: 'server_error', message: '内部错误' })
     const { wrapper } = await mountBatch()
