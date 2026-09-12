@@ -114,3 +114,12 @@ Thread: https://codex.openai.com/threads/current
 - **Learnings for future iterations:**
   - 复制再用的 handoff 必须由 SafeInfo 成功响应直接构造，导航只传递模块内存状态；草案建议必须在新 draft 存在后通过单独用户动作应用。
 ---
+
+## [2026-09-13 00:15:00 CST] - US-301
+Thread: https://codex.openai.com/threads/current
+- 依据运行时引用搜索确认旧复制按钮、详情独立修改表单及 ACCEPTED Settings/Auto Bangumi 外部提交入口均未被 Plans 旅程调用；旧 `/app/requests`、`/app/workbench` 与 `/index`/`/settings` 仍安全重定向。
+- 保留并验证列表当前行 aria-current、键盘 Tab/Enter/Space/Escape、焦点恢复、200% 等效缩放、reduced-motion 文本反馈及四路由响应式布局；新增 SafeInfo 未知敏感字段浏览器可观测面回归。
+- 定向验证：responsive/a11y Chromium 36 passed；SafeInfo、RequestDetail 敏感边界与旧路由定向 Chromium 9 passed；新增敏感字段回归 1 passed；git diff --check passed。
+- **Learnings for future iterations:**
+  - 旧入口重定向属于兼容契约，删除前需用 `git grep` 与 Flask/Router 回归证明其仍只保留公开 query；未知 SafeInfo 字段必须不能进入浏览器可观测面。
+---

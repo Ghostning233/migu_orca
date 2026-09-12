@@ -144,8 +144,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "完成跨功能 responsive/a11y 与敏感字段收敛；保留旧入口安全重定向，确认无旧复制/独立详情表单/Settings 外部提交运行时引用。定向 Chromium 与前端检查通过。"
     },
     {
       "id": "US-302",

@@ -142,3 +142,38 @@ def test_safe_info_reuse_is_one_shot_and_requires_explicit_search(
     page.reload()
     page.wait_for_selector("#mikan-candidate-search-form", timeout=5000)
     expect(page.locator("#reuse-handoff-summary")).to_have_count(0)
+
+
+def test_safe_info_ignores_sensitive_unknown_fields_in_browser_observables(
+    page: Page, live_server_url: str, storage_dir: Path
+) -> None:
+    create_saved_request(storage_dir, "葬送的芙莉莲", "req-safe-stage37-canary")
+    set_storage_preferences(page, storage_dir)
+    canary = "stage37-us301-secret-endpoint-token"
+    injected = {**_safe_info(), "ignored_sensitive": canary, "raw_response_body": canary}
+
+    def safe_info_route(route: Any, request: Any) -> None:
+        if request.method == "GET" and "/safe-info" in request.url:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"ok": True, "result": {"safe_info": injected}}, ensure_ascii=False),
+            )
+        else:
+            route.continue_()
+
+    page.route("**/api/v1/requests/*/safe-info*", safe_info_route)
+    page.goto(f"{live_server_url}/app/plans?request_id=req-safe-stage37-canary")
+    page.wait_for_selector("#detail-safe-info-button", timeout=5000)
+    page.locator("#detail-safe-info-button").click()
+    page.wait_for_selector(".safe-info-dialog", timeout=5000)
+    state = page.evaluate(
+        """() => ({
+          url: window.location.href,
+          history: JSON.stringify(window.history.state),
+          local: JSON.stringify(window.localStorage),
+          session: JSON.stringify(window.sessionStorage),
+          body: document.body.innerText,
+        })"""
+    )
+    assert all(canary not in value for value in state.values())
