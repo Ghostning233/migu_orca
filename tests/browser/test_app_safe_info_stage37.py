@@ -102,4 +102,3 @@ def test_safe_info_dialog_uses_safe_endpoint_and_restores_focus(
     page.keyboard.press("Escape")
     expect(dialog).to_have_count(0)
     expect(page.locator("#detail-safe-info-button")).to_be_focused()
-

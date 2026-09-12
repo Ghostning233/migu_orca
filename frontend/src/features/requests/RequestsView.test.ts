@@ -6,6 +6,7 @@ import { nextTick } from 'vue'
 
 import { api } from '@/api/client'
 import RequestsView from '@/features/requests/RequestsView.vue'
+import RequestDetailPanel from '@/features/requests/RequestDetailPanel.vue'
 import type { operations } from '@/api/generated/api'
 
 // US-202: Requests list migration. The view loads summaries through the shared
@@ -363,6 +364,24 @@ describe('RequestsView selection (US-296)', () => {
   it('replaces duplicated request_id query values', async () => {
     const { router } = await mountRequests({ request_id: ['req-a', 'req-b'] })
     await flushPromises()
+    expect(router.currentRoute.value.query.request_id).toBeUndefined()
+  })
+
+  it('moves focus to the next valid row after deletion without selecting it', async () => {
+    const { wrapper, router } = await mountRequests({ request_id: 'req-a' })
+    await nextTick()
+    let removed = false
+    apiGet.mockImplementation((path: string) => {
+      if (path === '/api/v1/requests') {
+        return Promise.resolve(removed ? { requests: LIST_RESULT.requests.slice(1) } : LIST_RESULT)
+      }
+      if (path === '/api/v1/requests/{request_id}') return Promise.resolve(detailResult('req-a'))
+      return Promise.resolve({})
+    })
+    removed = true
+    await wrapper.findComponent(RequestDetailPanel).vm.$emit('deleted', 'req-a')
+    await flushPromises()
+    expect((document.activeElement as HTMLElement).dataset.requestId).toBe('req-b')
     expect(router.currentRoute.value.query.request_id).toBeUndefined()
   })
 

@@ -43,6 +43,7 @@ const props = defineProps<{
   containerId?: string
   formId?: string
   canRetry?: boolean
+  retryLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -183,7 +184,7 @@ defineExpose({ patch, dirty, reset: resetForm })
         </details>
         <p v-if="error" class="field-error" role="alert">{{ error }}</p>
         <div v-if="canRetry" class="detail-form-recovery" role="group" aria-label="修改失败恢复">
-          <BaseButton :id="`${idPrefix}-retry-button`" type="button" variant="secondary" :loading="applying" @click="$emit('retry')">重试修改</BaseButton>
+          <BaseButton :id="`${idPrefix}-retry-button`" type="button" variant="secondary" :loading="applying" @click="$emit('retry')">{{ retryLabel ?? '重试修改' }}</BaseButton>
           <BaseButton :id="`${idPrefix}-reset-button`" type="button" variant="secondary" :disabled="applying" @click="$emit('reset')">恢复上次结果</BaseButton>
         </div>
         <div class="detail-form-actions">

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** SafeInfoDialog (US-297): the only consumer of getRequestSafeInfo. */
-import { nextTick, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
@@ -85,6 +85,15 @@ watch(
 function historyStatus(value: string | null): string {
   return value ? statusLabel(value) : '未设置'
 }
+
+function safeAbError(value: string | null | undefined): string {
+  return value ? '提交失败（详细原因已隐藏）' : '未设置'
+}
+
+onBeforeUnmount(() => {
+  ++requestSequence
+  deactivate()
+})
 </script>
 
 <template>
@@ -121,6 +130,7 @@ function historyStatus(value: string | null): string {
               <div><dt>标题</dt><dd>{{ safeLabel(safeInfo.title) }}</dd></div>
               <div><dt>别名</dt><dd>{{ safeInfo.aliases?.length ? safeInfo.aliases.join('、') : '无' }}</dd></div>
               <div><dt>季度</dt><dd>{{ safeInfo.season ? `第 ${safeInfo.season} 季` : '未设置' }}</dd></div>
+              <div><dt>季度原文</dt><dd>{{ safeLabel(safeInfo.season_raw) }}</dd></div>
               <div><dt>季度证据</dt><dd>{{ safeLabel(safeInfo.season_evidence) }}</dd></div>
               <div><dt>MiKan 合集</dt><dd>{{ safeLabel(safeInfo.mikan_collection?.title) }}</dd></div>
               <div><dt>公开编号</dt><dd>{{ safeLabel(safeInfo.mikan_collection?.bangumi_id) }}</dd></div>
@@ -142,6 +152,7 @@ function historyStatus(value: string | null): string {
             <ul v-if="safeInfo.subtitle_groups?.length" class="safe-info-list">
               <li v-for="group in safeInfo.subtitle_groups" :key="`${group.subtitle_group}-${group.total_resource_count}`">
                 {{ safeLabel(group.subtitle_group) }}：资源 {{ group.total_resource_count }}，有效 {{ group.valid_resource_count }}，排除 {{ group.invalid_resource_count }}
+                <span v-if="group.warnings?.length">（提示：{{ group.warnings.join('；') }}）</span>
               </li>
             </ul>
           </section>
@@ -152,6 +163,7 @@ function historyStatus(value: string | null): string {
               <div><dt>有效资源</dt><dd>{{ safeInfo.resources?.valid_resource_count ?? 0 }}</dd></div>
               <div><dt>排除资源</dt><dd>{{ safeInfo.resources?.invalid_resource_count ?? 0 }}</dd></div>
               <div><dt>完整资源</dt><dd>{{ safeInfo.resources?.complete_resource_count ?? 0 }}</dd></div>
+              <div><dt>资源字幕组</dt><dd>{{ safeLabel(safeInfo.resources?.selected_subtitle_group) }}</dd></div>
               <div><dt>总集数</dt><dd>{{ safeInfo.total_episodes ?? '待获取' }}</dd></div>
               <div><dt>已更新集数</dt><dd>待开发</dd></div>
             </dl>
@@ -176,7 +188,8 @@ function historyStatus(value: string | null): string {
             </ul>
             <p v-else class="safe-info-muted">暂无历史摘要。</p>
             <p class="safe-info-ab" role="status">
-              Auto Bangumi：{{ safeInfo.ab_status?.submitted ? (safeInfo.ab_status.success ? '已提交且成功' : '已提交，结果未成功') : '未提交' }}
+              Auto Bangumi：{{ safeInfo.ab_status?.submitted ? (safeInfo.ab_status.success === true ? '已提交且成功' : safeInfo.ab_status.success === false ? '已提交但未成功' : '已提交，结果未知') : '未提交' }}
+              <span v-if="safeInfo.ab_status?.submitted && safeInfo.ab_status.success === false">（{{ safeAbError(safeInfo.ab_status.error_type) }}）</span>
             </p>
           </section>
         </div>

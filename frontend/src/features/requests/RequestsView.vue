@@ -17,7 +17,7 @@
 // snapshots); the relative storage profile is the only value ever sent in the
 // query and never an absolute path; request_id appears in the URL only as the
 // public selection deep-link.
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
@@ -175,12 +175,22 @@ function onDetailChanged(): void {
   void loadList()
 }
 
-function onDetailDeleted(requestId: string): void {
+async function onDetailDeleted(requestId: string): Promise<void> {
+  const deletedIndex = filtered.value.findIndex((row) => row.request.request_id === requestId)
+  const fallbackId = filtered.value[deletedIndex + 1]?.request.request_id
+    ?? filtered.value[deletedIndex - 1]?.request.request_id
   // Clear the URL selection and drop the deleted item from the loaded list.
   loadedRequests.value = loadedRequests.value.filter((summary) => summary.request_id !== requestId)
   selectedRequestId.value = ''
   void router.replace(routeLocation('plans'))
-  void loadList()
+  await loadList()
+  await nextTick()
+  const container = document.querySelector<HTMLElement>('#request-list-container')
+  const nextItem = fallbackId
+    ? Array.from(container?.querySelectorAll<HTMLElement>('.request-list-item') ?? [])
+        .find((item) => item.dataset.requestId === fallbackId)
+    : undefined
+  ;(nextItem ?? container)?.focus()
 }
 
 onMounted(() => {
@@ -232,7 +242,7 @@ watch(
 
       <p id="request-list-count" class="request-list-count" aria-live="polite">{{ countText }}</p>
 
-      <div id="request-list-container" class="request-list-container" aria-live="polite" aria-relevant="additions text">
+      <div id="request-list-container" class="request-list-container" tabindex="-1" aria-label="方案列表" aria-live="polite" aria-relevant="additions text">
         <LoadingState v-if="loading && !loadedRequests.length" message="正在加载订阅方案列表..." />
         <ErrorState v-else-if="loadFailed" title="订阅方案列表加载失败" message="无法读取已保存的订阅方案。请确认存储目录后重试。" retry-label="重试" @retry="retry" />
         <EmptyState v-else-if="!loadedRequests.length" message="暂无已保存的订阅方案。" />
@@ -275,6 +285,8 @@ watch(
         :key="selectedRequestId"
         :request-id="selectedRequestId"
         :tracking-id="selectedRow.tracking?.trackingId ?? null"
+        :tracking-status="trackingLoading ? 'loading' : trackingFailed || selectedRow.trackingUnavailable ? 'unavailable' : selectedRow.tracking ? 'linked' : 'not_linked'"
+        :tracking-status-label="selectedRow.tracking?.statusLabel ?? null"
         @changed="onDetailChanged"
         @deleted="onDetailDeleted"
       />

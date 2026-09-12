@@ -83,4 +83,11 @@ Thread: https://codex.openai.com/threads/current
 - 定向验证：RequestDetailPanel + AnimeDraftEditor Vitest 26 passed；typecheck/lint/build passed；真实 Chromium 修改类 4 passed、Plans 唯一 tracking 导航 1 passed；git diff --check passed。
 - **Learnings for future iterations:**
   - saved 编辑器高级字段位于折叠 details，浏览器验证需显式展开后再操作。
+
+## [2026-09-12 23:35:00 CST] - US-297～US-299 审核修复
+Thread: https://codex.openai.com/threads/current
+- ACCEPTED 详情移除 Auto Bangumi/Settings 外部提交入口；仅保留本地方案修改、删除及只读历史展示。
+- saved 修改使用 generated PreviewPatch 窄适配；失败保留输入并支持重试/服务端快照恢复，网络/超时/非 JSON/5xx 结果先回查，已生效收敛、未生效才允许重试、回查失败不重复写。
+- 详情接收列表 tracking loading/不可用/未关联/唯一链接状态；删除后将焦点移至下一合法行或方案列表容器。SafeInfo 补齐季度原文、字幕组警告、资源字幕组、AB 三态及卸载 focus trap 清理。
+- 定向验证：相关 Vitest 55 passed；frontend typecheck/lint/build passed；真实 Chromium `test_app_safe_info_stage37.py test_app_request_detail.py test_app_plans_stage37.py` 28 passed；`git diff --check` passed。
 ---
