@@ -252,6 +252,15 @@ describe('RequestsView search/filter/sort (US-202)', () => {
     expect(items[0]!.text()).toContain('葬送的芙莉莲')
   })
 
+  it('does not search by technical request_id', async () => {
+    const { wrapper } = await mountRequests()
+    await nextTick()
+
+    await wrapper.find('#request-list-search').setValue('req-a')
+    await nextTick()
+    expect(wrapper.find('#request-list-count').text()).toContain('显示 0 / 3')
+  })
+
   it('filters by status code', async () => {
     const { wrapper } = await mountRequests()
     await nextTick()
@@ -299,7 +308,7 @@ describe('RequestsView search/filter/sort (US-202)', () => {
   })
 })
 
-describe('RequestsView selection & copy (US-202)', () => {
+describe('RequestsView selection (US-296)', () => {
   beforeEach(() => {
     localStorage.clear()
     apiGet.mockReset()
@@ -345,35 +354,4 @@ describe('RequestsView selection & copy (US-202)', () => {
     expect(router.currentRoute.value.query.request_id).toBeUndefined()
   })
 
-  it('copies request_id to the clipboard and shows a notification', async () => {
-    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
-    const { wrapper } = await mountRequests()
-    await nextTick()
-
-    await wrapper.find('.copy-request-id').trigger('click')
-    await nextTick()
-
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('req-a')
-    // The notification store drives the shell's aria-live region; assert the
-    // store state so the message copy is covered without mounting the shell.
-    const { useNotificationStore } = await import('@/app/stores/notification')
-    const notification = useNotificationStore()
-    expect(notification.current?.kind).toBe('success')
-    expect(notification.current?.title).toBe('已复制 request_id')
-    expect(notification.current?.message).toBe('req-a')
-  })
-
-  it('shows a safe error notification when clipboard write fails', async () => {
-    Object.assign(navigator, {
-      clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
-    })
-    const { wrapper } = await mountRequests()
-    await nextTick()
-
-    await wrapper.find('.copy-request-id').trigger('click')
-    await nextTick()
-
-    // No raw error text leaks into the DOM.
-    expect(wrapper.text()).not.toContain('denied')
-  })
 })

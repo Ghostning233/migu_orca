@@ -35,3 +35,15 @@ Thread: https://codex.openai.com/threads/current
   - 方案行只持有 generated Request summary 与可空 tracking association；tracking 状态标签优先服务端 status_label，未知值固定中文降级。
   - 稳定排序需要显式保留原索引，Date.parse 无效或缺失项统一置后。
 ---
+
+## [2026-09-12 22:38:00 CST] - US-296
+Thread: https://codex.openai.com/threads/current
+- 将 /app/plans 方案页重构为列表—详情双栏布局；列表展示标题、季度、字幕组、方案状态、修改时间和安全 tracking 状态。
+- 接入 listRequests 与只读 listTrackingItems(sort=updated_at) 的独立加载、失败、重试；合法公开 request_id query 可恢复选择，非法/不存在选择安全清除。
+- 移除 request_id 复制与技术化搜索，增加 Plans projection 的组件接入与状态/空态/未选择态。
+- 新增定向真实 Chromium 测试覆盖双栏字段、无复制按钮、tracking 局部失败；同步更新 RequestsView 单测。
+- 定向验证：RequestsView + plansProjection Vitest 19 passed；typecheck/lint/build passed；真实 Chromium 2 passed；git diff --check passed。
+- **Learnings for future iterations:**
+  - /app/plans 当前路由仍由 RequestsView 承载，详情组件自身保留 request-detail-container，外层使用 plans-detail-container 避免重复 id。
+  - tracking 列表失败时清空 tracking 投影并保持 Request 列表可用，固定显示“追番状态暂不可用”与局部重试。
+---

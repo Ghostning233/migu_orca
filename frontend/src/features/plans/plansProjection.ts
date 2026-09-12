@@ -37,6 +37,9 @@ export interface PlanRow {
   tracking: PlanTrackingAssociation | null
 }
 
+export const PLAN_SORT_MODES = ['default', 'title_asc'] as const
+export type PlanSortMode = (typeof PLAN_SORT_MODES)[number]
+
 export const TRACKING_UNAVAILABLE_LABEL = '追番状态暂不可用'
 export const TRACKING_NOT_LINKED_LABEL = '未进入追番管理'
 
@@ -125,8 +128,8 @@ export function planTimestamp(value: string | null | undefined): number | null {
 }
 
 /** Stable recent-first ordering; missing/invalid timestamps retain server order at the end. */
-export function sortPlanRows(rows: readonly PlanRow[]): PlanRow[] {
-  return rows
+export function sortPlanRows(rows: readonly PlanRow[], mode: PlanSortMode = 'default'): PlanRow[] {
+  const timestampSorted = rows
     .map((row, index) => ({ row, index, timestamp: planTimestamp(row.request.updated_at) }))
     .sort((a, b) => {
       if (a.timestamp === null && b.timestamp === null) return a.index - b.index
@@ -135,6 +138,10 @@ export function sortPlanRows(rows: readonly PlanRow[]): PlanRow[] {
       return b.timestamp - a.timestamp || a.index - b.index
     })
     .map(({ row }) => row)
+  if (mode === 'title_asc') {
+    return timestampSorted.slice().sort((a, b) => planTitle(a).localeCompare(planTitle(b), 'zh-CN'))
+  }
+  return timestampSorted
 }
 
 /** Public text used by title/subtitle-group search; request_id is excluded. */
