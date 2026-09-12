@@ -138,4 +138,9 @@ Thread: https://codex.openai.com/threads/current
 - README、主/前端/future/module/backlog 文档统一标记 F-E Stage 37（US-294～US-302）已完成并归档，F-F～F-G 继续待评审。
 - 增加真实 Chromium 的方案列表/详情三视口检查与 200% 修改、SafeInfo、复制再用旅程；canary 同步检查 console 且不生成 trace/screenshot 产物。
 - 定向验证：Stage37 plans/SafeInfo/responsive Chromium 45 passed；frontend typecheck/lint passed。
+
+## [2026-09-13 08:20:00 CST] - Stage 37 复审补充
+Thread: https://codex.openai.com/threads/current
+- `docs/frontend-ux-refactor-work-goals.md` 状态已收敛；200% 代表性 Chromium 旅程补齐实际修改、成功回查详情及新目录断言。
+- 复审定向验证：新增 200% 用例通过；`ruff check` 与 `git diff --check` 待提交后复核。
 ---

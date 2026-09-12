@@ -282,7 +282,11 @@ class TestCrossFeatureResponsive:
 
         page.locator("#detail-modify-toggle").click()
         expect(page.locator("#detail-modify-form")).to_be_visible()
-        page.locator("#detail-modify-toggle").click()
+        page.locator("#detail-modify-form details.advanced-settings").evaluate("el => el.open = true")
+        page.locator("#modify-folder-name").fill("200% 验收目录")
+        page.locator("#modify-apply-button").click()
+        expect(page.locator(".global-notification")).to_contain_text("修改成功", timeout=5000)
+        expect(page.locator("#request-detail-container")).to_contain_text("200% 验收目录")
         page.locator("#detail-safe-info-button").click()
         dialog = page.locator(".safe-info-dialog")
         expect(dialog).to_be_visible()
