@@ -1,0 +1,16 @@
+# Ralph Progress Log
+Started: Sat Sep 12 22:00:00 CST 2026
+---
+
+## Codebase Patterns
+
+- Stage 37 只完成 F-E 追番方案；F-F 独占正式 tracking 管理和所有外部动作，F-G 独占设置与发布收尾。
+- 每个 Ralph 迭代只完成一个 story；每次最多运行 3 个 stories，完成 US-296、US-299、US-302 后停止并独立审核。
+- 普通 story 只运行定向检查；完整前端、后端非浏览器和真实 Chromium 门禁只在 US-302 运行一次。
+- 前端 API 类型从 `frontend/src/api/generated/api.ts` 提取；除 US-294 的 RequestSummaryDTO `season`/`updated_at` 补口与候选字幕组去 URL 收紧外，不改 OpenAPI 或后端语义。
+- `/app/plans` 只组合 `listRequests`、`getRequestDetail`、`modifyRequest`、`getRequestSafeInfo` 与只读 `listTrackingItems`。
+- tracking 关联只按非空公开 `request_id` 精确匹配；不得推导 tracking ID，不读取 available actions，不调用同步、提交、恢复或管理端点。
+- `AnimeDraftEditor` 保持受控展示层；saved Request transport 不进入 `useDraftSession`，draft revision 行为不得回归。
+- SafeInfo 只来自 `getRequestSafeInfo`；已更新集数保持“待开发”，不得根据资源或 RSS 猜测。
+- 复制再用只允许一次性内存白名单 handoff；刷新失效，用户仍必须显式选择真实 MiKan 合集并生成新草案。
+- 完整 URL、RSS、magnet、endpoint、凭据、Cookie、Authorization、原始响应、capability、幂等键和绝对路径不得进入 DOM、URL、storage、日志、通知、trace 或 screenshot。

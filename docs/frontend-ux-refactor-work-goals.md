@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 工作目标 / 设计讨论基线（不是执行 PRD） |
-| 当前状态 | Gate 1～3、B-A～B-D、F-A～F-D 已完成；F-E～F-G 继续独立评审 |
+| 当前状态 | Gate 1～3、B-A～B-D、F-A～F-D 已完成；F-E 已规划为 Stage 37；F-F～F-G 继续独立评审 |
 | 创建日期 | 2026-09-07 |
 | 适用范围 | MiGuOrca Web 前端的信息架构、用户流程、页面设计、视觉方案与后续实现 |
 | 前置事实 | Stage 26、Stage 27 已完成；Vue 3、TypeScript、Vite、OpenAPI 客户端和浏览器测试基线继续保留 |
@@ -388,15 +388,16 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 | F-B 共享审核核心 | Stage 34 已完成（US-266～US-274） | 模式输入、候选集合、共享草案编辑器、revision 与兼容适配层 | Stage 33 已完成；执行 PRD 见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md` |
 | F-C 单番添加 | Stage 35 已完成（US-275～US-283） | 三步旅程、原子保存确认、失败恢复、tracking 只读 handoff | Stage 34 已完成；执行 PRD 见 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md` |
 | F-D 批量审核 | Stage 36 已完成（US-284～US-293） | 1/12/36、双栏、异常优先、部分成功、离开保护 | 由 Stage 35 generated 批量 save-confirm 接续完成 |
-| F-E～F-G 前端分片 | 待评审 | 方案、管理、设置/收尾 | Stage 36 结论纳入后续评审 |
+| F-E 追番方案 | Stage 37 已规划（US-294～US-302） | 列表—详情、SafeInfo、共享修改、复制再用、tracking 链接 | Stage 36 已合入；执行 PRD 见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md` |
+| F-F～F-G 前端分片 | 待评审 | 正式管理、设置/收尾 | Stage 37 结论纳入后续评审 |
 | 独立发布验收 | 待规划 | 跨流程 Chromium、无障碍/多视口/安全报告、文档切换 | 全部实现切片验收通过 |
 
 正式拆分原则：
 
 - B-A/B-B 已完成，Stage 30 B-C1、Stage 31 B-C2 与 Stage 32 B-D 已完成；后端契约或外部管理不得由前端 PR 临时顺带实现。
 - F-A 壳层与设计系统不依赖新业务 API，可以先行；F-B 共享审核核心必须先于单番/批量页面。
-- F-C 单番已完成为 Stage 35；F-D 批量已完成为 Stage 36。F-E 追番方案在 Stage 36 实际结论稳定后
-  评审；F-F 追番管理的后端 B-D 前置已满足，但仍等待前端主流程与页面边界评审。
+- F-C 单番已完成为 Stage 35；F-D 批量已完成为 Stage 36；F-E 追番方案已规划为 Stage 37。
+  F-F 追番管理的后端 B-D 前置已满足，但仍等待 Stage 37 完成和页面边界评审。
 - 一个 Stage 可以包含一个小工作包，也可以把高风险工作包继续拆开；不能为了连续编号制造超大 PR。
 - 收尾可并入最后一个前端 Stage，也可在集成风险较高时单列，最终由未承担主要实现的 Agent 验收。
 
@@ -489,9 +490,10 @@ passes，2026-09-08，执行与完成记录见 `docs/MiGuOrca_stage28_draft_cons
 4. F-A 已按[Stage 33 执行 PRD](MiGuOrca_stage33_frontend_shell_PRD.md)完成；F-B 已按
    [Stage 34 执行 PRD](MiGuOrca_stage34_shared_review_core_PRD.md)完成 Gate 4；F-C 已按
    [Stage 35 执行 PRD](MiGuOrca_stage35_single_anime_journey_PRD.md)已完成并归档，接管单番保存确认后
-   移除单番兼容保存层。真实 `SafeInfoDialog` 因只适用于已保存 Request 而仍延后到 F-E。
-5. Stage 36 每次最多运行 3 个 Ralph stories 并停下独立审核；完成 US-286、US-289、US-292 后必须
-   停止，全部完成并合入后再评审 F-E，不预先锁定 F-E～F-G 的 Stage 编号或并行关系。
+   移除单番兼容保存层；F-D 已按 Stage 36 完成并归档。真实 `SafeInfoDialog` 与追番方案 F-E 已规划
+   为 [Stage 37 执行 PRD](MiGuOrca_stage37_plans_safe_info_PRD.md)。
+5. Stage 37 每次最多运行 3 个 Ralph stories 并停下独立审核；完成 US-296、US-299、US-302 后必须
+   停止，全部完成并合入后再评审 F-F，不预先锁定 F-F～F-G 的 Stage 编号或并行关系。
 6. 后续实施包通过 Gate 4 评审后再生成 Ralph `prd.json`；通过评审的实施包按工作量映射
    Stage，不预先追求连续或固定数量的 Stage。
 7. 为每个正式 story 指定 API/单元/真实 Chromium/无障碍/多视口/敏感信息验收责任，并让未承担

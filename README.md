@@ -18,6 +18,8 @@ Stage 35 已完成 F-C「单番添加完整旅程」（US-275～US-283）：把 
 
 Stage 36 已完成并归档 F-D「批量审核完整旅程」（US-284～US-293）：把批量模式重构为 1/12/36 部左卡右详情、异常优先、筛选/下一异常与固定操作栏，正式接入 generated `saveConfirmBatchItems` 的原子保存确认、部分成功和逐项恢复，并退出批量 `preview-save → accept` 兼容链路。Stage 36 不实现 F-E `SafeInfoDialog`、F-F 正式 tracking 管理或 F-G 设置收尾；完成门禁、效果图偏差与 handoff 见 `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`。
 
+Stage 37 已规划 F-E「追番方案与安全信息」（US-294～US-302）：把 `/app/plans` 重构为本地方案列表—详情，补齐 Request 安全摘要的季度/修改时间，接入真实 `getRequestSafeInfo`、共享 saved Request 编辑、精确 tracking 链接和一次性内存“复制再用”。本阶段不实现 tracking 外部同步、提交或管理动作，也不开发设置收尾；执行边界见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md`。
+
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI、静态检查、OpenAPI 漂移检查、真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。
@@ -498,9 +500,10 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 
 > 当前 `ralph.sh` 只支持 `amp`、`claude`、`codex` 三种执行工具，不包含 DSH 或 provider 配置。项目保留的轻量定制是可通过 `--model`、`--claude-model` 或 `RALPH_MODEL` 指定模型；模型参数会传给 Claude 和 Codex，Amp 分支不使用该参数。
 
-- 当前 Ralph 状态快照：Stage 36 已完成并归档；US-284～US-293 全部通过
-- 当前执行阶段：Stage 36 已完成，批量审核完整旅程（F-D）；后续 F-E～F-G 待独立评审
-- 最近完成阶段：Stage 35，单番添加完整旅程（F-C）
+- 当前 Ralph 状态快照：Stage 37 已规划；US-294～US-302 均待开发
+- 当前执行阶段：Stage 37，追番方案与安全信息（F-E）
+- 最近完成阶段：Stage 36，批量审核完整旅程（F-D）
+- 前一完成阶段：Stage 35，单番添加完整旅程（F-C）
 - 前一完成阶段：Stage 34，前端共享审核核心（F-B）
 - 前一完成阶段：Stage 33，前端应用壳层与设计系统（F-A）
 - 最近完成阶段：Stage 31，Auto Bangumi 可靠写管理
@@ -537,6 +540,7 @@ Stage 16 不实现 Web UI 搜索候选展示、AI 番剧名解析、认证系统
 - Stage 34 执行：`docs/MiGuOrca_stage34_shared_review_core_PRD.md`；执行分支 `ralph/stage34-shared-review-core`，Ralph stories 为 US-266～US-274（已全部完成并归档）
 - Stage 35 执行：`docs/MiGuOrca_stage35_single_anime_journey_PRD.md`；执行分支 `ralph/stage35-single-anime-journey`，Ralph stories 为 US-275～US-283（已全部完成并归档）
 - Stage 36 执行：`docs/MiGuOrca_stage36_batch_review_journey_PRD.md`；执行分支 `ralph/stage36-batch-review-journey`，Ralph stories 为 US-284～US-293（已全部完成并归档）
+- Stage 37 执行：`docs/MiGuOrca_stage37_plans_safe_info_PRD.md`；执行分支 `ralph/stage37-plans-safe-info`，Ralph stories 为 US-294～US-302（待开发；每 3 个 stories 停止并独立审核）
 - 后续待办：`docs/backlog.md`；不为未开发事项预留 Stage 编号
 - 已归档阶段记录：`scripts/ralph/archive/`
 - Ralph 循环命令（Claude，可指定模型）：`./scripts/ralph/ralph.sh --tool claude --model claude-model-id 7`
