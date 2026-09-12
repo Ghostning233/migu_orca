@@ -293,6 +293,8 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 键盘可达性：App.vue 有 `#skip-link`（`.skip-link`）——Tab 首个聚焦目标，
   href=`#app-main`，聚焦时才可见（main.css）；`main#app-main` 带 `tabindex="-1"`
   是 skip 的焦点落点。新增 feature 路由不要移除 main landmark。
+  `/app/add` 是 Stage 35 的明确例外：进入单番输入壳层后会自动聚焦番剧标题输入框；
+  其他没有 feature autofocus 的路由仍以 skip-link 作为首个 Tab 目标。
 - 批量候选浮层 `BatchCandidatePopover.vue`（US-207）：打开时焦点移入 dialog
   （close 按钮），Escape 关闭，父组件（BatchWorkbenchView）在关闭时**同步**把
   焦点恢复到触发按钮（`candidateTrigger` 在 open 时捕获 `$event.currentTarget`

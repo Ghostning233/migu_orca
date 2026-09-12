@@ -236,7 +236,7 @@ class TestKeyboardAndFocus:
         self, page: Page, live_server_url: str
     ) -> None:
         """Tab lands on the skip link first and it jumps to the main landmark."""
-        _goto(page, live_server_url, "/app/add")
+        _goto(page, live_server_url, "/app/settings")
 
         page.keyboard.press("Tab")
         active_id = page.evaluate("() => document.activeElement?.id || ''")
@@ -267,7 +267,7 @@ class TestKeyboardAndFocus:
         self, page: Page, live_server_url: str
     ) -> None:
         """The skip link and all four route links are in the keyboard path."""
-        _goto(page, live_server_url, "/app/add")
+        _goto(page, live_server_url, "/app/settings")
         page.keyboard.press("Tab")
         assert page.locator("#skip-link").evaluate(
             "el => el === document.activeElement"
