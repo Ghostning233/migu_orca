@@ -12,6 +12,7 @@ import {
   batchItemMatchesReviewFilters,
   batchStatusLabel,
   batchSaveConfirmErrorLabel,
+  batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
   buildBatchSaveConfirmPayload,
   buildBatchCandidateCreatePayload,
@@ -43,6 +44,9 @@ describe('batch save-confirm contract (US-290)', () => {
     expect(batchSaveConfirmSucceeded({ outcome: 'failed', status: 'FAILED' } as never)).toBe(false)
     expect(batchSaveConfirmErrorLabel({ outcome: 'failed', error_type: 'save_confirm_failed' } as never)).toContain('确认未完成')
     expect(batchSaveConfirmErrorLabel({ outcome: 'failed', error_type: 'private_backend_detail' } as never)).toBe('保存确认失败，请重试。')
+    expect(batchSaveConfirmRecoveryAllowed({ outcome: 'failed', error_type: 'save_confirm_failed', request_id: 'req-saved' } as never)).toBe(true)
+    expect(batchSaveConfirmRecoveryAllowed({ outcome: 'SAVED_CONFIRM_FAILED', error_type: 'save_confirm_failed', request_id: 'req-saved' } as never)).toBe(false)
+    expect(batchSaveConfirmRecoveryAllowed({ outcome: 'failed', error_type: 'save_confirm_failed', request_id: 'https://private.invalid' } as never)).toBe(false)
   })
 })
 

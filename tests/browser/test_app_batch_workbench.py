@@ -348,6 +348,40 @@ class TestAppBatchParse:
         overflow = page.evaluate("() => document.body.scrollWidth > window.innerWidth")
         assert overflow is False
 
+    @pytest.mark.parametrize("count,zoom", [(12, 1), (36, 2)])
+    def test_populated_batch_layout_scrolls_without_horizontal_overflow(
+        self, page: Page, live_server_url: str, count: int, zoom: int
+    ) -> None:
+        items = [
+            _batch_item(
+                f"item-{index}",
+                f"番剧 {index}",
+                status="DRAFT",
+                preview_request=_preview_request(f"番剧 {index}", f"req-{index}"),
+            )
+            for index in range(count)
+        ]
+        page.route(
+            "**/api/v1/batches/parse",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_batch_parse_result(items),
+            ),
+        )
+        _goto_batch(page, live_server_url)
+        page.set_viewport_size({"width": 1280, "height": 900})
+        if zoom == 2:
+            page.evaluate("() => { document.documentElement.style.zoom = '2' }")
+        page.fill("#batch-raw-input", "\n".join(f"番剧 {index}" for index in range(count)))
+        page.click("#batch-parse-submit")
+        expect(page.locator(".batch-draft-card")).to_have_count(count)
+        assert page.evaluate("() => document.body.scrollWidth <= window.innerWidth")
+        expect(page.locator("#batch-accept-toolbar")).to_be_visible()
+        page.locator(".batch-draft-card").last.scroll_into_view_if_needed()
+        expect(page.locator(".batch-draft-card").last).to_be_visible()
+        expect(page.locator("#batch-accept-all")).to_be_visible()
+
 
 class TestAppBatchCandidateAndDraft:
     """AC: 右侧候选、季数确认、草案详情与删除."""
@@ -550,7 +584,7 @@ class TestAppBatchCandidateAndDraft:
                 body=_batch_accept_result(
                     [{
                         "item_id": "item-expired",
-                        "request_id": "req-batch-expired",
+                        "request_id": None,
                         "title": "咒术回战",
                         "status": "unacceptable",
                         "reason": "旧失败反馈",

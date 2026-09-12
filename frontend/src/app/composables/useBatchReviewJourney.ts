@@ -137,8 +137,8 @@ const BATCH_PHASE_TRANSITIONS: Record<BatchItemPhase, readonly BatchItemPhase[]>
   apply_failed: ['applying', 'draft', 'candidates', 'blocked'],
   saving: ['confirmed', 'saved_pending_confirm', 'draft', 'candidates', 'blocked', 'response_unknown'],
   confirmed: [],
-  saved_pending_confirm: ['confirmed'],
-  response_unknown: ['confirmed', 'saved_pending_confirm', 'draft', 'response_unknown'],
+  saved_pending_confirm: ['confirmed', 'response_unknown'],
+  response_unknown: ['confirmed', 'saved_pending_confirm', 'draft', 'candidates', 'blocked', 'response_unknown'],
 }
 
 export function canTransitionBatchItem(from: BatchItemPhase, to: BatchItemPhase): boolean {
@@ -204,7 +204,7 @@ function updateItem(state: BatchReviewState, itemId: string, update: Partial<Bat
 }
 
 export function batchItemCanConfirm(item: BatchReviewItem | undefined): boolean {
-  return Boolean(item && item.phase === 'draft' && item.draftId && item.draftRevision !== null && !item.dirty && !item.error)
+  return Boolean(item && item.phase === 'draft' && item.draftId && item.draftRevision !== null && !item.dirty)
 }
 
 export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAction): BatchReviewState {
@@ -251,7 +251,7 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
       const items = { ...state.items }
       for (const itemId of action.itemIds) {
         const item = items[itemId]
-        if (item) items[itemId] = { ...item, phase: 'saving', idempotencyKey: item.idempotencyKey ?? randomKey(), error: null }
+        if (item) items[itemId] = { ...item, phase: 'saving', idempotencyKey: randomKey(), error: null }
       }
       return { ...state, busy: 'saving', items }
     }
@@ -269,7 +269,7 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
       const item = state.items[action.itemId]
       const next = updateItem(state, action.itemId, {
         phase: saved ? 'saved_pending_confirm' : expired ? (item?.source?.candidates?.length ? 'candidates' : 'blocked') : 'draft',
-        ...(saved || expired ? { selected: false, draftId: null, draftRevision: null, dirty: false, idempotencyKey: null } : {}),
+        ...(saved || expired ? { selected: false, draftId: null, draftRevision: null, dirty: false, idempotencyKey: null } : { idempotencyKey: null }),
         ...(saved ? { requestId: error.requestId } : {}),
         error,
       })
@@ -284,7 +284,9 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
     case 'accept_succeeded': return updateItem(state, action.itemId, { phase: 'confirmed', selected: false, requestId: action.requestId, error: null })
     case 'tracking_located': return updateItem(state, action.itemId, { phase: 'confirmed', selected: false, requestId: action.requestId, trackingId: action.trackingId, error: null })
     case 'tracking_not_found': return state.items[action.itemId]?.phase === 'response_unknown' ? updateItem(state, action.itemId, { phase: 'saved_pending_confirm', selected: false }) : state
-    case 'tracking_verification_failed': return state
+    case 'tracking_verification_failed': return state.items[action.itemId]?.phase === 'saved_pending_confirm'
+      ? updateItem(state, action.itemId, { phase: 'response_unknown', selected: false })
+      : state
     case 'consume_confirmed': return state.items[action.itemId]?.phase === 'confirmed' ? updateItem(state, action.itemId, { draftId: null, idempotencyKey: null }) : state
     case 'remove_item': {
       if (!state.items[action.itemId]) return state

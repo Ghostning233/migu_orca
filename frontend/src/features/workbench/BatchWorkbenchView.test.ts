@@ -603,7 +603,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: [reviewableItems()[0]] }))
       .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
-      .mockRejectedValueOnce({ type: 'idempotency_conflict', message: 'private detail' })
+      .mockRejectedValueOnce({ type: 'conflict', status: 409, message: 'private detail' })
     const { wrapper } = await mountBatch()
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')
@@ -618,6 +618,56 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     expect(wrapper.text()).not.toContain('结果待核验')
     expect(wrapper.find('.batch-card-status').text()).toContain('草案')
     expect(wrapper.text()).not.toContain('private detail')
+  })
+
+  it('retries a deterministic idempotency conflict with a newly generated key', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: [reviewableItems()[0]] }))
+      .mockRejectedValueOnce({ type: 'idempotency_conflict', status: 409, message: 'private detail' })
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-1', outcome: 'CONFIRMED', request_id: 'req-1', status: 'CONFIRMED', error_type: null, error_message: null, tracking_id: null, tracking_ready: false }],
+        summary: { requested: 1, confirmed: 1, failed: 0 },
+      }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    const first = apiPost.mock.calls.find(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(false)
+    await wrapper.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    const saves = apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
+    expect(saves).toHaveLength(2)
+    expect(saves[1]?.[1]).not.toEqual(first?.[1])
+    expect((saves[1]?.[1] as { body: { items: Array<{ idempotency_key: string }> } }).body.items[0]?.idempotency_key)
+      .not.toBe((first?.[1] as { body: { items: Array<{ idempotency_key: string }> } }).body.items[0]?.idempotency_key)
+  })
+
+  it('freezes an unknown outcome or invalid saved-confirm identity without partial application', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: reviewableItems().slice(0, 1) }))
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-1', outcome: 'SKIPPED', request_id: 'https://private.invalid/x', status: null, error_type: 'save_confirm_failed', error_message: 'secret', tracking_id: null, tracking_ready: null }],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('secret')
+    expect(wrapper.text()).not.toContain('private.invalid')
   })
 
   it('retries an unknown batch response with the exact frozen request body', async () => {
@@ -645,6 +695,42 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     const saveCalls = apiPost.mock.calls.filter(([path]) => path === '/api/v1/batches/{batch_id}/save-confirm')
     expect(saveCalls).toHaveLength(2)
     expect(saveCalls[1]?.[1]).toEqual(first?.[1])
+  })
+
+  it('returns an expired frozen retry to candidates and permits a new draft', async () => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({
+        items: [batchItem({
+          item_id: 'item-1',
+          status: 'DRAFT',
+          candidates: [{ bangumi_id: '42', title: '候选合集', mikan_url: 'https://mikan.example/Home/Bangumi/42' }],
+          preview_request: previewRequest('req-1'),
+          draft_id: 'draft-1',
+        })],
+      }))
+      .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
+      .mockResolvedValueOnce(saveConfirmResult({
+        results: [{ item_id: 'item-1', outcome: 'failed', request_id: null, status: 'FAILED', error_type: 'draft_expired', error_message: null, tracking_id: null, tracking_ready: null }],
+        summary: { requested: 1, confirmed: 0, failed: 1 },
+      }))
+      .mockResolvedValueOnce({ request: previewRequest('req-new'), summary: {}, draft_id: 'draft-new', draft_revision: 1 })
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-retry-frozen-operation').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-card-status').text()).toContain('找到候选')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(false)
+    await wrapper.find('.batch-card-expand').trigger('click')
+    await nextTick()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-card-status').text()).toContain('草案')
   })
 
   it('keeps hidden selections while selecting the visible filtered item', async () => {

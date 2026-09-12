@@ -133,3 +133,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 补齐 saved-confirm/tracking 的 journey 同步，并将保存/响应未知期间的批量输入与解析按钮置为禁用；浏览器 mock 同步到真实 `results` DTO 结构。
 - 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 3 文件 48 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 50 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
 ---
+
+## 2026-09-12 - Stage 36 deterministic retry and result-semantics correction
+- 确定性保存失败回到可重试 draft：释放旧幂等键并清除安全错误，下一次用户明确保存才生成新 key；response_unknown 仍冻结原 key 和完整请求体。409/type=conflict 保持确定性失败，不进入相同操作重试。
+- 严格校验批量 200 结果集合及逐项 outcome/公开标识/错误字段；未知 outcome、缺失或非法身份、失败缺 error_type、成功缺 request_id 等均不应用部分结果，继续 response_unknown。冻结重试返回草案失效类结果时同步回到候选并允许重新生成。
+- 补齐 accept/tracking 的 journey phase 同步：核验失败进入 response_unknown、未找到回到 saved_pending_confirm、定位成功进入 confirmed；新增 12 部/36 部真实内容布局及 200% 等效缩放 Chromium 覆盖。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 53 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 52 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---
