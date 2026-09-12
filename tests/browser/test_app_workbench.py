@@ -135,6 +135,10 @@ def _register_generation_capture(
 class TestAppWorkbenchSingleSearch:
     """AC: 单个搜索迁移——loading、候选卡片、空状态、失败重试与旧页 parity."""
 
+    def test_shell_focuses_single_anime_input_on_entry(self, page: Page, live_server_url: str) -> None:
+        _goto_workbench(page, live_server_url)
+        expect(page.locator("#mikan-candidate-query")).to_be_focused()
+
     def test_empty_search_is_disabled_before_calling_api(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:

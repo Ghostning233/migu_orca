@@ -121,7 +121,7 @@ function asSafeString(value: unknown): string | undefined {
 export function toSafeJourneyError(error: unknown): SafeJourneyError {
   const source = error && typeof error === 'object' ? error as Record<string, unknown> : {}
   const rawType = source.type
-  const type = typeof rawType === 'string' && SAFE_ERROR_TYPES.has(rawType) ? rawType : 'journey_error'
+  let type = typeof rawType === 'string' && SAFE_ERROR_TYPES.has(rawType) ? rawType : 'journey_error'
   const details = source.details && typeof source.details === 'object' ? source.details as Record<string, unknown> : {}
   let field: SafeJourneyError['field']
   let currentRevision: number | undefined
@@ -136,8 +136,12 @@ export function toSafeJourneyError(error: unknown): SafeJourneyError {
   if (type === 'save_confirm_failed' && details.details && typeof details.details === 'object') {
     const nested = details.details as Record<string, unknown>
     const savedRequestId = asSafeString(nested.request_id)
-    if (savedRequestId) requestId = savedRequestId
-    if (nested.retry_action === 'ACCEPT_SAVED_REQUEST') retryAction = nested.retry_action
+    if (nested.outcome !== 'SAVED_CONFIRM_FAILED' || !savedRequestId || nested.retry_action !== 'ACCEPT_SAVED_REQUEST') {
+      type = 'journey_error'
+    } else {
+      requestId = savedRequestId
+      retryAction = nested.retry_action
+    }
   }
   return {
     type,

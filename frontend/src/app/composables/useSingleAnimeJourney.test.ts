@@ -69,4 +69,18 @@ describe('useSingleAnimeJourney (US-275)', () => {
     journey.fail({ type: 'network_error' })
     expect(journey.newConfirmOperation()).toBe(firstKey)
   })
+
+  it('requires the complete saved-confirm recovery details', () => {
+    const journey = useSingleAnimeJourney()
+    journey.setCandidates(1)
+    journey.transition('candidates')
+    journey.selectCandidate()
+    journey.setDraft('draft', 1)
+    journey.newConfirmOperation()
+    journey.begin('saving')
+    journey.fail({ type: 'save_confirm_failed', details: { details: { request_id: 'req-1', retry_action: 'ACCEPT_SAVED_REQUEST' } } })
+    expect(journey.state.phase).toBe('review')
+    expect(journey.state.error?.type).toBe('journey_error')
+    expect(journey.state.idempotencyKey).not.toBeNull()
+  })
 })

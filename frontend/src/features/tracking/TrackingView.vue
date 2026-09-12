@@ -46,6 +46,7 @@ async function loadDetail(): Promise<void> {
     })
     if (sequence !== loadSequence || requestedTrackingId !== trackingId.value) return
     detail.value = nextDetail
+    loading.value = false
     await nextTick()
     if (sequence === loadSequence && requestedTrackingId === trackingId.value) {
       heading.value?.focus({ preventScroll: true })
@@ -89,7 +90,7 @@ watch(() => route.query.tracking_id, syncRoute)
     <ErrorState
       v-else-if="failed"
       title="追番记录读取失败"
-      message="无法读取这条追番记录。请稍后重试。"
+      message="方案已经确认，但暂时无法定位追番记录。请稍后重试定位。"
       retry-label="重试定位"
       @retry="loadDetail"
     />

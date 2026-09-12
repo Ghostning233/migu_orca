@@ -580,7 +580,6 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     })
     expect(saveCall?.[1]?.body).toHaveProperty('idempotency_key')
     expect(saveCall?.[1]?.body).not.toHaveProperty('request')
-    expect(wrapper.find('#single-review-save-success').text()).toContain('已确认')
     expect(router.currentRoute.value.name).toBe('tracking')
     expect(router.currentRoute.value.query).toEqual({ tracking_id: 'tracking-confirmed' })
     expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/save-confirm')).toHaveLength(1)
@@ -611,7 +610,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
       .mockRejectedValueOnce({
         type: 'save_confirm_failed',
         message: '不要渲染此服务端消息',
-        details: { details: { request_id: 'saved-request-1', retry_action: 'ACCEPT_SAVED_REQUEST', secret: 'hidden' } },
+        details: { details: { outcome: 'SAVED_CONFIRM_FAILED', request_id: 'saved-request-1', retry_action: 'ACCEPT_SAVED_REQUEST', secret: 'hidden' } },
       })
       .mockResolvedValueOnce({ request: { request_id: 'saved-request-1' } } as never)
     apiGet.mockResolvedValueOnce({

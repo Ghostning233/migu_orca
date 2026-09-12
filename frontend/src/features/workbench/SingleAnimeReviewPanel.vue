@@ -50,6 +50,7 @@ const confirmError = ref('')
 const confirmedRequestId = ref<string | null>(null)
 const acceptError = ref('')
 const trackingLocated = ref(false)
+const trackingLocationState = ref<'not_found' | 'failed' | null>(null)
 
 const leaveGuard = useLeaveGuard({
   shouldGuard: () => {
@@ -110,25 +111,21 @@ function handoffFrom(result: ConfirmRequestSaveResult): NonNullable<ConfirmReque
   return handoff
 }
 
-function isAcceptStatusConflict(error: unknown): boolean {
-  return Boolean(error && typeof error === 'object' &&
-    ((error as { type?: unknown }).type === 'invalid_request_status' ||
-      (error as { type?: unknown }).type === 'conflict'))
-}
+type TrackingLocationResult = 'found' | 'not_found' | 'failed'
 
-async function locateTracking(requestId: string): Promise<boolean> {
+async function locateTracking(requestId: string): Promise<TrackingLocationResult> {
   try {
     const result = await api.get<TrackingItemsResult>('/api/v1/tracking/items', { query: storageQuery() })
     const item = result.items.find((candidate) => candidate.request_id === requestId)
-    if (!item || typeof item.tracking_id !== 'string' || !item.tracking_id) return false
+    if (!item || typeof item.tracking_id !== 'string' || !item.tracking_id) return 'not_found'
     journey.finishTracking(item.tracking_id)
     trackingLocated.value = true
     if (router.hasRoute('tracking')) {
       await router.replace(routeLocation('tracking', { tracking_id: item.tracking_id }))
     }
-    return true
+    return 'found'
   } catch {
-    return false
+    return 'failed'
   }
 }
 
@@ -158,8 +155,12 @@ async function saveAndConfirm(): Promise<void> {
     const safeError = toApiError(cause)
     journey.fail(safeError)
     confirmError.value = journey.state.error?.message ?? '保存并确认失败，请重试。'
+    if (safeError.type === 'save_confirm_failed' && journey.state.phase === 'saved_pending_confirm') {
+      session.invalidate()
+    }
     if (['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict'].includes(safeError.type)) {
       session.invalidate()
+      notification.error('订阅草案已失效', '订阅草案已失效，请重新选择合集。')
       emit('discard', 'candidates')
     }
   } finally {
@@ -173,22 +174,33 @@ async function retrySavedConfirmation(): Promise<void> {
   confirmLoading.value = true
   acceptError.value = ''
   trackingLocated.value = false
+  trackingLocationState.value = null
   try {
     await api.post<AcceptRequestResult>(`/api/v1/requests/{request_id}/accept`, {
       path: { request_id: requestId },
       body: { storage_dir: storageQuery().storage_dir ?? null },
     })
-    if (!(await locateTracking(requestId))) {
+    const located = await locateTracking(requestId)
+    if (located !== 'found') {
       journey.finishTracking()
+      trackingLocationState.value = located
       acceptError.value = '方案已确认，但暂未定位到追番记录。可稍后重试定位。'
       return
     }
-  } catch (cause) {
-    // A status conflict may mean the first accept reached the server. Verify
-    // the read-only tracking projection before ever attempting accept again.
-    if (isAcceptStatusConflict(cause) && await locateTracking(requestId)) return
-    journey.fail(toApiError(cause))
-    acceptError.value = '确认未完成，请稍后重试。'
+  } catch {
+    // Any uncertain accept result is verified through the read-only tracking
+    // projection first. A failed verification must never trigger another
+    // accept request.
+    const located = await locateTracking(requestId)
+    if (located === 'found') return
+    trackingLocationState.value = located
+    if (located === 'failed') {
+      journey.finishTracking()
+      acceptError.value = '确认结果暂无法核验。请重试定位，不会重复确认。'
+    } else {
+      journey.finishTracking()
+      acceptError.value = '确认结果已核验，但暂未找到追番记录。请重试定位或打开无定位追番管理。'
+    }
   } finally {
     confirmLoading.value = false
   }
@@ -232,6 +244,26 @@ function resetFailedModify(): void {
   formError.value = ''
 }
 
+async function retryTrackingLocation(): Promise<void> {
+  const requestId = journey.state.requestId
+  if (!requestId || confirmLoading.value) return
+  confirmLoading.value = true
+  acceptError.value = ''
+  const located = await locateTracking(requestId)
+  trackingLocationState.value = located === 'found' ? null : located
+  if (located !== 'found') {
+    acceptError.value = located === 'failed'
+      ? '确认结果暂无法核验。请稍后重试定位。'
+      : '方案已确认，但暂未定位到追番记录。请稍后重试定位。'
+  }
+  confirmLoading.value = false
+}
+
+async function openUnlocatedTracking(): Promise<void> {
+  if (confirmLoading.value) return
+  await router.replace(routeLocation('tracking'))
+}
+
 async function leave(destination: 'candidates' | 'input'): Promise<void> {
   if (navigationLoading.value) return
   navigationLoading.value = true
@@ -268,10 +300,12 @@ defineExpose({ session, editor, leaveGuard })
     <div id="request-detail-container">
       <p class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
       <div class="review-confirmation-block" aria-live="polite">
-        <BaseButton v-if="journey.state.phase !== 'saved_pending_confirm'" id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
-        <BaseButton v-else id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>
+        <BaseButton v-if="journey.state.phase === 'review'" id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
+        <BaseButton v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>
+        <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-retry-locate" variant="secondary" :loading="confirmLoading" :disabled="confirmLoading" @click="retryTrackingLocation">重试定位</BaseButton>
+        <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-open-unlocated" variant="secondary" :disabled="confirmLoading" @click="openUnlocatedTracking">打开无定位追番管理</BaseButton>
         <p v-if="trackingLocated" id="single-review-tracking-success" class="field-help" role="status">订阅方案已确认，并已定位到追番记录。</p>
-        <p v-else-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已确认，正在准备后续定位。</p>
+        <p v-else-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已经确认，正在准备后续定位。</p>
         <p v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-accept-recovery" class="field-help" role="status">订阅方案已保存但确认未完成，可直接重试确认；不会重复保存。</p>
         <p v-else-if="confirmError" id="single-review-save-error" class="field-error" role="alert">{{ confirmError }}</p>
         <p v-if="acceptError" id="single-review-accept-error" class="field-error" role="alert">{{ acceptError }}</p>
@@ -286,7 +320,7 @@ defineExpose({ session, editor, leaveGuard })
         :applying="session.applying.value"
         :error="formError"
         :can-retry="session.canRetry.value"
-        :disabled="navigationLoading"
+        :disabled="navigationLoading || session.invalid.value || journey.state.phase !== 'review'"
         @apply="applyModify"
         @dirty-change="dirty = $event; journey.setDirty($event)"
         @retry="retryModify"

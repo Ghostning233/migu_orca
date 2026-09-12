@@ -46,9 +46,9 @@ async function mountTracking(query: Record<string, string>) {
   })
   await router.push({ path: '/tracking', query })
   await router.isReady()
-  const wrapper = mount(TrackingView, { global: { plugins: [createPinia(), router] } })
+  const wrapper = mount(TrackingView, { attachTo: document.body, global: { plugins: [createPinia(), router] } })
   await flushPromises()
-  return wrapper
+  return { wrapper, router }
 }
 
 describe('TrackingView read-only handoff (US-280)', () => {
@@ -56,7 +56,7 @@ describe('TrackingView read-only handoff (US-280)', () => {
 
   it('loads a tracking_id detail and renders only the safe top-level summary', async () => {
     apiGet.mockResolvedValue(detail() as never)
-    const wrapper = await mountTracking({ tracking_id: 'tracking-safe-1' })
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-safe-1' })
 
     expect(apiGet).toHaveBeenCalledWith('/api/v1/tracking/items/{tracking_id}', {
       path: { tracking_id: 'tracking-safe-1' },
@@ -68,12 +68,14 @@ describe('TrackingView read-only handoff (US-280)', () => {
     expect(wrapper.text()).not.toContain('不要渲染')
     expect(wrapper.find('#tracking-detail-target button').exists()).toBe(false)
     expect(wrapper.find('#tracking-detail-target').attributes('tabindex')).toBe('-1')
+    expect(document.activeElement).toBe(wrapper.find('#tracking-detail-target').element)
   })
 
   it('shows a fixed empty state when no detail can be recovered', async () => {
     apiGet.mockResolvedValue(null as never)
-    const wrapper = await mountTracking({ tracking_id: 'tracking-safe-1' })
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-safe-1' })
 
     expect(wrapper.text()).toContain('没有可定位的追番记录')
   })
+
 })
