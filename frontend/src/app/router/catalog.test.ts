@@ -72,12 +72,20 @@ describe('Stage 33 route catalog (US-257)', () => {
     expect(sanitizeRouteQuery('tracking', new URLSearchParams('batch_id=%20batch-3%20'))).toEqual({
       batch_id: 'batch-3',
     })
+    expect(sanitizeRouteQuery('tracking', new URLSearchParams('tracking_id=track-3'))).toEqual({
+      tracking_id: 'track-3',
+    })
+    expect(sanitizeRouteQuery('tracking', { batch_id: 'batch-3', tracking_id: 'track-3' })).toEqual({})
   })
 
   it('provides a router-ready location with a sanitized query', () => {
     expect(routeLocation('plans', { request_id: 'request-1', batch_id: 'ignored' })).toEqual({
       path: '/plans',
       query: { request_id: 'request-1' },
+    })
+    expect(routeLocation('tracking', { tracking_id: 'tracking-1' })).toEqual({
+      path: '/tracking',
+      query: { tracking_id: 'tracking-1' },
     })
   })
 })

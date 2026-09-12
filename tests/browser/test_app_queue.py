@@ -154,6 +154,54 @@ class TestAppQueueRead:
         expect(page.locator("#batch-queue-refresh")).to_be_disabled()
         expect(page.locator("#batch-queue-submit-form")).to_have_count(0)
 
+    def test_tracking_id_handoff_renders_read_only_detail(self, page: Page, live_server_url: str) -> None:
+        _require_dist()
+
+        def _tracking_detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "ok": True,
+                        "result": {
+                            "tracking_id": "tracking-browser",
+                            "request_id": "request-browser",
+                            "title": "葬送的芙莉莲",
+                            "season": 1,
+                            "subtitle_group": "喵萌奶茶屋",
+                            "poster_path": None,
+                            "status": "PENDING_SUBMIT",
+                            "status_label": "待提交",
+                            "status_group": "PENDING",
+                            "available_actions": [{"code": "SUBMIT", "label": "提交"}],
+                            "valid_resource_count": 12,
+                            "updated_episode": None,
+                            "updated_episode_status": "NOT_IMPLEMENTED",
+                            "total_episodes": 28,
+                            "revision": 1,
+                            "origin": "single",
+                            "batch_id": None,
+                            "created_at": "2026-09-12T00:00:00Z",
+                            "updated_at": None,
+                            "last_synced_at": None,
+                            "safe_info": {"request_id": "must-not-render"},
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+        page.route("**/api/v1/tracking/items/tracking-browser*", _tracking_detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-browser")
+        page.wait_for_selector("#tracking-detail-target", timeout=5000)
+
+        assert page.url.endswith("/app/tracking?tracking_id=tracking-browser")
+        expect(page.locator("#tracking-detail-heading")).to_contain_text("葬送的芙莉莲")
+        expect(page.locator(".tracking-detail-summary")).to_contain_text("有效资源")
+        expect(page.locator("#tracking-detail-target")).not_to_contain_text("must-not-render")
+        expect(page.locator("#tracking-detail-target button")).to_have_count(0)
+
     def test_queue_loads_from_url_batch_id_and_renders_statuses(
         self, page: Page, live_server_url: str
     ) -> None:

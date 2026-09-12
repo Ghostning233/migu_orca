@@ -12,6 +12,7 @@ Started: Sat Sep 12 09:03:14 CST 2026
 - The application shell owns the first direct-load keyboard stop (skip link); feature views only autofocus when mounted outside the shell.
 - Atomic single-anime save-confirm hosts submit only generated capability fields plus a request-scoped idempotency key; the shared draft session is invalidated immediately after a confirmed handoff.
 - Saved-confirm recovery must treat accept status conflicts as possibly completed: verify the read-only tracking list by the saved request_id before allowing any further action.
+- Public handoff routes must sanitize mutually exclusive identifiers before mounting a feature; tracking detail renders only generated top-level safe summary fields and keeps batch queue mounting unchanged when no tracking identifier is present.
 
 ## 2026-09-12 09:08:00 Asia/Shanghai - US-275
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -60,5 +61,16 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - The accept endpoint needs the request_id as a path parameter and only receives the relative storage profile in its body.
   - A tracking_id returned by any other response must not be inferred or trusted for handoff; match the safe tracking list projection by request_id.
 - Verification passed: frontend typecheck, lint, 336 unit tests, build, 20 targeted Chromium tests, Python compileall, full backend pytest, and git diff --check.
+---
+
+## 2026-09-12 09:46:00 Asia/Shanghai - US-280
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added the tracking handoff route with mutually exclusive `tracking_id`/`batch_id` query sanitization. A `tracking_id` loads the generated read-only tracking detail endpoint, focuses the target, supports refresh/error recovery, and renders only title, status, valid resource count, total episodes, and the fixed not-yet-implemented updated-episode field. Existing `/app/tracking` and legacy `/app/queue` batch queue behavior remains intact. Successful saved-confirm tracking lookup now replaces the route with the server-matched tracking identifier.
+- Files changed: frontend/src/app/router/catalog.ts, frontend/src/app/router/catalog.test.ts, frontend/src/app/router/index.ts, frontend/src/features/tracking/TrackingView.vue, frontend/src/features/tracking/TrackingView.test.ts, frontend/src/features/workbench/SingleAnimeReviewPanel.vue, tests/browser/test_app_queue.py, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - The public tracking route needs a strict one-of query boundary: both identifiers or arrays must be discarded before feature mounting.
+  - The tracking handoff view must be a read-only wrapper around the existing queue route; no identifier means the established batch queue surface, while `tracking_id` alone mounts detail.
+  - Browser assertions for route URLs are more reliable with `page.url.endswith(...)` than a glob passed to `expect(page).to_have_url(...)` in this suite.
+- Verification passed: frontend api check, typecheck, lint, 339 unit tests, build, targeted compatibility Chromium tests (31), full Chromium suite (160), Python compileall, 1796 backend tests, and git diff --check.
 ---
 ---

@@ -10,7 +10,7 @@ import type { LocationQuery, LocationQueryRaw } from 'vue-router'
  */
 export type AppRouteKey = 'add' | 'plans' | 'tracking' | 'settings'
 
-export type PublicQueryKey = 'batch_id' | 'request_id'
+export type PublicQueryKey = 'batch_id' | 'request_id' | 'tracking_id'
 
 export interface RouteParityBaseline {
   readonly view: 'WorkbenchView' | 'RequestsView' | 'QueueView' | 'SettingsView'
@@ -23,6 +23,7 @@ export interface AppRouteCatalogEntry {
   readonly path: `/app/${string}`
   readonly routerPath: `/${string}`
   readonly queryKey: PublicQueryKey | null
+  readonly alternateQueryKey?: PublicQueryKey
   readonly parity: RouteParityBaseline
 }
 
@@ -64,6 +65,7 @@ export const routeCatalog = {
     path: '/app/tracking',
     routerPath: '/tracking',
     queryKey: 'batch_id',
+    alternateQueryKey: 'tracking_id',
     parity: {
       view: 'QueueView',
       vitest: ['src/features/queue/QueueView.test.ts', 'src/features/queue/queueWorkbench.test.ts'],
@@ -120,6 +122,33 @@ export function sanitizeRouteQuery(
 ): LocationQuery {
   const entry = typeof route === 'string' ? routeCatalog[route] : route
   if (!entry.queryKey) return {}
+
+  const alternateQueryKey = 'alternateQueryKey' in entry ? entry.alternateQueryKey : undefined
+  const queryKeys = [entry.queryKey, alternateQueryKey].filter(
+    (key): key is PublicQueryKey => Boolean(key),
+  )
+
+  if (alternateQueryKey) {
+    const presentKeys = queryKeys.filter((key) => {
+      const value = query instanceof URLSearchParams ? query.getAll(key) : query[key]
+      return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== null
+    })
+    if (presentKeys.length > 1) return {}
+    if (presentKeys.length === 1) {
+      const key = presentKeys[0]
+      if (!key) return {}
+      if (query instanceof URLSearchParams) {
+        const values = query.getAll(key)
+        if (values.length !== 1) return {}
+        const value = nonEmptyScalar(values[0])
+        return value ? { [key]: value } : {}
+      }
+      const rawValue = query[key]
+      if (Array.isArray(rawValue) || rawValue === null) return {}
+      const value = nonEmptyScalar(rawValue)
+      return value ? { [key]: value } : {}
+    }
+  }
 
   if (query instanceof URLSearchParams) {
     const values = query.getAll(entry.queryKey)

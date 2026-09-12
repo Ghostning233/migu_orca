@@ -2,6 +2,7 @@
 // Single-anime review step (US-277). The shared editor is the only editing
 // surface; this host owns the component-local draft session and step actions.
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { api, toApiError } from '@/api/client'
 import { useDraftSession } from '@/app/composables/useDraftSession'
@@ -20,6 +21,7 @@ import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import { effectiveSeeds, type RequestSnapshot } from '@/features/requests/requestDetail'
 import { storageQuery } from '@/features/requests/requestStorage'
+import { routeLocation } from '@/app/router/catalog'
 
 const props = defineProps<{
   request: RequestSnapshot
@@ -33,6 +35,7 @@ const emit = defineEmits<{
 }>()
 
 const notification = useNotificationStore()
+const router = useRouter()
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const editor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
 const session = useDraftSession({ request: props.request, draftId: props.draftId, draftRevision: props.draftRevision })
@@ -86,6 +89,9 @@ async function locateTracking(requestId: string): Promise<boolean> {
     if (!item || typeof item.tracking_id !== 'string' || !item.tracking_id) return false
     journey.finishTracking(item.tracking_id)
     trackingLocated.value = true
+    if (router.hasRoute('tracking')) {
+      await router.replace(routeLocation('tracking', { tracking_id: item.tracking_id }))
+    }
     return true
   } catch {
     return false
