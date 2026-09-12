@@ -13,6 +13,7 @@ Started: Sat Sep 12 09:03:14 CST 2026
 - Atomic single-anime save-confirm hosts submit only generated capability fields plus a request-scoped idempotency key; the shared draft session is invalidated immediately after a confirmed handoff.
 - Saved-confirm recovery must treat accept status conflicts as possibly completed: verify the read-only tracking list by the saved request_id before allowing any further action.
 - Public handoff routes must sanitize mutually exclusive identifiers before mounting a feature; tracking detail renders only generated top-level safe summary fields and keeps batch queue mounting unchanged when no tracking identifier is present.
+- Route-local leave guards should register browser unload protection only while mounted and make their router callback inactive on unmount, so feature capabilities cannot leak into later routes.
 
 ## 2026-09-12 09:08:00 Asia/Shanghai - US-275
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -73,4 +74,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Browser assertions for route URLs are more reliable with `page.url.endswith(...)` than a glob passed to `expect(page).to_have_url(...)` in this suite.
 - Verification passed: frontend api check, typecheck, lint, 339 unit tests, build, targeted compatibility Chromium tests (31), full Chromium suite (160), Python compileall, 1796 backend tests, and git diff --check.
 ---
+---
+
+## 2026-09-12 09:53:00 Asia/Shanghai - US-281
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added route-local single-anime leave protection for unsafe review work, including native beforeunload warnings and an in-app ConfirmDialog for router navigation. Confirmed departure invalidates the draft capability and journey state; cancel keeps the current draft and focus. Saved-confirm recovery and pure search results remain warning-free. Added focused composable coverage for unload blocking, navigation cancellation, approval, cleanup, and inactive guards.
+- Files changed: frontend/src/app/composables/useLeaveGuard.ts, frontend/src/app/composables/useLeaveGuard.test.ts, frontend/src/features/workbench/SingleAnimeReviewPanel.vue, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Feature-owned router guards need an active flag cleared during unmount because Vue Router does not remove registered guards; this prevents stale route-local capability state from blocking later navigation.
+  - The shared ConfirmDialog already puts its cancel action first in the focus trap, matching the leave-protection requirement that “留在此页” receives default focus.
+- Verification: frontend API contract check, typecheck, lint, production build, full Chromium suite (160 passed), Python compileall, full backend pytest (1796 passed), and git diff --check passed. Full frontend unit run has two unrelated pre-existing TrackingView fixture failures because those tests mount QueueView without Pinia; the focused US-281/workbench suite passes.
 ---

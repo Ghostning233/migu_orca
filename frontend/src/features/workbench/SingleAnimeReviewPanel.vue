@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router'
 
 import { api, toApiError } from '@/api/client'
 import { useDraftSession } from '@/app/composables/useDraftSession'
+import { useLeaveGuard } from '@/app/composables/useLeaveGuard'
 import {
   useSingleAnimeJourney,
   type AcceptRequestResult,
@@ -49,6 +50,34 @@ const confirmError = ref('')
 const confirmedRequestId = ref<string | null>(null)
 const acceptError = ref('')
 const trackingLocated = ref(false)
+
+const leaveGuard = useLeaveGuard({
+  shouldGuard: () => {
+    // A generated draft is an unsaved capability until save-confirm consumes
+    // it. During confirmation/apply, protect the in-flight operation too;
+    // saved-pending-confirm is intentionally recoverable without a warning.
+    return Boolean(
+      session.draftId.value &&
+      journey.state.phase === 'review' ||
+      session.applying.value ||
+      journey.state.busy !== null,
+    )
+  },
+  confirm: async () => {
+    const confirmed = await confirmDialog.value?.confirm({
+      title: '离开审核步骤',
+      message: '离开审核步骤将丢弃当前订阅草案和已应用编辑，是否继续？',
+      confirmLabel: '确认离开',
+      cancelLabel: '留在此页',
+      danger: true,
+    })
+    return confirmed === true
+  },
+  cleanup: () => {
+    session.invalidate()
+    journey.discard()
+  },
+})
 
 journey.setCandidates(1)
 journey.transition('candidates')
@@ -209,7 +238,7 @@ async function leave(destination: 'candidates' | 'input'): Promise<void> {
   emit('discard', destination)
 }
 
-defineExpose({ session, editor })
+defineExpose({ session, editor, leaveGuard })
 </script>
 
 <template>
