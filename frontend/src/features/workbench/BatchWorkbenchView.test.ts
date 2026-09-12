@@ -25,7 +25,7 @@ vi.mock('@/api/client', () => ({
   },
   toApiError: (error: unknown) =>
     error && typeof error === 'object' && 'type' in error
-      ? (error as { type: string; message: string })
+      ? error
       : { type: 'request_error', message: '请求失败，请重试' },
   isApiError: () => false,
   apiRequest: vi.fn(),
@@ -818,7 +818,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
         results: [{ item_id: 'item-1', outcome: 'failed', request_id: 'saved-request-unknown', status: null, error_type: 'save_confirm_failed', error_message: '固定安全错误', tracking_id: null, tracking_ready: null }],
         summary: { requested: 1, confirmed: 0, failed: 1 },
       }))
-      .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'private accept error' })
+      .mockRejectedValueOnce({ status: 409, type: 'invalid_request_status', message: 'private accept error' })
     vi.mocked(api.get)
       .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'private lookup error' })
       .mockResolvedValueOnce({ items: [{ request_id: 'saved-request-unknown', tracking_id: 'tracking-found' }] } as never)
@@ -852,10 +852,10 @@ describe('BatchWorkbenchView accept (US-205)', () => {
         results: [{ item_id: 'item-1', outcome: 'failed', request_id: 'saved-request-missing', status: null, error_type: 'save_confirm_failed', error_message: null, tracking_id: null, tracking_ready: null }],
         summary: { requested: 1, confirmed: 0, failed: 1 },
       }))
-      .mockRejectedValueOnce({ network: true, type: 'network_error' })
+      .mockRejectedValueOnce({ status: 409, type: 'invalid_request_status', message: 'private accept error' })
     vi.mocked(api.get)
       .mockRejectedValueOnce({ network: true, type: 'network_error' })
-      .mockResolvedValueOnce({ items: [] } as never)
+      .mockResolvedValueOnce({ items: [{ request_id: 'other-request', tracking_id: 'other-tracking' }] } as never)
     const { wrapper } = await mountBatch()
     await wrapper.find('#batch-raw-input').setValue('萌王S4')
     await wrapper.find('#batch-parse-submit').trigger('click')

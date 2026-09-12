@@ -247,7 +247,7 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
       return updateItem(state, action.itemId, { phase, selected: false, draftId: null, draftRevision: null, dirty: false, idempotencyKey: null, error: null })
     }
     case 'begin_save': {
-      if (state.busy || action.itemIds.some((id) => !batchItemCanConfirm(state.items[id]))) return state
+      if (state.busy || new Set(action.itemIds).size !== action.itemIds.length || action.itemIds.some((id) => !batchItemCanConfirm(state.items[id]))) return state
       const items = { ...state.items }
       for (const itemId of action.itemIds) {
         const item = items[itemId]

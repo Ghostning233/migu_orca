@@ -147,3 +147,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 新增真实 Chromium saved-confirm 恢复场景，验证无 retry_action、只调用一次 batch save-confirm、随后按公开 request_id 调用 accept 与 tracking 查询；保留 12/36 部及 200% 等效缩放布局测试。
 - 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 58 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 53 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
 ---
+
+## 2026-09-12 - Stage 36 final tracking verification correction
+- `invalid_request_status` 的 accept 恢复现在先按当前公开 request_id 只读核验 tracking；匹配到真实记录才进入 confirmed，核验失败进入 response_unknown 仅允许重试定位，明确未找到保留 saved_pending_confirm，禁止盲目再次 accept。
+- 批量 200 结果补齐 status/tracking_ready 类型及 confirmed 字段一致性校验；移除不可达的 SKIPPED 分支，发送前拒绝重复 participant，未知 error_type 的合法 failed 统一安全降级而不泄漏服务端内容。
+- 补充 409 恢复、其他 request_id 不匹配、tracking 查询失败、saved-confirm 真实 DTO 及幂等键/冻结 body 组件与 Chromium 覆盖。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 58 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 53 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---

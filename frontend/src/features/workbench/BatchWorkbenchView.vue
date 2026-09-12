@@ -589,20 +589,21 @@ function validateBatchSaveResult(
     if (typeof itemId !== 'string' || !itemId || !expected.has(itemId) || seen.has(itemId)) return null
     if (typeof outcome !== 'string' || !outcome.trim()) return null
     const normalizedOutcome = outcome.toUpperCase()
-    if (normalizedOutcome !== 'CONFIRMED' && normalizedOutcome !== 'FAILED' && normalizedOutcome !== 'SKIPPED') return null
+    if (normalizedOutcome !== 'CONFIRMED' && normalizedOutcome !== 'FAILED') return null
     if (row.request_id !== null && typeof row.request_id !== 'string') return null
+    if (row.status !== null && typeof row.status !== 'string') return null
     if (row.tracking_id !== null && typeof row.tracking_id !== 'string') return null
     if (row.error_type !== null && typeof row.error_type !== 'string') return null
     if (row.error_message !== null && typeof row.error_message !== 'string') return null
+    if (row.tracking_ready !== null && typeof row.tracking_ready !== 'boolean') return null
     if (normalizedOutcome === 'CONFIRMED' && (!batchSaveConfirmSucceeded(row as BatchSaveConfirmResult['results'][number]) || row.error_type !== null)) return null
-    if (normalizedOutcome === 'FAILED' || normalizedOutcome === 'SKIPPED') {
+    if (normalizedOutcome === 'FAILED') {
       if (typeof row.error_type !== 'string' || !row.error_type.trim() || row.error_type.length > 128) return null
       if (row.error_type === 'save_confirm_failed') {
         if (!isPublicRouteIdentifier(row.request_id)) return null
       } else if (row.request_id !== null) {
         return null
       }
-      if (normalizedOutcome === 'SKIPPED' && row.error_type !== 'duplicate_item') return null
     }
     seen.add(itemId)
     rows.push(row as BatchSaveConfirmResult['results'][number])
@@ -738,7 +739,8 @@ async function retrySavedConfirmation(item: BatchItem): Promise<void> {
   } catch (cause) {
     const safeError = toApiError(cause)
     const uncertain = safeError.network || safeError.nonJson || safeError.status >= 500 || ['network_error', 'request_timeout', 'upstream_timeout', 'cancelled'].includes(safeError.type)
-    if (!uncertain) {
+    const verificationRequired = uncertain || safeError.type === 'invalid_request_status'
+    if (!verificationRequired) {
       setRecoveryFeedback(itemId, '确认未完成，请根据安全错误提示处理后再试。')
       return
     }
@@ -750,7 +752,7 @@ async function retrySavedConfirmation(item: BatchItem): Promise<void> {
     journey.dispatch(located === 'failed'
       ? { type: 'tracking_verification_failed', itemId }
       : { type: 'tracking_not_found', itemId })
-    setRecoveryFeedback(itemId, uncertain
+    setRecoveryFeedback(itemId, verificationRequired
       ? located === 'failed' ? '确认结果暂无法核验，请重试定位；不会重复确认。' : '确认结果已核验，但暂未找到追番记录；请明确重试确认。'
       : '确认未完成，请根据安全错误提示处理后再试。')
   } finally {
@@ -787,7 +789,8 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
     itemIds = frozen.body.item_ids ?? null
   } else {
     const eligibleRows = rows.filter((row) => itemConfirmability(row.item_id ?? '').confirmable)
-    if (eligibleRows.length !== rows.length || eligibleRows.length === 0) {
+    const participantIds = eligibleRows.map((row) => row.item_id ?? '')
+    if (eligibleRows.length !== rows.length || eligibleRows.length === 0 || new Set(participantIds).size !== participantIds.length) {
       notification.error('保存确认失败', '存在尚未准备好的条目，请先完成修改或恢复。')
       return
     }
