@@ -11,6 +11,7 @@ Started: Sat Sep 12 14:24:07 CST 2026
 - `AnimeDraftEditor`/`useDraftSession` remains the shared draft editing core for single and batch flows; do not create parallel form state.
 - Stage 36 batch save-confirm replaces the legacy preview-save → accept path incrementally; successful items consume draft capabilities and save keys, while unknown responses retain keys for explicit retry.
 - Batch review layout keeps the card list and current-item detail in one responsive grid; card-body activation and checkbox activation must stop propagation so current-detail selection and batch selection remain independent.
+- Keyboard navigation should operate on derived visible cards, while exception targeting may temporarily add a filtered card; focus restoration must use reduced-motion-safe scrolling and remain safe in jsdom.
 
 ## 2026-09-12 14:29:00 Asia/Shanghai - US-284
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -51,4 +52,14 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
   - Keep the detail pane mounted inside the result layout so 1/12/36 item batches share one continuous review surface and narrow viewports can stack it safely.
   - The existing compatibility candidate popover remains available for legacy interaction tests while the authoritative candidate/detail view is the right-hand pane.
 - Verification passed: Python compileall, full pytest (1797 passed), frontend typecheck/lint/unit (352 passed)/build, and batch Chromium suite (14 passed).
+---
+
+## 2026-09-12 14:56:00 Asia/Shanghai - US-288
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Added next-exception navigation with wraparound, temporary reveal for filtered targets, polite focus announcements, arrow-key card navigation, Enter primary activation, and reduced-motion-aware card focusing. Added targeted reducer/helper and workbench interaction coverage.
+- Files changed: frontend/src/features/workbench/batchWorkbench.ts, frontend/src/features/workbench/BatchWorkbenchView.vue, frontend/src/features/workbench/BatchWorkbenchView.test.ts, scripts/ralph/prd.json, scripts/ralph/progress.txt.
+- **Learnings for future iterations:**
+  - Keep keyboard navigation derived from visible/frozen item collections so filters never mutate review identity or selection.
+  - DOM focus helpers need guards for browser APIs absent in jsdom (matchMedia, scrollIntoView) while preserving real Chromium behavior.
+  - Verification passed: frontend typecheck/lint/targeted unit (37 passed)/build, Chromium browser suite (161 passed), Python compileall, full pytest (1797 passed), and git diff --check.
 ---

@@ -7,6 +7,7 @@ import { nextTick } from 'vue'
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
+import { nextBatchException } from '@/features/workbench/batchWorkbench'
 
 // US-205: batch workbench migration. The view parses a multi-line input into
 // independent FOUND/EMPTY/FAILED cards, opens the shared candidate popover,
@@ -287,6 +288,57 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     await flushPromises()
 
     expect(router.currentRoute.value.query.batch_id).toBe('batch-1')
+  })
+
+  it('cycles to the next exception and temporarily reveals a filtered target', async () => {
+    apiPost.mockResolvedValue(parseResult({
+      items: [
+        batchItem({ item_id: 'item-normal', raw_title: '正常', status: 'FOUND' }),
+        batchItem({ item_id: 'item-failed', raw_title: '异常', status: 'FAILED', canonical_title_candidates: [] }),
+        batchItem({ item_id: 'item-empty', raw_title: '空结果', status: 'EMPTY', canonical_title_candidates: [] }),
+      ],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('正常\n异常\n空结果')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    expect(nextBatchException(
+      [batchItem({ item_id: 'normal' }), batchItem({ item_id: 'failed', status: 'FAILED' })],
+      'normal',
+    )?.item_id).toBe('failed')
+    await wrapper.find('.batch-draft-card[data-item-id="item-normal"]').trigger('click')
+    await wrapper.find('#batch-review-search').setValue('正常')
+    await nextTick()
+    await wrapper.find('#batch-next-exception').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-failed"]').exists()).toBe(true)
+    expect(wrapper.find('.batch-review-navigation').text()).toContain('已临时显示异常条目')
+    expect(document.activeElement).toBe(wrapper.find('.batch-draft-card[data-item-id="item-failed"]').element)
+    await wrapper.find('#batch-next-exception').trigger('click')
+    await nextTick()
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-empty"]').classes()).toContain('is-current')
+  })
+
+  it('uses arrow keys to move cards and Enter activates their primary action', async () => {
+    apiPost.mockResolvedValue(parseResult({
+      items: [
+        batchItem({ item_id: 'item-one', raw_title: '一', status: 'FAILED' }),
+        batchItem({ item_id: 'item-two', raw_title: '二', status: 'EMPTY' }),
+      ],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('一\n二')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    const first = wrapper.find('.batch-draft-card[data-item-id="item-one"]')
+    await first.trigger('keydown', { key: 'ArrowDown' })
+    await nextTick()
+    expect(wrapper.find('.batch-draft-card[data-item-id="item-two"]').classes()).toContain('is-current')
+    await wrapper.find('.batch-draft-card[data-item-id="item-two"]').trigger('keydown', { key: 'Enter' })
+    expect(wrapper.find('.batch-detail-title').text()).toContain('关于我转生变成史莱姆这档事')
   })
 })
 

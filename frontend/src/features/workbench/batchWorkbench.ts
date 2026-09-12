@@ -233,6 +233,15 @@ export function batchItemIsException(item: BatchItem): boolean {
   return String(item.status ?? '') === 'FAILED' || String(item.status ?? '') === 'EMPTY' || batchCardNeedsReview(item)
 }
 
+/** Find the next exception after the current item, wrapping at the end. */
+export function nextBatchException(items: BatchItem[], currentItemId: string | null): BatchItem | null {
+  const exceptions = items.filter(batchItemIsException)
+  if (!exceptions.length) return null
+  const currentIndex = items.findIndex((item) => item.item_id === currentItemId)
+  const start = currentIndex < 0 ? 0 : currentIndex + 1
+  return exceptions.find((item) => items.indexOf(item) >= start) ?? exceptions[0] ?? null
+}
+
 /** Match one item against the additive workbench search/filter controls. */
 export function batchItemMatchesReviewFilters(
   item: BatchItem,

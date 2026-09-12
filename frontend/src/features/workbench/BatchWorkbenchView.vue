@@ -62,6 +62,7 @@ import {
   canExpandBatchCard,
   collectBatchAcceptDescriptors,
   orderBatchItemsForReview,
+  nextBatchException,
   postBatchAccept,
   queueStatusLabel,
   validateBatchRawInput,
@@ -130,6 +131,9 @@ const exceptionsOnly = ref(false)
 const exceptionSorted = ref(false)
 const reviewList = ref<HTMLElement | null>(null)
 const reviewScrollPositions = new Map<string, number>()
+const cardElements = new Map<string, HTMLElement>()
+const temporarilyShownItemId = ref<string | null>(null)
+const focusAnnouncement = ref('')
 const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus.value}\u0000${exceptionsOnly.value}`)
 
 // Queue state (read-only snapshot after accept; full queue panel is US-206).
@@ -151,11 +155,13 @@ const detailItem = computed(() =>
     ? items.value.find((item) => item.item_id === (detailItemId.value || currentItemId.value)) ?? null
     : null,
 )
-const visibleItems = computed(() => items.value.filter((item) => batchItemMatchesReviewFilters(item, {
-  query: reviewQuery.value,
-  status: reviewStatus.value,
-  exceptionsOnly: exceptionsOnly.value,
-})))
+const visibleItems = computed(() => items.value.filter((item) =>
+  item.item_id === temporarilyShownItemId.value || batchItemMatchesReviewFilters(item, {
+    query: reviewQuery.value,
+    status: reviewStatus.value,
+    exceptionsOnly: exceptionsOnly.value,
+  }),
+))
 
 function saveReviewScrollPosition(): void {
   if (reviewList.value) reviewScrollPositions.set(reviewFilterKey.value, reviewList.value.scrollTop)
@@ -178,6 +184,7 @@ function clearReviewFilters(): void {
   reviewQuery.value = ''
   reviewStatus.value = ''
   exceptionsOnly.value = false
+  temporarilyShownItemId.value = null
 }
 
 function sortExceptionsFirst(): void {
@@ -190,6 +197,70 @@ function sortExceptionsFirst(): void {
 function selectCurrentItem(item: BatchItem): void {
   currentItemId.value = item.item_id ?? null
   detailItemId.value = item.item_id ?? null
+}
+
+function setCardElement(itemId: string | null | undefined, element: unknown): void {
+  if (!itemId) return
+  if (element instanceof HTMLElement) cardElements.set(itemId, element)
+  else cardElements.delete(itemId)
+}
+
+function focusCard(itemId: string): void {
+  void nextTick(() => {
+    const card = cardElements.get(itemId)
+    if (!card) return
+    card.focus({ preventScroll: true })
+    const reducedMotion = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (typeof card.scrollIntoView === 'function') {
+      card.scrollIntoView({ block: 'nearest', behavior: reducedMotion ? 'auto' : 'smooth' })
+    }
+  })
+}
+
+function activateCard(item: BatchItem): void {
+  selectCurrentItem(item)
+  if (canChooseBatchCandidate(item)) openCandidateChoices(item)
+  else if (canExpandBatchCard(item)) openDraftDetail(item)
+}
+
+function moveCardFocus(item: BatchItem, direction: 1 | -1): void {
+  const visible = visibleItems.value
+  if (!visible.length) return
+  const currentIndex = visible.findIndex((candidate) => candidate.item_id === item.item_id)
+  const nextIndex = currentIndex < 0
+    ? (direction > 0 ? 0 : visible.length - 1)
+    : (currentIndex + direction + visible.length) % visible.length
+  const next = visible[nextIndex]
+  if (!next) return
+  selectCurrentItem(next)
+  focusCard(next.item_id ?? '')
+}
+
+function onCardKeydown(event: KeyboardEvent, item: BatchItem): void {
+  if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+    event.preventDefault()
+    moveCardFocus(item, 1)
+  } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+    event.preventDefault()
+    moveCardFocus(item, -1)
+  } else if (event.key === 'Enter') {
+    event.preventDefault()
+    activateCard(item)
+  }
+}
+
+function goToNextException(): void {
+  const next = nextBatchException(items.value, currentItemId.value)
+  if (!next?.item_id) return
+  const hidden = !batchItemMatchesReviewFilters(next, {
+    query: reviewQuery.value,
+    status: reviewStatus.value,
+    exceptionsOnly: exceptionsOnly.value,
+  })
+  temporarilyShownItemId.value = hidden ? next.item_id : null
+  selectCurrentItem(next)
+  focusAnnouncement.value = hidden ? `已临时显示异常条目：${batchCardTitle(next)}` : `已定位到异常条目：${batchCardTitle(next)}`
+  focusCard(next.item_id)
 }
 
 function batchQueueStatusText(): string {
@@ -588,6 +659,18 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               </BaseButton>
             </div>
             <p class="batch-review-count" role="status">共 {{ items.length }} 部，当前显示 {{ visibleItems.length }} 部{{ exceptionSorted ? '；已按异常排序' : '' }}</p>
+            <div class="batch-review-navigation">
+              <BaseButton
+                id="batch-next-exception"
+                variant="secondary"
+                :disabled="!nextBatchException(items, currentItemId)"
+                @click="goToNextException"
+              >
+                下一异常
+              </BaseButton>
+              <span v-if="focusAnnouncement" role="status" aria-live="polite">{{ focusAnnouncement }}</span>
+              <span v-else class="field-help">无异常时不可用</span>
+            </div>
             <p v-if="detailItem && !visibleItems.some((item) => item.item_id === detailItem?.item_id)" class="batch-filter-hidden" role="status">
               当前条目已被筛选隐藏，详情仍保持显示。
             </p>
@@ -600,8 +683,9 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
               :data-item-id="item.item_id ?? ''"
               role="listitem"
               tabindex="0"
+              :ref="(element) => setCardElement(item.item_id, element)"
               @click="selectCurrentItem(item)"
-              @keydown.enter.prevent="selectCurrentItem(item)"
+              @keydown="onCardKeydown($event, item)"
             >
               <CheckboxRow
                 class="batch-card-checkbox-row"
@@ -871,6 +955,19 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
   margin: 0 0 0.75rem;
 }
 
+.batch-review-navigation {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.batch-review-navigation [role='status'] {
+  color: var(--color-text-muted);
+  font-size: 0.84rem;
+}
+
 .batch-filter-hidden {
   color: #8a5a13;
 }
@@ -1064,6 +1161,13 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchAccept, delete
 
   .batch-detail-pane {
     position: static;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .batch-draft-card {
+    scroll-behavior: auto;
+    transition: none;
   }
 }
 </style>
