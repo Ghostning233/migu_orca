@@ -569,6 +569,7 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await wrapper.find('#detail-modify-form').trigger('submit')
     await flushPromises()
     expect(wrapper.find('.field-error').text()).toContain('修改未生效，请重试')
+    expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '未生效目录')
     apiPost.mockResolvedValueOnce({ request: detailFixture().request })
     await wrapper.find('#modify-retry-button').trigger('click')
     await flushPromises()
@@ -587,6 +588,10 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await wrapper.find('#detail-modify-form').trigger('submit')
     await flushPromises()
     expect(wrapper.find('.field-error').text()).toContain('结果暂无法确认')
+    expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '结果未知目录')
+    await wrapper.find('#detail-modify-form').trigger('submit')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledTimes(1)
     await wrapper.find('#modify-retry-button').trigger('click')
     await flushPromises()
     expect(apiPost).toHaveBeenCalledTimes(1)
@@ -610,6 +615,54 @@ describe('RequestDetailPanel actions (US-203)', () => {
     await wrapper.find('#modify-reset-button').trigger('click')
     await flushPromises()
     expect(wrapper.find('#modify-folder-name').element).toHaveProperty('value', '服务端最新目录')
+  })
+
+  it('locks an accept action after an uncertain recheck failure and rechecks with GET only', async () => {
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-accept-button').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#detail-action-recheck-button').exists()).toBe(true)
+    expect(wrapper.find('#detail-accept-button').attributes('disabled')).toBeDefined()
+    await wrapper.find('#detail-accept-button').trigger('click')
+    expect(apiPost).toHaveBeenCalledTimes(1)
+
+    apiGet.mockResolvedValueOnce(detailFixture({ request: { ...detailFixture().request, status: 'ACCEPTED' } }))
+    const getCount = apiGet.mock.calls.length
+    await wrapper.find('#detail-action-recheck-button').trigger('click')
+    await flushPromises()
+    expect(apiGet.mock.calls.length).toBe(getCount + 1)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('#detail-action-recheck-button').exists()).toBe(false)
+  })
+
+  it('locks delete after an uncertain recheck failure and confirms deletion with GET only', async () => {
+    apiGet.mockResolvedValue(acceptedFixture())
+    const { wrapper } = await mountPanel()
+    await nextTick()
+    apiPost.mockRejectedValueOnce({ type: 'network_error', network: true, status: 0, message: 'network' })
+    apiGet.mockRejectedValue({ type: 'server_error', status: 503, message: 'raw backend error' })
+
+    await wrapper.find('#detail-delete-button').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .danger-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#detail-action-recheck-button').exists()).toBe(true)
+    await wrapper.find('#detail-delete-button').trigger('click')
+    expect(apiPost).toHaveBeenCalledTimes(1)
+
+    apiGet.mockRejectedValueOnce({ type: 'not_found', status: 404, message: 'not found' })
+    const getCount = apiGet.mock.calls.length
+    await wrapper.find('#detail-action-recheck-button').trigger('click')
+    await flushPromises()
+    expect(apiGet.mock.calls.length).toBe(getCount + 1)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.emitted('deleted')?.[0]).toEqual(['req-a'])
   })
 
   it('clear-field checkboxes send explicit empty values', async () => {

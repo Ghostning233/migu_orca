@@ -8,6 +8,7 @@ import { useFocusTrap } from '@/app/composables/useFocusTrap'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import { storageQuery } from '@/features/requests/requestStorage'
+import { actionLabel } from '@/features/requests/requestDetail'
 import { statusLabel } from '@/features/requests/requestsList'
 
 type SafeInfoResult = NonNullable<
@@ -30,7 +31,9 @@ const loading = ref(false)
 const failed = ref(false)
 let requestSequence = 0
 
-const { activate, deactivate } = useFocusTrap(backdrop, () => emit('close'))
+// Escape, backdrop and close button all share `close()` so every close path
+// invalidates in-flight requests before notifying the parent.
+const { activate, deactivate } = useFocusTrap(backdrop, close)
 
 function safeLabel(value: string | null | undefined): string {
   return value && value.trim() ? value : '未设置'
@@ -183,12 +186,13 @@ onBeforeUnmount(() => {
             <h3 id="safe-info-history-heading">历史与安全状态</h3>
             <ul v-if="safeInfo.history_summary?.length" class="safe-info-list">
               <li v-for="(event, index) in safeInfo.history_summary" :key="`${event.timestamp}-${index}`">
-                {{ safeLabel(event.action) }}：{{ historyStatus(event.previous_status) }} → {{ historyStatus(event.next_status) }}（{{ safeLabel(event.timestamp) }}）
+                {{ actionLabel(event.action) }}：{{ historyStatus(event.previous_status) }} → {{ historyStatus(event.next_status) }}（{{ safeLabel(event.timestamp) }}）
               </li>
             </ul>
             <p v-else class="safe-info-muted">暂无历史摘要。</p>
             <p class="safe-info-ab" role="status">
               Auto Bangumi：{{ safeInfo.ab_status?.submitted ? (safeInfo.ab_status.success === true ? '已提交且成功' : safeInfo.ab_status.success === false ? '已提交但未成功' : '已提交，结果未知') : '未提交' }}
+              <span v-if="safeInfo.ab_status?.submitted">（外部订阅编号：{{ safeLabel(safeInfo.ab_status.ab_subscription_id) }}）</span>
               <span v-if="safeInfo.ab_status?.submitted && safeInfo.ab_status.success === false">（{{ safeAbError(safeInfo.ab_status.error_type) }}）</span>
             </p>
           </section>

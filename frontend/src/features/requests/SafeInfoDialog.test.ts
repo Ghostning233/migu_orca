@@ -59,6 +59,8 @@ describe('SafeInfoDialog (US-297)', () => {
     expect(document.body.textContent).toContain('S1')
     expect(document.body.textContent).toContain('缺少季度信息')
     expect(document.body.textContent).toContain('资源字幕组')
+    expect(document.body.textContent).toContain('确认：待确认 → 已确认')
+    expect(document.body.textContent).not.toContain('ACCEPT：')
     expect(document.body.textContent).toContain('已更新集数')
     expect(document.body.textContent).toContain('待开发')
     expect(document.body.textContent).not.toContain('https://')
@@ -70,11 +72,12 @@ describe('SafeInfoDialog (US-297)', () => {
   it('renders submitted AB success, failure, and unknown as separate safe states', async () => {
     apiGet.mockResolvedValue({ safe_info: {
       ...safeInfo(),
-      ab_status: { submitted: true, success: null, ab_subscription_id: null, error_type: null },
+      ab_status: { submitted: true, success: null, ab_subscription_id: 'public-unknown', error_type: null },
     } } as never)
     const wrapper = mount(SafeInfoDialog, { attachTo: document.body, props: { open: true, requestId: 'request-safe-1' } })
     await flushPromises()
     expect(document.body.textContent).toContain('已提交，结果未知')
+    expect(document.body.textContent).toContain('外部订阅编号：public-unknown')
     expect(document.body.textContent).not.toContain('未成功')
 
     await wrapper.setProps({ open: false })
@@ -85,8 +88,19 @@ describe('SafeInfoDialog (US-297)', () => {
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(document.body.textContent).toContain('已提交但未成功')
+    expect(document.body.textContent).toContain('外部订阅编号：public-sub-1')
     expect(document.body.textContent).toContain('提交失败（详细原因已隐藏）')
     expect(document.body.textContent).not.toContain('upstream_error')
+
+    await wrapper.setProps({ open: false })
+    apiGet.mockResolvedValue({ safe_info: {
+      ...safeInfo(),
+      ab_status: { submitted: true, success: true, ab_subscription_id: 'public-success', error_type: null },
+    } } as never)
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(document.body.textContent).toContain('已提交且成功')
+    expect(document.body.textContent).toContain('外部订阅编号：public-success')
   })
 
   it('deactivates the focus trap on unmount', async () => {
@@ -95,6 +109,18 @@ describe('SafeInfoDialog (US-297)', () => {
     await flushPromises()
     const removeSpy = vi.spyOn(document, 'removeEventListener')
     wrapper.unmount()
+    expect(removeSpy).toHaveBeenCalledWith('keydown', expect.any(Function))
+    removeSpy.mockRestore()
+  })
+
+  it('routes Escape through close so the trap is removed immediately', async () => {
+    apiGet.mockResolvedValue({ safe_info: safeInfo() } as never)
+    const wrapper = mount(SafeInfoDialog, { attachTo: document.body, props: { open: true, requestId: 'request-safe-1' } })
+    await flushPromises()
+    const removeSpy = vi.spyOn(document, 'removeEventListener')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
+    await flushPromises()
+    expect(wrapper.emitted('close')).toBeTruthy()
     expect(removeSpy).toHaveBeenCalledWith('keydown', expect.any(Function))
     removeSpy.mockRestore()
   })

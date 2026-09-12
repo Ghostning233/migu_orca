@@ -101,6 +101,7 @@ const modifyError = ref('')
 const modifyEditor = ref<InstanceType<typeof AnimeDraftEditor> | null>(null)
 const lastModifyPatch = ref<PreviewPatch | null>(null)
 const modifyResultUnknown = ref(false)
+const actionUnknown = ref<'accept' | 'cancel' | 'delete' | null>(null)
 
 const cancelReason = ref('')
 
@@ -121,41 +122,54 @@ const selectedGroupName = computed(
 
 interface LoadDetailOptions {
   closeForms?: boolean
-  preserveOnFailure?: boolean
+}
+
+type DetailFetch =
+  | { result: RequestDetailResult; error: null }
+  | { result: null; error: ReturnType<typeof toApiError> }
+
+async function fetchDetailSnapshot(): Promise<DetailFetch> {
+  try {
+    const result = await api.get<RequestDetailResult>('/api/v1/requests/{request_id}', {
+      path: { request_id: props.requestId },
+      query: storageQuery(),
+    })
+    return { result, error: null }
+  } catch (error) {
+    return { result: null, error: toApiError(error) }
+  }
+}
+
+function commitDetail(result: RequestDetailResult): void {
+  detail.value = result
+  lastLoadError.value = null
 }
 
 async function loadDetail(options: LoadDetailOptions = {}): Promise<boolean> {
   if (!props.requestId) return false
   loading.value = true
   loadFailed.value = false
-  try {
-    const result = await api.get<RequestDetailResult>('/api/v1/requests/{request_id}', {
-      path: { request_id: props.requestId },
-      query: storageQuery(),
-    })
-    detail.value = result
-    lastLoadError.value = null
+  const fetched = await fetchDetailSnapshot()
+  if (fetched.result) {
+    commitDetail(fetched.result)
     if (options.closeForms !== false) {
       cancelFormOpen.value = false
       modifyFormOpen.value = false
       cancelReason.value = ''
     }
-    return true
-  } catch (error) {
-    lastLoadError.value = toApiError(error)
-    if (!options.preserveOnFailure) {
-      detail.value = null
-      loadFailed.value = true
-      notification.error('订阅方案详情加载失败', '请确认 request_id 是否存在。')
-    }
-    void error
-    return false
-  } finally {
     loading.value = false
+    return true
   }
+  lastLoadError.value = fetched.error
+  detail.value = null
+  loadFailed.value = true
+  notification.error('订阅方案详情加载失败', '请确认 request_id 是否存在。')
+  loading.value = false
+  return false
 }
 
 async function confirmAccept(): Promise<void> {
+  if (actionUnknown.value) return
   const ok = await confirmDialog.value?.confirm({
     title: '确认订阅方案',
     message: '确认接受此订阅方案？',
@@ -178,6 +192,7 @@ function toggleModifyForm(): void {
 }
 
 async function confirmCancel(): Promise<void> {
+  if (actionUnknown.value) return
   const reason = cancelReason.value.trim()
   const ok = await confirmDialog.value?.confirm({
     title: '取消订阅方案',
@@ -190,6 +205,7 @@ async function confirmCancel(): Promise<void> {
 }
 
 function submitModify(patch: PreviewPatch): void {
+  if (modifyResultUnknown.value || actionUnknown.value) return
   if (!Object.keys(patch).length) {
     modifyError.value = '请至少修改或清空一个字段。'
     return
@@ -200,8 +216,8 @@ function submitModify(patch: PreviewPatch): void {
   void performModify(patch)
 }
 
-function modifyPatchApplied(patch: PreviewPatch): boolean {
-  const config = request.value?.confirmable_config
+function modifyPatchApplied(patch: PreviewPatch, snapshot: RequestDetailResult): boolean {
+  const config = snapshot.request?.confirmable_config
   if (!config) return false
   if (patch.selected_subtitle_group !== undefined && patch.selected_subtitle_group !== config.selected_subtitle_group) return false
   if (patch.expected_folder_name !== undefined && patch.expected_folder_name !== config.expected_folder_name) return false
@@ -233,22 +249,43 @@ function isUncertainWrite(error: unknown): boolean {
     || type === 'upstream_timeout' || type === 'upstream_unavailable'
 }
 
-async function recheckModify(patch: PreviewPatch): Promise<'applied' | 'not_applied' | 'unknown'> {
-  const loaded = await loadDetail({ closeForms: false, preserveOnFailure: true })
-  if (!loaded) return 'unknown'
-  return modifyPatchApplied(patch) ? 'applied' : 'not_applied'
+type ModifyCheck =
+  | { state: 'applied' | 'not_applied'; snapshot: RequestDetailResult }
+  | { state: 'unknown' }
+
+async function recheckModify(patch: PreviewPatch): Promise<ModifyCheck> {
+  const fetched = await fetchDetailSnapshot()
+  if (!fetched.result) {
+    lastLoadError.value = fetched.error
+    return { state: 'unknown' }
+  }
+  return {
+    state: modifyPatchApplied(patch, fetched.result) ? 'applied' : 'not_applied',
+    snapshot: fetched.result,
+  }
 }
 
 async function recoverModify(): Promise<void> {
-  const loaded = await loadDetail({ closeForms: false, preserveOnFailure: true })
-  if (loaded) {
+  const fetched = await fetchDetailSnapshot()
+  if (fetched.result) {
+    commitDetail(fetched.result)
     modifyError.value = ''
     modifyResultUnknown.value = false
     modifyEditor.value?.reset()
   } else {
+    lastLoadError.value = fetched.error
     modifyError.value = '结果暂无法确认，请重新确认结果。'
     modifyResultUnknown.value = true
   }
+}
+
+function commitModifySuccess(snapshot: RequestDetailResult): void {
+  commitDetail(snapshot)
+  modifyResultUnknown.value = false
+  modifyFormOpen.value = false
+  lastModifyPatch.value = null
+  notification.success('修改成功', `订阅方案 ${props.requestId}`)
+  emit('changed')
 }
 
 async function retryModify(): Promise<void> {
@@ -256,11 +293,9 @@ async function retryModify(): Promise<void> {
   if (!patch) return
   if (modifyResultUnknown.value) {
     const result = await recheckModify(patch)
-    if (result === 'applied') {
-      modifyResultUnknown.value = false
-      modifyError.value = ''
-      modifyEditor.value?.reset()
-    } else if (result === 'not_applied') {
+    if (result.state === 'applied') {
+      commitModifySuccess(result.snapshot)
+    } else if (result.state === 'not_applied') {
       modifyResultUnknown.value = false
       modifyError.value = '修改未生效，请重试。'
     } else {
@@ -284,27 +319,20 @@ async function performModify(patch: PreviewPatch): Promise<void> {
       query: storageQuery(),
       body,
     })
-    const loaded = await loadDetail({ closeForms: false, preserveOnFailure: true })
-    if (!loaded) {
+    const fetched = await fetchDetailSnapshot()
+    if (!fetched.result) {
+      lastLoadError.value = fetched.error
       modifyError.value = '结果暂无法确认，请重新确认结果。'
       modifyResultUnknown.value = true
       return
     }
-    modifyResultUnknown.value = false
-    modifyFormOpen.value = false
-    lastModifyPatch.value = null
-    notification.success('修改成功', `订阅方案 ${props.requestId}`)
-    emit('changed')
+    commitModifySuccess(fetched.result)
   } catch (error) {
     if (isUncertainWrite(error)) {
       const result = await recheckModify(patch)
-      if (result === 'applied') {
-        modifyResultUnknown.value = false
-        modifyFormOpen.value = false
-        lastModifyPatch.value = null
-        notification.success('修改成功', `订阅方案 ${props.requestId}`)
-        emit('changed')
-      } else if (result === 'not_applied') {
+      if (result.state === 'applied') {
+        commitModifySuccess(result.snapshot)
+      } else if (result.state === 'not_applied') {
         modifyResultUnknown.value = false
         modifyError.value = '修改未生效，请重试。'
       } else {
@@ -320,7 +348,59 @@ async function performModify(patch: PreviewPatch): Promise<void> {
   }
 }
 
+type ActionCheck =
+  | { state: 'applied' | 'not_applied'; snapshot?: RequestDetailResult }
+  | { state: 'unknown' }
+
+async function recheckAction(action: 'accept' | 'cancel' | 'delete'): Promise<ActionCheck> {
+  const fetched = await fetchDetailSnapshot()
+  if (!fetched.result) {
+    lastLoadError.value = fetched.error
+    if (action === 'delete' && fetched.error.status === 404) return { state: 'applied' }
+    return { state: 'unknown' }
+  }
+  if (action === 'delete') return { state: 'not_applied', snapshot: fetched.result }
+  const expectedStatus = action === 'accept' ? 'ACCEPTED' : 'CANCELLED'
+  return {
+    state: fetched.result.request?.status === expectedStatus ? 'applied' : 'not_applied',
+    snapshot: fetched.result,
+  }
+}
+
+function actionSuccessMessage(action: 'accept' | 'cancel' | 'delete'): string {
+  return action === 'accept' ? '确认成功' : action === 'cancel' ? '取消成功' : '删除成功'
+}
+
+function commitActionSuccess(action: 'accept' | 'cancel', snapshot: RequestDetailResult): void {
+  commitDetail(snapshot)
+  actionUnknown.value = null
+  cancelFormOpen.value = false
+  notification.success(actionSuccessMessage(action), `订阅方案 ${props.requestId}`)
+  emit('changed')
+}
+
+async function recheckPendingAction(): Promise<void> {
+  const action = actionUnknown.value
+  if (!action) return
+  actionInFlight.value = true
+  const checked = await recheckAction(action)
+  if (checked.state === 'applied') {
+    actionUnknown.value = null
+    if (action === 'delete') {
+      notification.success('删除成功', `已删除订阅方案 ${props.requestId}`)
+      emit('deleted', props.requestId)
+    } else if (checked.snapshot) {
+      commitActionSuccess(action, checked.snapshot)
+    }
+  } else if (checked.state === 'not_applied') {
+    actionUnknown.value = null
+    notification.error('操作未生效', '操作未生效，请确认后重新发起。')
+  }
+  actionInFlight.value = false
+}
+
 async function confirmDelete(): Promise<void> {
+  if (actionUnknown.value) return
   const ok = await confirmDialog.value?.confirm({
     title: '删除订阅方案',
     message: '确认删除此订阅方案？此操作不可恢复。',
@@ -335,21 +415,27 @@ async function confirmDelete(): Promise<void> {
       query: storageQuery(),
       body: { storage_dir: storageQuery().storage_dir ?? null },
     })
-    const checked = await loadDetail({ closeForms: false, preserveOnFailure: true })
-    if (checked || lastLoadError.value?.status !== 404) {
-      notification.error('结果暂无法确认', '删除结果暂无法确认，请稍后重新检查。')
-    } else {
+    const checked = await recheckAction('delete')
+    if (checked.state === 'applied') {
       notification.success('删除成功', `已删除订阅方案 ${props.requestId}`)
       emit('deleted', props.requestId)
+    } else if (checked.state === 'not_applied') {
+      notification.error('操作未生效', '删除未生效，请确认后重新发起。')
+    } else {
+      actionUnknown.value = 'delete'
+      notification.error('结果暂无法确认', '操作结果暂无法确认，请重新确认结果。')
     }
   } catch (error) {
     if (isUncertainWrite(error)) {
-      const checked = await loadDetail({ closeForms: false, preserveOnFailure: true })
-      if (checked || lastLoadError.value?.status !== 404) {
-        notification.error('结果暂无法确认', '删除结果暂无法确认，请稍后重新检查。')
-      } else {
+      const checked = await recheckAction('delete')
+      if (checked.state === 'applied') {
         notification.success('删除成功', `已删除订阅方案 ${props.requestId}`)
         emit('deleted', props.requestId)
+      } else if (checked.state === 'not_applied') {
+        notification.error('操作未生效', '删除未生效，请确认后重新发起。')
+      } else {
+        actionUnknown.value = 'delete'
+        notification.error('结果暂无法确认', '操作结果暂无法确认，请重新确认结果。')
       }
     } else {
       void error
@@ -361,6 +447,7 @@ async function confirmDelete(): Promise<void> {
 }
 
 async function performAction(action: 'accept' | 'cancel', body: LocalActionBody): Promise<void> {
+  if (actionUnknown.value) return
   actionInFlight.value = true
   try {
     const options = {
@@ -369,41 +456,31 @@ async function performAction(action: 'accept' | 'cancel', body: LocalActionBody)
       body: { ...body, storage_dir: storageQuery().storage_dir ?? null },
     }
     await api.post<ActionResult>(`/api/v1/requests/{request_id}/${action}`, options)
-    const loaded = await loadDetail({ closeForms: false, preserveOnFailure: true })
-    const expectedStatus = action === 'accept' ? 'ACCEPTED' : 'CANCELLED'
-    if (!loaded || request.value?.status !== expectedStatus) {
-      notification.error('结果暂无法确认', '操作结果暂无法确认，请稍后重新检查。')
-      return
+    const checked = await recheckAction(action)
+    if (checked.state === 'applied' && checked.snapshot) {
+      commitActionSuccess(action, checked.snapshot)
+    } else if (checked.state === 'not_applied') {
+      notification.error('操作未生效', '操作未生效，请确认后重新发起。')
+    } else {
+      actionUnknown.value = action
+      notification.error('结果暂无法确认', '操作结果暂无法确认，请重新确认结果。')
     }
-    const titles: Record<string, string> = {
-      accept: '确认成功',
-      cancel: '取消成功',
-    }
-    notification.success(titles[action] ?? '操作成功', `订阅方案 ${props.requestId}`)
-    // Refresh through GET detail so the panel only consumes the safe
-    // server-authoritative projection, then refresh the list.
-    cancelFormOpen.value = false
-    emit('changed')
   } catch (error) {
     if (isUncertainWrite(error)) {
-      const checked = await loadDetail({ closeForms: false, preserveOnFailure: true })
-      const expectedStatus = action === 'accept' ? 'ACCEPTED' : 'CANCELLED'
-      if (checked && request.value?.status === expectedStatus) {
-        notification.success(action === 'accept' ? '确认成功' : '取消成功', `订阅方案 ${props.requestId}`)
-        cancelFormOpen.value = false
-        emit('changed')
-        return
+      const checked = await recheckAction(action)
+      if (checked.state === 'applied' && checked.snapshot) {
+        commitActionSuccess(action, checked.snapshot)
+      } else if (checked.state === 'not_applied') {
+        notification.error('操作未生效', '操作未生效，请确认后重新发起。')
+      } else {
+        actionUnknown.value = action
+        notification.error('结果暂无法确认', '操作结果暂无法确认，请重新确认结果。')
       }
-      notification.error(
-        '结果暂无法确认',
-        '操作结果暂无法确认，请稍后重新检查。',
-      )
       return
     }
     const messages: Record<string, string> = {
       accept: '确认失败，请稍后重试。',
       cancel: '取消失败，请稍后重试。',
-      modify: '修改失败，请稍后重试。',
     }
     notification.error('操作失败', messages[action] ?? '操作失败，请稍后重试。')
   } finally {
@@ -439,13 +516,13 @@ onMounted(() => {
       <!-- ── actions ─────────────────────────────────────────────── -->
       <div class="detail-actions" aria-label="订阅方案操作">
         <template v-if="isPending">
-          <BaseButton id="detail-accept-button" variant="primary" :loading="actionInFlight" @click="confirmAccept">
+          <BaseButton id="detail-accept-button" variant="primary" :loading="actionInFlight" :disabled="Boolean(actionUnknown)" @click="confirmAccept">
             确认
           </BaseButton>
-          <BaseButton id="detail-cancel-toggle" :disabled="actionInFlight" @click="toggleCancelForm">
+          <BaseButton id="detail-cancel-toggle" :disabled="actionInFlight || Boolean(actionUnknown)" @click="toggleCancelForm">
             取消
           </BaseButton>
-          <BaseButton id="detail-modify-toggle" :disabled="actionInFlight" @click="toggleModifyForm">
+          <BaseButton id="detail-modify-toggle" :disabled="actionInFlight || Boolean(actionUnknown)" @click="toggleModifyForm">
             修改
           </BaseButton>
         </template>
@@ -454,10 +531,10 @@ onMounted(() => {
           <p class="field-help">
             此订阅方案已{{ detailStatusLabel(request?.status) }}，可进行本地方案修改或删除。
           </p>
-          <BaseButton id="detail-accepted-modify-toggle" :disabled="actionInFlight" @click="toggleModifyForm">
+          <BaseButton id="detail-accepted-modify-toggle" :disabled="actionInFlight || Boolean(actionUnknown)" @click="toggleModifyForm">
             修改
           </BaseButton>
-          <BaseButton id="detail-delete-button" variant="danger" :disabled="actionInFlight" @click="confirmDelete">
+          <BaseButton id="detail-delete-button" variant="danger" :disabled="actionInFlight || Boolean(actionUnknown)" @click="confirmDelete">
             删除
           </BaseButton>
         </template>
@@ -465,6 +542,13 @@ onMounted(() => {
         <template v-else-if="isCancelled">
           <p class="field-help">此订阅方案已{{ detailStatusLabel(request?.status) }}，不可操作。</p>
         </template>
+      </div>
+
+      <div v-if="actionUnknown" class="detail-action-recovery" role="alert">
+        <span class="field-error">结果暂无法确认</span>
+        <BaseButton id="detail-action-recheck-button" type="button" variant="secondary" :loading="actionInFlight" @click="recheckPendingAction">
+          重新确认结果
+        </BaseButton>
       </div>
 
       <!-- ── inline cancel form ──────────────────────────────────── -->
@@ -484,7 +568,7 @@ onMounted(() => {
           />
         </FormField>
         <div class="detail-form-actions">
-          <BaseButton id="detail-cancel-submit" type="submit" variant="danger" :loading="actionInFlight">
+          <BaseButton id="detail-cancel-submit" type="submit" variant="danger" :loading="actionInFlight" :disabled="Boolean(actionUnknown)">
             提交取消
           </BaseButton>
           <BaseButton type="button" :disabled="actionInFlight" @click="cancelFormOpen = false">
@@ -508,6 +592,7 @@ onMounted(() => {
         :error="modifyError"
         :can-retry="Boolean(modifyError)"
         :retry-label="modifyResultUnknown ? '重新确认结果' : '重试修改'"
+        :disabled="Boolean(actionUnknown) || modifyResultUnknown"
         @apply="submitModify"
         @empty-apply="submitModify({})"
         @retry="retryModify"

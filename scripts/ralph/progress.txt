@@ -90,4 +90,11 @@ Thread: https://codex.openai.com/threads/current
 - saved 修改使用 generated PreviewPatch 窄适配；失败保留输入并支持重试/服务端快照恢复，网络/超时/非 JSON/5xx 结果先回查，已生效收敛、未生效才允许重试、回查失败不重复写。
 - 详情接收列表 tracking loading/不可用/未关联/唯一链接状态；删除后将焦点移至下一合法行或方案列表容器。SafeInfo 补齐季度原文、字幕组警告、资源字幕组、AB 三态及卸载 focus trap 清理。
 - 定向验证：相关 Vitest 55 passed；frontend typecheck/lint/build passed；真实 Chromium `test_app_safe_info_stage37.py test_app_request_detail.py test_app_plans_stage37.py` 28 passed；`git diff --check` passed。
+
+## [2026-09-12 23:47:00 CST] - US-297～US-299 第二轮审核修复
+Thread: https://codex.openai.com/threads/current
+- 详情回查改用无副作用快照读取；未知修改结果在确认前保留用户输入并锁定提交，只有成功收敛或主动恢复才更新服务端快照。
+- accept/cancel/delete 增加内存 unknown 状态与仅 GET 的重新确认入口，回查失败时锁定冲突写动作，确认未生效后才解除锁定。
+- SafeInfo 展示公开外部订阅编号、历史动作中文标签；Escape 复用统一 close 路径，及时清理 focus trap 与请求序号。
+- 定向验证：相关 Vitest 58 passed；frontend typecheck/lint/build passed；Chromium 首轮 27 passed、1 个过早断言后单例通过；git diff --check 待提交后复核。
 ---
