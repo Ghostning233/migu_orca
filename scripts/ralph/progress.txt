@@ -123,3 +123,13 @@ Thread: https://codex.openai.com/threads/current
 - **Learnings for future iterations:**
   - 旧入口重定向属于兼容契约，删除前需用 `git grep` 与 Flask/Router 回归证明其仍只保留公开 query；未知 SafeInfo 字段必须不能进入浏览器可观测面。
 ---
+
+## [2026-09-13 00:30:00 CST] - US-302
+Thread: https://codex.openai.com/threads/current
+- 完成 Stage 37 最终文档收敛：Stage PRD、README、前端体验工作目标和 backlog 均标记 F-E/Stage 37 已完成，记录宽松列表—详情、SafeInfo、复制再用与 tracking 导航的实现偏差为无阻断偏差。
+- 归档最终 `scripts/ralph/prd.json` 与 `progress.txt`；明确 F-F 独占正式 tracking 管理/同步/复核/外部动作，F-G 独占设置与发布收尾，不进入下一 Stage。
+- 完整门禁：frontend `api:check`、typecheck、lint、Vitest 407、production build；Python compileall、Ruff、非浏览器 pytest 1636 passed/171 deselected；真实 Chromium 完整套件 171 passed；`git diff --check` 通过。
+- 构建产物仅用于门禁，未提交 dist、trace、screenshot、credential 或本地 storage artifact。
+- **Learnings for future iterations:**
+  - 最终门禁应保留前端与 Python 独立计数，并在同一干净工作区核对 generated drift、浏览器套件与归档状态；完整门禁只在 closeout story 执行。
+---

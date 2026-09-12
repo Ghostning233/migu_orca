@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 工作目标 / 设计讨论基线（不是执行 PRD） |
-| 当前状态 | Gate 1～3、B-A～B-D、F-A～F-D 已完成；F-E 已规划为 Stage 37；F-F～F-G 继续独立评审 |
+| 当前状态 | Gate 1～3、B-A～B-D、F-A～F-E 已完成；F-F～F-G 继续独立评审 |
 | 创建日期 | 2026-09-07 |
 | 适用范围 | MiGuOrca Web 前端的信息架构、用户流程、页面设计、视觉方案与后续实现 |
 | 前置事实 | Stage 26、Stage 27 已完成；Vue 3、TypeScript、Vite、OpenAPI 客户端和浏览器测试基线继续保留 |
@@ -388,7 +388,7 @@ Auto Bangumi 也必须通过 capability 探测适配，不能假设各版本写�
 | F-B 共享审核核心 | Stage 34 已完成（US-266～US-274） | 模式输入、候选集合、共享草案编辑器、revision 与兼容适配层 | Stage 33 已完成；执行 PRD 见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md` |
 | F-C 单番添加 | Stage 35 已完成（US-275～US-283） | 三步旅程、原子保存确认、失败恢复、tracking 只读 handoff | Stage 34 已完成；执行 PRD 见 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md` |
 | F-D 批量审核 | Stage 36 已完成（US-284～US-293） | 1/12/36、双栏、异常优先、部分成功、离开保护 | 由 Stage 35 generated 批量 save-confirm 接续完成 |
-| F-E 追番方案 | Stage 37 已规划（US-294～US-302） | 列表—详情、SafeInfo、共享修改、复制再用、tracking 链接 | Stage 36 已合入；执行 PRD 见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md` |
+| F-E 追番方案 | Stage 37 已完成（US-294～US-302，2026-09-13） | 列表—详情、SafeInfo、共享修改、复制再用、tracking 链接 | Stage 36 已合入；完成记录见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md` |
 | F-F～F-G 前端分片 | 待评审 | 正式管理、设置/收尾 | Stage 37 结论纳入后续评审 |
 | 独立发布验收 | 待规划 | 跨流程 Chromium、无障碍/多视口/安全报告、文档切换 | 全部实现切片验收通过 |
 

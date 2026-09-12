@@ -7,7 +7,7 @@
 | Stage | 37 |
 | 工作包 | F-E：追番方案 |
 | Backlog | BL-026 |
-| 状态 | 已规划，待开发 |
+| 状态 | 已完成（2026-09-13） |
 | 目标分支 | `ralph/stage37-plans-safe-info` |
 | Ralph stories | US-294～US-302 |
 | 实时基线 | `origin/main` 合并提交 `ee8acb7`（Stage 36 已合入） |
@@ -244,7 +244,15 @@ git diff --check
 3. US-294～US-302 全部 `passes=true`、代码独立审核无阻断、完整门禁通过后，才可标记完成并归档。
 4. 合并、push、PR 和远端/旧分支清理仍需用户单独授权；Ralph Agent 不得自行执行。
 
-## 11. 后续 handoff
+## 11. Stage 37 完成记录
+
+- US-294～US-302 全部通过；实现列表—详情、SafeInfo 白名单、saved Request 修改、一次性内存复制再用、响应式/键盘/敏感信息收敛。
+- 最终门禁：`api:check`、前端 typecheck/lint/Vitest/build、Python compileall/Ruff/非浏览器 pytest 与完整真实 Chromium 均通过；具体命令和计数记录在 `scripts/ralph/progress.txt`。
+- 视觉对照：宽松列表—详情层级、弹窗安全摘要、复制再用显式搜索/合集选择/草案生成路径与交互规格一致；未发现阻断性偏差。
+- 本阶段未实现正式 tracking 管理、外部同步/复核/提交/恢复或 Auto Bangumi 管理动作，也未扩展设置发布流程。
+- Ralph 归档：`scripts/ralph/archive/2026-09-13-stage37-plans-safe-info/`。
+
+## 12. 后续 handoff
 
 - F-F：正式追番管理总览、单选列表、检查器、页面级临时凭据、同步、复核、外部提交、结果未知恢复
   及 MODIFY/SET_ENABLED/REFRESH_RSS/DELETE_EXTERNAL 管理动作。

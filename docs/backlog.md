@@ -30,7 +30,7 @@
 | 18 | BL-023 | Web API 契约固化与服务端边界治理 | 已完成 (Stage 26, 2026-08-30) |
 | 19 | BL-024 | 前端工程化迁移与页面重构 | 已完成 (Stage 27, 2026-08-31) |
 | 20 | BL-025 | 前端体验重构的后端支撑与 Auto Bangumi 管理契约 | B-A～B-D 已完成（Stage 28～32，US-210～US-256） |
-| 21 | BL-026 | 桌面端前端体验分片重构 | F-A～F-D 已完成（Stage 33～36）；F-E 已规划（Stage 37）；F-F～F-G 待评审 |
+| 21 | BL-026 | 桌面端前端体验分片重构 | F-A～F-E 已完成（Stage 33～37）；F-F～F-G 待评审 |
 | 22 | BL-014 | 部署/配置向导可行性验证 | 待办，远期，仅辅助配置 |
 
 以下事项已经落盘，但尚未进入开发优先级排序；触发条件满足或完成独立可行性评估后，再决定是否进入新的 Stage：
@@ -536,7 +536,7 @@ Stage 32 执行范围见 `docs/MiGuOrca_stage32_contract_hardening_PRD.md`（US-
 
 ### BL-026: 桌面端前端体验分片重构
 
-- 状态：F-A～F-D 已完成为 Stage 33～36（US-257～US-293）；F-E 已规划为 Stage 37（US-294～US-302）；F-F～F-G 待评审
+- 状态：F-A～F-E 已完成为 Stage 33～37（US-257～US-302）；F-F～F-G 待评审
 - 来源：2026-09-07 前端体验重构 Gate 1～3
 - 优先级：21，P1
 - 候选 PRD：`docs/MiGuOrca_frontend_ux_implementation_PRD.md`

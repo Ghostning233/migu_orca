@@ -213,7 +213,6 @@ class TestAppRequestDetailActions:
         # The panel reloads the server-authoritative local snapshot; the
         # confirm action button disappears and no external entry is offered.
         expect(page.locator("#request-detail-container")).to_contain_text("已确认", timeout=5000)
-        detail_text = page.locator("#request-detail-container").inner_text()
         assert page.locator("#detail-accept-button").count() == 0
 
     def test_cancel_flow_with_reason(

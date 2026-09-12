@@ -163,8 +163,8 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Stage 37 完成归档；US-294～US-302 全部通过。前端/后端完整门禁与 171 项真实 Chromium 套件通过，F-F/F-G handoff 已记录，未提交 dist/trace/screenshot/凭据/本地 storage。"
     }
   ]
 }

@@ -18,7 +18,7 @@ Stage 35 已完成 F-C「单番添加完整旅程」（US-275～US-283）：把 
 
 Stage 36 已完成并归档 F-D「批量审核完整旅程」（US-284～US-293）：把批量模式重构为 1/12/36 部左卡右详情、异常优先、筛选/下一异常与固定操作栏，正式接入 generated `saveConfirmBatchItems` 的原子保存确认、部分成功和逐项恢复，并退出批量 `preview-save → accept` 兼容链路。Stage 36 不实现 F-E `SafeInfoDialog`、F-F 正式 tracking 管理或 F-G 设置收尾；完成门禁、效果图偏差与 handoff 见 `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`。
 
-Stage 37 已规划 F-E「追番方案与安全信息」（US-294～US-302）：把 `/app/plans` 重构为本地方案列表—详情，补齐 Request 安全摘要的季度/修改时间，接入真实 `getRequestSafeInfo`、共享 saved Request 编辑、精确 tracking 链接和一次性内存“复制再用”。本阶段不实现 tracking 外部同步、提交或管理动作，也不开发设置收尾；执行边界见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md`。
+Stage 37 已完成 F-E「追番方案与安全信息」（US-294～US-302）：`/app/plans` 已重构为本地方案列表—详情，补齐 Request 安全摘要季度/修改时间，接入真实 `getRequestSafeInfo`、共享 saved Request 编辑、精确 tracking 链接和一次性内存“复制再用”；已完成响应式、键盘/焦点、敏感信息与旧入口兼容收敛。阶段不实现 tracking 外部同步、提交或管理动作，也不开发设置收尾；完成记录与边界见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md`。
 
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
