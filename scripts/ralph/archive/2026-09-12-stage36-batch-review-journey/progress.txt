@@ -2,6 +2,12 @@
 Started: Sat Sep 12 14:24:07 CST 2026
 ---
 
+## 2026-09-12 - Stage 36 independent review fix
+- 右侧 `CandidateCollectionList` 成为 FOUND 候选的唯一选择入口，移除旧候选浮层及并行焦点流程；选择始终绑定当前 detail item。
+- 逐项 save-confirm 幂等键按 draft capability 指纹管理：未知 transport 响应仅在同一能力上复用，编辑/新草案/成功/失效/删除后清理或轮换；成功 accept 后仅允许 tracking 定位恢复。
+- 收紧 `save_confirm_failed` 恢复条件、可见范围全选、部分失败首项聚焦和固定安全错误文案；Stage 35 两个 archive 文件精确恢复为 `origin/main` 版本。
+- 定向验证：BatchWorkbench/useBatchReviewJourney Vitest 23 passed，批量 Chromium 14 passed，前端 build/typecheck 通过，`.migu_orca/storage` 不存在，`git diff --check` 通过。
+
 ## Codebase Patterns
 
 - Batch items use `item_id` as identity; input order, frozen review order, current detail, and selection are independent state.

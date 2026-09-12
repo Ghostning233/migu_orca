@@ -341,7 +341,7 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     apiPost.mockReset()
   })
 
-  it('opens the candidate popover for a FOUND card and generates a draft on selection', async () => {
+  it('selects a FOUND candidate in the current detail pane and generates its draft', async () => {
     apiPost
       .mockResolvedValueOnce(
         parseResult({
@@ -366,10 +366,9 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     await card.find('.batch-card-expand').trigger('click')
     await nextTick()
 
-    const popover = wrapper.find('#batch-candidate-choices')
-    expect(popover.exists()).toBe(true)
-    expect(popover.text()).toContain('候选合集')
-    await popover.find('.candidate-select').trigger('click')
+    const detailCandidates = wrapper.find('.batch-detail-pane')
+    expect(detailCandidates.text()).toContain('候选合集')
+    await detailCandidates.find('.candidate-select').trigger('click')
     await flushPromises()
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/requests', expect.objectContaining({}))

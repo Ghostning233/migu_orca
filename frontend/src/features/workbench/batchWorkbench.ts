@@ -16,6 +16,7 @@
  * is ever persisted or logged.
  */
 import type { operations } from '@/api/generated/api'
+import { isPublicRouteIdentifier } from '@/app/router/catalog'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
 import type { SaveConfirmBatchItemsBody, SaveConfirmBatchItemsResult, TrackingItemsResult } from '@/app/composables/useBatchReviewJourney'
 
@@ -344,11 +345,19 @@ export function batchSaveConfirmErrorLabel(item: BatchSaveConfirmItem): string {
   return labels[item.error_type ?? ''] ?? '保存确认失败，请重试。'
 }
 
+export function batchSaveConfirmRecoveryAllowed(item: BatchSaveConfirmItem): boolean {
+  return item.error_type === 'save_confirm_failed' &&
+    String(item.outcome ?? '').toUpperCase() === 'FAILED' &&
+    isPublicRouteIdentifier(item.request_id)
+}
+
 /** Locate a public tracking row only by the confirmed request identity. */
 export function findBatchTrackingItem(result: TrackingItemsResult, requestId: string): BatchTrackingItem | null {
-  if (!requestId || !Array.isArray(result.items)) return null
+  if (!isPublicRouteIdentifier(requestId) || !Array.isArray(result.items)) return null
   const match = result.items.find((item) => item.request_id === requestId)
-  return match && match.request_id === requestId && match.tracking_id ? match : null
+  return match && isPublicRouteIdentifier(match.request_id) && match.request_id === requestId && isPublicRouteIdentifier(match.tracking_id)
+    ? match
+    : null
 }
 
 /** Build the batch submit summary message (legacy batchQueueSummaryMessage). */

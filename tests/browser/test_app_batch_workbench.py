@@ -336,9 +336,9 @@ class TestAppBatchParse:
 
 
 class TestAppBatchCandidateAndDraft:
-    """AC: 候选浮层、季数确认、草案详情与删除."""
+    """AC: 右侧候选、季数确认、草案详情与删除."""
 
-    def test_found_card_opens_candidate_popover_and_generates_draft(
+    def test_found_card_selects_right_detail_candidate_and_generates_draft(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
         captured: list[dict[str, Any]] = []
@@ -392,9 +392,8 @@ class TestAppBatchCandidateAndDraft:
         expect(card.locator(".batch-card-expand")).to_contain_text("查看候选")
         card.locator(".batch-card-expand").click()
 
-        choices = page.locator("#batch-candidate-choices")
+        choices = page.locator("#batch-detail-pane")
         expect(choices).to_be_visible()
-        expect(choices).to_have_attribute("role", "dialog")
         choices.locator(".candidate-select").click()
         page.wait_for_selector(".batch-draft-card .batch-card-status", timeout=5000)
 
@@ -441,7 +440,7 @@ class TestAppBatchCandidateAndDraft:
 
         card = page.locator(".batch-draft-card", has_text="芙莉莲S4")
         card.locator(".batch-card-expand").click()
-        choices = page.locator("#batch-candidate-choices")
+        choices = page.locator("#batch-detail-pane")
         confirmation = choices.locator(".candidate-season-confirmation input")
         choose = choices.locator(".candidate-select")
         expect(confirmation).not_to_be_checked()
@@ -556,7 +555,7 @@ class TestAppBatchCandidateAndDraft:
         page.click("#batch-accept-submit")
         page.wait_for_selector(".confirm-dialog", timeout=5000)
         page.locator(".confirm-dialog .primary-button").click()
-        expect(card.locator(".batch-card-reason")).to_contain_text("旧失败反馈")
+        expect(card.locator(".batch-card-reason")).to_contain_text("保存确认失败，请重试。")
         expect(card.locator(".batch-card-status")).to_contain_text("草案")
         expect(card.locator(".batch-card-checkbox-row")).to_be_checked()
 

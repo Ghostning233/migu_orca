@@ -46,6 +46,7 @@ import CandidateCollectionList from '@/features/workbench/CandidateCollectionLis
 
 import {
   batchSaveConfirmErrorLabel,
+  batchSaveConfirmRecoveryAllowed,
   batchSaveConfirmSucceeded,
   findBatchTrackingItem,
   batchCardNeedsReview,
@@ -72,7 +73,6 @@ import {
   type BatchItem,
   type BatchParseResult,
 } from '@/features/workbench/batchWorkbench'
-import BatchCandidatePopover from '@/features/workbench/BatchCandidatePopover.vue'
 import { displayValue, type RequestSnapshot } from '@/features/requests/requestDetail'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
@@ -114,7 +114,7 @@ const acceptInFlight = ref(false)
 const acceptFeedback = ref<Record<string, string>>({})
 // Save-confirm keys are deliberately route-local and survive only explicit
 // retries of the same operation.
-const saveKeys = new Map<string, string>()
+const saveKeys = new Map<string, { key: string; fingerprint: string }>()
 const savingItemIds = ref<Set<string>>(new Set())
 const saveSummary = ref<Record<string, number>>({})
 const recoveryLoadingItemIds = ref<Set<string>>(new Set())
@@ -131,11 +131,9 @@ function batchItemTrackingId(item: BatchItem): string {
 }
 
 // Candidate popover state (component memory only).
-const activeCandidateItemId = ref<string | null>(null)
 const seasonConfirmations = ref<Record<string, number | null>>({})
 // US-207: remember the trigger button so closing the popover restores focus
 // to it (keyboard/AT users keep their place in the batch grid).
-const candidateTrigger = ref<HTMLButtonElement | null>(null)
 
 // Draft detail state.
 const detailItemId = ref<string | null>(null)
@@ -198,7 +196,7 @@ const temporarilyShownItemId = ref<string | null>(null)
 const focusAnnouncement = ref('')
 const reviewFilterKey = computed(() => `${reviewQuery.value}\u0000${reviewStatus.value}\u0000${exceptionsOnly.value}`)
 
-const selectable = computed(() => items.value.filter(canAcceptBatchCard))
+const selectable = computed(() => visibleItems.value.filter(canAcceptBatchCard))
 const selectedCount = computed(
   () => items.value.filter((item) => selectedItemIds.value.has(item.item_id ?? '') && canAcceptBatchCard(item)).length,
 )
@@ -206,9 +204,6 @@ const allSelected = computed(
   () => selectable.value.length > 0 && selectable.value.every((item) => selectedItemIds.value.has(item.item_id ?? '')),
 )
 
-const activeItem = computed(() =>
-  activeCandidateItemId.value ? items.value.find((item) => item.item_id === activeCandidateItemId.value) ?? null : null,
-)
 const detailItem = computed(() =>
   (detailItemId.value || currentItemId.value)
     ? items.value.find((item) => item.item_id === (detailItemId.value || currentItemId.value)) ?? null
@@ -278,8 +273,7 @@ function focusCard(itemId: string): void {
 
 function activateCard(item: BatchItem): void {
   selectCurrentItem(item)
-  if (canChooseBatchCandidate(item)) openCandidateChoices(item)
-  else if (canExpandBatchCard(item)) openDraftDetail(item)
+  if (canExpandBatchCard(item)) openDraftDetail(item)
 }
 
 function moveCardFocus(item: BatchItem, direction: 1 | -1): void {
@@ -358,7 +352,6 @@ async function parseBatch(): Promise<void> {
     syncBatchIdToUrl(batchId.value)
     selectedItemIds.value = new Set()
     acceptInFlight.value = false
-    activeCandidateItemId.value = null
     detailItemId.value = null
     currentItemId.value = items.value[0]?.item_id ?? null
     detailItemId.value = currentItemId.value
@@ -401,7 +394,7 @@ function setAllSelected(selected: boolean): void {
 }
 
 async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<void> {
-  const item = activeItem.value
+  const item = detailItem.value
   if (!item) return
   acceptInFlight.value = true
   try {
@@ -419,13 +412,13 @@ async function generateDraftFromCandidate(candidate: BatchCandidate): Promise<vo
     const draftId = result?.draft_id ?? ''
     const draftRevision =
       typeof result?.draft_revision === 'number' ? result.draft_revision : 1
+    clearSaveKey(item.item_id ?? '')
     items.value = items.value.map((current) =>
       current.item_id === item.item_id
         ? { ...current, status: 'DRAFT', preview_request: request, draft_id: draftId, draft_revision: draftRevision }
         : current,
     )
     ensureDraftSession({ ...item, preview_request: request, draft_id: draftId, draft_revision: draftRevision })
-    activeCandidateItemId.value = null
     notification.success('订阅草案已生成', '已根据所选 MiKan 合集生成当前批量条目的订阅草案。')
   } catch (error) {
     void error
@@ -475,43 +468,15 @@ async function retryCardSubtitleGroup(item: BatchItem): Promise<void> {
   }
 }
 
-function openCandidateChoices(item: BatchItem, trigger?: HTMLElement | null): void {
-  selectCurrentItem(item)
-  if (activeCandidateItemId.value === item.item_id) {
-    closeCandidateChoices()
-    return
-  }
-  // Prefer the explicit trigger element (click target); fall back to the
-  // currently focused element (keyboard activation) so focus restore on close
-  // always has a target (US-207).
-  candidateTrigger.value =
-    (trigger as HTMLButtonElement | null) ??
-    (document.activeElement as HTMLButtonElement | null)
-  activeCandidateItemId.value = item.item_id
-}
-
-function closeCandidateChoices(): void {
-  const trigger = candidateTrigger.value
-  activeCandidateItemId.value = null
-  candidateTrigger.value = null
-  // Restore focus to the trigger button *before* the popover unmounts: the
-  // browser moves focus to <body> when the focused close button is removed,
-  // and the popover unmounts on the next tick, so focus must be restored
-  // synchronously here (US-207 keyboard accessibility).
-  trigger?.focus()
-}
-
 function openDraftDetail(item: BatchItem): void {
   selectCurrentItem(item)
 }
 
 function deleteBatchCard(itemId: string): void {
+  clearSaveKey(itemId)
   const next = new Set(selectedItemIds.value)
   next.delete(itemId)
   selectedItemIds.value = next
-  if (activeCandidateItemId.value === itemId) {
-    activeCandidateItemId.value = null
-  }
   if (detailItemId.value === itemId) {
     detailItemId.value = null
   }
@@ -525,6 +490,14 @@ function newSaveKey(): string {
   return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
     : `batch-save-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function saveFingerprint(item: BatchItem): string {
+  return `${item.draft_id ?? ''}:${item.draft_revision ?? ''}`
+}
+
+function clearSaveKey(itemId: string): void {
+  saveKeys.delete(itemId)
 }
 
 function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
@@ -548,20 +521,28 @@ function applySaveConfirmResult(result: BatchSaveConfirmResult): void {
         const selected = new Set(selectedItemIds.value)
         selected.delete(row.item_id ?? '')
         selectedItemIds.value = selected
+        clearSaveKey(row.item_id ?? '')
       } else {
-        const legacyReason = (item as Record<string, unknown>).reason
-        feedback[row.item_id ?? ''] = typeof legacyReason === 'string' && legacyReason
-          ? `无法接受：${legacyReason}`
-          : batchSaveConfirmErrorLabel(item)
-        if (item.error_type === 'save_confirm_failed') {
+        feedback[row.item_id ?? ''] = batchSaveConfirmErrorLabel(item)
+        if (batchSaveConfirmRecoveryAllowed(item)) {
           updated = { ...row, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: item.request_id }
         }
+        clearSaveKey(row.item_id ?? '')
       }
     }
     return updated
   })
   items.value = nextItems
   acceptFeedback.value = { ...acceptFeedback.value, ...feedback }
+  const firstFailed = resultItems.find((item) => !batchSaveConfirmSucceeded(item))?.item_id
+  const firstFailedRow = nextItems.find((item) => item.item_id === firstFailed)
+  if (firstFailed && firstFailedRow) {
+    const hidden = !visibleItems.value.some((item) => item.item_id === firstFailed)
+    temporarilyShownItemId.value = hidden ? firstFailed : null
+    selectCurrentItem(firstFailedRow)
+    focusAnnouncement.value = `已定位到首个失败条目：${batchCardTitle(firstFailedRow)}`
+    focusCard(firstFailed)
+  }
 
 }
 
@@ -605,6 +586,12 @@ async function retrySavedConfirmation(item: BatchItem): Promise<void> {
       path: { request_id: requestId },
       body: { storage_dir: storageQuery().storage_dir ?? null },
     })
+    // Accept was explicitly successful. From this point on only location may
+    // be retried; the accept action is never reopened.
+    items.value = items.value.map((row) => row.item_id === itemId
+      ? { ...row, status: 'CONFIRMED', request_id: requestId, tracking_id: null, queue_status: 'CONFIRMED' }
+      : row)
+    clearSaveKey(itemId)
     const located = await locateBatchTracking(item)
     if (located === 'not_found') setRecoveryFeedback(itemId, '方案已确认，但暂未定位到追番记录；可稍后重试定位。')
     if (located === 'failed') setRecoveryFeedback(itemId, '确认已完成，但定位暂不可用；请稍后重试定位。')
@@ -617,6 +604,9 @@ async function retrySavedConfirmation(item: BatchItem): Promise<void> {
     }
     const located = await locateBatchTracking(item)
     if (located === 'found') return
+    items.value = items.value.map((row) => row.item_id === itemId
+      ? { ...row, status: located === 'failed' ? 'RESPONSE_UNKNOWN' : 'SAVED_PENDING_CONFIRM' }
+      : row)
     setRecoveryFeedback(itemId, uncertain
       ? located === 'failed' ? '确认结果暂无法核验，请重试定位；不会重复确认。' : '确认结果已核验，但暂未找到追番记录；请明确重试确认。'
       : '确认未完成，请根据安全错误提示处理后再试。')
@@ -631,7 +621,13 @@ async function retryBatchTrackingLocation(item: BatchItem): Promise<void> {
   setRecoveryLoading(itemId, true)
   setRecoveryFeedback(itemId, '')
   const located = await locateBatchTracking(item)
-  if (located === 'not_found') setRecoveryFeedback(itemId, '暂未定位到追番记录，请稍后重试定位。')
+  if (located === 'not_found') {
+    const current = items.value.find((row) => row.item_id === itemId)
+    if (current?.status === 'RESPONSE_UNKNOWN') {
+      items.value = items.value.map((row) => row.item_id === itemId ? { ...row, status: 'SAVED_PENDING_CONFIRM' } : row)
+      setRecoveryFeedback(itemId, '确认结果已核验，但暂未找到追番记录；可明确重试确认。')
+    } else setRecoveryFeedback(itemId, '暂未定位到追番记录，请稍后重试定位。')
+  }
   if (located === 'failed') setRecoveryFeedback(itemId, '定位暂不可用，请稍后重试。')
   setRecoveryLoading(itemId, false)
 }
@@ -646,8 +642,10 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
   try {
     const descriptors: BatchSaveConfirmDescriptor[] = rows.map((row) => {
       const itemId = row.item_id ?? ''
-      const key = saveKeys.get(itemId) ?? newSaveKey()
-      saveKeys.set(itemId, key)
+      const fingerprint = saveFingerprint(row)
+      const savedKey = saveKeys.get(itemId)
+      const key = savedKey?.fingerprint === fingerprint ? savedKey.key : newSaveKey()
+      saveKeys.set(itemId, { key, fingerprint })
       return { item_id: itemId, draft_id: row.draft_id ?? '', base_revision: row.draft_revision ?? 1, idempotency_key: key }
     })
     if (!descriptors.length || descriptors.some((item) => !item.draft_id)) {
@@ -674,11 +672,16 @@ async function submitBatchSaveConfirm(rows: BatchItem[], itemIds: string[] | nul
       isPublicRouteIdentifier(requestId)
     if (validSavedFailure && rows.length === 1) {
       const row = rows[0]
+      clearSaveKey(row?.item_id ?? '')
       items.value = items.value.map((item) => item.item_id === row?.item_id
         ? { ...item, status: 'SAVED_PENDING_CONFIRM', draft_id: null, draft_revision: null, request_id: requestId }
         : item)
       setRecoveryFeedback(row?.item_id ?? '', '订阅方案已保存但确认未完成；不会重复保存，可直接重试确认。')
     }
+    const source = error && typeof error === 'object' ? error as { network?: unknown; nonJson?: unknown; status?: unknown; type?: unknown } : {}
+    const status = typeof source.status === 'number' ? source.status : 0
+    const responseUnknown = source.network === true || source.nonJson === true || status >= 500 || source.type === 'request_timeout'
+    if (!responseUnknown) rows.forEach((row) => clearSaveKey(row.item_id ?? ''))
     notification.error('保存确认失败', '批量保存确认响应未知，请使用相同操作重试。')
   } finally {
     acceptInFlight.value = false
@@ -718,6 +721,7 @@ function onDraftChanged(
   itemId: string,
   state: { request: RequestSnapshot; draftId: string; draftRevision: number },
 ): void {
+  clearSaveKey(itemId)
   items.value = items.value.map((current) =>
     current.item_id === itemId
       ? {
@@ -740,6 +744,7 @@ function onDraftDeleted(itemId: string): void {
 }
 
 function onDraftExpired(itemId: string): void {
+  clearSaveKey(itemId)
   const nextSelected = new Set(selectedItemIds.value)
   nextSelected.delete(itemId)
   selectedItemIds.value = nextSelected
@@ -1036,7 +1041,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                   @click.stop="router.replace(routeLocation('tracking', { tracking_id: batchItemTrackingId(item) }))"
                 >打开追番记录</BaseButton>
                 <BaseButton
-                  v-if="String(item.status ?? '') === 'CONFIRMED' && !batchItemTrackingId(item)"
+                  v-if="['CONFIRMED', 'RESPONSE_UNKNOWN'].includes(String(item.status ?? '')) && !batchItemTrackingId(item)"
                   :id="`batch-retry-locate-${item.item_id}`"
                   variant="secondary"
                   :loading="recoveryLoadingItemIds.has(item.item_id ?? '')"
@@ -1046,14 +1051,14 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
                 <BaseButton
                   v-if="canChooseBatchCandidate(item)"
                   :class="{ 'batch-card-expand': true }"
-                  :aria-expanded="activeCandidateItemId === item.item_id ? 'true' : 'false'"
-                  :aria-controls="'batch-candidate-choices'"
-                  :aria-label="`${activeCandidateItemId === item.item_id ? '收起候选' : '查看候选'}：${item.raw_title ?? '批量条目'}`"
+                  :aria-expanded="detailItemId === item.item_id ? 'true' : 'false'"
+                  aria-controls="batch-detail-pane"
+                  :aria-label="`查看候选：${item.raw_title ?? '批量条目'}`"
                   :disabled="savingItemIds.has(item.item_id ?? '')"
                   @click.stop
-                  @click="openCandidateChoices(item, $event.currentTarget as HTMLElement)"
+                  @click="selectCurrentItem(item)"
                 >
-                  {{ activeCandidateItemId === item.item_id ? '收起候选' : '查看候选' }}
+                  查看候选
                 </BaseButton>
                 <BaseButton
                   v-else-if="canExpandBatchCard(item)"
@@ -1078,7 +1083,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             </div>
           </div>
 
-          <aside class="batch-detail-pane" aria-label="当前批量条目详情">
+          <aside id="batch-detail-pane" class="batch-detail-pane" aria-label="当前批量条目详情">
             <template v-if="detailItem && canChooseBatchCandidate(detailItem)">
               <h3 class="batch-detail-title">候选合集：{{ batchCardTitle(detailItem) }}</h3>
               <p class="field-help">请选择一个真实 MiKan 合集后生成订阅草案。</p>
@@ -1134,18 +1139,6 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
           解析完成：{{ items.length }} / {{ parseCount }} 部；异常条目已置顶，条目顺序已固定。
         </p>
 
-        <BatchCandidatePopover
-          v-if="activeItem && canChooseBatchCandidate(activeItem)"
-          :title="batchCardTitle(activeItem)"
-          :candidates="activeItem.candidates ?? []"
-          :query="batchCardTitle(activeItem)"
-          :disabled="acceptInFlight"
-          :confirmed-seasons="seasonConfirmations"
-          @select="generateDraftFromCandidate"
-          @update:confirmed-season="(bangumiId: string, season: number | null) => (seasonConfirmations = { ...seasonConfirmations, [bangumiId]: season })"
-          @close="closeCandidateChoices"
-        />
-
         <div id="batch-accept-toolbar" class="batch-accept-toolbar">
           <CheckboxRow
             id="batch-select-all-checkbox"
@@ -1155,7 +1148,7 @@ defineExpose({ parseBatch, generateDraftFromCandidate, submitBatchSaveConfirm, d
             @update:checked="setAllSelected"
           />
           <span id="batch-accept-selected-count" class="batch-selected-count">
-            已选择 {{ selectedCount }} 项；可确认 {{ selectable.length }} 项；{{ saveSummary.failed ?? 0 }} 项失败
+            已选择 {{ selectedCount }} 项；请求 {{ saveSummary.requested ?? 0 }} 项；已确认 {{ saveSummary.confirmed ?? 0 }} 项；失败 {{ saveSummary.failed ?? 0 }} 项
           </span>
           <div class="notification-actions batch-accept-actions">
             <BaseButton

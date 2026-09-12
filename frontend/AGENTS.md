@@ -235,12 +235,9 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `canExpandBatchCard`/`canAcceptBatchCard`/`collectBatchAcceptDescriptors`/
   `buildBatchAcceptPayload`/`postBatchAccept`/`batchAcceptNotification`/
   `queueStatusLabel`/`queueItemSummary` 等），feature 与 Vitest 共用，不复制第二套。
-- Stage 35 合入时的兼容基线仍复用共享组件：FOUND 卡片的候选浮层是
-  `BatchCandidatePopover.vue`（内部复用 `CandidateCard`，`role="dialog"`，Escape/
-  关闭后焦点回触发器）；DRAFT 卡片的详情面板是 `BatchDraftPreviewPanel.vue`（复用
-  `AnimeDraftEditor` + 批量专属旧接受动作）。Stage 36 必须把结果改为左卡右详情，继续复用
-  `CandidateCollectionList`、`AnimeDraftEditor` 和 `useDraftSession`，不得再造第二套候选或表单；
-  F-D 完成后删除无调用的 `BatchDraftPreviewPanel`。
+- Stage 36 的结果采用左卡右详情：FOUND 卡片选择当前条目后，统一由右侧
+  `CandidateCollectionList` 生成草案；DRAFT 详情继续复用 `AnimeDraftEditor` 和
+  `useDraftSession`，不得恢复候选浮层或另一套候选/表单流程。无调用的旧批量预览适配层已退出。
 - 下述 `POST /api/v1/batches/{batch_id}/accept` 是 Stage 20/27 的兼容基线（US-146：单卡接受与批量接受
   同端点）。「批量接受」只发选中的 reviewable 卡片并带 `item_ids`；「全接受」按 legacy
   parity 发送**所有卡片**（含 FOUND/EMPTY/FAILED，不带 `item_ids`），让服务端对不可
@@ -294,11 +291,8 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   是 skip 的焦点落点。新增 feature 路由不要移除 main landmark。
   `/app/add` 是 Stage 35 的明确例外：进入单番输入壳层后会自动聚焦番剧标题输入框；
   其他没有 feature autofocus 的路由仍以 skip-link 作为首个 Tab 目标。
-- 批量候选浮层 `BatchCandidatePopover.vue`（US-207）：打开时焦点移入 dialog
-  （close 按钮），Escape 关闭，父组件（BatchWorkbenchView）在关闭时**同步**把
-  焦点恢复到触发按钮（`candidateTrigger` 在 open 时捕获 `$event.currentTarget`
-  或 `document.activeElement`；不要在 `requestAnimationFrame` 里恢复——popover
-  卸载会先把焦点丢到 body）。
+- Stage 36 批量候选不再使用并行候选浮层；FOUND 卡片先选择当前条目，候选统一
+  在右侧 detail pane 的 `CandidateCollectionList` 中操作，避免候选结果脱离 detail item。
 - 响应式：`top-nav` 是 `flex-wrap`（360px 下 4 个导航链接换行不溢出）；所有 feature
   路由 360/768/1280 无横向溢出由 `tests/browser/test_app_responsive_a11y.py` 守护
   （`body.scrollWidth <= innerWidth`）。

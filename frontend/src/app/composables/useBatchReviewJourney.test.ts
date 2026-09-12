@@ -88,4 +88,27 @@ describe('useBatchReviewJourney', () => {
       type: 'save_confirm_failed', requestId: 'req-a', retryAction: 'ACCEPT_SAVED_REQUEST',
     })
   })
+
+  it('blocks dirty/applying drafts and rotates keys after capability changes', () => {
+    let state = reduceBatchReview(createBatchReviewState(), { type: 'parse_succeeded', result: parsed([item('a', 'DRAFT', { preview_request: {}, draft_id: 'draft-a', draft_revision: 1 })]) })
+    state = reduceBatchReview(state, { type: 'set_dirty', itemId: 'a', dirty: true })
+    expect(batchItemCanConfirm(state.items.a!)).toBe(false)
+    state = reduceBatchReview(state, { type: 'set_dirty', itemId: 'a', dirty: false })
+    state = reduceBatchReview(state, { type: 'begin_apply', itemId: 'a' })
+    expect(state.items.a!.phase).toBe('applying')
+    expect(batchItemCanConfirm(state.items.a!)).toBe(false)
+    state = reduceBatchReview(state, { type: 'apply_failed', itemId: 'a', error: { type: 'network_error' } })
+    expect(state.items.a!.phase).toBe('apply_failed')
+    expect(batchItemCanConfirm(state.items.a!)).toBe(false)
+    state = reduceBatchReview(state, { type: 'retry_apply', itemId: 'a' })
+    state = reduceBatchReview(state, { type: 'apply_succeeded', itemId: 'a', draftId: 'draft-a', revision: 2 })
+    state = reduceBatchReview(state, { type: 'begin_save', itemIds: ['a'] })
+    const firstKey = state.items.a!.idempotencyKey
+    state = reduceBatchReview(state, { type: 'save_response_unknown', itemIds: ['a'] })
+    expect(state.items.a!.idempotencyKey).toBe(firstKey)
+    state = reduceBatchReview(state, { type: 'set_draft', itemId: 'a', draftId: 'draft-b', revision: 1 })
+    expect(state.items.a!.idempotencyKey).toBeNull()
+    state = reduceBatchReview(state, { type: 'begin_save', itemIds: ['a'] })
+    expect(state.items.a!.idempotencyKey).not.toBe(firstKey)
+  })
 })

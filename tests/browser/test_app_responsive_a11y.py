@@ -286,11 +286,10 @@ class TestKeyboardAndFocus:
 
         assert focused_labels == ["添加番剧", "追番方案", "追番管理", "设置"]
 
-    def test_batch_popover_escape_restores_focus_to_trigger(
+    def test_batch_candidate_selection_stays_in_right_detail(
         self, page: Page, live_server_url: str
     ) -> None:
-        """Opening the batch candidate popover focuses it; Escape closes and
-        restores focus to the trigger button (US-207 keyboard accessibility)."""
+        """FOUND candidate selection is rendered in the current right detail pane."""
         _goto(page, live_server_url, "/app/add")
         page.wait_for_selector("#anime-mode-switch", timeout=5000)
         page.click("#anime-mode-batch")
@@ -356,18 +355,10 @@ class TestKeyboardAndFocus:
         expect(trigger).to_be_visible()
         trigger.click()
 
-        choices = page.locator("#batch-candidate-choices")
+        choices = page.locator("#batch-detail-pane")
         expect(choices).to_be_visible()
-        # Focus moved into the dialog (close button is the first focusable).
-        active = page.evaluate("() => document.activeElement?.className || ''")
-        assert "batch-candidate-close" in active, f"focus was {active!r}"
-
-        page.keyboard.press("Escape")
-        expect(choices).not_to_be_visible()
-        focused_trigger = page.evaluate(
-            "() => document.activeElement?.classList.contains('batch-card-expand')"
-        )
-        assert focused_trigger, "Escape did not restore focus to the trigger button"
+        expect(page.locator("#batch-candidate-choices")).to_have_count(0)
+        expect(choices.locator(".candidate-select")).to_be_visible()
 
 
 class TestReducedMotionAndFeedback:
