@@ -7,6 +7,7 @@ Started: Sat Sep 12 09:03:14 CST 2026
 - Frontend API boundary types must be conditional aliases derived from `operations` in `api/generated/api.ts`; feature state models must not recreate API DTOs.
 - Request-scoped journey capabilities and idempotency keys stay in component/composable memory; safe UI errors use fixed messages and allowlisted details only.
 - Shared workflow state should be API-free; transport orchestration belongs in the later host story so single-anime and batch compatibility paths cannot accidentally share side effects.
+- Single-anime search hosts invalidate candidate results as soon as the title changes, and apply result focus only after loading has been released so the loading rerender cannot steal focus.
 
 ## 2026-09-12 09:08:00 Asia/Shanghai - US-275
 Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
@@ -15,5 +16,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - The journey core must remain transport-free; later stories can attach generated endpoint calls without introducing a second state owner.
   - A saved-confirm failure must explicitly transition to saved-pending-confirm; entering that state clears both draft capability and the save idempotency key.
-  - Verification passed: frontend typecheck, lint, 331 unit tests, build, Python compileall, and 1795 backend tests.
+- Verification passed: frontend typecheck, lint, 331 unit tests, build, Python compileall, and 1795 backend tests.
+---
+
+## 2026-09-12 09:13:00 Asia/Shanghai - US-276
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Completed the single-anime input/candidate journey at the workbench host: initial title-input focus, duplicate-search protection, safe input/search summary, stale candidate invalidation when the title is edited, post-search focus on the first candidate, and preserved explicit candidate/season-confirmation behavior. Batch mode remains unchanged.
+- Files changed: `frontend/src/features/workbench/WorkbenchView.vue`, `frontend/src/features/workbench/WorkbenchView.test.ts`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Candidate focus must run after `searchLoading` is cleared and the resulting rerender completes; focusing earlier is lost when the submit button unlocks.
+  - Search results and season confirmations are tied to the exact trimmed input that produced them; editing the input keeps the text but clears the old result and one-time confirmation state.
+  - Verification passed: frontend api:check, typecheck, lint, 333 unit tests, build, and 21 targeted Chromium browser tests.
 ---

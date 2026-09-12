@@ -164,6 +164,20 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(wrapper.find('#mikan-candidate-search-error').text()).toContain('搜索 MiKan 候选前必须填写番剧标题')
   })
 
+  it('focuses the title input on entry and moves focus to the first candidate', async () => {
+    apiPost.mockResolvedValue(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('#mikan-candidate-query').element)
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(document.activeElement).toBe(wrapper.find('.candidate-select').element)
+  })
+
   it('searches candidates through the shared transport and renders cards', async () => {
     apiPost.mockResolvedValue(candidateResult())
     const { wrapper } = await mountWorkbench()
@@ -245,6 +259,23 @@ describe('WorkbenchView single search (US-204)', () => {
 
     expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('未找到候选合集')
     expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('直连合集')
+  })
+
+  it('clears stale candidates when the search title is edited', async () => {
+    apiPost.mockResolvedValue(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+
+    await wrapper.find('#mikan-candidate-query').setValue('无职转生')
+    await nextTick()
+
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(0)
+    expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('输入番剧标题后搜索候选合集')
+    expect((wrapper.find('#mikan-candidate-query').element as HTMLInputElement).value).toBe('无职转生')
   })
 
   it('shows a safe Chinese error state on search failure and keeps the query', async () => {

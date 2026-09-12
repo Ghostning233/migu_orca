@@ -18,7 +18,7 @@
 // candidate is ever auto-selected; parser hints are never treated as real
 // season evidence (only the explicit confirmation checkbox or the server's
 // one-time candidate_context can do that).
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
@@ -72,6 +72,7 @@ const selections = ref<Record<AnimeMode, { start: number; end: number }>>({
 const searchLoading = ref(false)
 const searchError = ref('')
 const searchResult = ref<CandidateSearchResult | null>(null)
+const lastSearchQuery = ref('')
 
 // Fallback (direct-collection) state.
 const fallbackEnabled = ref(false)
@@ -84,8 +85,21 @@ const draftRequest = ref<RequestSnapshot | null>(null)
 const draftId = ref('')
 const draftRevision = ref(1)
 const draftLoading = ref(false)
+// Track per-candidate season confirmation in memory (never persisted).
+const seasonConfirmations = ref<Record<string, number | null>>({})
 
 const hasResults = computed(() => (searchResult.value?.candidates?.length ?? 0) > 0)
+
+watch(query, (value) => {
+  const normalized = value.trim()
+  if (!searchResult.value || normalized === lastSearchQuery.value) return
+  // A result belongs to the exact title that produced it. Keep the user's
+  // edited input, but remove stale candidates and their one-time confirmations.
+  searchResult.value = null
+  lastSearchQuery.value = ''
+  searchError.value = ''
+  seasonConfirmations.value = {}
+})
 
 async function changeMode(nextMode: AnimeMode): Promise<void> {
   if (nextMode === mode.value || searchLoading.value || draftLoading.value) return
@@ -159,6 +173,7 @@ function attemptedQueryTexts(): string[] {
 }
 
 async function searchCandidates(): Promise<void> {
+  if (searchLoading.value) return
   const validationError = validateCandidateQuery(query.value)
   if (validationError) {
     searchError.value = validationError
@@ -167,6 +182,9 @@ async function searchCandidates(): Promise<void> {
     return
   }
   searchError.value = ''
+  searchResult.value = null
+  seasonConfirmations.value = {}
+  lastSearchQuery.value = query.value.trim()
   searchLoading.value = true
   try {
     const result = await api.post<CandidateSearchResult>('/api/v1/mikan/candidates', {
@@ -186,6 +204,10 @@ async function searchCandidates(): Promise<void> {
     notification.error('候选搜索失败', '候选搜索失败。请稍后重试。')
   } finally {
     searchLoading.value = false
+    await nextTick()
+    if (searchResult.value?.candidates?.length) {
+      document.querySelector<HTMLElement>('#mikan-candidate-search-result .candidate-select')?.focus()
+    }
   }
 }
 
@@ -240,9 +262,6 @@ async function generateDraft(payload: Record<string, unknown>): Promise<boolean>
   }
 }
 
-// Track per-candidate season confirmation in memory (never persisted).
-const seasonConfirmations = ref<Record<string, number | null>>({})
-
 function confirmedSeasonFor(candidate: MikanCandidate): number | null {
   const key = candidate.bangumi_id
   return seasonConfirmations.value[key] ?? null
@@ -280,6 +299,7 @@ function onDraftChanged(state: { request: RequestSnapshot; draftId: string; draf
 onMounted(() => {
   // The workbench has no persisted state; the storage profile comes from
   // Settings localStorage (relative only). Nothing to preload here.
+  void nextTick(() => singleInput.value?.focus())
 })
 
 defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
@@ -373,6 +393,9 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         message="未找到候选合集。可调整番剧标题后重试，或勾选「搜索无结果时使用直连合集」直接生成订阅草案。"
       />
       <template v-else-if="searchResult && hasResults">
+        <p class="candidate-search-summary" role="status">
+          已搜索「{{ searchResult.query }}」，请选择要审核的 MiKan 合集。
+        </p>
         <section v-if="parseSummaryRows().length" class="title-parse-summary" aria-label="标题解析摘要">
           <h3 class="detail-section-heading">标题解析摘要</h3>
           <dl class="detail-grid">

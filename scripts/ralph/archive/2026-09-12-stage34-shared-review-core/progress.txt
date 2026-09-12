@@ -1,0 +1,35 @@
+# MiGuOrca Ralph Progress - Stage 35
+
+## Codebase Patterns
+
+- 正式执行 PRD：`docs/MiGuOrca_stage35_single_anime_journey_PRD.md`；分支：
+  `ralph/stage35-single-anime-journey`；stories：US-275～US-283。
+- 实现基线是 Stage 34 合入提交 `cee2452`。OpenAPI、generated client、Flask API 和
+  `docs/api/frontend-contract-handoff-v1.md` 是只读契约，不得由前端 story 修改。
+- 本阶段只实现 F-C 单番三步旅程：输入名称、人工选择真实 MiKan 合集、审核并保存确认；不得
+  顺带开发 F-D～F-G。
+- 第三步必须复用 Stage 34 `AnimeDraftEditor`/`useDraftSession`，不创建 V2 组件、不复制字幕组、
+  资源、revision 或候选选择状态。
+- 单番唯一保存入口是 generated `confirmRequestSave`；禁止 `preview-save → accept` 拼接。
+  `DraftPreviewPanel` 的单番 preview-save 兼容路径须在 US-282 前退出，批量兼容路径不动。
+- 一次用户操作只生成一个 route-local `idempotency_key`；网络/响应未知重试必须复用。draft ID、
+  revision、key 和 candidate context 不进入 URL、DOM、storage、日志、通知、截图或 trace。
+- 409 `save_confirm_failed` 只在白名单 details 完整合法时进入“已保存待确认”；重试只调用
+  `acceptRequest`，成功后用 `listTrackingItems` 精确 request_id 匹配真实 tracking_id，不得推导 ID。
+- accept 响应未知或可能已接受的状态冲突必须先执行只读 tracking 核验；核验失败时禁止盲目重复
+  accept，找到同 request_id 的 tracking 即视为确认已完成。
+- 正常成功只使用 handoff.tracking_id 跳转；`tracking_ready=false` 不回滚确认、不重复保存。
+- `/app/tracking` 的 tracking_id 模式只读 `getTrackingItemDetail` 顶层安全摘要，不渲染 safe_info、
+  external mapping、audit、available actions；batch_id 继续使用 QueueView。
+- `SafeInfoDialog/getRequestSafeInfo` 归 F-E；同步、提交、恢复、修改、启停、刷新、外部删除归 F-F。
+- 每轮只完成一个 story；每次 Ralph 严格最多 3 轮。完成 US-277、US-280 时必须停止独立审核。
+- 普通 story 只跑定向 Vitest/typecheck/lint/少量 Chromium；只有 US-283 跑一次完整门禁。UI story
+  必须使用 `dev-browser` skill 在真实 Chromium 验证。
+
+## Stage 35 Planning
+
+- 2026-09-12：Stage 34 已合入 `origin/main`（`cee2452`），F-B handoff 可供 F-C 消费。
+- 2026-09-12：冻结 US-275～US-283 与三个开发批次；所有 story 初始 `passes=false`。
+- 2026-09-12：确认恢复契约缺口无需修改后端：save-confirm 正常返回 tracking_id；saved-confirm-failed
+  重试 accept 后通过现有只读 tracking list 精确解析 ID。解析失败不得重新保存/确认。
+- 2026-09-12：废弃前端并行 clone 已按用户授权移入系统回收站；Stage 35 只在当前主工作区执行。
