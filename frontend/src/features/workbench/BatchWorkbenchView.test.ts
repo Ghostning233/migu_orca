@@ -442,7 +442,7 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
         })],
       }))
       .mockResolvedValueOnce(saveConfirmResult({
-        results: [{ item_id: 'item-expired', outcome: 'failed', request_id: null, status: 'FAILED', error_type: 'draft_expired', error_message: null, tracking_id: null, tracking_ready: null }],
+        results: [{ item_id: 'item-expired', outcome: 'failed', request_id: null, status: null, error_type: 'draft_expired', error_message: null, tracking_id: null, tracking_ready: null }],
         summary: { requested: 1, confirmed: 0, failed: 1 },
       }))
       .mockRejectedValueOnce({ type: 'draft_expired', message: 'draft expired' })
@@ -674,7 +674,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: reviewableItems().slice(0, 1) }))
       .mockResolvedValueOnce(saveConfirmResult({
-        results: [{ item_id: 'item-1', outcome: 'failed', request_id: null, status: 'FAILED', error_type: errorType, error_message: 'poisoned server detail', tracking_id: null, tracking_ready: null }],
+        results: [{ item_id: 'item-1', outcome: 'failed', request_id: null, status: null, error_type: errorType, error_message: 'poisoned server detail', tracking_id: null, tracking_ready: null }],
         summary: { requested: 1, confirmed: 0, failed: 1 },
       }))
     const { wrapper } = await mountBatch()
@@ -689,6 +689,27 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('poisoned server detail')
     expect(wrapper.text()).not.toContain(errorType)
+  })
+
+  it.each([
+    ['confirmed-with-error', { item_id: 'item-1', outcome: 'CONFIRMED', request_id: 'req-1', status: null, error_type: null, error_message: 'poisoned', tracking_id: null, tracking_ready: null }],
+    ['failed-with-status', { item_id: 'item-1', outcome: 'failed', request_id: null, status: 'FAILED', error_type: 'unexpected_error', error_message: null, tracking_id: 'tracking-leak', tracking_ready: true }],
+  ])('freezes branch-inconsistent result: %s', async (_label, resultItem) => {
+    apiPost
+      .mockResolvedValueOnce(parseResult({ items: reviewableItems().slice(0, 1) }))
+      .mockResolvedValueOnce(saveConfirmResult({ results: [resultItem], summary: { requested: 1, confirmed: 0, failed: 1 } }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('#batch-accept-all').trigger('click')
+    await nextTick()
+    await wrapper.find('.confirm-dialog .primary-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('poisoned')
+    expect(wrapper.text()).not.toContain('tracking-leak')
   })
 
   it('retries an unknown batch response with the exact frozen request body', async () => {
@@ -731,7 +752,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
       }))
       .mockRejectedValueOnce({ network: true, type: 'network_error', message: 'network' })
       .mockResolvedValueOnce(saveConfirmResult({
-        results: [{ item_id: 'item-1', outcome: 'failed', request_id: null, status: 'FAILED', error_type: 'draft_expired', error_message: null, tracking_id: null, tracking_ready: null }],
+        results: [{ item_id: 'item-1', outcome: 'failed', request_id: null, status: null, error_type: 'draft_expired', error_message: null, tracking_id: null, tracking_ready: null }],
         summary: { requested: 1, confirmed: 0, failed: 1 },
       }))
       .mockResolvedValueOnce({ request: previewRequest('req-new'), summary: {}, draft_id: 'draft-new', draft_revision: 1 })

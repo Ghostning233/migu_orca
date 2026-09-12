@@ -596,9 +596,13 @@ function validateBatchSaveResult(
     if (row.error_type !== null && typeof row.error_type !== 'string') return null
     if (row.error_message !== null && typeof row.error_message !== 'string') return null
     if (row.tracking_ready !== null && typeof row.tracking_ready !== 'boolean') return null
-    if (normalizedOutcome === 'CONFIRMED' && (!batchSaveConfirmSucceeded(row as BatchSaveConfirmResult['results'][number]) || row.error_type !== null)) return null
+    if (normalizedOutcome === 'CONFIRMED' && (
+      !batchSaveConfirmSucceeded(row as BatchSaveConfirmResult['results'][number]) ||
+      row.error_type !== null || row.error_message !== null
+    )) return null
     if (normalizedOutcome === 'FAILED') {
       if (typeof row.error_type !== 'string' || !row.error_type.trim() || row.error_type.length > 128) return null
+      if (row.status !== null || row.tracking_id !== null || row.tracking_ready !== null) return null
       if (row.error_type === 'save_confirm_failed') {
         if (!isPublicRouteIdentifier(row.request_id)) return null
       } else if (row.request_id !== null) {

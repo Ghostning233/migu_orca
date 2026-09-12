@@ -154,7 +154,7 @@ def _batch_accept_result(items: list[dict[str, Any]], queue_items: list[dict[str
             "item_id": item.get("item_id"),
             "outcome": outcome,
             "request_id": item.get("request_id"),
-            "status": item.get("status"),
+            "status": item.get("status") if outcome == "CONFIRMED" else None,
             "error_type": item.get("error_type") or (None if outcome == "CONFIRMED" else "batch_error"),
             "error_message": None,
             "tracking_id": item.get("tracking_id"),

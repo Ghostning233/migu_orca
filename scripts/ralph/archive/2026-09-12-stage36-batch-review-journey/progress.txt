@@ -154,3 +154,9 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 补充 409 恢复、其他 request_id 不匹配、tracking 查询失败、saved-confirm 真实 DTO 及幂等键/冻结 body 组件与 Chromium 覆盖。
 - 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 58 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 53 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
 ---
+
+## 2026-09-12 - Stage 36 result branch exclusivity correction
+- `validateBatchSaveResult` 现在强制区分 CONFIRMED 与 FAILED：成功要求公开 request_id、合法 tracking_id、空错误字段；失败要求受限非空 error_type 且 status/tracking_id/tracking_ready 全为空。未知但结构合法的失败仍安全降级为确定性普通失败，分支矛盾才冻结操作。
+- 补充 accept `invalid_request_status` 后 tracking failed/not_found/found 组件覆盖，并确认恢复过程中 batch save-confirm 只调用一次；同步修正浏览器 DTO mock 的 FAILED nullable 字段。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 60 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 53 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---
