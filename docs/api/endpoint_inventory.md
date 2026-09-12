@@ -181,8 +181,8 @@ CLI 显式 `--storage-dir` 行为不受影响）。
 | POST `/api/v1/requests/<request_id>/submit-ab` | `request_id`（路径）、`ab_config`（`auth_mode`/`base_url`/`username`/`password`/`token`/`fallback_enabled`）、`storage_dir?` | `{"request", "summary", "ab_submit_result", "saved_request"?, "saved_ab_result"?}` | 非 ACCEPTED → `invalid_request_status` |
 
 `summary` 形状（`request_engine.controllers.request_controller.summarize_request`）：
-`request_id`、`status`、`bangumi_title`、`candidate_subtitle_groups[]`
-（`subtitle_group`/`rss_url`/`total_seed_count`/`valid_seed_count`/`invalid_seed_count`）、
+`request_id`、`status`、`bangumi_title`、`season`、`updated_at`、`candidate_subtitle_groups[]`
+（`subtitle_group`/`total_resource_count`/`valid_resource_count`/`invalid_resource_count`，不含 RSS URL）、
 `selected_subtitle_group`、`effective_seed_count`、`expected_folder_name`、`warnings[]`。
 
 `safe-info` 形状（`RequestSafeInfoDTO`，US-217 严格白名单，`extra="forbid"`）：

@@ -2652,8 +2652,15 @@ export interface operations {
                      *             "request_id": "示例",
                      *             "status": "示例",
                      *             "bangumi_title": "示例",
+                     *             "season": 1,
+                     *             "updated_at": "示例",
                      *             "candidate_subtitle_groups": [
-                     *               {}
+                     *               {
+                     *                 "subtitle_group": "示例",
+                     *                 "total_resource_count": 1,
+                     *                 "valid_resource_count": 1,
+                     *                 "invalid_resource_count": 1
+                     *               }
                      *             ],
                      *             "selected_subtitle_group": "示例",
                      *             "effective_seed_count": 1,
@@ -2684,9 +2691,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;
@@ -2846,8 +2864,15 @@ export interface operations {
                      *           "request_id": "示例",
                      *           "status": "示例",
                      *           "bangumi_title": "示例",
+                     *           "season": 1,
+                     *           "updated_at": "示例",
                      *           "candidate_subtitle_groups": [
-                     *             {}
+                     *             {
+                     *               "subtitle_group": "示例",
+                     *               "total_resource_count": 1,
+                     *               "valid_resource_count": 1,
+                     *               "invalid_resource_count": 1
+                     *             }
                      *           ],
                      *           "selected_subtitle_group": "示例",
                      *           "effective_seed_count": 1,
@@ -3096,9 +3121,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;
@@ -3557,8 +3593,15 @@ export interface operations {
                      *           "request_id": "示例",
                      *           "status": "示例",
                      *           "bangumi_title": "示例",
+                     *           "season": 1,
+                     *           "updated_at": "示例",
                      *           "candidate_subtitle_groups": [
-                     *             {}
+                     *             {
+                     *               "subtitle_group": "示例",
+                     *               "total_resource_count": 1,
+                     *               "valid_resource_count": 1,
+                     *               "invalid_resource_count": 1
+                     *             }
                      *           ],
                      *           "selected_subtitle_group": "示例",
                      *           "effective_seed_count": 1,
@@ -3806,9 +3849,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;
@@ -3958,8 +4012,15 @@ export interface operations {
                      *           "request_id": "示例",
                      *           "status": "示例",
                      *           "bangumi_title": "示例",
+                     *           "season": 1,
+                     *           "updated_at": "示例",
                      *           "candidate_subtitle_groups": [
-                     *             {}
+                     *             {
+                     *               "subtitle_group": "示例",
+                     *               "total_resource_count": 1,
+                     *               "valid_resource_count": 1,
+                     *               "invalid_resource_count": 1
+                     *             }
                      *           ],
                      *           "selected_subtitle_group": "示例",
                      *           "effective_seed_count": 1,
@@ -4209,9 +4270,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;
@@ -4566,8 +4638,15 @@ export interface operations {
                      *           "request_id": "示例",
                      *           "status": "示例",
                      *           "bangumi_title": "示例",
+                     *           "season": 1,
+                     *           "updated_at": "示例",
                      *           "candidate_subtitle_groups": [
-                     *             {}
+                     *             {
+                     *               "subtitle_group": "示例",
+                     *               "total_resource_count": 1,
+                     *               "valid_resource_count": 1,
+                     *               "invalid_resource_count": 1
+                     *             }
                      *           ],
                      *           "selected_subtitle_group": "示例",
                      *           "effective_seed_count": 1,
@@ -4832,9 +4911,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;
@@ -7911,8 +8001,15 @@ export interface operations {
                      *           "request_id": "示例",
                      *           "status": "示例",
                      *           "bangumi_title": "示例",
+                     *           "season": 1,
+                     *           "updated_at": "示例",
                      *           "candidate_subtitle_groups": [
-                     *             {}
+                     *             {
+                     *               "subtitle_group": "示例",
+                     *               "total_resource_count": 1,
+                     *               "valid_resource_count": 1,
+                     *               "invalid_resource_count": 1
+                     *             }
                      *           ],
                      *           "selected_subtitle_group": "示例",
                      *           "effective_seed_count": 1,
@@ -8164,9 +8261,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;
@@ -8561,8 +8669,15 @@ export interface operations {
                      *           "request_id": "示例",
                      *           "status": "示例",
                      *           "bangumi_title": "示例",
+                     *           "season": 1,
+                     *           "updated_at": "示例",
                      *           "candidate_subtitle_groups": [
-                     *             {}
+                     *             {
+                     *               "subtitle_group": "示例",
+                     *               "total_resource_count": 1,
+                     *               "valid_resource_count": 1,
+                     *               "invalid_resource_count": 1
+                     *             }
                      *           ],
                      *           "selected_subtitle_group": "示例",
                      *           "effective_seed_count": 1,
@@ -8814,9 +8929,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;
@@ -9341,8 +9467,15 @@ export interface operations {
                      *           "request_id": "示例",
                      *           "status": "示例",
                      *           "bangumi_title": "示例",
+                     *           "season": 1,
+                     *           "updated_at": "示例",
                      *           "candidate_subtitle_groups": [
-                     *             {}
+                     *             {
+                     *               "subtitle_group": "示例",
+                     *               "total_resource_count": 1,
+                     *               "valid_resource_count": 1,
+                     *               "invalid_resource_count": 1
+                     *             }
                      *           ],
                      *           "selected_subtitle_group": "示例",
                      *           "effective_seed_count": 1,
@@ -9594,9 +9727,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;
@@ -10396,8 +10540,15 @@ export interface operations {
                      *           "request_id": "示例",
                      *           "status": "示例",
                      *           "bangumi_title": "示例",
+                     *           "season": 1,
+                     *           "updated_at": "示例",
                      *           "candidate_subtitle_groups": [
-                     *             {}
+                     *             {
+                     *               "subtitle_group": "示例",
+                     *               "total_resource_count": 1,
+                     *               "valid_resource_count": 1,
+                     *               "invalid_resource_count": 1
+                     *             }
                      *           ],
                      *           "selected_subtitle_group": "示例",
                      *           "effective_seed_count": 1,
@@ -10654,9 +10805,20 @@ export interface operations {
                                 status: string | null;
                                 /** Bangumi Title */
                                 bangumi_title: string | null;
+                                /** Season */
+                                season: number | null;
+                                /** Updated At */
+                                updated_at: string | null;
                                 /** Candidate Subtitle Groups */
                                 candidate_subtitle_groups: {
-                                    [key: string]: unknown;
+                                    /** Subtitle Group */
+                                    subtitle_group: string | null;
+                                    /** Total Resource Count */
+                                    total_resource_count: number;
+                                    /** Valid Resource Count */
+                                    valid_resource_count: number;
+                                    /** Invalid Resource Count */
+                                    invalid_resource_count: number;
                                 }[];
                                 /** Selected Subtitle Group */
                                 selected_subtitle_group: string | null;

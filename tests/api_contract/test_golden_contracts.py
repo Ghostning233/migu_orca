@@ -99,6 +99,8 @@ def test_golden_request_list_success(client: FlaskClient, tmp_path: Path) -> Non
         "request_id",
         "status",
         "bangumi_title",
+        "season",
+        "updated_at",
         "candidate_subtitle_groups",
         "selected_subtitle_group",
         "effective_seed_count",

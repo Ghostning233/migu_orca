@@ -14,3 +14,13 @@ Started: Sat Sep 12 22:00:00 CST 2026
 - SafeInfo 只来自 `getRequestSafeInfo`；已更新集数保持“待开发”，不得根据资源或 RSS 猜测。
 - 复制再用只允许一次性内存白名单 handoff；刷新失效，用户仍必须显式选择真实 MiKan 合集并生成新草案。
 - 完整 URL、RSS、magnet、endpoint、凭据、Cookie、Authorization、原始响应、capability、幂等键和绝对路径不得进入 DOM、URL、storage、日志、通知、trace 或 screenshot。
+
+## [2026-09-12 22:30:00 CST] - US-294
+Thread: https://codex.openai.com/threads/current
+- 为 RequestSummaryDTO 增加可空 season/updated_at，并将候选字幕组收紧为无 URL 的严格资源计数摘要。
+- 同步 request serializer/controller、OpenAPI、generated TypeScript、endpoint inventory 与契约断言。
+- 定向验证：request controller/API DTO/golden/openapi consistency 48 passed；frontend api:check passed。
+- **Learnings for future iterations:**
+  - Request 列表摘要由 request_controller.summarize_request 直接构造，OpenAPI 变更后必须运行 openapi_gen 与 frontend api:generate。
+  - updated_at 仅接受可解析 ISO 时间文本，候选计数字段统一使用 resource 命名且不包含 rss_url。
+---

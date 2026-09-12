@@ -128,21 +128,52 @@ def summarize_request(request: dict[str, Any]) -> dict[str, Any]:
         "request_id": request.get("request_id"),
         "status": request.get("status"),
         "bangumi_title": matched.get("title"),
+        "season": (
+            matched.get("season")
+            if isinstance(matched.get("season"), int)
+            and not isinstance(matched.get("season"), bool)
+            else None
+        ),
+        "updated_at": _public_updated_at(request.get("updated_at")),
         "candidate_subtitle_groups": [
             {
-                "subtitle_group": source.get("subtitle_group"),
-                "rss_url": source.get("rss_url"),
-                "total_seed_count": source.get("total_seed_count", 0),
-                "valid_seed_count": source.get("valid_seed_count", 0),
-                "invalid_seed_count": source.get("invalid_seed_count", 0),
+                "subtitle_group": (
+                    source.get("subtitle_group")
+                    if isinstance(source.get("subtitle_group"), str)
+                    else None
+                ),
+                "total_resource_count": _resource_count(source.get("total_seed_count")),
+                "valid_resource_count": _resource_count(source.get("valid_seed_count")),
+                "invalid_resource_count": _resource_count(source.get("invalid_seed_count")),
             }
             for source in rss_sources
+            if isinstance(source, dict)
         ],
         "selected_subtitle_group": confirmable.get("selected_subtitle_group"),
         "effective_seed_count": len(confirmable.get("effective_seed_names", [])),
         "expected_folder_name": confirmable.get("expected_folder_name"),
         "warnings": list(confirmable.get("warnings", [])),
     }
+
+
+def _resource_count(value: Any) -> int:
+    """Return a deterministic non-negative public resource count."""
+
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    return 0
+
+
+def _public_updated_at(value: Any) -> str | None:
+    """Expose only the persisted public timestamp, never arbitrary text."""
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return value
 
 
 def validate_modify_patch(patch: dict[str, Any]) -> dict[str, Any]:
