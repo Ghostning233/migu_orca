@@ -7,7 +7,7 @@
 | Stage | 36 |
 | 工作包 | F-D：批量审核 |
 | Backlog | BL-026 |
-| 状态 | 已规划，待开发 |
+| 状态 | 已完成并归档（2026-09-12） |
 | 目标分支 | `ralph/stage36-batch-review-journey` |
 | Ralph stories | US-284～US-293 |
 | 实时基线 | `origin/main` 合并提交 `c260a86`（Stage 35 已合入） |
@@ -227,14 +227,28 @@ git diff --check
 真实 Chromium 验证必须按 `dev-browser` skill 执行；route fake/本地 fake transport 不得访问真实外部
 服务。测试失败后先运行最小失败用例，无代码变化不得重复跑同一完整门禁。
 
-## 10. 回退与完成定义
+## 10. 最终门禁与交付记录
+
+- US-284～US-293 均已通过并分别提交；Ralph 状态归档于
+  `scripts/ralph/archive/2026-09-12-stage36-batch-review-journey/`。
+- 前端 `api:check`、typecheck、lint、355 个 Vitest、production build，后端 compileall、Ruff、
+  1,636 个非浏览器 pytest，以及真实 Chromium 161 tests 全部通过；`git diff --check` 通过。
+- AC-06～AC-14 由批量状态、容量/排序、双栏/选择、键盘焦点、共享 revision、save-confirm、部分成功、
+  tracking 恢复和离开保护的 Vitest 与 Chromium 覆盖；AC-23～AC-25 由安全边界、旧链路引用搜索、
+  queue 兼容和真实浏览器回归覆盖。完整 1/12/36、响应式/200% 与 reduced-motion 以 Chromium
+  回归为证；效果图仅作方向参考。
+- 对照 `batch-review-12-v2.png` 与 `batch-partial-success-v1.png`：双栏比例、异常优先层级、固定
+  操作栏和逐项部分成功方向已实现；“全部信息”仍明确留给 F-E 的已保存 Request SafeInfo。
+- 未修改 OpenAPI、generated client 或后端业务语义；未产生应提交的 dist、trace、截图或敏感测试产物。
+
+## 11. 回退与完成定义
 
 1. Stage 36 只改批量前端 slice、相关共享 helper/test 与状态文档，可独立回退到 Stage 35 批量兼容页。
 2. 删除旧组件前必须有引用搜索、bundle、定向 Chromium 和旧 queue 路由兼容证据。
 3. US-284～US-293 全部 `passes=true`、代码独立审核无阻断、完整门禁通过后，才可标记完成并归档。
 4. 合并、push、PR 和分支清理仍需用户单独授权；Ralph Agent 不得自行执行。
 
-## 11. 后续 handoff
+## 12. 后续 handoff
 
 - F-E：追番方案列表—详情、已保存 Request 修改/复制再用/历史、真实 `SafeInfoDialog`。
 - F-F：正式追番管理总览、列表、检查器、凭据会话、复核/提交/恢复与 AB 完整管理动作。

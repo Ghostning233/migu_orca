@@ -183,7 +183,7 @@
         "Verify in browser using dev-browser skill"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "第四开发批次与 Stage 36 最终终点。"
     }
   ]

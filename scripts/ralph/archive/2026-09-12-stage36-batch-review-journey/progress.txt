@@ -94,5 +94,15 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - Query-only URL synchronization is part of the current SPA surface and must not invoke a route-local discard confirmation; compare route paths in shared leave guards.
   - The batch workbench should own the shared editor/session directly so save-confirm cleanup and leave protection can inspect the same in-memory capabilities.
-  - Verification passed: frontend typecheck, lint, unit tests (355 passed), production build, targeted Chromium batch/accessibility tests (50 passed), Python compileall, full pytest (1797 passed), and `git diff --check`.
+- Verification passed: frontend typecheck, lint, unit tests (355 passed), production build, targeted Chromium batch/accessibility tests (50 passed), Python compileall, full pytest (1797 passed), and `git diff --check`.
+---
+
+## 2026-09-12 15:51:00 Asia/Shanghai - US-293
+Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
+- What was implemented: Completed the Stage 36 final gate and handoff documentation. Recorded all story completion, AC evidence mapping, visual-direction deviations, security/contract boundaries, Ralph archive location, and the F-E/F-F/F-G follow-up ownership.
+- Files changed: `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`, `docs/MiGuOrca_main_PRD.md`, `docs/backlog.md`, `docs/frontend-ux-refactor-work-goals.md`, `docs/modules/M13-web-ui-PRD.md`, `README.md`, `scripts/ralph/prd.json`, `scripts/ralph/progress.txt`.
+- **Learnings for future iterations:**
+  - Stage closeout must synchronize the stage PRD, main PRD, backlog, UX goals, M13 module status, README, and archived Ralph state.
+  - F-E owns saved-Request SafeInfo, F-F owns formal tracking management, and F-G owns settings/release closeout; F-D must not expand into those scopes.
+- Verification passed: frontend api:check, typecheck, lint, 355 Vitest tests, build; Python compileall, Ruff, 1,636 non-browser pytest tests; real Chromium 161 tests; `git diff --check`.
 ---
