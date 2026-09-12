@@ -442,7 +442,7 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
         })],
       }))
       .mockResolvedValueOnce(saveConfirmResult({
-        results: [{ item_id: 'item-expired', status: 'FAILED', error_type: 'draft_expired' }],
+        results: [{ item_id: 'item-expired', outcome: 'failed', request_id: null, status: 'FAILED', error_type: 'draft_expired', error_message: null, tracking_id: null, tracking_ready: null }],
         summary: { requested: 1, confirmed: 0, failed: 1 },
       }))
       .mockRejectedValueOnce({ type: 'draft_expired', message: 'draft expired' })
@@ -488,8 +488,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
       .mockResolvedValueOnce(
         saveConfirmResult({
           results: [
-            { item_id: 'item-1', request_id: 'req-1', status: 'CONFIRMED', outcome: 'CONFIRMED', error_type: null },
-            { item_id: 'item-3', request_id: null, status: 'FAILED', error_type: 'draft_expired' },
+            { item_id: 'item-1', request_id: 'req-1', status: 'CONFIRMED', outcome: 'CONFIRMED', error_type: null, error_message: null, tracking_id: null, tracking_ready: false },
           ],
           queue: { queue_id: 'queue-1', batch_id: 'batch-1', created_at: '', updated_at: '', items: [queueItem('item-1', 'req-1')] },
           summary: { requested: 2, confirmed: 1, failed: 1 },
@@ -583,7 +582,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     expect(wrapper.find('.batch-draft-card[data-item-id="item-1"] .batch-card-status').text()).toContain('草案')
   })
 
-  it('clears saving after a malformed 200 result so the draft can be retried', async () => {
+  it('freezes a malformed 200 result for the same-operation retry', async () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: [reviewableItems()[0]] }))
       .mockResolvedValueOnce(saveConfirmResult({ results: [], summary: { requested: 1, confirmed: 0, failed: 1 } }))
@@ -596,9 +595,8 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     await wrapper.find('.confirm-dialog .primary-button').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('.batch-card-status').text()).toContain('草案')
-    expect(wrapper.find('#batch-accept-all').attributes('disabled')).toBeUndefined()
-    expect(wrapper.text()).toContain('保存确认结果不完整')
+    expect(wrapper.find('.batch-card-status').text()).toContain('结果待核验')
+    expect(wrapper.find('#batch-retry-frozen-operation').exists()).toBe(true)
   })
 
   it('ends a frozen retry in a deterministic draft failure state', async () => {
@@ -675,7 +673,7 @@ describe('BatchWorkbenchView accept (US-205)', () => {
     apiPost
       .mockResolvedValueOnce(parseResult({ items: [reviewableItems()[0]] }))
       .mockResolvedValueOnce(saveConfirmResult({
-        results: [{ item_id: 'item-1', outcome: 'SAVED_CONFIRM_FAILED', request_id: 'saved-request-1', retry_action: 'ACCEPT_SAVED_REQUEST', status: null, error_type: 'save_confirm_failed', error_message: null, tracking_id: null, tracking_ready: null }],
+        results: [{ item_id: 'item-1', outcome: 'failed', request_id: 'saved-request-1', status: null, error_type: 'save_confirm_failed', error_message: '确认未完成', tracking_id: null, tracking_ready: null }],
         summary: { requested: 1, confirmed: 0, failed: 1 },
       }))
       .mockResolvedValueOnce({ request: { request_id: 'saved-request-1' } } as never)

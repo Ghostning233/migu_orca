@@ -126,3 +126,10 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - 解析在保存发送或结果待核验期间被明确阻断；草案生成与保存分别使用逐项生成锁和参与项保存锁，未参与条目仍可操作。apply failed 的 retry/reset 进入显式状态转换。
 - 验证：`api:check`、typecheck、lint、build 均通过；定向 Vitest 3 文件 48 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 50 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
 ---
+
+## 2026-09-12 - Stage 36 batch contract and frozen-operation correction
+- 批量 HTTP 200 逐项结果按生成 DTO 解析：`save_confirm_failed` 仅接受 `error_type=save_confirm_failed`、`outcome=failed` 和合法公开 `request_id`，不读取批量 DTO 不存在的 `retry_action`；单番 409 恢复结构仍由独立错误解析处理。
+- 删除组件侧第二份 save key，实际请求 descriptor、journey 条目和 response-unknown 冻结重试共用 journey 持有的唯一幂等键。结果集合缺失、重复、未知 item_id 或字段畸形时不应用部分结果，保留原操作并仅允许相同 body 重试；确定性草案失效回到候选并消费旧 capability。
+- 补齐 saved-confirm/tracking 的 journey 同步，并将保存/响应未知期间的批量输入与解析按钮置为禁用；浏览器 mock 同步到真实 `results` DTO 结构。
+- 验证：`api:check`、typecheck、lint、build 通过；定向 Vitest 3 文件 48 passed；真实 Chromium `test_app_batch_workbench.py` 与 `test_app_responsive_a11y.py` 共 50 passed；`.migu_orca/storage` 不存在；`git diff --check` 通过。
+---

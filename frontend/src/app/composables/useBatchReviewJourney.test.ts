@@ -125,13 +125,13 @@ describe('useBatchReviewJourney', () => {
     expect(state.items.expired?.phase).toBe('candidates')
     expect(state.items.expired?.draftId).toBeNull()
     state = reduceBatchReview(state, { type: 'save_failed', itemId: 'saved', error: {
-      error_type: 'save_confirm_failed', outcome: 'SAVED_CONFIRM_FAILED', request_id: 'req-saved', retry_action: 'ACCEPT_SAVED_REQUEST',
+      error_type: 'save_confirm_failed', outcome: 'failed', request_id: 'req-saved',
     } })
     expect(state.busy).toBeNull()
     expect(state.items.saved?.phase).toBe('saved_pending_confirm')
     expect(state.items.saved?.selected).toBe(false)
-    expect(toSafeBatchResultError({ error_type: 'save_confirm_failed', outcome: 'SAVED_CONFIRM_FAILED', request_id: 'req-saved', retry_action: 'ACCEPT_SAVED_REQUEST' } as never)).toMatchObject({
-      type: 'save_confirm_failed', requestId: 'req-saved', retryAction: 'ACCEPT_SAVED_REQUEST',
+    expect(toSafeBatchResultError({ error_type: 'save_confirm_failed', outcome: 'failed', request_id: 'req-saved' } as never)).toMatchObject({
+      type: 'save_confirm_failed', requestId: 'req-saved',
     })
   })
 

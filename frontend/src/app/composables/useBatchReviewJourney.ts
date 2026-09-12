@@ -104,6 +104,10 @@ export type BatchReviewAction =
   | { type: 'save_failed'; itemId: string; error: unknown }
   | { type: 'save_response_unknown'; itemIds: readonly string[]; error?: unknown }
   | { type: 'retry_saved_confirm'; itemId: string }
+  | { type: 'accept_succeeded'; itemId: string; requestId: string }
+  | { type: 'tracking_located'; itemId: string; requestId: string; trackingId: string }
+  | { type: 'tracking_not_found'; itemId: string }
+  | { type: 'tracking_verification_failed'; itemId: string }
   | { type: 'consume_confirmed'; itemId: string }
   | { type: 'remove_item'; itemId: string }
   | { type: 'clear_route' }
@@ -133,16 +137,12 @@ const BATCH_PHASE_TRANSITIONS: Record<BatchItemPhase, readonly BatchItemPhase[]>
   apply_failed: ['applying', 'draft', 'candidates', 'blocked'],
   saving: ['confirmed', 'saved_pending_confirm', 'draft', 'candidates', 'blocked', 'response_unknown'],
   confirmed: [],
-  saved_pending_confirm: [],
+  saved_pending_confirm: ['confirmed'],
   response_unknown: ['confirmed', 'saved_pending_confirm', 'draft', 'response_unknown'],
 }
 
 export function canTransitionBatchItem(from: BatchItemPhase, to: BatchItemPhase): boolean {
   return BATCH_PHASE_TRANSITIONS[from]?.includes(to) ?? false
-}
-
-function safeString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.length > 0 && value.length <= 128 ? value : undefined
 }
 
 /** Map only stable error types and explicitly public recovery fields. */
@@ -159,7 +159,7 @@ export function toSafeBatchError(error: unknown): SafeBatchError {
   let retryAction: SafeBatchError['retryAction']
   if (candidate === 'save_confirm_failed') {
     const nested = details.details && typeof details.details === 'object' ? details.details as Record<string, unknown> : {}
-    requestId = safeString(nested.request_id)
+    requestId = isPublicRouteIdentifier(nested.request_id) ? nested.request_id : undefined
     retryAction = nested.outcome === 'SAVED_CONFIRM_FAILED' && nested.retry_action === 'ACCEPT_SAVED_REQUEST'
       ? nested.retry_action : undefined
     if (!requestId || !retryAction) type = 'batch_error'
@@ -181,9 +181,8 @@ export function toSafeBatchResultError(result: BatchSaveResultItem): SafeBatchEr
   const outcome = typeof source.outcome === 'string' ? source.outcome.toUpperCase() : ''
   const requestId = typeof source.request_id === 'string' && isPublicRouteIdentifier(source.request_id)
     ? source.request_id : undefined
-  const retryAction = source.retry_action === 'ACCEPT_SAVED_REQUEST' ? source.retry_action : undefined
-  if (errorType === 'save_confirm_failed' && outcome === 'SAVED_CONFIRM_FAILED' && requestId && retryAction) {
-    return { type: errorType, message: SAFE_MESSAGES[errorType]!, requestId, retryAction }
+  if (errorType === 'save_confirm_failed' && outcome === 'FAILED' && requestId) {
+    return { type: errorType, message: SAFE_MESSAGES[errorType]!, requestId }
   }
   const safeType = SAFE_ERROR_TYPES.has(errorType) ? errorType : 'batch_error'
   return { type: safeType, message: SAFE_MESSAGES[safeType] ?? '操作失败，请重新尝试。' }
@@ -237,7 +236,7 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
     case 'set_draft': return updateItem(state, action.itemId, { phase: 'draft', draftId: action.draftId, draftRevision: action.revision, dirty: false, error: null, idempotencyKey: null })
     case 'set_dirty': return updateItem(state, action.itemId, { dirty: action.dirty, ...(action.dirty ? { idempotencyKey: null } : {}) })
     case 'begin_apply': return state.items[action.itemId]?.phase === 'draft' ? updateItem(state, action.itemId, { phase: 'applying', error: null }) : state
-    case 'apply_succeeded': return updateItem(state, action.itemId, { phase: 'draft', dirty: false, error: null, ...(action.draftId ? { draftId: action.draftId } : {}), ...(action.revision === undefined ? {} : { draftRevision: action.revision }) })
+    case 'apply_succeeded': return updateItem(state, action.itemId, { phase: 'draft', dirty: false, error: null, idempotencyKey: null, ...(action.draftId ? { draftId: action.draftId } : {}), ...(action.revision === undefined ? {} : { draftRevision: action.revision }) })
     case 'apply_failed': return updateItem(state, action.itemId, { phase: 'apply_failed', error: toSafeBatchError(action.error) })
     case 'retry_apply': return state.items[action.itemId]?.phase === 'apply_failed' ? updateItem(state, action.itemId, { phase: 'applying', error: null }) : state
     case 'reset_apply': return state.items[action.itemId]?.phase === 'apply_failed' ? updateItem(state, action.itemId, { phase: 'draft', error: null, dirty: false }) : state
@@ -265,7 +264,7 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
       const error = typeof source.error_type === 'string'
         ? toSafeBatchResultError(action.error as BatchSaveResultItem)
         : toSafeBatchError(action.error)
-      const saved = error.type === 'save_confirm_failed' && Boolean(error.requestId && error.retryAction)
+      const saved = error.type === 'save_confirm_failed' && Boolean(error.requestId)
       const expired = ['draft_expired', 'draft_evicted', 'draft_replayed', 'draft_revision_conflict'].includes(error.type)
       const item = state.items[action.itemId]
       const next = updateItem(state, action.itemId, {
@@ -282,6 +281,10 @@ export function reduceBatchReview(state: BatchReviewState, action: BatchReviewAc
       return { ...state, items, busy: null }
     }
     case 'retry_saved_confirm': return state.items[action.itemId]?.phase === 'saved_pending_confirm' ? updateItem(state, action.itemId, { error: null }) : state
+    case 'accept_succeeded': return updateItem(state, action.itemId, { phase: 'confirmed', selected: false, requestId: action.requestId, error: null })
+    case 'tracking_located': return updateItem(state, action.itemId, { phase: 'confirmed', selected: false, requestId: action.requestId, trackingId: action.trackingId, error: null })
+    case 'tracking_not_found': return state.items[action.itemId]?.phase === 'response_unknown' ? updateItem(state, action.itemId, { phase: 'saved_pending_confirm', selected: false }) : state
+    case 'tracking_verification_failed': return state
     case 'consume_confirmed': return state.items[action.itemId]?.phase === 'confirmed' ? updateItem(state, action.itemId, { draftId: null, idempotencyKey: null }) : state
     case 'remove_item': {
       if (!state.items[action.itemId]) return state

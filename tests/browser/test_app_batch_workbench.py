@@ -147,6 +147,19 @@ def _batch_accept_result(items: list[dict[str, Any]], queue_items: list[dict[str
         status = item.get("status", "accepted")
         if status in summary:
             summary[status] += 1
+    results = []
+    for item in items:
+        outcome = str(item.get("outcome") or ("CONFIRMED" if item.get("status") == "CONFIRMED" else "failed"))
+        results.append({
+            "item_id": item.get("item_id"),
+            "outcome": outcome,
+            "request_id": item.get("request_id"),
+            "status": item.get("status"),
+            "error_type": item.get("error_type") or (None if outcome == "CONFIRMED" else "batch_error"),
+            "error_message": None,
+            "tracking_id": item.get("tracking_id"),
+            "tracking_ready": item.get("tracking_ready"),
+        })
     return json.dumps(
         {
             "ok": True,
@@ -159,7 +172,7 @@ def _batch_accept_result(items: list[dict[str, Any]], queue_items: list[dict[str
                     "updated_at": "2026-08-19T00:00:00+00:00",
                     "items": queue_items,
                 },
-                "items": items,
+                "results": results,
                 "summary": summary,
             },
         },
