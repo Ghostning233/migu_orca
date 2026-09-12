@@ -104,3 +104,13 @@ Thread: https://codex.openai.com/threads/current
 - 补充 unknown 修改输入保持、动作锁定、并发回查、成功回查不匹配及 SafeInfo 快速 requestId 切换回归。
 - 定向验证：相关 Vitest 63 passed；frontend typecheck/lint/build passed；Chromium 失败用例修正 mock 后单例通过。
 ---
+
+## [2026-09-13 00:05:00 CST] - US-300
+Thread: https://codex.openai.com/threads/current
+- 新增 `reuseHandoff` 一次性 SPA 内存白名单，仅保留公开标题、合法 MiKan bangumi_id 与用户可编辑配置建议；不含 request_id、URL、资源、历史、tracking、capability 或幂等键，也不接触浏览器存储/URL/history/Pinia。
+- SafeInfo 成功加载后提供“复制再用”，导航 `/app/add`；添加页消费并清除 handoff，预填标题但不自动搜索/生成，要求用户重新搜索并选择真实合集。
+- 新草案生成后才显示“应用复制方案建议”，由用户显式载入受控编辑器字段；不会自动创建、保存确认或外部提交。
+- 定向验证：reuseHandoff/SafeInfoDialog/WorkbenchView/AnimeDraftEditor Vitest 42 passed；typecheck/lint/build passed；真实 Chromium handoff 单次消费与显式搜索 1 passed；git diff --check passed。
+- **Learnings for future iterations:**
+  - 复制再用的 handoff 必须由 SafeInfo 成功响应直接构造，导航只传递模块内存状态；草案建议必须在新 draft 存在后通过单独用户动作应用。
+---

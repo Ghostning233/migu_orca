@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** SafeInfoDialog (US-297): the only consumer of getRequestSafeInfo. */
-import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
@@ -10,6 +10,7 @@ import LoadingState from '@/components/feedback/LoadingState.vue'
 import { storageQuery } from '@/features/requests/requestStorage'
 import { actionLabel } from '@/features/requests/requestDetail'
 import { statusLabel } from '@/features/requests/requestsList'
+import { buildReuseHandoff, publishReuseHandoff } from '@/features/requests/reuseHandoff'
 
 type SafeInfoResult = NonNullable<
   operations['getRequestSafeInfo']['responses']['200']['content']['application/json']['result']
@@ -23,6 +24,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (event: 'close'): void
+  (event: 'reuse'): void
 }>()
 
 const backdrop = ref<HTMLElement | null>(null)
@@ -34,6 +36,8 @@ let requestSequence = 0
 // Escape, backdrop and close button all share `close()` so every close path
 // invalidates in-flight requests before notifying the parent.
 const { activate, deactivate } = useFocusTrap(backdrop, close)
+
+const canReuse = computed(() => Boolean(safeInfo.value && buildReuseHandoff(safeInfo.value)))
 
 function safeLabel(value: string | null | undefined): string {
   return value && value.trim() ? value : '未设置'
@@ -68,6 +72,14 @@ function close(): void {
   ++requestSequence
   deactivate()
   emit('close')
+}
+
+function reuse(): void {
+  if (!safeInfo.value) return
+  const handoff = buildReuseHandoff(safeInfo.value)
+  if (!handoff) return
+  publishReuseHandoff(handoff)
+  emit('reuse')
 }
 
 watch(
@@ -126,6 +138,10 @@ onBeforeUnmount(() => {
         />
         <div v-else-if="!safeInfo" class="safe-info-empty" role="status">暂无可展示的方案安全信息。</div>
         <div v-else class="safe-info-content">
+          <div class="safe-info-actions">
+            <button v-if="canReuse" type="button" class="safe-info-reuse" @click="reuse">复制再用</button>
+            <p v-else class="safe-info-muted">当前方案缺少可复用的公开合集信息。</p>
+          </div>
           <section class="safe-info-section" aria-labelledby="safe-info-basic-heading">
             <h3 id="safe-info-basic-heading">标题与合集</h3>
             <dl class="safe-info-grid">
@@ -210,6 +226,8 @@ onBeforeUnmount(() => {
 .safe-info-header h2 { margin: 0.25rem 0 0; }
 .safe-info-close { border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: transparent; color: inherit; padding: 0.4rem 0.75rem; cursor: pointer; }
 .safe-info-content { display: grid; gap: var(--space-5); padding-top: var(--space-4); }
+.safe-info-actions { display: flex; align-items: center; gap: var(--space-3); }
+.safe-info-reuse { border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-accent); color: var(--color-on-accent); padding: 0.45rem 0.8rem; cursor: pointer; }
 .safe-info-section { display: grid; gap: var(--space-2); }
 .safe-info-section h3 { margin: 0; font-size: var(--font-size-md); }
 .safe-info-grid { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.4rem 1rem; margin: 0; }

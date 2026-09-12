@@ -7,6 +7,7 @@ import { nextTick } from 'vue'
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import WorkbenchView from '@/features/workbench/WorkbenchView.vue'
+import { buildReuseHandoff, publishReuseHandoff, clearReuseHandoff } from '@/features/requests/reuseHandoff'
 
 // US-204: workbench single-search migration. The view searches MiKan
 // candidates through the shared transport, renders explicit candidate cards
@@ -152,8 +153,57 @@ async function mountWorkbench() {
 describe('WorkbenchView single search (US-204)', () => {
   beforeEach(() => {
     localStorage.clear()
+    clearReuseHandoff()
     apiPost.mockReset()
     apiGet.mockReset()
+  })
+
+  it('consumes a reuse handoff once and requires explicit search', async () => {
+    const handoff = buildReuseHandoff({
+      request_id: 'not-copied', status: 'ACCEPTED', raw_title: '原始', title: '葬送的芙莉莲',
+      aliases: [], season: 1, season_raw: 'S1', season_evidence: 'evidence',
+      mikan_collection: { title: '真实合集', bangumi_id: '2353' }, subtitle_groups: [],
+      selected_subtitle_group: '字幕组', filter_rule: { must_contain: '1080p', must_not_contain: '', use_regex: false, case_sensitive: false },
+      resources: { selected_subtitle_group: '字幕组', valid_resource_count: 1, invalid_resource_count: 0, complete_resource_count: 1 },
+      folder_name: '葬送的芙莉莲', storage_profile: 'storage', total_episodes: null,
+      updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED', history_summary: [],
+      ab_status: { submitted: false, success: null, ab_subscription_id: null, error_type: null },
+    })
+    publishReuseHandoff(handoff!)
+    const { wrapper } = await mountWorkbench()
+
+    expect(wrapper.find('#mikan-candidate-query').element).toHaveProperty('value', '葬送的芙莉莲')
+    expect(wrapper.find('#reuse-handoff-summary').text()).toContain('公开合集编号 2353')
+    expect(apiPost).not.toHaveBeenCalled()
+    expect(wrapper.find('#mikan-candidate-search-submit').attributes('disabled')).toBeUndefined()
+    // The module-level handoff has already been consumed by this mount.
+    expect((await import('@/features/requests/reuseHandoff')).consumeReuseHandoff()).toBeNull()
+  })
+
+  it('offers reuse suggestions only after a new draft is generated and explicit apply', async () => {
+    const handoff = buildReuseHandoff({
+      request_id: 'not-copied', status: 'ACCEPTED', raw_title: '原始', title: '葬送的芙莉莲',
+      aliases: [], season: 1, season_raw: 'S1', season_evidence: 'evidence',
+      mikan_collection: { title: '真实合集', bangumi_id: '2353' }, subtitle_groups: [],
+      selected_subtitle_group: '字幕组', filter_rule: { must_contain: '', must_not_contain: '', use_regex: false, case_sensitive: false },
+      resources: { selected_subtitle_group: '字幕组', valid_resource_count: 1, invalid_resource_count: 0, complete_resource_count: 1 },
+      folder_name: '建议目录', storage_profile: 'storage', total_episodes: null,
+      updated_episode: null, updated_episode_status: 'NOT_IMPLEMENTED', history_summary: [],
+      ab_status: { submitted: false, success: null, ab_subscription_id: null, error_type: null },
+    })
+    publishReuseHandoff(handoff!)
+    apiPost.mockResolvedValueOnce(candidateResult()).mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#single-review-apply-reuse-suggestion').exists()).toBe(true)
+    expect(wrapper.find('#preview-folder-name').element).toHaveProperty('value', '葬送的芙莉莲')
+    await wrapper.find('#single-review-apply-reuse-suggestion').trigger('click')
+    expect(wrapper.find('#preview-folder-name').element).toHaveProperty('value', '建议目录')
   })
 
   it('disables search for empty input before calling the API', async () => {

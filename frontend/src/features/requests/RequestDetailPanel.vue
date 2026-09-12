@@ -20,6 +20,7 @@
 // snapshot's raw URLs (rss_url / mikan_url / poster_url) are never rendered.
 // No value here is persisted, logged or put into the URL.
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 import { api, toApiError } from '@/api/client'
 import type { operations } from '@/api/generated/api'
@@ -84,6 +85,7 @@ const emit = defineEmits<{
 }>()
 
 const notification = useNotificationStore()
+const router = useRouter()
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 
 const loading = ref(false)
@@ -119,6 +121,11 @@ const completeTotal = computed(() => (request.value ? totalCompleteSeedCount(req
 const selectedGroupName = computed(
   () => request.value?.confirmable_config?.selected_subtitle_group ?? '未选择字幕组',
 )
+
+function reuseRequest(): void {
+  safeInfoOpen.value = false
+  void router.push(routeLocation('add'))
+}
 
 interface LoadDetailOptions {
   closeForms?: boolean
@@ -792,7 +799,7 @@ onMounted(() => {
     </div>
 
     <ConfirmDialog ref="confirmDialog" />
-    <SafeInfoDialog :open="safeInfoOpen" :request-id="props.requestId" @close="safeInfoOpen = false" />
+    <SafeInfoDialog :open="safeInfoOpen" :request-id="props.requestId" @close="safeInfoOpen = false" @reuse="reuseRequest" />
   </PanelSection>
 
   <PanelSection v-else title="订阅方案详情" class="request-detail-panel">

@@ -29,6 +29,7 @@ import {
   type RequestSnapshot,
 } from '@/features/requests/requestDetail'
 import { statusLabel } from '@/features/requests/requestsList'
+import type { ReuseSuggestion } from '@/features/requests/reuseHandoff'
 
 const props = defineProps<{
   request: RequestSnapshot | RequestDetailSnapshot
@@ -141,7 +142,19 @@ function apply(): void {
   emit('apply', patch.value)
 }
 
-defineExpose({ patch, dirty, reset: resetForm })
+function applySuggestion(suggestion: ReuseSuggestion): void {
+  editGroup.value = suggestion.selectedSubtitleGroup
+  editMustContain.value = suggestion.filterRule.mustContain
+  editMustNotContain.value = suggestion.filterRule.mustNotContain
+  editUseRegex.value = suggestion.filterRule.useRegex
+  editCaseSensitive.value = suggestion.filterRule.caseSensitive
+  editFolderName.value = suggestion.expectedFolderName
+  clearMustContain.value = false
+  clearMustNotContain.value = false
+  clearFolderName.value = false
+}
+
+defineExpose({ patch, dirty, reset: resetForm, applySuggestion })
 </script>
 
 <template>

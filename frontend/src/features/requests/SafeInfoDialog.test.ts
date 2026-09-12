@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api/client'
 import SafeInfoDialog from '@/features/requests/SafeInfoDialog.vue'
+import { clearReuseHandoff, consumeReuseHandoff } from '@/features/requests/reuseHandoff'
 
 vi.mock('@/api/client', () => ({ api: { get: vi.fn() } }))
 
@@ -37,7 +38,25 @@ function safeInfo(title = '葬送的芙莉莲') {
 }
 
 describe('SafeInfoDialog (US-297)', () => {
-  beforeEach(() => apiGet.mockReset())
+  beforeEach(() => {
+    apiGet.mockReset()
+    clearReuseHandoff()
+  })
+
+  it('publishes a minimal handoff only after safe-info has loaded', async () => {
+    apiGet.mockResolvedValue({ safe_info: safeInfo() } as never)
+    const wrapper = mount(SafeInfoDialog, { attachTo: document.body, props: { open: true, requestId: 'request-safe-1' } })
+    await flushPromises()
+
+    const reuseButton = document.querySelector<HTMLButtonElement>('.safe-info-reuse')
+    expect(reuseButton).not.toBeNull()
+    reuseButton?.click()
+    await flushPromises()
+    expect(wrapper.emitted('reuse')).toHaveLength(1)
+    expect(consumeReuseHandoff()).toMatchObject({ title: '葬送的芙莉莲', mikanBangumiId: '123' })
+    expect(consumeReuseHandoff()).toBeNull()
+    wrapper.unmount()
+  })
 
   it('loads only generated safe-info and renders the complete safe whitelist', async () => {
     apiGet.mockResolvedValue({ safe_info: safeInfo() } as never)
