@@ -83,4 +83,24 @@ describe('useSingleAnimeJourney (US-275)', () => {
     expect(journey.state.error?.type).toBe('journey_error')
     expect(journey.state.idempotencyKey).not.toBeNull()
   })
+
+  it('keeps failed tracking verification separate from accept recovery', () => {
+    const journey = useSingleAnimeJourney()
+    journey.setCandidates(1)
+    journey.transition('candidates')
+    journey.selectCandidate()
+    journey.setDraft('draft', 1)
+    journey.newConfirmOperation()
+    journey.begin('saving')
+    journey.fail({ type: 'save_confirm_failed', details: { details: { outcome: 'SAVED_CONFIRM_FAILED', request_id: 'req-1', retry_action: 'ACCEPT_SAVED_REQUEST' } } })
+
+    expect(journey.begin('accepting')).toBe(true)
+    journey.finishVerificationPending()
+    expect(journey.state.phase).toBe('verification_pending')
+    expect(journey.begin('accepting')).toBe(false)
+
+    journey.returnToSavedPending()
+    expect(journey.state.phase).toBe('saved_pending_confirm')
+    expect(journey.begin('accepting')).toBe(true)
+  })
 })

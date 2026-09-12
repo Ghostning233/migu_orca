@@ -35,6 +35,7 @@ export type JourneyPhase =
   | 'review'
   | 'confirming'
   | 'saved_pending_confirm'
+  | 'verification_pending'
   | 'confirmed_pending_tracking'
   | 'complete'
 
@@ -80,6 +81,7 @@ const TRANSITIONS: Record<JourneyPhase, readonly JourneyPhase[]> = {
   review: ['input', 'candidates', 'confirming'],
   confirming: ['saved_pending_confirm', 'confirmed_pending_tracking', 'review'],
   saved_pending_confirm: ['confirmed_pending_tracking', 'saved_pending_confirm'],
+  verification_pending: ['complete', 'saved_pending_confirm', 'verification_pending'],
   confirmed_pending_tracking: ['complete', 'confirmed_pending_tracking'],
   complete: ['input'],
 }
@@ -168,6 +170,8 @@ export interface SingleAnimeJourney {
   begin: (busy: Exclude<JourneyBusyPhase, null>) => boolean
   finishConfirm: (result?: { requestId?: string; savedOnly?: boolean }) => void
   finishTracking: (trackingId?: string) => void
+  finishVerificationPending: () => void
+  returnToSavedPending: () => void
   fail: (error: unknown) => void
   discard: () => void
   newConfirmOperation: () => string | null
@@ -204,6 +208,8 @@ export function useSingleAnimeJourney(): SingleAnimeJourney {
       snapshot = { ...snapshot, busy: null, requestId: result.requestId ?? snapshot.requestId, phase: result.savedOnly ? 'saved_pending_confirm' : 'confirmed_pending_tracking', dirty: false, draftId: null, draftRevision: null, idempotencyKey: null }
     },
     finishTracking(trackingId) { snapshot = { ...snapshot, busy: null, trackingId: trackingId ?? snapshot.trackingId, phase: trackingId ? 'complete' : 'confirmed_pending_tracking' } },
+    finishVerificationPending() { snapshot = { ...snapshot, busy: null, phase: 'verification_pending' } },
+    returnToSavedPending() { snapshot = { ...snapshot, busy: null, phase: 'saved_pending_confirm', error: null } },
     fail(error) {
       const safeError = toSafeJourneyError(error)
       const clearsConfirmKey = safeError.type === 'idempotency_conflict' ||

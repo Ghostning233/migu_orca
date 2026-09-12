@@ -22,7 +22,7 @@ import AnimeDraftEditor from '@/features/workbench/AnimeDraftEditor.vue'
 import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 import { effectiveSeeds, type RequestSnapshot } from '@/features/requests/requestDetail'
 import { storageQuery } from '@/features/requests/requestStorage'
-import { routeLocation } from '@/app/router/catalog'
+import { isPublicRouteIdentifier, routeLocation } from '@/app/router/catalog'
 
 const props = defineProps<{
   request: RequestSnapshot
@@ -102,10 +102,10 @@ const saveButtonDisabled = computed(() => !journey.canConfirm() || confirmLoadin
 function handoffFrom(result: ConfirmRequestSaveResult): NonNullable<ConfirmRequestSaveResult['handoff']> | null {
   const handoff = result.handoff
   if (!handoff) return null
-  const validIdentifier = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= 128
-  if (!validIdentifier(handoff.request_id)) return null
-  if (typeof handoff.status !== 'string' || !handoff.status.trim() || typeof handoff.next_action !== 'string' || !handoff.next_action.trim()) return null
-  if (!validIdentifier(handoff.tracking_id)) return null
+  if (result.outcome !== 'CONFIRMED') return null
+  if (!isPublicRouteIdentifier(handoff.request_id)) return null
+  if (handoff.status !== 'CONFIRMED' || handoff.next_action !== 'TRACKING') return null
+  if (!isPublicRouteIdentifier(handoff.tracking_id)) return null
   if (typeof handoff.tracking_ready !== 'boolean') return null
   if (handoff.tracking_status !== null && typeof handoff.tracking_status !== 'string') return null
   if (handoff.safe_message !== null && typeof handoff.safe_message !== 'string') return null
@@ -118,7 +118,7 @@ async function locateTracking(requestId: string): Promise<TrackingLocationResult
   try {
     const result = await api.get<TrackingItemsResult>('/api/v1/tracking/items', { query: storageQuery() })
     const item = result.items.find((candidate) => candidate.request_id === requestId)
-    if (!item || typeof item.tracking_id !== 'string' || !item.tracking_id) return 'not_found'
+    if (!item || !isPublicRouteIdentifier(item.request_id) || item.request_id !== requestId || !isPublicRouteIdentifier(item.tracking_id)) return 'not_found'
     journey.finishTracking(item.tracking_id)
     trackingLocated.value = true
     if (router.hasRoute('tracking')) {
@@ -183,7 +183,7 @@ async function retrySavedConfirmation(): Promise<void> {
     })
     const located = await locateTracking(requestId)
     if (located !== 'found') {
-      journey.finishTracking()
+      journey.finishVerificationPending()
       trackingLocationState.value = located
       acceptError.value = '方案已确认，但暂未定位到追番记录。可稍后重试定位。'
       return
@@ -193,7 +193,10 @@ async function retrySavedConfirmation(): Promise<void> {
     // projection first. A failed verification must never trigger another
     // accept request.
     const safeError = toApiError(cause)
-    const requiresVerification = ['network_error', 'request_timeout', 'upstream_timeout', 'conflict', 'invalid_request_status'].includes(safeError.type)
+    const transport = cause && typeof cause === 'object' ? cause as { network?: unknown; nonJson?: unknown; status?: unknown } : {}
+    const status = typeof transport.status === 'number' ? transport.status : 0
+    const requiresVerification = Boolean(transport.network === true || transport.nonJson === true || status >= 500) ||
+      ['network_error', 'request_timeout', 'upstream_timeout', 'conflict', 'invalid_request_status'].includes(safeError.type)
     if (!requiresVerification) {
       journey.fail(safeError)
       acceptError.value = '确认未完成，请根据错误提示处理后再试。'
@@ -203,7 +206,7 @@ async function retrySavedConfirmation(): Promise<void> {
     if (located === 'found') return
     trackingLocationState.value = located
     if (located === 'failed') {
-      journey.finishTracking()
+      journey.finishVerificationPending()
       acceptError.value = '确认结果暂无法核验。请重试定位，不会重复确认。'
     } else {
       journey.fail(safeError)
@@ -254,15 +257,18 @@ function resetFailedModify(): void {
 
 async function retryTrackingLocation(): Promise<void> {
   const requestId = journey.state.requestId
-  if (!requestId || confirmLoading.value) return
+  if (!requestId || confirmLoading.value || !['verification_pending', 'confirmed_pending_tracking'].includes(journey.state.phase)) return
   confirmLoading.value = true
   acceptError.value = ''
   const located = await locateTracking(requestId)
   trackingLocationState.value = located === 'found' ? null : located
+  if (located === 'not_found' && journey.state.phase === 'verification_pending') journey.returnToSavedPending()
   if (located !== 'found') {
-    acceptError.value = located === 'failed'
-      ? '确认结果暂无法核验。请稍后重试定位。'
-      : '方案已确认，但暂未定位到追番记录。请稍后重试定位。'
+      acceptError.value = located === 'failed'
+        ? '确认结果暂无法核验。请稍后重试定位。'
+        : journey.state.phase === 'saved_pending_confirm'
+          ? '确认结果已核验，但暂未找到追番记录。可明确重试确认。'
+          : '方案已确认，但暂未定位到追番记录。请稍后重试定位。'
   }
   confirmLoading.value = false
 }
@@ -310,7 +316,7 @@ defineExpose({ session, editor, leaveGuard })
       <div class="review-confirmation-block" aria-live="polite">
         <BaseButton v-if="journey.state.phase === 'review'" id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
         <BaseButton v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>
-        <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-retry-locate" variant="secondary" :loading="confirmLoading" :disabled="confirmLoading" @click="retryTrackingLocation">重试定位</BaseButton>
+        <BaseButton v-if="journey.state.phase === 'verification_pending' || journey.state.phase === 'confirmed_pending_tracking'" id="single-review-retry-locate" variant="secondary" :loading="confirmLoading" :disabled="confirmLoading" @click="retryTrackingLocation">重试定位</BaseButton>
         <BaseButton v-if="journey.state.phase === 'confirmed_pending_tracking'" id="single-review-open-unlocated" variant="secondary" :disabled="confirmLoading" @click="openUnlocatedTracking">打开无定位追番管理</BaseButton>
         <p v-if="trackingLocated" id="single-review-tracking-success" class="field-help" role="status">订阅方案已确认，并已定位到追番记录。</p>
         <p v-else-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已经确认，正在准备后续定位。</p>

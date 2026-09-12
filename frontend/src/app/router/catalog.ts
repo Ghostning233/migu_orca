@@ -109,6 +109,11 @@ function nonEmptyScalar(value: unknown): string | undefined {
   return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(trimmed) ? trimmed : undefined
 }
 
+/** Public route identifiers shared by handoffs and route query sanitization. */
+export function isPublicRouteIdentifier(value: unknown): value is string {
+  return nonEmptyScalar(value) !== undefined
+}
+
 /**
  * Keep only the one public scalar identifier consumed by a target route.
  *
