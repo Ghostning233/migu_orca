@@ -186,8 +186,8 @@ export function useSingleAnimeJourney(): SingleAnimeJourney {
     setTitle(title) { snapshot = { ...snapshot, title: title.trim(), error: null } },
     setCandidates(count) { snapshot = { ...snapshot, candidateCount: Math.max(0, Math.floor(count)), selectedCandidate: false, error: null } },
     selectCandidate() { if (snapshot.phase !== 'candidates' || snapshot.candidateCount < 1) return; snapshot = { ...snapshot, selectedCandidate: true, error: null } },
-    setDraft(draftId, revision) { if (snapshot.phase === 'candidates') journey.transition('review'); snapshot = { ...snapshot, draftId, draftRevision: revision, dirty: false, error: null } },
-    setDirty(dirty) { snapshot = { ...snapshot, dirty } },
+    setDraft(draftId, revision) { if (snapshot.phase === 'candidates') journey.transition('review'); snapshot = { ...snapshot, draftId, draftRevision: revision, dirty: false, idempotencyKey: null, error: null } },
+    setDirty(dirty) { snapshot = { ...snapshot, dirty, ...(dirty ? { idempotencyKey: null } : {}) } },
     begin(busy) {
       if (snapshot.busy !== null) return false
       if (busy === 'searching' && snapshot.phase !== 'input') return false
@@ -200,9 +200,32 @@ export function useSingleAnimeJourney(): SingleAnimeJourney {
       snapshot = { ...snapshot, busy: null, requestId: result.requestId ?? snapshot.requestId, phase: result.savedOnly ? 'saved_pending_confirm' : 'confirmed_pending_tracking', dirty: false, draftId: null, draftRevision: null, idempotencyKey: null }
     },
     finishTracking(trackingId) { snapshot = { ...snapshot, busy: null, trackingId: trackingId ?? snapshot.trackingId, phase: trackingId ? 'complete' : 'confirmed_pending_tracking' } },
-    fail(error) { snapshot = { ...snapshot, busy: null, error: toSafeJourneyError(error) } },
+    fail(error) {
+      const safeError = toSafeJourneyError(error)
+      if (safeError.type === 'save_confirm_failed' && safeError.requestId && safeError.retryAction === 'ACCEPT_SAVED_REQUEST') {
+        snapshot = {
+          ...snapshot,
+          phase: 'saved_pending_confirm',
+          busy: null,
+          draftId: null,
+          draftRevision: null,
+          dirty: false,
+          idempotencyKey: null,
+          requestId: safeError.requestId,
+          error: safeError,
+        }
+        return
+      }
+      snapshot = { ...snapshot, phase: snapshot.phase === 'confirming' ? 'review' : snapshot.phase, busy: null, error: safeError }
+    },
     discard() { snapshot = { ...snapshot, phase: 'input', title: '', candidateCount: 0, selectedCandidate: false, draftId: null, draftRevision: null, dirty: false, busy: null, idempotencyKey: null, requestId: null, trackingId: null, error: null } },
-    newConfirmOperation() { if (!journey.canConfirm()) return null; const key = randomKey(); snapshot = { ...snapshot, idempotencyKey: key }; return key },
+    newConfirmOperation() {
+      if (!journey.canConfirm()) return null
+      if (snapshot.idempotencyKey) return snapshot.idempotencyKey
+      const key = randomKey()
+      snapshot = { ...snapshot, idempotencyKey: key }
+      return key
+    },
     canConfirm() { return snapshot.phase === 'review' && snapshot.busy === null && !snapshot.dirty && !!snapshot.draftId && snapshot.draftRevision !== null },
   }
   return journey

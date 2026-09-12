@@ -477,10 +477,10 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         assert payload["save_request"] is False
         assert "mikan_config" not in payload
 
-        # The editable preview form is offered; no saved-request actions.
+        # The editable preview form and atomic save-confirm action are offered.
         detail = page.locator("#request-detail-container")
         assert "订阅草案（未保存）" in detail.inner_text()
-        expect(detail.locator("#single-review-save-button")).to_be_disabled()
+        expect(detail.locator("#single-review-save-button")).to_be_enabled()
         expect(detail.locator(".detail-actions button:has-text('确认')")).to_have_count(0)
         # The draft_id never enters the URL or DOM.
         assert "request_id=" not in page.url
@@ -661,8 +661,8 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         page.locator(".candidate-card button:has-text('选择此合集')").click()
         page.wait_for_selector("#detail-preview-edit-form", timeout=5000)
 
-        # The review step intentionally leaves save-confirm to the next story.
-        expect(page.locator("#single-review-save-button")).to_be_disabled()
+        # The review step owns the atomic save-confirm action.
+        expect(page.locator("#single-review-save-button")).to_be_enabled()
         assert not (storage_dir / "requests").exists()
 
     def test_generation_failure_preserves_candidates_and_shows_sanitized_error(

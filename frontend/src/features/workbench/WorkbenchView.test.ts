@@ -533,7 +533,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(wrapper.text()).not.toContain('draft_revision_conflict')
   })
 
-  it('keeps save-confirm unavailable during the review-only step', async () => {
+  it('enables atomic save-confirm when the review is valid', async () => {
     apiPost.mockResolvedValueOnce(candidateResult()).mockResolvedValueOnce(createDraftResult())
     const { wrapper } = await mountWorkbench()
 
@@ -543,11 +543,41 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await wrapper.find('.candidate-select').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeUndefined()
     expect(apiPost).toHaveBeenCalledTimes(2)
   })
 
-  it('keeps the review panel open while save-confirm belongs to the next step', async () => {
+  it('sends only the generated save-confirm capability and consumes it on success', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockResolvedValueOnce({
+        outcome: 'CONFIRMED',
+        request: { request_id: 'req-confirmed' },
+        handoff: { request_id: 'req-confirmed' },
+      } as never)
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+    await wrapper.find('#single-review-save-button').trigger('click')
+    await flushPromises()
+
+    const saveCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/requests/save-confirm')
+    expect(saveCall?.[1]?.body).toMatchObject({
+      draft_id: 'opaque-draft-token',
+      base_revision: 1,
+      storage_dir: null,
+    })
+    expect(saveCall?.[1]?.body).toHaveProperty('idempotency_key')
+    expect(saveCall?.[1]?.body).not.toHaveProperty('request')
+    expect(wrapper.find('#single-review-save-success').text()).toContain('已确认')
+  })
+
+  it('keeps the review panel open after entering the save-confirm host', async () => {
     apiPost
       .mockResolvedValueOnce(candidateResult())
       .mockResolvedValueOnce(createDraftResult())
@@ -560,7 +590,7 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await wrapper.find('.candidate-select').trigger('click')
     await flushPromises()
 
-    expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
     expect(apiPost).toHaveBeenCalledTimes(2)
   })

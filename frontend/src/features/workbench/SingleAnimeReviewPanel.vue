@@ -3,7 +3,9 @@
 // surface; this host owns the component-local draft session and step actions.
 import { computed, ref } from 'vue'
 
+import { api, toApiError } from '@/api/client'
 import { useDraftSession } from '@/app/composables/useDraftSession'
+import { useSingleAnimeJourney, type ConfirmRequestSaveBody, type ConfirmRequestSaveResult } from '@/app/composables/useSingleAnimeJourney'
 import { useNotificationStore } from '@/app/stores/notification'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
@@ -32,6 +34,15 @@ const draftSnapshot = computed(() => (session.request.value ?? props.request) as
 const formError = ref('')
 const navigationLoading = ref(false)
 const dirty = ref(false)
+const journey = useSingleAnimeJourney()
+const confirmLoading = ref(false)
+const confirmError = ref('')
+const confirmedRequestId = ref<string | null>(null)
+
+journey.setCandidates(1)
+journey.transition('candidates')
+journey.selectCandidate()
+journey.setDraft(props.draftId, props.draftRevision ?? 1)
 
 const blockingReasons = computed(() => {
   const reasons: string[] = []
@@ -41,8 +52,48 @@ const blockingReasons = computed(() => {
   if (!effectiveSeeds(draftSnapshot.value).length) reasons.push('没有有效资源')
   if (session.invalid.value) reasons.push('订阅草案已失效')
   if (session.error.value) reasons.push('存在未恢复的字段修改失败')
+  if (journey.state.phase !== 'review') reasons.push('当前订阅方案已进入确认恢复流程')
   return reasons
 })
+
+const saveButtonDisabled = computed(() => !journey.canConfirm() || confirmLoading.value || blockingReasons.value.length > 0)
+
+function requestIdFrom(result: ConfirmRequestSaveResult): string | null {
+  const handoff = result.handoff
+  if (handoff && typeof handoff.request_id === 'string' && handoff.request_id.length <= 128) return handoff.request_id
+  const requestId = result.request?.request_id
+  return typeof requestId === 'string' && requestId.length <= 128 ? requestId : null
+}
+
+async function saveAndConfirm(): Promise<void> {
+  const key = journey.newConfirmOperation()
+  const draft = session.draftId.value
+  const revision = session.draftRevision.value
+  if (!key || !draft || revision === null) return
+  if (!journey.begin('saving')) return
+  confirmLoading.value = true
+  confirmError.value = ''
+  const body: ConfirmRequestSaveBody = {
+    draft_id: draft,
+    base_revision: revision,
+    idempotency_key: key,
+    storage_dir: storageQuery().storage_dir ?? null,
+  }
+  try {
+    const result = await api.post<ConfirmRequestSaveResult>('/api/v1/requests/save-confirm', { body })
+    const requestId = requestIdFrom(result)
+    if (!requestId) throw { type: 'request_error' }
+    confirmedRequestId.value = requestId
+    journey.finishConfirm({ requestId })
+    session.invalidate()
+  } catch (cause) {
+    const safeError = toApiError(cause)
+    journey.fail(safeError)
+    confirmError.value = journey.state.error?.message ?? '保存并确认失败，请重试。'
+  } finally {
+    confirmLoading.value = false
+  }
+}
 
 async function applyModify(patch: PreviewPatch): Promise<void> {
   formError.value = ''
@@ -62,6 +113,7 @@ async function applyModify(patch: PreviewPatch): Promise<void> {
     draftId: session.draftId.value ?? '',
     draftRevision: session.draftRevision.value ?? 1,
   })
+  journey.setDraft(session.draftId.value ?? '', session.draftRevision.value ?? 1)
   notification.success('已应用修改', '订阅草案种子展示已重新计算。')
 }
 
@@ -117,8 +169,10 @@ defineExpose({ session, editor })
     <div id="request-detail-container">
       <p class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
       <div class="review-confirmation-block" aria-live="polite">
-        <BaseButton id="single-review-save-button" variant="primary" disabled aria-describedby="single-review-save-blockers">保存并确认</BaseButton>
-        <p id="single-review-save-blockers" class="field-help">保存并确认暂不可用：{{ blockingReasons.length ? blockingReasons.join('；') : '将在下一步接入。' }}。</p>
+        <BaseButton id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
+        <p v-if="confirmedRequestId" id="single-review-save-success" class="field-help" role="status">订阅方案已确认，正在准备后续定位。</p>
+        <p v-else-if="confirmError" id="single-review-save-error" class="field-error" role="alert">{{ confirmError }}</p>
+        <p v-else id="single-review-save-blockers" class="field-help">保存并确认{{ blockingReasons.length ? `暂不可用：${blockingReasons.join('；')}` : '可用' }}。</p>
       </div>
 
       <AnimeDraftEditor
@@ -131,12 +185,12 @@ defineExpose({ session, editor })
         :can-retry="session.canRetry.value"
         :disabled="navigationLoading"
         @apply="applyModify"
-        @dirty-change="dirty = $event"
+        @dirty-change="dirty = $event; journey.setDirty($event)"
         @retry="retryModify"
         @reset="resetFailedModify"
       >
         <template #review-note>
-          <p class="review-note">审核完成后由保存宿主执行确认；本步骤不会保存、确认或触发外部订阅动作。</p>
+          <p class="review-note">保存并确认只提交当前草案能力、版本和本次操作的内存幂等键；不会回传订阅方案快照或触发外部订阅动作。</p>
         </template>
       </AnimeDraftEditor>
     </div>

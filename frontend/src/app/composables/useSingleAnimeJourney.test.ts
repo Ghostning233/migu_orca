@@ -37,7 +37,7 @@ describe('useSingleAnimeJourney (US-275)', () => {
     journey.newConfirmOperation()
     journey.begin('saving')
     journey.fail({ type: 'save_confirm_failed', details: { details: { outcome: 'SAVED_CONFIRM_FAILED', request_id: 'req-1', retry_action: 'ACCEPT_SAVED_REQUEST', secret: 'no' } } })
-    expect(journey.state.phase).toBe('review')
+    expect(journey.state.phase).toBe('saved_pending_confirm')
     expect(journey.state.error).toEqual({
       type: 'save_confirm_failed',
       message: '已保存订阅方案，但确认未完成，可直接重试确认。',
@@ -56,5 +56,17 @@ describe('useSingleAnimeJourney (US-275)', () => {
       type: 'journey_error',
       message: '操作失败，请重新尝试。',
     })
+  })
+
+  it('reuses a save key after a retryable failure', () => {
+    const journey = useSingleAnimeJourney()
+    journey.setCandidates(1)
+    journey.transition('candidates')
+    journey.selectCandidate()
+    journey.setDraft('draft', 1)
+    const firstKey = journey.newConfirmOperation()
+    journey.begin('saving')
+    journey.fail({ type: 'network_error' })
+    expect(journey.newConfirmOperation()).toBe(firstKey)
   })
 })
