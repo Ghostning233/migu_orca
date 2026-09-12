@@ -54,3 +54,14 @@ Thread: https://codex.openai.com/threads/current
 - plansProjection 搜索限定标题/字幕组；RequestsView 使用 router.replace 清理不存在、重复数组及非法 request_id query；同步更新冻结语义的 Chromium 断言并删除 Stage37 测试 EOF 空行。
 - 定向验证：相关 Vitest 24 passed；frontend typecheck/lint/build passed；真实 Chromium `test_app_plans_stage37.py test_app_requests.py` 19 passed；`git diff --check` passed。
 ---
+
+## [2026-09-12 22:58:00 CST] - US-297
+Thread: https://codex.openai.com/threads/current
+- 新增 SafeInfoDialog，仅调用 generated getRequestSafeInfo，按白名单展示标题/别名/季度证据/MiKan 合集公开编号、字幕组过滤、资源/脱敏文件名、总集数、历史及 AB 安全状态。
+- updated_episode_status 固定呈现“已更新集数：待开发”；错误文案固定中文，不显示原始异常。
+- 使用共享 useFocusTrap 实现 Teleport 弹窗 Escape/遮罩/关闭焦点恢复，使用请求序列丢弃关闭或切换后的旧响应；详情入口仅打开弹窗，不从详情快照拼装数据。
+- 定向验证：SafeInfoDialog Vitest 2 passed；typecheck/lint/build passed；真实 Chromium 1 passed。
+- **Learnings for future iterations:**
+  - Teleport 弹窗组件单测应从 document.body 断言内容，wrapper 只持有 Teleport 占位。
+  - Chromium 必须在 UI 改动后重新 build frontend/dist；旧哈希 dist 会掩盖新组件。
+---

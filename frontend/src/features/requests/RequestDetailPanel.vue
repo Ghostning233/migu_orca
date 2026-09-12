@@ -47,6 +47,7 @@ import {
   type RequestDetailResult,
   type RequestDetailSnapshot,
 } from '@/features/requests/requestDetail'
+import SafeInfoDialog from '@/features/requests/SafeInfoDialog.vue'
 import { statusLabel as detailStatusLabel } from '@/features/requests/requestsList'
 import { storageQuery } from '@/features/requests/requestStorage'
 
@@ -70,6 +71,7 @@ const loading = ref(false)
 const loadFailed = ref(false)
 const detail = ref<RequestDetailResult | null>(null)
 const actionInFlight = ref(false)
+const safeInfoOpen = ref(false)
 
 // Inline form visibility (legacy hidden toggles).
 const cancelFormOpen = ref(false)
@@ -382,6 +384,9 @@ watch(modifyClearFolderName, (clear) => {
 
       <!-- ── actions ─────────────────────────────────────────────── -->
       <div class="detail-actions" aria-label="订阅方案操作">
+        <BaseButton id="detail-safe-info-button" :disabled="actionInFlight" @click="safeInfoOpen = true">
+          全部信息
+        </BaseButton>
         <template v-if="isPending">
           <BaseButton id="detail-accept-button" variant="primary" :loading="actionInFlight" @click="confirmAccept">
             确认
@@ -702,6 +707,7 @@ watch(modifyClearFolderName, (clear) => {
     </div>
 
     <ConfirmDialog ref="confirmDialog" />
+    <SafeInfoDialog :open="safeInfoOpen" :request-id="props.requestId" @close="safeInfoOpen = false" />
   </PanelSection>
 
   <PanelSection v-else title="订阅方案详情" class="request-detail-panel">
