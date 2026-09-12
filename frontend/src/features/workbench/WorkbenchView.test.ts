@@ -612,8 +612,11 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
         message: '不要渲染此服务端消息',
         details: { details: { outcome: 'SAVED_CONFIRM_FAILED', request_id: 'saved-request-1', retry_action: 'ACCEPT_SAVED_REQUEST', secret: 'hidden' } },
       })
+      .mockRejectedValueOnce({ type: 'network_error' })
       .mockResolvedValueOnce({ request: { request_id: 'saved-request-1' } } as never)
     apiGet.mockResolvedValueOnce({
+      items: [],
+    } as never).mockResolvedValueOnce({
       items: [
         { tracking_id: 'tracking-from-server', request_id: 'saved-request-1' },
         { tracking_id: 'wrong-item', request_id: 'another-request' },
@@ -640,6 +643,13 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
       path: { request_id: 'saved-request-1' },
       body: { storage_dir: null },
     }))
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/{request_id}/accept')).toHaveLength(1)
+    expect(wrapper.find('#single-review-retry-accept').exists()).toBe(true)
+    expect(wrapper.text()).toContain('可明确重试确认')
+
+    await wrapper.find('#single-review-retry-accept').trigger('click')
+    await flushPromises()
+
     expect(apiGet).toHaveBeenCalledWith('/api/v1/tracking/items', { query: {} })
     expect(wrapper.find('#single-review-tracking-success').text()).toContain('已定位')
   })

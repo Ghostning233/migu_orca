@@ -117,3 +117,5 @@ Thread: https://codex.openai.com/threads/$CODEX_CURRENT_THREAD_ID
 - accept 的不确定结果统一先执行只读 tracking 核验，区分已找到、核验成功但未找到、核验失败；后两者只提供重试定位或无定位追番管理，不重复 accept/save-confirm。
 - 修正确认后 tracking 定位状态文案、详情加载后的焦点时序与单番壳层初始焦点，并更新真实 Chromium 的保存跳转、空搜索和不存在请求文件隔离验证。
 - 验证通过：前端 typecheck、lint、定向 Vitest（31 passed）、build，以及 Chromium 定向用例（3 passed）；`git diff --check` 通过。未修改后端、OpenAPI/generated client、批量流程或 F-D～F-G。
+- 后续审核修正：accept 核验成功但暂未找到 tracking 时保留 `saved_pending_confirm` 并允许明确重试 accept；核验失败切换为仅重试定位；明确 accept 失败不伪造已确认。handoff 拒绝空白 request/tracking ID，恢复态隐藏未保存草案提示；真实 `/app/add` shell 入口在渲染后聚焦单番输入。保存跳转 Chromium 用例等待详情响应，并只检查 requests 下不存在 JSON 文件。
+- 本轮验证：前端 typecheck、lint、定向 Vitest（31 passed）、build；Chromium `focuses_single or save_draft` 为 2 passed；`.migu_orca/storage` 不存在，`git diff --check` 通过。

@@ -677,6 +677,25 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
                 }, ensure_ascii=False),
             ),
         )
+        page.route(
+            "**/api/v1/tracking/items/tracking-wb-save*",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({
+                    "ok": True,
+                    "result": {
+                        "tracking_id": "tracking-wb-save", "request_id": "req-wb-save",
+                        "title": "葬送的芙莉莲", "season": 1, "subtitle_group": "喵萌奶茶屋",
+                        "poster_path": None, "status": "PENDING_SUBMIT", "status_label": "待提交",
+                        "status_group": "PENDING", "available_actions": [], "valid_resource_count": 1,
+                        "updated_episode": None, "updated_episode_status": "NOT_IMPLEMENTED",
+                        "total_episodes": 28, "revision": 1, "origin": "single", "batch_id": None,
+                        "created_at": "2026-09-12T00:00:00Z", "updated_at": None, "last_synced_at": None,
+                    },
+                }, ensure_ascii=False),
+            ),
+        )
 
         set_storage_preferences(page, storage_dir)
         _goto_workbench(page, live_server_url)
@@ -690,8 +709,9 @@ class TestAppWorkbenchCandidateSelectionAndDraft:
         expect(page.locator("#single-review-save-button")).to_be_enabled()
         page.locator("#single-review-save-button").click()
         page.wait_for_url("**/app/tracking?tracking_id=tracking-wb-save")
+        page.wait_for_selector("#tracking-detail-target", timeout=5000)
         assert page.url.endswith("/app/tracking?tracking_id=tracking-wb-save")
-        assert not (storage_dir / "requests").exists()
+        assert not list((storage_dir / "requests").glob("*.json"))
 
     def test_generation_failure_preserves_candidates_and_shows_sanitized_error(
         self, page: Page, live_server_url: str, storage_dir: Path

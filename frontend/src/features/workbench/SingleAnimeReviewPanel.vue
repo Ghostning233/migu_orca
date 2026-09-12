@@ -102,9 +102,10 @@ const saveButtonDisabled = computed(() => !journey.canConfirm() || confirmLoadin
 function handoffFrom(result: ConfirmRequestSaveResult): NonNullable<ConfirmRequestSaveResult['handoff']> | null {
   const handoff = result.handoff
   if (!handoff) return null
-  if (typeof handoff.request_id !== 'string' || handoff.request_id.length > 128) return null
-  if (typeof handoff.status !== 'string' || typeof handoff.next_action !== 'string') return null
-  if (typeof handoff.tracking_id !== 'string' || handoff.tracking_id.length > 128) return null
+  const validIdentifier = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0 && value.length <= 128
+  if (!validIdentifier(handoff.request_id)) return null
+  if (typeof handoff.status !== 'string' || !handoff.status.trim() || typeof handoff.next_action !== 'string' || !handoff.next_action.trim()) return null
+  if (!validIdentifier(handoff.tracking_id)) return null
   if (typeof handoff.tracking_ready !== 'boolean') return null
   if (handoff.tracking_status !== null && typeof handoff.tracking_status !== 'string') return null
   if (handoff.safe_message !== null && typeof handoff.safe_message !== 'string') return null
@@ -187,10 +188,17 @@ async function retrySavedConfirmation(): Promise<void> {
       acceptError.value = '方案已确认，但暂未定位到追番记录。可稍后重试定位。'
       return
     }
-  } catch {
+  } catch (cause) {
     // Any uncertain accept result is verified through the read-only tracking
     // projection first. A failed verification must never trigger another
     // accept request.
+    const safeError = toApiError(cause)
+    const requiresVerification = ['network_error', 'request_timeout', 'upstream_timeout', 'conflict', 'invalid_request_status'].includes(safeError.type)
+    if (!requiresVerification) {
+      journey.fail(safeError)
+      acceptError.value = '确认未完成，请根据错误提示处理后再试。'
+      return
+    }
     const located = await locateTracking(requestId)
     if (located === 'found') return
     trackingLocationState.value = located
@@ -198,8 +206,8 @@ async function retrySavedConfirmation(): Promise<void> {
       journey.finishTracking()
       acceptError.value = '确认结果暂无法核验。请重试定位，不会重复确认。'
     } else {
-      journey.finishTracking()
-      acceptError.value = '确认结果已核验，但暂未找到追番记录。请重试定位或打开无定位追番管理。'
+      journey.fail(safeError)
+      acceptError.value = '确认结果已核验，但暂未找到追番记录。可明确重试确认。'
     }
   } finally {
     confirmLoading.value = false
@@ -298,7 +306,7 @@ defineExpose({ session, editor, leaveGuard })
     </div>
 
     <div id="request-detail-container">
-      <p class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
+      <p v-if="journey.state.phase === 'review'" class="review-summary preview-mode-note" role="status">订阅草案（未保存）：当前修改只保留在本次页面操作中。</p>
       <div class="review-confirmation-block" aria-live="polite">
         <BaseButton v-if="journey.state.phase === 'review'" id="single-review-save-button" variant="primary" :loading="confirmLoading" :disabled="saveButtonDisabled" aria-describedby="single-review-save-blockers" @click="saveAndConfirm">保存并确认</BaseButton>
         <BaseButton v-else-if="journey.state.phase === 'saved_pending_confirm'" id="single-review-retry-accept" variant="primary" :loading="confirmLoading" :disabled="confirmLoading" @click="retrySavedConfirmation">重试确认</BaseButton>

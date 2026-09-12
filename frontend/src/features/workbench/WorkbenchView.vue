@@ -293,12 +293,9 @@ function discardDraft(destination: 'candidates' | 'input'): void {
 onMounted(() => {
   // The workbench has no persisted state; the storage profile comes from
   // Settings localStorage (relative only). Nothing to preload here.
-  // The application shell keeps the skip link as the first keyboard stop on
-  // a direct page load. Standalone mounts (including focused component tests)
-  // still receive the convenient title-input focus.
-  if (!document.getElementById('app-main')) {
-    void nextTick(() => singleInput.value?.focus())
-  }
+  // The real application shell enters this view at /app/add; focus the first
+  // actionable single-anime control after the shell has rendered it.
+  void nextTick(() => singleInput.value?.focus())
 })
 
 defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
