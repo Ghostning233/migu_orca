@@ -137,7 +137,7 @@ def test_app_shell_skip_link_moves_keyboard_focus_to_main(
     """US-260: keyboard users can bypass the brand and four navigation links."""
     _require_dist()
 
-    page.goto(f"{live_server_url}/app/add")
+    page.goto(f"{live_server_url}/app/settings")
     page.wait_for_selector(".app-title")
     page.keyboard.press("Tab")
     assert page.locator("#skip-link").evaluate("el => el === document.activeElement")

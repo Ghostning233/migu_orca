@@ -3,19 +3,20 @@
 MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全部走 npm（`npm ci`），
 与后端 `uv` 分离；**不得**混用多个 lockfile（`package-lock.json` 是唯一来源）。
 
-## Stage 34 当前执行边界
+## Stage 35 当前执行边界
 
-- 当前执行 PRD 是 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`，分支固定为
-  `ralph/stage34-shared-review-core`，stories 为 US-266～US-274。
-- Stage 34 只实现 F-B：模式输入、候选集合、draft session、`AnimeDraftEditor`、revision 重算和
-  旧流程薄兼容适配层；不得顺带实现 F-C～F-G。
-- 共享审核核心只消费 generated `createRequest`/`previewModifyRequest` 类型。`preview-save`、
-  单番 `confirmRequestSave` 和批量 `saveConfirmBatchItems` 只能留在或进入阶段明确指定的宿主适配层，
-  不得进入 `AnimeDraftEditor` 或 draft session。
-- `getRequestSafeInfo` 只服务已保存 Request；真实 `SafeInfoDialog` 已延后到 F-E。不得为未保存草案
-  请求、拼接或 mock “全部信息”。
-- 每次 Ralph 最多运行 3 个 stories；完成 US-268、US-271 后必须停下独立审核。普通 story 只跑
-  定向检查，完整前端与 Chromium 门禁只在 US-274 运行。
+- 当前执行 PRD 是 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md`，分支固定为
+  `ralph/stage35-single-anime-journey`，stories 为 US-275～US-283。
+- Stage 35 只实现 F-C：单番输入、人工选择真实 MiKan 合集、共享审核、原子保存确认和 tracking
+  只读 handoff；不得顺带实现 F-D～F-G。
+- 第三步必须复用 Stage 34 `AnimeDraftEditor`/`useDraftSession`。单番保存只调用 generated
+  `confirmRequestSave`，不得连续调用 `preview-save → accept`；批量兼容路径保持不变。
+- `save_confirm_failed` 只允许对已保存 Request 调用 `acceptRequest`，成功后通过只读 tracking list
+  精确解析服务端 tracking ID；不得推导 ID、重复保存或重复确认。
+- `/app/tracking?tracking_id=...` 在本阶段只显示真实安全摘要，不渲染 `safe_info` 或管理动作。
+  `getRequestSafeInfo`/`SafeInfoDialog` 仍归 F-E，正式 tracking 管理动作归 F-F。
+- 每次 Ralph 最多运行 3 个 stories；完成 US-277、US-280 后必须停下独立审核。普通 story 只跑
+  定向检查，完整前端与 Chromium 门禁只在 US-283 运行。
 
 ## 工程结构与约定
 
@@ -292,6 +293,8 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 键盘可达性：App.vue 有 `#skip-link`（`.skip-link`）——Tab 首个聚焦目标，
   href=`#app-main`，聚焦时才可见（main.css）；`main#app-main` 带 `tabindex="-1"`
   是 skip 的焦点落点。新增 feature 路由不要移除 main landmark。
+  `/app/add` 是 Stage 35 的明确例外：进入单番输入壳层后会自动聚焦番剧标题输入框；
+  其他没有 feature autofocus 的路由仍以 skip-link 作为首个 Tab 目标。
 - 批量候选浮层 `BatchCandidatePopover.vue`（US-207）：打开时焦点移入 dialog
   （close 按钮），Escape 关闭，父组件（BatchWorkbenchView）在关闭时**同步**把
   焦点恢复到触发按钮（`candidateTrigger` 在 open 时捕获 `$event.currentTarget`

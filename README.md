@@ -14,6 +14,8 @@ Stage 32「后端契约固化、兼容迁移与前端交接」已完成 B-D：�
 
 Stage 33 已完成 F-A「前端应用壳层与设计系统」（US-257～US-265）：基于 Stage 32 合入后的生成契约交付“添加番剧 / 追番方案 / 追番管理 / 设置”四项导航、新旧路由安全迁移、语义设计 Token、桌面壳层、共享状态视觉及现有页面兼容挂载。`/app/tracking` 仍使用现有 `QueueView` 兼容内容，不代表正式追番管理。Stage 34 已完成 F-B「前端共享审核核心」（US-266～US-274）：单番/批量共享模式输入、候选集合、服务端权威草案编辑器、revision 失败恢复和薄兼容适配层；旧保存/接受流程暂留在适配层，F-C/F-D 分别接管后移除，真实 `SafeInfoDialog`/`getRequestSafeInfo` 仅由 F-E 接入。执行范围与 handoff 见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`。
 
+Stage 35 已完成 F-C「单番添加完整旅程」（US-275～US-283）：把 `/app/add` 默认单番模式收敛为名称输入、人工选择真实 MiKan 合集、共享审核与“保存并确认”三个步骤，正式接入原子 `confirmRequestSave`、已保存确认失败恢复和真实 tracking 只读 handoff；不开发批量重构、SafeInfo 或正式 tracking 管理动作。执行范围与完成记录见 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md`，Ralph 状态已归档至 `scripts/ralph/archive/2026-09-12-stage35-single-anime-journey/`。
+
 Stage 27「前端工程化迁移与页面重构」已完成：建立 Vue 3 + TypeScript(strict) + Vite 独立前端工程，以 Stage 26 OpenAPI/DTO 生成类型化客户端，迁移 Settings、Request 列表与详情、单个与批量工作台及提交队列，完成响应式、无障碍、缓存和安全收敛；默认入口已切换到 Flask 同源托管的 `/app/*` SPA，旧 Jinja 主页面、`app.js` 与旧 CSS 已删除。实现与验收见 `docs/MiGuOrca_stage27_frontend_engineering_migration_PRD.md`。
 
 Stage 26「Web API 契约固化与服务端边界治理」已完成：冻结全部 `/api/v1` 端点清单与 golden contract、建立响应 DTO 与确定性 OpenAPI（`docs/api/openapi.json`）、按职责拆分 Web schema/serializer/service/context/route、为失败建立稳定 HTTP 状态（400/404/409/401/502/503/504/500）、把 Web storage 限制为服务端根目录下相对 profile（空值回落服务端根）、用服务端权威 DraftStore 替代客户端完整 Request 持久化，并建立 CI、静态检查、OpenAPI 漂移检查、真实 Chromium 门禁及 local-only 部署基线。实现与验收见 `docs/MiGuOrca_stage26_web_api_contract_hardening_PRD.md`。

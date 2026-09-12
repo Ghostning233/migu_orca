@@ -24,13 +24,14 @@ vi.mock('@/api/client', () => ({
   },
   toApiError: (error: unknown) =>
     error && typeof error === 'object' && 'type' in error
-      ? (error as { type: string; message: string })
+      ? (error as { type: string; message: string; details?: Record<string, unknown> })
       : { type: 'request_error', message: '请求失败，请重试' },
   isApiError: () => false,
   apiRequest: vi.fn(),
 }))
 
 const apiPost = vi.mocked(api.post)
+const apiGet = vi.mocked(api.get)
 
 type CandidateResult = NonNullable<
   operations['searchMikanCandidates']['responses']['200']['content']['application/json']['result']
@@ -131,6 +132,7 @@ async function mountWorkbench() {
       { path: '/add', name: 'add', component: WorkbenchView },
       { path: '/plans', name: 'plans', component: { template: '<p>requests</p>' } },
       { path: '/settings', name: 'settings', component: { template: '<p>settings</p>' } },
+      { path: '/tracking', name: 'tracking', component: { template: '<p>tracking</p>' } },
     ],
   })
   await router.push({ path: '/add' })
@@ -151,17 +153,29 @@ describe('WorkbenchView single search (US-204)', () => {
   beforeEach(() => {
     localStorage.clear()
     apiPost.mockReset()
+    apiGet.mockReset()
   })
 
-  it('shows the empty search state and validates the query before calling the API', async () => {
+  it('disables search for empty input before calling the API', async () => {
     const { wrapper } = await mountWorkbench()
 
     expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('输入番剧标题后搜索候选合集')
-    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
-    await nextTick()
-
+    expect(wrapper.find('#mikan-candidate-search-submit').attributes('disabled')).toBeDefined()
     expect(apiPost).not.toHaveBeenCalled()
-    expect(wrapper.find('#mikan-candidate-search-error').text()).toContain('搜索 MiKan 候选前必须填写番剧标题')
+  })
+
+  it('focuses the title input on entry and moves focus to the first candidate', async () => {
+    apiPost.mockResolvedValue(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await nextTick()
+    expect(document.activeElement).toBe(wrapper.find('#mikan-candidate-query').element)
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+
+    expect(document.activeElement).toBe(wrapper.find('.candidate-select').element)
   })
 
   it('searches candidates through the shared transport and renders cards', async () => {
@@ -247,6 +261,25 @@ describe('WorkbenchView single search (US-204)', () => {
     expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('直连合集')
   })
 
+  it('clears stale candidates when the search title is edited', async () => {
+    apiPost.mockResolvedValue(candidateResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(1)
+
+    await wrapper.find('#mikan-edit-search').trigger('click')
+    await nextTick()
+    await wrapper.find('#mikan-candidate-query').setValue('无职转生')
+    await nextTick()
+
+    expect(wrapper.findAll('.candidate-card')).toHaveLength(0)
+    expect(wrapper.find('#mikan-candidate-search-result').text()).toContain('输入番剧标题后搜索候选合集')
+    expect((wrapper.find('#mikan-candidate-query').element as HTMLInputElement).value).toBe('无职转生')
+  })
+
   it('shows a safe Chinese error state on search failure and keeps the query', async () => {
     apiPost.mockRejectedValue({ type: 'mikan_http_failed', message: 'MiKan HTTP 请求失败' })
     const { wrapper } = await mountWorkbench()
@@ -326,9 +359,31 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     // The draft preview panel mounts with the display snapshot.
     expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
     expect(wrapper.find('.preview-mode-note').text()).toContain('订阅草案（未保存）')
-    expect(wrapper.find('#draft-save-button').exists()).toBe(true)
+    expect(wrapper.find('#single-review-save-button').exists()).toBe(true)
     // The draft_id never enters the DOM.
     expect(wrapper.text()).not.toContain('opaque-draft-token')
+  })
+
+  it('protects review navigation and restores candidates after confirmed discard', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult()).mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('#single-review-back-candidates').trigger('click')
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(true)
+    await wrapper.find('.confirm-dialog .secondary-button').trigger('click')
+    expect(wrapper.find('#single-anime-review-step').exists()).toBe(true)
+
+    await wrapper.find('#single-review-back-candidates').trigger('click')
+    await wrapper.find('.confirm-dialog .danger-button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#single-anime-review-step').exists()).toBe(false)
+    expect(wrapper.find('.candidate-card').exists()).toBe(true)
   })
 
   it('isolates batch mode from the single draft panel and keeps the draft in memory', async () => {
@@ -480,14 +535,33 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     expect(wrapper.text()).not.toContain('draft_revision_conflict')
   })
 
-  it('COMPATIBILITY: saves the draft through preview-save and routes to the saved request', async () => {
+  it('enables atomic save-confirm when the review is valid', async () => {
+    apiPost.mockResolvedValueOnce(candidateResult()).mockResolvedValueOnce(createDraftResult())
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeUndefined()
+    expect(apiPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('sends only the generated save-confirm capability and consumes it on success', async () => {
     apiPost
       .mockResolvedValueOnce(candidateResult())
       .mockResolvedValueOnce(createDraftResult())
       .mockResolvedValueOnce({
-        request: previewSnapshot(),
-        summary: {},
-      })
+        outcome: 'CONFIRMED',
+        request: { request_id: 'req-confirmed' },
+        handoff: {
+          request_id: 'req-confirmed', status: 'CONFIRMED', next_action: 'TRACKING',
+          tracking_id: 'tracking-confirmed', tracking_status: 'PENDING_SUBMIT',
+          tracking_ready: true, safe_message: null,
+        },
+      } as never)
     const { wrapper, router } = await mountWorkbench()
 
     await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
@@ -495,32 +569,28 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await flushPromises()
     await wrapper.find('.candidate-select').trigger('click')
     await flushPromises()
-
-    await wrapper.find('#draft-save-button').trigger('click')
+    await wrapper.find('#single-review-save-button').trigger('click')
     await flushPromises()
 
-    expect(apiPost).toHaveBeenCalledWith('/api/v1/requests/preview-save', {
-      // US-212: the save reserves the draft against the last-observed revision.
-      body: { draft_id: 'opaque-draft-token', base_revision: 1, storage_dir: null },
+    const saveCall = apiPost.mock.calls.find(([path]) => path === '/api/v1/requests/save-confirm')
+    expect(saveCall?.[1]?.body).toMatchObject({
+      draft_id: 'opaque-draft-token',
+      base_revision: 1,
+      storage_dir: null,
     })
-    expect(router.currentRoute.value.path).toBe('/plans')
-    expect(router.currentRoute.value.query.request_id).toBe('req-draft-1')
+    expect(saveCall?.[1]?.body).toHaveProperty('idempotency_key')
+    expect(saveCall?.[1]?.body).not.toHaveProperty('request')
+    expect(router.currentRoute.value.name).toBe('tracking')
+    expect(router.currentRoute.value.query).toEqual({ tracking_id: 'tracking-confirmed' })
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/save-confirm')).toHaveLength(1)
   })
 
-  it('keeps the draft panel open when a save fails (US-212 retryable)', async () => {
+  it('keeps the review panel open after entering the save-confirm host', async () => {
     apiPost
       .mockResolvedValueOnce(candidateResult())
       .mockResolvedValueOnce(createDraftResult())
-      // A disk-write failure (storage_error 500): the server releases the
-      // reservation, so the panel must stay open for a retry — never force a
-      // re-search.
-      .mockRejectedValueOnce({
-        type: 'storage_error',
-        message: '保存订阅方案 JSON 失败',
-        status: 500,
-        details: { failed_step: 'save_request_snapshot', details: { request_id: 'req-draft-1' } },
-      })
-    const { wrapper, router } = await mountWorkbench()
+
+    const { wrapper } = await mountWorkbench()
 
     await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
     await wrapper.find('#mikan-candidate-search-submit').trigger('click')
@@ -528,16 +598,94 @@ describe('WorkbenchView candidate selection & draft (US-204)', () => {
     await wrapper.find('.candidate-select').trigger('click')
     await flushPromises()
 
-    await wrapper.find('#draft-save-button').trigger('click')
+    expect(wrapper.find('#single-review-save-button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
+    expect(apiPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('recovers a saved-but-unconfirmed request with accept and locates tracking safely', async () => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockRejectedValueOnce({
+        type: 'save_confirm_failed',
+        message: '不要渲染此服务端消息',
+        details: { details: { outcome: 'SAVED_CONFIRM_FAILED', request_id: 'saved-request-1', retry_action: 'ACCEPT_SAVED_REQUEST', secret: 'hidden' } },
+      })
+      .mockRejectedValueOnce({ type: 'network_error' })
+      .mockResolvedValueOnce({ request: { request_id: 'saved-request-1' } } as never)
+    apiGet.mockRejectedValueOnce({ type: 'network_error' }).mockResolvedValueOnce({
+      items: [],
+    } as never).mockResolvedValueOnce({
+      items: [
+        { tracking_id: 'tracking-from-server', request_id: 'saved-request-1' },
+        { tracking_id: 'wrong-item', request_id: 'another-request' },
+      ],
+    } as never)
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+    await wrapper.find('#single-review-save-button').trigger('click')
     await flushPromises()
 
-    const { useNotificationStore } = await import('@/app/stores/notification')
-    const notification = useNotificationStore()
-    expect(notification.current?.title).toBe('保存失败')
-    // The draft panel (and its draft_id/revision) is preserved for retry.
-    expect(wrapper.find('#detail-preview-edit-form').exists()).toBe(true)
-    expect(wrapper.find('#draft-save-button').exists()).toBe(true)
-    expect(router.currentRoute.value.path).toBe('/add')
+    expect(wrapper.find('#single-review-retry-accept').exists()).toBe(true)
+    expect(wrapper.text()).toContain('不会重复保存')
+    expect(wrapper.text()).not.toContain('不要渲染此服务端消息')
+
+    await wrapper.find('#single-review-retry-accept').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenLastCalledWith('/api/v1/requests/{request_id}/accept', expect.objectContaining({
+      path: { request_id: 'saved-request-1' },
+      body: { storage_dir: null },
+    }))
+    expect(apiPost.mock.calls.filter(([path]) => path === '/api/v1/requests/{request_id}/accept')).toHaveLength(1)
+    expect(wrapper.find('#single-review-retry-accept').exists()).toBe(false)
+    expect(wrapper.find('#single-review-retry-locate').exists()).toBe(true)
+
+    await wrapper.find('#single-review-retry-locate').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#single-review-retry-accept').exists()).toBe(true)
+    expect(wrapper.text()).toContain('可明确重试确认')
+
+    await wrapper.find('#single-review-retry-accept').trigger('click')
+    await flushPromises()
+
+    expect(apiGet).toHaveBeenCalledWith('/api/v1/tracking/items', { query: {} })
+    expect(wrapper.find('#single-review-tracking-success').text()).toContain('已定位')
+  })
+
+  it.each(['not_found', 'failed'] as const)('keeps accept closed after successful accept with %s tracking lookup', async (lookup) => {
+    apiPost
+      .mockResolvedValueOnce(candidateResult())
+      .mockResolvedValueOnce(createDraftResult())
+      .mockRejectedValueOnce({
+        type: 'save_confirm_failed',
+        details: { details: { outcome: 'SAVED_CONFIRM_FAILED', request_id: 'saved-request-2', retry_action: 'ACCEPT_SAVED_REQUEST' } },
+      })
+      .mockResolvedValueOnce({ request: { request_id: 'saved-request-2' } } as never)
+    if (lookup === 'failed') apiGet.mockRejectedValueOnce({ type: 'network_error' })
+    else apiGet.mockResolvedValueOnce({ items: [] } as never)
+    const { wrapper } = await mountWorkbench()
+
+    await wrapper.find('#mikan-candidate-query').setValue('芙莉莲')
+    await wrapper.find('#mikan-candidate-search-submit').trigger('click')
+    await flushPromises()
+    await wrapper.find('.candidate-select').trigger('click')
+    await flushPromises()
+    await wrapper.find('#single-review-save-button').trigger('click')
+    await flushPromises()
+    await wrapper.find('#single-review-retry-accept').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#single-review-retry-accept').exists()).toBe(false)
+    expect(wrapper.find('#single-review-retry-locate').exists()).toBe(true)
+    expect(wrapper.find('#single-review-open-unlocated').exists()).toBe(true)
   })
 
   it('shows a safe error and keeps the search state when generation fails', async () => {

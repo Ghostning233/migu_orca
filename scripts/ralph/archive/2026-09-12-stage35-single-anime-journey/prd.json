@@ -1,0 +1,173 @@
+{
+  "project": "MiGuOrca",
+  "branchName": "ralph/stage35-single-anime-journey",
+  "description": "Stage 35（F-C）：把 /app/add 默认单番模式收敛为输入名称、人工选择真实 MiKan 合集、审核并保存确认三个步骤，正式接入原子 confirmRequestSave 与可靠恢复，并把结果定位到真实 tracking 只读落点。",
+  "userStories": [
+    {
+      "id": "US-275",
+      "title": "冻结单番旅程状态与 generated 契约边界",
+      "description": "作为前端维护者，我需要明确且可测试的单番旅程状态机，以便三个步骤、保存确认和失败恢复不会形成平行状态。",
+      "acceptanceCriteria": [
+        "建立单番 journey/save-confirm 状态模型，覆盖输入、候选、审核、确认中、已保存待确认、已确认待定位和完成状态",
+        "定义合法状态迁移、主操作阻断、返回/丢弃语义和幂等键生命周期",
+        "类型只从 generated createRequest、previewModifyRequest、confirmRequestSave、acceptRequest、listTrackingItems、getTrackingItemDetail 提取，不手写 API DTO",
+        "安全错误分类只识别稳定 error_type 和白名单字段，不向 UI 透传原始 error_data",
+        "本 story 不调用 API、不修改 AnimeDraftEditor 或批量流程",
+        "Targeted journey state tests pass",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-276",
+      "title": "实现输入与候选两步旅程",
+      "description": "作为单番用户，我希望从名称输入进入真实 MiKan 合集选择，并能在失败或需要修正时返回。",
+      "acceptanceCriteria": [
+        "/app/add 默认单番，初始焦点、空输入阻断、搜索防重、输入摘要、零结果和安全失败状态完整",
+        "复用 AnimeModeSwitch、AnimeTitleInput、CandidateCollectionList 和现有搜索契约，不建立第二套组件",
+        "即使只有一个候选也不得自动选择；季数冲突和证据不足沿用既有明确确认规则",
+        "搜索成功移动焦点到候选，修改搜索保留原输入并按规则清理旧候选",
+        "批量模式现有输入、解析与 route-local 状态不变",
+        "Targeted input/candidate journey tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-277",
+      "title": "接入第三步共享审核与返回保护",
+      "description": "作为单番用户，我希望选择合集后使用共享编辑器审核方案，并能安全返回重选或修改搜索。",
+      "acceptanceCriteria": [
+        "第三步复用 AnimeDraftEditor/useDraftSession 的唯一快照、revision、dirty 和失败恢复状态",
+        "页面显示步骤标题、审核摘要、重新选择合集、修改搜索和保存确认阻断原因",
+        "重算中、dirty、季数未确认、无有效资源、字段失败或草案失效时保存并确认不可用",
+        "返回会丢弃草案或编辑时显式说明并确认；取消返回保持当前草案和焦点",
+        "本 story 不调用 preview-save、confirmRequestSave、acceptRequest 或 tracking API",
+        "Targeted review-step tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "第一开发批次终点：完成本 story 后停止 Ralph，等待独立审核。"
+    },
+    {
+      "id": "US-278",
+      "title": "接入原子保存并确认",
+      "description": "作为单番用户，我希望一次明确操作可靠地保存并确认方案，而不会产生重复 Request 或外部订阅。",
+      "acceptanceCriteria": [
+        "保存宿主在应用最新编辑后只调用 generated confirmRequestSave，不串联 preview-save 与 accept",
+        "请求只含 draft_id、base_revision、内存 idempotency_key 和相对 storage profile，不回传 Request 快照",
+        "一次用户操作生成一个键，同次网络/未知结果重试复用；新草案或业务修改后才生成新键",
+        "操作期间锁定草案写入；成功后使 draft capability 与旧幂等键失效",
+        "成功只消费 handoff 并进入本地待提交，不调用任何 Auto Bangumi/qBittorrent API",
+        "普通失败、reserved、revision/expired/replayed 与 idempotency conflict 显示固定安全恢复路径",
+        "Targeted save-confirm/idempotency tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-279",
+      "title": "实现已保存确认失败恢复",
+      "description": "作为保存已成功但确认失败的用户，我希望直接重试确认并保留已保存结果，而无需重新搜索或重复保存。",
+      "acceptanceCriteria": [
+        "只对白名单合法 save_confirm_failed details 进入已保存待确认状态，并保留公开 request_id",
+        "进入该状态立即废止 draft capability/保存幂等键，不得再次调用 save-confirm",
+        "重试确认只调用 generated acceptRequest；重复点击和并发请求被阻止",
+        "accept 成功后通过 listTrackingItems 的安全投影精确匹配同一 request_id，取得服务端 tracking_id，浏览器不得推导 ID",
+        "accept 响应未知或可能已接受的状态冲突先执行只读 tracking 核验；找到即视为成功，核验失败不得盲目重复确认",
+        "accept 成功但 tracking 定位失败时只允许重试定位或打开无定位追番管理，不得再次 accept/save-confirm",
+        "非白名单错误详情不进入 DOM、通知、URL、日志或 storage",
+        "Targeted saved-confirm recovery tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-280",
+      "title": "实现 tracking 只读 handoff 落点",
+      "description": "作为刚确认方案的用户，我希望进入追番管理并定位真实待提交记录，同时不被提前暴露正式管理动作。",
+      "acceptanceCriteria": [
+        "tracking 路由只接受互斥的合法 tracking_id 或既有 batch_id；歧义、数组、路径片段和未知 query 全部丢弃",
+        "成功使用 router.replace 进入 tracking；tracking_id 模式调用 generated getTrackingItemDetail，并支持刷新恢复、加载失败和安全重试",
+        "只展示顶层安全摘要、状态、有效资源数、总集数与已更新集数待开发，并聚焦/高亮目标",
+        "不得渲染 safe_info、external_mapping、audit_events、原始错误或 available_actions 按钮",
+        "batch_id 模式继续挂载 QueueView，旧 /app/queue 重定向和批量提交兼容不回归",
+        "tracking_ready=false 保留已确认事实并使用固定恢复文案，绝不重复保存",
+        "Targeted router/tracking handoff tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "第二开发批次终点：完成本 story 后停止 Ralph，等待独立审核。"
+    },
+    {
+      "id": "US-281",
+      "title": "完成单番离开保护与无障碍状态",
+      "description": "作为正在审核单番的用户，我希望意外离开前得到明确提醒，并能用键盘和焦点顺序完成整个旅程。",
+      "acceptanceCriteria": [
+        "未确认草案、未应用编辑和进行中操作触发应用内确认与 beforeunload；纯搜索结果不误触发",
+        "应用内弹窗默认焦点为留在此页；取消保持现场，确认离开清理所有 route-local capability",
+        "保存完成或已保存待重试确认状态不被误报为未保存草案",
+        "三个步骤、返回、错误恢复和 tracking handoff 具备明确标题、状态文本、键盘顺序与焦点目标",
+        "reduced-motion 和项目支持的桌面多视口保持可用",
+        "Targeted leave-guard/a11y tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-282",
+      "title": "移除单番旧保存兼容路径并完成安全回归",
+      "description": "作为维护者，我需要确保单番只有新的原子保存实现，同时批量兼容流程和敏感边界保持稳定。",
+      "acceptanceCriteria": [
+        "WorkbenchView 不再通过 DraftPreviewPanel 调用 previewSaveRequest 或跳转 plans request_id",
+        "删除无调用的 DraftPreviewPanel，或将仍需保留的包装收敛为无保存能力且有依赖守卫的展示层",
+        "代码搜索/测试证明单番只有 confirmRequestSave；BatchDraftPreviewPanel 的旧批量路径不变",
+        "路由清洗、刷新恢复、旧路由、批量模式和 Stage 34 共享核心回归通过",
+        "draft_id、revision、idempotency_key、candidate context、完整 URL、magnet、endpoint、凭据、原始响应和绝对路径不进入 URL、DOM、storage、日志、截图或 trace",
+        "Targeted compatibility/security tests pass",
+        "Typecheck passes",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-283",
+      "title": "完成最终门禁文档归档与后续 handoff",
+      "description": "作为维护者，我需要完整验证 F-C 并为 F-D、F-E、F-F 留下无歧义边界。",
+      "acceptanceCriteria": [
+        "US-275 至 US-282 的实现、story 状态和独立提交记录完整",
+        "完整前端 api:check、typecheck、lint、unit、build 与完整真实 Chromium 套件通过",
+        "必要后端非浏览器回归、git diff --check 和敏感信息边界检查通过",
+        "OpenAPI、generated client 和后端业务语义无修改，仓库不包含 dist、trace、截图或敏感测试产物",
+        "文档记录 F-D 复用共享核心、F-E 独占 SafeInfo、F-F 独占正式 tracking 管理动作",
+        "Ralph prd/progress 正确归档，工作区状态和设计偏差有记录",
+        "Typecheck passes",
+        "Tests pass",
+        "Verify in browser using dev-browser skill"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "第三开发批次与 Stage 35 最终终点。"
+    }
+  ]
+}

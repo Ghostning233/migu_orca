@@ -11,15 +11,14 @@
 //      URL/ID form; both paths generate an unsaved server-authoritative draft
 //      (save_request=false) through POST /api/v1/requests;
 //   3. 订阅草案 preview — the returned draft_id + display snapshot render in
-//      DraftPreviewPanel (editable preview-modify + one-shot preview-save).
+//      SingleAnimeReviewPanel (editable preview-modify + atomic save-confirm).
 //
 // Security boundary (US-194): candidate context and draft_id exist only in
 // component memory — never in URL, browser storage, history or logs. No
 // candidate is ever auto-selected; parser hints are never treated as real
 // season evidence (only the explicit confirmation checkbox or the server's
 // one-time candidate_context can do that).
-import { computed, nextTick, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
@@ -33,7 +32,7 @@ import LoadingState from '@/components/feedback/LoadingState.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
 
 import CandidateCollectionList from '@/features/workbench/CandidateCollectionList.vue'
-import DraftPreviewPanel from '@/features/workbench/DraftPreviewPanel.vue'
+import SingleAnimeReviewPanel from '@/features/workbench/SingleAnimeReviewPanel.vue'
 import BatchWorkbenchView from '@/features/workbench/BatchWorkbenchView.vue'
 import AnimeModeSwitch, { type AnimeMode } from '@/features/workbench/AnimeModeSwitch.vue'
 import AnimeTitleInput from '@/features/workbench/AnimeTitleInput.vue'
@@ -50,13 +49,11 @@ import {
 import { displayValue } from '@/features/requests/requestDetail'
 import type { RequestSnapshot } from '@/features/requests/requestDetail'
 import { currentStorageDir, storageQuery } from '@/features/requests/requestStorage'
-import { routeLocation } from '@/app/router/catalog'
 
 type CreateRequestResult = NonNullable<
   operations['createRequest']['responses']['200']['content']['application/json']['result']
 >
 
-const router = useRouter()
 const notification = useNotificationStore()
 
 // Search state.
@@ -72,6 +69,7 @@ const selections = ref<Record<AnimeMode, { start: number; end: number }>>({
 const searchLoading = ref(false)
 const searchError = ref('')
 const searchResult = ref<CandidateSearchResult | null>(null)
+const lastSearchQuery = ref('')
 
 // Fallback (direct-collection) state.
 const fallbackEnabled = ref(false)
@@ -84,8 +82,28 @@ const draftRequest = ref<RequestSnapshot | null>(null)
 const draftId = ref('')
 const draftRevision = ref(1)
 const draftLoading = ref(false)
+// Track per-candidate season confirmation in memory (never persisted).
+const seasonConfirmations = ref<Record<string, number | null>>({})
 
 const hasResults = computed(() => (searchResult.value?.candidates?.length ?? 0) > 0)
+
+function editSearch(): void {
+  searchResult.value = null
+  lastSearchQuery.value = ''
+  searchError.value = ''
+  void nextTick(() => singleInput.value?.focus())
+}
+
+watch(query, (value) => {
+  const normalized = value.trim()
+  if (!searchResult.value || normalized === lastSearchQuery.value) return
+  // A result belongs to the exact title that produced it. Keep the user's
+  // edited input, but remove stale candidates and their one-time confirmations.
+  searchResult.value = null
+  lastSearchQuery.value = ''
+  searchError.value = ''
+  seasonConfirmations.value = {}
+})
 
 async function changeMode(nextMode: AnimeMode): Promise<void> {
   if (nextMode === mode.value || searchLoading.value || draftLoading.value) return
@@ -159,6 +177,7 @@ function attemptedQueryTexts(): string[] {
 }
 
 async function searchCandidates(): Promise<void> {
+  if (searchLoading.value) return
   const validationError = validateCandidateQuery(query.value)
   if (validationError) {
     searchError.value = validationError
@@ -167,6 +186,9 @@ async function searchCandidates(): Promise<void> {
     return
   }
   searchError.value = ''
+  searchResult.value = null
+  seasonConfirmations.value = {}
+  lastSearchQuery.value = query.value.trim()
   searchLoading.value = true
   try {
     const result = await api.post<CandidateSearchResult>('/api/v1/mikan/candidates', {
@@ -186,6 +208,10 @@ async function searchCandidates(): Promise<void> {
     notification.error('候选搜索失败', '候选搜索失败。请稍后重试。')
   } finally {
     searchLoading.value = false
+    await nextTick()
+    if (searchResult.value?.candidates?.length) {
+      document.querySelector<HTMLElement>('#mikan-candidate-search-result .candidate-select')?.focus()
+    }
   }
 }
 
@@ -240,35 +266,9 @@ async function generateDraft(payload: Record<string, unknown>): Promise<boolean>
   }
 }
 
-// Track per-candidate season confirmation in memory (never persisted).
-const seasonConfirmations = ref<Record<string, number | null>>({})
-
 function confirmedSeasonFor(candidate: MikanCandidate): number | null {
   const key = candidate.bangumi_id
   return seasonConfirmations.value[key] ?? null
-}
-
-function onSaved(requestId: string): void {
-  draftRequest.value = null
-  draftId.value = ''
-  draftRevision.value = 1
-  seasonConfirmations.value = {}
-  notification.success('保存成功', `已保存订阅草案 ${requestId}`)
-  void router.push(routeLocation('plans', { request_id: requestId }))
-}
-
-function onDraftExpired(): void {
-  draftRequest.value = null
-  draftId.value = ''
-  draftRevision.value = 1
-}
-
-// US-212: a generic operation failure (e.g. a disk-write error on save) must
-// keep the draft panel open — the server releases the reservation on a failed
-// persist, so the same draft/revision can be retried without re-searching.
-// Only ``expired`` (the server reports the draft is truly gone) clears state.
-function onDraftOperationFailed(): void {
-  // The shared panel already surfaced the sanitized error notification.
 }
 
 function onDraftChanged(state: { request: RequestSnapshot; draftId: string; draftRevision: number }): void {
@@ -277,9 +277,25 @@ function onDraftChanged(state: { request: RequestSnapshot; draftId: string; draf
   draftRevision.value = state.draftRevision
 }
 
+function discardDraft(destination: 'candidates' | 'input'): void {
+  draftRequest.value = null
+  draftId.value = ''
+  draftRevision.value = 1
+  seasonConfirmations.value = {}
+  if (destination === 'input') {
+    searchResult.value = null
+    lastSearchQuery.value = ''
+    searchError.value = ''
+  }
+  void nextTick(() => singleInput.value?.focus())
+}
+
 onMounted(() => {
   // The workbench has no persisted state; the storage profile comes from
   // Settings localStorage (relative only). Nothing to preload here.
+  // The real application shell enters this view at /app/add; focus the first
+  // actionable single-anime control after the shell has rendered it.
+  void nextTick(() => singleInput.value?.focus())
 })
 
 defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
@@ -292,7 +308,8 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
     <!-- ── single search ──────────────────────────────────────────── -->
     <AnimeModeSwitch :model-value="mode" :disabled="searchLoading || draftLoading" @update:model-value="changeMode" />
 
-    <form v-if="mode === 'single'" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
+    <form v-if="mode === 'single' && !hasResults" id="mikan-candidate-search-form" class="workbench-search-form" @submit.prevent="searchCandidates">
+      <p class="step-label">步骤 1 · 输入番剧</p>
       <label for="mikan-candidate-query">番剧标题</label>
       <AnimeTitleInput
         ref="singleInput"
@@ -308,14 +325,14 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         {{ searchError }}
       </p>
       <div class="notification-actions">
-        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading">
+        <BaseButton id="mikan-candidate-search-submit" type="submit" variant="primary" :loading="searchLoading" :disabled="searchLoading || !query.trim()">
           搜索候选
         </BaseButton>
       </div>
     </form>
 
     <!-- ── direct fallback (single mode only) ────────────────────── -->
-    <template v-if="mode === 'single'">
+    <template v-if="mode === 'single' && !hasResults">
       <CheckboxRow
         id="mikan-fallback-enabled"
         v-model:checked="fallbackEnabled"
@@ -353,7 +370,7 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   </PanelSection>
 
   <!-- ── search results ──────────────────────────────────────────── -->
-  <PanelSection v-if="mode === 'single'" title="搜索结果" class="search-results-panel">
+  <PanelSection v-if="mode === 'single' && !draftRequest" title="搜索结果" class="search-results-panel">
     <div
       id="mikan-candidate-search-result"
       class="candidate-list-wrapper"
@@ -373,6 +390,11 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
         message="未找到候选合集。可调整番剧标题后重试，或勾选「搜索无结果时使用直连合集」直接生成订阅草案。"
       />
       <template v-else-if="searchResult && hasResults">
+        <p class="step-label">步骤 2 · 选择候选合集</p>
+        <p class="candidate-search-summary" role="status">
+          已搜索「{{ searchResult.query }}」，请选择要审核的 MiKan 合集。
+        </p>
+        <BaseButton id="mikan-edit-search" variant="secondary" @click="editSearch">修改搜索</BaseButton>
         <section v-if="parseSummaryRows().length" class="title-parse-summary" aria-label="标题解析摘要">
           <h3 class="detail-section-heading">标题解析摘要</h3>
           <dl class="detail-grid">
@@ -409,16 +431,14 @@ defineExpose({ searchCandidates, generateFromCandidate, generateFromFallback })
   </PanelSection>
 
   <!-- ── draft preview ───────────────────────────────────────────── -->
-  <DraftPreviewPanel
+  <SingleAnimeReviewPanel
     v-if="mode === 'single' && draftRequest && draftId"
     :key="draftId"
     :request="draftRequest"
     :draft-id="draftId"
     :draft-revision="draftRevision"
-    @saved="onSaved"
-    @expired="onDraftExpired"
-    @failed="onDraftOperationFailed"
     @changed="onDraftChanged"
+    @discard="discardDraft"
   />
   <LoadingState v-if="mode === 'single' && draftLoading && !draftRequest" message="正在从候选生成订阅草案..." />
 
