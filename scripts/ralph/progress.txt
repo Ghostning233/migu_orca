@@ -15,6 +15,7 @@ Started: Sun Sep 13 08:40:00 CST 2026
 - 外部写全部使用最新 revision、confirm、单意图 opaque idempotency key、单飞、服务端返回收敛和结果未知只读回查；不得盲重试或用新 key 掩盖未知结果。
 - DELETE_EXTERNAL 始终逐条操作且请求无 `file` 字段，必须明确并实际保留本地 Request、tracking、审计、任务和已下载媒体。
 - “已更新集数”固定为待开发；不得根据资源数、RSS、下载或文件名猜测。自动化只用 fake/route mock，不连接真实 MiKan、Auto Bangumi 或 qBittorrent。
+- 已知遗留红灯（**不是** US-309～US-315 引入，也不要在这些 story 里顺手修）：`/app/tracking` 已被 US-305 替换为 TrackingView，但 `tests/browser/test_app_queue.py`、`tests/browser/test_app_feature_parity.py`、`tests/browser/test_app_responsive_a11y.py`、`tests/browser/test_app_shell.py`、`tests/browser/test_app_workbench.py` 里约 30 条用例仍按旧 QueueView 选择器（`#batch-queue-list` / `#batch-queue-count` / `#tracking-detail-target`）断言该路由。旧入口退出、兼容定位与这些浏览器用例的迁移统一由 US-316 收口，US-317 跑完整 Chromium 门禁。普通 story 只跑定向检查，不要因为看到这批红灯而扩大范围。
 
 ## [2026-09-13 09:10:00 CST] - US-303
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
