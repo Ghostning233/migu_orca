@@ -1893,7 +1893,13 @@ class TestAppTrackingCompatAndRuntimeExit:
         """D38-12.3: the mockups' global chip waits for F-G; the page owns state."""
         _require_dist()
         _mock_list(page)
-        page.route("**/api/v1/autobangumi/capabilities", _probe_handler)
+        captured: dict[str, Any] = {}
+
+        def probe(route: Any, request: Any) -> None:
+            captured["body"] = request.post_data_json
+            _probe_handler(route, request)
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
         page.goto(f"{live_server_url}/app/tracking")
         page.wait_for_selector("#tracking-overview")
 
@@ -1907,14 +1913,19 @@ class TestAppTrackingCompatAndRuntimeExit:
         expect(page.locator("#tracking-connect")).to_be_visible()
         assert page.locator(".tracking-connection-status").count() == 0
         page.locator("#tracking-connect").click()
-        page.locator("#tracking-ab-base-url").fill("https://ab.invalid")
+        page.locator("#tracking-ab-base-url").fill("192.168.1.20:7890")
         page.locator("#tracking-ab-username").fill("user")
-        page.locator("#tracking-ab-password").fill("pass")
+        page.locator("#tracking-ab-password").fill("lan-password-canary")
         page.locator("#tracking-ab-probe").click()
         connection = page.locator(".tracking-connection-status")
         expect(connection).to_contain_text("当前页面已连接 Auto Bangumi")
         expect(page.locator("#tracking-capability-summary")).to_be_visible()
         expect(page.locator(".tracking-clear-connection")).to_be_visible()
+        assert captured["body"]["ab_config"]["base_url"] == "http://192.168.1.20:7890"
+        expect(page.locator("body")).not_to_contain_text("192.168.1.20:7890")
+        expect(page.locator("body")).not_to_contain_text("lan-password-canary")
+        assert page.url == f"{live_server_url}/app/tracking"
+        assert page.evaluate("() => ({ls: Object.keys(localStorage), ss: Object.keys(sessionStorage)})") == {"ls": [], "ss": []}
 
 
 def _probe_handler(route: Any, request: Any) -> None:

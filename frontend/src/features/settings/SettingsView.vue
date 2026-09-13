@@ -38,6 +38,10 @@ import BaseTextarea from '@/components/forms/BaseTextarea.vue'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import FormField from '@/components/layout/FormField.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
+import {
+  AUTO_BANGUMI_SERVICE_ROOT_HELP,
+  validateAutoBangumiServiceRoot,
+} from '@/features/autobangumi/serviceRoot'
 
 import { DEFAULT_PREFERENCES, listToText, textToList, type UserPreferences } from './preferences'
 import {
@@ -357,9 +361,10 @@ const requestId = computed(() => {
 const hasRequestContext = computed(() => requestId.value.length > 0)
 
 function buildAbConfig(): Record<string, string | boolean> {
+  const serviceRoot = validateAutoBangumiServiceRoot(ab.get('baseUrl'))
   const base: Record<string, string | boolean> = {
     auth_mode: abAuthMode.value,
-    base_url: ab.get('baseUrl'),
+    base_url: serviceRoot.value ?? ab.get('baseUrl').trim(),
     fallback_enabled: abFallbackEnabled.value,
   }
   if (abAuthMode.value === 'api_token') {
@@ -372,7 +377,8 @@ function buildAbConfig(): Record<string, string | boolean> {
 }
 
 function abValidate(): string | null {
-  if (!ab.get('baseUrl')) return '请填写服务地址。'
+  const serviceRoot = validateAutoBangumiServiceRoot(ab.get('baseUrl'))
+  if (!serviceRoot.value) return serviceRoot.message ?? '请填写合法的 Auto Bangumi 服务根地址。'
   if (abAuthMode.value === 'api_token') {
     if (!ab.get('token')) return '请填写 API Token。'
   } else {
@@ -763,10 +769,12 @@ onMounted(() => {
             id="settings-ab-endpoint"
             v-model="abBaseUrl"
             name="ab_base_url"
-            type="url"
+            type="text"
+            inputmode="url"
             autocomplete="off"
-            placeholder="例如：局域网 Auto Bangumi 服务根地址"
+            placeholder="例如：192.168.1.20:7890"
           />
+          <p class="field-help">{{ AUTO_BANGUMI_SERVICE_ROOT_HELP }}</p>
         </FormField>
 
         <template v-if="abAuthMode === 'password'">

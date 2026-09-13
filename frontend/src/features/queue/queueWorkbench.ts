@@ -17,6 +17,7 @@
  */
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
+import { normalizeAutoBangumiServiceRoot, validateAutoBangumiServiceRoot } from '@/features/autobangumi/serviceRoot'
 
 /** Public queue result produced by `GET /api/v1/batches/{id}/queue`. */
 export type BatchQueueResult = NonNullable<
@@ -119,7 +120,7 @@ export function buildAbConfig(
 ): AbConfigPayload {
   const base: AbConfigPayload = {
     auth_mode: authMode,
-    base_url: baseUrl,
+    base_url: normalizeAutoBangumiServiceRoot(baseUrl) ?? baseUrl.trim(),
     fallback_enabled: fallbackEnabled,
   }
   if (authMode === 'api_token') {
@@ -137,9 +138,8 @@ export function validateAbConfig(
   baseUrl: string,
   credentials: { username?: string; password?: string; token?: string },
 ): string | null {
-  if (!baseUrl.trim()) {
-    return '请填写服务地址。'
-  }
+  const serviceRoot = validateAutoBangumiServiceRoot(baseUrl)
+  if (!serviceRoot.value) return serviceRoot.message ?? '请填写合法的 Auto Bangumi 服务根地址。'
   if (authMode === 'api_token') {
     if (!(credentials.token ?? '').trim()) {
       return '请填写 API Token。'

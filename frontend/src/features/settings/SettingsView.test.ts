@@ -386,7 +386,7 @@ describe('SettingsView Auto Bangumi panel (US-201)', () => {
     const { wrapper } = await mountSettings()
     await nextTick()
 
-    await wrapper.find('#settings-ab-endpoint').setValue('http://ab.example.invalid')
+    await wrapper.find('#settings-ab-endpoint').setValue('192.168.1.20:7890')
     await wrapper.find('#settings-ab-username').setValue('browser-user')
     await wrapper.find('#settings-ab-password').setValue('browser-secret-password')
     await wrapper.find('#settings-ab-test-submit').trigger('click')
@@ -398,7 +398,7 @@ describe('SettingsView Auto Bangumi panel (US-201)', () => {
     expect(call?.[1]?.body).toEqual({
       ab_config: {
         auth_mode: 'password',
-        base_url: 'http://ab.example.invalid',
+        base_url: 'http://192.168.1.20:7890',
         username: 'browser-user',
         password: 'browser-secret-password',
         fallback_enabled: false,

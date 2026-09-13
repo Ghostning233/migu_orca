@@ -37,6 +37,7 @@ import BaseSelect from '@/components/forms/BaseSelect.vue'
 import CheckboxRow from '@/components/forms/CheckboxRow.vue'
 import FormField from '@/components/layout/FormField.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
+import { AUTO_BANGUMI_SERVICE_ROOT_HELP } from '@/features/autobangumi/serviceRoot'
 
 import {
   batchSubmitNotification,
@@ -421,11 +422,13 @@ watch(
           id="batch-queue-ab-endpoint"
           v-model="abBaseUrl"
           name="ab_base_url"
-          type="url"
+          type="text"
+          inputmode="url"
           autocomplete="off"
-          placeholder="例如：局域网 Auto Bangumi 服务根地址"
+          placeholder="例如：192.168.1.20:7890"
           :disabled="actionInFlight"
         />
+        <p class="field-help">{{ AUTO_BANGUMI_SERVICE_ROOT_HELP }}</p>
       </FormField>
 
       <template v-if="abAuthMode === 'password'">

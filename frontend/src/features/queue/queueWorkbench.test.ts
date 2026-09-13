@@ -97,14 +97,14 @@ describe('queue status helpers', () => {
 
 describe('AB config helpers', () => {
   it('builds a password-mode config with only public/credential fields', () => {
-    const config = buildAbConfig('password', 'https://ab.example/api', true, {
+    const config = buildAbConfig('password', '192.168.1.20:7890', true, {
       username: 'user',
       password: 'secret',
       token: 'token',
     })
     expect(config).toEqual({
       auth_mode: 'password',
-      base_url: 'https://ab.example/api',
+      base_url: 'http://192.168.1.20:7890',
       fallback_enabled: true,
       username: 'user',
       password: 'secret',
@@ -113,12 +113,12 @@ describe('AB config helpers', () => {
   })
 
   it('builds an api_token-mode config without password fields', () => {
-    const config = buildAbConfig('api_token', 'https://ab.example/api', false, {
+    const config = buildAbConfig('api_token', 'https://ab.example', false, {
       token: 'tok',
     })
     expect(config).toEqual({
       auth_mode: 'api_token',
-      base_url: 'https://ab.example/api',
+      base_url: 'https://ab.example',
       fallback_enabled: false,
       token: 'tok',
     })
@@ -128,20 +128,20 @@ describe('AB config helpers', () => {
 
   it('validates required fields with fixed Chinese copy', () => {
     expect(validateAbConfig('password', '', {})).toBe('请填写服务地址。')
-    expect(validateAbConfig('password', 'https://ab.example/api', { username: '', password: '' })).toBe(
+    expect(validateAbConfig('password', 'https://ab.example', { username: '', password: '' })).toBe(
       '请填写用户名。',
     )
     expect(
-      validateAbConfig('password', 'https://ab.example/api', { username: 'u', password: '' }),
+      validateAbConfig('password', 'https://ab.example', { username: 'u', password: '' }),
     ).toBe('请填写密码。')
-    expect(validateAbConfig('api_token', 'https://ab.example/api', { token: '' })).toBe(
+    expect(validateAbConfig('api_token', 'https://ab.example', { token: '' })).toBe(
       '请填写 API Token。',
     )
     expect(
-      validateAbConfig('api_token', 'https://ab.example/api', { token: 'tok' }),
+      validateAbConfig('api_token', 'https://ab.example', { token: 'tok' }),
     ).toBeNull()
     expect(
-      validateAbConfig('password', 'https://ab.example/api', { username: 'u', password: 'p' }),
+      validateAbConfig('password', 'https://ab.example', { username: 'u', password: 'p' }),
     ).toBeNull()
   })
 })
