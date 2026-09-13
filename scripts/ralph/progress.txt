@@ -159,3 +159,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 新增写状态时 `WRITE_MESSAGES` 的 `Record<TrackingWriteState, string>` 会强制补齐文案（编译期守护）；`writeSessionKeepsIntent` 用白名单（只列 3 个 indeterminate 态），因此新确定态天然不保留 intent——但必须在 catch 里显式清 `writeIntent`，否则同条目重放仍会复用旧 key。
 - 定向验证：`cd frontend && npm run typecheck && npm run lint && npm run api:check && npm run test:unit -- --run && npm run build`（typecheck/lint/api:check 通过；44 files / 491 tests passed；dist 构建成功）；`uv run pytest tests/browser/test_app_tracking.py -q`（10 passed，真实 Chromium）；`git diff --check`（exit 0，无空白错误）。
 ---
+
+## [2026-09-13 11:00:00 CST] - US-312
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: 结果未知恢复闭环。`TrackingInspector` 新增「结果未知恢复」区：只投影服务端 `available_actions` 里的 `RECOVER_AUTO`/`MARK_SUCCEEDED`/`MARK_FAILED`（纯本地，无 capability/凭据/scope 门控），并在恢复流程内提供页面自有的 **只读** `VERIFY_EXTERNAL`（仅 `credentialReady && external_verify=SUPPORTED` 且记录可恢复时渲染）；emit 改为 `recovery-requested { action, item }`（携带**动作码**与最新 detail）。`TrackingView.runTrackingRecovery` 拥有请求：AUTO 零确认零凭据、MARK_* 二次确认（默认焦点取消）、VERIFY_EXTERNAL 用当前 `ab_config` 只读核验同一 operation。
+- 请求体单点构造 `createTrackingRecoverBody()`：AUTO = `{expected_revision, action:'AUTO'}`；MARK_* 多一个 `confirm:true`；VERIFY_EXTERNAL 是唯一带 `ab_config` 的分支（缺 `base_url` 返回 null 即不发）。形状本身无法表达外部 ID/URL/原始响应/备注。
+- 恢复会话独立于写会话（无 idempotency key）：`TrackingRecoveryState`/`createRecoverySession`/`createRecoveryConflictSession`/`projectRecoveryOutcome`/`recoverySessionKeepsLock`；`needs_manual` 以服务端字段为准（`RECOVERY_REQUIRED` 但标志缺失时也按人工核验处理），文档枚举之外的 `outcome`（如管理回读的 `DISABLED`/`EXTERNAL_DELETED`）一律落到 `UNKNOWN`。200 用返回 tracking 收敛列表 + `reload()` 回查详情；409 清意图、重读列表与详情并要求重新确认；transport 不明只回查。
+- 锁定：`inspectorWriteBusy` 更名 `inspectorIntentBusy`（写/恢复在飞行中**或**其他条目持有未决 intent），同时喂给 submit/retry 与恢复按钮的 `actionBusy`；未决恢复（`UNKNOWN`/`RECOVERY_REQUIRED`）保持页面锁，人工结论落地后释放。`clearConnection()`/卸载同时重置写与恢复 intent。
+- Files changed: `frontend/src/features/tracking/trackingProjection.ts`、`TrackingInspector.vue`、`TrackingView.vue` 及三个 Vitest（+22 例）；`tests/browser/test_app_tracking.py`（+2 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。**未改后端契约、未新增端点或迁移。**
+- **Learnings for future iterations:**
+  - 恢复**没有 idempotency key**：绑定只有 `expected_revision`。因此不要套用写会话的 key 复用逻辑；`RECOVERY_ACTIONS` 里的 `VERIFY_EXTERNAL` 是「页面自有动作」，服务端 `available_actions` 永远不返回它，所以它不能放进 `TrackingAction`（generated code 联合没有它）——emit 直接传**动作码**，页面再 `createTrackingRecoveryIntent()` 校验（VERIFY_EXTERNAL 额外要求 `external_verify=SUPPORTED` 且记录可恢复）。
+  - `TrackingRecoverPayload` 的 `extra="forbid"` + `model_validator` 使「AUTO/MARK 带 `ab_config`」和「VERIFY_EXTERNAL 不带」都是 400；`confirm` 只对 MARK_* 有意义。前端把这三条规则编码在 `createTrackingRecoverBody` 一处，测试用 `toEqual` 整份断言即可守住。
+  - 服务端 `VERIFY_EXTERNAL` 的 `outcome` 可能返回恢复枚举之外的值（管理操作回读会返回 `DISABLED`/`EXTERNAL_DELETED`/旧状态）。必须 `const outcome: unknown = result.outcome` 显式比较，否则 TS 会把最后那条 fail-closed 分支判成死代码。
+  - 「needs_manual 时保持锁定」= 未决恢复继续占用页面单飞 intent：`inspectorIntentBusy` 必须把恢复会话与写会话一起算，否则另一个条目的 SUBMIT/RETRY 会在恢复未决时被放行。
+  - Vitest 陷阱：`vi.fn().mockResolvedValueOnce(async () => {...})` **不会**执行那个函数（它被当成返回值），要造「请求中途记录状态再抛错」必须用 `mockImplementationOnce`；真实弹窗断言（默认焦点）与 `answerConfirm()` 间谍互斥，同一用例里不能混用。
+- 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（44 files / 510 tests）、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（12 passed，真实 Chromium）、`git diff --check` 全部通过。
+---

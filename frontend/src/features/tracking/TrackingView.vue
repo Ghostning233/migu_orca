@@ -18,17 +18,26 @@ import { storageQuery } from '@/features/requests/requestStorage'
 import {
   capabilityStateLabel,
   capabilityVersionLabel,
+  createRecoveryConflictSession,
+  createRecoverySession,
   createTrackingActionIntent,
+  createTrackingRecoverBody,
+  createTrackingRecoveryIntent,
   createWriteConflictSession,
   createWriteSession,
   filterTrackingItems,
   isDefiniteWriteRejection,
+  isRecoveryActionCode,
   isWriteActionCode,
   probeStatusLabel,
   projectCapabilitySummary,
+  projectRecoveryOutcome,
   projectTrackingOverview,
   projectWriteOutcome,
+  recoveryConfirmation,
+  recoverySessionKeepsLock,
   sortTrackingItems,
+  TRACKING_RECOVER_ENDPOINT,
   TRACKING_STATUS_GROUPS,
   WRITE_ACTION_CONFIRMATIONS,
   WRITE_ACTION_ENDPOINTS,
@@ -36,6 +45,9 @@ import {
   type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
+  type TrackingRecoverResult,
+  type TrackingRecoveryActionCode,
+  type TrackingRecoverySession,
   type TrackingStatusGroup,
   type TrackingWriteActionCode,
   type TrackingWriteBody,
@@ -89,6 +101,15 @@ const writePending = ref(false)
 let writeIntent: TrackingActionIntent | null = null
 let writeSequence = 0
 let writeController: AbortController | null = null
+// Unknown-result recovery (US-312).  Like the write family, the page owns the
+// request (only VERIFY_EXTERNAL needs the page credential) and the single
+// page-level intent; no recovery key or credential is ever stored here beyond
+// the live session config.
+const recoverySession = ref<TrackingRecoverySession | null>(null)
+const recoveryLoading = ref(false)
+const recoveryPending = ref(false)
+let recoverySequence = 0
+let recoveryController: AbortController | null = null
 // List reads and server-confirmed tracking writes have independent lifecycles:
 // `listSequence` only invalidates stale list responses, while `writeGeneration`
 // marks the revision a sync (or a local revalidate) already applied.  A list
@@ -117,17 +138,23 @@ const selectedHidden = computed(() => Boolean(
   selectedItem.value && !filteredItems.value.some((item) => item.tracking_id === selectedTrackingId.value),
 ))
 /**
- * External writes are single-flight (Stage 38 invariant).  The lock covers the
- * external write action only: selecting, searching, refreshing and the pure
- * local revalidate of *other* items stay available while one write is running.
- * An unresolved result keeps locking other items because it still holds the
- * one page-level intent, but never blocks an explicit retry of its own item.
+ * External writes and recoveries are single-flight (Stage 38 invariant).  The
+ * lock covers the external action only: selecting, searching, refreshing and
+ * the pure local revalidate of *other* items stay available while one action is
+ * running.  An unresolved result keeps locking other items because it still
+ * holds the one page-level intent (D38-09.4 keeps that lock for an unresolved
+ * recovery too), but never blocks the item's own next step.
  */
-const inspectorWriteBusy = computed(() => {
-  if (writeLoading.value) return true
-  const session = writeSession.value
-  if (!session || !writeSessionKeepsIntent(session.state)) return false
-  return session.trackingId !== selectedTrackingId.value
+const inspectorIntentBusy = computed(() => {
+  if (writeLoading.value || recoveryLoading.value) return true
+  const write = writeSession.value
+  if (write && writeSessionKeepsIntent(write.state) && write.trackingId !== selectedTrackingId.value) {
+    return true
+  }
+  const recovery = recoverySession.value
+  return Boolean(
+    recovery && recoverySessionKeepsLock(recovery.state) && recovery.trackingId !== selectedTrackingId.value,
+  )
 })
 
 function queryTrackingId(): string | null {
@@ -211,12 +238,19 @@ function onConnected(value: { config: ProbeBody['ab_config']; capabilities: Capa
   credentialDialogOpen.value = false
 }
 
+/**
+ * Clearing the page session drops every page-level intent (the locked write key
+ * and the recovery lock).  The server record stays authoritative: the record's
+ * own status and actions are re-read from the server on demand, so nothing is
+ * lost or assumed.
+ */
 function clearConnection(): void {
   credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
   cancelSync()
   resetWrite()
+  resetRecovery()
   syncMessage.value = ''
   syncSummary.value = null
 }
@@ -306,15 +340,24 @@ function resetWrite(): void {
   writeSession.value = null
 }
 
+function resetRecovery(): void {
+  recoverySequence += 1
+  recoveryController?.abort()
+  recoveryController = null
+  recoveryPending.value = false
+  recoveryLoading.value = false
+  recoverySession.value = null
+}
+
 /**
- * Read-back after an external write (US-310).
+ * Read-back after an external write or a recovery (US-310, US-312).
  *
  * The list already converged from the returned tracking; only the inspector
- * detail is re-read, so a write never blanks the list.  When the round trip told
- * us nothing authoritative (409 conflict, unreadable result) the list is
+ * detail is re-read, so an action never blanks the list.  When the round trip
+ * told us nothing authoritative (409 conflict, unreadable result) the list is
  * re-read too, because the returned summary cannot be trusted in those paths.
  */
-async function recheckAfterWrite(trackingId: string, refreshList = false): Promise<void> {
+async function recheckAfterAction(trackingId: string, refreshList = false): Promise<void> {
   if (refreshList) await loadList(true)
   if (selectedTrackingId.value !== trackingId) return
   await inspector.value?.reload()
@@ -328,9 +371,10 @@ async function recheckAfterWrite(trackingId: string, refreshList = false): Promi
  * action code, so a retry can never be sent with submit copy (or the reverse).
  */
 async function runTrackingWrite(payload: { action: TrackingAction; item: TrackingItem }): Promise<void> {
-  // A confirmation is already open, or an external write is already running:
-  // one external write at a time, and no second dialog can displace the first.
-  if (writePending.value || writeLoading.value) return
+  // A confirmation is already open, or an external write/recovery is already
+  // running: one page-level intent at a time, and no second dialog can displace
+  // the first (D38-09.4: an active recovery blocks submit/retry).
+  if (writePending.value || writeLoading.value || recoveryPending.value || recoveryLoading.value) return
   const config = sessionConfig.value
   const capabilities = sessionCapabilities.value
   // No page credential session means no external write at all.
@@ -393,7 +437,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     const session = projectWriteOutcome(trackingId, action, result)
     writeSession.value = session
     if (!writeSessionKeepsIntent(session.state)) writeIntent = null
-    await recheckAfterWrite(trackingId)
+    await recheckAfterAction(trackingId)
   } catch (error) {
     if (sequence !== writeSequence) return
     const apiError = toApiError(error)
@@ -406,7 +450,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       // nothing is ever resent on the user's behalf.
       writeIntent = null
       writeSession.value = createWriteConflictSession(trackingId, action, apiError.type)
-      await recheckAfterWrite(trackingId, true)
+      await recheckAfterAction(trackingId, true)
       return
     }
     if (isDefiniteWriteRejection(apiError)) {
@@ -417,7 +461,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       // and the page only reads the latest state back. Nothing is ever resent.
       writeIntent = null
       writeSession.value = createWriteSession(trackingId, action, 'REJECTED')
-      await recheckAfterWrite(trackingId, true)
+      await recheckAfterAction(trackingId, true)
       return
     }
     // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
@@ -425,11 +469,104 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
     // never duplicate a subscription, so this path fails closed and only reads
     // back; it never mints a new key and never resends by itself.
     writeSession.value = createWriteSession(trackingId, action, 'UNKNOWN')
-    await recheckAfterWrite(trackingId, true)
+    await recheckAfterAction(trackingId, true)
   } finally {
     if (sequence === writeSequence) {
       writeLoading.value = false
       if (writeController === controller) writeController = null
+    }
+  }
+}
+
+/**
+ * Run one explicit unknown-result recovery (US-312).
+ *
+ * ``RECOVER_AUTO`` is pure local: no credential, no confirmation, no external
+ * call.  ``MARK_SUCCEEDED``/``MARK_FAILED`` are the user's manual conclusion and
+ * are always confirmed a second time (the dialog defaults to cancel and states
+ * that the user must have checked Auto Bangumi first).  ``VERIFY_EXTERNAL`` is
+ * the read-only external check: it uses the live page session's ``ab_config``
+ * for one verification of the record's own operation and can never create an
+ * external write.  Every path converges on the returned tracking and never
+ * resends by itself.
+ */
+async function runTrackingRecovery(
+  payload: { action: TrackingRecoveryActionCode; item: TrackingItem },
+): Promise<void> {
+  // One page-level intent at a time: a confirmation is open, or a write or
+  // recovery is already running, or another item still owns the locked intent.
+  if (recoveryPending.value || recoveryLoading.value || writePending.value || writeLoading.value) return
+  const requested = payload.action
+  if (!isRecoveryActionCode(requested)) return
+  const trackingId = payload.item.tracking_id
+  const unresolvedWrite = writeSession.value
+  if (unresolvedWrite && unresolvedWrite.trackingId !== trackingId && writeSessionKeepsIntent(unresolvedWrite.state)) return
+  const openRecovery = recoverySession.value
+  if (openRecovery && openRecovery.trackingId !== trackingId && recoverySessionKeepsLock(openRecovery.state)) return
+  const confirmation = recoveryConfirmation(requested)
+  if (confirmation) {
+    recoveryPending.value = true
+    let confirmed = false
+    try {
+      confirmed = (await confirmDialog.value?.confirm({ ...confirmation, cancelLabel: '取消' })) ?? false
+    } finally {
+      recoveryPending.value = false
+    }
+    // Cancelling the recovery confirmation sends zero requests.
+    if (!confirmed) return
+  }
+  // Read the live session *after* the confirmation: a session cleared while the
+  // dialog was open must not be used (and the local actions never need one).
+  const intent = createTrackingRecoveryIntent(payload.item, requested, sessionCapabilities.value)
+  if (!intent) return
+  const body = createTrackingRecoverBody(
+    intent.action, intent.expectedRevision, sessionConfig.value, storageQuery().storage_dir,
+  )
+  // A body the page cannot build safely (external verification without the live
+  // session) is not sent at all.
+  if (!body) return
+
+  const sequence = ++recoverySequence
+  const controller = new AbortController()
+  recoveryController?.abort()
+  recoveryController = controller
+  recoveryLoading.value = true
+  recoverySession.value = createRecoverySession(trackingId, intent.action, 'IN_FLIGHT')
+  try {
+    const result = await api.post<TrackingRecoverResult>(TRACKING_RECOVER_ENDPOINT, {
+      path: { tracking_id: trackingId }, body, signal: controller.signal,
+    })
+    if (sequence !== recoverySequence) return
+    // The returned tracking converges the list row; the detail is re-read so the
+    // inspector shows the recovered status and its next legitimate action.
+    applyReturnedTracking(result.tracking)
+    recoverySession.value = projectRecoveryOutcome(trackingId, intent.action, result)
+    await recheckAfterAction(trackingId)
+  } catch (error) {
+    if (sequence !== recoverySequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    if (apiError.status === 409) {
+      // Revision/state conflict: the recovery was refused before anything was
+      // persisted, so re-read the server state and let the user confirm again.
+      recoverySession.value = createRecoveryConflictSession(trackingId, intent.action)
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    if (isDefiniteWriteRejection(apiError)) {
+      // A structured non-409 4xx is decided before any state change.
+      recoverySession.value = createRecoverySession(trackingId, intent.action, 'REJECTED')
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    // Anything unreadable stays indeterminate: read back, keep the recovery
+    // state and never resend on the user's behalf.
+    recoverySession.value = createRecoverySession(trackingId, intent.action, 'UNKNOWN')
+    await recheckAfterAction(trackingId, true)
+  } finally {
+    if (sequence === recoverySequence) {
+      recoveryLoading.value = false
+      if (recoveryController === controller) recoveryController = null
     }
   }
 }
@@ -449,6 +586,7 @@ watch(selectedTrackingId, (trackingId) => {
 onBeforeUnmount(() => {
   cancelSync()
   resetWrite()
+  resetRecovery()
   credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
@@ -514,9 +652,11 @@ onBeforeUnmount(() => {
           :capabilities="sessionCapabilities"
           :credential-ready="Boolean(sessionConfig)"
           :write-session="writeSession"
-          :write-busy="inspectorWriteBusy"
+          :recovery-session="recoverySession"
+          :write-busy="inspectorIntentBusy"
           @tracking-updated="applyReturnedTracking"
           @write-requested="runTrackingWrite"
+          @recovery-requested="runTrackingRecovery"
         />
         <template v-else>
           <h2 id="tracking-inspector-heading">检查器</h2>

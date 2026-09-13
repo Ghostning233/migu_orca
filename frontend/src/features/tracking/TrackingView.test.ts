@@ -1067,3 +1067,338 @@ describe('TrackingView explicit retry (US-311)', () => {
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
   })
 })
+
+const recoverAutoAction = {
+  code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY',
+  requires_confirmation: false, target_scopes: [],
+}
+const markSucceededAction = {
+  code: 'MARK_SUCCEEDED', label: '标记为成功', style: 'PRIMARY',
+  requires_confirmation: true, target_scopes: [],
+}
+const markFailedAction = {
+  code: 'MARK_FAILED', label: '标记为失败', style: 'DANGER',
+  requires_confirmation: true, target_scopes: [],
+}
+const recoveryActions = [recoverAutoAction, markSucceededAction, markFailedAction]
+
+/** A record the server says is recoverable (only the three local actions). */
+function recoveryDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    ...detail(), status: 'RECOVERY_REQUIRED', status_label: '需要恢复', status_group: 'ATTENTION',
+    available_actions: recoveryActions, ...overrides,
+  }
+}
+
+/** The authoritative recovery summary the recover endpoint returns. */
+function recoverySummary(overrides: Record<string, unknown> = {}) {
+  return {
+    ...item('tracking-1', '葬送的芙莉莲'), status: 'RECOVERY_REQUIRED', status_label: '需要恢复',
+    status_group: 'ATTENTION', revision: 2, available_actions: recoveryActions, ...overrides,
+  }
+}
+
+function recoveryPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    tracking_id: 'tracking-1', action: 'AUTO', outcome: 'ACTIVE', checked_revision: 1, next_revision: 2,
+    checked_at: '2026-09-13T05:00:00Z', operation_id: 'operation-1', needs_manual: false,
+    tracking: recoverySummary({ status: 'ACTIVE', status_label: '追番中', status_group: 'ACTIVE' }),
+    ...overrides,
+  }
+}
+
+function recoveredBodies(): Record<string, unknown>[] {
+  return apiPost.mock.calls
+    .filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}/recover')
+    .map((call) => (call[1]?.body ?? {}) as Record<string, unknown>)
+}
+
+function clickDialogButton(label: string): void {
+  const button = Array.from(document.querySelectorAll<HTMLButtonElement>('.confirm-dialog-actions button'))
+    .find((candidate) => candidate.textContent?.includes(label))
+  if (!button) throw new Error(`no confirm-dialog button labelled ${label}`)
+  button.click()
+}
+
+describe('TrackingView unknown-result recovery (US-312)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('recovers locally with no credential, no confirmation and no external write', async () => {
+    serveApi(() => recoveryDetail({ revision: 4 }))
+    apiPost.mockResolvedValueOnce(recoveryPayload({
+      checked_revision: 4, next_revision: 5,
+      tracking: recoverySummary({ status: 'ACTIVE', status_label: '已恢复', status_group: 'ACTIVE', revision: 5 }),
+    }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    const confirmSpy = answerConfirm(wrapper, true)
+    expect(wrapper.find('#tracking-recover-auto').exists()).toBe(true)
+
+    await wrapper.find('#tracking-recover-auto').trigger('click')
+    await flushPromises()
+
+    // AUTO contacts nothing: no confirmation, no credential, no other endpoint.
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(apiPost).toHaveBeenLastCalledWith('/api/v1/tracking/items/{tracking_id}/recover', {
+      path: { tracking_id: 'tracking-1' },
+      body: { expected_revision: 4, action: 'AUTO' },
+      signal: expect.any(AbortSignal),
+    })
+    const result = wrapper.find('#tracking-recovery-result')
+    expect(result.text()).toContain('恢复完成')
+    expect(result.text()).not.toContain('ACTIVE')
+    // The returned tracking converges the list row without a page reload.
+    expect(wrapper.find('.tracking-list-item').text()).toContain('已恢复')
+  })
+
+  it('confirms every manual verdict again, defaults the focus on cancel and sends no external evidence', async () => {
+    let recovered = false
+    serveApi(() => (recovered
+      ? {
+          ...recoveryDetail(), status: 'SUBMIT_FAILED', status_label: '提交失败',
+          available_actions: [revalidateAction, retryAction],
+        }
+      : recoveryDetail()))
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockImplementationOnce((async () => {
+        recovered = true
+        return recoveryPayload({
+          action: 'MARK_FAILED', outcome: 'SUBMIT_FAILED',
+          tracking: recoverySummary({
+            status: 'SUBMIT_FAILED', status_label: '提交失败', available_actions: [revalidateAction, retryAction],
+          }),
+        })
+      }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-recover-failed').trigger('click')
+    await flushPromises()
+    // A manual verdict is never inferred by one click.
+    expect(recoveredBodies()).toHaveLength(0)
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    expect(document.querySelector('.confirm-dialog')?.textContent).toContain('独立核对')
+    expect(document.activeElement?.textContent).toContain('取消')
+    clickDialogButton('取消')
+    await flushPromises()
+    expect(recoveredBodies()).toHaveLength(0)
+    expect(wrapper.find('#tracking-recovery-result').exists()).toBe(false)
+
+    await wrapper.find('#tracking-recover-failed').trigger('click')
+    await flushPromises()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    clickDialogButton('确认标记失败')
+    await flushPromises()
+
+    // The body carries the verdict and nothing else: no external id/URL/raw
+    // result/note can even be expressed.
+    expect(recoveredBodies()).toEqual([{ expected_revision: 1, action: 'MARK_FAILED', confirm: true }])
+    expect(wrapper.find('#tracking-recovery-result').text()).toContain('恢复完成')
+    // The recovered record is re-read, so its next legitimate action appears.
+    expect(wrapper.find('#tracking-retry').exists()).toBe(true)
+  })
+
+  it('verifies externally read-only with the live page session only', async () => {
+    serveApi(() => recoveryDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockResolvedValueOnce(recoveryPayload({ action: 'VERIFY_EXTERNAL' }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    // No page session: the read-only external check is not offered at all.
+    expect(wrapper.find('#tracking-recover-verify').exists()).toBe(false)
+    // The local actions stay available without it.
+    expect(wrapper.find('#tracking-recover-auto').exists()).toBe(true)
+    expect(wrapper.find('#tracking-recover-succeeded').exists()).toBe(true)
+
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-recover-verify').trigger('click')
+    await flushPromises()
+
+    expect(recoveredBodies()).toEqual([{
+      expected_revision: 1,
+      action: 'VERIFY_EXTERNAL',
+      ab_config: {
+        auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user',
+        password: 'pass', fallback_enabled: false,
+      },
+    }])
+    // Only the probe and the read-only verification ever reached the server.
+    expect(apiPost.mock.calls.map((call) => call[0]))
+      .toEqual(['/api/v1/autobangumi/capabilities', '/api/v1/tracking/items/{tracking_id}/recover'])
+    expect(wrapper.find('#tracking-recovery-result').text()).toContain('恢复完成')
+    expect(wrapper.text()).not.toContain('VERIFY_EXTERNAL')
+  })
+
+  it('keeps the recovery state and only reads back when the result is unknown', async () => {
+    serveApi(() => recoveryDetail({ revision: 2 }))
+    apiPost.mockRejectedValueOnce(unknownError as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    const readsBefore = apiGet.mock.calls.length
+
+    await wrapper.find('#tracking-recover-auto').trigger('click')
+    await flushPromises()
+
+    const result = wrapper.find('#tracking-recovery-result')
+    expect(result.classes()).toContain('is-unknown')
+    expect(result.text()).toContain('恢复结果未知')
+    expect(result.text()).toContain('只读回查')
+    expect(wrapper.text()).not.toContain('network_error')
+    // Exactly one recovery reached the server, and it was never resent.
+    expect(recoveredBodies()).toHaveLength(1)
+    expect(recoveredBodies()[0]).toEqual({ expected_revision: 2, action: 'AUTO' })
+    expect(result.text()).not.toContain('恢复完成')
+    // The page only re-read the server state, including the list.
+    expect(apiGet.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items').length).toBeGreaterThan(1)
+    expect(apiGet.mock.calls.length).toBeGreaterThan(readsBefore)
+
+    // The user may explicitly recover again; nothing is replayed automatically.
+    apiPost.mockResolvedValueOnce(recoveryPayload({ checked_revision: 2, next_revision: 3 }) as never)
+    await wrapper.find('#tracking-recover-auto').trigger('click')
+    await flushPromises()
+    expect(recoveredBodies()).toHaveLength(2)
+    expect(wrapper.find('#tracking-recovery-result').text()).toContain('恢复完成')
+  })
+
+  it('never reads an undocumented outcome as success', async () => {
+    for (const outcome of ['DISABLED', 'EXTERNAL_DELETED']) {
+      apiGet.mockReset()
+      apiPost.mockReset()
+      serveApi(() => recoveryDetail())
+      apiPost.mockResolvedValueOnce(capabilities() as never)
+        .mockResolvedValueOnce(recoveryPayload({ action: 'VERIFY_EXTERNAL', outcome: outcome as never }) as never)
+      const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+      await connect(wrapper)
+      answerConfirm(wrapper, true)
+      await wrapper.find('#tracking-recover-verify').trigger('click')
+      await flushPromises()
+
+      const result = wrapper.find('#tracking-recovery-result')
+      expect(result.classes()).toContain('is-unknown')
+      expect(result.text()).not.toContain('恢复完成')
+      expect(wrapper.text()).not.toContain(outcome)
+      wrapper.unmount()
+    }
+  })
+
+  it('converges a conflicting recovery on the server state and asks again', async () => {
+    let revision = 1
+    serveApi(() => recoveryDetail({ revision }))
+    apiPost.mockImplementationOnce((async () => { revision = 6; throw conflictError }) as never)
+      .mockResolvedValueOnce(recoveryPayload({ checked_revision: 6, next_revision: 7 }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    const listReadsBefore = apiGet.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items').length
+
+    await wrapper.find('#tracking-recover-auto').trigger('click')
+    await flushPromises()
+
+    const result = wrapper.find('#tracking-recovery-result')
+    expect(result.classes()).toContain('is-conflict')
+    expect(result.text()).toContain('本次未执行恢复')
+    expect(result.text()).toContain('请重新确认')
+    expect(wrapper.text()).not.toContain('tracking_revision_conflict')
+    expect(wrapper.text()).not.toContain('"current_revision"')
+    // Nothing was silently resent; both the list and the detail were re-read.
+    expect(recoveredBodies()).toHaveLength(1)
+    expect(apiGet.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items').length)
+      .toBeGreaterThan(listReadsBefore)
+
+    await wrapper.find('#tracking-recover-auto').trigger('click')
+    await flushPromises()
+    expect(recoveredBodies()).toHaveLength(2)
+    expect(recoveredBodies()[1]?.expected_revision).toBe(6)
+  })
+
+  it('keeps submit and retry locked while a recovery still needs a manual verdict', async () => {
+    const trackingTwoDetail = {
+      ...detail(), tracking_id: 'tracking-2', request_id: 'request-tracking-2', title: '咒术回战',
+      status: 'SUBMIT_FAILED', status_label: '提交失败', status_group: 'ATTENTION', revision: 7,
+      available_actions: [retryAction],
+    }
+    let currentDetail: unknown = recoveryDetail()
+    apiGet.mockImplementation((url: string) => Promise.resolve(
+      (url === '/api/v1/tracking/items'
+        ? { items: [item('tracking-1', '葬送的芙莉莲'), item('tracking-2', '咒术回战', 'ATTENTION')], summary: {}, warnings: [] }
+        : currentDetail) as never,
+    ))
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      // AUTO cannot conclude from local evidence: only a human may decide.
+      .mockResolvedValueOnce(recoveryPayload({ outcome: 'RECOVERY_REQUIRED', needs_manual: true }) as never)
+      .mockResolvedValueOnce(recoveryPayload({
+        action: 'MARK_SUCCEEDED',
+        tracking: recoverySummary({ status: 'ACTIVE', status_label: '已恢复', status_group: 'ACTIVE', revision: 3,
+          available_actions: [] }),
+      }) as never)
+      .mockResolvedValueOnce(submitPayload({
+        tracking_id: 'tracking-2', tracking: { ...item('tracking-2', '咒术回战'), revision: 9 },
+      }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-recover-auto').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-recovery-manual-notice').text()).toContain('先在 Auto Bangumi 中独立核对')
+    expect(wrapper.find('#tracking-recovery-result').classes()).toContain('is-recovery_required')
+
+    // The unresolved recovery still owns the page intent: another record's
+    // retry must stay locked (D38-09.4).
+    currentDetail = trackingTwoDetail
+    await wrapper.findAll('.tracking-list-item')[1]?.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-retry').attributes('disabled')).toBeDefined()
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    // A locked action opens no dialog and sends nothing at all.
+    expect(document.querySelector('.confirm-dialog')).toBeNull()
+    expect(recoveredBodies()).toHaveLength(1)
+    expect(wrapper.find('#tracking-recovery-result').exists()).toBe(false)
+
+    // The manual verdict is the only way out; once it lands the lock is gone.
+    currentDetail = recoveryDetail({ revision: 2 })
+    await wrapper.findAll('.tracking-list-item')[0]?.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-recovery-manual-notice').exists()).toBe(true)
+    await wrapper.find('#tracking-recover-succeeded').trigger('click')
+    await flushPromises()
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    clickDialogButton('确认标记成功')
+    await flushPromises()
+    expect(wrapper.find('#tracking-recovery-result').text()).toContain('恢复完成')
+
+    // With the verdict landed the lock is gone: the other record may retry.
+    currentDetail = trackingTwoDetail
+    await wrapper.findAll('.tracking-list-item')[1]?.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-retry').attributes('disabled')).toBeUndefined()
+    await wrapper.find('#tracking-retry').trigger('click')
+    await flushPromises()
+    clickDialogButton('确认重试')
+    await flushPromises()
+    expect(recoveredBodies().map((body) => body.action)).toEqual(['AUTO', 'MARK_SUCCEEDED'])
+    expect(apiPost).toHaveBeenLastCalledWith('/api/v1/tracking/items/{tracking_id}/retry', expect.objectContaining({
+      path: { tracking_id: 'tracking-2' },
+    }))
+  })
+
+  it('aborts an in-flight recovery when the page connection is cleared', async () => {
+    let resolveRecover: ((value: unknown) => void) | undefined
+    serveApi(() => recoveryDetail({ revision: 1 }))
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveRecover = resolve }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+
+    await wrapper.find('#tracking-recover-verify').trigger('click')
+    await flushPromises()
+    expect(recoveredBodies()).toHaveLength(1)
+
+    await wrapper.find('.tracking-clear-connection').trigger('click')
+    await flushPromises()
+    resolveRecover?.(recoveryPayload({ action: 'VERIFY_EXTERNAL' }))
+    await flushPromises()
+    // The cleared session drops the page intent: no result is rendered from a
+    // response the user cancelled, and the list is never rewritten by it.
+    expect(wrapper.find('#tracking-recovery-result').exists()).toBe(false)
+    expect(wrapper.find('.tracking-connection-status').exists()).toBe(false)
+  })
+})

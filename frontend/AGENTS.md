@@ -356,7 +356,7 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   固定落到 `TrackingWriteState` 的 `REJECTED`（`WRITE_MESSAGES` 固定中文，绝不渲染服务端
   `error_type`/原始状态，也不暗示可能已创建订阅）。该态 `writeSessionKeepsIntent()` 为 false：
   释放页面级 intent（其他条目不再被写锁挡住），下一次确认生成**新 key**；仍然只读回查
-  （`recheckAfterWrite(trackingId, true)`），绝不自动重发。只有网络失败/timeout/非 JSON/5xx/
+  （`recheckAfterAction(trackingId, true)`），绝不自动重发。只有网络失败/timeout/非 JSON/5xx/
   不可读的 status 才继续走 `UNKNOWN` 并保留锁定 intent。
 - **幂等 key 生命周期（US-310/US-311）**：一次用户确认一个 key；只有
   `writeSessionKeepsIntent()` 为 true（`UNKNOWN`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`）
@@ -366,6 +366,26 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   一律释放 intent，下一次确认生成新 key。锁定期间若用户点到**另一个** action，直接不发请求
   （既不换 key 也不按新动作重放）。外部写单飞：请求中只禁用外部写动作，
   选择/筛选/刷新/其他条目的本地复核保持可用。
+- **结果未知恢复（US-312）**：恢复由 `TrackingView.runTrackingRecovery` 统一拥有，端点固定
+  `TRACKING_RECOVER_ENDPOINT`（`/api/v1/tracking/items/{tracking_id}/recover`）。服务端返回的
+  `RECOVER_AUTO`/`MARK_SUCCEEDED`/`MARK_FAILED` 是**纯本地**动作（无 capability、无凭据、无 scope），
+  只按 `available_actions` 渲染；`VERIFY_EXTERNAL` **永不出现**在 `available_actions` 里，它是恢复
+  流程自己的**只读**选择，只在 `credentialReady && external_verify=SUPPORTED` 且服务端标记该记录可恢复
+  （`RECOVER_AUTO` 存在）时渲染，且只核验同一 operation，绝不创建外部写。
+- **恢复请求体（US-312）**：由 `createTrackingRecoverBody()` 单点构造 —— `AUTO` 只发
+  `expected_revision + action`（无 `confirm`、无 `ab_config`，也不需要确认弹窗），`MARK_*` 只多一个
+  `confirm: true`，`VERIFY_EXTERNAL` 是唯一带 `ab_config` 的分支（缺 `base_url` 时返回 null，即不发请求）。
+  请求体形状本身无法表达外部 ID/URL/原始响应/备注。人工结论必须二次确认
+  （`RECOVERY_ACTION_CONFIRMATIONS`，`ConfirmDialog` 默认焦点即取消按钮）；`needs_manual` 时 inspector
+  渲染 `RECOVERY_NEEDS_MANUAL_NOTICE`，要求先在 Auto Bangumi 独立核对再选择人工结论。
+- **恢复状态与锁定（US-312）**：恢复会话独立于写会话
+  （`trackingProjection.createRecoverySession/createRecoveryConflictSession/projectRecoveryOutcome`），
+  没有 idempotency key；`recoverySessionKeepsLock()` 仅在 `UNKNOWN`/`RECOVERY_REQUIRED` 为 true，
+  `needs_manual` 以服务端字段为准（`RECOVERY_REQUIRED` 缺失该标志时也按人工核验处理），文档枚举之外的
+  `outcome` 一律落到 `UNKNOWN`，绝不当作成功。`inspectorIntentBusy` = 写/恢复在飞行中**或**其他条目仍
+  持有未决 intent，它同时喂给 submit/retry 与恢复按钮（`actionBusy`），因此一次未决恢复会锁住其他条目的
+  外部写（D38-09.4）；管理动作由服务端 `available_actions` 保证在恢复态根本不出现。`clearConnection()`
+  同时重置写与恢复 intent —— 服务端记录仍是权威，按需重读。
 - 浏览器测试：`tests/browser/test_app_tracking.py`。Playwright **后注册的 route 优先**，
-  所以 revalidate 这类写端点要在 `_mock_list()` 之后单独 `page.route` 注册；否则会被
+  所以 revalidate/recover 这类写端点要在 `_mock_list()` 之后单独 `page.route` 注册；否则会被
   更宽的 `**/api/v1/tracking/items*` 通配吃掉。

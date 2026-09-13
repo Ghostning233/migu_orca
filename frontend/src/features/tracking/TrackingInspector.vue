@@ -9,13 +9,17 @@ import LoadingState from '@/components/feedback/LoadingState.vue'
 import { routeLocation } from '@/app/router/catalog'
 import { storageQuery } from '@/features/requests/requestStorage'
 import {
+  canVerifyExternally,
   createTrackingActionIntent,
   executableTrackingActions,
   projectRevalidateIssues,
+  RECOVERY_NEEDS_MANUAL_NOTICE,
   type CapabilityResult,
   type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
+  type TrackingRecoveryActionCode,
+  type TrackingRecoverySession,
   type TrackingRevalidateBody,
   type TrackingRevalidateIssueView,
   type TrackingRevalidateResult,
@@ -36,12 +40,17 @@ const props = defineProps<{
   credentialReady?: boolean
   /** Page-level external write state for one item; the page owns the request. */
   writeSession?: TrackingWriteSession | null
-  /** Another item's unresolved external write still holds the single page intent. */
+  /** Page-level unknown-result recovery state for one item (US-312). */
+  recoverySession?: TrackingRecoverySession | null
+  /** The single page intent is spent elsewhere (another item's write/recovery). */
   writeBusy?: boolean
 }>()
 const emit = defineEmits<{
   (e: 'tracking-updated', tracking: TrackingItem): void
   (e: 'write-requested', payload: { action: TrackingAction; item: TrackingItem }): void
+  // The recovery action travels as its server-agreed code, not as a projected
+  // action object: VERIFY_EXTERNAL is never part of the server's action list.
+  (e: 'recovery-requested', payload: { action: TrackingRecoveryActionCode; item: TrackingItem }): void
 }>()
 const detail = ref<TrackingDetail | null>(null)
 const loading = ref(false)
@@ -97,9 +106,64 @@ const writeHint = computed(() => {
 })
 
 function requestWrite(action: TrackingAction | null): void {
-  if (!action || !detail.value || writeInFlight.value || props.writeBusy) return
+  if (!action || !detail.value || actionBusy.value) return
   // The page confirms, builds the intent (fresh revision + opaque key) and sends.
   emit('write-requested', { action, item: detail.value })
+}
+
+// -- unknown-result recovery (US-312) ----------------------------------------
+// The three local actions are rendered exactly as the server offers them for a
+// recovery status, so no capability or credential is involved; the read-only
+// external verification is the page's own recovery-flow choice and therefore
+// requires the live page session to have proven `external_verify`.  The page
+// owns the request: this component only projects the actions and renders the
+// page-level recovery result.
+const RECOVERY_BUTTON_IDS = {
+  RECOVER_AUTO: 'tracking-recover-auto',
+  MARK_SUCCEEDED: 'tracking-recover-succeeded',
+  MARK_FAILED: 'tracking-recover-failed',
+} as const satisfies Record<Exclude<TrackingRecoveryActionCode, 'VERIFY_EXTERNAL'>, string>
+
+const RECOVERY_VARIANTS = {
+  PRIMARY: 'primary', SECONDARY: 'secondary', DANGER: 'danger',
+} as const
+
+/** Only the server-computed local recovery actions, in server order. */
+const recoveryActions = computed(() => (
+  detail.value
+    ? executableTrackingActions(detail.value, null).filter(
+        (action): action is TrackingAction & { code: keyof typeof RECOVERY_BUTTON_IDS } =>
+          action.code === 'RECOVER_AUTO' || action.code === 'MARK_SUCCEEDED' || action.code === 'MARK_FAILED',
+      )
+    : []
+))
+/**
+ * The read-only external verification is offered only inside a recovery flow
+ * (the server marks every recoverable status with RECOVER_AUTO) and only while
+ * the page session proves the capability; it never creates an external write.
+ */
+const verifyExternalOffered = computed(() => (
+  recoveryActions.value.length > 0 && props.credentialReady === true && canVerifyExternally(props.capabilities)
+))
+const recoveryInFlight = computed(() => (
+  props.recoverySession?.trackingId === props.trackingId && props.recoverySession.state === 'IN_FLIGHT'
+))
+const thisRecovery = computed(() => (
+  props.recoverySession && props.recoverySession.trackingId === props.trackingId ? props.recoverySession : null
+))
+/** This item's own conflicting action is in flight: both change its revision. */
+const itemActionInFlight = computed(() => writeInFlight.value || recoveryInFlight.value)
+/**
+ * One page-level intent at a time: a recovery in flight, or an unresolved write
+ * of another item, disables every action that would race it (D38-09.4).
+ * Management actions are server-computed, so a record in a recovery status
+ * never offers any — this lock covers the actions the page can actually send.
+ */
+const actionBusy = computed(() => props.writeBusy === true || itemActionInFlight.value)
+
+function requestRecovery(action: TrackingRecoveryActionCode): void {
+  if (!detail.value || actionBusy.value) return
+  emit('recovery-requested', { action, item: detail.value })
 }
 
 function resetRevalidate(): void {
@@ -228,9 +292,11 @@ watch(() => props.trackingId, () => {
   resetRevalidate()
   void loadDetail()
 }, { immediate: true })
-// A write result supersedes a local revalidate verdict for the same item.
-watch(() => props.writeSession, (session) => {
-  if (session && session.trackingId === props.trackingId) resetRevalidate()
+// A write or recovery result supersedes a local revalidate verdict for the
+// same item (all three change the revision the verdict was made against).
+watch([() => props.writeSession, () => props.recoverySession], ([write, recovery]) => {
+  const changed = write?.trackingId === props.trackingId || recovery?.trackingId === props.trackingId
+  if (changed) resetRevalidate()
 })
 onBeforeUnmount(() => {
   controller?.abort()
@@ -291,7 +357,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           id="tracking-revalidate"
           variant="secondary"
           :loading="revalidateLoading"
-          :disabled="revalidateLoading || writeInFlight"
+          :disabled="revalidateLoading || itemActionInFlight"
           @click="revalidatePlan"
         >{{ revalidateAction.label }}</BaseButton>
         <p v-else class="field-help">当前状态不可发起本地复核。</p>
@@ -316,7 +382,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           <BaseButton
             id="tracking-submit"
             :loading="writeInFlight"
-            :disabled="writeInFlight || writeBusy"
+            :disabled="actionBusy"
             @click="requestWrite(submitAction)"
           >{{ submitAction.label }}</BaseButton>
         </template>
@@ -325,7 +391,7 @@ defineExpose({ reload: () => fetchDetail(true) })
           <BaseButton
             id="tracking-retry"
             :loading="writeInFlight"
-            :disabled="writeInFlight || writeBusy"
+            :disabled="actionBusy"
             @click="requestWrite(retryAction)"
           >{{ retryAction.label }}</BaseButton>
         </template>
@@ -341,6 +407,47 @@ defineExpose({ reload: () => fetchDetail(true) })
           <ul v-if="thisWrite.issues.length" class="tracking-submit-issues" aria-label="提交问题">
             <li v-for="issue in thisWrite.issues" :key="issue.code">{{ issue.message }}</li>
           </ul>
+        </div>
+      </section>
+
+      <section
+        v-if="recoveryActions.length || verifyExternalOffered || thisRecovery"
+        class="tracking-inspector-section tracking-recovery"
+        aria-labelledby="tracking-recovery-heading"
+      >
+        <h4 id="tracking-recovery-heading">结果未知恢复</h4>
+        <p class="field-help">恢复只用本地证据或只读外部核验，不会重新提交，也不会创建、修改或删除 Auto Bangumi 订阅。</p>
+        <div class="tracking-recovery-actions">
+          <BaseButton
+            v-for="action in recoveryActions"
+            :key="action.code"
+            :id="RECOVERY_BUTTON_IDS[action.code]"
+            :variant="RECOVERY_VARIANTS[action.style]"
+            :disabled="actionBusy"
+            @click="requestRecovery(action.code)"
+          >{{ action.label }}</BaseButton>
+          <BaseButton
+            v-if="verifyExternalOffered"
+            id="tracking-recover-verify"
+            variant="secondary"
+            :disabled="actionBusy"
+            @click="requestRecovery('VERIFY_EXTERNAL')"
+          >只读核验外部状态</BaseButton>
+        </div>
+        <p v-if="!verifyExternalOffered && recoveryActions.length" class="field-help">
+          只读外部核验需要先在页面连接 Auto Bangumi，并确认外部核验能力可用。
+        </p>
+        <div
+          v-if="thisRecovery"
+          id="tracking-recovery-result"
+          class="tracking-recovery-result"
+          :class="`is-${thisRecovery.state.toLowerCase()}`"
+          role="status"
+        >
+          <p class="tracking-recovery-verdict">{{ thisRecovery.message }}</p>
+          <p v-if="thisRecovery.needsManual" id="tracking-recovery-manual-notice" class="tracking-recovery-manual">
+            {{ RECOVERY_NEEDS_MANUAL_NOTICE }}
+          </p>
         </div>
       </section>
 
@@ -389,4 +496,11 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-submit-result.is-needs_reconfirm, .tracking-submit-result.is-verifying_external, .tracking-submit-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
 .tracking-submit-verdict { font-weight: 600; }
 .tracking-submit-issues { padding-left: 1.2rem; }
+.tracking-recovery { gap: .65rem; }
+.tracking-recovery-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.tracking-recovery-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+.tracking-recovery-result.is-active { border-left-color: var(--color-feedback-success-border); }
+.tracking-recovery-result.is-submit_failed, .tracking-recovery-result.is-conflict, .tracking-recovery-result.is-rejected, .tracking-recovery-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
+.tracking-recovery-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
+.tracking-recovery-verdict, .tracking-recovery-manual { font-weight: 600; }
 </style>

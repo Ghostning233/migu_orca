@@ -726,3 +726,203 @@ class TestAppTrackingStage38:
         page.wait_for_selector("#tracking-submit-result:has-text('提交成功')")
         assert len(retries) == 2, retries
         expect(page.locator(".tracking-list-item").first).to_contain_text("重试成功")
+
+
+def _recovery_actions() -> list[dict[str, Any]]:
+    return [
+        {"code": "RECOVER_AUTO", "label": "自动恢复", "style": "SECONDARY",
+         "requires_confirmation": False, "target_scopes": []},
+        {"code": "MARK_SUCCEEDED", "label": "标记为成功", "style": "PRIMARY",
+         "requires_confirmation": True, "target_scopes": []},
+        {"code": "MARK_FAILED", "label": "标记为失败", "style": "DANGER",
+         "requires_confirmation": True, "target_scopes": []},
+    ]
+
+
+def _recovery_item(tracking_id: str, title: str, **overrides: Any) -> dict[str, Any]:
+    return {
+        **_item(tracking_id, title, "ATTENTION"),
+        "status": "RECOVERY_REQUIRED", "status_label": "需要恢复",
+        "available_actions": _recovery_actions(), **overrides,
+    }
+
+
+def _detail_payload(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **item, "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+        "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None, "safe_info": None,
+        "current_operation": None, "revalidation_issues": [], "external_mapping": None,
+        "audit_events": [], "warnings": [],
+    }
+
+
+def _probe_capabilities() -> dict[str, Any]:
+    return {
+        "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+        "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED", "subscription_submit": "SUPPORTED",
+        "subscription_modify": "SUPPORTED", "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+        "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+        "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED", "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+        "checked_at": None, "safe_message": "已完成安全探测",
+    }
+
+
+class TestAppTrackingRecovery:
+    """US-312: unknown-result recovery in a real Chromium session."""
+
+    def test_local_auto_and_manual_verdict_stay_separate_and_safe(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        recover_calls: list[dict[str, Any]] = []
+        state = {"revision": 1}
+        requests: list[str] = []
+        page.on("request", lambda request: requests.append(request.url))
+
+        def detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"ok": True, "result": _detail_payload(
+                    _recovery_item("tracking-a", "葬送的芙莉莲", revision=state["revision"]),
+                )}, ensure_ascii=False),
+            )
+
+        def recover(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            body = json.loads(request.post_data or "{}")
+            recover_calls.append(body)
+            if body["action"] == "AUTO":
+                # No local evidence: only a human verdict can progress.
+                state["revision"] = 2
+                route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                    "tracking_id": "tracking-a", "action": "AUTO", "outcome": "RECOVERY_REQUIRED",
+                    "checked_revision": 1, "next_revision": 2, "checked_at": "2026-09-13T06:00:00+00:00",
+                    "operation_id": "operation-1", "needs_manual": True,
+                    "tracking": _recovery_item("tracking-a", "葬送的芙莉莲", revision=2),
+                }}, ensure_ascii=False))
+                return
+            state["revision"] = 3
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "action": "MARK_SUCCEEDED", "outcome": "ACTIVE",
+                "checked_revision": 2, "next_revision": 3, "checked_at": "2026-09-13T06:05:00+00:00",
+                "operation_id": "operation-1", "needs_manual": False,
+                "tracking": {
+                    **_item("tracking-a", "葬送的芙莉莲"), "status_label": "已恢复",
+                    "revision": 3, "available_actions": [],
+                },
+            }}, ensure_ascii=False))
+
+        _mock_list(page)
+        # Registered after the broader tracking routes: later routes win.
+        page.route("**/api/v1/tracking/items/tracking-a/recover", recover)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+
+        # The three local recovery actions need no page session at all; the
+        # read-only external check is not offered without one.
+        expect(page.locator("#tracking-recover-auto")).to_be_visible()
+        expect(page.locator("#tracking-recover-succeeded")).to_be_visible()
+        expect(page.locator("#tracking-recover-failed")).to_be_visible()
+        expect(page.locator("#tracking-recover-verify")).to_have_count(0)
+
+        page.locator("#tracking-recover-auto").click()
+        page.wait_for_selector("#tracking-recovery-result")
+        # AUTO is pure local: no confirmation dialog and a credential-free body.
+        expect(page.locator(".confirm-dialog")).to_have_count(0)
+        assert recover_calls == [{"expected_revision": 1, "action": "AUTO"}], recover_calls
+        notice = page.locator("#tracking-recovery-manual-notice")
+        expect(notice).to_contain_text("先在 Auto Bangumi 中独立核对")
+        expect(page.locator("#tracking-recovery-result")).not_to_contain_text("RECOVERY_REQUIRED")
+
+        # A manual verdict is always confirmed again, and the default focus is
+        # the cancel button so a stray Enter cannot assert a verdict.
+        page.locator("#tracking-recover-succeeded").click()
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("独立核对")
+        assert page.evaluate("document.activeElement.textContent") == "取消", "default focus must be cancel"
+        page.locator(".confirm-dialog-actions button").filter(has_text="取消").click()
+        expect(page.locator(".confirm-dialog")).to_have_count(0)
+        assert len(recover_calls) == 1, recover_calls
+
+        page.locator("#tracking-recover-succeeded").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认标记成功").click()
+        page.wait_for_selector("#tracking-recovery-result:has-text('恢复完成')")
+        assert recover_calls == [
+            {"expected_revision": 1, "action": "AUTO"},
+            {"expected_revision": 2, "action": "MARK_SUCCEEDED", "confirm": True},
+        ], recover_calls
+        expect(page.locator(".tracking-list-item").first).to_contain_text("已恢复")
+        expect(page).to_have_url(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        # Recovery never touches a submit/retry endpoint and leaks nothing.
+        assert not [url for url in requests if "/submit" in url or "/retry" in url], requests
+        assert "MARK_SUCCEEDED" not in page.locator("body").inner_text()
+
+    def test_read_only_external_verification_needs_the_live_page_session(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        recover_calls: list[dict[str, Any]] = []
+        requests: list[str] = []
+        page.on("request", lambda request: requests.append(request.url))
+
+        def detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"ok": True, "result": _detail_payload(
+                    _recovery_item("tracking-a", "葬送的芙莉莲", revision=4),
+                )}, ensure_ascii=False),
+            )
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(
+                {"ok": True, "result": _probe_capabilities()}, ensure_ascii=False,
+            ))
+
+        def recover(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            recover_calls.append(json.loads(request.post_data or "{}"))
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "action": "VERIFY_EXTERNAL", "outcome": "RECOVERY_REQUIRED",
+                "checked_revision": 4, "next_revision": 4, "checked_at": "2026-09-13T06:10:00+00:00",
+                "operation_id": "operation-1", "needs_manual": True,
+                "tracking": _recovery_item("tracking-a", "葬送的芙莉莲", revision=4),
+            }}, ensure_ascii=False))
+
+        _mock_list(page)
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.route("**/api/v1/tracking/items/tracking-a/recover", recover)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        expect(page.locator("#tracking-recover-verify")).to_have_count(0)
+
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("secret-user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-recover-verify")
+        assert not recover_calls, recover_calls
+
+        page.locator("#tracking-recover-verify").click()
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("只读核对")
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认只读核验").click()
+        page.wait_for_selector("#tracking-recovery-result")
+
+        assert len(recover_calls) == 1, recover_calls
+        body = recover_calls[0]
+        # The read-only check spends the page credential and asserts no verdict.
+        assert body["action"] == "VERIFY_EXTERNAL", body
+        assert "confirm" not in body, body
+        assert "external_id" not in body and "note" not in body, body
+        assert body["ab_config"]["password"] == "secret-password", body
+        assert body["ab_config"]["base_url"] == "https://private.invalid", body
+        expect(page.locator("#tracking-recovery-manual-notice")).to_contain_text("独立核对")
+        # The credential stays in the single request body: not in the page or URL.
+        assert not [url for url in requests if "/submit" in url or "/retry" in url], requests
+        expect(page).to_have_url(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        expect(page.locator("body")).not_to_contain_text("secret-password")
+        expect(page.locator("body")).not_to_contain_text("secret-user")
+        expect(page.locator("body")).not_to_contain_text("VERIFY_EXTERNAL")

@@ -1,23 +1,37 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  canVerifyExternally,
   capabilityStateLabel,
   capabilityVersionLabel,
+  createRecoveryConflictSession,
+  createRecoverySession,
   createTrackingActionIntent,
+  createTrackingRecoverBody,
+  createTrackingRecoveryIntent,
   createWriteConflictSession,
   createWriteSession,
   executableTrackingActions,
   filterTrackingItems,
   isDefiniteWriteRejection,
+  isRecoveryActionCode,
   isWriteActionCode,
   probeStatusLabel,
   projectCapabilitySummary,
+  projectRecoveryOutcome,
   projectRevalidateIssues,
   projectTrackingOverview,
   projectWriteOutcome,
+  RECOVERY_ACTION_BODIES,
+  RECOVERY_ACTION_CONFIRMATIONS,
+  RECOVERY_ACTIONS,
+  RECOVERY_NEEDS_MANUAL_NOTICE,
+  recoveryConfirmation,
+  recoverySessionKeepsLock,
   reuseTrackingActionIntent,
   sortTrackingItems,
   SUBMIT_OUTCOMES,
+  TRACKING_RECOVER_ENDPOINT,
   WRITE_ACTION_CONFIRMATIONS,
   WRITE_ACTION_ENDPOINTS,
   WRITE_CONFLICT_FALLBACK_MESSAGE,
@@ -27,6 +41,9 @@ import {
   writeSessionMessage,
   type CapabilityResult,
   type TrackingItem,
+  type TrackingRecoverResult,
+  type TrackingRecoveryActionCode,
+  type TrackingRecoveryConfirmation,
 } from './trackingProjection'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
@@ -357,5 +374,172 @@ describe('tracking retry projection (US-311)', () => {
       expect(session.message).toBe(writeConflictMessage(errorType))
       expect(writeSessionKeepsIntent(session.state)).toBe(false)
     }
+  })
+})
+
+const recoveryAutoAction: ItemAction = {
+  code: 'RECOVER_AUTO', label: '自动恢复', style: 'SECONDARY',
+  requires_confirmation: false, target_scopes: [],
+}
+const markSucceededAction: ItemAction = {
+  code: 'MARK_SUCCEEDED', label: '标记为成功', style: 'PRIMARY',
+  requires_confirmation: true, target_scopes: [],
+}
+const markFailedAction: ItemAction = {
+  code: 'MARK_FAILED', label: '标记为失败', style: 'DANGER',
+  requires_confirmation: true, target_scopes: [],
+}
+
+/** A recoverable record: the server offers exactly the three local actions. */
+function recoverableItem(overrides: Partial<TrackingItem> = {}): TrackingItem {
+  return item({
+    status: 'RECOVERY_REQUIRED', status_label: '需要恢复', status_group: 'ATTENTION',
+    available_actions: [recoveryAutoAction, markSucceededAction, markFailedAction],
+    ...overrides,
+  })
+}
+
+function recoverResult(overrides: Partial<TrackingRecoverResult> = {}): TrackingRecoverResult {
+  return {
+    tracking_id: 'tracking-1', action: 'AUTO', outcome: 'ACTIVE', checked_revision: 3,
+    next_revision: 4, checked_at: '2026-09-13T05:00:00Z', operation_id: 'operation-1',
+    needs_manual: false, tracking: recoverableItem({ revision: 4 }), ...overrides,
+  }
+}
+
+const sessionConfig = {
+  auth_mode: 'password' as const, base_url: 'https://ab.invalid', username: 'user',
+  password: 'secret-password', fallback_enabled: false,
+}
+
+describe('tracking recovery projection (US-312)', () => {
+  it('binds every recovery action to its own request body value and copy', () => {
+    expect(RECOVERY_ACTIONS).toEqual(['RECOVER_AUTO', 'MARK_SUCCEEDED', 'MARK_FAILED', 'VERIFY_EXTERNAL'])
+    expect(RECOVERY_ACTION_BODIES).toEqual({
+      RECOVER_AUTO: 'AUTO', MARK_SUCCEEDED: 'MARK_SUCCEEDED',
+      MARK_FAILED: 'MARK_FAILED', VERIFY_EXTERNAL: 'VERIFY_EXTERNAL',
+    })
+    expect(TRACKING_RECOVER_ENDPOINT).toBe('/api/v1/tracking/items/{tracking_id}/recover')
+
+    // AUTO contacts nothing and is confirmed by its own click; every other
+    // action carries its own fixed copy.
+    expect(recoveryConfirmation('RECOVER_AUTO')).toBeNull()
+    for (const action of ['MARK_SUCCEEDED', 'MARK_FAILED', 'VERIFY_EXTERNAL'] as const) {
+      expect(recoveryConfirmation(action)).toBe(RECOVERY_ACTION_CONFIRMATIONS[action])
+      expect(RECOVERY_ACTION_CONFIRMATIONS[action].message).toContain('Auto Bangumi')
+    }
+    // A manual conclusion is a user assertion: it must be confirmed again and
+    // styled as a danger only for the failure verdict.
+    const succeeded: TrackingRecoveryConfirmation = RECOVERY_ACTION_CONFIRMATIONS.MARK_SUCCEEDED
+    expect(succeeded.danger).toBeUndefined()
+    expect(RECOVERY_ACTION_CONFIRMATIONS.MARK_FAILED.danger).toBe(true)
+    for (const action of ['MARK_SUCCEEDED', 'MARK_FAILED'] as const) {
+      expect(RECOVERY_ACTION_CONFIRMATIONS[action].message).toContain('独立核对')
+    }
+
+    expect(isRecoveryActionCode('RECOVER_AUTO')).toBe(true)
+    expect(isRecoveryActionCode('VERIFY_EXTERNAL')).toBe(true)
+    expect(isRecoveryActionCode('SUBMIT')).toBe(false)
+    expect(isRecoveryActionCode(null)).toBe(false)
+  })
+
+  it('builds a credential-free AUTO body and a confirm-only manual body', () => {
+    expect(createTrackingRecoverBody('RECOVER_AUTO', 7, sessionConfig)).toEqual({
+      expected_revision: 7, action: 'AUTO',
+    })
+    for (const action of ['MARK_SUCCEEDED', 'MARK_FAILED'] as const) {
+      expect(createTrackingRecoverBody(action, 7, sessionConfig)).toEqual({
+        expected_revision: 7, action, confirm: true,
+      })
+    }
+    expect(createTrackingRecoverBody('RECOVER_AUTO', 7, sessionConfig, 'profile')).toEqual({
+      expected_revision: 7, action: 'AUTO', storage_dir: 'profile',
+    })
+    // The body shape itself cannot express an external id/URL/raw result/note.
+    const serialized = JSON.stringify(createTrackingRecoverBody('MARK_SUCCEEDED', 7, sessionConfig))
+    for (const leaked of ['external_id', 'external_url', 'raw', 'note', 'ab_config']) {
+      expect(serialized).not.toContain(leaked)
+    }
+  })
+
+  it('sends the credential only for VERIFY_EXTERNAL, and never without a base url', () => {
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, sessionConfig)).toEqual({
+      expected_revision: 2, action: 'VERIFY_EXTERNAL', ab_config: sessionConfig,
+    })
+    // Without the live page session (or without a server address) the read-only
+    // external verification is not sent at all.
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, null)).toBeNull()
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: '' })).toBeNull()
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: undefined })).toBeNull()
+    // A base url is normalized, and the other actions never carry a credential.
+    expect(createTrackingRecoverBody('VERIFY_EXTERNAL', 2, { ...sessionConfig, base_url: ' https://ab.invalid ' }))
+      .toMatchObject({ ab_config: { base_url: 'https://ab.invalid' } })
+  })
+
+  it('accepts only a recovery action the server actually offers for the record', () => {
+    expect(createTrackingRecoveryIntent(recoverableItem(), 'RECOVER_AUTO')).toEqual({
+      action: 'RECOVER_AUTO', expectedRevision: 3,
+    })
+    expect(createTrackingRecoveryIntent(recoverableItem(), 'MARK_FAILED')).toEqual({
+      action: 'MARK_FAILED', expectedRevision: 3,
+    })
+    // A stale/hand-made action, a non-recoverable record and a bad revision.
+    expect(createTrackingRecoveryIntent(recoverableItem({ available_actions: [markFailedAction] }), 'RECOVER_AUTO')).toBeNull()
+    expect(createTrackingRecoveryIntent(item({ status: 'ACTIVE' }), 'MARK_SUCCEEDED')).toBeNull()
+    expect(createTrackingRecoveryIntent(recoverableItem({ revision: 0 }), 'RECOVER_AUTO')).toBeNull()
+    // The read-only external verification needs both a recoverable record and
+    // the capability the live page session proved.
+    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities())).toEqual({
+      action: 'VERIFY_EXTERNAL', expectedRevision: 3,
+    })
+    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL')).toBeNull()
+    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities({ external_verify: 'UNSUPPORTED' }))).toBeNull()
+    expect(createTrackingRecoveryIntent(recoverableItem(), 'VERIFY_EXTERNAL', capabilities({ probe_status: 'PARTIAL' }))).toBeNull()
+    expect(createTrackingRecoveryIntent(item({ status: 'ACTIVE' }), 'VERIFY_EXTERNAL', capabilities())).toBeNull()
+
+    expect(canVerifyExternally(capabilities())).toBe(true)
+    expect(canVerifyExternally(null)).toBe(false)
+    expect(canVerifyExternally(capabilities({ probe_status: 'FAILED' }))).toBe(false)
+  })
+
+  it('keeps the recovery state whenever the outcome is not a decided verdict', () => {
+    expect(projectRecoveryOutcome('tracking-1', 'RECOVER_AUTO', recoverResult())).toMatchObject({
+      state: 'ACTIVE', needsManual: false,
+    })
+    expect(projectRecoveryOutcome('tracking-1', 'MARK_FAILED', recoverResult({ action: 'MARK_FAILED', outcome: 'SUBMIT_FAILED' })))
+      .toMatchObject({ state: 'SUBMIT_FAILED', needsManual: false })
+
+    const manual = projectRecoveryOutcome('tracking-1', 'RECOVER_AUTO', recoverResult({
+      outcome: 'RECOVERY_REQUIRED', needs_manual: true,
+    }))
+    expect(manual).toMatchObject({ state: 'RECOVERY_REQUIRED', needsManual: true })
+    expect(manual.message).not.toContain('RECOVERY_REQUIRED')
+    expect(RECOVERY_NEEDS_MANUAL_NOTICE).toContain('独立核对')
+
+    // needs_manual is the server's own verdict even without the outcome value.
+    expect(projectRecoveryOutcome('tracking-1', 'VERIFY_EXTERNAL', recoverResult({
+      action: 'VERIFY_EXTERNAL', outcome: 'ACTIVE', needs_manual: true,
+    }))).toMatchObject({ state: 'RECOVERY_REQUIRED', needsManual: true })
+    // An outcome outside the documented enum is never read as a success.
+    for (const outcome of ['DISABLED', 'EXTERNAL_DELETED', 'SOMETHING_NEW']) {
+      expect(projectRecoveryOutcome('tracking-1', 'VERIFY_EXTERNAL', recoverResult({
+        outcome: outcome as never,
+      }))).toMatchObject({ state: 'UNKNOWN', needsManual: false })
+    }
+
+    for (const [action, state, locked] of [
+      ['RECOVER_AUTO', 'UNKNOWN', true],
+      ['MARK_SUCCEEDED', 'RECOVERY_REQUIRED', true],
+      ['MARK_FAILED', 'ACTIVE', false],
+      ['VERIFY_EXTERNAL', 'SUBMIT_FAILED', false],
+      ['VERIFY_EXTERNAL', 'CONFLICT', false],
+      ['VERIFY_EXTERNAL', 'REJECTED', false],
+    ] as ReadonlyArray<[TrackingRecoveryActionCode, 'UNKNOWN' | 'RECOVERY_REQUIRED' | 'ACTIVE' | 'SUBMIT_FAILED' | 'CONFLICT' | 'REJECTED', boolean]>) {
+      const session = createRecoverySession('tracking-1', action, state, state === 'RECOVERY_REQUIRED')
+      expect(session).toMatchObject({ trackingId: 'tracking-1', action, state })
+      expect(recoverySessionKeepsLock(session.state)).toBe(locked)
+      expect(session.message).not.toContain(state)
+    }
+    expect(recoverySessionKeepsLock(createRecoveryConflictSession('tracking-1', 'RECOVER_AUTO').state)).toBe(false)
   })
 })

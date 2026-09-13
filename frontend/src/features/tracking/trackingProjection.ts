@@ -1,6 +1,6 @@
 /**
  * API-free tracking page projection and intent helpers (US-304, US-309, US-310,
- * US-311).
+ * US-311, US-312).
  *
  * This module only consumes generated OpenAPI operation types. It never
  * performs transport, reconstructs server state, or stores an intent/key.
@@ -48,6 +48,20 @@ export type TrackingRetryResult = NonNullable<
  */
 export type TrackingWriteBody = TrackingSubmitBody | TrackingRetryBody
 export type TrackingWriteResult = TrackingSubmitResult | TrackingRetryResult
+export type TrackingRecoverBody = NonNullable<
+  operations['recoverTrackingItem']['requestBody']['content']['application/json']
+>
+export type TrackingRecoverResult = NonNullable<
+  operations['recoverTrackingItem']['responses']['200']['content']['application/json']['result']
+>
+/**
+ * The request-scoped Auto Bangumi connection the page holds after one successful
+ * probe.  The generated probe body keeps ``base_url`` optional, so the recovery
+ * body builder normalizes it into the strict recover shape and refuses to send a
+ * credential that has no server address at all.
+ */
+export type TrackingSessionAbConfig =
+  operations['probeAutoBangumiCapabilities']['requestBody']['content']['application/json']['ab_config']
 
 export const TRACKING_STATUS_GROUPS = [
   'PENDING', 'PROCESSING', 'ACTIVE', 'ATTENTION', 'INACTIVE',
@@ -538,4 +552,242 @@ export function projectWriteOutcome(
  */
 export function writeSessionKeepsIntent(state: TrackingWriteState): boolean {
   return state === 'UNKNOWN' || state === 'VERIFYING_EXTERNAL' || state === 'RECOVERY_REQUIRED'
+}
+
+/**
+ * Unknown-result recovery (US-312).
+ *
+ * The page never guesses a recovery action. ``RECOVER_AUTO``, ``MARK_SUCCEEDED``
+ * and ``MARK_FAILED`` are rendered only when the server's ``available_actions``
+ * offers them for the current status (they are pure-local: no capability, no
+ * credential, no external call). ``VERIFY_EXTERNAL`` is *never* in
+ * ``available_actions`` — it is the recovery flow's own read-only choice, offered
+ * only while the page holds a live credential session that proves
+ * ``external_verify``; it re-reads the record's current operation and can never
+ * create, modify or delete an external subscription.
+ */
+export const RECOVERY_ACTIONS = [
+  'RECOVER_AUTO', 'MARK_SUCCEEDED', 'MARK_FAILED', 'VERIFY_EXTERNAL',
+] as const
+
+export type TrackingRecoveryActionCode = (typeof RECOVERY_ACTIONS)[number]
+
+/**
+ * The single recover endpoint. Every action is bound to exactly one request
+ * body value below, so the button the user pressed can never send another
+ * action's request.
+ */
+export const TRACKING_RECOVER_ENDPOINT =
+  '/api/v1/tracking/items/{tracking_id}/recover' as const satisfies ApiPath
+
+export const RECOVERY_ACTION_BODIES = {
+  RECOVER_AUTO: 'AUTO',
+  MARK_SUCCEEDED: 'MARK_SUCCEEDED',
+  MARK_FAILED: 'MARK_FAILED',
+  VERIFY_EXTERNAL: 'VERIFY_EXTERNAL',
+} as const satisfies Record<TrackingRecoveryActionCode, TrackingRecoverBody['action']>
+
+export interface TrackingRecoveryConfirmation {
+  title: string
+  message: string
+  confirmLabel: string
+  /** Only the manual "mark as failed" conclusion is styled as a danger. */
+  danger?: boolean
+}
+
+/**
+ * A manual conclusion is a user assertion about the external world, so it is
+ * always confirmed a second time and the confirmation tells the user to check
+ * Auto Bangumi first. ``VERIFY_EXTERNAL`` is confirmed too because it spends the
+ * page credential on one external read. ``RECOVER_AUTO`` has no entry at all:
+ * it contacts nothing and needs no confirmation.
+ */
+export const RECOVERY_ACTION_CONFIRMATIONS = {
+  MARK_SUCCEEDED: {
+    title: '标记为提交成功',
+    message: '请先在 Auto Bangumi 中独立核对该追番的实际状态。标记为成功只更新 MiGuOrca 本地追番状态，不会创建、修改或删除任何外部订阅，是否继续？',
+    confirmLabel: '确认标记成功',
+  },
+  MARK_FAILED: {
+    title: '标记为提交失败',
+    message: '请先在 Auto Bangumi 中独立核对该追番的实际状态。标记为失败只更新 MiGuOrca 本地追番状态，不会删除任何外部订阅，是否继续？',
+    confirmLabel: '确认标记失败',
+    danger: true,
+  },
+  VERIFY_EXTERNAL: {
+    title: '只读核验外部状态',
+    message: '将使用本页面已探测的连接，只读核对该追番在 Auto Bangumi 中的当前状态；不会创建、修改或删除任何外部订阅，是否继续？',
+    confirmLabel: '确认只读核验',
+  },
+} as const satisfies Record<Exclude<TrackingRecoveryActionCode, 'RECOVER_AUTO'>, TrackingRecoveryConfirmation>
+
+export function isRecoveryActionCode(value: unknown): value is TrackingRecoveryActionCode {
+  return typeof value === 'string' && (RECOVERY_ACTIONS as readonly string[]).includes(value)
+}
+
+/** Null for ``RECOVER_AUTO``: the local recovery is confirmed by its click alone. */
+export function recoveryConfirmation(
+  action: TrackingRecoveryActionCode,
+): TrackingRecoveryConfirmation | null {
+  return action === 'RECOVER_AUTO' ? null : RECOVERY_ACTION_CONFIRMATIONS[action]
+}
+
+/** True only while the current probe proves the read-only external check. */
+export function canVerifyExternally(capabilities?: CapabilityResult | null): boolean {
+  return supported(capabilities, 'external_verify')
+}
+
+export interface TrackingRecoveryIntent {
+  readonly action: TrackingRecoveryActionCode
+  readonly expectedRevision: number
+}
+
+/**
+ * Build the one recovery request body for a validated action.
+ *
+ * ``VERIFY_EXTERNAL`` is the only credential-bearing recovery and returns null
+ * without the page session, so it can never be sent credential-free; the two
+ * manual conclusions are the only bodies that carry ``confirm: true``; ``AUTO``
+ * is explicitly credential-free and confirmation-free. The body shape itself
+ * cannot express an external id, URL, raw response or free-text note.
+ */
+export function createTrackingRecoverBody(
+  action: TrackingRecoveryActionCode,
+  expectedRevision: number,
+  abConfig: TrackingSessionAbConfig | null,
+  storageDir?: string,
+): TrackingRecoverBody | null {
+  const storage = storageDir ? { storage_dir: storageDir } : {}
+  if (action === 'VERIFY_EXTERNAL') {
+    const baseUrl = typeof abConfig?.base_url === 'string' ? abConfig.base_url.trim() : ''
+    if (!abConfig || !baseUrl) return null
+    return {
+      expected_revision: expectedRevision,
+      action: RECOVERY_ACTION_BODIES[action],
+      ab_config: { ...abConfig, base_url: baseUrl },
+      ...storage,
+    }
+  }
+  const manual = action === 'MARK_SUCCEEDED' || action === 'MARK_FAILED'
+  return {
+    expected_revision: expectedRevision,
+    action: RECOVERY_ACTION_BODIES[action],
+    ...(manual ? { confirm: true as const } : {}),
+    ...storage,
+  }
+}
+
+/**
+ * Validate one recovery action against the current server-observed record.
+ *
+ * The three local actions must be in the server's projected action list, so a
+ * stale or hand-made action can never be sent. ``VERIFY_EXTERNAL`` is accepted
+ * only for a record the server says is recoverable (``RECOVER_AUTO`` is the
+ * server's marker for exactly those statuses) and only with a proven
+ * ``external_verify`` capability from the live page session.
+ */
+export function createTrackingRecoveryIntent(
+  item: TrackingItem,
+  action: TrackingRecoveryActionCode,
+  capabilities?: CapabilityResult | null,
+): TrackingRecoveryIntent | null {
+  if (!isRecoveryActionCode(action)) return null
+  if (!Number.isInteger(item.revision) || item.revision < 1) return null
+  const offered = executableTrackingActions(item, null).map((candidate) => candidate.code)
+  if (action === 'VERIFY_EXTERNAL') {
+    if (!offered.includes('RECOVER_AUTO') || !canVerifyExternally(capabilities)) return null
+  } else if (!offered.includes(action)) {
+    return null
+  }
+  return { action, expectedRevision: item.revision }
+}
+
+/**
+ * ``IN_FLIGHT``/``CONFLICT``/``REJECTED`` are page-level facts about one
+ * request; the three outcome values are the persisted server verdicts a
+ * recovery may produce. ``UNKNOWN`` also covers an outcome value outside the
+ * documented enum, which is never interpreted as success.
+ */
+export const RECOVERY_OUTCOMES = [
+  'ACTIVE', 'SUBMIT_FAILED', 'RECOVERY_REQUIRED',
+] as const satisfies readonly TrackingRecoverResult['outcome'][]
+
+export type TrackingRecoveryState =
+  | 'IN_FLIGHT' | (typeof RECOVERY_OUTCOMES)[number] | 'CONFLICT' | 'REJECTED' | 'UNKNOWN'
+
+export interface TrackingRecoverySession {
+  readonly trackingId: string
+  readonly action: TrackingRecoveryActionCode
+  readonly state: TrackingRecoveryState
+  readonly needsManual: boolean
+  readonly message: string
+}
+
+const RECOVERY_MESSAGES: Record<TrackingRecoveryState, string> = {
+  IN_FLIGHT: '正在恢复该追番的结果，请稍候…',
+  ACTIVE: '恢复完成：已确认该追番在 Auto Bangumi 中存在外部订阅。',
+  SUBMIT_FAILED: '恢复完成：已确认本次未创建外部订阅，可在确认后显式重试提交。',
+  RECOVERY_REQUIRED: '结果仍无法确认，保持恢复状态；未确认前不会自动提交。',
+  CONFLICT: '追番记录已变化或当前状态不允许恢复，本次未执行恢复；正在刷新最新详情，请重新确认。',
+  REJECTED: '服务端明确拒绝了本次恢复请求，本次未执行任何外部操作；正在刷新最新详情，请重新确认。',
+  UNKNOWN: '恢复结果未知，正在只读回查；未确认前不会自动重发。',
+}
+
+/** Shown whenever a recovery could not be concluded without a human verdict. */
+export const RECOVERY_NEEDS_MANUAL_NOTICE =
+  '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再选择“标记为成功”或“标记为失败”；本页不会代替你判断，也不会自动提交。'
+
+export function createRecoverySession(
+  trackingId: string,
+  action: TrackingRecoveryActionCode,
+  state: TrackingRecoveryState,
+  needsManual = false,
+): TrackingRecoverySession {
+  return { trackingId, action, state, needsManual, message: RECOVERY_MESSAGES[state] }
+}
+
+/** A 409 refuses the recovery before anything is persisted; ask again. */
+export function createRecoveryConflictSession(
+  trackingId: string,
+  action: TrackingRecoveryActionCode,
+): TrackingRecoverySession {
+  return createRecoverySession(trackingId, action, 'CONFLICT')
+}
+
+/**
+ * Project one HTTP 200 recovery result.
+ *
+ * ``needs_manual`` is the server's own verdict that only a human conclusion can
+ * progress, so it always keeps the recovery state — including a
+ * ``RECOVERY_REQUIRED`` outcome that arrives without the flag. An outcome value
+ * outside the documented enum stays indeterminate rather than being read as a
+ * success.
+ */
+export function projectRecoveryOutcome(
+  trackingId: string,
+  action: TrackingRecoveryActionCode,
+  result: TrackingRecoverResult,
+): TrackingRecoverySession {
+  if (result.needs_manual === true) {
+    return createRecoverySession(trackingId, action, 'RECOVERY_REQUIRED', true)
+  }
+  const outcome: unknown = result.outcome
+  if (outcome === 'ACTIVE' || outcome === 'SUBMIT_FAILED') {
+    return createRecoverySession(trackingId, action, outcome)
+  }
+  if (outcome === 'RECOVERY_REQUIRED') {
+    return createRecoverySession(trackingId, action, 'RECOVERY_REQUIRED', true)
+  }
+  return createRecoverySession(trackingId, action, 'UNKNOWN')
+}
+
+/**
+ * True while the recovery still owns the page's single intent.
+ *
+ * An unresolved recovery keeps every other item's submit/retry locked (D38-09.4)
+ * until the user concludes it; a resolved verdict, a conflict or a definite
+ * refusal releases it immediately.
+ */
+export function recoverySessionKeepsLock(state: TrackingRecoveryState): boolean {
+  return state === 'UNKNOWN' || state === 'RECOVERY_REQUIRED'
 }
