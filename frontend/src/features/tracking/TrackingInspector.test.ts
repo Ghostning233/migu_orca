@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api/client'
 import TrackingInspector from './TrackingInspector.vue'
-import { RECOVERY_NEEDS_MANUAL_NOTICE } from './trackingProjection'
+import { createManagementSession, RECOVERY_NEEDS_MANUAL_NOTICE } from './trackingProjection'
 import type { CapabilityResult, TrackingRecoverySession, TrackingWriteSession } from './trackingProjection'
 
 vi.mock('@/api/client', () => ({
@@ -585,5 +585,91 @@ describe('TrackingInspector unknown-result recovery (US-312)', () => {
   it('never shows another item recovery result on this item', async () => {
     const wrapper = await mountRecoverable({ recoverySession: recoverySession({ trackingId: 'tracking-2' }) })
     expect(wrapper.find('#tracking-recovery-result').exists()).toBe(false)
+  })
+})
+
+describe('TrackingInspector per-record external delete (US-315)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  const deleteAction = {
+    code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER',
+    requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+  }
+
+  it('offers the delete only with a live session and a proven per-scope capability', async () => {
+    apiGet.mockResolvedValue(detail({ available_actions: [deleteAction] }) as never)
+    const wrapper = await mountInspector()
+    expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(false)
+    expect(wrapper.find('.tracking-delete-external-section').text())
+      .toContain('需要先在页面连接 Auto Bangumi')
+
+    const connected = await mountInspector('tracking-1', LIVE_SESSION)
+    expect(connected.find('#tracking-delete-external-submit').exists()).toBe(true)
+
+    // Only the scope whose own delete capability is proven keeps a control.
+    const degraded = await mountInspector('tracking-1', {
+      ...LIVE_SESSION, capabilities: capabilities({ subscription_delete: 'UNSUPPORTED' }),
+    })
+    expect(degraded.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(false)
+    expect(degraded.find('#tracking-delete-external-scope-ASSOCIATED_RSS').exists()).toBe(true)
+  })
+
+  it('never projects an unknown, out-of-family or scope-less delete', async () => {
+    for (const action of [
+      { ...deleteAction, code: 'DELETE_EVERYTHING' },
+      { ...deleteAction, target_scopes: [] },
+      { ...deleteAction, target_scopes: ['EVERYTHING'] },
+      { ...deleteAction, style: 'MYSTERY' },
+    ]) {
+      apiGet.mockResolvedValue(detail({ available_actions: [action] }) as never)
+      const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+      expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(false)
+      expect(wrapper.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(false)
+      // The rejected value is never echoed back into the DOM either.
+      expect(wrapper.text()).not.toContain('EVERYTHING')
+      expect(wrapper.text()).not.toContain('MYSTERY')
+      wrapper.unmount()
+    }
+  })
+
+  it('emits the chosen scope with the latest revision and never posts itself', async () => {
+    apiGet.mockResolvedValue(detail({
+      revision: 6, available_actions: [deleteAction],
+    }) as never)
+    const wrapper = await mountInspector('tracking-1', LIVE_SESSION)
+    // Nothing is pre-selected, so no request can be emitted by accident.
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    expect(wrapper.emitted('management-requested')).toBeUndefined()
+
+    await wrapper.find('#tracking-delete-external-scope-ASSOCIATED_RSS').setValue()
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    const emitted = wrapper.emitted('management-requested') as unknown[][]
+    expect(emitted).toHaveLength(1)
+    expect(emitted[0]?.[0]).toMatchObject({
+      action: deleteAction, targetScope: 'ASSOCIATED_RSS', patch: null,
+    })
+    expect((emitted[0]?.[0] as { item: { revision: number } }).item.revision).toBe(6)
+    // The page owns the request: the inspector never sends anything itself.
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('renders this item delete result in its own panel only', async () => {
+    apiGet.mockResolvedValue(detail({ available_actions: [deleteAction] }) as never)
+    const session = createManagementSession(
+      'tracking-1', 'DELETE_EXTERNAL', 'SUBSCRIPTION', 'SUCCEEDED',
+    )
+    const wrapper = await mountInspector('tracking-1', { ...LIVE_SESSION, managementSession: session })
+    const result = wrapper.find('#tracking-delete-external-result')
+    expect(result.text()).toContain('外部删除已完成')
+    expect(result.text()).toContain('本次目标：外部番剧订阅')
+    expect(result.text()).not.toContain('SUCCEEDED')
+    // The delete verdict never leaks into the enable/refresh panel.
+    expect(wrapper.find('#tracking-management-result').exists()).toBe(false)
+
+    const other = await mountInspector('tracking-1', {
+      ...LIVE_SESSION,
+      managementSession: createManagementSession('tracking-2', 'DELETE_EXTERNAL', 'SUBSCRIPTION', 'SUCCEEDED'),
+    })
+    expect(other.find('#tracking-delete-external-result').exists()).toBe(false)
   })
 })

@@ -8,11 +8,13 @@ import {
   createManagementInFlightSession,
   createManagementRejectedSession,
   createManagementUnbuildableSession,
+  createTrackingDeleteExternalIntent,
   createTrackingManagementActionIntent,
   createTrackingManagementBody,
   createTrackingManagementIntent,
   createTrackingRefreshRssIntent,
   createTrackingSetEnabledIntent,
+  DELETE_EXTERNAL_HELP,
   emptyRssForm,
   emptySubscriptionForm,
   isModifyActionCode,
@@ -34,6 +36,11 @@ import {
 } from './trackingManagement'
 
 type ItemAction = NonNullable<TrackingItem['available_actions']>[number]
+
+/** A JSON rendering of one request body, used to prove fields are absent. */
+function serialize(value: unknown): string {
+  return JSON.stringify(value ?? null)
+}
 
 function action(overrides: Partial<ItemAction> = {}): ItemAction {
   return {
@@ -354,8 +361,6 @@ const REFRESH_ACTION = {
   requires_confirmation: true, target_scopes: ['ASSOCIATED_RSS'],
 } satisfies ItemAction
 
-const BOTH_SCOPES = ['SUBSCRIPTION', 'ASSOCIATED_RSS'] as const
-
 function enableDetail(overrides: Partial<TrackingItem> = {}): TrackingItem {
   return item({ status: 'DISABLED', status_label: '已停用', available_actions: [ENABLE_ACTION], ...overrides })
 }
@@ -470,15 +475,12 @@ describe('tracking refresh request (US-314)', () => {
 })
 
 describe('tracking management dispatch and locking (US-314)', () => {
-  it('dispatches only the actions this page sends, and never DELETE_EXTERNAL', () => {
+  it('dispatches every action this page sends to its own builder', () => {
     const record = item({
-      available_actions: [
-        { code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER', requires_confirmation: true, target_scopes: [...BOTH_SCOPES] },
-        DISABLE_ACTION, REFRESH_ACTION,
-      ],
+      available_actions: [DELETE_ACTION, DISABLE_ACTION, REFRESH_ACTION],
     })
     expect(createTrackingManagementActionIntent(record, 'DELETE_EXTERNAL', 'SUBSCRIPTION', null, capabilities()))
-      .toBeNull()
+      .toMatchObject({ action: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION' })
     expect(createTrackingManagementActionIntent(record, 'SET_ENABLED', 'SUBSCRIPTION', null, capabilities()))
       .toMatchObject({ action: 'SET_ENABLED', enabled: false })
     expect(createTrackingManagementActionIntent(record, 'REFRESH_RSS', 'ASSOCIATED_RSS', null, capabilities()))
@@ -516,6 +518,136 @@ describe('tracking management dispatch and locking (US-314)', () => {
     )!
     expect(sameManagementRequest(modify, otherPatch)).toBe(false)
     expect(sameManagementRequest(modify, samePatchLater)).toBe(true)
+  })
+})
+
+// -- US-315: per-record external delete --------------------------------------
+
+const DELETE_ACTION = {
+  code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER',
+  requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+} satisfies ItemAction
+
+describe('tracking external delete request (US-315)', () => {
+  it('deletes exactly one explicitly chosen external object of this record', () => {
+    const record = item({ available_actions: [DELETE_ACTION] })
+    const intent = createTrackingDeleteExternalIntent(record, 'SUBSCRIPTION', capabilities())!
+    expect(intent).toMatchObject({
+      action: 'DELETE_EXTERNAL', targetScope: 'SUBSCRIPTION', patch: null, enabled: null,
+      expectedRevision: 4, confirm: true,
+    })
+    const body = createTrackingManagementBody(intent, abConfig)
+    expect(body).toEqual({
+      target_scope: 'SUBSCRIPTION',
+      expected_revision: 4,
+      idempotency_key: intent.idempotencyKey,
+      confirm: true,
+      ab_config: abConfig,
+    })
+    // The generated delete body has no ``file`` field at all, and the intent
+    // cannot carry a patch, a direction or a second scope.
+    expect(Object.keys(body ?? {}).sort()).toEqual(
+      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+    )
+    expect(serialize(body)).not.toContain('file')
+
+    // A different scope is a different request, so a locked delete is replayed
+    // only for the very scope the user confirmed.
+    const rss = createTrackingDeleteExternalIntent(record, 'ASSOCIATED_RSS', capabilities())!
+    expect(rss.targetScope).toBe('ASSOCIATED_RSS')
+    expect(sameManagementRequest(intent, rss)).toBe(false)
+    expect(sameManagementRequest(intent, createTrackingDeleteExternalIntent(
+      { ...record, revision: 9 }, 'SUBSCRIPTION', capabilities(),
+    )!)).toBe(true)
+  })
+
+  it('fails closed without the server action, the chosen scope or the capability', () => {
+    // The server does not offer the delete for this record at all.
+    expect(createTrackingDeleteExternalIntent(item(), 'SUBSCRIPTION', capabilities())).toBeNull()
+    // The server offers only the subscription scope; the RSS choice is dropped.
+    expect(createTrackingDeleteExternalIntent(
+      item({ available_actions: [{ ...DELETE_ACTION, target_scopes: ['SUBSCRIPTION'] }] }),
+      'ASSOCIATED_RSS', capabilities(),
+    )).toBeNull()
+    // A delete capability that is not proven for this very scope is no delete.
+    for (const value of ['UNSUPPORTED', 'UNKNOWN'] as const) {
+      expect(createTrackingDeleteExternalIntent(
+        item({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION',
+        capabilities({ subscription_delete: value }),
+      )).toBeNull()
+      expect(createTrackingDeleteExternalIntent(
+        item({ available_actions: [DELETE_ACTION] }), 'ASSOCIATED_RSS',
+        capabilities({ rss_delete: value }),
+      )).toBeNull()
+    }
+    expect(createTrackingDeleteExternalIntent(
+      item({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION',
+      capabilities({ probe_status: 'PARTIAL' }),
+    )).toBeNull()
+    expect(createTrackingDeleteExternalIntent(
+      item({ revision: 0, available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION', capabilities(),
+    )).toBeNull()
+    // A scope the generated contract does not know can never become a request.
+    expect(createTrackingDeleteExternalIntent(
+      item({ available_actions: [DELETE_ACTION] }), 'EVERYTHING' as never, capabilities(),
+    )).toBeNull()
+  })
+
+  it('confirms the delete as a danger that keeps every local record', () => {
+    const intent = createTrackingDeleteExternalIntent(
+      item({ available_actions: [DELETE_ACTION] }), 'SUBSCRIPTION', capabilities(),
+    )!
+    const copy = managementConfirmation(intent)
+    expect(copy.danger).toBe(true)
+    expect(copy.confirmLabel).toBe('确认删除外部对象')
+    expect(copy.message).toContain('不会删除任何媒体文件')
+    for (const kept of ['本地订阅方案', '追番记录', '审计记录', '下载任务', '已下载媒体文件']) {
+      expect(copy.message).toContain(kept)
+    }
+    // The other management dialogs stay non-dangerous.
+    const refresh = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }), capabilities())!
+    expect(managementConfirmation(refresh).danger).toBeUndefined()
+    expect(managementConfirmation(
+      createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities())!,
+    ).danger).toBeUndefined()
+    expect(DELETE_EXTERNAL_HELP).toContain('没有勾选、批量或全局删除')
+  })
+
+  it('reports the delete outcome in its own wording and never claims a media delete', () => {
+    const succeeded = projectManagementOutcome('tracking-1', 'DELETE_EXTERNAL', 'SUBSCRIPTION', modifyResult({
+      action: 'DELETE_EXTERNAL', management_status: 'SUCCEEDED',
+    }))
+    expect(succeeded).toMatchObject({ action: 'DELETE_EXTERNAL', state: 'SUCCEEDED', needsManual: false })
+    expect(succeeded.message).toContain('外部删除已完成')
+    expect(succeeded.message).toContain('均保留')
+    expect(succeeded.message).not.toContain('修改')
+
+    const failed = projectManagementOutcome('tracking-1', 'DELETE_EXTERNAL', 'SUBSCRIPTION', modifyResult({
+      action: 'DELETE_EXTERNAL', management_status: 'FAILED',
+    }))
+    expect(failed.state).toBe('FAILED')
+    expect(failed.message).toContain('未删除该外部对象')
+
+    // A partial or undocumented delete result stays unresolved and keeps the
+    // page's single intent instead of being read as a successful delete.
+    for (const status of ['PREPARED', 'IN_PROGRESS', 'OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED']) {
+      const session = projectManagementOutcome('tracking-1', 'DELETE_EXTERNAL', 'SUBSCRIPTION', modifyResult({
+        action: 'DELETE_EXTERNAL', management_status: status as never,
+      }))
+      expect(session.state).toBe('UNKNOWN')
+      expect(managementSessionKeepsIntent(session)).toBe(true)
+      expect(session.message).not.toContain('已删除')
+      expect(session.message).not.toContain(status)
+    }
+
+    const conflict = createManagementConflictSession(
+      'tracking-1', 'DELETE_EXTERNAL', 'SUBSCRIPTION', 'tracking_target_missing',
+    )
+    expect(conflict.state).toBe('CONFLICT')
+    expect(conflict.message).toContain('本次未删除任何外部对象')
+    expect(managementSessionKeepsIntent(conflict)).toBe(false)
+    const rejected = createManagementRejectedSession('tracking-1', 'DELETE_EXTERNAL', 'SUBSCRIPTION')
+    expect(rejected.message).toContain('未删除 Auto Bangumi 外部对象')
   })
 })
 

@@ -1262,8 +1262,9 @@ def _management_actions(status: str = "ACTIVE") -> list[dict[str, Any]]:
          "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
         {"code": "REFRESH_RSS", "label": "刷新关联 RSS", "style": "SECONDARY",
          "requires_confirmation": True, "target_scopes": ["ASSOCIATED_RSS"]},
-        # The server offers the per-record external delete here too; wiring it is
-        # its own story, so this page must never render or send it (US-314).
+        # The server offers the per-record external delete here too; it has its
+        # own section and its own story (US-315), never a control inside the
+        # enable/refresh section.
         {"code": "DELETE_EXTERNAL", "label": "删除外部订阅", "style": "DANGER",
          "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
     ]
@@ -1347,10 +1348,12 @@ class TestAppTrackingManagementActions:
         expect(section).not_to_contain_text("SUBSCRIPTION")
         expect(section).not_to_contain_text("ASSOCIATED_RSS")
         assert not enables, enables
-        # DELETE_EXTERNAL is server-offered but not wired by this page: it has
-        # no control at all and never becomes a request.
-        assert page.locator("[id*='delete-external']").count() == 0, "delete control rendered"
+        # The external delete is wired by US-315 and lives in its own section:
+        # the enable/refresh section still holds no delete or danger control.
+        assert section.locator("[id*='delete-external']").count() == 0, section.inner_text()
         assert section.locator("button.danger-button").count() == 0, section.inner_text()
+        expect(page.locator("#tracking-delete-external-submit")).to_have_count(1)
+        assert not enables, enables
 
         # The enable/disable target is the user's explicit choice: nothing is
         # pre-selected and nothing can be sent before one is picked.
@@ -1565,3 +1568,206 @@ class TestAppTrackingManagementActions:
         expect(page.locator("#tracking-set-enabled-submit")).to_be_disabled()
         page.locator("#tracking-set-enabled-scope-SUBSCRIPTION").check()
         expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()
+
+
+def _delete_actions(scopes: list[str] | None = None) -> list[dict[str, Any]]:
+    """The server-computed per-record external delete for one status (US-315)."""
+    return [{
+        "code": "DELETE_EXTERNAL", "label": "删除外部订阅", "style": "DANGER",
+        "requires_confirmation": True,
+        "target_scopes": scopes if scopes is not None else ["SUBSCRIPTION", "ASSOCIATED_RSS"],
+    }]
+
+
+def _delete_detail(revision: int, scopes: list[str] | None = None) -> dict[str, Any]:
+    """The full ``getTrackingItemDetail`` envelope for one delete revision."""
+    return {"ok": True, "result": {
+        **_item("tracking-a", "葬送的芙莉莲"),
+        "available_actions": _delete_actions(scopes),
+        "revision": revision,
+        "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+        "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+        "safe_info": None, "current_operation": None, "revalidation_issues": [],
+        "external_mapping": {"match_reason": "标题与季度匹配", "enabled": True, "external_deleted": False},
+        "audit_events": [], "warnings": [],
+    }}
+
+
+def _delete_success_payload(revision: int) -> dict[str, Any]:
+    """The safe management result of one successful external delete."""
+    return {"ok": True, "result": {
+        "action": "DELETE_EXTERNAL", "management_status": "SUCCEEDED", "needs_manual": False,
+        "safe_message": "Auto Bangumi 管理操作已完成并通过回查", "operation_id": "operation-delete",
+        "operation": None,
+        "tracking": {
+            **_item("tracking-a", "葬送的芙莉莲"), "status": "EXTERNAL_DELETED",
+            "status_label": "外部已删除", "status_group": "INACTIVE", "revision": revision,
+        },
+    }}
+
+
+class TestAppTrackingExternalDelete:
+    """US-315: per-record external delete in a real Chromium session."""
+
+    def test_delete_needs_a_chosen_target_and_keeps_every_local_record(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        deletes: list[dict[str, Any]] = []
+        state = {"revision": 1}
+
+        def detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_delete_detail(state["revision"]), ensure_ascii=False),
+            )
+
+        def delete_external(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            deletes.append(json.loads(request.post_data or "{}"))
+            state["revision"] = 2
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_delete_success_payload(2), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", _modify_probe)
+        # Registered after the broader tracking routes: later routes win.
+        page.route("**/api/v1/tracking/items/tracking-a/delete-external", delete_external)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+
+        # Server-computed and capability-gated: no session, no control at all.
+        expect(page.locator("#tracking-delete-external-submit")).to_have_count(0)
+        expect(page.locator(".tracking-delete-external-section")).to_contain_text("需要先在页面连接")
+
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("secret-user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-delete-external-submit")
+        assert not deletes, deletes
+        # Connecting never deletes anything on its own; every target is named in
+        # user copy and never as a raw enum.
+        section = page.locator(".tracking-delete-external-section")
+        expect(section).to_contain_text("外部番剧订阅")
+        expect(section).to_contain_text("关联 RSS")
+        expect(section).not_to_contain_text("SUBSCRIPTION")
+        expect(section).not_to_contain_text("ASSOCIATED_RSS")
+        # Single-record and explicit: no checkbox, no batch or global control.
+        assert section.locator("input[type=checkbox]").count() == 0, section.inner_text()
+        assert page.locator("input[type=checkbox]").count() == 0, "batch control rendered"
+
+        # No target is pre-selected, so nothing can be deleted by accident.
+        expect(page.locator("#tracking-delete-external-submit")).to_be_disabled()
+        expect(section).to_contain_text("请先明确选择要删除的外部对象")
+        page.locator("#tracking-delete-external-scope-ASSOCIATED_RSS").check()
+        expect(page.locator("#tracking-delete-external-submit")).to_be_enabled()
+
+        page.locator("#tracking-delete-external-submit").click()
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("不会删除任何媒体文件")
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("本地订阅方案")
+        # The destructive confirmation is a danger dialog whose default focus is
+        # the cancel button, so Enter never deletes an external object.
+        assert page.locator(".confirm-dialog .danger-button").count() == 1, "not a danger dialog"
+        focused = page.evaluate("document.activeElement?.textContent?.trim()")
+        assert focused == "取消", focused
+        assert not deletes, deletes
+        page.keyboard.press("Enter")
+        page.wait_for_selector(".confirm-dialog", state="detached")
+        assert not deletes, deletes
+        expect(page.locator("#tracking-delete-external-result")).to_have_count(0)
+        # The cancelled dialog never touched the page URL or any browser storage.
+        assert "delete" not in page.url, page.url
+        assert page.evaluate(
+            "JSON.stringify(window.localStorage) + JSON.stringify(window.sessionStorage)"
+        ).count("secret") == 0
+
+        page.locator("#tracking-delete-external-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认删除外部对象").click()
+        page.wait_for_selector("#tracking-delete-external-result")
+
+        expect(page.locator("#tracking-delete-external-result")).to_contain_text("外部删除已完成")
+        expect(page.locator("#tracking-delete-external-result")).not_to_contain_text("SUCCEEDED")
+        expect(page.locator("#tracking-delete-external-result")).to_contain_text("本次目标：关联 RSS")
+        assert len(deletes) == 1, deletes
+        body = deletes[0]
+        assert body["target_scope"] == "ASSOCIATED_RSS", body
+        assert "file" not in body, body
+        assert "patch" not in body, body
+        assert body["confirm"] is True, body
+        assert body["expected_revision"] == 1, body
+        assert body["ab_config"]["password"] == "secret-password", body
+        key = body["idempotency_key"]
+        assert isinstance(key, str) and len(key) >= 8, body
+        # The record stays in the local list with its history and plan entry.
+        row = page.locator(".tracking-list-item[data-tracking-id='tracking-a']")
+        expect(row).to_have_count(1)
+        expect(row).to_contain_text("外部已删除")
+        expect(page.locator(".tracking-plan-link")).to_be_visible()
+        # No credential and no key ever reaches the DOM, the URL or storage.
+        expect(page.locator("body")).not_to_contain_text("secret-password")
+        expect(page.locator("body")).not_to_contain_text("secret-user")
+        expect(page.locator("body")).not_to_contain_text(key)
+        assert key not in page.url, page.url
+        assert page.evaluate(
+            "JSON.stringify(window.localStorage) + JSON.stringify(window.sessionStorage)"
+        ).count(key) == 0
+
+    def test_delete_capability_degradation_hides_only_the_unproven_scope(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        deletes: list[dict[str, Any]] = []
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            payload = _probe_capabilities()
+            payload["subscription_delete"] = "UNSUPPORTED"
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"ok": True, "result": payload}, ensure_ascii=False),
+            )
+
+        def detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_delete_detail(1), ensure_ascii=False),
+            )
+
+        def delete_external(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            deletes.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_delete_success_payload(2), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.route("**/api/v1/tracking/items/tracking-a/delete-external", delete_external)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-delete-external-submit")
+
+        # Only the scope whose own delete capability is proven keeps a control.
+        expect(page.locator("#tracking-delete-external-scope-SUBSCRIPTION")).to_have_count(0)
+        expect(page.locator("#tracking-delete-external-scope-ASSOCIATED_RSS")).to_have_count(1)
+        page.locator("#tracking-delete-external-scope-ASSOCIATED_RSS").check()
+        page.locator("#tracking-delete-external-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认删除外部对象").click()
+        page.wait_for_selector("#tracking-delete-external-result")
+        assert len(deletes) == 1, deletes
+        assert deletes[0]["target_scope"] == "ASSOCIATED_RSS", deletes
+        assert "file" not in deletes[0], deletes
+        expect(page.locator("#tracking-delete-external-result")).to_contain_text("外部删除已完成")

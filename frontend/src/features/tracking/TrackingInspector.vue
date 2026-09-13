@@ -32,10 +32,12 @@ import {
   type TrackingWriteSession,
 } from './trackingProjection'
 import {
+  DELETE_EXTERNAL_HELP,
   isSendableManagementActionCode,
   MANAGEMENT_ACTIONS_HELP,
   type SendableManagementActionCode,
 } from './trackingManagement'
+import TrackingExternalDelete from './TrackingExternalDelete.vue'
 import TrackingManagementActions from './TrackingManagementActions.vue'
 import TrackingModifyForm from './TrackingModifyForm.vue'
 
@@ -190,8 +192,15 @@ const thisManagement = computed(() => (
 ))
 /** The modify result is rendered next to the modify form; the rest next to the actions. */
 const thisModify = computed(() => (thisManagement.value?.action === 'MODIFY' ? thisManagement.value : null))
+/** The delete result belongs to the delete section only (US-315). */
+const thisDelete = computed(() => (
+  thisManagement.value?.action === 'DELETE_EXTERNAL' ? thisManagement.value : null
+))
 const thisManagementAction = computed(() => (
-  thisManagement.value && thisManagement.value.action !== 'MODIFY' ? thisManagement.value : null
+  thisManagement.value && thisManagement.value.action !== 'MODIFY'
+    && thisManagement.value.action !== 'DELETE_EXTERNAL'
+    ? thisManagement.value
+    : null
 ))
 
 /** This item's own conflicting action is in flight: all of them bump its revision. */
@@ -211,14 +220,15 @@ function requestRecovery(action: TrackingRecoveryActionCode): void {
   emit('recovery-requested', { action, item: detail.value })
 }
 
-// -- external management writes (US-313, US-314) -----------------------------
-// Every management action the page sends (MODIFY, SET_ENABLED, REFRESH_RSS) is
-// server-computed with explicit target scopes, so each one is projected the same
-// way: it needs the page credential session and the matching capability for the
-// scope the user wants to act on.  The forms own the user's explicit choice (the
-// fields to change, the enable/disable target, the refresh), emit it with the
-// latest revision, and the page owns the request, confirmation and idempotency.
-// An action this page does not send (DELETE_EXTERNAL) is never offered at all.
+// -- external management writes (US-313, US-314, US-315) ---------------------
+// Every management action the page sends (MODIFY, SET_ENABLED, REFRESH_RSS,
+// DELETE_EXTERNAL) is server-computed with explicit target scopes, so each one is
+// projected the same way: it needs the page credential session and the matching
+// capability for the scope the user wants to act on.  The forms own the user's
+// explicit choice (the fields to change, the enable/disable target, the refresh,
+// the object to delete), emit it with the latest revision, and the page owns the
+// request, confirmation and idempotency.  An action this page does not send is
+// never offered at all.
 
 /** One management action together with the scopes this page may request for it. */
 interface ManagementOfferView {
@@ -249,6 +259,7 @@ function offerFor(code: SendableManagementActionCode): ManagementOfferView | nul
 const modifyOffer = computed(() => offerFor('MODIFY'))
 const setEnabledOffer = computed(() => offerFor('SET_ENABLED'))
 const refreshOffer = computed(() => offerFor('REFRESH_RSS'))
+const deleteOffer = computed(() => offerFor('DELETE_EXTERNAL'))
 const modifyScopes = computed(() => modifyOffer.value?.scopes ?? [])
 
 /** Fixed read-only degradation copy when the live session cannot offer an action. */
@@ -261,6 +272,7 @@ function managementHint(code: TrackingManagementActionCode, verb: string): strin
 const modifyHint = computed(() => managementHint('MODIFY', '修改外部方案'))
 const setEnabledHint = computed(() => managementHint('SET_ENABLED', '启停外部订阅或关联 RSS'))
 const refreshHint = computed(() => managementHint('REFRESH_RSS', '刷新关联 RSS'))
+const deleteHint = computed(() => managementHint('DELETE_EXTERNAL', '删除外部对象'))
 
 function requestManagement(payload: {
   action: TrackingAction
@@ -587,6 +599,23 @@ defineExpose({ reload: () => fetchDetail(true) })
       </section>
 
       <section
+        class="tracking-inspector-section tracking-delete-external-section"
+        aria-labelledby="tracking-delete-external-section-heading"
+      >
+        <h4 id="tracking-delete-external-section-heading">删除 Auto Bangumi 外部对象</h4>
+        <p class="field-help">{{ DELETE_EXTERNAL_HELP }}</p>
+        <TrackingExternalDelete
+          :item="detail"
+          :action="deleteOffer?.action ?? null"
+          :result="thisDelete"
+          :hint="deleteHint"
+          :busy="actionBusy"
+          :loading="managementInFlight"
+          @submit="requestManagement"
+        />
+      </section>
+
+      <section
         v-if="recoveryActions.length || verifyExternalOffered || thisRecovery"
         class="tracking-inspector-section tracking-recovery"
         aria-labelledby="tracking-recovery-heading"
@@ -686,4 +715,5 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-modify-result.is-succeeded { border-left-color: var(--color-feedback-success-border); }
 .tracking-modify-result.is-failed, .tracking-modify-result.is-conflict, .tracking-modify-result.is-rejected, .tracking-modify-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
 .tracking-modify-verdict, .tracking-modify-manual { font-weight: 600; }
+.tracking-delete-external-section { gap: .65rem; }
 </style>

@@ -415,11 +415,21 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   （`DISABLED`→启用，`ACTIVE`/`EXTERNAL_ONLY`→停用，其余一律 null 即零请求）；刷新没有全局面板，
   端点就是 `MANAGEMENT_ACTION_ENDPOINTS.REFRESH_RSS`，请求体由 `createTrackingManagementBody`
   单点构造且**不含** `patch`/`enabled`。
-- **发送集合是页面自己的闸门（US-314）**：`SENDABLE_MANAGEMENT_ACTION_CODES`
-  （MODIFY/SET_ENABLED/REFRESH_RSS）决定哪些动作能离开页面，`DELETE_EXTERNAL` **不在其中**；
-  inspector 用 `isSendableManagementActionCode` 过滤 offer，页面在 `runTrackingManagement`
-  再过滤一次，所以 DELETE_EXTERNAL 即使出现在 `available_actions` 里也既不渲染、也不发请求
-  （等 US-315）。
+- **发送集合是页面自己的闸门（US-314/US-315）**：`SENDABLE_MANAGEMENT_ACTION_CODES`
+  （MODIFY/SET_ENABLED/REFRESH_RSS/DELETE_EXTERNAL）决定哪些动作能离开页面；inspector 用
+  `isSendableManagementActionCode` 过滤 offer，页面在 `runTrackingManagement` 再过滤一次，
+  `createTrackingManagementActionIntent` 第三个闸门按 action code 分派到各自 builder。
+  新增管理动作时必须三处同步：sendable 集合、dispatch 分支、`createTrackingManagementBody`
+  分支；只加 `available_actions` 的 server 投影不会让动作变成请求。
+- **逐条外部删除（US-315）**：`DELETE_EXTERNAL` 复用 `runTrackingManagement` 一条管理写路径，
+  但它是**逐条**动作（`TrackingExternalDelete.vue`，radio 选择目标，**无** checkbox/批量/全局），
+  删除目标由用户显式选择并经 `createTrackingDeleteExternalIntent` 用
+  `projectTrackingActionScopes(item, 'DELETE_EXTERNAL', scope, capabilities)` 重新校验
+  （`subscription_delete`/`rss_delete` 各自 prove）。确认弹窗是唯一 `danger: true` 的管理弹窗
+  （`ConfirmDialog` 默认焦点即取消按钮），文案固定声明保留本地方案、追番记录、审计、下载任务与
+  已下载媒体；生成的 delete body 里**没有** `file` 字段，所以「顺带删媒体」在类型上不可表达。
+  删除成功后服务端返回 `EXTERNAL_DELETED` 的 tracking，`applyReturnedTracking` 原位替换，
+  记录仍留在本地列表、仍可看审计并 `返回修改方案`（**不要**在写成功后移除列表项）。
 - **锁定意图的重放判据（US-314）**：`sameManagementRequest()` 比较 action + targetScope +
   patch + enabled，**故意不比较** `expectedRevision` 与 `idempotencyKey` —— 服务端在外部边界
   **之前**就把 revision +1 落盘，所以结果未知后回查到的 revision 必然前进，重放必须整份复用锁定
@@ -434,10 +444,13 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `**/api/v1/tracking/items/tracking-a` **之后**。详情路由的 mock 必须返回完整 envelope
   （`{"ok": true, "result": {...}}`）；只返回裸对象会让客户端按 envelope 校验失败并渲染
   「追番详情读取失败」。
-- 新写动作的浏览器用例模板：`_management_actions()` 故意同时返回 `DELETE_EXTERNAL`，页面必须
-  「有 offer 也不渲染、也不发送」；`_action_detail()` / `_action_success_payload()` 是 US-314
-  的详情与安全结果 mock，新故事可在此基础上加字段。
+- 新写动作的浏览器用例模板：`_action_detail()` / `_action_success_payload()` 是 US-314
+  的详情与安全结果 mock，`_delete_detail()` / `_delete_success_payload()` 是 US-315 的删除 mock；
+  `_management_actions()` 同时返回 `DELETE_EXTERNAL`，所以「启停/刷新」那一段必须断言
+  `.tracking-management-actions-section` 内**没有** `[id*='delete-external']` 与 `button.danger-button`
+  （删除控件在自己的 section 里），而不是断言整页没有删除控件。
 - CSS 类命名避免父子同名：inspector 里的 `<section>` 用 `-section` 后缀
-  （`tracking-modify-section` / `tracking-management-actions-section`），子组件根节点用短名
-  （`tracking-modify` / `tracking-management-actions`）。同名会让 Playwright 的
-  `.locator()` 触发 strict mode violation（两个元素）。
+  （`tracking-modify-section` / `tracking-management-actions-section` /
+  `tracking-delete-external-section`），子组件根节点用短名
+  （`tracking-modify` / `tracking-management-actions` / `tracking-external-delete`）。同名会让
+  Playwright 的 `.locator()` 触发 strict mode violation（两个元素）。

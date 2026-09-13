@@ -922,11 +922,11 @@ const MANAGEMENT_ACTION_MESSAGES: Record<
   },
   DELETE_EXTERNAL: {
     IN_FLIGHT: '正在提交外部删除，请稍候…',
-    SUCCEEDED: '外部删除已完成：Auto Bangumi 已删除该外部对象。',
-    FAILED: '外部删除明确失败，Auto Bangumi 未删除该外部对象；可核对后重新发起。',
+    SUCCEEDED: '外部删除已完成：Auto Bangumi 已删除该外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件均保留。',
+    FAILED: '外部删除明确失败，Auto Bangumi 未删除该外部对象；本地方案与已下载媒体未受影响，可核对后重新发起。',
     CONFLICT: '追番记录已变化或当前状态不允许本次删除，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
     REJECTED: '服务端明确拒绝了本次删除请求，本次未删除 Auto Bangumi 外部对象；正在刷新最新详情，请重新确认。',
-    UNKNOWN: '外部删除结果未知，正在只读回查；未确认删除前不会自动重试。',
+    UNKNOWN: '外部删除结果未知，正在只读回查；未确认删除前不会自动重试，本地方案与已下载媒体未受影响。',
   },
 }
 
@@ -985,6 +985,13 @@ const MANAGEMENT_CONFLICT_ACTION_MESSAGES: Partial<
   REFRESH_RSS: {
     tracking_management_patch_invalid:
       '本次刷新请求未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  },
+  DELETE_EXTERNAL: {
+    // The one delete conflict whose generic wording would misdescribe it: the
+    // target the user chose simply does not exist any more, so nothing was
+    // deleted and there is nothing to re-confirm.
+    tracking_target_missing:
+      '该记录当前没有对应的外部对象，本次未删除任何外部对象；正在刷新最新详情。',
   },
 }
 

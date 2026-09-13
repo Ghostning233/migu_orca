@@ -1,11 +1,12 @@
 /**
- * Management-write projection and request builders (US-313, US-314).
+ * Management-write projection and request builders (US-313, US-314, US-315).
  *
- * Scope here is the three management actions this page sends: ``MODIFY`` (the
+ * Scope here is the four management actions this page sends: ``MODIFY`` (the
  * strict, scope-discriminated patch the generated ``modifyTrackingItem``
  * operation accepts), ``SET_ENABLED`` (the record's own status decides the
- * direction) and ``REFRESH_RSS`` (this record's associated RSS only).  The
- * module is API-free — it consumes generated operation types, builds the one
+ * direction), ``REFRESH_RSS`` (this record's associated RSS only) and
+ * ``DELETE_EXTERNAL`` (one explicitly chosen external object of this record).
+ * The module is API-free — it consumes generated operation types, builds the one
  * request body per intent and turns the server's management result into fixed
  * Chinese copy.  Everything generic to the management write family (action
  * codes, scope projection, per-action messages, confirmations, sessions) lives
@@ -46,6 +47,17 @@ export type TrackingSetEnabledBody = NonNullable<
 export type TrackingRefreshRssBody = NonNullable<
   operations['refreshTrackingRss']['requestBody']['content']['application/json']
 >
+/**
+ * The per-record external delete body (US-315).
+ *
+ * It is its own generated shape: ``target_scope`` plus the shared
+ * revision/key/confirm/credential fields, and deliberately no ``file`` field —
+ * the contract cannot express "also delete the downloaded media", so the page
+ * cannot send it either.
+ */
+export type TrackingDeleteExternalBody = NonNullable<
+  operations['deleteExternalTrackingItem']['requestBody']['content']['application/json']
+>
 
 /**
  * Every management route answers with the same ``TrackingManagementResultDTO``,
@@ -77,13 +89,15 @@ export function isModifyActionCode(value: TrackingManagementActionCode): value i
 }
 
 /**
- * The management actions this page actually sends (US-314).
+ * The management actions this page actually sends (US-314, US-315).
  *
- * ``DELETE_EXTERNAL`` is deliberately absent: the per-record external delete is
- * its own story and must keep sending zero requests until then, so the set (not
- * the server) is what decides whether an action can leave the page.
+ * The set — not the server — decides whether an action can leave the page, so
+ * an action the page has no request shape for can never be sent however the
+ * server projects it.  Every entry here has exactly one builder below.
  */
-export const SENDABLE_MANAGEMENT_ACTION_CODES = ['MODIFY', 'SET_ENABLED', 'REFRESH_RSS'] as const
+export const SENDABLE_MANAGEMENT_ACTION_CODES = [
+  'MODIFY', 'SET_ENABLED', 'REFRESH_RSS', 'DELETE_EXTERNAL',
+] as const
 
 export type SendableManagementActionCode = (typeof SENDABLE_MANAGEMENT_ACTION_CODES)[number]
 
@@ -323,6 +337,12 @@ export type TrackingManagementIntent =
       readonly patch: null
       readonly enabled: null
     })
+  | (TrackingManagementIntentBase & {
+      readonly action: 'DELETE_EXTERNAL'
+      readonly targetScope: TrackingManagementScope
+      readonly patch: null
+      readonly enabled: null
+    })
 
 function makeOpaqueKey(): string {
   const candidate = globalThis.crypto?.randomUUID?.()
@@ -420,10 +440,38 @@ export function createTrackingRefreshRssIntent(
 }
 
 /**
+ * Validate one per-record external delete against the server's own projection.
+ *
+ * The scope is the user's explicit choice (which external object disappears) and
+ * is re-validated here: the server must still offer ``DELETE_EXTERNAL`` for that
+ * very scope at this revision and the live session must still prove the matching
+ * delete capability, so neither a stale form nor a hand-made request can become
+ * a delete.  There is no patch and no direction: a delete removes one object.
+ */
+export function createTrackingDeleteExternalIntent(
+  item: TrackingItem,
+  targetScope: TrackingManagementScope,
+  capabilities?: CapabilityResult | null,
+): TrackingManagementIntent | null {
+  if (!validRevision(item)) return null
+  if (!projectTrackingActionScopes(item, 'DELETE_EXTERNAL', targetScope, capabilities).length) return null
+  return {
+    action: 'DELETE_EXTERNAL',
+    targetScope,
+    patch: null,
+    enabled: null,
+    expectedRevision: item.revision,
+    confirm: true,
+    idempotencyKey: makeOpaqueKey(),
+  }
+}
+
+/**
  * Build one intent for whichever management action the user requested.
  *
- * This is the page's single entry point: an action the page does not send —
- * including ``DELETE_EXTERNAL`` — yields ``null`` rather than a request.
+ * This is the page's single entry point: an action the page does not send yields
+ * ``null`` rather than a request, so an action code without a builder below can
+ * never leave the page however the server projects it.
  */
 export function createTrackingManagementActionIntent(
   item: TrackingItem,
@@ -437,6 +485,7 @@ export function createTrackingManagementActionIntent(
   }
   if (action === 'SET_ENABLED') return createTrackingSetEnabledIntent(item, targetScope, capabilities)
   if (action === 'REFRESH_RSS') return createTrackingRefreshRssIntent(item, capabilities)
+  if (action === 'DELETE_EXTERNAL') return createTrackingDeleteExternalIntent(item, targetScope, capabilities)
   return null
 }
 
@@ -470,7 +519,7 @@ export function createTrackingManagementBody(
   intent: TrackingManagementIntent,
   abConfig: TrackingModifyBody['ab_config'],
   storageDir?: string,
-): TrackingModifyBody | TrackingSetEnabledBody | TrackingRefreshRssBody | null {
+): TrackingModifyBody | TrackingSetEnabledBody | TrackingRefreshRssBody | TrackingDeleteExternalBody | null {
   const baseUrl = typeof abConfig?.base_url === 'string' ? abConfig.base_url.trim() : ''
   if (!abConfig || !baseUrl) return null
   const common = {
@@ -485,6 +534,11 @@ export function createTrackingManagementBody(
   }
   if (intent.action === 'REFRESH_RSS') {
     return { ...common, target_scope: 'ASSOCIATED_RSS' }
+  }
+  if (intent.action === 'DELETE_EXTERNAL') {
+    // The generated shape has no ``file`` field at all, so this body can only
+    // ever ask Auto Bangumi to drop the external object.
+    return { ...common, target_scope: intent.targetScope }
   }
   if (intent.targetScope === 'SUBSCRIPTION') {
     if (!managementPatchPresent('SUBSCRIPTION', intent.patch)) return null
@@ -590,6 +644,8 @@ export interface TrackingManagementConfirmation {
   title: string
   message: string
   confirmLabel: string
+  /** Only the external delete is styled and announced as a danger. */
+  danger?: boolean
 }
 
 /**
@@ -647,6 +703,21 @@ const SET_ENABLED_CONFIRMATIONS = {
 } as const satisfies Record<TrackingManagementScope, Record<EnableDirection, TrackingManagementConfirmation>>
 
 /**
+ * The external delete confirmation (US-315).
+ *
+ * It is the only danger-styled management dialog, and it names every local
+ * record that survives: the request has no ``file`` field, so the delete can only
+ * remove the external object and never the downloaded media.  ``danger`` makes
+ * the dialog announce and style the confirm button as destructive.
+ */
+const DELETE_EXTERNAL_CONFIRMATION: TrackingManagementConfirmation = {
+  title: '删除 Auto Bangumi 外部对象',
+  message: '将在 Auto Bangumi 中删除该追番对应的外部对象；只影响 Auto Bangumi 外部对象，MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件都会保留，本操作也不会删除任何媒体文件。是否继续？',
+  confirmLabel: '确认删除外部对象',
+  danger: true,
+}
+
+/**
  * The refresh confirmation says explicitly that only this record's own RSS is
  * refreshed: there is no global refresh behind this button.
  */
@@ -670,6 +741,7 @@ export function managementConfirmation(
     return SET_ENABLED_CONFIRMATIONS[intent.targetScope][intent.enabled ? 'enable' : 'disable']
   }
   if (intent.action === 'REFRESH_RSS') return REFRESH_RSS_CONFIRMATION
+  if (intent.action === 'DELETE_EXTERNAL') return DELETE_EXTERNAL_CONFIRMATION
   return MODIFY_SCOPE_CONFIRMATIONS[intent.targetScope]
 }
 
@@ -680,3 +752,7 @@ export const MODIFY_FORM_HELP =
 /** Fixed copy shown next to the enable/disable and refresh actions (US-314). */
 export const MANAGEMENT_ACTIONS_HELP =
   '启停与刷新只作用于 Auto Bangumi 中的外部对象，不修改 MiGuOrca 本地方案；每次操作都需要单独确认。'
+
+/** Fixed copy for the per-record external delete section (US-315). */
+export const DELETE_EXTERNAL_HELP =
+  '删除按当前追番逐条执行：没有勾选、批量或全局删除，也只会删除你明确选择的那一个 Auto Bangumi 外部对象；MiGuOrca 本地订阅方案、追番记录、审计记录、下载任务和已下载媒体文件都会保留，且不会删除任何媒体文件。'

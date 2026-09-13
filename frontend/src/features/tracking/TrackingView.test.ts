@@ -2080,3 +2080,214 @@ describe('TrackingView locked-intent feedback', () => {
     expect(wrapper.find('#tracking-intent-blocked-notice').exists()).toBe(false)
   })
 })
+
+// -- US-315: per-record external delete --------------------------------------
+
+const deleteAction = {
+  code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER',
+  requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+}
+
+/** A detail record that offers the per-record external delete. */
+function deleteDetail(overrides: Record<string, unknown> = {}) {
+  return { ...modifyDetail(), available_actions: [deleteAction], ...overrides }
+}
+
+/** The authoritative summary the delete endpoint returns. */
+function deletePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    action: 'DELETE_EXTERNAL', management_status: 'SUCCEEDED', needs_manual: false,
+    safe_message: 'Auto Bangumi 管理操作已完成并通过回查', operation_id: 'operation-delete',
+    operation: null,
+    tracking: {
+      ...item('tracking-1', '葬送的芙莉莲'), status: 'EXTERNAL_DELETED', status_label: '外部已删除',
+      status_group: 'INACTIVE', revision: 2,
+    },
+    ...overrides,
+  }
+}
+
+function deleteBodies(): Record<string, unknown>[] {
+  return apiPost.mock.calls
+    .filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}/delete-external')
+    .map((call) => (call[1]?.body ?? {}) as Record<string, unknown>)
+}
+
+describe('TrackingView per-record external delete (US-315)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('offers no delete without a live session, a chosen target or the capability', async () => {
+    serveApi(() => deleteDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    // No page credential session: no delete control at all, zero requests.
+    expect(wrapper.find('#tracking-delete-external-submit').exists()).toBe(false)
+    expect(wrapper.find('.tracking-delete-external-section').text())
+      .toContain('需要先在页面连接 Auto Bangumi')
+
+    await connect(wrapper)
+    // Connecting never deletes anything on its own.
+    expect(deleteBodies()).toHaveLength(0)
+    const section = wrapper.find('.tracking-delete-external-section')
+    // Single-record and explicit: no checkbox and no batch control anywhere.
+    expect(section.findAll('input[type=checkbox]')).toHaveLength(0)
+    expect(section.findAll('input[type=radio]')).toHaveLength(2)
+    expect(section.text()).toContain('没有勾选、批量或全局删除')
+    expect(section.text()).not.toContain('SUBSCRIPTION')
+    expect(section.text()).not.toContain('ASSOCIATED_RSS')
+    // No target is pre-selected, so nothing can be deleted by accident.
+    expect(wrapper.find('#tracking-delete-external-submit').attributes('disabled')).toBeDefined()
+    expect(section.text()).toContain('请先明确选择要删除的外部对象')
+  })
+
+  it('drops a scope whose own delete capability is not proven', async () => {
+    serveApi(() => deleteDetail())
+    apiPost.mockResolvedValueOnce(capabilities({ subscription_delete: 'UNSUPPORTED' }))
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    expect(wrapper.find('#tracking-delete-external-scope-SUBSCRIPTION').exists()).toBe(false)
+    expect(wrapper.find('#tracking-delete-external-scope-ASSOCIATED_RSS').exists()).toBe(true)
+
+    // An unproven delete capability hides the action entirely instead of
+    // offering a button that could never succeed.
+    apiPost.mockReset()
+    apiPost.mockResolvedValueOnce(capabilities({ rss_delete: 'UNKNOWN' }))
+    const second = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(second.wrapper)
+    expect(second.wrapper.find('.tracking-delete-external-section').findAll('input[type=radio]'))
+      .toHaveLength(1)
+    expect(second.wrapper.find('#tracking-delete-external-submit').exists()).toBe(true)
+  })
+
+  it('deletes only the chosen external object and keeps every local record', async () => {
+    let revision = 1
+    serveApi(() => deleteDetail({ revision }))
+    apiPost.mockResolvedValueOnce(capabilities())
+      .mockImplementationOnce((async () => {
+        revision = 2
+        return deletePayload()
+      }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    // Cancelling the impact confirmation sends zero requests.
+    await wrapper.find('#tracking-delete-external-scope-SUBSCRIPTION').setValue()
+    answerConfirm(wrapper, false)
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    await flushPromises()
+    expect(deleteBodies()).toHaveLength(0)
+    expect(wrapper.find('#tracking-delete-external-result').exists()).toBe(false)
+
+    const confirmed = answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    await flushPromises()
+
+    // The danger dialog names the external object and every local record kept.
+    const options = confirmed.mock.calls[0]?.[0] as { message: string; danger: boolean; confirmLabel: string }
+    expect(options.danger).toBe(true)
+    expect(options.confirmLabel).toBe('确认删除外部对象')
+    expect(options.message).toContain('不会删除任何媒体文件')
+    expect(options.message).toContain('本地订阅方案')
+
+    const bodies = deleteBodies()
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toEqual({
+      target_scope: 'SUBSCRIPTION',
+      expected_revision: 1,
+      idempotency_key: expect.any(String),
+      confirm: true,
+      ab_config: {
+        auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user',
+        password: 'pass', fallback_enabled: false,
+      },
+    })
+    // The generated delete body cannot express a media delete, a patch or a
+    // second scope, and no key or credential reaches the DOM.
+    expect(Object.keys(bodies[0] ?? {}).sort()).toEqual(
+      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+    )
+    expect(JSON.stringify(bodies[0])).not.toContain('file')
+
+    const result = wrapper.find('#tracking-delete-external-result')
+    expect(result.classes()).toContain('is-succeeded')
+    expect(result.text()).toContain('外部删除已完成')
+    expect(result.text()).toContain('本次目标：外部番剧订阅')
+    expect(result.text()).not.toContain('SUCCEEDED')
+    // The record stays in the local list with its history and plan entry.
+    expect(wrapper.findAll('.tracking-list-item')).toHaveLength(1)
+    expect(wrapper.find('#tracking-list-container').text()).toContain('外部已删除')
+    expect(wrapper.find('.tracking-plan-link').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain(String(bodies[0]?.idempotency_key))
+    expect(wrapper.text()).not.toContain('pass')
+  })
+
+  it('locks the delete intent on an unknown result and never resends a different one', async () => {
+    serveApi(() => deleteDetail())
+    apiPost.mockResolvedValueOnce(capabilities()).mockRejectedValueOnce(unknownError)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-delete-external-scope-SUBSCRIPTION').setValue()
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    await flushPromises()
+    const result = wrapper.find('#tracking-delete-external-result')
+    expect(result.classes()).toContain('is-unknown')
+    expect(result.text()).toContain('外部删除结果未知')
+    expect(result.text()).toContain('只读回查')
+    expect(result.text()).not.toContain('已完成')
+    expect(deleteBodies()).toHaveLength(1)
+
+    // A different scope is a different delete: zero requests, one stated reason.
+    await wrapper.find('#tracking-delete-external-scope-ASSOCIATED_RSS').setValue()
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    await flushPromises()
+    expect(deleteBodies()).toHaveLength(1)
+    expect(wrapper.find('#tracking-intent-blocked-notice').text())
+      .toContain('上一次外部操作的结果仍未确认')
+    expect(result.text()).toContain('外部删除结果未知')
+
+    // Replaying the same delete reuses the very same key and revision.
+    await wrapper.find('#tracking-delete-external-scope-SUBSCRIPTION').setValue()
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    await flushPromises()
+    const bodies = deleteBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).toBe(bodies[0]?.idempotency_key)
+    expect(bodies[1]?.expected_revision).toBe(bodies[0]?.expected_revision)
+  })
+
+  it('converges a conflict and a definite refusal on the server state', async () => {
+    serveApi(() => deleteDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+      .mockRejectedValueOnce(conflictError)
+      .mockRejectedValueOnce(rejectedError)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-delete-external-scope-SUBSCRIPTION').setValue()
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    await flushPromises()
+    const result = wrapper.find('#tracking-delete-external-result')
+    expect(result.classes()).toContain('is-conflict')
+    expect(result.text()).toContain('本次未提交到 Auto Bangumi')
+    expect(result.text()).toContain('请重新确认')
+    expect(wrapper.text()).not.toContain('tracking_revision_conflict')
+
+    // A 409 released the intent: the next confirmation mints a fresh key and a
+    // structured non-409 4xx is a definite refusal, never an unknown result.
+    await wrapper.find('#tracking-delete-external-scope-SUBSCRIPTION').setValue()
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-delete-external-submit').trigger('submit')
+    await flushPromises()
+    expect(result.classes()).toContain('is-rejected')
+    expect(result.text()).toContain('未删除 Auto Bangumi 外部对象')
+    expect(result.text()).not.toContain('结果未知')
+
+    const bodies = deleteBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+  })
+})
