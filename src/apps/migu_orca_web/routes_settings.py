@@ -9,6 +9,10 @@ storage repositories.
 
 from flask import request
 
+from apps.migu_orca_web.autobangumi_probe_service import (
+    invalidate_saved_capabilities,
+    probe_saved_capabilities,
+)
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
     AutoBangumiConfigDeletePayload,
@@ -17,6 +21,7 @@ from apps.migu_orca_web.schemas import (
     CorrectionSavePayload,
     PreferenceQuery,
     PreferenceSavePayload,
+    SavedAutoBangumiProbePayload,
 )
 from apps.migu_orca_web.serializers import serialize_autobangumi_connection_summary
 from apps.migu_orca_web.services import _storage_dir
@@ -65,6 +70,7 @@ class AutoBangumiConfigSaveView(PostView):
         record = AutoBangumiConfigRepository().save(
             config, expected_configuration_revision=payload.expected_configuration_revision
         )
+        invalidate_saved_capabilities()
         return serialize_autobangumi_connection_summary(record)
 
     def put(self) -> object:
@@ -82,10 +88,27 @@ class AutoBangumiConfigDeleteView(PostView):
         record = AutoBangumiConfigRepository().delete(
             expected_configuration_revision=payload.expected_configuration_revision
         )
+        invalidate_saved_capabilities()
         return serialize_autobangumi_connection_summary(record)
 
     def delete(self) -> object:
         return self.post()
+
+
+@class_route(api_blueprint, "/api/v1/settings/autobangumi/probe", methods=["POST"])
+class SavedAutoBangumiCapabilitiesView(PostView):
+    request_validator_model = SavedAutoBangumiProbePayload
+
+    def save(self) -> dict[str, object]:
+        _require_json()
+        assert isinstance(self.request_validator_model, SavedAutoBangumiProbePayload)
+        payload = self.request_validator_model
+        capabilities = probe_saved_capabilities(
+            AutoBangumiConfigRepository(),
+            connection_ref=payload.connection_ref,
+            configuration_revision=payload.configuration_revision,
+        )
+        return capabilities.to_public_dict()
 
 
 @class_route(api_blueprint, "/api/v1/preferences", methods=["GET"])

@@ -435,6 +435,26 @@ _ENDPOINTS: dict[str, dict[str, Any]] = {
         "success": AutoBangumiConnectionSummaryDTO,
         "errors": {"400": {"validation_error": "请求参数校验失败"}, "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_in_use": "Auto Bangumi 连接正在使用中"}, "500": {"storage_error": "Auto Bangumi 配置存储不可用"}},
     },
+    "POST /api/v1/settings/autobangumi/probe": {
+        "operationId": "probeSavedAutoBangumiCapabilities",
+        "summary": "探测已保存 Auto Bangumi 连接能力",
+        "description": "显式只读探测当前保存配置；请求仅携带 opaque connection_ref 与 configuration_revision，服务端以不可变快照和 lease 执行，结果不持久化原始响应。",
+        "requestBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["connection_ref", "configuration_revision"],
+            "properties": {
+                "connection_ref": {"type": "string", "format": "uuid"},
+                "configuration_revision": {"type": "integer", "minimum": 0},
+            },
+        },
+        "success": AutoBangumiCapabilitiesDTO,
+        "errors": {
+            "400": {"data_validation_errors": "请求参数校验失败", "config_error": "Auto Bangumi 配置未配置或引用无效"},
+            "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_ref_conflict": "Auto Bangumi 配置引用已变化"},
+            "500": {"storage_error": "Auto Bangumi 配置存储不可用", "storage_json_error": "Auto Bangumi 配置内容无效"},
+        },
+    },
     "POST /api/v1/tracking/items/<path:tracking_id>/modify": {
         **_management_endpoint("modifyTrackingItem", "修改外部追番方案", required_extra=["patch"]),
         "requestBody": _modify_request_body(),

@@ -9,6 +9,7 @@ response DTOs stay in ``api_contract.py`` (which is the Stage 27 contract).
 
 import re
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator, model_validator
 
@@ -470,6 +471,27 @@ class AutoBangumiConfigDeletePayload(BaseModel):
         if self.confirm is not True:
             raise ValueError("confirm must be true")
         return self
+
+
+class SavedAutoBangumiProbePayload(BaseModel):
+    """Reference one immutable, server-owned saved configuration generation."""
+
+    model_config = ConfigDict(extra="forbid")
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def require_canonical_connection_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
 
 
 class AutoBangumiCapabilitiesConfigPayload(BaseModel):

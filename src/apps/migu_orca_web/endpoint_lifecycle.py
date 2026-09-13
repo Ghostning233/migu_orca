@@ -26,6 +26,11 @@ ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
     ("GET", "/api/v1/settings/autobangumi"): _entry(_PRIMARY, "部署端 Auto Bangumi 安全摘要读取", "Deployment config repository"),
     ("PUT", "/api/v1/settings/autobangumi"): _entry(_PRIMARY, "部署端 Auto Bangumi 配置保存", "Deployment config repository"),
     ("DELETE", "/api/v1/settings/autobangumi"): _entry(_PRIMARY, "部署端 Auto Bangumi 配置清除", "Deployment config repository"),
+    ("POST", "/api/v1/settings/autobangumi/probe"): _entry(
+        _PRIMARY,
+        "使用已保存连接执行显式只读能力探测；结果仅绑定当前 ref/revision",
+        "Capability probe cache",
+    ),
     ("POST", "/api/v1/autobangumi/capabilities"): _entry(
         _PRIMARY,
         "只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持",

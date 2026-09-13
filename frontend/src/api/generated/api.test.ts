@@ -20,6 +20,7 @@ const EXPECTED_OPERATION_IDS = [
   'getAutoBangumiConnection',
   'saveAutoBangumiConnection',
   'deleteAutoBangumiConnection',
+  'probeSavedAutoBangumiCapabilities',
   'listRequests',
   'getRequestDetail',
   'getRequestSafeInfo',
@@ -69,6 +70,7 @@ describe('generated API client (US-198)', () => {
       | 'getAutoBangumiConnection'
       | 'saveAutoBangumiConnection'
       | 'deleteAutoBangumiConnection'
+      | 'probeSavedAutoBangumiCapabilities'
       | 'listRequests'
       | 'getRequestDetail'
       | 'getRequestSafeInfo'
@@ -115,6 +117,7 @@ describe('generated API client (US-198)', () => {
     type PathKeys = keyof paths
     expectTypeOf<PathKeys>().toEqualTypeOf<
       | '/api/v1/settings/autobangumi'
+      | '/api/v1/settings/autobangumi/probe'
       | '/api/v1/autobangumi/capabilities'
       | '/api/v1/autobangumi/test-connection'
       | '/api/v1/batches/parse'
@@ -199,6 +202,6 @@ describe('generated API client (US-198)', () => {
   })
 
   it('has a non-empty expected operation set (guards the fixture)', () => {
-    expect(EXPECTED_OPERATION_IDS).toHaveLength(39)
+    expect(EXPECTED_OPERATION_IDS).toHaveLength(43)
   })
 })

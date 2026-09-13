@@ -64,6 +64,13 @@ Started: 2026-09-13
 - 验证：repo+AB+settings `49 passed`；inventory+openapi_runtime+DTO+lifecycle+settings/repo `109 passed`；views_test `186 passed`；OpenAPI connection_ref 为 `format: uuid`；Ruff、OpenAPI check、frontend api:check/typecheck、git diff check 通过。
 - 遗留风险：未运行全量 pytest、Vitest、浏览器、真实上游；US-321 probe 与 US-320+ 绑定未实现。US-318/319 passes 保持 false。
 
+## 2026-09-13 / US-321 修复 B
+
+- 修复：回退 `base.py` 全局 POST JSON guard，保存 probe 自身 `_require_json` 仍拒绝非 JSON；扩充 saved probe 测试覆盖未配置、错误/非 canonical ref、bool revision、额外秘密字段、PARTIAL/FAILED/异常安全降级、lease 释放后替换、缓存代际、损坏配置固定错误与敏感值不泄漏。
+- 中途失败：生命周期 inventory 与 registry 的 probe relation 文案不一致，已同步 inventory。
+- 验证：受影响 probe/repository/AB capability+management+connection/inventory/OpenAPI/DTO/lifecycle/views 组合 `314 passed`；Ruff、`migu-orca-openapi --check`、frontend `api:check`、`typecheck`、generated API Vitest `6 passed`、`git diff --check` 通过。
+- 现行公共契约 probe_status 仍仅 `VERIFIED/PARTIAL/FAILED`，UNKNOWN 仅存在于各 capability 字段；未引入 UNKNOWN probe_status。US-321 passes 保持 false。
+
 ## 2026-09-13 / US-318/319 trusted IPv6 精确匹配微修复
 
 - 审核反例：Werkzeug 对 `[fd00::2]` 在 trusted `[fd00::1]` 下出现宽松匹配；同时 `localhost:5000` 被错误识别为 IPv6。
@@ -111,3 +118,24 @@ Started: 2026-09-13
 - 独立安全反例：operation 与 mapping 的 `True`、`False`、浮点及字符串 schema 均 fail closed；v1/v2 operation round-trip 保持原 schema；旧 v1/v2 CAS 与 recover 返回固定 `tracking_operation_legacy_read_only` 且文件 bytes、schema、state 不变。
 - 验证边界：未运行全量 pytest、Vitest、浏览器或真实上游；本故事没有 UI 改动。保存配置 probe 与业务服务 ref 原子迁移仍由 US-321～US-324 负责。
 - 第三轮测试真实性微修：repository 改用 `TRACKING_OPERATION_SCHEMA_VERSION` 常量；legacy CAS/recover 测试先断言固定 `error_type`、bytes 与重新加载的 schema/state，再布置下一状态，避免覆盖未验证保护。验证 operation repository `38 passed`，五模块定向组 `137 passed`，Ruff 与 `git diff --check` 通过。
+
+## 2026-09-13 23:38 / US-321
+
+- 范围：新增 `POST /api/v1/settings/autobangumi/probe` 与 `probeSavedAutoBangumiCapabilities`；请求只接受规范 `connection_ref + configuration_revision`，拒绝 `ab_config`、缺配置、损坏配置及过期 ref/revision。
+- 实现：`autobangumi_probe_service.py` 在配置 repository lease 内取得 immutable snapshot，转换为 request-scoped adapter 配置，探测结束/异常均释放 lease；能力结果仅在进程内按 ref/revision 缓存，配置保存/删除清缓存，GET 摘要投影 `CONFIGURED/VERIFIED/ERROR`，HTTP 200 的 PARTIAL/FAILED 不升级为 VERIFIED。
+- 契约/文件：同步 `routes_settings.py`、`schemas.py`、`serializers.py`、统一 Host/Origin JSON 入口与错误分类、endpoint lifecycle/inventory、`openapi_gen.py`、`docs/api/openapi.json`、generated `frontend/src/api/generated/api.ts` 及其 operation/path 断言；新增 `tests/api_contract/test_saved_autobangumi_probe.py`。
+- 验证：`uv run pytest tests/api_contract/test_saved_autobangumi_probe.py tests/api_contract/test_autobangumi_settings_security.py src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config_test.py src/ab_engine/controllers/ab_management_client_test.py src/ab_engine/controllers/ab_connection_controller_test.py tests/api_contract/test_inventory_consistency.py tests/api_contract/test_openapi_runtime_consistency.py tests/api_contract/test_openapi_generation.py tests/api_contract/test_dto_contracts.py src/apps/migu_orca_web/views_test.py -q` → `321 passed`；`uv run migu-orca-openapi --check`、受影响 Ruff、定向 compileall、`git diff --check` 通过；frontend `npm run api:check`、`npm run typecheck`、generated API 三文件 Vitest → `10 passed`。
+- 遗留风险：未运行全量后端/前端门禁、真实 Chromium 或真实 Auto Bangumi；旧临时凭据探测入口仍按 PRD 保留，待 US-330 删除；尚未迁移 submit/sync/management/recovery 的业务请求引用。
+- 可复用结论：保存配置的外部只读调用必须在同一 repository lease 内完成，结果缓存必须绑定 opaque ref 与 revision；summary 只消费安全 capability DTO，任何非 VERIFIED probe 状态都进入 `ERROR`，不得把 HTTP 200 当作能力验证成功。
+
+## 2026-09-13 / US-321 Ralph 验证中止
+
+- Ralph 最终验证命令引用不存在的 `src/ab_engine/controllers/ab_capability_service_test.py`，pytest 退出码 4；本批按规则停止，未进入 US-322/323，也未创建 story commit。
+- 上一条 progress 中的通过结果仅作为开发 Agent 自述保留，不构成审核结论；US-321 恢复为 `passes=false`，等待主 Agent 独立审核与修复。
+
+## 2026-09-13 / US-321 修复与主 Agent 独立审核通过
+
+- 修复：撤回为单一 probe 端点扩大全仓 POST Content-Type 行为的改动；补齐未配置/错误 ref 与 revision/canonical 输入、PARTIAL/FAILED、已知与未知异常安全降级、lease 释放、缓存代际失效及损坏配置 canary。现行公共 `probe_status` 保持 `VERIFIED/PARTIAL/FAILED`，能力字段继续用 `UNKNOWN` 表示未验证能力。
+- 审核结论：保存配置 probe 只接收 `connection_ref + configuration_revision`，在 immutable snapshot lease 内完成只读外调并在全路径释放；缓存只绑定当前 ref/revision 且不持久化，保存/替换/删除均失效；非 VERIFIED 结果不误报成功，公开结果不含配置、秘密或原始异常。US-321 更新为 `passes=true`，US-322/323 保持 `false`。
+- 独立验证：probe/settings repository/AB capability 与管理/连接、inventory/OpenAPI/DTO/lifecycle/views 组合 `329 passed`；`migu-orca-openapi --check`、受影响 Ruff、frontend `api:check` 与 `typecheck`、`git diff --check` 均通过；generated API 三文件 Vitest `10 passed`。
+- 验证记录：首次误用不存在的 `npm test` 脚本，仅在 typecheck 通过后导致该组合命令中止；随后按 `package.json` 使用 `npm run test:unit -- --run ...` 正确补跑通过。未运行全量 pytest/Vitest、浏览器或真实 AB；本故事无 UI 改动。

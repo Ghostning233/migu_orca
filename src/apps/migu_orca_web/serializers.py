@@ -13,6 +13,7 @@ from typing import Any
 
 from flask import url_for
 
+from apps.migu_orca_web.autobangumi_probe_service import cached_capabilities
 from apps.migu_orca_web.contexts import candidate_selection_contexts
 from batch_engine.controllers.candidate_search_orchestrator import (
     CandidateSearchOutcome,
@@ -303,15 +304,25 @@ def _sanitize_ab_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
 def serialize_autobangumi_connection_summary(record: AutoBangumiConfigRecord) -> dict[str, Any]:
     """Serialize the deployment repository record through an explicit whitelist."""
     configured = bool(getattr(record, "configured", False))
+    capabilities = cached_capabilities(record)
+    capability_result = capabilities.to_public_dict() if capabilities is not None else None
+    if not configured:
+        connection_status = "UNCONFIGURED"
+    elif capabilities is None:
+        connection_status = "CONFIGURED"
+    elif capabilities.probe_status == "VERIFIED":
+        connection_status = "VERIFIED"
+    else:
+        connection_status = "ERROR"
     return {
         "configured": configured,
         "configuration_revision": getattr(record, "configuration_revision"),
         "connection_ref": record.connection_ref,
         "auth_mode": getattr(getattr(record, "config", None), "auth_mode", None),
         "credential_present": configured,
-        "connection_status": "CONFIGURED" if configured else "UNCONFIGURED",
-        "checked_at": None,
-        "capabilities": None,
+        "connection_status": connection_status,
+        "checked_at": capabilities.checked_at if capabilities is not None else None,
+        "capabilities": capability_result,
     }
 
 

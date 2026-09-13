@@ -115,6 +115,7 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     "tracking_management_state_conflict",
     "configuration_revision_conflict",
     "connection_in_use",
+    "connection_ref_conflict",
 }
 _HTTP_CONFLICT_ERROR_TYPES.update(
     name
