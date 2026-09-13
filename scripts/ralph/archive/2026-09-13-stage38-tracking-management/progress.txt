@@ -283,3 +283,14 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 长期文档需要同步的是 8 处（README 头部状态段 + Ralph 状态链、backlog BL-026 两处、future_stages 的 Stage 清单/依赖段、frontend_ux_implementation_PRD 文档信息与状态注记、work-goals 状态表、M13 阶段表、contract handoff 的 F-F 小节），漏掉任何一处都会让「F-F 已规划」残留。
 - 定向验证：完整门禁如上；`git status` 无 `dist/`、trace、截图、凭据或本地 storage artifact（由 `test_no_dist_trace_or_screenshot_artifact_is_tracked` 用 `git ls-files` 固化）。
 ---
+
+## [2026-09-13 13:32:08 CST] - Stage 38 审核修复（US-312/US-315，子 Agent B / 浏览器焦点断言时序竞态）
+- 同步 live progress 的最终 CI 焦点断言修复记录：异步焦点统一使用 Playwright 轮询断言，覆盖 tracking、shell、responsive_a11y，未改变产品语义。
+- 未改前端实现、后端契约、端点、OpenAPI、`prd.json`；未产生 dist/trace/截图/凭据产物。
+- 定向恢复/删除焦点用例 2 passed；真实 Chromium 212 passed；ruff 与 `git diff --check` 通过。
+---
+
+## [2026-09-13 16:00:00 CST] - Stage 38 合并后安全审核修复
+- TrackingView 清除连接销毁凭据并中止在途敏感请求，同时保留 UNKNOWN/RECOVERY_REQUIRED 未决 intent tombstone；重连不得复用旧 key/revision。明确恢复终态才释放源锁，非 JSON/网络/取消/408/429 保持未知。
+- ConfirmDialog 改用 Vue `nextTick` 代际守卫并在卸载时清理焦点陷阱；Ralph completion guard 严格校验末条 token 与全 true PRD。定向 Vitest 144 passed、typecheck/lint/build 通过、受影响 Chromium 3 passed，未产生产物。
+---

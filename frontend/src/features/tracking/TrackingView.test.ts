@@ -715,6 +715,10 @@ describe('TrackingView explicit submission (US-310)', () => {
       ['server_error', { type: 'server_error', message: '服务端错误', status: 500, cancelled: false, httpError: true }],
       ['network_error', unknownError],
       ['request_timeout', { type: 'request_timeout', message: '请求超时，请稍后重试', status: 0, cancelled: false, httpError: false }],
+      ['html_400', { type: 'request_error', message: '请求失败', status: 400, cancelled: false, httpError: true, nonJson: true }],
+      ['html_404', { type: 'not_found', message: '请求失败', status: 404, cancelled: false, httpError: true, nonJson: true }],
+      ['timeout_408', { type: 'request_error', message: '请求失败', status: 408, cancelled: false, httpError: true }],
+      ['rate_limit_429', { type: 'request_error', message: '请求失败', status: 429, cancelled: false, httpError: true }],
     ]
     for (const [type, failure] of cases) {
       apiGet.mockReset()
@@ -819,7 +823,7 @@ describe('TrackingView explicit submission (US-310)', () => {
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
   })
 
-  it('aborts an in-flight submit and drops the key when the connection is cleared', async () => {
+  it('aborts an in-flight submit but keeps a safe unknown tombstone when cleared', async () => {
     let resolveSubmit: ((value: unknown) => void) | undefined
     serveApi(() => submitDetail())
     apiPost.mockResolvedValueOnce(capabilities() as never)
@@ -836,7 +840,7 @@ describe('TrackingView explicit submission (US-310)', () => {
     await flushPromises()
     expect(signal.aborted).toBe(true)
     expect(wrapper.find('#tracking-submit').exists()).toBe(false)
-    expect(wrapper.find('#tracking-submit-result').exists()).toBe(false)
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
   })
 })
 
@@ -1178,7 +1182,7 @@ describe('TrackingView unknown-result recovery (US-312)', () => {
     expect(recoveredBodies()).toHaveLength(0)
     await new Promise((resolve) => requestAnimationFrame(resolve))
     expect(document.querySelector('.confirm-dialog')?.textContent).toContain('独立核对')
-    expect(document.activeElement?.textContent).toContain('取消')
+    expect(document.activeElement).toBe(wrapper.find('.confirm-dialog .secondary-button').element)
     clickDialogButton('取消')
     await flushPromises()
     expect(recoveredBodies()).toHaveLength(0)
@@ -1348,7 +1352,7 @@ describe('TrackingView unknown-result recovery (US-312)', () => {
     await wrapper.find('#tracking-retry').trigger('click')
     await flushPromises()
     // A locked action opens no dialog and sends nothing at all.
-    expect(document.querySelector('.confirm-dialog')).toBeNull()
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
     expect(recoveredBodies()).toHaveLength(1)
     expect(wrapper.find('#tracking-recovery-result').exists()).toBe(false)
 
@@ -1396,9 +1400,9 @@ describe('TrackingView unknown-result recovery (US-312)', () => {
     await flushPromises()
     resolveRecover?.(recoveryPayload({ action: 'VERIFY_EXTERNAL' }))
     await flushPromises()
-    // The cleared session drops the page intent: no result is rendered from a
-    // response the user cancelled, and the list is never rewritten by it.
-    expect(wrapper.find('#tracking-recovery-result').exists()).toBe(false)
+    // The cleared session keeps a safe unknown lock: no stale result is
+    // rendered, and the list is never rewritten by the response.
+    expect(wrapper.find('#tracking-recovery-result').text()).toContain('恢复结果未知')
     expect(wrapper.find('.tracking-connection-status').exists()).toBe(false)
   })
 })
@@ -1600,7 +1604,7 @@ describe('TrackingView external modify (US-313)', () => {
     expect(notice.attributes('role')).toBe('status')
     expect(notice.text()).toContain('上一次外部操作的结果仍未确认')
     expect(notice.text()).toContain('只读回查')
-    expect(notice.text()).toContain('清除连接')
+    expect(notice.text()).not.toContain('清除连接')
     expect(notice.text()).not.toContain('network_error')
     expect(wrapper.find('#tracking-modify-result').text()).toContain('外部修改结果未知')
 
@@ -1711,7 +1715,7 @@ describe('TrackingView external modify (US-313)', () => {
     await flushPromises()
     resolveModify?.(modifyPayload({ tracking: { ...item('tracking-1', '葬送的芙莉莲'), status_label: '不应写回' } }))
     await flushPromises()
-    expect(wrapper.find('#tracking-modify-result').exists()).toBe(false)
+    expect(wrapper.find('#tracking-modify-result').text()).toContain('外部修改结果未知')
     expect(wrapper.text()).not.toContain('不应写回')
     expect(wrapper.find('.tracking-connection-status').exists()).toBe(false)
   })
@@ -2015,7 +2019,8 @@ describe('TrackingView locked-intent feedback', () => {
     expect(notice.text()).not.toContain('network_error')
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交结果未知')
 
-    // Clearing the page connection drops the intent, so the notice goes with it.
+    // Clearing credentials destroys the session but must retain the unresolved
+    // tombstone; reconnecting cannot replay it with a different account.
     await wrapper.find('.tracking-clear-connection').trigger('click')
     await flushPromises()
     expect(wrapper.find('#tracking-intent-blocked-notice').exists()).toBe(false)
@@ -2060,7 +2065,7 @@ describe('TrackingView locked-intent feedback', () => {
     await flushPromises()
     expect(submittedBodies()).toHaveLength(1)
     expect(modifiedBodies()).toHaveLength(0)
-    expect(document.querySelector('.confirm-dialog')).toBeNull()
+    expect(wrapper.find('.confirm-dialog').exists()).toBe(false)
 
     // The notice belongs to the acted-on record only: the lock owner is never
     // shown another record's refusal.

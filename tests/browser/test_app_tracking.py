@@ -1166,7 +1166,7 @@ class TestAppTrackingRecovery:
         page.locator("#tracking-recover-succeeded").click()
         expect(page.locator(".confirm-dialog")).to_be_visible()
         expect(page.locator(".confirm-dialog-message")).to_contain_text("独立核对")
-        # Focus lands via requestAnimationFrame after the dialog is rendered, so
+        # Focus lands via Vue nextTick after the dialog is rendered, so
         # this must be a polling assertion: a one-shot read can still see the
         # trigger button on a slow machine.
         expect(page.locator(".confirm-dialog-actions button").filter(has_text="取消")).to_be_focused()
@@ -1677,7 +1677,7 @@ class TestAppTrackingExternalDelete:
         expect(page.locator(".confirm-dialog-message")).to_contain_text("本地订阅方案")
         # The destructive confirmation is a danger dialog whose default focus is
         # the cancel button, so Enter never deletes an external object. Poll:
-        # the focus trap activates on the frame after the dialog is rendered.
+        # the focus trap activates after Vue's DOM update tick.
         assert page.locator(".confirm-dialog .danger-button").count() == 1, "not a danger dialog"
         expect(page.locator(".confirm-dialog-actions button").filter(has_text="取消")).to_be_focused()
         assert not deletes, deletes

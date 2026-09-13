@@ -579,16 +579,27 @@ export function createWriteConflictSession(
 }
 
 /**
- * True only for a structured, non-409 HTTP 4xx (D38-08.5).
+ * True only for a structured JSON 400/404 pre-boundary refusal (D38-08.5).
  *
- * Every documented submit-family 4xx other than 409 is raised before the
- * external boundary, so Auto Bangumi was never called with the request: that is
- * a definite refusal ("本次未创建外部订阅"), not the indeterminate ``UNKNOWN``
- * result. A network failure, timeout, non-JSON body, 5xx, or a status we cannot
- * read stays ``UNKNOWN`` because it may already have reached the boundary.
+ * Only the documented 400/404 JSON envelope is known to be raised before the
+ * external boundary. A network failure, timeout, non-JSON body, 5xx, 408/429,
+ * or another status stays ``UNKNOWN`` because it may already have reached it.
  */
-export function isDefiniteWriteRejection(error: { status: number; httpError: boolean }): boolean {
-  return error.httpError === true && error.status >= 400 && error.status < 500 && error.status !== 409
+export function isDefiniteWriteRejection(error: {
+  status: number
+  httpError: boolean
+  nonJson?: boolean
+  network?: boolean
+  cancelled?: boolean
+}): boolean {
+  // Only documented JSON pre-boundary refusals release an intent. Proxy HTML,
+  // cancellation/network failures, and statuses such as 408/429 may have
+  // crossed the external boundary and therefore remain UNKNOWN.
+  return error.httpError === true
+    && error.nonJson !== true
+    && error.network !== true
+    && error.cancelled !== true
+    && (error.status === 400 || error.status === 404)
 }
 
 /**

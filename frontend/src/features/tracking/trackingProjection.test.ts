@@ -273,7 +273,7 @@ describe('tracking write session projection (US-310)', () => {
     // D38-08.5: these are refused before the external boundary.
     expect(isDefiniteWriteRejection({ status: 400, httpError: true })).toBe(true)
     expect(isDefiniteWriteRejection({ status: 404, httpError: true })).toBe(true)
-    expect(isDefiniteWriteRejection({ status: 422, httpError: true })).toBe(true)
+    expect(isDefiniteWriteRejection({ status: 422, httpError: true })).toBe(false)
     // 409 keeps its own conflict branch and must never become a plain refusal.
     expect(isDefiniteWriteRejection({ status: 409, httpError: true })).toBe(false)
     // Everything that may already have crossed the external boundary stays
@@ -283,6 +283,10 @@ describe('tracking write session projection (US-310)', () => {
     expect(isDefiniteWriteRejection({ status: 504, httpError: true })).toBe(false)
     expect(isDefiniteWriteRejection({ status: 0, httpError: false })).toBe(false)
     expect(isDefiniteWriteRejection({ status: 400, httpError: false })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: 400, httpError: true, nonJson: true })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: 404, httpError: true, network: true })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: 408, httpError: true })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: 429, httpError: true })).toBe(false)
     expect(isDefiniteWriteRejection({ status: Number.NaN, httpError: true })).toBe(false)
   })
 

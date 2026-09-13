@@ -106,6 +106,32 @@ if [ ! -f "$PROGRESS_FILE" ]; then
   echo "---" >> "$PROGRESS_FILE"
 fi
 
+# Accept completion only when both the agent's final non-empty line and the
+# authoritative PRD agree.  A token in prose/code fences, or a partially
+# completed PRD, must never terminate the loop.
+completion_guard() {
+  local output="$1"
+  local final_nonempty
+  final_nonempty=$(printf '%s\n' "$output" | awk 'NF { last = $0 } END { print last }')
+  [ "$final_nonempty" = '<promise>COMPLETE</promise>' ] || return 1
+  python3 - "$PRD_FILE" <<'PY'
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        document = json.load(handle)
+except (OSError, ValueError):
+    raise SystemExit(1)
+
+stories = document.get("userStories") if isinstance(document, dict) else None
+if not isinstance(stories, list) or not stories:
+    raise SystemExit(1)
+if not all(isinstance(story, dict) and type(story.get("passes")) is bool and story["passes"] for story in stories):
+    raise SystemExit(1)
+PY
+}
+
 MODEL_LABEL="${MODEL:-default}"
 echo "Starting Ralph - Tool: $TOOL - Model: $MODEL_LABEL - Max iterations: $MAX_ITERATIONS"
 for i in $(seq 1 $MAX_ITERATIONS); do
@@ -142,13 +168,14 @@ for i in $(seq 1 $MAX_ITERATIONS); do
   fi
 
   # Check for completion signal
-  if echo "$COMPLETION_OUTPUT" | grep -q "<promise>COMPLETE</promise>"; then
+  if completion_guard "$COMPLETION_OUTPUT"; then
     echo ""
     echo "Ralph completed all tasks!"
     echo "Completed at iteration $i of $MAX_ITERATIONS"
     exit 0
   fi
 
+  echo "Completion token or PRD state not accepted; continuing safely."
   echo "Iteration $i complete. Continuing..."
   sleep 2
 done

@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { nextTick } from 'vue'
 
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 
@@ -166,5 +167,38 @@ describe('ConfirmDialog (US-200)', () => {
     // Close and resolve the pending promise so the test ends cleanly.
     wrapper.find('.secondary-button').trigger('click')
     await expect(promise).resolves.toBe(false)
+  })
+
+  it('activates focus and inert siblings after Vue nextTick', async () => {
+    // Keep Teleport real here so inert is observable on the page siblings.
+    wrapper = mount(ConfirmDialog, { attachTo: document.body })
+    const background = document.createElement('button')
+    background.id = 'background'
+    document.body.appendChild(background)
+    background.focus()
+
+    const pending = wrapper.vm.confirm({ title: '确认操作', message: '正文' })
+    await nextTick()
+    await nextTick()
+
+    const cancel = document.querySelector<HTMLElement>('.confirm-dialog .secondary-button')
+    expect(cancel).toBe(document.activeElement)
+    expect(document.querySelector('[inert]')).toBeTruthy()
+    cancel?.click()
+    await expect(pending).resolves.toBe(false)
+    expect(document.querySelector('[inert]')).toBeNull()
+  })
+
+  it('invalidates a replaced or unmounted dialog before its activation tick', async () => {
+    wrapper = mountDialog()
+    const first = wrapper.vm.confirm({ title: '第一步', message: '正文' })
+    const second = wrapper.vm.confirm({ title: '第二步', message: '正文' })
+    await expect(first).resolves.toBe(false)
+    wrapper.unmount()
+    await expect(second).resolves.toBe(false)
+    await nextTick()
+
+    expect(document.querySelector('.confirm-dialog')).toBeNull()
+    expect(Array.from(document.body.children).some((node) => node.hasAttribute('inert'))).toBe(false)
   })
 })
