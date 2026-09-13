@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import { api } from '@/api/client'
+import { api, toApiError } from '@/api/client'
 import type { operations } from '@/api/generated/api'
 import EmptyState from '@/components/feedback/EmptyState.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
@@ -18,14 +18,23 @@ import { storageQuery } from '@/features/requests/requestStorage'
 import {
   capabilityStateLabel,
   capabilityVersionLabel,
+  createTrackingActionIntent,
+  createWriteSession,
   filterTrackingItems,
   probeStatusLabel,
   projectCapabilitySummary,
+  projectSubmitOutcome,
   projectTrackingOverview,
   sortTrackingItems,
   TRACKING_STATUS_GROUPS,
+  writeSessionKeepsIntent,
+  type TrackingAction,
+  type TrackingActionIntent,
   type TrackingItem,
   type TrackingStatusGroup,
+  type TrackingSubmitBody,
+  type TrackingSubmitResult,
+  type TrackingWriteSession,
 } from './trackingProjection'
 import TrackingInspector from './TrackingInspector.vue'
 import CredentialSessionDialog from './CredentialSessionDialog.vue'
@@ -65,6 +74,15 @@ const syncMessage = ref('')
 const syncSummary = ref<SyncResult['summary'] | null>(null)
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const detailRevision = ref(0)
+const inspector = ref<InstanceType<typeof TrackingInspector> | null>(null)
+// Explicit external submission (US-310).  The credential itself never leaves
+// this component: it is read here and placed only into the single POST body.
+const writeSession = ref<TrackingWriteSession | null>(null)
+const writeLoading = ref(false)
+const writePending = ref(false)
+let writeIntent: TrackingActionIntent | null = null
+let writeSequence = 0
+let writeController: AbortController | null = null
 // List reads and server-confirmed tracking writes have independent lifecycles:
 // `listSequence` only invalidates stale list responses, while `writeGeneration`
 // marks the revision a sync (or a local revalidate) already applied.  A list
@@ -92,6 +110,19 @@ const selectedItem = computed(() => items.value.find(
 const selectedHidden = computed(() => Boolean(
   selectedItem.value && !filteredItems.value.some((item) => item.tracking_id === selectedTrackingId.value),
 ))
+/**
+ * External writes are single-flight (Stage 38 invariant).  The lock covers the
+ * external write action only: selecting, searching, refreshing and the pure
+ * local revalidate of *other* items stay available while one write is running.
+ * An unresolved result keeps locking other items because it still holds the
+ * one page-level intent, but never blocks an explicit retry of its own item.
+ */
+const inspectorWriteBusy = computed(() => {
+  if (writeLoading.value) return true
+  const session = writeSession.value
+  if (!session || !writeSessionKeepsIntent(session.state)) return false
+  return session.trackingId !== selectedTrackingId.value
+})
 
 function queryTrackingId(): string | null {
   const value = route.query.tracking_id
@@ -116,10 +147,10 @@ function syncSelection(forceAbsentCheck = false): void {
   }
 }
 
-async function loadList(): Promise<void> {
+async function loadList(silent = false): Promise<void> {
   const sequence = ++listSequence
   const generation = writeGeneration
-  loading.value = true
+  if (!silent) loading.value = true
   failed.value = false
   try {
     const result = await api.get<ListResult>('/api/v1/tracking/items', {
@@ -132,10 +163,11 @@ async function loadList(): Promise<void> {
     if (selectedTrackingId.value && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
     if (sequence !== listSequence || generation !== writeGeneration) return
-    failed.value = true
+    // A silent re-check never replaces a healthy list with an error state.
+    if (!silent) failed.value = true
     void error
   } finally {
-    if (sequence === listSequence) {
+    if (sequence === listSequence && !silent) {
       loading.value = false
     }
   }
@@ -178,6 +210,7 @@ function clearConnection(): void {
   sessionConfig.value = null
   sessionCapabilities.value = null
   cancelSync()
+  resetWrite()
   syncMessage.value = ''
   syncSummary.value = null
 }
@@ -257,6 +290,116 @@ async function syncTracking(): Promise<void> {
   }
 }
 
+function resetWrite(): void {
+  writeSequence += 1
+  writeController?.abort()
+  writeController = null
+  writeIntent = null
+  writePending.value = false
+  writeLoading.value = false
+  writeSession.value = null
+}
+
+/**
+ * Read-back after an external write (US-310).
+ *
+ * The list already converged from the returned tracking; only the inspector
+ * detail is re-read, so a write never blanks the list.  When the round trip told
+ * us nothing authoritative (409 conflict, unreadable result) the list is
+ * re-read too, because the returned summary cannot be trusted in those paths.
+ */
+async function recheckAfterWrite(trackingId: string, refreshList = false): Promise<void> {
+  if (refreshList) await loadList(true)
+  if (selectedTrackingId.value !== trackingId) return
+  await inspector.value?.reload()
+}
+
+async function submitTrackingItem(payload: { action: TrackingAction; item: TrackingItem }): Promise<void> {
+  // A confirmation is already open, or an external write is already running:
+  // one external write at a time, and no second dialog can displace the first.
+  if (writePending.value || writeLoading.value) return
+  const config = sessionConfig.value
+  const capabilities = sessionCapabilities.value
+  // No page credential session means no external write at all.
+  if (!config || !capabilities) return
+  const trackingId = payload.item.tracking_id
+  const unresolved = writeSession.value
+  if (unresolved && unresolved.trackingId !== trackingId && writeSessionKeepsIntent(unresolved.state)) return
+
+  writePending.value = true
+  let confirmed = false
+  try {
+    confirmed = (await confirmDialog.value?.confirm({
+      title: '提交 Auto Bangumi 订阅',
+      message: '将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载。提交只使用本页面已探测的连接，是否继续？',
+      confirmLabel: '确认提交',
+      cancelLabel: '取消',
+    })) ?? false
+  } finally {
+    writePending.value = false
+  }
+  // Cancelling the impact confirmation sends zero requests.
+  if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
+
+  // One opaque key per confirmation.  Only an indeterminate earlier result keeps
+  // its locked intent, so a transport retry reuses the very same key instead of
+  // risking a second external subscription.
+  const reused = writeIntent && writeSession.value?.trackingId === trackingId ? writeIntent : null
+  const intent = reused ?? createTrackingActionIntent(payload.item, payload.action, undefined, sessionCapabilities.value)
+  if (!intent) return
+  writeIntent = intent
+  const sequence = ++writeSequence
+  const controller = new AbortController()
+  writeController?.abort()
+  writeController = controller
+  writeLoading.value = true
+  writeSession.value = createWriteSession(trackingId, intent.action, 'IN_FLIGHT')
+  try {
+    const storageDir = storageQuery().storage_dir
+    const body: TrackingSubmitBody = {
+      expected_revision: intent.expectedRevision,
+      idempotency_key: intent.idempotencyKey,
+      confirm: true,
+      ab_config: config,
+      ...(storageDir ? { storage_dir: storageDir } : {}),
+    }
+    const result = await api.post<TrackingSubmitResult>('/api/v1/tracking/items/{tracking_id}/submit', {
+      path: { tracking_id: trackingId }, body, signal: controller.signal,
+    })
+    if (sequence !== writeSequence) return
+    // The returned tracking converges the list row without a second list read.
+    applyReturnedTracking(result.tracking)
+    const session = projectSubmitOutcome(trackingId, intent.action, result)
+    writeSession.value = session
+    if (!writeSessionKeepsIntent(session.state)) writeIntent = null
+    await recheckAfterWrite(trackingId)
+  } catch (error) {
+    if (sequence !== writeSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    if (apiError.status === 409) {
+      // Revision/state/idempotency conflict: the locked intent is spent, the
+      // returned summary is an error body, so re-read both and require a new
+      // explicit confirmation — nothing is ever resent on the user's behalf.
+      writeIntent = null
+      writeSession.value = createWriteSession(trackingId, intent.action, 'CONFLICT')
+      await recheckAfterWrite(trackingId, true)
+      return
+    }
+    // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
+    // outcome: the external result is unknown. Keeping the locked intent can
+    // never duplicate a subscription, so this path fails closed and only reads
+    // back; it never mints a new key and never resends by itself.
+    writeSession.value = createWriteSession(trackingId, intent.action, 'UNKNOWN')
+    await recheckAfterWrite(trackingId, true)
+  } finally {
+    if (sequence === writeSequence) {
+      writeLoading.value = false
+      if (writeController === controller) writeController = null
+    }
+  }
+}
+
 onMounted(() => {
   void loadList().then(() => {
     if (selectedTrackingId.value) void focusSelection()
@@ -271,6 +414,7 @@ watch(selectedTrackingId, (trackingId) => {
 }, { flush: 'post' })
 onBeforeUnmount(() => {
   cancelSync()
+  resetWrite()
   credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
@@ -283,7 +427,7 @@ onBeforeUnmount(() => {
       <template #actions>
         <BaseButton id="tracking-connect" variant="secondary" @click="credentialDialogOpen = true">连接 Auto Bangumi</BaseButton>
         <BaseButton v-if="sessionCapabilities" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
-        <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList">刷新列表</BaseButton>
+        <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList()">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
     </PanelSection>
@@ -312,7 +456,7 @@ onBeforeUnmount(() => {
           <BaseButton v-if="searchTerm || statusFilter" variant="secondary" @click="clearFilters">清除筛选</BaseButton>
         </div>
         <div v-if="loading" class="tracking-list-state"><LoadingState message="正在读取追番列表…" /></div>
-        <ErrorState v-else-if="failed" title="追番列表读取失败" message="暂时无法读取本地追番列表，请稍后重试。" retry-label="重试读取" @retry="loadList" />
+        <ErrorState v-else-if="failed" title="追番列表读取失败" message="暂时无法读取本地追番列表，请稍后重试。" retry-label="重试读取" @retry="loadList()" />
         <EmptyState v-else-if="!items.length" message="还没有本地追番记录。" />
         <EmptyState v-else-if="!filteredItems.length" message="没有符合当前搜索或状态筛选的记录。" />
         <div v-else id="tracking-list-container" ref="listContainer" class="tracking-list" tabindex="-1" aria-label="追番记录列表">
@@ -330,9 +474,15 @@ onBeforeUnmount(() => {
       <aside class="tracking-inspector" aria-labelledby="tracking-inspector-heading">
         <TrackingInspector
           v-if="selectedItem"
+          ref="inspector"
           :key="`${selectedItem.tracking_id}:${detailRevision}`"
           :tracking-id="selectedItem.tracking_id"
+          :capabilities="sessionCapabilities"
+          :credential-ready="Boolean(sessionConfig)"
+          :write-session="writeSession"
+          :write-busy="inspectorWriteBusy"
           @tracking-updated="applyReturnedTracking"
+          @submit-requested="submitTrackingItem"
         />
         <template v-else>
           <h2 id="tracking-inspector-heading">检查器</h2>

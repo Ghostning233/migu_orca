@@ -433,3 +433,278 @@ describe('TrackingView formal overview (US-305)', () => {
     expect(wrapper.find('.tracking-list-state').exists()).toBe(false)
   })
 })
+
+const submitAction = {
+  code: 'SUBMIT', label: '提交到 Auto Bangumi', style: 'PRIMARY',
+  requires_confirmation: true, target_scopes: [],
+}
+
+function submitDetail(overrides: Record<string, unknown> = {}) {
+  return { ...detail(), available_actions: [revalidateAction, submitAction], ...overrides }
+}
+
+function submitPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    tracking_id: 'tracking-1', outcome: 'ACTIVE', checked_revision: 1, next_revision: 2,
+    checked_at: '2026-09-13T03:00:00Z', operation_id: 'operation-1', issues: [],
+    tracking: { ...item('tracking-1', '葬送的芙莉莲'), revision: 2 }, ...overrides,
+  }
+}
+
+/** Serve the list and detail endpoints independently of call order. */
+function serveApi(detailValue: () => unknown, listValue: () => unknown = () => (
+  { items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] }
+)): void {
+  apiGet.mockImplementation((url: string) => Promise.resolve(
+    (url === '/api/v1/tracking/items' ? listValue() : detailValue()) as never,
+  ))
+}
+
+/** Replace the shared confirmation dialog with a deterministic answer. */
+function answerConfirm(wrapper: TrackingWrapper, answer: boolean) {
+  const instance = wrapper.findComponent(ConfirmDialog).vm as unknown as {
+    $: { exposed: { confirm: (options: Record<string, unknown>) => Promise<boolean> } | null }
+  }
+  const exposed = instance.$.exposed
+  if (!exposed) throw new Error('ConfirmDialog must expose confirm()')
+  const spy = vi.fn((options: Record<string, unknown>) => {
+    void options
+    return Promise.resolve(answer)
+  })
+  exposed.confirm = spy
+  return spy
+}
+
+function submittedBodies(): Record<string, unknown>[] {
+  return apiPost.mock.calls
+    .filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}/submit')
+    .map((call) => call[1]?.body as Record<string, unknown>)
+}
+
+const conflictError = {
+  type: 'tracking_revision_conflict', message: '追番记录版本已变化，请刷新后重试',
+  status: 409, cancelled: false, httpError: true,
+}
+const unknownError = {
+  type: 'network_error', message: '网络请求失败', status: 0, cancelled: false, httpError: false,
+}
+
+describe('TrackingView explicit submission (US-310)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('never submits without a live session or an explicit confirmation', async () => {
+    serveApi(() => submitDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    // No page credential session yet: the action is not offered at all.
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+
+    await connect(wrapper)
+    // Connecting must never submit on the user's behalf.
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    const confirmSpy = answerConfirm(wrapper, false)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(String(confirmSpy.mock.calls[0]?.[0]?.message)).toContain('创建该追番的外部订阅')
+    confirmSpy.mockClear()
+
+    // Cancelling the impact confirmation sends zero requests.
+    document.querySelector<HTMLButtonElement>('.confirm-dialog-actions button')?.click()
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(submittedBodies()).toHaveLength(0)
+    expect(wrapper.find('#tracking-submit-result').exists()).toBe(false)
+  })
+
+  it('sends the latest revision, one opaque key and the page credential only in the body', async () => {
+    serveApi(() => submitDetail({ revision: 4 }))
+    apiPost.mockResolvedValueOnce(capabilities() as never).mockResolvedValueOnce(submitPayload() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+
+    expect(apiPost).toHaveBeenLastCalledWith('/api/v1/tracking/items/{tracking_id}/submit', {
+      path: { tracking_id: 'tracking-1' },
+      body: {
+        expected_revision: 4, idempotency_key: expect.stringMatching(/^[A-Za-z0-9-]{8,128}$/), confirm: true,
+        ab_config: {
+          auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user',
+          password: 'pass', fallback_enabled: false,
+        },
+      },
+      signal: expect.any(AbortSignal),
+    })
+    const result = wrapper.find('#tracking-submit-result')
+    expect(result.text()).toContain('提交成功')
+    expect(result.text()).not.toContain('ACTIVE')
+    // The key stays in page memory: never in the URL, DOM or storage.
+    const key = submittedBodies()[0]?.idempotency_key as string
+    expect(window.location.href).not.toContain(key)
+    expect(document.body.textContent).not.toContain(key)
+    expect(JSON.stringify(window.localStorage)).not.toContain(key)
+  })
+
+  it('converges the list from the returned tracking and re-reads the detail', async () => {
+    serveApi(() => submitDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never).mockResolvedValueOnce(submitPayload({
+      tracking: { ...item('tracking-1', '葬送的芙莉莲'), status_label: '已提交', revision: 2 },
+    }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    const detailReads = apiGet.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}').length
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.tracking-list-item').text()).toContain('已提交')
+    const after = apiGet.mock.calls.filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}').length
+    expect(after).toBe(detailReads + 1)
+  })
+
+  it('branches every persisted outcome into fixed Chinese copy', async () => {
+    const cases: Array<[string, string]> = [
+      ['SUBMIT_FAILED', '提交明确失败'],
+      ['NEEDS_RECONFIRM', '本地方案已变化'],
+      ['VERIFYING_EXTERNAL', '外部提交结果未知'],
+      ['RECOVERY_REQUIRED', '本地结果未完成落盘'],
+    ]
+    for (const [outcome, copy] of cases) {
+      apiGet.mockReset()
+      apiPost.mockReset()
+      serveApi(() => submitDetail())
+      apiPost.mockResolvedValueOnce(capabilities() as never)
+        .mockResolvedValueOnce(submitPayload({ outcome, issues: [{
+          code: 'REQUEST_CHANGED', field: null, message: '本地方案已变化', recovery_action: 'SUBMIT',
+        }] }) as never)
+      const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+      await connect(wrapper)
+      answerConfirm(wrapper, true)
+      await wrapper.find('#tracking-submit').trigger('click')
+      await flushPromises()
+      const result = wrapper.find('#tracking-submit-result')
+      expect(result.text()).toContain(copy)
+      expect(result.text()).not.toContain(outcome)
+      wrapper.unmount()
+    }
+  })
+
+  it('keeps the locked key and only reads back when the result is unknown', async () => {
+    serveApi(() => submitDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockRejectedValueOnce(unknownError as never)
+      .mockResolvedValueOnce(submitPayload() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+
+    // No blind resend: exactly one submit reached the server and the panel says so.
+    expect(submittedBodies()).toHaveLength(1)
+    const result = wrapper.find('#tracking-submit-result')
+    expect(result.text()).toContain('提交结果未知')
+    expect(result.text()).toContain('只读回查')
+    expect(wrapper.text()).not.toContain('network_error')
+
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    const bodies = submittedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).toBe(bodies[0]?.idempotency_key)
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+  })
+
+  it('drops the spent intent and requires a new confirmation on a conflict', async () => {
+    let revision = 1
+    serveApi(() => submitDetail({ revision }))
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      // The record moves on while the submit is in flight.
+      .mockImplementationOnce((async () => { revision = 5; throw conflictError }) as never)
+      .mockResolvedValueOnce(submitPayload() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('请重新确认后再提交')
+    expect(wrapper.text()).not.toContain('tracking_revision_conflict')
+
+    // The conflict re-read the fresh detail; the next confirmation is a fresh
+    // intent built from the new revision with a new key.
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    const bodies = submittedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.expected_revision).toBe(5)
+    expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+  })
+
+  it('mints a new key for the next confirmation after an explicit failure', async () => {
+    serveApi(() => submitDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockResolvedValueOnce(submitPayload({ outcome: 'SUBMIT_FAILED' }) as never)
+      .mockResolvedValueOnce(submitPayload() as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交明确失败')
+
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    const bodies = submittedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+  })
+
+  it('locks only the conflicting actions of the item being written', async () => {
+    let resolveSubmit: ((value: unknown) => void) | undefined
+    serveApi(() => submitDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSubmit = resolve }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('正在提交')
+    expect(wrapper.find('#tracking-submit').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#tracking-revalidate').attributes('disabled')).toBeDefined()
+    // The rest of the page stays usable: filtering, refreshing and re-reading.
+    expect(wrapper.find('#tracking-refresh').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#tracking-search').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('.tracking-list-item').exists()).toBe(true)
+
+    resolveSubmit?.(submitPayload())
+    await flushPromises()
+    expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+  })
+
+  it('aborts an in-flight submit and drops the key when the connection is cleared', async () => {
+    let resolveSubmit: ((value: unknown) => void) | undefined
+    serveApi(() => submitDetail())
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSubmit = resolve }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    const signal = apiPost.mock.calls.at(-1)?.[1]?.signal as AbortSignal
+
+    await wrapper.find('.tracking-clear-connection').trigger('click')
+    resolveSubmit?.(submitPayload())
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-submit-result').exists()).toBe(false)
+  })
+})

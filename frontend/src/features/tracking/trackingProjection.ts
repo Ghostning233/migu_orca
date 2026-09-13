@@ -1,5 +1,5 @@
 /**
- * API-free tracking page projection and intent helpers (US-304, US-309).
+ * API-free tracking page projection and intent helpers (US-304, US-309, US-310).
  *
  * This module only consumes generated OpenAPI operation types. It never
  * performs transport, reconstructs server state, or stores an intent/key.
@@ -25,6 +25,12 @@ export type TrackingRevalidateResult = NonNullable<
   operations['revalidateTrackingItem']['responses']['200']['content']['application/json']['result']
 >
 export type TrackingRevalidateIssue = NonNullable<TrackingRevalidateResult['issues']>[number]
+export type TrackingSubmitBody = NonNullable<
+  operations['submitTrackingItem']['requestBody']['content']['application/json']
+>
+export type TrackingSubmitResult = NonNullable<
+  operations['submitTrackingItem']['responses']['200']['content']['application/json']['result']
+>
 
 export const TRACKING_STATUS_GROUPS = [
   'PENDING', 'PROCESSING', 'ACTIVE', 'ATTENTION', 'INACTIVE',
@@ -321,4 +327,86 @@ export function projectRevalidateIssues(issues: unknown): TrackingRevalidateIssu
     views.push({ code: candidate.code, message: message || REVALIDATE_ISSUE_FALLBACK_MESSAGE })
   }
   return views
+}
+
+/**
+ * Explicit external submission (US-310).
+ *
+ * ``SUBMIT`` is the only write that reaches Auto Bangumi in this story, so the
+ * page-level write session below describes one item-scoped external write:
+ * ``state`` is either the persisted business outcome the server returned, the
+ * in-flight marker, or one of the two client-side states that mean "the server
+ * never gave us a definite answer" (a 409 conflict, or an unreadable result).
+ * Fixed Chinese copy only — the raw server enum never reaches the DOM.
+ */
+export const SUBMIT_OUTCOMES = [
+  'ACTIVE', 'SUBMIT_FAILED', 'NEEDS_RECONFIRM', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED',
+] as const satisfies readonly TrackingSubmitResult['outcome'][]
+
+export type TrackingSubmitOutcome = (typeof SUBMIT_OUTCOMES)[number]
+
+/** ``UNKNOWN`` also covers a transport result we could not read at all. */
+export type TrackingWriteState = 'IN_FLIGHT' | TrackingSubmitOutcome | 'CONFLICT' | 'UNKNOWN'
+
+export interface TrackingWriteSession {
+  readonly trackingId: string
+  readonly action: TrackingActionCode
+  readonly state: TrackingWriteState
+  readonly message: string
+  readonly issues: TrackingRevalidateIssueView[]
+}
+
+const WRITE_MESSAGES: Record<TrackingWriteState, string> = {
+  IN_FLIGHT: '正在提交到 Auto Bangumi，请稍候…',
+  ACTIVE: '提交成功：已在 Auto Bangumi 创建外部订阅。',
+  SUBMIT_FAILED: '提交明确失败，尚未创建外部订阅；可在确认后显式重试。',
+  NEEDS_RECONFIRM: '本地方案已变化，本次尚未创建外部订阅；请返回修改方案后重新确认。',
+  VERIFYING_EXTERNAL: '外部提交结果未知，正在只读回查；请勿重复提交。',
+  RECOVERY_REQUIRED: '本地结果未完成落盘，需要恢复；请勿重复提交。',
+  CONFLICT: '追番记录已变化或当前状态不允许提交，正在刷新最新详情；请重新确认后再提交。',
+  UNKNOWN: '提交结果未知，正在只读回查；未确认生效前不会再次提交。',
+}
+
+const KNOWN_SUBMIT_OUTCOMES = new Set<string>(SUBMIT_OUTCOMES)
+
+function isSubmitOutcome(value: unknown): value is TrackingSubmitOutcome {
+  return typeof value === 'string' && KNOWN_SUBMIT_OUTCOMES.has(value)
+}
+
+export function writeSessionMessage(state: TrackingWriteState): string {
+  return WRITE_MESSAGES[state]
+}
+
+export function createWriteSession(
+  trackingId: string,
+  action: TrackingActionCode,
+  state: TrackingWriteState,
+  issues: TrackingRevalidateIssueView[] = [],
+): TrackingWriteSession {
+  return { trackingId, action, state, message: WRITE_MESSAGES[state], issues }
+}
+
+/**
+ * Project one HTTP 200 submit result. An outcome we do not recognize is treated
+ * exactly like an unreadable transport result: read back, never resubmit blind.
+ */
+export function projectSubmitOutcome(
+  trackingId: string,
+  action: TrackingActionCode,
+  result: TrackingSubmitResult,
+): TrackingWriteSession {
+  const outcome: TrackingWriteState = isSubmitOutcome(result.outcome) ? result.outcome : 'UNKNOWN'
+  return createWriteSession(trackingId, action, outcome, projectRevalidateIssues(result.issues))
+}
+
+/**
+ * True only while the external result is still indeterminate.
+ *
+ * These are the states where a transport retry must reuse the *same* opaque key:
+ * the external call may already have happened, so minting a new key could create
+ * a second subscription.  Every definite outcome (including an explicit failure)
+ * releases the intent so the next user confirmation gets a fresh key.
+ */
+export function writeSessionKeepsIntent(state: TrackingWriteState): boolean {
+  return state === 'UNKNOWN' || state === 'VERIFYING_EXTERNAL' || state === 'RECOVERY_REQUIRED'
 }

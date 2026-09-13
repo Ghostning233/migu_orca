@@ -13,6 +13,7 @@ Started: Sun Sep 13 08:40:00 CST 2026
 - 页面初始只读本地 tracking；probe、sync、submit、retry、verify 和管理动作仅由用户显式发起。revalidate 是纯本地动作，不带 AB 凭据。
 - 凭据只存在 TrackingView 当前实例和单次 POST body；刷新、离页、取消、切模、清除和卸载后销毁，不进入 URL、storage、日志、通知、DOM、截图或 trace。
 - 外部写全部使用最新 revision、confirm、单意图 opaque idempotency key、单飞、服务端返回收敛和结果未知只读回查；不得盲重试或用新 key 掩盖未知结果。
+- 外部写的请求/确认/key/结果面板固定在 `TrackingView`（凭据所在实例），**不要**把 `ab_config` 当 prop 传给 inspector；inspector 只按 `credentialReady + capabilities + available_actions` 投影按钮并 emit intent（携带最新 detail revision），写后回查用 inspector `defineExpose` 的 `reload()`，绝不用 `detailRevision`/`:key` 重挂载（会丢写结果面板）。
 - DELETE_EXTERNAL 始终逐条操作且请求无 `file` 字段，必须明确并实际保留本地 Request、tracking、审计、任务和已下载媒体。
 - “已更新集数”固定为待开发；不得根据资源数、RSS、下载或文件名猜测。自动化只用 fake/route mock，不连接真实 MiKan、Auto Bangumi 或 qBittorrent。
 - 已知遗留红灯（**不是** US-309～US-315 引入，也不要在这些 story 里顺手修）：`/app/tracking` 已被 US-305 替换为 TrackingView，但 `tests/browser/test_app_queue.py`、`tests/browser/test_app_feature_parity.py`、`tests/browser/test_app_responsive_a11y.py`、`tests/browser/test_app_shell.py`、`tests/browser/test_app_workbench.py` 里约 30 条用例仍按旧 QueueView 选择器（`#batch-queue-list` / `#batch-queue-count` / `#tracking-detail-target`）断言该路由。旧入口退出、兼容定位与这些浏览器用例的迁移统一由 US-316 收口，US-317 跑完整 Chromium 门禁。普通 story 只跑定向检查，不要因为看到这批红灯而扩大范围。
@@ -113,4 +114,21 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - `projectRevalidateIssues` 只渲染已知 §11.5 code，未知 code 直接丢弃（fail closed），空 message 回退固定中文；服务端 issue message 是固定文案表，可安全渲染。
   - Playwright route **后注册优先**：revalidate POST 要单独 `page.route` 注册在 `_mock_list()` 之后，否则被 `**/api/v1/tracking/items*` 吃掉。
 - 定向验证：TrackingInspector/TrackingView/trackingProjection Vitest（42 passed）、typecheck、lint、build、`npm run api:check` 通过；`uv run pytest tests/browser/test_app_tracking.py -q`（6 passed，真实 Chromium）；`git diff --check` 干净。
+---
+
+## [2026-09-13 10:40:00 CST] - US-310
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: `TrackingView` 现拥有全部显式外部写生命周期（确认、单意图 opaque key、单飞、outcome 分流、写后回查、结果未知只读回查）；`TrackingInspector` 只按 `credentialReady + capabilities + available_actions` 投影 SUBMIT 按钮、emit `submit-requested { action, item }`（携带**最新 detail revision**）并渲染页面传入的 `writeSession`。凭据从未离开 TrackingView（**没有**把 `ab_config` 当 prop 下传）。
+- 新增 `trackingProjection` 写会话投影：`SUBMIT_OUTCOMES` / `TrackingWriteState` / `TrackingWriteSession`、`createWriteSession`、`projectSubmitOutcome`（未知 outcome fail closed 到 `UNKNOWN`）、`writeSessionMessage`、`writeSessionKeepsIntent`。
+- 确认弹窗说明「将在 Auto Bangumi 创建该追番的外部订阅，并可能触发下载」；取消零请求；`writePending` 守卫保证同一时刻只有一个意图/弹窗。
+- key 生命周期：一次确认一个 key；只有 `UNKNOWN`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED` 保留锁定 intent（显式重试复用同 key），`ACTIVE`/`SUBMIT_FAILED`/`NEEDS_RECONFIRM`/`CONFLICT` 释放 intent，下次确认生成新 key。
+- 收敛：HTTP 200 用 `result.tracking` 走既有 `applyReturnedTracking`（原位替换 + 递增 `writeGeneration`）；随后调用 inspector 暴露的 `reload()`（保留面板、不抢焦点、失败不清空健康列表）回查详情；409 与结果不明额外 `loadList(true)` 静默重读列表（静默路径不显示 loading/error 占位）。
+- Files changed: `frontend/src/features/tracking/TrackingView.vue`、`TrackingInspector.vue`、`trackingProjection.ts` 及三个 Vitest；`tests/browser/test_app_tracking.py`（+1 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。
+- **Learnings for future iterations:**
+  - 外部写的请求必须在 `TrackingView`（凭据所在实例），不能在 inspector：inspector 以 `:key="tracking_id:detailRevision"` 随选择重挂载，把外部写放进去会在切条目时丢掉飞行中的结果与「结果未知」回查闭环。inspector 用 emit 把 `{action, item}` 交回页面即可，`item` 直接传 detail（它是 TrackingItem 的超集），页面用 `createTrackingActionIntent` 再校验一次 capability（fail closed）。
+  - 写后回查**不要**用 `detailRevision`/`:key`：那会重挂载并丢掉写结果面板。用 `defineExpose({ reload })` 暴露一个 `fetchDetail(preserve=true)`（保留当前 detail、不 focus heading、失败静默）。
+  - `loadList(silent)` 的默认参数会被模板 `@click="loadList"` 的事件对象污染，所有 handler 必须写成 `@click="loadList()"`。
+  - 单飞语义与「只锁当前条目的冲突动作」并存：请求中禁用外部写动作（含其他条目的 SUBMIT），但选择/筛选/刷新/detail 读取/其他条目的本地复核全部保持可用。
+  - Playwright route 后注册优先：`/submit` 必须注册在 `**/api/v1/tracking/items/tracking-a*` **之后**，否则被详情通配吃掉。
+- 定向验证：tracking 四个 Vitest 文件 64 passed、`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（7 passed，真实 Chromium）、`git diff --check` 全部通过。
 ---

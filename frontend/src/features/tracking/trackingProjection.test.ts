@@ -8,10 +8,15 @@ import {
   filterTrackingItems,
   probeStatusLabel,
   projectCapabilitySummary,
+  createWriteSession,
   projectRevalidateIssues,
+  projectSubmitOutcome,
   projectTrackingOverview,
   reuseTrackingActionIntent,
   sortTrackingItems,
+  SUBMIT_OUTCOMES,
+  writeSessionKeepsIntent,
+  writeSessionMessage,
   type CapabilityResult,
   type TrackingItem,
 } from './trackingProjection'
@@ -171,5 +176,70 @@ describe('capability display projection (US-307 review fix)', () => {
     expect(JSON.stringify(issues)).not.toContain('private.invalid')
     expect(projectRevalidateIssues(undefined)).toEqual([])
     expect(projectRevalidateIssues({ code: 'REQUEST_CHANGED' })).toEqual([])
+  })
+})
+
+describe('tracking write session projection (US-310)', () => {
+  function submitResult(overrides: Record<string, unknown> = {}) {
+    return {
+      tracking_id: 'tracking-1', outcome: 'ACTIVE', checked_revision: 3, next_revision: 4,
+      checked_at: '2026-09-13T03:00:00Z', operation_id: 'operation-1', issues: [],
+      tracking: item({ revision: 4 }), ...overrides,
+    } as never
+  }
+
+  it('maps every generated submit outcome to fixed Chinese copy', () => {
+    for (const outcome of SUBMIT_OUTCOMES) {
+      const session = projectSubmitOutcome('tracking-1', 'SUBMIT', submitResult({ outcome }))
+      expect(session.state).toBe(outcome)
+      expect(session.message).toBe(writeSessionMessage(outcome))
+      expect(session.trackingId).toBe('tracking-1')
+      expect(session.action).toBe('SUBMIT')
+    }
+    // No raw server enum ever reaches the rendered copy.
+    for (const outcome of SUBMIT_OUTCOMES) {
+      expect(writeSessionMessage(outcome)).not.toContain(outcome)
+    }
+  })
+
+  it('fails closed to an unknown result when the outcome is not a documented one', () => {
+    const session = projectSubmitOutcome('tracking-1', 'SUBMIT', submitResult({ outcome: 'SOMETHING_NEW' }))
+    expect(session.state).toBe('UNKNOWN')
+    expect(session.message).toBe(writeSessionMessage('UNKNOWN'))
+    expect(session.message).not.toContain('SOMETHING_NEW')
+  })
+
+  it('projects only documented §11.5 issues and never echoes unknown server text', () => {
+    const session = projectSubmitOutcome('tracking-1', 'SUBMIT', submitResult({
+      outcome: 'NEEDS_RECONFIRM',
+      issues: [
+        { code: 'REQUEST_CHANGED', field: null, message: '本地方案已变化', recovery_action: 'SUBMIT' },
+        { code: 'BRAND_NEW_CODE', field: null, message: 'https://private.invalid/leak', recovery_action: '' },
+      ],
+    }))
+    expect(session.issues).toEqual([{ code: 'REQUEST_CHANGED', message: '本地方案已变化' }])
+    expect(JSON.stringify(session)).not.toContain('private.invalid')
+  })
+
+  it('locks the intent only while the external result is indeterminate', () => {
+    expect(writeSessionKeepsIntent('UNKNOWN')).toBe(true)
+    expect(writeSessionKeepsIntent('VERIFYING_EXTERNAL')).toBe(true)
+    expect(writeSessionKeepsIntent('RECOVERY_REQUIRED')).toBe(true)
+    // A definite business result (success or explicit failure) frees the key so
+    // the next confirmation starts from a fresh one.
+    expect(writeSessionKeepsIntent('ACTIVE')).toBe(false)
+    expect(writeSessionKeepsIntent('SUBMIT_FAILED')).toBe(false)
+    expect(writeSessionKeepsIntent('NEEDS_RECONFIRM')).toBe(false)
+    expect(writeSessionKeepsIntent('CONFLICT')).toBe(false)
+    expect(writeSessionKeepsIntent('IN_FLIGHT')).toBe(false)
+  })
+
+  it('creates an in-flight session without leaking any request material', () => {
+    const session = createWriteSession('tracking-1', 'SUBMIT', 'IN_FLIGHT')
+    expect(session).toEqual({
+      trackingId: 'tracking-1', action: 'SUBMIT', state: 'IN_FLIGHT',
+      message: writeSessionMessage('IN_FLIGHT'), issues: [],
+    })
+    expect(Object.keys(session)).not.toContain('idempotencyKey')
   })
 })

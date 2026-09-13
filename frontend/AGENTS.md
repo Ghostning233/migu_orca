@@ -330,6 +330,22 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   说明「尚未向 Auto Bangumi 创建订阅」（`projectRevalidateIssues` 只渲染已知 code，
   未知 code 丢弃）；409 必须先清空意图、重新 GET 详情、再要求用户重新确认，绝不静默重发；
   transport 失败保留意图以便显式重试复用同一 revision。
+- **外部写归页面所有（US-310 起）**：`SUBMIT`/后续 `RETRY`/`MODIFY`/`SET_ENABLED`/
+  `REFRESH_RSS`/`DELETE_EXTERNAL` 的请求、确认弹窗、opaque key 与结果面板都在
+  `TrackingView`（凭据只存在于该实例与单次 POST body）；`TrackingInspector` 只按
+  `credentialReady + capabilities + available_actions` 投影按钮，emit
+  `submit-requested { action, item }` 把**最新 revision** 交回页面，并渲染页面传入的
+  `writeSession`（`trackingProjection.createWriteSession/projectSubmitOutcome`，固定中文文案）。
+  **不要**把 `ab_config` 当 prop 往下传，否则凭据会离开 TrackingView 实例。
+- **写结果与回查（US-310）**：HTTP 200 用返回 `tracking` 收敛列表（`applyReturnedTracking`），
+  随后只通过 `TrackingInspector` 暴露的 `reload()`（`fetchDetail(true)`，保留面板且不抢焦点）
+  回查详情；409 与结果不明额外 `loadList(true)` 静默重读列表。**不要**用
+  `detailRevision`/`:key` 触发回查——那会重挂载检查器并丢掉写结果面板。
+- **幂等 key 生命周期（US-310）**：一次用户确认一个 key；只有
+  `writeSessionKeepsIntent()` 为 true（`UNKNOWN`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`）
+  才保留锁定的 intent，显式重试复用同 key；`ACTIVE`/`SUBMIT_FAILED`/`NEEDS_RECONFIRM`/`CONFLICT`
+  一律释放 intent，下一次确认生成新 key。外部写单飞：请求中只禁用外部写动作，
+  选择/筛选/刷新/其他条目的本地复核保持可用。
 - 浏览器测试：`tests/browser/test_app_tracking.py`。Playwright **后注册的 route 优先**，
   所以 revalidate 这类写端点要在 `_mock_list()` 之后单独 `page.route` 注册；否则会被
   更宽的 `**/api/v1/tracking/items*` 通配吃掉。

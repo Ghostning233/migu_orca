@@ -12,11 +12,14 @@ import {
   createTrackingActionIntent,
   executableTrackingActions,
   projectRevalidateIssues,
+  type CapabilityResult,
+  type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
   type TrackingRevalidateBody,
   type TrackingRevalidateIssueView,
   type TrackingRevalidateResult,
+  type TrackingWriteSession,
 } from './trackingProjection'
 
 type TrackingDetail = NonNullable<
@@ -25,8 +28,21 @@ type TrackingDetail = NonNullable<
 
 type RevalidateState = 'IDLE' | 'READY' | 'BLOCKED' | 'CONFLICT' | 'FAILED'
 
-const props = defineProps<{ trackingId: string }>()
-const emit = defineEmits<{ (e: 'tracking-updated', tracking: TrackingItem): void }>()
+const props = defineProps<{
+  trackingId: string
+  /** Non-null only while the page holds a credential session (US-307). */
+  capabilities?: CapabilityResult | null
+  /** True only while the page credential session is live; the page owns it. */
+  credentialReady?: boolean
+  /** Page-level external write state for one item; the page owns the request. */
+  writeSession?: TrackingWriteSession | null
+  /** Another item's unresolved external write still holds the single page intent. */
+  writeBusy?: boolean
+}>()
+const emit = defineEmits<{
+  (e: 'tracking-updated', tracking: TrackingItem): void
+  (e: 'submit-requested', payload: { action: TrackingAction; item: TrackingItem }): void
+}>()
 const detail = ref<TrackingDetail | null>(null)
 const loading = ref(false)
 const failed = ref(false)
@@ -52,6 +68,35 @@ const revalidateAction = computed(() => (
   detail.value ? executableTrackingActions(detail.value, null).find((action) => action.code === 'REVALIDATE') ?? null : null
 ))
 
+// -- explicit external submission (US-310) -----------------------------------
+// The page owns the credential and the request; this component only offers the
+// server-computed SUBMIT action when the page session proves the capability,
+// and renders the fixed page-level write result.  No key, credential or request
+// state ever lives here.
+const writeInFlight = computed(() => (
+  props.writeSession?.trackingId === props.trackingId && props.writeSession.state === 'IN_FLIGHT'
+))
+const thisWrite = computed(() => (
+  props.writeSession && props.writeSession.trackingId === props.trackingId ? props.writeSession : null
+))
+const submitAction = computed(() => (
+  detail.value && props.credentialReady === true
+    ? executableTrackingActions(detail.value, props.capabilities).find((action) => action.code === 'SUBMIT') ?? null
+    : null
+))
+const submitHint = computed(() => {
+  if (props.credentialReady !== true) return '需要先在页面连接 Auto Bangumi，才能提交外部订阅。'
+  const offered = (detail.value?.available_actions ?? []).some((action) => action.code === 'SUBMIT')
+  return offered ? '当前连接未确认提交能力，已降级为只读。' : '当前状态不可提交外部订阅。'
+})
+
+function requestSubmit(): void {
+  const action = submitAction.value
+  if (!action || !detail.value || writeInFlight.value || props.writeBusy) return
+  // The page confirms, builds the intent (fresh revision + opaque key) and sends.
+  emit('submit-requested', { action, item: detail.value })
+}
+
 function resetRevalidate(): void {
   revalidateSequence += 1
   revalidateController?.abort()
@@ -71,7 +116,9 @@ function applyReturnedTracking(summary: TrackingItem): void {
 }
 
 async function revalidatePlan(): Promise<void> {
-  if (revalidateLoading.value || !detail.value) return
+  // Revalidation rewrites the local revision, so it is a conflicting action of
+  // this item while an external submit is in flight.
+  if (revalidateLoading.value || writeInFlight.value || !detail.value) return
   const action = revalidateAction.value
   if (!action) return
   // One intent per user confirmation; a transport retry below reuses the same
@@ -133,41 +180,59 @@ async function revalidatePlan(): Promise<void> {
   }
 }
 
-async function loadDetail(): Promise<void> {
+/**
+ * ``preserve`` keeps the current detail visible while re-reading (US-310 write
+ * read-back): blanking or re-focusing the panel after a write would both hide
+ * the write result and steal focus from it.
+ */
+async function fetchDetail(preserve: boolean): Promise<void> {
   const sequence = ++requestSequence
   controller?.abort()
-  controller = new AbortController()
-  loading.value = true
-  failed.value = false
-  detail.value = null
+  const requestController = new AbortController()
+  controller = requestController
+  if (!preserve) {
+    loading.value = true
+    failed.value = false
+    detail.value = null
+  }
   try {
     const nextDetail = await api.get<TrackingDetail>('/api/v1/tracking/items/{tracking_id}', {
       path: { tracking_id: props.trackingId },
       query: storageQuery(),
-      signal: controller.signal,
+      signal: requestController.signal,
     })
-    if (sequence !== requestSequence || controller.signal.aborted) return
+    if (sequence !== requestSequence || requestController.signal.aborted) return
     detail.value = nextDetail
+    if (preserve) return
     await nextTick()
     if (sequence === requestSequence) inspectorHeading.value?.focus({ preventScroll: true })
   } catch (error) {
-    if (sequence !== requestSequence || controller.signal.aborted) return
-    failed.value = true
+    if (sequence !== requestSequence || requestController.signal.aborted) return
+    if (!preserve) failed.value = true
     void error
   } finally {
-    if (sequence === requestSequence) loading.value = false
+    if (sequence === requestSequence && !preserve) loading.value = false
   }
+}
+
+function loadDetail(): Promise<void> {
+  return fetchDetail(false)
 }
 
 watch(() => props.trackingId, () => {
   resetRevalidate()
   void loadDetail()
 }, { immediate: true })
+// A write result supersedes a local revalidate verdict for the same item.
+watch(() => props.writeSession, (session) => {
+  if (session && session.trackingId === props.trackingId) resetRevalidate()
+})
 onBeforeUnmount(() => {
   controller?.abort()
   requestSequence += 1
   resetRevalidate()
 })
+defineExpose({ reload: () => fetchDetail(true) })
 </script>
 
 <template>
@@ -221,6 +286,7 @@ onBeforeUnmount(() => {
           id="tracking-revalidate"
           variant="secondary"
           :loading="revalidateLoading"
+          :disabled="revalidateLoading || writeInFlight"
           @click="revalidatePlan"
         >{{ revalidateAction.label }}</BaseButton>
         <p v-else class="field-help">当前状态不可发起本地复核。</p>
@@ -234,6 +300,31 @@ onBeforeUnmount(() => {
           <p class="tracking-revalidate-verdict">{{ revalidateMessage }}</p>
           <ul v-if="revalidateIssues.length" class="tracking-revalidate-issues" aria-label="复核问题">
             <li v-for="issue in revalidateIssues" :key="issue.code">{{ issue.message }}</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="tracking-inspector-section tracking-submit" aria-labelledby="tracking-submit-heading">
+        <h4 id="tracking-submit-heading">提交到 Auto Bangumi</h4>
+        <p class="field-help">提交会使用本页面已探测的连接，在 Auto Bangumi 创建外部订阅并可能触发下载；每次提交都需要单独确认。</p>
+        <BaseButton
+          v-if="submitAction"
+          id="tracking-submit"
+          :loading="writeInFlight"
+          :disabled="writeInFlight || writeBusy"
+          @click="requestSubmit"
+        >{{ submitAction.label }}</BaseButton>
+        <p v-else class="field-help">{{ submitHint }}</p>
+        <div
+          v-if="thisWrite"
+          id="tracking-submit-result"
+          class="tracking-submit-result"
+          :class="`is-${thisWrite.state.toLowerCase()}`"
+          role="status"
+        >
+          <p class="tracking-submit-verdict">{{ thisWrite.message }}</p>
+          <ul v-if="thisWrite.issues.length" class="tracking-submit-issues" aria-label="提交问题">
+            <li v-for="issue in thisWrite.issues" :key="issue.code">{{ issue.message }}</li>
           </ul>
         </div>
       </section>
@@ -276,4 +367,11 @@ onBeforeUnmount(() => {
 .tracking-revalidate-result.is-failed { border-left-color: var(--color-feedback-error-border); }
 .tracking-revalidate-verdict { font-weight: 600; }
 .tracking-revalidate-issues { padding-left: 1.2rem; }
+.tracking-submit { gap: .65rem; }
+.tracking-submit-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+.tracking-submit-result.is-active { border-left-color: var(--color-feedback-success-border); }
+.tracking-submit-result.is-submit_failed, .tracking-submit-result.is-conflict, .tracking-submit-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
+.tracking-submit-result.is-needs_reconfirm, .tracking-submit-result.is-verifying_external, .tracking-submit-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
+.tracking-submit-verdict { font-weight: 600; }
+.tracking-submit-issues { padding-left: 1.2rem; }
 </style>

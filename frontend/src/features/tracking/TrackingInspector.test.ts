@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api/client'
 import TrackingInspector from './TrackingInspector.vue'
+import type { CapabilityResult } from './trackingProjection'
 
 vi.mock('@/api/client', () => ({
   api: { get: vi.fn(), post: vi.fn() },
@@ -247,5 +248,118 @@ describe('TrackingInspector local revalidation (US-309)', () => {
     expect(wrapper.find('#tracking-revalidate').exists()).toBe(false)
     expect(wrapper.text()).toContain('当前状态不可发起本地复核')
     expect(apiPost).not.toHaveBeenCalled()
+  })
+})
+
+const submitAction = {
+  code: 'SUBMIT', label: '提交到 Auto Bangumi', style: 'PRIMARY',
+  requires_confirmation: true, target_scopes: [],
+}
+
+function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResult {
+  return {
+    probe_status: 'VERIFIED', version: '3.1.18', adapter: 'legacy_3_1',
+    subscription_list: 'SUPPORTED', subscription_detail: 'SUPPORTED', subscription_submit: 'SUPPORTED',
+    subscription_modify: 'SUPPORTED', subscription_enable: 'SUPPORTED', subscription_disable: 'SUPPORTED',
+    subscription_delete: 'SUPPORTED', rss_list: 'SUPPORTED', rss_modify: 'SUPPORTED', rss_enable: 'SUPPORTED',
+    rss_disable: 'SUPPORTED', rss_delete: 'SUPPORTED', rss_refresh: 'SUPPORTED', external_verify: 'SUPPORTED',
+    checked_at: null, safe_message: null, ...overrides,
+  }
+}
+
+function writeSession(overrides: Record<string, unknown> = {}) {
+  return {
+    trackingId: 'tracking-1', action: 'SUBMIT', state: 'ACTIVE',
+    message: '提交成功：已在 Auto Bangumi 创建外部订阅。', issues: [], ...overrides,
+  }
+}
+
+/** Mount the inspector with a live page credential session offering SUBMIT. */
+async function mountSubmittable(
+  props: Record<string, unknown> = {},
+  detailOverrides: Record<string, unknown> = {},
+) {
+  apiGet.mockResolvedValue(detail({ available_actions: [revalidateAction, submitAction], ...detailOverrides }) as never)
+  const router = createRouter({ history: createMemoryHistory('/app/'), routes: [
+    { path: '/tracking', component: TrackingInspector }, { path: '/plans', component: { template: '<div />' } },
+  ] })
+  const wrapper = mount(TrackingInspector, {
+    props: { trackingId: 'tracking-1', credentialReady: true, capabilities: capabilities(), ...props },
+    global: { plugins: [router] },
+  })
+  await flushPromises()
+  return wrapper
+}
+
+describe('TrackingInspector explicit submission (US-310)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('offers SUBMIT only with a live page session and a proven capability', async () => {
+    apiGet.mockResolvedValue(detail({ available_actions: [submitAction] }) as never)
+    const wrapper = await mountInspector()
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.text()).toContain('需要先在页面连接 Auto Bangumi')
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('hides SUBMIT and downgrades to read-only when the capability is unsupported', async () => {
+    const wrapper = await mountSubmittable(
+      { capabilities: capabilities({ subscription_submit: 'UNSUPPORTED' }) },
+    )
+    expect(wrapper.find('#tracking-submit').exists()).toBe(false)
+    expect(wrapper.text()).toContain('未确认提交能力，已降级为只读')
+  })
+
+  it('leaves the request to the page and emits the action with the latest revision', async () => {
+    const wrapper = await mountSubmittable()
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    // The inspector never performs the external write itself.
+    expect(apiPost).not.toHaveBeenCalled()
+    const payload = wrapper.emitted('submit-requested')?.at(-1)?.[0] as {
+      action: { code: string }; item: { revision: number; tracking_id: string }
+    }
+    expect(payload.action.code).toBe('SUBMIT')
+    expect(payload.item.tracking_id).toBe('tracking-1')
+    expect(payload.item.revision).toBe(2)
+  })
+
+  it('locks the conflicting actions of this item while the write is in flight', async () => {
+    const wrapper = await mountSubmittable({ writeSession: writeSession({ state: 'IN_FLIGHT' }) })
+    expect(wrapper.find('#tracking-submit').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('#tracking-submit').attributes('aria-busy')).toBe('true')
+    expect(wrapper.find('#tracking-revalidate').attributes('disabled')).toBeDefined()
+    await wrapper.find('#tracking-submit').trigger('click')
+    await wrapper.find('#tracking-revalidate').trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('submit-requested')).toBeUndefined()
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('renders only the fixed write copy and the documented §11.5 issues', async () => {
+    const wrapper = await mountSubmittable({ writeSession: writeSession({
+      state: 'VERIFYING_EXTERNAL', message: '外部提交结果未知，正在只读回查；请勿重复提交。',
+      issues: [{ code: 'OPERATION_IN_PROGRESS', message: '本地方案尚未通过提交前复核。' }],
+    }) })
+    const result = wrapper.find('#tracking-submit-result')
+    expect(result.text()).toContain('外部提交结果未知')
+    expect(result.text()).toContain('请勿重复提交')
+    expect(result.find('.tracking-submit-issues').text()).toContain('本地方案尚未通过提交前复核')
+    expect(wrapper.text()).not.toContain('VERIFYING_EXTERNAL')
+  })
+
+  it('never shows another item write result on this item', async () => {
+    const wrapper = await mountSubmittable({ writeSession: writeSession({ trackingId: 'tracking-2' }) })
+    expect(wrapper.find('#tracking-submit-result').exists()).toBe(false)
+  })
+
+  it('re-reads the detail in place without blanking the panel after a write', async () => {
+    const wrapper = await mountSubmittable()
+    apiGet.mockResolvedValueOnce(detail({ revision: 9, title: '写后详情' }) as never)
+    await (wrapper.vm as unknown as { reload: () => Promise<void> }).reload()
+    await flushPromises()
+    expect(wrapper.text()).toContain('写后详情')
+    expect(wrapper.find('.tracking-inspector-loading').exists()).toBe(false)
+    expect(document.activeElement).not.toBe(wrapper.find('#tracking-inspector-heading').element)
   })
 })

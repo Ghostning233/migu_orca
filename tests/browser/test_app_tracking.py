@@ -366,3 +366,99 @@ class TestAppTrackingStage38:
         expect(page.locator("#tracking-revalidate-result")).to_contain_text("复核通过")
         assert len(revalidate_calls) == 2, revalidate_calls
         expect(page.locator(".tracking-list-item").first).to_contain_text("待提交")
+
+    def test_explicit_submit_confirms_once_and_keeps_the_key_in_page_memory(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        submits: list[dict[str, Any]] = []
+        state = {"revision": 1, "detail_reads": 0}
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED", "subscription_submit": "SUPPORTED",
+                "subscription_modify": "SUPPORTED", "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+                "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED", "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+                "checked_at": None, "safe_message": "已完成安全探测",
+            }}, ensure_ascii=False))
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                **_item("tracking-a", "葬送的芙莉莲"),
+                "status": "PENDING_SUBMIT", "status_label": "待提交", "revision": state["revision"],
+                "available_actions": [
+                    {"code": "REVALIDATE", "label": "重新复核", "style": "SECONDARY",
+                     "requires_confirmation": False, "target_scopes": []},
+                    {"code": "SUBMIT", "label": "提交到 Auto Bangumi", "style": "PRIMARY",
+                     "requires_confirmation": True, "target_scopes": []},
+                ],
+                "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+                "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+                "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                "external_mapping": None, "audit_events": [], "warnings": [],
+            }}, ensure_ascii=False))
+
+        def submit(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            submits.append(json.loads(request.post_data or "{}"))
+            state["revision"] = 2
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "outcome": "ACTIVE", "checked_revision": 1, "next_revision": 2,
+                "checked_at": "2026-09-13T03:00:00+00:00", "operation_id": "operation-1", "issues": [],
+                "tracking": {
+                    **_item("tracking-a", "葬送的芙莉莲"), "status_label": "已提交外部订阅", "revision": 2,
+                },
+            }}, ensure_ascii=False))
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        # Registered after the two broader tracking routes: later routes win.
+        page.route("**/api/v1/tracking/items/tracking-a/submit", submit)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        # No page credential session yet, so no external write is offered.
+        expect(page.locator("#tracking-submit")).to_have_count(0)
+
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("secret-user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-submit")
+        # Connecting never submits on the user's behalf.
+        assert not submits, submits
+
+        page.locator("#tracking-submit").click()
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("创建该追番的外部订阅")
+        assert not submits, submits
+        page.locator(".confirm-dialog-actions button").filter(has_text="取消").click()
+        # Cancelling the impact confirmation sends zero requests.
+        assert not submits, submits
+
+        page.locator("#tracking-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认提交").click()
+        page.wait_for_selector("#tracking-submit-result")
+
+        expect(page.locator("#tracking-submit-result")).to_contain_text("提交成功")
+        expect(page.locator("#tracking-submit-result")).not_to_contain_text("ACTIVE")
+        assert len(submits) == 1, submits
+        body = submits[0]
+        assert body["confirm"] is True, body
+        assert body["expected_revision"] == 1, body
+        assert body["ab_config"]["password"] == "secret-password", body
+        key = body["idempotency_key"]
+        assert isinstance(key, str) and len(key) >= 8, body
+        # The key lives in page memory only, and the write result converges the
+        # list row from the returned tracking without a reload of the page.
+        expect(page.locator(".tracking-list-item").first).to_contain_text("已提交外部订阅")
+        expect(page).to_have_url(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        expect(page.locator("body")).not_to_contain_text("secret-password")
+        expect(page.locator("body")).not_to_contain_text("secret-user")
+        expect(page.locator("body")).not_to_contain_text(key)
+        assert state["detail_reads"] >= 2, state
