@@ -242,3 +242,10 @@ Started: 2026-09-13
 - 验证：`uv run pytest tests/api_contract/test_autobangumi_settings_security.py tests/api_contract/test_saved_autobangumi_probe.py tests/api_contract/test_endpoint_lifecycle.py -q --maxfail=1` → `18 passed`；Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。按 US-326 范围未重跑全量后端/前端/Chromium 门禁。
 - 遗留风险：未运行真实 Chromium 与真实 Auto Bangumi；旧业务 HTTP/generated 输入仍按 PRD 保持可编译，待后续 US-328～US-330 原子切换。
 - 可复用结论：涉及部署端秘密的 contract/browser fixture 必须显式注入临时服务端配置根；session-scoped Flask fixture 需在整个 live server 生命周期保留环境变量，结束后恢复原值。
+
+## 2026-09-14 / US-326 批次边界独立验收通过
+
+- 主 Agent补跑配置 repository、saved submit/sync/management/recovery、设置与探测安全契约、endpoint/OpenAPI runtime/inventory 的后端交接组合，结果 `134 passed`；工作区未读取或写入开发者默认部署配置。
+- 独立审核逐条核对 US-318～US-326 的配置权限与原子写、Host/Origin/JSON 防护、probe snapshot/lease、operation/mapping ref、四类 saved service 严格模型及秘密隔离，未发现 P0/P1，允许 US-326 保持 passes=true。
+- 确认 API contract autouse fixture 在 client 构造前注入临时配置根；browser session fixture 在 Flask app 创建前设置并保持至 live server 结束后恢复。旧业务 HTTP/generated 仍可编译，未提前实现 US-327。
+- 本批次到 US-326 强制停止；未运行完整后端、完整前端、真实 Chromium 或真实 AB，未 push/PR/merge。后续前端与 HTTP 原子迁移从 US-327 开始，需下一批明确启动。
