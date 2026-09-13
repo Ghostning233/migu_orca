@@ -9,7 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 from shared.errors import Stage1Error
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class AutoBangumiConfig:
     """Request-scoped AutoBangumi credentials and service root."""
 
@@ -19,6 +19,16 @@ class AutoBangumiConfig:
     username: str | None = None
     password: str | None = None
     token: str | None = None
+
+    def __repr__(self) -> str:
+        """Never put credentials (or the service root) in debug output."""
+
+        return (
+            "AutoBangumiConfig("
+            f"auth_mode={self.auth_mode!r}, fallback_enabled={self.fallback_enabled!r}, "
+            f"credential_present={self.username is not None or self.token is not None}"
+            ")"
+        )
 
 
 def build_ab_config(data: dict[str, Any]) -> AutoBangumiConfig:
@@ -70,18 +80,44 @@ def load_ab_config(path: Path) -> AutoBangumiConfig:
 def _service_root(value: Any) -> str:
     if not isinstance(value, str) or not value.strip():
         _config_error("base_url")
-    parsed = urlsplit(value.strip())
+    raw = value.strip()
+    if any(ord(character) < 32 or ord(character) == 127 for character in raw):
+        _config_error("base_url")
+
+    # The Web settings form accepts the convenient LAN form ``host:port``.
+    # It is deliberately not allowed to omit the port when the scheme is also
+    # omitted: accepting a bare hostname makes a typo look like a service root.
+    has_scheme = "://" in raw
+    candidate = raw if has_scheme else f"http://{raw}"
+    try:
+        parsed = urlsplit(candidate)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        _config_error("base_url")
+    if not has_scheme and port is None:
+        _config_error("base_url")
     if (
-        parsed.scheme not in {"http", "https"}
+        parsed.scheme.lower() not in {"http", "https"}
         or not parsed.netloc
         or parsed.username is not None
         or parsed.password is not None
         or parsed.query
         or parsed.fragment
         or parsed.path not in {"", "/"}
+        or hostname is None
+        or not hostname.strip()
+        or (port is not None and not 1 <= port <= 65535)
     ):
         _config_error("base_url")
-    return urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))
+
+    normalized_host = hostname.lower()
+    if ":" in normalized_host and not normalized_host.startswith("["):
+        normalized_host = f"[{normalized_host}]"
+    normalized_netloc = normalized_host
+    if port is not None:
+        normalized_netloc += f":{port}"
+    return urlunsplit((parsed.scheme.lower(), normalized_netloc, "", "", ""))
 
 
 def _required_secret_string(value: Any, field: str) -> str:

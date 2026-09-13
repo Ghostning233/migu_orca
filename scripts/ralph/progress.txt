@@ -4,7 +4,7 @@ Started: 2026-09-13
 
 ## Codebase Patterns
 
-- Stage 39 目标为部署端 Auto Bangumi 配置持久化与安全连接绑定；当前仅启动准备，23 个 story 均未实现。
+- Stage 39 目标为部署端 Auto Bangumi 配置持久化与安全连接绑定；US-318 已完成，US-319～US-340 仍待实现。
 - 每个 Ralph 迭代只完成一个 story；本次首批仅授权 US-318～US-320，最多 3 次迭代，完成批次后停止并由主 Agent 独立审核。
 - 本阶段使用 `codex --model gpt-5.6-luna` 运行 Ralph；仅允许本地精确提交，不 push、PR、merge 或部署。
 - 秘密只允许受控配置存储与单次受控 adapter 请求；不得进入业务 JSON、公开 DTO、URL/history、浏览器存储、日志、DOM、截图或 trace。公共响应只给安全摘要。
@@ -16,3 +16,20 @@ Started: 2026-09-13
 
 - 2026-09-13：从 `c294ee4` 创建 `ralph/stage39-deployment-settings`；归档 Stage38 活动状态后加载 Stage39 计划。
 - 授权范围：US-318～US-320，最多 3 迭代；批次结束强制停下独立审核。
+
+## 2026-09-13 / US-318
+
+- 范围：新增独立于业务 storage/profile 的服务端 AB 配置 repository；支持
+  `MIGU_ORCA_WEB_CONFIG_ROOT`（默认 `.migu_orca/config`）、严格 password/API Token 联合、
+  HTTP(S) 根地址及裸 `host:port` 规范化、配置 CAS/revision、opaque UUID connection_ref、
+  无秘密 tombstone、受限权限目录/文件、符号链接与损坏内容 fail closed、同目录原子写入。
+- 文件：`src/storage_engine/controllers/autobangumi_config_repository.py`、对应专属测试；
+  `src/ab_engine/controllers/ab_config.py` 加固服务根规范化并隐藏 request-scoped 配置 repr。
+- 验证：`uv run pytest src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config_test.py -q`（34 passed）；
+  `uv run pytest src/ab_engine src/storage_engine/controllers -q`（339 passed）；
+  `uv run ruff check src/storage_engine/controllers/autobangumi_config_repository.py src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config.py`（passed）；
+  `uv run python -m compileall -q src/storage_engine/controllers/autobangumi_config_repository.py src/ab_engine/controllers/ab_config.py`（passed）；`git diff --check`（passed）。
+- 遗留风险：本轮只交付 repository，尚未接入 US-319 配置管理 API、同源/Host 防护或前端；
+  directory/file 权限验证按 POSIX 受限存储语义实现，Windows 凭据设施不在本阶段。
+- 可复用结论：配置 root 必须保留词法路径并在每次 IO 前检查父路径符号链接；读写均使用
+  `lstat`/`O_NOFOLLOW`，写临时文件先 fsync 再 `os.replace`，CAS 冲突只返回 revision 元数据。
