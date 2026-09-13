@@ -33,6 +33,8 @@ const probeError = ref('')
 const capabilities = ref<CapabilityResult | null>(null)
 const dialogEl = ref<HTMLElement | null>(null)
 const { activate, deactivate } = useFocusTrap(dialogEl, () => cancel())
+let probeSequence = 0
+let probeController: AbortController | null = null
 
 const baseUrl = computed({ get: () => fields.get('baseUrl'), set: (value: string) => fields.set('baseUrl', value) })
 const username = computed({ get: () => fields.get('username'), set: (value: string) => fields.set('username', value) })
@@ -42,18 +44,30 @@ const token = computed({ get: () => fields.get('token'), set: (value: string) =>
 watch(() => props.open, async (open) => {
   if (open) {
     await nextTick()
+    if (!props.open) return
     activate()
     dialogEl.value?.querySelector<HTMLInputElement>('#tracking-ab-base-url')?.focus()
   } else {
+    invalidateProbe()
+    fields.clearAll()
+    capabilities.value = null
     deactivate()
   }
 })
 watch(authMode, () => {
+  invalidateProbe()
   fields.reset()
   probeError.value = ''
   capabilities.value = null
 })
-onBeforeUnmount(() => { fields.clearAll(); deactivate() })
+onBeforeUnmount(() => { invalidateProbe(); fields.clearAll(); deactivate() })
+
+function invalidateProbe(): void {
+  probeSequence += 1
+  probeController?.abort()
+  probeController = null
+  probing.value = false
+}
 
 function buildConfig(): ProbeBody['ab_config'] | null {
   if (!fields.get('baseUrl').trim()) {
@@ -83,26 +97,37 @@ function buildConfig(): ProbeBody['ab_config'] | null {
 }
 
 async function probe(): Promise<void> {
+  if (probing.value) return
   const config = buildConfig()
   if (!config) return
+  const sequence = ++probeSequence
+  const controller = new AbortController()
+  probeController?.abort()
+  probeController = controller
   probing.value = true
   probeError.value = ''
   try {
     const result = await api.post<CapabilityResult>('/api/v1/autobangumi/capabilities', {
       body: { ab_config: config },
+      signal: controller.signal,
     })
+    if (sequence !== probeSequence || controller.signal.aborted) return
     capabilities.value = result
     emit('connected', { config, capabilities: result })
   } catch (error) {
+    if (sequence !== probeSequence || controller.signal.aborted) return
     probeError.value = 'Auto Bangumi 连接探测失败，请检查输入后重试。'
     void error
   } finally {
-    probing.value = false
+    if (sequence === probeSequence) {
+      probing.value = false
+      if (probeController === controller) probeController = null
+    }
   }
 }
 
 function cancel(): void {
-  probing.value = false
+  invalidateProbe()
   probeError.value = ''
   capabilities.value = null
   fields.clearAll()
@@ -110,6 +135,7 @@ function cancel(): void {
 }
 
 function clearSession(): void {
+  invalidateProbe()
   fields.clearAll()
   capabilities.value = null
   probeError.value = ''
@@ -151,7 +177,7 @@ defineExpose({ clearSession })
         </section>
         <div class="credential-dialog-actions">
           <BaseButton variant="secondary" @click="cancel">取消</BaseButton>
-          <BaseButton id="tracking-ab-probe" :loading="probing" @click="probe">探测并连接</BaseButton>
+          <BaseButton id="tracking-ab-probe" :loading="probing" :disabled="probing" @click="probe">探测并连接</BaseButton>
         </div>
       </section>
     </div>

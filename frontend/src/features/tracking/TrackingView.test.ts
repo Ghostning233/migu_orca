@@ -123,6 +123,7 @@ describe('TrackingView formal overview (US-305)', () => {
     await flushPromises()
     expect(apiPost).toHaveBeenLastCalledWith('/api/v1/tracking/sync', {
       body: { ab_config: { auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user', password: 'pass', fallback_enabled: false }, confirm: true },
+      signal: expect.any(AbortSignal),
     })
     expect(wrapper.text()).toContain('同步后的记录')
   })
@@ -144,5 +145,71 @@ describe('TrackingView formal overview (US-305)', () => {
     expect(wrapper.text()).toContain('仍在本地')
     expect(wrapper.text()).toContain('已保留原有本地列表')
     expect(wrapper.text()).not.toContain('private response')
+  })
+
+  it('aborts an in-flight sync when the page connection is cleared', async () => {
+    apiGet.mockResolvedValue({ items: [item('tracking-1', '仍在本地')], summary: {}, warnings: [] } as never)
+    let resolveSync: ((value: unknown) => void) | undefined
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSync = resolve }) as never)
+    const { wrapper } = await mountTracking()
+    await wrapper.find('#tracking-connect').trigger('click')
+    await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
+    await wrapper.find('#tracking-ab-username').setValue('user')
+    await wrapper.find('#tracking-ab-password').setValue('pass')
+    await wrapper.find('#tracking-ab-probe').trigger('click')
+    await flushPromises()
+    await wrapper.find('#tracking-sync').trigger('click')
+    document.querySelector<HTMLButtonElement>('.confirm-dialog-actions .primary-button')?.click()
+    await flushPromises()
+    const signal = apiPost.mock.calls.at(-1)?.[1]?.signal as AbortSignal
+    await wrapper.find('.tracking-clear-connection').trigger('click')
+    resolveSync?.({ sync_status: 'COMPLETE', items: [item('tracking-1', '不应写回')], summary: {}, capabilities: capabilities() })
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(wrapper.text()).toContain('仍在本地')
+    expect(wrapper.text()).not.toContain('不应写回')
+    expect(wrapper.find('#tracking-sync').exists()).toBe(false)
+  })
+
+  it('clearing connection does not strand an unrelated local list request', async () => {
+    let resolveList: ((value: unknown) => void) | undefined
+    apiGet.mockReturnValueOnce(new Promise((resolve) => { resolveList = resolve }) as never)
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+    const { wrapper } = await mountTracking()
+    await wrapper.find('#tracking-connect').trigger('click')
+    await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
+    await wrapper.find('#tracking-ab-username').setValue('user')
+    await wrapper.find('#tracking-ab-password').setValue('pass')
+    await wrapper.find('#tracking-ab-probe').trigger('click')
+    await flushPromises()
+    await wrapper.find('.tracking-clear-connection').trigger('click')
+    resolveList?.({ items: [item('tracking-1', '列表仍可完成')], summary: {}, warnings: [] })
+    await flushPromises()
+    expect(wrapper.text()).toContain('列表仍可完成')
+    expect(wrapper.find('.tracking-list-state').exists()).toBe(false)
+  })
+
+  it('aborts a pending sync on unmount and ignores its late response', async () => {
+    apiGet.mockResolvedValue({ items: [item('tracking-1', '仍在本地')], summary: {}, warnings: [] } as never)
+    let resolveSync: ((value: unknown) => void) | undefined
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSync = resolve }) as never)
+    const { wrapper } = await mountTracking()
+    await wrapper.find('#tracking-connect').trigger('click')
+    await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
+    await wrapper.find('#tracking-ab-username').setValue('user')
+    await wrapper.find('#tracking-ab-password').setValue('pass')
+    await wrapper.find('#tracking-ab-probe').trigger('click')
+    await flushPromises()
+    await wrapper.find('#tracking-sync').trigger('click')
+    document.querySelector<HTMLButtonElement>('.confirm-dialog-actions .primary-button')?.click()
+    await flushPromises()
+    const signal = apiPost.mock.calls.at(-1)?.[1]?.signal as AbortSignal
+    wrapper.unmount()
+    resolveSync?.({ sync_status: 'COMPLETE', items: [item('tracking-1', '不应覆盖')], summary: {}, capabilities: capabilities() })
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(wrapper.emitted()).toBeDefined()
   })
 })

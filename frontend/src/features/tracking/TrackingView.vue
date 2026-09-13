@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** Formal tracking overview (US-305). The first management screen is read-only. */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
@@ -62,6 +62,7 @@ const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const detailRevision = ref(0)
 let dataSequence = 0
 let syncSequence = 0
+let syncController: AbortController | null = null
 
 const statusLabels: Record<TrackingStatusGroup, string> = {
   PENDING: '待处理', PROCESSING: '处理中', ACTIVE: '追番中',
@@ -102,10 +103,6 @@ function syncSelection(forceAbsentCheck = false): void {
 }
 
 async function loadList(): Promise<void> {
-  if (syncLoading.value) {
-    syncSequence += 1
-    syncLoading.value = false
-  }
   const sequence = ++dataSequence
   loading.value = true
   failed.value = false
@@ -149,11 +146,16 @@ function clearConnection(): void {
   credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
-  dataSequence += 1
-  syncSequence += 1
-  syncLoading.value = false
+  cancelSync()
   syncMessage.value = ''
   syncSummary.value = null
+}
+
+function cancelSync(): void {
+  syncSequence += 1
+  syncController?.abort()
+  syncController = null
+  syncLoading.value = false
 }
 
 const capabilityFields: Array<keyof CapabilityResult> = [
@@ -176,14 +178,18 @@ async function syncTracking(): Promise<void> {
     cancelLabel: '取消',
   })
   if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
+  const config = sessionConfig.value
   const sequence = ++syncSequence
   const dataRevision = ++dataSequence
+  const controller = new AbortController()
+  syncController?.abort()
+  syncController = controller
   loading.value = false
   syncLoading.value = true
   syncMessage.value = ''
   try {
-    const body: SyncBody = { ab_config: sessionConfig.value, confirm: true }
-    const result = await api.post<SyncResult>('/api/v1/tracking/sync', { body })
+    const body: SyncBody = { ab_config: config, confirm: true }
+    const result = await api.post<SyncResult>('/api/v1/tracking/sync', { body, signal: controller.signal })
     if (sequence !== syncSequence || dataRevision !== dataSequence) return
     syncSummary.value = result.summary
     const degraded = result.sync_status !== 'COMPLETE' || hasUnknownCapability(result.capabilities)
@@ -203,7 +209,10 @@ async function syncTracking(): Promise<void> {
     syncMessage.value = '同步 Auto Bangumi 失败，已保留原有本地列表；可重连或再次同步。'
     void error
   } finally {
-    if (sequence === syncSequence && dataRevision === dataSequence) syncLoading.value = false
+    if (sequence === syncSequence && dataRevision === dataSequence) {
+      syncLoading.value = false
+      if (syncController === controller) syncController = null
+    }
   }
 }
 
@@ -219,6 +228,12 @@ watch(() => route.query.tracking_id, () => {
 watch(selectedTrackingId, (trackingId) => {
   if (trackingId) void focusSelection()
 }, { flush: 'post' })
+onBeforeUnmount(() => {
+  cancelSync()
+  credentialDialog.value?.clearSession()
+  sessionConfig.value = null
+  sessionCapabilities.value = null
+})
 </script>
 
 <template>

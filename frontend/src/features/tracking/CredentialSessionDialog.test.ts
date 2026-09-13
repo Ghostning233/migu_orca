@@ -33,7 +33,7 @@ describe('CredentialSessionDialog (US-307)', () => {
     expect(apiPost).toHaveBeenCalledWith('/api/v1/autobangumi/capabilities', {
       body: { ab_config: {
         auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user', password: 'secret', fallback_enabled: false,
-      } },
+      } }, signal: expect.any(AbortSignal),
     })
     expect(wrapper.text()).toContain('3.1.18')
     expect(wrapper.text()).not.toContain('https://ab.invalid')
@@ -66,5 +66,54 @@ describe('CredentialSessionDialog (US-307)', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('提交能力：UNSUPPORTED')
     expect(wrapper.text()).not.toContain('secret')
+  })
+
+  it('does not emit a stale connection when a pending probe is cancelled', async () => {
+    let resolveProbe: ((value: unknown) => void) | undefined
+    apiPost.mockReturnValueOnce(new Promise((resolve) => { resolveProbe = resolve }) as never)
+    const wrapper = mount(CredentialSessionDialog, { props: { open: true }, global: { stubs: { Teleport: true } } })
+    await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
+    await wrapper.find('#tracking-ab-username').setValue('user')
+    await wrapper.find('#tracking-ab-password').setValue('secret')
+    await wrapper.find('#tracking-ab-probe').trigger('click')
+    const signal = apiPost.mock.calls[0]?.[1]?.signal as AbortSignal
+    await wrapper.findAll('.credential-dialog-actions button')[0]!.trigger('click')
+    resolveProbe?.(capabilities())
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(wrapper.emitted('connected')).toBeUndefined()
+  })
+
+  it('invalidates a pending probe on auth-mode switch and unmount', async () => {
+    let resolveProbe: ((value: unknown) => void) | undefined
+    apiPost.mockReturnValueOnce(new Promise((resolve) => { resolveProbe = resolve }) as never)
+    const wrapper = mount(CredentialSessionDialog, { props: { open: true }, global: { stubs: { Teleport: true } } })
+    await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
+    await wrapper.find('#tracking-ab-username').setValue('user')
+    await wrapper.find('#tracking-ab-password').setValue('secret')
+    await wrapper.find('#tracking-ab-probe').trigger('click')
+    const signal = apiPost.mock.calls[0]?.[1]?.signal as AbortSignal
+    await wrapper.find('#tracking-ab-auth-mode').setValue('api_token')
+    resolveProbe?.(capabilities())
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(wrapper.emitted('connected')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('aborts a still-pending probe when the dialog component unmounts', async () => {
+    let resolveProbe: ((value: unknown) => void) | undefined
+    apiPost.mockReturnValueOnce(new Promise((resolve) => { resolveProbe = resolve }) as never)
+    const wrapper = mount(CredentialSessionDialog, { props: { open: true }, global: { stubs: { Teleport: true } } })
+    await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
+    await wrapper.find('#tracking-ab-username').setValue('user')
+    await wrapper.find('#tracking-ab-password').setValue('secret')
+    await wrapper.find('#tracking-ab-probe').trigger('click')
+    const signal = apiPost.mock.calls[0]?.[1]?.signal as AbortSignal
+    wrapper.unmount()
+    resolveProbe?.(capabilities())
+    await flushPromises()
+    expect(signal.aborted).toBe(true)
+    expect(wrapper.emitted('connected')).toBeUndefined()
   })
 })
