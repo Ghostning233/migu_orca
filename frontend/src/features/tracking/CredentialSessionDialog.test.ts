@@ -36,6 +36,10 @@ describe('CredentialSessionDialog (US-307)', () => {
       } }, signal: expect.any(AbortSignal),
     })
     expect(wrapper.text()).toContain('3.1.18')
+    expect(wrapper.find('.credential-capability-summary').text()).toContain('已验证')
+    expect(wrapper.find('.credential-capability-list').text()).toContain('新增订阅')
+    expect(wrapper.text()).not.toContain('VERIFIED')
+    expect(wrapper.text()).not.toContain('SUPPORTED')
     expect(wrapper.text()).not.toContain('https://ab.invalid')
   })
 
@@ -64,7 +68,13 @@ describe('CredentialSessionDialog (US-307)', () => {
     apiPost.mockResolvedValue(capabilities({ subscription_submit: 'UNSUPPORTED', subscription_modify: 'UNKNOWN' }) as never)
     await wrapper.find('#tracking-ab-probe').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('提交能力：UNSUPPORTED')
+    const list = wrapper.find('.credential-capability-list')
+    expect(list.text()).toContain('新增订阅')
+    expect(list.text()).toContain('不支持')
+    expect(list.text()).toContain('修改订阅')
+    expect(list.text()).toContain('未知')
+    expect(wrapper.text()).not.toContain('UNSUPPORTED')
+    expect(wrapper.text()).not.toContain('UNKNOWN')
     expect(wrapper.text()).not.toContain('secret')
   })
 

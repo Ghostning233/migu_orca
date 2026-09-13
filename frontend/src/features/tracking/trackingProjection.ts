@@ -202,3 +202,70 @@ export function createTrackingActionIntent(
 export function reuseTrackingActionIntent(intent: TrackingActionIntent): TrackingActionIntent {
   return intent
 }
+
+/**
+ * Capability display projection (US-307 review fix).
+ *
+ * The generated probe result is the only source. These helpers turn whitelisted
+ * enum fields into fixed Chinese labels; they never accept or render endpoint,
+ * account, credential, adapter or any other free-form server value.
+ */
+export const CAPABILITY_SUMMARY_FIELDS = [
+  { key: 'subscription_list', label: '读取订阅列表' },
+  { key: 'subscription_detail', label: '读取订阅详情' },
+  { key: 'subscription_submit', label: '新增订阅' },
+  { key: 'subscription_modify', label: '修改订阅' },
+  { key: 'subscription_enable', label: '启用订阅' },
+  { key: 'subscription_disable', label: '停用订阅' },
+  { key: 'subscription_delete', label: '删除订阅' },
+  { key: 'rss_list', label: '读取 RSS 列表' },
+  { key: 'rss_modify', label: '修改 RSS' },
+  { key: 'rss_enable', label: '启用 RSS' },
+  { key: 'rss_disable', label: '停用 RSS' },
+  { key: 'rss_delete', label: '删除 RSS' },
+  { key: 'rss_refresh', label: '刷新 RSS' },
+  { key: 'external_verify', label: '外部核验' },
+] as const satisfies ReadonlyArray<{ key: keyof CapabilityResult; label: string }>
+
+export interface CapabilitySummaryEntry {
+  key: (typeof CAPABILITY_SUMMARY_FIELDS)[number]['key']
+  label: string
+  state: CapabilityState
+}
+
+const CAPABILITY_STATE_LABELS: Record<CapabilityState, string> = {
+  SUPPORTED: '支持', UNSUPPORTED: '不支持', UNKNOWN: '未知',
+}
+const PROBE_STATUS_LABELS: Record<string, string> = {
+  VERIFIED: '已验证', PARTIAL: '部分验证', FAILED: '探测失败',
+}
+// Version is the only free-form value rendered; keep it to a plain version token
+// so a hostile server value can never smuggle an endpoint or URL into the DOM.
+const SAFE_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,31}$/
+
+/** Unknown or unexpected server values always fail closed to 未知. */
+export function capabilityState(value: unknown): CapabilityState {
+  return value === 'SUPPORTED' || value === 'UNSUPPORTED' ? value : 'UNKNOWN'
+}
+
+export function capabilityStateLabel(value: unknown): string {
+  return CAPABILITY_STATE_LABELS[capabilityState(value)]
+}
+
+export function probeStatusLabel(status: string): string {
+  return PROBE_STATUS_LABELS[status] ?? '未确认'
+}
+
+/** Version is the only free-form field shown, and only as a plain version token. */
+export function capabilityVersionLabel(capabilities: CapabilityResult): string {
+  const version = typeof capabilities.version === 'string' ? capabilities.version.trim() : ''
+  return SAFE_VERSION_PATTERN.test(version) ? version : '未确认'
+}
+
+export function projectCapabilitySummary(capabilities: CapabilityResult): CapabilitySummaryEntry[] {
+  return CAPABILITY_SUMMARY_FIELDS.map((field) => ({
+    key: field.key,
+    label: field.label,
+    state: capabilityState(capabilities[field.key]),
+  }))
+}

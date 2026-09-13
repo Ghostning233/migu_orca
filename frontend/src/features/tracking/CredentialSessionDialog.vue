@@ -8,6 +8,12 @@ import BaseInput from '@/components/forms/BaseInput.vue'
 import BaseSelect from '@/components/forms/BaseSelect.vue'
 import { useSensitiveFields } from '@/app/composables/useSensitiveFields'
 import { useFocusTrap } from '@/app/composables/useFocusTrap'
+import {
+  capabilityStateLabel,
+  capabilityVersionLabel,
+  probeStatusLabel,
+  projectCapabilitySummary,
+} from './trackingProjection'
 
 type CapabilityResult = NonNullable<
   operations['probeAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
@@ -40,6 +46,9 @@ const baseUrl = computed({ get: () => fields.get('baseUrl'), set: (value: string
 const username = computed({ get: () => fields.get('username'), set: (value: string) => fields.set('username', value) })
 const password = computed({ get: () => fields.get('password'), set: (value: string) => fields.set('password', value) })
 const token = computed({ get: () => fields.get('token'), set: (value: string) => fields.set('token', value) })
+const capabilityEntries = computed(() => (
+  capabilities.value ? projectCapabilitySummary(capabilities.value) : []
+))
 
 watch(() => props.open, async (open) => {
   if (open) {
@@ -169,10 +178,13 @@ defineExpose({ clearSession })
         <p v-if="probeError" class="credential-dialog-error" role="alert">{{ probeError }}</p>
         <section v-if="capabilities" class="credential-capability-summary" aria-live="polite">
           <h3>能力探测结果</h3>
-          <p>探测状态：{{ capabilities.probe_status }}</p>
-          <p>版本：{{ capabilities.version || '未确认' }}</p>
-          <p>提交能力：{{ capabilities.subscription_submit }}</p>
-          <p>读取能力：{{ capabilities.subscription_list }} / {{ capabilities.subscription_detail }}</p>
+          <p>探测状态：{{ probeStatusLabel(capabilities.probe_status) }}</p>
+          <p>版本：{{ capabilityVersionLabel(capabilities) }}</p>
+          <dl class="credential-capability-list">
+            <div v-for="entry in capabilityEntries" :key="entry.key">
+              <dt>{{ entry.label }}</dt><dd>{{ capabilityStateLabel(entry.state) }}</dd>
+            </div>
+          </dl>
           <p class="field-help">管理写能力仍需服务端按当前认证与版本逐项确认。</p>
         </section>
         <div class="credential-dialog-actions">
@@ -191,5 +203,9 @@ defineExpose({ clearSession })
 .credential-dialog label { font-weight: 600; }
 .credential-dialog-error { color: var(--color-danger-emphasis); }
 .credential-capability-summary { display: grid; gap: .35rem; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); }
+.credential-capability-list { display: grid; gap: .25rem; margin: 0; }
+.credential-capability-list div { display: flex; justify-content: space-between; gap: .75rem; }
+.credential-capability-list dt { color: var(--color-text-muted); }
+.credential-capability-list dd { margin: 0; font-weight: 600; }
 .credential-dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: .5rem; }
 </style>

@@ -12,7 +12,7 @@ type TrackingDetail = NonNullable<
   operations['getTrackingItemDetail']['responses']['200']['content']['application/json']['result']
 >
 
-const props = defineProps<{ trackingId: string; fallbackRequestId?: string | null }>()
+const props = defineProps<{ trackingId: string }>()
 const detail = ref<TrackingDetail | null>(null)
 const loading = ref(false)
 const failed = ref(false)

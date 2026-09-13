@@ -16,7 +16,11 @@ import PanelSection from '@/components/layout/PanelSection.vue'
 import { routeLocation } from '@/app/router/catalog'
 import { storageQuery } from '@/features/requests/requestStorage'
 import {
+  capabilityStateLabel,
+  capabilityVersionLabel,
   filterTrackingItems,
+  probeStatusLabel,
+  projectCapabilitySummary,
   projectTrackingOverview,
   sortTrackingItems,
   TRACKING_STATUS_GROUPS,
@@ -56,11 +60,17 @@ const credentialDialog = ref<InstanceType<typeof CredentialSessionDialog> | null
 const sessionConfig = ref<ProbeBody['ab_config'] | null>(null)
 const sessionCapabilities = ref<CapabilityResult | null>(null)
 const syncLoading = ref(false)
+const syncPending = ref(false)
 const syncMessage = ref('')
 const syncSummary = ref<SyncResult['summary'] | null>(null)
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const detailRevision = ref(0)
-let dataSequence = 0
+// List and sync have independent lifecycles: `listSequence` only invalidates
+// stale list responses, while `syncGeneration` marks the revision a sync wrote.
+// A list response started before a sync must never overwrite synced data, and a
+// list refresh must never discard a sync result.
+let listSequence = 0
+let syncGeneration = 0
 let syncSequence = 0
 let syncController: AbortController | null = null
 
@@ -69,6 +79,9 @@ const statusLabels: Record<TrackingStatusGroup, string> = {
   ATTENTION: '需处理', INACTIVE: '已停用/已删除',
 }
 const overview = computed(() => projectTrackingOverview(items.value))
+const capabilitySummary = computed(() => (
+  sessionCapabilities.value ? projectCapabilitySummary(sessionCapabilities.value) : []
+))
 const filteredItems = computed(() => sortTrackingItems(filterTrackingItems(items.value, {
   query: searchTerm.value, statusGroup: statusFilter.value,
 })))
@@ -103,24 +116,25 @@ function syncSelection(forceAbsentCheck = false): void {
 }
 
 async function loadList(): Promise<void> {
-  const sequence = ++dataSequence
+  const sequence = ++listSequence
+  const generation = syncGeneration
   loading.value = true
   failed.value = false
   try {
     const result = await api.get<ListResult>('/api/v1/tracking/items', {
       query: { ...storageQuery(), sort: 'updated_at' },
     })
-    if (sequence !== dataSequence) return
+    if (sequence !== listSequence || generation !== syncGeneration) return
     const previous = selectedTrackingId.value
     items.value = result?.items ?? []
     syncSelection(true)
     if (selectedTrackingId.value && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
-    if (sequence !== dataSequence) return
+    if (sequence !== listSequence || generation !== syncGeneration) return
     failed.value = true
     void error
   } finally {
-    if (sequence === dataSequence) {
+    if (sequence === listSequence) {
       loading.value = false
     }
   }
@@ -155,32 +169,35 @@ function cancelSync(): void {
   syncSequence += 1
   syncController?.abort()
   syncController = null
+  syncPending.value = false
   syncLoading.value = false
 }
 
-const capabilityFields: Array<keyof CapabilityResult> = [
-  'subscription_list', 'subscription_detail', 'subscription_submit', 'subscription_modify',
-  'subscription_enable', 'subscription_disable', 'subscription_delete', 'rss_list', 'rss_modify',
-  'rss_enable', 'rss_disable', 'rss_delete', 'rss_refresh', 'external_verify',
-]
-
 function hasUnknownCapability(capabilities: CapabilityResult): boolean {
   return capabilities.probe_status !== 'VERIFIED'
-    || capabilityFields.some((field) => capabilities[field] === 'UNKNOWN')
+    || projectCapabilitySummary(capabilities).some((entry) => entry.state === 'UNKNOWN')
 }
 
 async function syncTracking(): Promise<void> {
-  if (syncLoading.value || !sessionConfig.value || !sessionCapabilities.value) return
-  const confirmed = await confirmDialog.value?.confirm({
-    title: '同步 Auto Bangumi',
-    message: '将使用本页面已探测的连接读取外部追番并更新本地安全摘要，是否继续？',
-    confirmLabel: '确认同步',
-    cancelLabel: '取消',
-  })
+  // One sync intent at a time: the guard is taken before the confirmation
+  // dialog opens so a second click cannot supersede a pending intent.
+  if (syncPending.value || syncLoading.value) return
+  if (!sessionConfig.value || !sessionCapabilities.value) return
+  syncPending.value = true
+  let confirmed = false
+  try {
+    confirmed = (await confirmDialog.value?.confirm({
+      title: '同步 Auto Bangumi',
+      message: '将使用本页面已探测的连接读取外部追番并更新本地安全摘要，是否继续？',
+      confirmLabel: '确认同步',
+      cancelLabel: '取消',
+    })) ?? false
+  } finally {
+    syncPending.value = false
+  }
   if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
   const config = sessionConfig.value
   const sequence = ++syncSequence
-  const dataRevision = ++dataSequence
   const controller = new AbortController()
   syncController?.abort()
   syncController = controller
@@ -190,26 +207,33 @@ async function syncTracking(): Promise<void> {
   try {
     const body: SyncBody = { ab_config: config, confirm: true }
     const result = await api.post<SyncResult>('/api/v1/tracking/sync', { body, signal: controller.signal })
-    if (sequence !== syncSequence || dataRevision !== dataSequence) return
+    // Only a newer sync intent or an explicit connection reset can discard this
+    // result; list refreshes use their own sequence and revision guard.
+    if (sequence !== syncSequence) return
+    const incomplete = result.sync_status !== 'COMPLETE'
+    const degraded = incomplete || hasUnknownCapability(result.capabilities)
     syncSummary.value = result.summary
-    const degraded = result.sync_status !== 'COMPLETE' || hasUnknownCapability(result.capabilities)
     if (!degraded && result.items) {
+      // Writing the synced revision invalidates list responses already in flight.
+      syncGeneration += 1
       items.value = result.items
       detailRevision.value += 1
       syncSelection(true)
       syncMessage.value = `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条。`
-    } else {
+    } else if (incomplete) {
       syncMessage.value = result.sync_status === 'PARTIAL'
         ? '同步部分完成，已保留原有本地列表；可重连或再次同步。'
         : '同步未完成，已保留原有本地列表；可重连、重探测或再次同步。'
+    } else {
+      syncMessage.value = '同步已完成，但当前连接能力未知，已降级为只读并保留原有本地列表；可重新探测或再次同步。'
     }
     sessionCapabilities.value = result.capabilities
   } catch (error) {
-    if (sequence !== syncSequence || dataRevision !== dataSequence) return
+    if (sequence !== syncSequence) return
     syncMessage.value = '同步 Auto Bangumi 失败，已保留原有本地列表；可重连或再次同步。'
     void error
   } finally {
-    if (sequence === syncSequence && dataRevision === dataSequence) {
+    if (sequence === syncSequence) {
       syncLoading.value = false
       if (syncController === controller) syncController = null
     }
@@ -241,7 +265,7 @@ onBeforeUnmount(() => {
     <PanelSection title="追番管理" class="tracking-header">
       <template #actions>
         <BaseButton id="tracking-connect" variant="secondary" @click="credentialDialogOpen = true">连接 Auto Bangumi</BaseButton>
-        <BaseButton v-if="sessionCapabilities" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading" @click="syncTracking">同步 Auto Bangumi</BaseButton>
+        <BaseButton v-if="sessionCapabilities" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading || syncPending" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
@@ -294,10 +318,21 @@ onBeforeUnmount(() => {
         </template>
       </aside>
     </section>
-    <p v-if="sessionCapabilities" class="tracking-connection-status" role="status">
-      当前页面已连接 Auto Bangumi（{{ sessionCapabilities.probe_status }}），仅在用户明确操作时使用。
-      <button type="button" class="tracking-clear-connection" @click="clearConnection">清除连接</button>
-    </p>
+    <section v-if="sessionCapabilities" class="tracking-connection-status" aria-labelledby="tracking-connection-heading">
+      <h2 id="tracking-connection-heading">Auto Bangumi 页面连接</h2>
+      <p role="status">
+        当前页面已连接 Auto Bangumi（{{ probeStatusLabel(sessionCapabilities.probe_status) }}），仅在用户明确操作时使用。
+        <button type="button" class="tracking-clear-connection" @click="clearConnection">清除连接</button>
+      </p>
+      <dl id="tracking-capability-summary" class="tracking-capability-summary">
+        <div><dt>版本</dt><dd>{{ capabilityVersionLabel(sessionCapabilities) }}</dd></div>
+        <div><dt>探测状态</dt><dd>{{ probeStatusLabel(sessionCapabilities.probe_status) }}</dd></div>
+        <div v-for="entry in capabilitySummary" :key="entry.key">
+          <dt>{{ entry.label }}</dt><dd>{{ capabilityStateLabel(entry.state) }}</dd>
+        </div>
+      </dl>
+      <p class="field-help">以上仅为本次探测到的安全能力摘要，管理写能力仍需服务端按当前认证与版本逐项确认。</p>
+    </section>
     <p v-if="syncMessage" id="tracking-sync-status" class="tracking-sync-status" role="status">{{ syncMessage }}</p>
     <p v-if="syncSummary" class="tracking-sync-summary" role="status">本次安全同步摘要：检查 {{ syncSummary.checked }}，新增 {{ syncSummary.created }}，更新 {{ syncSummary.updated }}，未变化 {{ syncSummary.unchanged }}。</p>
     <CredentialSessionDialog ref="credentialDialog" v-model:open="credentialDialogOpen" @connected="onConnected" />
@@ -333,7 +368,13 @@ onBeforeUnmount(() => {
 .tracking-inspector { position: sticky; top: var(--space-4); display: grid; gap: var(--space-3); min-height: 15rem; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
 .tracking-inspector-placeholder { display: grid; gap: .5rem; padding: var(--space-4); border: 1px dashed var(--color-border); border-radius: var(--radius-md); }
 .tracking-inspector-placeholder h3, .tracking-inspector-placeholder p { margin: 0; }
-.tracking-connection-status { margin: 0; color: var(--color-text-muted); }
+.tracking-connection-status { display: grid; gap: .5rem; margin: 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text-muted); }
+.tracking-connection-status h2 { margin: 0; font-size: 1.05rem; color: var(--color-text); }
+.tracking-connection-status p { margin: 0; }
+.tracking-capability-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: .35rem var(--space-4); margin: 0; }
+.tracking-capability-summary div { display: flex; justify-content: space-between; gap: .5rem; border-bottom: 1px dashed var(--color-border); }
+.tracking-capability-summary dt { color: var(--color-text-muted); }
+.tracking-capability-summary dd { margin: 0; font-weight: 600; color: var(--color-text); }
 .tracking-clear-connection { margin-left: .5rem; color: var(--color-primary); text-decoration: underline; }
 .tracking-sync-status, .tracking-sync-summary { margin: 0; color: var(--color-text-muted); }
 @media (max-width: 1280px) { .tracking-workspace { grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr); } }

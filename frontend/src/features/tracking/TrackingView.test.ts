@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { api } from '@/api/client'
+import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import TrackingView from './TrackingView.vue'
 
 vi.mock('@/api/client', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
@@ -54,6 +55,42 @@ async function mountTracking(query: Record<string, string> = {}) {
   })
   await flushPromises()
   return { wrapper, router }
+}
+
+type TrackingWrapper = Awaited<ReturnType<typeof mountTracking>>['wrapper']
+
+function syncPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    sync_status: 'COMPLETE', checked_at: '2026-09-13T01:00:00Z', capabilities: capabilities(),
+    summary: { checked: 1, created: 0, updated: 1, unchanged: 0, external_only: 0, failed: 0, unreadable: 0 },
+    items: [item('tracking-1', '同步后的记录')], warnings: [], ...overrides,
+  }
+}
+
+async function connect(wrapper: TrackingWrapper): Promise<void> {
+  await wrapper.find('#tracking-connect').trigger('click')
+  await wrapper.find('#tracking-ab-base-url').setValue('https://ab.invalid')
+  await wrapper.find('#tracking-ab-username').setValue('user')
+  await wrapper.find('#tracking-ab-password').setValue('pass')
+  await wrapper.find('#tracking-ab-probe').trigger('click')
+  await flushPromises()
+}
+
+function confirmPrimaryButton(): HTMLButtonElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>('.confirm-dialog-actions button'))
+    .find((button) => button.textContent?.includes('确认同步'))
+}
+
+/** Count how many sync intents actually reach the shared confirmation dialog. */
+function spyConfirmDialog(wrapper: TrackingWrapper) {
+  const instance = wrapper.findComponent(ConfirmDialog).vm as unknown as {
+    $: { exposed: { confirm: (options: Record<string, unknown>) => Promise<boolean> } | null }
+  }
+  const exposed = instance.$.exposed
+  if (!exposed) throw new Error('ConfirmDialog must expose confirm()')
+  const spy = vi.fn(exposed.confirm)
+  exposed.confirm = spy
+  return spy
 }
 
 describe('TrackingView formal overview (US-305)', () => {
@@ -211,5 +248,122 @@ describe('TrackingView formal overview (US-305)', () => {
     await flushPromises()
     expect(signal.aborted).toBe(true)
     expect(wrapper.emitted()).toBeDefined()
+  })
+
+  it('shows a Chinese page-level capability summary instead of raw probe enums', async () => {
+    apiGet.mockResolvedValue({ items: [], summary: {}, warnings: [] } as never)
+    apiPost.mockResolvedValueOnce(capabilities({
+      version: null, subscription_submit: 'UNSUPPORTED', rss_refresh: 'UNKNOWN',
+    }) as never)
+    const { wrapper } = await mountTracking()
+    await connect(wrapper)
+
+    const status = wrapper.find('.tracking-connection-status')
+    expect(status.exists()).toBe(true)
+    expect(status.text()).toContain('已验证')
+    expect(status.find('.tracking-clear-connection').exists()).toBe(true)
+    const summary = wrapper.find('#tracking-capability-summary')
+    expect(summary.findAll('div')).toHaveLength(16)
+    expect(summary.text()).toContain('未确认')
+    expect(summary.text()).toContain('新增订阅')
+    expect(summary.text()).toContain('刷新 RSS')
+    expect(summary.text()).toContain('修改 RSS')
+    // Compare the rendered states exactly so 支持 is not satisfied by 不支持.
+    const states = Array.from(summary.element.querySelectorAll('dd'))
+      .map((node) => node.textContent?.trim())
+    expect(states).toContain('不支持')
+    expect(states).toContain('未知')
+    expect(states).toContain('支持')
+    expect(status.text()).not.toContain('VERIFIED')
+    expect(status.text()).not.toContain('UNSUPPORTED')
+    expect(status.text()).not.toContain('UNKNOWN')
+    expect(status.text()).not.toContain('ab.invalid')
+    expect(status.text()).not.toContain('pass')
+  })
+
+  it('applies the sync result when the list is refreshed while sync is in flight', async () => {
+    apiGet.mockResolvedValue({ items: [item('tracking-1', '旧本地记录')], summary: {}, warnings: [] } as never)
+    let resolveSync: ((value: unknown) => void) | undefined
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveSync = resolve }) as never)
+    const { wrapper } = await mountTracking()
+    await connect(wrapper)
+    await wrapper.find('#tracking-sync').trigger('click')
+    confirmPrimaryButton()?.click()
+    await flushPromises()
+    expect(wrapper.find('#tracking-sync').attributes('disabled')).toBeDefined()
+
+    await wrapper.find('#tracking-refresh').trigger('click')
+    await flushPromises()
+    resolveSync?.(syncPayload())
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-sync-status').text()).toContain('同步完成')
+    expect(wrapper.find('.tracking-list-item').text()).toContain('同步后的记录')
+    expect(wrapper.text()).not.toContain('旧本地记录')
+    expect(wrapper.find('#tracking-sync').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('#tracking-sync').attributes('aria-busy')).toBeUndefined()
+  })
+
+  it('never lets a list response started before sync overwrite the synced revision', async () => {
+    let resolveList: ((value: unknown) => void) | undefined
+    apiGet.mockResolvedValueOnce({ items: [item('tracking-1', '初始记录')], summary: {}, warnings: [] } as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveList = resolve }) as never)
+    apiPost.mockResolvedValueOnce(capabilities() as never).mockResolvedValueOnce(syncPayload() as never)
+    const { wrapper } = await mountTracking()
+    await connect(wrapper)
+    await wrapper.find('#tracking-refresh').trigger('click')
+    await wrapper.find('#tracking-sync').trigger('click')
+    confirmPrimaryButton()?.click()
+    await flushPromises()
+    expect(wrapper.find('.tracking-list-item').text()).toContain('同步后的记录')
+
+    resolveList?.({ items: [item('tracking-1', '陈旧列表')], summary: {}, warnings: [] })
+    await flushPromises()
+    expect(wrapper.find('.tracking-list-item').text()).toContain('同步后的记录')
+    expect(wrapper.text()).not.toContain('陈旧列表')
+    expect(wrapper.find('.tracking-list-state').exists()).toBe(false)
+  })
+
+  it('keeps a single sync intent while the confirmation dialog is open', async () => {
+    apiGet.mockResolvedValue({ items: [item('tracking-1', '本地记录')], summary: {}, warnings: [] } as never)
+    apiPost.mockResolvedValueOnce(capabilities() as never).mockResolvedValueOnce(syncPayload() as never)
+    const { wrapper } = await mountTracking()
+    await connect(wrapper)
+    const confirmSpy = spyConfirmDialog(wrapper)
+
+    await wrapper.find('#tracking-sync').trigger('click')
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('#tracking-sync').attributes('disabled')).toBeDefined()
+
+    // The browser dialog is modal; dispatch directly to prove the intent guard
+    // refuses a second confirmation even if the click reaches the handler.
+    wrapper.find('#tracking-sync').element.dispatchEvent(new Event('click'))
+    await flushPromises()
+    expect(confirmSpy).toHaveBeenCalledTimes(1)
+
+    confirmPrimaryButton()?.click()
+    await flushPromises()
+    expect(apiPost.mock.calls.filter((call) => call[0] === '/api/v1/tracking/sync')).toHaveLength(1)
+    expect(wrapper.find('#tracking-sync').attributes('disabled')).toBeUndefined()
+  })
+
+  it('labels a completed sync with unknown capabilities as a read-only downgrade', async () => {
+    apiGet.mockResolvedValue({ items: [item('tracking-1', '旧本地记录')], summary: {}, warnings: [] } as never)
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockResolvedValueOnce(syncPayload({ capabilities: capabilities({ rss_refresh: 'UNKNOWN' }) }) as never)
+    const { wrapper } = await mountTracking()
+    await connect(wrapper)
+    await wrapper.find('#tracking-sync').trigger('click')
+    confirmPrimaryButton()?.click()
+    await flushPromises()
+
+    const message = wrapper.find('#tracking-sync-status').text()
+    expect(message).toContain('能力未知')
+    expect(message).toContain('降级为只读')
+    expect(message).not.toContain('同步未完成')
+    expect(wrapper.find('.tracking-list-item').text()).toContain('旧本地记录')
+    expect(wrapper.text()).not.toContain('同步后的记录')
   })
 })

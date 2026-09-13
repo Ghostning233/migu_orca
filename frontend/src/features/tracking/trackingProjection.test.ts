@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  capabilityStateLabel,
+  capabilityVersionLabel,
   createTrackingActionIntent,
   executableTrackingActions,
   filterTrackingItems,
+  probeStatusLabel,
+  projectCapabilitySummary,
   projectTrackingOverview,
   reuseTrackingActionIntent,
   sortTrackingItems,
@@ -113,5 +117,40 @@ describe('tracking projection (US-304)', () => {
     const disabled = item({ status: 'DISABLED', available_actions: [action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION'] })] })
     expect(executableTrackingActions(active, capabilities({ subscription_enable: 'UNKNOWN' }))).toHaveLength(1)
     expect(executableTrackingActions(disabled, capabilities({ subscription_enable: 'UNKNOWN' }))).toHaveLength(0)
+  })
+})
+
+describe('capability display projection (US-307 review fix)', () => {
+  it('renders only fixed Chinese labels for the whitelisted capability fields', () => {
+    const summary = projectCapabilitySummary(capabilities({
+      subscription_submit: 'UNSUPPORTED', rss_refresh: 'UNKNOWN',
+    }))
+    expect(summary).toHaveLength(14)
+    expect(summary.map((entry) => entry.key)).toContain('external_verify')
+    expect(summary.find((entry) => entry.key === 'subscription_submit')).toMatchObject({ label: '新增订阅', state: 'UNSUPPORTED' })
+    expect(summary.find((entry) => entry.key === 'rss_refresh')).toMatchObject({ label: '刷新 RSS', state: 'UNKNOWN' })
+    expect(summary.map((entry) => entry.key)).not.toContain('probe_status')
+    expect(summary.map((entry) => entry.key)).not.toContain('adapter')
+  })
+
+  it('translates every state and fails closed for unknown server values', () => {
+    expect(capabilityStateLabel('SUPPORTED')).toBe('支持')
+    expect(capabilityStateLabel('UNSUPPORTED')).toBe('不支持')
+    expect(capabilityStateLabel('UNKNOWN')).toBe('未知')
+    expect(capabilityStateLabel('SOMETHING_ELSE')).toBe('未知')
+    expect(capabilityStateLabel(null)).toBe('未知')
+    expect(capabilityStateLabel(undefined)).toBe('未知')
+  })
+
+  it('translates probe status and never leaks the raw enum or a missing version', () => {
+    expect(probeStatusLabel('VERIFIED')).toBe('已验证')
+    expect(probeStatusLabel('PARTIAL')).toBe('部分验证')
+    expect(probeStatusLabel('FAILED')).toBe('探测失败')
+    expect(probeStatusLabel('WHATEVER')).toBe('未确认')
+    expect(capabilityVersionLabel(capabilities())).toBe('3.1.18')
+    expect(capabilityVersionLabel(capabilities({ version: null }))).toBe('未确认')
+    expect(capabilityVersionLabel(capabilities({ version: '   ' }))).toBe('未确认')
+    expect(capabilityVersionLabel(capabilities({ version: 'https://private.invalid' }))).toBe('未确认')
+    expect(capabilityVersionLabel(capabilities({ version: '3.1.18 (legacy)' }))).toBe('未确认')
   })
 })
