@@ -386,6 +386,30 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   持有未决 intent，它同时喂给 submit/retry 与恢复按钮（`actionBusy`），因此一次未决恢复会锁住其他条目的
   外部写（D38-09.4）；管理动作由服务端 `available_actions` 保证在恢复态根本不出现。`clearConnection()`
   同时重置写与恢复 intent —— 服务端记录仍是权威，按需重读。
+- **外部修改（US-313）**：`MODIFY` 的请求归 `TrackingView.runTrackingManagement`，端点由
+  `MANAGEMENT_ACTION_ENDPOINTS` 按 action code 绑定，请求体由
+  `trackingManagement.createTrackingManagementBody()` 单点构造并按 scope 分派 patch ——
+  `SUBSCRIPTION` 只发 title/season/subtitle_group/filter_rule/offset/expected_folder_name，
+  `ASSOCIATED_RSS` 只发 name/aggregate/parser，形状本身无法表达跨 scope 字段、外部 ID 或 URL。
+  它复用凭据会话、影响确认（`MODIFY_SCOPE_CONFIRMATIONS`）、最新 revision、单意图 opaque key、
+  单飞、`applyReturnedTracking` 收敛与只读回查；409 与结构化非 409 4xx 的语义与 submit 家族一致。
+- **management_status 才是判据（US-313）**：管理写返回的是 `management_status`
+  （PREPARED/IN_PROGRESS/SUCCEEDED/FAILED/OUTCOME_UNKNOWN/RECOVERY_REQUIRED），**不是** submit 家族的
+  `outcome`；只有 `SUCCEEDED` 是成功，`FAILED` 是确定失败，其余（含文档枚举之外的值）一律
+  `UNKNOWN` + `needsManual`，只读回查而绝不重试，`safe_message` 不作为权威文案。
+  `managementSessionKeepsIntent()` 只在 `UNKNOWN` 为 true。管理写 409 的 error_type 与 submit 家族
+  不同（多出 `tracking_management_*`/`tracking_target_*`/`tracking_mapping_missing`），
+  固定中文表在 `MANAGEMENT_CONFLICT_MESSAGES`，未知类型回退 `MANAGEMENT_CONFLICT_FALLBACK_MESSAGE`。
+- **修改表单是「只写字段集」（US-313）**：页面**不读取** Auto Bangumi 的当前值（generated 详情也没有
+  安全的外部值），所以每个字段都是显式勾选（`TrackingModifyForm.vue` + `buildSubscriptionPatch`/
+  `buildRssPatch`）：未勾选 = 保持外部现值；勾选但留空 = 显式清空（`null`）。空 patch、非法数字、
+  URL/绝对路径（`isUnsafePatchValue`，与服务端 patch 校验同规则）都在页面直接拒绝、零请求。
+  `filter_rule` 的两个布尔开关总是随规则一起提交（Auto Bangumi 的 filter 是单条排除表达式），
+  两个文本条件只在各自勾选时提交。表单在 `tracking_id:revision` 变化时整体重置 —— 写结果回查会让
+  revision 前进，所以**写后再提交必须先重新勾选字段**（测试里不要假设旧选择还在）。
 - 浏览器测试：`tests/browser/test_app_tracking.py`。Playwright **后注册的 route 优先**，
-  所以 revalidate/recover 这类写端点要在 `_mock_list()` 之后单独 `page.route` 注册；否则会被
-  更宽的 `**/api/v1/tracking/items*` 通配吃掉。
+  所以 revalidate/recover/modify 这类写端点要在 `_mock_list()` 之后单独 `page.route` 注册；否则会被
+  更宽的 `**/api/v1/tracking/items*` 通配吃掉。`/modify` 还要注册在
+  `**/api/v1/tracking/items/tracking-a` **之后**。详情路由的 mock 必须返回完整 envelope
+  （`{"ok": true, "result": {...}}`）；只返回裸对象会让客户端按 envelope 校验失败并渲染
+  「追番详情读取失败」。

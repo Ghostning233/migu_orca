@@ -175,3 +175,20 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Vitest 陷阱：`vi.fn().mockResolvedValueOnce(async () => {...})` **不会**执行那个函数（它被当成返回值），要造「请求中途记录状态再抛错」必须用 `mockImplementationOnce`；真实弹窗断言（默认焦点）与 `answerConfirm()` 间谍互斥，同一用例里不能混用。
 - 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（44 files / 510 tests）、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（12 passed，真实 Chromium）、`git diff --check` 全部通过。
 ---
+
+## [2026-09-13 11:20:00 CST] - US-313
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: 外部订阅与关联 RSS 修改（`MODIFY`）。新增 `trackingManagement.ts`（scope 投影、两种 scope 的严格表单模型与 patch 构造、单点请求体构造、`management_status` 结果投影、固定中文冲突表）与 `TrackingModifyForm.vue`（番剧/RSS 两个**分离**表单，每个字段显式勾选）；`TrackingInspector` 只按 `credentialReady + capabilities + available_actions` 投影 MODIFY 并渲染**服务端允许的 scope 用户文案**（外部番剧订阅 / 关联 RSS），emit `management-requested { action, item, targetScope, patch }`；`TrackingView.runTrackingManagement` 拥有请求：端点由 action code 绑定、body 由 `createTrackingManagementBody` 单点构造、复用凭据会话/影响确认/最新 revision/单意图 opaque key/单飞/`applyReturnedTracking` 收敛/只读回查。
+- patch 严格性：番剧只允许 title/season/subtitle_group/filter_rule/offset/expected_folder_name，RSS 只允许 name/aggregate/parser；空 patch、非法数字（season 非 0～100 整数、offset 负/非整数）、URL 与绝对路径（`isUnsafePatchValue`，与服务端 patch 校验同规则）都在页面直接拒绝、零请求；跨 scope 字段在类型与 `managementPatchPresent` 两处都被拒。`filter_rule` 的两个布尔开关总是随规则一起提交（Auto Bangumi 的 filter 是单条排除表达式），两个文本条件只在各自勾选时提交，勾选留空 = 显式清空（`null`）。
+- 结果语义：管理写返回 `management_status`（**不是** submit 家族的 `outcome`）。只有 `SUCCEEDED` 是成功、`FAILED` 是确定失败，`PREPARED`/`IN_PROGRESS`/`OUTCOME_UNKNOWN`/`RECOVERY_REQUIRED` 与枚举之外的值一律 `UNKNOWN` + `needsManual=true`，只读回查、绝不重试；`safe_message` 不作为权威文案。`managementSessionKeepsIntent()` 只在 `UNKNOWN` 为 true。管理 409 的 error_type 与 submit 家族不同（多出 `tracking_management_*`/`tracking_target_*`/`tracking_mapping_missing`），有独立固定中文表与未知类型回退；结构化非 409 4xx 仍走确定拒绝态并释放 intent（不锁死其他条目）。
+- 表单生命周期：`TrackingModifyForm` 在 `tracking_id:revision` 变化时整体重置。写结果回查会让 revision 前进，因此**写后再提交必须重新勾选字段**（浏览器用例显式重复 check/fill）。
+- Files changed: `frontend/src/features/tracking/trackingManagement.ts`、`trackingManagement.test.ts`（新）、`TrackingModifyForm.vue`（新）、`TrackingInspector.vue`、`TrackingView.vue`、`trackingProjection.ts`、`trackingProjection.test.ts`、`TrackingView.test.ts`（+14 例）；`tests/browser/test_app_tracking.py`（+4 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。**未改后端契约、未新增端点或迁移。**
+- **Learnings for future iterations:**
+  - 管理写的判据是 `management_status`，**不要**照抄 submit 家族的 `outcome` 分流；两者枚举完全不同。`safe_message` 是服务端自由文案，前端只渲染自己的固定中文表。
+  - 管理端点的 409 error_type 与 submit 家族不同，需要自己的固定中文表；`isDefiniteWriteRejection`（非 409 4xx 的确定拒绝）可以两个家族共用。新写动作从服务端 `available_actions[].target_scopes` 与 capability 交集取 scope，未知 scope 一律不渲染也不可请求。
+  - `createTrackingActionIntent`/`createTrackingManagementIntent` 的重放绑定仍是 **key + expected_revision**：锁定 intent 重放必须整份复用（action + scope + patch + revision）。跨 scope/跨 patch 的请求在锁定期间直接零请求。
+  - 表单在 revision 变化时重置是**有意的**：写后回查推进 revision，旧选择必须让用户重新确认。测试与浏览器用例都要按此写，否则会拿到空 patch 而误以为按钮坏了。
+  - Playwright 详情 route 的 mock 必须返回**完整 envelope**（`{"ok": true, "result": {...}}`）：只返回裸对象时统一 transport 的 envelope 校验会失败，页面渲染「追番详情读取失败」，症状看起来像按钮/表单没实现。新增 `_modify_detail()` 时踩过一次，已由 `_mock_list()` 的既有写法对照修正。
+  - 反向验证（突变 5 项，全部证明新用例是承重的）：① 端点映射改成 `/revalidate` → 2 个单测 + 5 个页面用例红；② `buildSubscriptionPatch` 放行空 patch → 2 例红；③ `projectModifyOutcome` 把一切当成功 → 1 例红；④ scope 投影去掉 capability 门控 → 10 例红；⑤ 锁定 intent 的 scope/patch 比对放宽 → **未变红**（设计上由 `offeredScopes` + 表单重置挡住，比对是纵深防御而非唯一闸门），因此保留比对但如实记录它当前不可达。
+- 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（45 files / 536 tests）、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（16 passed，真实 Chromium）、`git diff --check` 全部通过。
+---

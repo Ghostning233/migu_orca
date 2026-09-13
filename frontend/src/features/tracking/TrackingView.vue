@@ -18,6 +18,7 @@ import { storageQuery } from '@/features/requests/requestStorage'
 import {
   capabilityStateLabel,
   capabilityVersionLabel,
+  createManagementSession,
   createRecoveryConflictSession,
   createRecoverySession,
   createTrackingActionIntent,
@@ -27,8 +28,11 @@ import {
   createWriteSession,
   filterTrackingItems,
   isDefiniteWriteRejection,
+  isManagementActionCode,
   isRecoveryActionCode,
+  isTrackingManagementScope,
   isWriteActionCode,
+  managementSessionKeepsIntent,
   probeStatusLabel,
   projectCapabilitySummary,
   projectRecoveryOutcome,
@@ -45,6 +49,8 @@ import {
   type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
+  type TrackingManagementScope,
+  type TrackingManagementSession,
   type TrackingRecoverResult,
   type TrackingRecoveryActionCode,
   type TrackingRecoverySession,
@@ -54,6 +60,18 @@ import {
   type TrackingWriteResult,
   type TrackingWriteSession,
 } from './trackingProjection'
+import {
+  createModifyConflictSession,
+  createModifyInFlightSession,
+  createModifyRejectedSession,
+  createTrackingManagementBody,
+  createTrackingManagementIntent,
+  MANAGEMENT_ACTION_ENDPOINTS,
+  MODIFY_SCOPE_CONFIRMATIONS,
+  projectModifyOutcome,
+  type TrackingManagementIntent,
+  type TrackingModifyResult,
+} from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
 import CredentialSessionDialog from './CredentialSessionDialog.vue'
 
@@ -110,6 +128,17 @@ const recoveryLoading = ref(false)
 const recoveryPending = ref(false)
 let recoverySequence = 0
 let recoveryController: AbortController | null = null
+// External management writes (US-313).  MODIFY shares the page credential, the
+// impact confirmation, the latest revision and the single page-level intent
+// with the submit family; only the endpoint, the request body and the server
+// verdict differ (management_status instead of outcome).  The patch lives only
+// in the locked in-memory intent and the single POST body.
+const managementSession = ref<TrackingManagementSession | null>(null)
+const managementLoading = ref(false)
+const managementPending = ref(false)
+let managementIntent: TrackingManagementIntent | null = null
+let managementSequence = 0
+let managementController: AbortController | null = null
 // List reads and server-confirmed tracking writes have independent lifecycles:
 // `listSequence` only invalidates stale list responses, while `writeGeneration`
 // marks the revision a sync (or a local revalidate) already applied.  A list
@@ -146,14 +175,18 @@ const selectedHidden = computed(() => Boolean(
  * recovery too), but never blocks the item's own next step.
  */
 const inspectorIntentBusy = computed(() => {
-  if (writeLoading.value || recoveryLoading.value) return true
+  if (writeLoading.value || recoveryLoading.value || managementLoading.value) return true
   const write = writeSession.value
   if (write && writeSessionKeepsIntent(write.state) && write.trackingId !== selectedTrackingId.value) {
     return true
   }
   const recovery = recoverySession.value
+  if (recovery && recoverySessionKeepsLock(recovery.state) && recovery.trackingId !== selectedTrackingId.value) {
+    return true
+  }
+  const management = managementSession.value
   return Boolean(
-    recovery && recoverySessionKeepsLock(recovery.state) && recovery.trackingId !== selectedTrackingId.value,
+    management && managementSessionKeepsIntent(management) && management.trackingId !== selectedTrackingId.value,
   )
 })
 
@@ -251,6 +284,7 @@ function clearConnection(): void {
   cancelSync()
   resetWrite()
   resetRecovery()
+  resetManagement()
   syncMessage.value = ''
   syncSummary.value = null
 }
@@ -349,6 +383,16 @@ function resetRecovery(): void {
   recoverySession.value = null
 }
 
+function resetManagement(): void {
+  managementSequence += 1
+  managementController?.abort()
+  managementController = null
+  managementIntent = null
+  managementPending.value = false
+  managementLoading.value = false
+  managementSession.value = null
+}
+
 /**
  * Read-back after an external write or a recovery (US-310, US-312).
  *
@@ -374,7 +418,8 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
   // A confirmation is already open, or an external write/recovery is already
   // running: one page-level intent at a time, and no second dialog can displace
   // the first (D38-09.4: an active recovery blocks submit/retry).
-  if (writePending.value || writeLoading.value || recoveryPending.value || recoveryLoading.value) return
+  if (writePending.value || writeLoading.value || recoveryPending.value || recoveryLoading.value
+    || managementPending.value || managementLoading.value) return
   const config = sessionConfig.value
   const capabilities = sessionCapabilities.value
   // No page credential session means no external write at all.
@@ -495,7 +540,8 @@ async function runTrackingRecovery(
 ): Promise<void> {
   // One page-level intent at a time: a confirmation is open, or a write or
   // recovery is already running, or another item still owns the locked intent.
-  if (recoveryPending.value || recoveryLoading.value || writePending.value || writeLoading.value) return
+  if (recoveryPending.value || recoveryLoading.value || writePending.value || writeLoading.value
+    || managementPending.value || managementLoading.value) return
   const requested = payload.action
   if (!isRecoveryActionCode(requested)) return
   const trackingId = payload.item.tracking_id
@@ -571,6 +617,131 @@ async function runTrackingRecovery(
   }
 }
 
+/**
+ * Run one explicit external management write (US-313).
+ *
+ * ``MODIFY`` is the management action this story sends.  It reuses everything
+ * the submit family already guarantees: the live page credential, the latest
+ * revision, an impact confirmation, one opaque key per confirmation, the single
+ * page-level intent, the returned-tracking convergence and a read-only read-back
+ * — never an automatic resend.  The endpoint and the request body are both bound
+ * to the scope the user chose, so a scope can only ever send its own patch.
+ */
+async function runTrackingManagement(payload: {
+  action: TrackingAction
+  item: TrackingItem
+  targetScope: TrackingManagementScope
+  patch: unknown
+}): Promise<void> {
+  if (managementPending.value || managementLoading.value || writePending.value || writeLoading.value
+    || recoveryPending.value || recoveryLoading.value) return
+  const config = sessionConfig.value
+  const capabilities = sessionCapabilities.value
+  // No page credential session means no external management write at all.
+  if (!config || !capabilities) return
+  const requested = payload.action.code
+  // Only the management actions this page can actually send are accepted.
+  if (!isManagementActionCode(requested)) return
+  const action = requested
+  const targetScope = payload.targetScope
+  if (!isTrackingManagementScope(targetScope)) return
+  const trackingId = payload.item.tracking_id
+  const unresolvedWrite = writeSession.value
+  if (unresolvedWrite && unresolvedWrite.trackingId !== trackingId && writeSessionKeepsIntent(unresolvedWrite.state)) return
+  const openRecovery = recoverySession.value
+  if (openRecovery && openRecovery.trackingId !== trackingId && recoverySessionKeepsLock(openRecovery.state)) return
+  const openManagement = managementSession.value
+  if (openManagement && openManagement.trackingId !== trackingId && managementSessionKeepsIntent(openManagement)) return
+  // A locked intent still owns the single opaque key *and* the scope/patch it
+  // was confirmed with. Replaying it under a different scope or patch would
+  // send something the user did not ask for, and minting a new key while the
+  // external result is unresolved could apply the change twice — so a
+  // mismatching request does nothing at all.
+  const locked = managementIntent && managementSession.value?.trackingId === trackingId ? managementIntent : null
+  if (locked && (locked.action !== action || locked.targetScope !== targetScope
+    || JSON.stringify(locked.patch) !== JSON.stringify(payload.patch))) return
+
+  // The page re-validates the emitted request against the current server
+  // projection: the action and scope must still be offered for this revision
+  // and the live session must still prove the capability.
+  const intent = locked ?? createTrackingManagementIntent(
+    payload.item, action, targetScope, payload.patch, capabilities,
+  )
+  if (!intent) return
+
+  managementPending.value = true
+  let confirmed = false
+  try {
+    confirmed = (await confirmDialog.value?.confirm({
+      ...MODIFY_SCOPE_CONFIRMATIONS[targetScope], cancelLabel: '取消',
+    })) ?? false
+  } finally {
+    managementPending.value = false
+  }
+  // Cancelling the impact confirmation sends zero requests.
+  if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
+
+  managementIntent = intent
+  const sequence = ++managementSequence
+  const controller = new AbortController()
+  managementController?.abort()
+  managementController = controller
+  managementLoading.value = true
+  managementSession.value = createModifyInFlightSession(trackingId, targetScope)
+  try {
+    // A body the page cannot build safely (no server address, missing scope
+    // patch) is not sent at all.
+    const body = createTrackingManagementBody(intent, sessionConfig.value, storageQuery().storage_dir)
+    if (!body) return
+    const result = await api.post<TrackingModifyResult>(MANAGEMENT_ACTION_ENDPOINTS[intent.action], {
+      path: { tracking_id: trackingId }, body, signal: controller.signal,
+    })
+    if (sequence !== managementSequence) return
+    // The returned tracking converges the list row without a second list read.
+    applyReturnedTracking(result.tracking)
+    const session = projectModifyOutcome(trackingId, targetScope, result)
+    managementSession.value = session
+    if (!managementSessionKeepsIntent(session)) managementIntent = null
+    await recheckAfterAction(trackingId)
+  } catch (error) {
+    if (sequence !== managementSequence) return
+    const apiError = toApiError(error)
+    if (apiError.cancelled && !apiError.httpError) return
+    if (apiError.status === 409) {
+      // Every documented management 409 is raised while the operation is being
+      // prepared, i.e. before the external boundary: nothing was submitted. The
+      // locked intent is spent, the error body carries no authoritative
+      // tracking, so re-read both and require a new explicit confirmation —
+      // nothing is ever resent on the user's behalf.
+      managementIntent = null
+      managementSession.value = createModifyConflictSession(trackingId, targetScope, apiError.type)
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    if (isDefiniteWriteRejection(apiError)) {
+      // A structured non-409 4xx is a definite refusal raised before the
+      // external boundary, so Auto Bangumi was never modified. The intent is
+      // released (other items are no longer blocked and the next confirmation
+      // mints a fresh key) and the page only reads the latest state back.
+      managementIntent = null
+      managementSession.value = createModifyRejectedSession(trackingId, targetScope)
+      await recheckAfterAction(trackingId, true)
+      return
+    }
+    // Network, timeout, non-JSON, 5xx — anything we cannot read as a definite
+    // verdict: the external result is unknown. Keeping the locked intent can
+    // never apply the change twice, so this path fails closed and only reads
+    // back; it never mints a new key and never resends by itself.
+    managementSession.value = createManagementSession(trackingId, action, targetScope, 'UNKNOWN', true)
+    await recheckAfterAction(trackingId, true)
+  } finally {
+    if (sequence === managementSequence) {
+      managementLoading.value = false
+      if (managementController === controller) managementController = null
+    }
+  }
+}
+
 onMounted(() => {
   void loadList().then(() => {
     if (selectedTrackingId.value) void focusSelection()
@@ -587,6 +758,7 @@ onBeforeUnmount(() => {
   cancelSync()
   resetWrite()
   resetRecovery()
+  resetManagement()
   credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
@@ -653,10 +825,12 @@ onBeforeUnmount(() => {
           :credential-ready="Boolean(sessionConfig)"
           :write-session="writeSession"
           :recovery-session="recoverySession"
+          :management-session="managementSession"
           :write-busy="inspectorIntentBusy"
           @tracking-updated="applyReturnedTracking"
           @write-requested="runTrackingWrite"
           @recovery-requested="runTrackingRecovery"
+          @management-requested="runTrackingManagement"
         />
         <template v-else>
           <h2 id="tracking-inspector-heading">检查器</h2>

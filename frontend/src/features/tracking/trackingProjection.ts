@@ -94,12 +94,40 @@ const KNOWN_ACTIONS = new Set<TrackingActionCode>([
 ])
 const KNOWN_STYLES = new Set<TrackingActionStyle>(['PRIMARY', 'SECONDARY', 'DANGER'])
 const KNOWN_SCOPES = new Set<TrackingScope>(['SUBSCRIPTION', 'ASSOCIATED_RSS'])
-const MANAGEMENT_CAPABILITY: Partial<Record<TrackingActionCode, Partial<Record<TrackingScope, keyof CapabilityResult>>>> = {
+export const MANAGEMENT_CAPABILITY: Partial<Record<TrackingActionCode, Partial<Record<TrackingScope, keyof CapabilityResult>>>> = {
   MODIFY: { SUBSCRIPTION: 'subscription_modify', ASSOCIATED_RSS: 'rss_modify' },
   SET_ENABLED: { SUBSCRIPTION: 'subscription_enable', ASSOCIATED_RSS: 'rss_enable' },
   REFRESH_RSS: { ASSOCIATED_RSS: 'rss_refresh' },
   DELETE_EXTERNAL: { SUBSCRIPTION: 'subscription_delete', ASSOCIATED_RSS: 'rss_delete' },
 }
+
+/**
+ * The scope of a management action *as it is being requested* (US-313).
+ *
+ * ``TrackingScope`` is the generated public scope enum, but the requested scope
+ * is only real if this page has a builder for it: a scope without a request body
+ * shape can never be sent, so it fails closed here rather than at the boundary.
+ */
+export const TRACKING_MANAGEMENT_SCOPES = ['SUBSCRIPTION', 'ASSOCIATED_RSS'] as const
+
+export type TrackingManagementScope = (typeof TRACKING_MANAGEMENT_SCOPES)[number]
+
+export function isTrackingManagementScope(value: unknown): value is TrackingManagementScope {
+  return value === 'SUBSCRIPTION' || value === 'ASSOCIATED_RSS'
+}
+
+const MANAGEMENT_ACTION_CODES = new Set<TrackingActionCode>(['MODIFY', 'SET_ENABLED', 'REFRESH_RSS', 'DELETE_EXTERNAL'])
+
+/**
+ * The management family as a set, so the page can route one action code to the
+ * management write path without re-deriving it from the scope list.
+ */
+export function isManagementActionCode(value: TrackingActionCode): value is TrackingManagementActionCode {
+  return MANAGEMENT_ACTION_CODES.has(value)
+}
+
+export type TrackingManagementActionCode =
+  'MODIFY' | 'SET_ENABLED' | 'REFRESH_RSS' | 'DELETE_EXTERNAL'
 
 function isKnownStatusGroup(value: unknown): value is TrackingStatusGroup {
   return typeof value === 'string' && TRACKING_STATUS_GROUPS.includes(value as TrackingStatusGroup)
@@ -208,6 +236,29 @@ export function executableTrackingActions(
     result.push(action)
   }
   return result
+}
+
+/**
+ * The target scopes this page may request for one projected management action.
+ *
+ * This is the same intersection ``executableTrackingActions`` already applied,
+ * narrowed to a requested scope: a scope is requestable only when the server
+ * offered it *and* the live session proves the matching capability.  An unknown
+ * action, style or scope therefore never yields a requestable scope — the page
+ * can use this to re-validate an emitted request instead of trusting the emit.
+ */
+export function projectTrackingActionScopes(
+  item: TrackingItem,
+  actionCode: TrackingActionCode,
+  targetScope: TrackingScope,
+  capabilities?: CapabilityResult | null,
+): TrackingManagementScope[] {
+  if (!isTrackingManagementScope(targetScope)) return []
+  const requested = executableTrackingActions(item, capabilities)
+    .filter((candidate) => candidate.code === actionCode)
+    .flatMap((candidate) => candidate.target_scopes ?? [])
+    .filter((scope): scope is TrackingManagementScope => scope === targetScope)
+  return requested.length === 1 ? requested : []
 }
 
 function makeOpaqueKey(): string {
@@ -791,3 +842,131 @@ export function projectRecoveryOutcome(
 export function recoverySessionKeepsLock(state: TrackingRecoveryState): boolean {
   return state === 'UNKNOWN' || state === 'RECOVERY_REQUIRED'
 }
+
+/**
+ * External management writes (US-313).
+ *
+ * Management writes (``MODIFY``, ``SET_ENABLED``, ``REFRESH_RSS``,
+ * ``DELETE_EXTERNAL``) are the second external write family.  They share the
+ * page's credential session, the impact confirmation, the latest revision and
+ * the single page-level intent with the submit family, but their server verdict
+ * is ``management_status`` rather than ``outcome`` and ``safe_message`` is not
+ * authoritative — a truncated or unrecognized status must never be read as
+ * success, so the page states only what it can prove.
+ *
+ * ``TrackingActionCode`` (not the narrower management union) is used here so the
+ * scope-bound request shape stays the only thing that decides whether a request
+ * can be sent at all.
+ */
+export type TrackingManagementState =
+  | 'IN_FLIGHT' | 'SUCCEEDED' | 'FAILED' | 'CONFLICT' | 'REJECTED' | 'UNKNOWN'
+
+export interface TrackingManagementSession {
+  readonly trackingId: string
+  readonly action: TrackingActionCode
+  readonly targetScope: TrackingManagementScope
+  readonly state: TrackingManagementState
+  readonly needsManual: boolean
+  readonly message: string
+}
+
+const MANAGEMENT_MESSAGES: Record<TrackingManagementState, string> = {
+  IN_FLIGHT: '正在提交外部修改，请稍候…',
+  SUCCEEDED: '外部修改已完成：Auto Bangumi 已应用本次修改。',
+  FAILED: '外部修改明确失败，Auto Bangumi 未应用本次修改；可核对后重新发起。',
+  CONFLICT: '追番记录已变化或当前状态不允许本次管理操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  REJECTED: '服务端明确拒绝了本次管理请求，本次未修改 Auto Bangumi 外部订阅；正在刷新最新详情，请重新确认。',
+  UNKNOWN: '外部修改结果未知，正在只读回查；未确认生效前不会自动重试。',
+}
+
+/**
+ * Every 409 a management endpoint can raise (US-225) happens before the
+ * external boundary: the management operation is refused while it is being
+ * prepared, so Auto Bangumi was never called with it.  An unrecognized type
+ * falls back to generic copy that also claims exactly that.
+ */
+export const MANAGEMENT_CONFLICT_TYPES = [
+  'tracking_revision_conflict', 'tracking_idempotency_conflict',
+  'tracking_management_state_conflict', 'tracking_management_patch_invalid',
+  'tracking_target_missing', 'tracking_target_drift', 'tracking_target_ambiguous',
+  'tracking_mapping_missing',
+] as const
+
+export type TrackingManagementConflictType = (typeof MANAGEMENT_CONFLICT_TYPES)[number]
+
+export const MANAGEMENT_CONFLICT_FALLBACK_MESSAGE =
+  '追番记录已变化或当前状态不允许本次管理操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。'
+
+const MANAGEMENT_CONFLICT_MESSAGES: Record<TrackingManagementConflictType, string> = {
+  tracking_revision_conflict:
+    '追番记录已变化，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  tracking_idempotency_conflict:
+    '本次管理请求标识已失效，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  tracking_management_state_conflict:
+    '存在尚未完成的管理操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请先完成恢复。',
+  tracking_management_patch_invalid:
+    '本次修改内容未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认后再修改。',
+  tracking_target_missing:
+    '该记录当前没有对应的外部对象，本次未提交到 Auto Bangumi；正在刷新最新详情。',
+  tracking_target_drift:
+    '外部对象已变化，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  tracking_target_ambiguous:
+    '匹配到多个外部对象，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  tracking_mapping_missing:
+    '该记录缺少外部关联信息，本次未提交到 Auto Bangumi；正在刷新最新详情。',
+}
+
+/** Fixed next step for one documented management conflict; unknown types fail closed. */
+export function managementConflictMessage(errorType: unknown): string {
+  return typeof errorType === 'string' && (MANAGEMENT_CONFLICT_TYPES as readonly string[]).includes(errorType)
+    ? MANAGEMENT_CONFLICT_MESSAGES[errorType as TrackingManagementConflictType]
+    : MANAGEMENT_CONFLICT_FALLBACK_MESSAGE
+}
+
+/**
+ * Create one management write session.
+ *
+ * ``message`` is always built from the fixed table unless a caller passes a
+ * conflict's own next step, so the raw server enum and the server's
+ * ``safe_message`` never reach the DOM.  ``needsManual`` means the external
+ * result cannot be concluded without a human verdict, and it always keeps the
+ * page's single intent (D38-09.4).
+ */
+export function createManagementSession(
+  trackingId: string,
+  action: TrackingActionCode,
+  targetScope: TrackingManagementScope,
+  state: TrackingManagementState,
+  needsManual = false,
+  message?: string,
+): TrackingManagementSession {
+  return {
+    trackingId, action, targetScope, state,
+    needsManual,
+    message: message ?? MANAGEMENT_MESSAGES[state],
+  }
+}
+
+/**
+ * The server's own flag wins; when it is missing an unresolved state is still
+ * treated as requiring a human verdict rather than being read as decided.
+ */
+export function managementSessionNeedsManual(state: TrackingManagementState, serverFlag: unknown): boolean {
+  if (state === 'SUCCEEDED' || state === 'FAILED' || state === 'CONFLICT' || state === 'REJECTED') {
+    return false
+  }
+  return serverFlag === undefined ? true : serverFlag === true
+}
+
+/**
+ * True only while a management result is still indeterminate: those are the
+ * states where a transport retry must reuse the very same intent (key, scope and
+ * patch), because the external change may already have been applied.
+ */
+export function managementSessionKeepsIntent(session: TrackingManagementSession): boolean {
+  return session.state === 'UNKNOWN'
+}
+
+/** Shown whenever a management result needs a human verdict before continuing. */
+export const MANAGEMENT_NEEDS_MANUAL_NOTICE =
+  '需要人工核验：请先在 Auto Bangumi 中独立核对该追番的实际状态，再决定是否重新发起修改；本页不会代替你判断，也不会自动重试。'

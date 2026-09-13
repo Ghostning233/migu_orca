@@ -727,6 +727,313 @@ class TestAppTrackingStage38:
         assert len(retries) == 2, retries
         expect(page.locator(".tracking-list-item").first).to_contain_text("重试成功")
 
+    def test_explicit_modify_sends_only_the_selected_scope_patch(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        modifies: list[dict[str, Any]] = []
+        state = {"revision": 1, "detail_reads": 0}
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_modify_detail(state["revision"]), ensure_ascii=False),
+            )
+
+        def modify(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            modifies.append(json.loads(request.post_data or "{}"))
+            state["revision"] = 2
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_modify_success_payload("已修改外部方案", 2), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", _modify_probe)
+        # Registered after the broader tracking routes: later routes win.
+        page.route("**/api/v1/tracking/items/tracking-a/modify", modify)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        # MODIFY is server-computed and capability-gated: no session, no form.
+        expect(page.locator("#tracking-modify-subscription-submit")).to_have_count(0)
+        expect(page.locator("#tracking-modify-rss-submit")).to_have_count(0)
+
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("secret-user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-modify-subscription-submit")
+        # Both server-offered scopes are shown with user copy and no raw enum.
+        expect(page.locator(".tracking-modify-scope")).to_have_count(2)
+        section = page.locator(".tracking-modify-section")
+        expect(section).to_contain_text("外部番剧订阅")
+        expect(section).to_contain_text("关联 RSS")
+        expect(section).not_to_contain_text("SUBSCRIPTION")
+        expect(section).not_to_contain_text("ASSOCIATED_RSS")
+        # Connecting never modifies anything on the user's behalf.
+        assert not modifies, modifies
+
+        # An empty form is not submittable at all.
+        expect(page.locator("#tracking-modify-subscription-submit")).to_be_disabled()
+
+        # The two scope forms are separate: the RSS selection never leaks into
+        # the subscription request.
+        page.locator("#tracking-modify-title-enabled").check()
+        page.locator("#tracking-modify-title").fill("公开新标题")
+        page.locator("#tracking-modify-rss-name-enabled").check()
+        page.locator("#tracking-modify-rss-name").fill("不该出现在订阅请求里")
+        page.locator("#tracking-modify-subscription-submit").click()
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("不修改 MiGuOrca 本地方案")
+        assert not modifies, modifies
+        page.locator(".confirm-dialog-actions button").filter(has_text="取消").click()
+        assert not modifies, modifies
+
+        page.locator("#tracking-modify-subscription-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认修改订阅").click()
+        page.wait_for_selector("#tracking-modify-result")
+
+        expect(page.locator("#tracking-modify-result")).to_contain_text("已应用本次修改")
+        expect(page.locator("#tracking-modify-result")).not_to_contain_text("SUCCEEDED")
+        assert len(modifies) == 1, modifies
+        body = modifies[0]
+        assert body["target_scope"] == "SUBSCRIPTION", body
+        assert body["patch"] == {"title": "公开新标题"}, body
+        assert body["confirm"] is True, body
+        assert body["expected_revision"] == 1, body
+        assert body["ab_config"]["password"] == "secret-password", body
+        key = body["idempotency_key"]
+        assert isinstance(key, str) and len(key) >= 8, body
+        # The returned tracking converges the list row in place.
+        expect(page.locator(".tracking-list-item").first).to_contain_text("已修改外部方案")
+        expect(page.locator("body")).not_to_contain_text("secret-password")
+        expect(page.locator("body")).not_to_contain_text("secret-user")
+        expect(page.locator("body")).not_to_contain_text(key)
+        assert state["detail_reads"] >= 2, state
+
+    def test_modify_unknown_result_locks_the_intent_and_never_resends(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        modifies: list[dict[str, Any]] = []
+        state = {"revision": 1, "detail_reads": 0}
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(
+                    _modify_detail(state["revision"], scopes=["ASSOCIATED_RSS"]), ensure_ascii=False,
+                ),
+            )
+
+        def modify(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            modifies.append(json.loads(request.post_data or "{}"))
+            if len(modifies) == 1:
+                # The request never got a readable answer: the external result is
+                # unknown, so the page may only read back.
+                route.abort()
+                return
+            state["revision"] = 2
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_modify_success_payload("已修改外部方案", 2), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", _modify_probe)
+        page.route("**/api/v1/tracking/items/tracking-a/modify", modify)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-modify-rss-submit")
+
+        page.locator("#tracking-modify-rss-name-enabled").check()
+        page.locator("#tracking-modify-rss-name").fill("第一次修改")
+        page.locator("#tracking-modify-rss-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认修改 RSS").click()
+        page.wait_for_selector("#tracking-modify-result")
+
+        expect(page.locator("#tracking-modify-result")).to_contain_text("外部修改结果未知")
+        expect(page.locator("#tracking-modify-result")).to_contain_text("只读回查")
+        expect(page.locator("body")).not_to_contain_text("network_error")
+        assert len(modifies) == 1, modifies
+        assert state["detail_reads"] >= 2, state
+
+        # The user re-selects the identical field set; the page recognises the
+        # locked intent and replays the very same key and revision binding.
+        page.locator("#tracking-modify-rss-name-enabled").check()
+        page.locator("#tracking-modify-rss-name").fill("第一次修改")
+        page.locator("#tracking-modify-rss-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认修改 RSS").click()
+        page.wait_for_selector("#tracking-modify-result:has-text('已应用本次修改')")
+        assert len(modifies) == 2, modifies
+        assert modifies[1]["idempotency_key"] == modifies[0]["idempotency_key"], modifies
+        assert modifies[1]["expected_revision"] == modifies[0]["expected_revision"], modifies
+        expect(page.locator(".tracking-list-item").first).to_contain_text("已修改外部方案")
+
+    def test_modify_conflict_rereads_both_views_and_needs_a_new_key(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        modifies: list[dict[str, Any]] = []
+        state = {"revision": 1, "detail_reads": 0}
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(
+                    _modify_detail(state["revision"], scopes=["SUBSCRIPTION"]), ensure_ascii=False,
+                ),
+            )
+
+        def modify(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            body = json.loads(request.post_data or "{}")
+            modifies.append(body)
+            if len(modifies) == 1:
+                # The record moved on while the modify was in flight.
+                state["revision"] = 9
+                route.fulfill(status=409, content_type="application/json", body=json.dumps({
+                    "ok": False, "error_type": "tracking_management_state_conflict",
+                    "error_message": "已有管理操作正在执行，请先恢复", "error_data": None,
+                }, ensure_ascii=False))
+                return
+            assert body["expected_revision"] == 9, body
+            assert body["idempotency_key"] != modifies[0]["idempotency_key"], modifies
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_modify_success_payload("已修改外部方案", 10), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", _modify_probe)
+        page.route("**/api/v1/tracking/items/tracking-a/modify", modify)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-modify-subscription-submit")
+
+        page.locator("#tracking-modify-title-enabled").check()
+        page.locator("#tracking-modify-title").fill("冲突修改")
+        page.locator("#tracking-modify-subscription-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认修改订阅").click()
+        page.wait_for_selector("#tracking-modify-result")
+
+        expect(page.locator("#tracking-modify-result")).to_contain_text("未提交到 Auto Bangumi")
+        expect(page.locator("#tracking-modify-result")).to_contain_text("先完成恢复")
+        expect(page.locator("body")).not_to_contain_text("tracking_management_state_conflict")
+        # Nothing was silently resent; the stale intent forced fresh reads.
+        assert len(modifies) == 1, modifies
+        assert state["detail_reads"] >= 2, state
+
+        # The conflict released the intent, so the next confirmation against the
+        # fresh revision mints a brand new key.
+        page.locator("#tracking-modify-title-enabled").check()
+        page.locator("#tracking-modify-title").fill("重试修改")
+        page.locator("#tracking-modify-subscription-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认修改订阅").click()
+        page.wait_for_selector("#tracking-modify-result:has-text('已应用本次修改')")
+        assert len(modifies) == 2, modifies
+        expect(page.locator(".tracking-list-item").first).to_contain_text("已修改外部方案")
+
+    def test_modify_capability_degradation_hides_the_scope(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            payload = _probe_capabilities()
+            payload["rss_modify"] = "UNSUPPORTED"
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"ok": True, "result": payload}, ensure_ascii=False),
+            )
+
+        def detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_modify_detail(1), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-modify-subscription-submit")
+        # Only the scope whose capability is proven is offered at all.
+        expect(page.locator("#tracking-modify-rss-submit")).to_have_count(0)
+        expect(page.locator(".tracking-modify-scope")).to_have_count(1)
+        expect(page.locator(".tracking-modify-scope")).to_have_text("外部番剧订阅")
+        # The remaining form still works: selecting a field makes it submittable.
+        expect(page.locator("#tracking-modify-subscription-submit")).to_be_disabled()
+        page.locator("#tracking-modify-title-enabled").check()
+        page.locator("#tracking-modify-title").fill("降级下仍可修改")
+        expect(page.locator("#tracking-modify-subscription-submit")).to_be_enabled()
+
+
+def _modify_actions(scopes: list[str] | None = None) -> list[dict[str, Any]]:
+    return [{
+        "code": "MODIFY", "label": "修改外部方案", "style": "SECONDARY",
+        "requires_confirmation": True,
+        "target_scopes": scopes if scopes is not None else ["SUBSCRIPTION", "ASSOCIATED_RSS"],
+    }]
+
+
+def _modify_detail(revision: int, scopes: list[str] | None = None) -> dict[str, Any]:
+    """The full ``getTrackingItemDetail`` envelope for one modify revision."""
+    return {"ok": True, "result": {
+        **_item("tracking-a", "葬送的芙莉莲"),
+        "available_actions": _modify_actions(scopes),
+        "revision": revision,
+        "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+        "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+        "safe_info": None, "current_operation": None, "revalidation_issues": [],
+        "external_mapping": {"match_reason": "标题与季度匹配", "enabled": True, "external_deleted": False},
+        "audit_events": [], "warnings": [],
+    }}
+
+
+def _modify_success_payload(status_label: str, revision: int) -> dict[str, Any]:
+    return {"ok": True, "result": {
+        "action": "MODIFY", "management_status": "SUCCEEDED", "needs_manual": False,
+        "safe_message": "Auto Bangumi 管理操作已完成并通过回查", "operation_id": "operation-modify",
+        "operation": None,
+        "tracking": {
+            **_item("tracking-a", "葬送的芙莉莲"), "status_label": status_label, "revision": revision,
+        },
+    }}
+
+
+def _modify_probe(route: Any, request: Any) -> None:
+    assert request.method == "POST"
+    route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"ok": True, "result": _probe_capabilities()}, ensure_ascii=False),
+    )
 
 def _recovery_actions() -> list[dict[str, Any]]:
     return [

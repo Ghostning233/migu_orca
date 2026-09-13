@@ -12,12 +12,16 @@ import {
   canVerifyExternally,
   createTrackingActionIntent,
   executableTrackingActions,
+  MANAGEMENT_NEEDS_MANUAL_NOTICE,
   projectRevalidateIssues,
+  projectTrackingActionScopes,
   RECOVERY_NEEDS_MANUAL_NOTICE,
   type CapabilityResult,
   type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
+  type TrackingManagementScope,
+  type TrackingManagementSession,
   type TrackingRecoveryActionCode,
   type TrackingRecoverySession,
   type TrackingRevalidateBody,
@@ -25,6 +29,7 @@ import {
   type TrackingRevalidateResult,
   type TrackingWriteSession,
 } from './trackingProjection'
+import TrackingModifyForm from './TrackingModifyForm.vue'
 
 type TrackingDetail = NonNullable<
   operations['getTrackingItemDetail']['responses']['200']['content']['application/json']['result']
@@ -42,6 +47,8 @@ const props = defineProps<{
   writeSession?: TrackingWriteSession | null
   /** Page-level unknown-result recovery state for one item (US-312). */
   recoverySession?: TrackingRecoverySession | null
+  /** Page-level external management state for one item (US-313). */
+  managementSession?: TrackingManagementSession | null
   /** The single page intent is spent elsewhere (another item's write/recovery). */
   writeBusy?: boolean
 }>()
@@ -51,6 +58,14 @@ const emit = defineEmits<{
   // The recovery action travels as its server-agreed code, not as a projected
   // action object: VERIFY_EXTERNAL is never part of the server's action list.
   (e: 'recovery-requested', payload: { action: TrackingRecoveryActionCode; item: TrackingItem }): void
+  // A management request carries the scope the user chose and the strict patch
+  // its own form built; the page re-validates both before anything is sent.
+  (e: 'management-requested', payload: {
+    action: TrackingAction
+    item: TrackingItem
+    targetScope: TrackingManagementScope
+    patch: unknown
+  }): void
 }>()
 const detail = ref<TrackingDetail | null>(null)
 const loading = ref(false)
@@ -151,8 +166,20 @@ const recoveryInFlight = computed(() => (
 const thisRecovery = computed(() => (
   props.recoverySession && props.recoverySession.trackingId === props.trackingId ? props.recoverySession : null
 ))
-/** This item's own conflicting action is in flight: both change its revision. */
-const itemActionInFlight = computed(() => writeInFlight.value || recoveryInFlight.value)
+const managementInFlight = computed(() => (
+  props.managementSession?.trackingId === props.trackingId
+  && props.managementSession.state === 'IN_FLIGHT'
+))
+const thisManagement = computed(() => (
+  props.managementSession && props.managementSession.trackingId === props.trackingId
+    ? props.managementSession
+    : null
+))
+
+/** This item's own conflicting action is in flight: all of them bump its revision. */
+const itemActionInFlight = computed(() => (
+  writeInFlight.value || recoveryInFlight.value || managementInFlight.value
+))
 /**
  * One page-level intent at a time: a recovery in flight, or an unresolved write
  * of another item, disables every action that would race it (D38-09.4).
@@ -164,6 +191,55 @@ const actionBusy = computed(() => props.writeBusy === true || itemActionInFlight
 function requestRecovery(action: TrackingRecoveryActionCode): void {
   if (!detail.value || actionBusy.value) return
   emit('recovery-requested', { action, item: detail.value })
+}
+
+// -- external modify (US-313) ------------------------------------------------
+// MODIFY is server-computed with explicit target scopes, so it is projected
+// exactly like the other management actions: it needs the page credential
+// session and the matching capability for the scope the user wants to change.
+// The form owns the field selection and builds the strict, scope-specific
+// patch; the page owns the request, confirmation, revision and idempotency.
+const modifyAction = computed(() => (
+  detail.value && props.credentialReady === true
+    ? executableTrackingActions(detail.value, props.capabilities).find((action) => action.code === 'MODIFY') ?? null
+    : null
+))
+/** The server-offered scopes this page can actually request, in server order. */
+function offeredScopes(action: TrackingAction): TrackingManagementScope[] {
+  if (!detail.value) return []
+  return (action.target_scopes ?? [])
+    .filter((scope): scope is 'SUBSCRIPTION' | 'ASSOCIATED_RSS' =>
+      scope === 'SUBSCRIPTION' || scope === 'ASSOCIATED_RSS')
+    .filter((scope) => projectTrackingActionScopes(detail.value!, action.code, scope, props.capabilities).length > 0)
+}
+const modifyScopes = computed(() => (modifyAction.value ? offeredScopes(modifyAction.value) : []))
+const modifyScopeLabels: Record<TrackingManagementScope, string> = {
+  SUBSCRIPTION: '外部番剧订阅', ASSOCIATED_RSS: '关联 RSS',
+}
+const modifyOffered = computed(() => Boolean(modifyAction.value && modifyScopes.value.length))
+const modifyHint = computed(() => {
+  if (props.credentialReady !== true) return '需要先在页面连接 Auto Bangumi，才能修改外部方案。'
+  const offered = (detail.value?.available_actions ?? []).some((action) => action.code === 'MODIFY')
+  return offered ? '当前连接未确认修改能力，已降级为只读。' : '当前状态不可修改外部方案。'
+})
+
+function requestManagement(payload: {
+  action: TrackingAction
+  item: TrackingItem
+  targetScope: TrackingManagementScope
+  patch: unknown
+}): void {
+  if (actionBusy.value || !detail.value) return
+  const action = modifyAction.value
+  // The emitted action object must still be the server-projected one and the
+  // scope must still be requestable for this very revision: a stale form emit
+  // after a revision change is dropped instead of being sent.
+  if (!action || action.code !== payload.action.code) return
+  if (!offeredScopes(action).includes(payload.targetScope)) return
+  if (payload.item.tracking_id !== props.trackingId || payload.item.revision !== detail.value.revision) return
+  emit('management-requested', {
+    action, item: detail.value, targetScope: payload.targetScope, patch: payload.patch,
+  })
 }
 
 function resetRevalidate(): void {
@@ -292,10 +368,12 @@ watch(() => props.trackingId, () => {
   resetRevalidate()
   void loadDetail()
 }, { immediate: true })
-// A write or recovery result supersedes a local revalidate verdict for the
-// same item (all three change the revision the verdict was made against).
-watch([() => props.writeSession, () => props.recoverySession], ([write, recovery]) => {
-  const changed = write?.trackingId === props.trackingId || recovery?.trackingId === props.trackingId
+// A write, recovery or management result supersedes a local revalidate verdict
+// for the same item (all of them change the revision it was made against).
+watch([() => props.writeSession, () => props.recoverySession, () => props.managementSession], ([write, recovery, management]) => {
+  const changed = write?.trackingId === props.trackingId
+    || recovery?.trackingId === props.trackingId
+    || management?.trackingId === props.trackingId
   if (changed) resetRevalidate()
 })
 onBeforeUnmount(() => {
@@ -410,6 +488,38 @@ defineExpose({ reload: () => fetchDetail(true) })
         </div>
       </section>
 
+      <section class="tracking-inspector-section tracking-modify-section" aria-labelledby="tracking-modify-heading">
+        <h4 id="tracking-modify-heading">修改 Auto Bangumi 外部方案</h4>
+        <template v-if="modifyOffered && modifyAction">
+          <p class="field-help">
+            可用修改范围（只影响 Auto Bangumi 外部对象，不显示外部 ID）：
+            <span v-for="scope in modifyScopes" :key="scope" class="tracking-modify-scope">{{ modifyScopeLabels[scope] }}</span>
+          </p>
+          <TrackingModifyForm
+            :item="detail"
+            :action="modifyAction"
+            :busy="actionBusy"
+            :loading="managementInFlight"
+            @submit="requestManagement"
+          />
+        </template>
+        <p v-else class="field-help">{{ modifyHint }}</p>
+        <div
+          v-if="thisManagement"
+          id="tracking-modify-result"
+          class="tracking-modify-result"
+          :class="`is-${thisManagement.state.toLowerCase()}`"
+          role="status"
+        >
+          <p class="tracking-modify-verdict">
+            本次目标：{{ modifyScopeLabels[thisManagement.targetScope] }}。{{ thisManagement.message }}
+          </p>
+          <p v-if="thisManagement.needsManual" id="tracking-modify-manual-notice" class="tracking-modify-manual">
+            {{ MANAGEMENT_NEEDS_MANUAL_NOTICE }}
+          </p>
+        </div>
+      </section>
+
       <section
         v-if="recoveryActions.length || verifyExternalOffered || thisRecovery"
         class="tracking-inspector-section tracking-recovery"
@@ -503,4 +613,10 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-recovery-result.is-submit_failed, .tracking-recovery-result.is-conflict, .tracking-recovery-result.is-rejected, .tracking-recovery-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
 .tracking-recovery-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
 .tracking-recovery-verdict, .tracking-recovery-manual { font-weight: 600; }
+.tracking-modify-section { gap: .65rem; }
+.tracking-modify-scope { margin-left: .4rem; padding: .1rem .45rem; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-surface-subtle); font-weight: 600; }
+.tracking-modify-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
+.tracking-modify-result.is-succeeded { border-left-color: var(--color-feedback-success-border); }
+.tracking-modify-result.is-failed, .tracking-modify-result.is-conflict, .tracking-modify-result.is-rejected, .tracking-modify-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
+.tracking-modify-verdict, .tracking-modify-manual { font-weight: 600; }
 </style>

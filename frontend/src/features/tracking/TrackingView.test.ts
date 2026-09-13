@@ -1402,3 +1402,305 @@ describe('TrackingView unknown-result recovery (US-312)', () => {
     expect(wrapper.find('.tracking-connection-status').exists()).toBe(false)
   })
 })
+
+const modifyAction = {
+  code: 'MODIFY', label: '修改外部方案', style: 'SECONDARY',
+  requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+}
+
+function modifyDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    ...detail(),
+    available_actions: [revalidateAction, modifyAction],
+    external_mapping: { match_reason: '标题与季度匹配', enabled: true, external_deleted: false },
+    ...overrides,
+  }
+}
+
+/** The authoritative management summary the modify endpoint returns. */
+function modifyPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    action: 'MODIFY', management_status: 'SUCCEEDED', needs_manual: false,
+    safe_message: 'Auto Bangumi 管理操作已完成并通过回查', operation_id: 'operation-1', operation: null,
+    tracking: { ...item('tracking-1', '葬送的芙莉莲'), status_label: '已修改', revision: 2 },
+    ...overrides,
+  }
+}
+
+function modifiedBodies(): Record<string, unknown>[] {
+  return apiPost.mock.calls
+    .filter((call) => call[0] === '/api/v1/tracking/items/{tracking_id}/modify')
+    .map((call) => (call[1]?.body ?? {}) as Record<string, unknown>)
+}
+
+describe('TrackingView external modify (US-313)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('never offers a modify form without a live session or the proven capability', async () => {
+    serveApi(() => modifyDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    // No page credential session yet: no form, no request.
+    expect(wrapper.find('#tracking-modify-subscription-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-modify-rss-submit').exists()).toBe(false)
+    expect(wrapper.text()).toContain('需要先在页面连接 Auto Bangumi')
+
+    await connect(wrapper)
+    // Connecting must never modify anything on the user's behalf.
+    expect(modifiedBodies()).toHaveLength(0)
+    expect(wrapper.find('#tracking-modify-subscription-submit').exists()).toBe(true)
+    expect(wrapper.find('#tracking-modify-rss-submit').exists()).toBe(true)
+  })
+
+  it('shows only the scopes the server and the live capability both allow', async () => {
+    serveApi(() => modifyDetail({
+      available_actions: [modifyAction],
+    }))
+    // The session proves only the subscription modify capability.
+    apiPost.mockResolvedValueOnce(capabilities({ rss_modify: 'UNSUPPORTED' }))
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    expect(wrapper.find('#tracking-modify-subscription-submit').exists()).toBe(true)
+    // The RSS scope is dropped entirely: no form, no scope label.
+    expect(wrapper.find('#tracking-modify-rss-submit').exists()).toBe(false)
+    expect(wrapper.find('.tracking-modify-scope').text()).toBe('外部番剧订阅')
+    expect(wrapper.text()).not.toContain('ASSOCIATED_RSS')
+    expect(wrapper.text()).not.toContain('SUBSCRIPTION')
+  })
+
+  it('keeps the two scope forms apart and sends only the selected scope patch', async () => {
+    serveApi(() => modifyDetail())
+    apiPost.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce(modifyPayload())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    // Nothing selected: the submit control is disabled and sends nothing.
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('#tracking-modify-subscription-submit').attributes('disabled')).toBeDefined()
+    expect(modifiedBodies()).toHaveLength(0)
+
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('新标题')
+    await wrapper.find('#tracking-modify-season-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-season').setValue('2')
+    expect(wrapper.find('#tracking-modify-subscription-submit').attributes('disabled')).toBeUndefined()
+
+    answerConfirm(wrapper, false)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    // Cancelling the impact confirmation sends zero requests.
+    expect(modifiedBodies()).toHaveLength(0)
+
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    const bodies = modifiedBodies()
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]?.target_scope).toBe('SUBSCRIPTION')
+    expect(bodies[0]?.patch).toEqual({ title: '新标题', season: 2 })
+    expect(bodies[0]?.expected_revision).toBe(1)
+    expect(bodies[0]?.confirm).toBe(true)
+    expect(bodies[0]?.ab_config).toMatchObject({ base_url: 'https://ab.invalid', password: 'pass' })
+    expect(typeof bodies[0]?.idempotency_key).toBe('string')
+    // The RSS form never contributed a field to the subscription request.
+    expect(JSON.stringify(bodies[0]?.patch)).not.toContain('name')
+    // The returned tracking converges the list row.
+    expect(wrapper.find('.tracking-list-item').text()).toContain('已修改')
+    expect(wrapper.text()).not.toContain('SUCCEEDED')
+    expect(wrapper.text()).not.toContain('pass')
+  })
+
+  it('sends the RSS scope through its own form and its own patch shape', async () => {
+    serveApi(() => modifyDetail())
+    apiPost.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce(modifyPayload())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-modify-rss-name-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-rss-name').setValue('新 RSS 名称')
+    await wrapper.find('#tracking-modify-rss-aggregate-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-rss-aggregate').setValue('true')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-rss-submit').trigger('submit')
+    await flushPromises()
+
+    const bodies = modifiedBodies()
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]?.target_scope).toBe('ASSOCIATED_RSS')
+    expect(bodies[0]?.patch).toEqual({ name: '新 RSS 名称', aggregate: true })
+    expect(JSON.stringify(bodies[0]?.patch)).not.toContain('title')
+  })
+
+  it('refuses an empty patch and unsafe values instead of sending them', async () => {
+    serveApi(() => modifyDetail())
+    apiPost.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce(modifyPayload())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    // Switching the filter rule on without any term is still a valid rule (the
+    // two switches travel with it), so it is a legal patch.
+    await wrapper.find('#tracking-modify-filter-enabled').setValue(true)
+    expect(wrapper.find('#tracking-modify-subscription-submit').attributes('disabled')).toBeUndefined()
+
+    // A URL is refused by the page exactly like the server would refuse it.
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('https://private.invalid')
+    await nextTick()
+    expect(wrapper.find('#tracking-modify-subscription-submit').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('.tracking-modify').text()).toContain('请至少勾选一个要修改的字段')
+    expect(wrapper.find('.tracking-modify').text()).not.toContain('private.invalid')
+
+    // The unsafe value never reaches the form state either.
+    await wrapper.find('#tracking-modify-title').setValue('安全标题')
+    await wrapper.find('#tracking-modify-season-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-season').setValue('2')
+    expect(wrapper.find('#tracking-modify-subscription-submit').attributes('disabled')).toBeUndefined()
+
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    const bodies = modifiedBodies()
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]?.patch).toEqual({
+      title: '安全标题', season: 2, filter_rule: { use_regex: false, case_sensitive: false },
+    })
+  })
+
+  it('locks the intent on an unknown result and rejects a mismatching second request', async () => {
+    serveApi(() => modifyDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+      .mockRejectedValueOnce(unknownError)
+      .mockResolvedValueOnce(modifyPayload())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('第一次修改')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+
+    const result = wrapper.find('#tracking-modify-result')
+    expect(result.text()).toContain('外部修改结果未知')
+    expect(result.text()).toContain('只读回查')
+    expect(result.text()).not.toContain('network_error')
+    expect(modifiedBodies()).toHaveLength(1)
+
+    // A different scope while the result is unresolved sends nothing at all.
+    await wrapper.find('#tracking-modify-rss-name-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-rss-name').setValue('不该发送')
+    await wrapper.find('#tracking-modify-rss-submit').trigger('submit')
+    await flushPromises()
+    expect(modifiedBodies()).toHaveLength(1)
+
+    // The very same intent replays with the same key and revision binding: the
+    // user re-selects the identical field set, so the page recognises the same
+    // intent and reuses the locked key instead of minting a new one.
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('第一次修改')
+    await wrapper.find('.tracking-modify-form').trigger('submit')
+    await flushPromises()
+    const bodies = modifiedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).toBe(bodies[0]?.idempotency_key)
+    expect(bodies[1]?.expected_revision).toBe(bodies[0]?.expected_revision)
+    expect(bodies[1]?.patch).toEqual(bodies[0]?.patch)
+    expect(wrapper.find('#tracking-modify-result').text()).toContain('已应用本次修改')
+  })
+
+  it('releases the intent on a conflict and requires a fresh confirmation', async () => {
+    let revision = 1
+    serveApi(() => modifyDetail({ revision }))
+    apiPost.mockResolvedValueOnce(capabilities())
+      // The record moves on while the modify is in flight.
+      .mockImplementationOnce((async () => { revision = 9; throw conflictError }) as never)
+      .mockResolvedValueOnce(modifyPayload())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    const before = reads()
+
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('冲突修改')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+
+    const result = wrapper.find('#tracking-modify-result')
+    expect(result.text()).toContain('未提交到 Auto Bangumi')
+    expect(result.text()).toContain('重新确认')
+    expect(result.text()).not.toContain('tracking_revision_conflict')
+    expect(modifiedBodies()).toHaveLength(1)
+    // Both the list and the detail were re-read, and nothing was resent.
+    expect(reads().list).toBe(before.list + 1)
+    expect(reads().detail).toBe(before.detail + 1)
+
+    // The conflict released the intent: the next confirmation is a brand new
+    // one, so the user selects the field again against the fresh revision.
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('重试修改')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    const bodies = modifiedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+    expect(bodies[1]?.expected_revision).toBe(9)
+  })
+
+  it('treats a structured non-409 4xx as a definite refusal and frees the page lock', async () => {
+    serveApi(() => modifyDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+      .mockRejectedValueOnce(rejectedError)
+      .mockResolvedValueOnce(modifyPayload())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('被拒绝的修改')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+
+    const result = wrapper.find('#tracking-modify-result')
+    expect(result.classes()).toContain('is-rejected')
+    expect(result.text()).toContain('本次未修改 Auto Bangumi 外部订阅')
+    expect(wrapper.text()).not.toContain('结果未知')
+    expect(modifiedBodies()).toHaveLength(1)
+
+    // The refusal released the page intent: a new confirmation mints a new key,
+    // so the user selects the field again.
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('再次修改')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    const bodies = modifiedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+  })
+
+  it('clears the page modify state when the connection is cleared', async () => {
+    let resolveModify: ((value: unknown) => void) | undefined
+    serveApi(() => modifyDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+      .mockReturnValueOnce(new Promise((resolve) => { resolveModify = resolve }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-modify-title-enabled').setValue(true)
+    await wrapper.find('#tracking-modify-title').setValue('飞行中的修改')
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-modify-subscription-submit').trigger('submit')
+    await flushPromises()
+    expect(modifiedBodies()).toHaveLength(1)
+
+    await wrapper.find('.tracking-clear-connection').trigger('click')
+    await flushPromises()
+    resolveModify?.(modifyPayload({ tracking: { ...item('tracking-1', '葬送的芙莉莲'), status_label: '不应写回' } }))
+    await flushPromises()
+    expect(wrapper.find('#tracking-modify-result').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('不应写回')
+    expect(wrapper.find('.tracking-connection-status').exists()).toBe(false)
+  })
+})

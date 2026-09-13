@@ -16,10 +16,17 @@ import {
   isDefiniteWriteRejection,
   isRecoveryActionCode,
   isWriteActionCode,
+  MANAGEMENT_CONFLICT_FALLBACK_MESSAGE,
+  MANAGEMENT_CONFLICT_TYPES,
+  MANAGEMENT_NEEDS_MANUAL_NOTICE,
+  managementConflictMessage,
+  managementSessionKeepsIntent,
+  managementSessionNeedsManual,
   probeStatusLabel,
   projectCapabilitySummary,
   projectRecoveryOutcome,
   projectRevalidateIssues,
+  projectTrackingActionScopes,
   projectTrackingOverview,
   projectWriteOutcome,
   RECOVERY_ACTION_BODIES,
@@ -39,8 +46,10 @@ import {
   writeConflictMessage,
   writeSessionKeepsIntent,
   writeSessionMessage,
+  createManagementSession,
   type CapabilityResult,
   type TrackingItem,
+  type TrackingManagementState,
   type TrackingRecoverResult,
   type TrackingRecoveryActionCode,
   type TrackingRecoveryConfirmation,
@@ -541,5 +550,87 @@ describe('tracking recovery projection (US-312)', () => {
       expect(session.message).not.toContain(state)
     }
     expect(recoverySessionKeepsLock(createRecoveryConflictSession('tracking-1', 'RECOVER_AUTO').state)).toBe(false)
+  })
+})
+
+describe('tracking management projection (US-313)', () => {
+  it('requests only a scope the server offered and the live session proves', () => {
+    const scoped = item({
+      available_actions: [action({ target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] })],
+    })
+    // Both scopes are requestable while both capabilities are proven.
+    expect(projectTrackingActionScopes(scoped, 'MODIFY', 'SUBSCRIPTION', capabilities()))
+      .toEqual(['SUBSCRIPTION'])
+    expect(projectTrackingActionScopes(scoped, 'MODIFY', 'ASSOCIATED_RSS', capabilities()))
+      .toEqual(['ASSOCIATED_RSS'])
+
+    // A scope the server did not offer is never requestable, even with the
+    // capability proven, and an unproven capability drops the offered scope.
+    const subscriptionOnly = item({
+      available_actions: [action({ target_scopes: ['SUBSCRIPTION'] })],
+    })
+    expect(projectTrackingActionScopes(subscriptionOnly, 'MODIFY', 'ASSOCIATED_RSS', capabilities())).toEqual([])
+    expect(projectTrackingActionScopes(
+      subscriptionOnly, 'MODIFY', 'SUBSCRIPTION', capabilities({ subscription_modify: 'UNSUPPORTED' }),
+    )).toEqual([])
+    expect(projectTrackingActionScopes(subscriptionOnly, 'MODIFY', 'SUBSCRIPTION', capabilities({ rss_modify: 'SUPPORTED' })))
+      .toEqual(['SUBSCRIPTION'])
+  })
+
+  it('never derives a requestable scope from an unknown action, style or scope', () => {
+    const cases: TrackingItem[] = [
+      item({ available_actions: [action({ code: 'REBOOT_EXTERNAL' as never })] }),
+      item({ available_actions: [action({ style: 'GLOWING' as never })] }),
+      item({ available_actions: [action({ target_scopes: ['WHOLE_LIBRARY' as never] })] }),
+      item({ available_actions: [action({ target_scopes: [] })] }),
+    ]
+    for (const record of cases) {
+      expect(projectTrackingActionScopes(record, 'MODIFY', 'SUBSCRIPTION', capabilities())).toEqual([])
+    }
+    // A record with no live session has no requestable scope either.
+    expect(projectTrackingActionScopes(item({
+      available_actions: [action()],
+    }), 'MODIFY', 'SUBSCRIPTION', null)).toEqual([])
+  })
+
+  it('maps every documented management conflict to a fixed next step and fails closed', () => {
+    for (const type of MANAGEMENT_CONFLICT_TYPES) {
+      const message = managementConflictMessage(type)
+      expect(message).toContain('未提交到 Auto Bangumi')
+      expect(message).not.toContain(type)
+    }
+    expect(managementConflictMessage('tracking_management_patch_invalid')).toContain('未通过服务端校验')
+    expect(managementConflictMessage('tracking_target_missing')).toContain('没有对应的外部对象')
+    for (const unknown of ['something_new', undefined, 42, null]) {
+      expect(managementConflictMessage(unknown)).toBe(MANAGEMENT_CONFLICT_FALLBACK_MESSAGE)
+    }
+  })
+
+  it('locks the single intent only while the management result is indeterminate', () => {
+    for (const [state, locked] of [
+      ['IN_FLIGHT', false], ['SUCCEEDED', false], ['FAILED', false],
+      ['CONFLICT', false], ['REJECTED', false], ['UNKNOWN', true],
+    ] as ReadonlyArray<[TrackingManagementState, boolean]>) {
+      const session = createManagementSession('tracking-1', 'MODIFY', 'SUBSCRIPTION', state)
+      expect(session).toMatchObject({ trackingId: 'tracking-1', action: 'MODIFY', targetScope: 'SUBSCRIPTION', state })
+      expect(managementSessionKeepsIntent(session)).toBe(locked)
+      expect(session.message).not.toContain(state)
+      expect(session.message.length).toBeGreaterThan(0)
+    }
+    // The server's own flag decides needs_manual; a missing flag never reads as
+    // a decided verdict.
+    expect(managementSessionNeedsManual('UNKNOWN', true)).toBe(true)
+    expect(managementSessionNeedsManual('UNKNOWN', undefined)).toBe(true)
+    expect(managementSessionNeedsManual('UNKNOWN', false)).toBe(false)
+    expect(managementSessionNeedsManual('SUCCEEDED', true)).toBe(false)
+    expect(MANAGEMENT_NEEDS_MANUAL_NOTICE).toContain('独立核对')
+  })
+
+  it('releases the page lock for every decided management state', () => {
+    const conflict = createManagementSession('tracking-1', 'MODIFY', 'ASSOCIATED_RSS', 'CONFLICT', false,
+      managementConflictMessage('tracking_target_missing'))
+    expect(conflict.message).toContain('没有对应的外部对象')
+    expect(managementSessionKeepsIntent(conflict)).toBe(false)
+    expect(conflict.state).toBe('CONFLICT')
   })
 })
