@@ -35,3 +35,13 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - idempotency key 只随局部 intent 返回，transport retry 原样复用，不提供 URL/storage/log 写入接口。
   - 定向验证：trackingProjection Vitest、单文件 ESLint、typecheck 均通过。
 ---
+
+## [2026-09-13 09:25:00 CST] - US-305
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: `/app/tracking` 改为正式只读追番总览，接入 generated `listTrackingItems`，提供状态总览、公开搜索/筛选、稳定单选列表、tracking_id 深链、刷新/错误/空态与检查器占位。
+- Files changed: `TrackingView.vue`/测试、tracking 路由 catalog/测试、新增定向 Chromium 测试 `tests/browser/test_app_tracking.py`、Ralph 状态文件。
+- **Learnings for future iterations:**
+  - tracking 正式 query 只接受单一公开 `tracking_id`；列表仅由服务端返回项目确认选择，非法/不存在/已删除值清理且不自动切换。
+  - UI 状态使用背景、边界、指示条与 aria-current，不使用 checkbox 或批量动作；检查器/详情和外部动作留给后续 stories。
+  - 按 dev-browser 运行真实 Chromium 定向测试（2 passed）；定向 TrackingView/路由 Vitest（28 passed）、typecheck、单文件 lint 与 build 均通过。
+---

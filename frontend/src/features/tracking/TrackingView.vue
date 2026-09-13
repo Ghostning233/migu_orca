@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+/** Formal tracking overview (US-305). The first management screen is read-only. */
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '@/api/client'
 import type { operations } from '@/api/generated/api'
@@ -8,125 +9,210 @@ import EmptyState from '@/components/feedback/EmptyState.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
+import BaseInput from '@/components/forms/BaseInput.vue'
+import BaseSelect from '@/components/forms/BaseSelect.vue'
 import PanelSection from '@/components/layout/PanelSection.vue'
-import QueueView from '@/features/queue/QueueView.vue'
+import { routeLocation } from '@/app/router/catalog'
 import { storageQuery } from '@/features/requests/requestStorage'
+import {
+  filterTrackingItems,
+  projectTrackingOverview,
+  sortTrackingItems,
+  TRACKING_STATUS_GROUPS,
+  type TrackingItem,
+  type TrackingStatusGroup,
+} from './trackingProjection'
 
-type TrackingDetail = NonNullable<
-  operations['getTrackingItemDetail']['responses']['200']['content']['application/json']['result']
+type ListResult = NonNullable<
+  operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
 >
 
 const route = useRoute()
-const trackingId = ref('')
-const detail = ref<TrackingDetail | null>(null)
+const router = useRouter()
+const items = ref<TrackingItem[]>([])
 const loading = ref(false)
 const failed = ref(false)
-const heading = ref<HTMLElement | null>(null)
+const searchTerm = ref('')
+const statusFilter = ref<TrackingStatusGroup | ''>('')
+const selectedTrackingId = ref('')
+const listContainer = ref<HTMLElement | null>(null)
 let loadSequence = 0
 
-function readTrackingId(): string {
-  return typeof route.query.tracking_id === 'string' ? route.query.tracking_id : ''
+const statusLabels: Record<TrackingStatusGroup, string> = {
+  PENDING: '待处理', PROCESSING: '处理中', ACTIVE: '追番中',
+  ATTENTION: '需处理', INACTIVE: '已停用/已删除',
+}
+const overview = computed(() => projectTrackingOverview(items.value))
+const filteredItems = computed(() => sortTrackingItems(filterTrackingItems(items.value, {
+  query: searchTerm.value, statusGroup: statusFilter.value,
+})))
+const selectedItem = computed(() => items.value.find(
+  (item) => item.tracking_id === selectedTrackingId.value,
+) ?? null)
+const selectedHidden = computed(() => Boolean(
+  selectedItem.value && !filteredItems.value.some((item) => item.tracking_id === selectedTrackingId.value),
+))
+
+function queryTrackingId(): string | null {
+  const value = route.query.tracking_id
+  return typeof value === 'string' ? value.trim() || null : null
 }
 
-async function loadDetail(): Promise<void> {
-  const sequence = ++loadSequence
-  const requestedTrackingId = trackingId.value
-  if (!trackingId.value) {
-    detail.value = null
-    failed.value = false
-    loading.value = false
-    return
+async function focusSelection(): Promise<void> {
+  await nextTick()
+  const selected = listContainer.value?.querySelector<HTMLElement>('[aria-current="true"]')
+  ;(selected ?? listContainer.value)?.focus({ preventScroll: true })
+}
+
+function syncSelection(): void {
+  const queryId = queryTrackingId()
+  const next = queryId && items.value.some(
+    (item) => item.tracking_id === queryId && item.status !== 'EXTERNAL_DELETED',
+  ) ? queryId : ''
+  selectedTrackingId.value = next
+  if (queryId && !next && !loading.value) {
+    void router.replace(routeLocation('tracking'))
+    void focusSelection()
   }
+}
+
+async function loadList(): Promise<void> {
+  const sequence = ++loadSequence
   loading.value = true
   failed.value = false
   try {
-    const nextDetail = await api.get<TrackingDetail>('/api/v1/tracking/items/{tracking_id}', {
-      path: { tracking_id: trackingId.value },
-      query: storageQuery(),
+    const result = await api.get<ListResult>('/api/v1/tracking/items', {
+      query: { ...storageQuery(), sort: 'updated_at' },
     })
-    if (sequence !== loadSequence || requestedTrackingId !== trackingId.value) return
-    detail.value = nextDetail
-    loading.value = false
-    await nextTick()
-    if (sequence === loadSequence && requestedTrackingId === trackingId.value) {
-      heading.value?.focus({ preventScroll: true })
-    }
+    if (sequence !== loadSequence) return
+    const previous = selectedTrackingId.value
+    items.value = result?.items ?? []
+    syncSelection()
+    if (previous && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
-    if (sequence !== loadSequence || requestedTrackingId !== trackingId.value) return
-    detail.value = null
+    if (sequence !== loadSequence) return
     failed.value = true
-    // The detail endpoint's raw error is never part of the tracking handoff UI.
     void error
   } finally {
-    if (sequence === loadSequence) loading.value = false
+    if (sequence === loadSequence) {
+      loading.value = false
+      syncSelection()
+    }
   }
 }
 
-function syncRoute(): void {
-  trackingId.value = readTrackingId()
-  void loadDetail()
+function selectItem(trackingId: string): void {
+  selectedTrackingId.value = trackingId
+  void router.push(routeLocation('tracking', { tracking_id: trackingId }))
 }
 
-onMounted(syncRoute)
-watch(() => route.query.tracking_id, syncRoute)
+function clearFilters(): void {
+  searchTerm.value = ''
+  statusFilter.value = ''
+}
+
+onMounted(() => { void loadList() })
+watch(() => route.query.tracking_id, () => {
+  syncSelection()
+  void focusSelection()
+})
 </script>
 
 <template>
-  <QueueView v-if="!trackingId" />
-  <PanelSection v-else title="追番管理" class="tracking-detail-panel">
-    <template #actions>
-      <BaseButton
-        id="tracking-detail-refresh"
-        aria-label="刷新追番记录"
-        :disabled="!trackingId"
-        :loading="loading"
-        @click="loadDetail"
-      >
-        刷新
-      </BaseButton>
-    </template>
+  <main id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
+    <PanelSection title="追番管理" class="tracking-header">
+      <template #actions>
+        <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList">刷新列表</BaseButton>
+      </template>
+      <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
+    </PanelSection>
 
-    <div v-if="loading" class="tracking-detail-state"><LoadingState message="正在读取追番记录..." /></div>
-    <ErrorState
-      v-else-if="failed"
-      title="追番记录读取失败"
-      message="方案已经确认，但暂时无法定位追番记录。请稍后重试定位。"
-      retry-label="重试定位"
-      @retry="loadDetail"
-    />
-    <EmptyState
-      v-else-if="!detail"
-      message="没有可定位的追番记录。请从已确认结果重新进入。"
-    />
-    <section
-      v-else
-      id="tracking-detail-target"
-      ref="heading"
-      tabindex="-1"
-      aria-labelledby="tracking-detail-heading"
-      class="tracking-detail"
-    >
-      <p class="field-help">已确认方案的只读落点</p>
-      <h2 id="tracking-detail-heading">{{ detail.title || '未命名番剧' }}</h2>
-      <p class="tracking-detail-status" role="status">状态：{{ detail.status_label }}</p>
-      <dl class="tracking-detail-summary">
-        <div><dt>有效资源</dt><dd>{{ detail.valid_resource_count }}</dd></div>
-        <div><dt>总集数</dt><dd>{{ detail.total_episodes ?? '待获取' }}</dd></div>
-        <div><dt>已更新集数</dt><dd>待开发</dd></div>
-      </dl>
-      <p v-if="detail.status === 'UNKNOWN'" class="field-help" role="status">
-        已保留确认结果，但暂时无法完成追番定位。请稍后重试定位。
-      </p>
+    <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
+      <h2 id="tracking-status-heading">状态总览</h2>
+      <div class="tracking-status-cards">
+        <button v-for="group in TRACKING_STATUS_GROUPS" :key="group" type="button" class="tracking-status-card"
+          :class="{ 'is-selected': statusFilter === group }" :aria-pressed="statusFilter === group"
+          @click="statusFilter = statusFilter === group ? '' : group">
+          <span>{{ statusLabels[group] }}</span><strong>{{ overview.byGroup[group] }}</strong>
+        </button>
+      </div>
+      <p class="tracking-status-total" role="status">共 {{ overview.total }} 条追番记录</p>
     </section>
-  </PanelSection>
+
+    <section class="tracking-workspace" aria-label="追番记录与检查器">
+      <PanelSection title="追番列表" class="tracking-list-panel">
+        <template #actions><span class="tracking-count" aria-live="polite">显示 {{ filteredItems.length }} / {{ items.length }}</span></template>
+        <div class="tracking-filters">
+          <label for="tracking-search">搜索标题或字幕组</label>
+          <BaseInput id="tracking-search" v-model="searchTerm" type="search" placeholder="输入公开标题或字幕组" />
+          <label for="tracking-status-filter">状态筛选</label>
+          <BaseSelect id="tracking-status-filter" v-model="statusFilter" label="状态筛选"
+            :options="[{ value: '', label: '全部状态' }, ...TRACKING_STATUS_GROUPS.map((group) => ({ value: group, label: statusLabels[group] }))]" />
+          <BaseButton v-if="searchTerm || statusFilter" variant="secondary" @click="clearFilters">清除筛选</BaseButton>
+        </div>
+        <div v-if="loading" class="tracking-list-state"><LoadingState message="正在读取追番列表…" /></div>
+        <ErrorState v-else-if="failed" title="追番列表读取失败" message="暂时无法读取本地追番列表，请稍后重试。" retry-label="重试读取" @retry="loadList" />
+        <EmptyState v-else-if="!items.length" message="还没有本地追番记录。" />
+        <EmptyState v-else-if="!filteredItems.length" message="没有符合当前搜索或状态筛选的记录。" />
+        <div v-else id="tracking-list-container" ref="listContainer" class="tracking-list" tabindex="-1" aria-label="追番记录列表">
+          <button v-for="item in filteredItems" :key="item.tracking_id" type="button" class="tracking-list-item"
+            :class="{ 'is-selected': selectedTrackingId === item.tracking_id }" :data-tracking-id="item.tracking_id"
+            :aria-current="selectedTrackingId === item.tracking_id ? 'true' : undefined" @click="selectItem(item.tracking_id)">
+            <span class="tracking-list-indicator" aria-hidden="true" />
+            <span class="tracking-list-copy"><strong>{{ item.title || '未命名番剧' }}</strong><span>{{ item.subtitle_group || '未设置字幕组' }}</span></span>
+            <span class="tracking-list-meta"><span>{{ item.status_label }}</span><small>{{ item.updated_episode_status === 'NOT_IMPLEMENTED' ? '更新集数待开发' : '更新信息不可用' }}</small></span>
+          </button>
+        </div>
+        <p v-if="selectedHidden" class="tracking-selection-note" role="status">当前选择被筛选条件隐藏，未自动切换记录。</p>
+      </PanelSection>
+
+      <aside class="tracking-inspector" aria-labelledby="tracking-inspector-heading">
+        <h2 id="tracking-inspector-heading">检查器</h2>
+        <section v-if="selectedItem" class="tracking-inspector-placeholder" aria-live="polite">
+          <p class="field-help">已选择追番记录</p><h3>{{ selectedItem.title || '未命名番剧' }}</h3>
+          <p>{{ selectedItem.status_label }}</p><p class="field-help">安全详情和操作将在后续迭代提供。</p>
+        </section>
+        <EmptyState v-else message="选择一条追番记录查看安全检查器。" />
+      </aside>
+    </section>
+  </main>
 </template>
 
 <style scoped>
-.tracking-detail { display: grid; gap: 0.65rem; }
-.tracking-detail h2, .tracking-detail p { margin: 0; }
-.tracking-detail-status { font-weight: 600; }
-.tracking-detail-summary { display: grid; gap: 0.55rem; margin: 0; max-width: 34rem; }
-.tracking-detail-summary div { display: flex; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--color-border); padding: 0.45rem 0; }
-.tracking-detail-summary dd { margin: 0; font-weight: 600; }
-.tracking-detail-state { min-height: 5rem; }
+.tracking-overview { display: grid; gap: var(--space-5); }
+.tracking-lede { margin: 0; color: var(--color-text-muted); }
+.tracking-status-overview { display: grid; gap: var(--space-3); }
+.tracking-status-overview h2, .tracking-inspector h2 { margin: 0; font-size: 1.05rem; }
+.tracking-status-cards { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-3); }
+.tracking-status-card { display: grid; gap: .35rem; text-align: left; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); cursor: pointer; }
+.tracking-status-card:hover, .tracking-status-card:focus-visible, .tracking-status-card.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent); }
+.tracking-status-card strong { font-size: 1.35rem; }
+.tracking-status-total, .tracking-count { margin: 0; color: var(--color-text-muted); }
+.tracking-workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(17rem, 1fr); gap: var(--space-5); align-items: start; }
+.tracking-list-panel { min-width: 0; }
+.tracking-filters { display: grid; grid-template-columns: auto minmax(10rem, 1fr) auto minmax(8rem, .7fr) auto; gap: .65rem; align-items: center; margin-bottom: var(--space-4); }
+.tracking-filters label { font-size: .85rem; font-weight: 600; }
+.tracking-list { display: grid; gap: .55rem; }
+.tracking-list-item { display: grid; grid-template-columns: .35rem minmax(0, 1fr) auto; gap: .8rem; align-items: center; width: 100%; padding: .85rem .9rem; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); text-align: left; cursor: pointer; }
+.tracking-list-item:hover, .tracking-list-item:focus-visible, .tracking-list-item.is-selected { border-color: var(--color-primary); background: var(--color-surface-subtle); }
+.tracking-list-item.is-selected .tracking-list-indicator { background: var(--color-primary); }
+.tracking-list-indicator { align-self: stretch; min-height: 2rem; border-radius: 99px; background: var(--color-border); }
+.tracking-list-copy, .tracking-list-meta { display: grid; gap: .25rem; min-width: 0; }
+.tracking-list-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tracking-list-copy span, .tracking-list-meta small { color: var(--color-text-muted); }
+.tracking-list-meta { text-align: right; white-space: nowrap; }
+.tracking-list-state { min-height: 8rem; }
+.tracking-selection-note { margin: var(--space-3) 0 0; color: var(--color-text-muted); }
+.tracking-inspector { position: sticky; top: var(--space-4); display: grid; gap: var(--space-3); min-height: 15rem; padding: var(--space-4); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface); }
+.tracking-inspector-placeholder { display: grid; gap: .5rem; padding: var(--space-4); border: 1px dashed var(--color-border); border-radius: var(--radius-md); }
+.tracking-inspector-placeholder h3, .tracking-inspector-placeholder p { margin: 0; }
+@media (max-width: 1280px) { .tracking-workspace { grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr); } }
+@media (max-width: 800px) {
+  .tracking-status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tracking-workspace { grid-template-columns: 1fr; }
+  .tracking-inspector { position: static; }
+  .tracking-filters { grid-template-columns: 1fr; }
+  .tracking-filters label { margin-top: .25rem; }
+  .tracking-list-meta { white-space: normal; }
+}
 </style>

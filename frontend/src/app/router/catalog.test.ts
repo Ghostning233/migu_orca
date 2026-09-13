@@ -19,13 +19,13 @@ describe('Stage 33 route catalog (US-257)', () => {
     expect(Object.values(routeCatalog).map(({ parity }) => parity.view)).toEqual([
       'WorkbenchView',
       'RequestsView',
-      'QueueView',
+      'TrackingView',
       'SettingsView',
     ])
     expect(Object.fromEntries(Object.entries(routeCatalog).map(([key, value]) => [key, value.queryKey]))).toEqual({
       add: 'batch_id',
       plans: 'request_id',
-      tracking: 'batch_id',
+      tracking: 'tracking_id',
       settings: 'request_id',
     })
   })
@@ -46,7 +46,7 @@ describe('Stage 33 route catalog (US-257)', () => {
 
   it.each([
     ['add', 'batch_id', 'batch-1'],
-    ['tracking', 'batch_id', 'batch-2'],
+    ['tracking', 'tracking_id', 'tracking-2'],
     ['plans', 'request_id', 'request-1'],
     ['settings', 'request_id', 'request-2'],
   ] as const)('keeps the allowed scalar query for %s', (route, key, value) => {
@@ -69,13 +69,10 @@ describe('Stage 33 route catalog (US-257)', () => {
 
   it('rejects duplicate URLSearchParams values and trims one scalar value', () => {
     expect(sanitizeRouteQuery('add', new URLSearchParams('batch_id=batch-1&batch_id=batch-2'))).toEqual({})
-    expect(sanitizeRouteQuery('tracking', new URLSearchParams('batch_id=%20batch-3%20'))).toEqual({
-      batch_id: 'batch-3',
-    })
-    expect(sanitizeRouteQuery('tracking', new URLSearchParams('tracking_id=track-3'))).toEqual({
+    expect(sanitizeRouteQuery('tracking', new URLSearchParams('tracking_id=%20track-3%20'))).toEqual({
       tracking_id: 'track-3',
     })
-    expect(sanitizeRouteQuery('tracking', { batch_id: 'batch-3', tracking_id: 'track-3' })).toEqual({})
+    expect(sanitizeRouteQuery('tracking', { batch_id: 'batch-3' })).toEqual({})
   })
 
   it('provides a router-ready location with a sanitized query', () => {
