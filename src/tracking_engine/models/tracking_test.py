@@ -165,6 +165,13 @@ def test_external_mapping_v2_rejects_missing_invalid_or_unknown_binding(
         tracking_from_storage_dict(storage)
 
 
+def test_external_mapping_rejects_boolean_schema_version() -> None:
+    storage = tracking_to_storage_dict(_record())
+    storage["external_mapping"] = {"schema_version": True}
+    with pytest.raises(ValueError, match="schema_version must be an integer"):
+        tracking_from_storage_dict(storage)
+
+
 def test_external_mapping_v1_rejects_unknown_fields_but_legacy_is_preserved() -> None:
     storage = tracking_to_storage_dict(_record())
     storage["external_mapping"] = {

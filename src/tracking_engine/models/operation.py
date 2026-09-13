@@ -345,7 +345,7 @@ def operation_to_storage_dict(operation: TrackingOperation) -> dict[str, Any]:
     an accidental sensitive field can never reach disk.
     """
     payload = {
-        "schema_version": TRACKING_OPERATION_SCHEMA_VERSION,
+        "schema_version": operation.schema_version,
         "operation_id": operation.operation_id,
         "tracking_id": operation.tracking_id,
         "operation": operation.operation,
@@ -394,6 +394,8 @@ def operation_from_storage_dict(data: Any) -> TrackingOperation:
     if not isinstance(data, dict):
         raise ValueError("tracking operation JSON must be an object")
     schema_version = data.get("schema_version")
+    if type(schema_version) is not int:
+        raise ValueError("schema_version must be an integer")
     allowed_fields = {
         TRACKING_OPERATION_LEGACY_SCHEMA_VERSION: _OPERATION_BASE_FIELDS,
         TRACKING_OPERATION_MANAGEMENT_SCHEMA_VERSION: _OPERATION_MANAGEMENT_FIELDS,

@@ -23,6 +23,7 @@ from storage_engine.controllers.operation_repository import (
     bind_tracking_operation,
     compare_and_swap_tracking_operation,
     load_tracking_operation,
+    recover_tracking_operation,
 )
 from storage_engine.controllers.storage_config import load_storage_config
 from tracking_engine.models.operation import (
@@ -357,6 +358,39 @@ def test_compare_and_swap_rejects_connection_ref_binding_change(tmp_path: Path) 
 
     assert error.value.error_type == "invalid_tracking_operation"
     assert error.value.details["field"] == "connection_ref"
+
+
+@pytest.mark.parametrize("version", [1, 2])
+def test_legacy_operation_is_read_only_for_cas_and_recovery(tmp_path: Path, version: int) -> None:
+    config = _config(tmp_path)
+    operation, _ = _bind(config)
+    path = config.tracking_operations_dir / f"{operation.operation_id}.json"
+    payload = operation_to_storage_dict(operation)
+    payload["schema_version"] = 1
+    payload["state"] = TRACKING_OPERATION_STATE_IN_PROGRESS
+    if version == 2:
+        payload["schema_version"] = 2
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    before = path.read_bytes()
+    loaded = load_tracking_operation(config, operation.operation_id)
+    progressed = transition_tracking_operation(loaded, state=TRACKING_OPERATION_STATE_FAILED)
+    with pytest.raises(Stage1Error) as cas_error:
+        compare_and_swap_tracking_operation(config, operation.operation_id, loaded.state, progressed)
+    assert cas_error.value.error_type == "tracking_operation_legacy_read_only"
+    assert path.read_bytes() == before
+    unchanged = load_tracking_operation(config, operation.operation_id)
+    assert unchanged.schema_version == version
+    assert unchanged.state == TRACKING_OPERATION_STATE_IN_PROGRESS
+    payload["state"] = "OUTCOME_UNKNOWN"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    before = path.read_bytes()
+    with pytest.raises(Stage1Error) as recover_error:
+        recover_tracking_operation(config, operation.operation_id, "OUTCOME_UNKNOWN", target_state=TRACKING_OPERATION_STATE_FAILED)
+    assert recover_error.value.error_type == "tracking_operation_legacy_read_only"
+    assert path.read_bytes() == before
+    unchanged = load_tracking_operation(config, operation.operation_id)
+    assert unchanged.schema_version == version
+    assert unchanged.state == "OUTCOME_UNKNOWN"
 
 
 def test_compare_and_swap_rejects_operation_id_mismatch(tmp_path: Path) -> None:

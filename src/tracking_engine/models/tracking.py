@@ -768,6 +768,8 @@ def _clean_external_mapping(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError("external_mapping must be an object or null")
     schema_version = value.get("schema_version")
+    if type(schema_version) is not int:
+        raise ValueError("external_mapping schema_version must be an integer")
     allowed_fields = (
         _EXTERNAL_MAPPING_LEGACY_FIELDS
         if schema_version == EXTERNAL_MAPPING_LEGACY_SCHEMA_VERSION

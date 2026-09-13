@@ -343,6 +343,7 @@ def test_old_operation_versions_remain_readable_without_connection_binding() -> 
             })
         restored = operation_from_storage_dict(fixture)
         assert restored.schema_version == version
+        assert operation_to_storage_dict(restored)["schema_version"] == version
         assert restored.connection_ref is None
 
 
@@ -427,6 +428,13 @@ def test_from_storage_rejects_operation_id_mismatching_key() -> None:
     with pytest.raises(ValueError) as error:
         operation_from_storage_dict(poisoned)
     assert "does not match idempotency-key-derived id" in str(error.value)
+
+
+def test_from_storage_rejects_boolean_schema_version() -> None:
+    payload = operation_to_storage_dict(_operation())
+    payload["schema_version"] = True
+    with pytest.raises(ValueError, match="schema_version must be an integer"):
+        operation_from_storage_dict(payload)
 
 
 def test_from_storage_rejects_sensitive_nested_field() -> None:

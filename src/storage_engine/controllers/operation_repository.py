@@ -54,6 +54,7 @@ from storage_engine.controllers.storage_config import (
     ensure_storage_layout,
 )
 from tracking_engine.models.operation import (
+    TRACKING_OPERATION_SCHEMA_VERSION,
     TRACKING_OPERATION_STATE_FAILED,
     TRACKING_OPERATION_STATE_OUTCOME_UNKNOWN,
     TRACKING_OPERATION_STATE_RECOVERY_REQUIRED,
@@ -217,6 +218,12 @@ def compare_and_swap_tracking_operation(
                     "current_state": current.state,
                 },
             )
+        if current.schema_version != TRACKING_OPERATION_SCHEMA_VERSION:
+            raise Stage1Error(
+                "tracking_operation_legacy_read_only",
+                "旧版提交操作仅支持读取，不能修改",
+                "compare_and_swap_tracking_operation",
+            )
         if record.operation_id != clean_id:
             raise Stage1Error(
                 "invalid_tracking_operation",
@@ -278,6 +285,12 @@ def recover_tracking_operation(
     ensure_storage_layout(config)
     with _key_lock(clean_id):
         current = _load_tracking_operation(config, clean_id, "recover_tracking_operation")
+        if current.schema_version != TRACKING_OPERATION_SCHEMA_VERSION:
+            raise Stage1Error(
+                "tracking_operation_legacy_read_only",
+                "旧版提交操作仅支持读取，不能恢复",
+                "recover_tracking_operation",
+            )
         if current.state != expected_state:
             raise Stage1Error("tracking_operation_state_conflict", "提交操作状态已变化，请重新读取后重试", "recover_tracking_operation")
         recovered = replace(

@@ -93,3 +93,21 @@ Started: 2026-09-13
 - 验证：核心模型/repository/target/reconcile 定向测试 `155 passed`；受影响 engine/storage/Web 管理回归 `488 passed`；API/追番回归 `57 passed`；全 `src` Ruff、`uv run python -m compileall -q src`、`git diff --check`、frontend `npm run typecheck` 均通过。
 - 遗留风险：US-321 起的保存连接探测、submit/sync/management/recovery service 对新 ref 的 HTTP 原子切换尚未实现；旧入口仍按 legacy 未绑定语义运行，需后续 story 在取得保存配置快照后传递并校验 ref。
 - 可复用结论：schema 版本校验必须按版本使用字段白名单；旧 operation/mapping 读取保留原 schema/ref 缺失状态，只有显式新连接入口生成 v3/v2；管理外部写前若无当前精确 ref 只能返回固定重新核验原因。
+
+## 2026-09-13 / US-320 审核修复 B
+
+- 审核发现并修复：operation 与 external_mapping 的 schema_version 现要求 `type(value) is int`，布尔值 fail closed；operation 序列化保留已读取的 v1/v2 版本，不自动升级为 v3。
+- 旧 v1/v2 operation 在 CAS/recover 写入口统一固定拒绝，避免未绑定旧记录被自动改写或终结；新增临时目录测试核对旧 IN_PROGRESS 文件 CAS/recover 后字节、状态与 schema 均不变。
+- 验证：相关模型/repository/target/reconcile 定向测试 `136 passed`；受影响 Python Ruff 通过；frontend `npm run typecheck` 按要求执行（本轮未改前端）；未提交、未运行 Ralph、未触碰真实 storage/上游。
+- 遗留风险：US-321 起的保存连接探测及业务服务 ref 原子切换仍未实现；US-320 `passes` 保持 `false`，待主 Agent 独立复审。
+
+- 修复 B 第二轮微修整：移除 recover 对 `IN_PROGRESS` 的重复预读特判；旧 v1/v2 operation 在合法 CAS/recover 状态下统一经参数校验后 load，再由 legacy read-only guard 拒绝写入。测试参数化覆盖 v1/v2 的 CAS 与 OUTCOME_UNKNOWN recover，并核对文件 bytes/schema/state 不变；round-trip 明确保持原 schema。
+- 验证：同一组模型/repository/target/reconcile 定向测试 `137 passed`；受影响 Python Ruff 通过；`git diff --check` 通过。未提交，US-320 `passes=false`。
+
+## 2026-09-13 / US-320 主 Agent 独立审核通过
+
+- 审核结论：operation schema v3 与 external_mapping schema v2 的连接绑定满足本故事验收；v1/v2 operation 与 v1 mapping 保持向后可读，旧 operation 写入口固定只读，不猜测归属、不升级或终结；US-320 更新为 `passes=true`，US-321 仍为 `false`。
+- 独立验证：提交/管理/恢复/同步/读取及 API 契约组合 `279 passed`；五个核心模型/repository/target/reconcile 文件组合 `137 passed`；受影响 Ruff、frontend `npm run typecheck`、`git diff --check` 均通过。
+- 独立安全反例：operation 与 mapping 的 `True`、`False`、浮点及字符串 schema 均 fail closed；v1/v2 operation round-trip 保持原 schema；旧 v1/v2 CAS 与 recover 返回固定 `tracking_operation_legacy_read_only` 且文件 bytes、schema、state 不变。
+- 验证边界：未运行全量 pytest、Vitest、浏览器或真实上游；本故事没有 UI 改动。保存配置 probe 与业务服务 ref 原子迁移仍由 US-321～US-324 负责。
+- 第三轮测试真实性微修：repository 改用 `TRACKING_OPERATION_SCHEMA_VERSION` 常量；legacy CAS/recover 测试先断言固定 `error_type`、bytes 与重新加载的 schema/state，再布置下一状态，避免覆盖未验证保护。验证 operation repository `38 passed`，五模块定向组 `137 passed`，Ruff 与 `git diff --check` 通过。
