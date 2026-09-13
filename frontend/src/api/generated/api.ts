@@ -221,6 +221,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/autobangumi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 读取 Auto Bangumi 安全连接摘要 */
+        get: operations["getAutoBangumiConnection"];
+        /** 保存 Auto Bangumi 部署连接 */
+        put: operations["saveAutoBangumiConnection"];
+        post?: never;
+        /** 清除 Auto Bangumi 部署连接 */
+        delete: operations["deleteAutoBangumiConnection"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/tracking/items": {
         parameters: {
             query?: never;
@@ -5021,6 +5040,742 @@ export interface operations {
                      *       "ok": false,
                      *       "error_type": "invalid_request_status",
                      *       "error_message": "只有待确认的订阅方案可以保存",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    getAutoBangumiConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "configured": true,
+                     *         "configuration_revision": 1,
+                     *         "connection_ref": "示例",
+                     *         "auth_mode": "示例",
+                     *         "credential_present": true,
+                     *         "connection_status": "示例",
+                     *         "checked_at": "示例",
+                     *         "capabilities": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * AutoBangumiConnectionSummaryDTO
+                         * @description Safe deployment configuration summary; never contains its address.
+                         */
+                        result: {
+                            /** Configured */
+                            configured: boolean;
+                            /** Configuration Revision */
+                            configuration_revision: number;
+                            /** Connection Ref */
+                            connection_ref: string | null;
+                            /** Auth Mode */
+                            auth_mode: ("password" | "api_token") | null;
+                            /** Credential Present */
+                            credential_present: boolean;
+                            /**
+                             * Connection Status
+                             * @enum {string}
+                             */
+                            connection_status: "UNCONFIGURED" | "CONFIGURED" | "VERIFIED" | "ERROR";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** @default null */
+                            capabilities: {
+                                /**
+                                 * Probe Status
+                                 * @enum {string}
+                                 */
+                                probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                                /** Version */
+                                version: string | null;
+                                /** Adapter */
+                                adapter: ("legacy_3_1" | "api_token") | null;
+                                /**
+                                 * Subscription List
+                                 * @enum {string}
+                                 */
+                                subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Detail
+                                 * @enum {string}
+                                 */
+                                subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Submit
+                                 * @enum {string}
+                                 */
+                                subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Modify
+                                 * @enum {string}
+                                 */
+                                subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Enable
+                                 * @enum {string}
+                                 */
+                                subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Disable
+                                 * @enum {string}
+                                 */
+                                subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Delete
+                                 * @enum {string}
+                                 */
+                                subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss List
+                                 * @enum {string}
+                                 */
+                                rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Modify
+                                 * @enum {string}
+                                 */
+                                rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Enable
+                                 * @enum {string}
+                                 */
+                                rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Disable
+                                 * @enum {string}
+                                 */
+                                rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Delete
+                                 * @enum {string}
+                                 */
+                                rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Refresh
+                                 * @enum {string}
+                                 */
+                                rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * External Verify
+                                 * @enum {string}
+                                 */
+                                external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /** Checked At */
+                                checked_at: string | null;
+                                /** Safe Message */
+                                safe_message: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description storage_error: Auto Bangumi 配置存储不可用 / storage_json_error: Auto Bangumi 配置内容无效 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "Auto Bangumi 配置存储不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    saveAutoBangumiConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 保存 Auto Bangumi 部署连接 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "confirm": true,
+                 *       "expected_configuration_revision": 1,
+                 *       "config": "示例"
+                 *     }
+                 */
+                "application/json": {
+                    /** @constant */
+                    confirm: true;
+                    expected_configuration_revision: number;
+                    config: {
+                        /** @constant */
+                        auth_mode: "password";
+                        base_url: string;
+                        username: string;
+                        password: string;
+                    } | {
+                        /** @constant */
+                        auth_mode: "api_token";
+                        base_url: string;
+                        token: string;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "configured": true,
+                     *         "configuration_revision": 1,
+                     *         "connection_ref": "示例",
+                     *         "auth_mode": "示例",
+                     *         "credential_present": true,
+                     *         "connection_status": "示例",
+                     *         "checked_at": "示例",
+                     *         "capabilities": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * AutoBangumiConnectionSummaryDTO
+                         * @description Safe deployment configuration summary; never contains its address.
+                         */
+                        result: {
+                            /** Configured */
+                            configured: boolean;
+                            /** Configuration Revision */
+                            configuration_revision: number;
+                            /** Connection Ref */
+                            connection_ref: string | null;
+                            /** Auth Mode */
+                            auth_mode: ("password" | "api_token") | null;
+                            /** Credential Present */
+                            credential_present: boolean;
+                            /**
+                             * Connection Status
+                             * @enum {string}
+                             */
+                            connection_status: "UNCONFIGURED" | "CONFIGURED" | "VERIFIED" | "ERROR";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** @default null */
+                            capabilities: {
+                                /**
+                                 * Probe Status
+                                 * @enum {string}
+                                 */
+                                probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                                /** Version */
+                                version: string | null;
+                                /** Adapter */
+                                adapter: ("legacy_3_1" | "api_token") | null;
+                                /**
+                                 * Subscription List
+                                 * @enum {string}
+                                 */
+                                subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Detail
+                                 * @enum {string}
+                                 */
+                                subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Submit
+                                 * @enum {string}
+                                 */
+                                subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Modify
+                                 * @enum {string}
+                                 */
+                                subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Enable
+                                 * @enum {string}
+                                 */
+                                subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Disable
+                                 * @enum {string}
+                                 */
+                                subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Delete
+                                 * @enum {string}
+                                 */
+                                subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss List
+                                 * @enum {string}
+                                 */
+                                rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Modify
+                                 * @enum {string}
+                                 */
+                                rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Enable
+                                 * @enum {string}
+                                 */
+                                rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Disable
+                                 * @enum {string}
+                                 */
+                                rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Delete
+                                 * @enum {string}
+                                 */
+                                rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Refresh
+                                 * @enum {string}
+                                 */
+                                rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * External Verify
+                                 * @enum {string}
+                                 */
+                                external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /** Checked At */
+                                checked_at: string | null;
+                                /** Safe Message */
+                                safe_message: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description validation_error: 请求参数校验失败 / config_error: Auto Bangumi 配置无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "validation_error",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description configuration_revision_conflict: Auto Bangumi 配置已变化，请重新读取后重试 / connection_in_use: Auto Bangumi 连接正在使用中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "configuration_revision_conflict",
+                     *       "error_message": "Auto Bangumi 配置已变化，请重新读取后重试",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: Auto Bangumi 配置存储不可用 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "Auto Bangumi 配置存储不可用",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+        };
+    };
+    deleteAutoBangumiConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 清除 Auto Bangumi 部署连接 */
+        requestBody: {
+            content: {
+                /**
+                 * @example {
+                 *       "confirm": true,
+                 *       "expected_configuration_revision": 1
+                 *     }
+                 */
+                "application/json": {
+                    /** @constant */
+                    confirm: true;
+                    expected_configuration_revision: number;
+                };
+            };
+        };
+        responses: {
+            /** @description 成功 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": true,
+                     *       "result": {
+                     *         "configured": true,
+                     *         "configuration_revision": 1,
+                     *         "connection_ref": "示例",
+                     *         "auth_mode": "示例",
+                     *         "credential_present": true,
+                     *         "connection_status": "示例",
+                     *         "checked_at": "示例",
+                     *         "capabilities": null
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /** @constant */
+                        ok: true;
+                        /**
+                         * AutoBangumiConnectionSummaryDTO
+                         * @description Safe deployment configuration summary; never contains its address.
+                         */
+                        result: {
+                            /** Configured */
+                            configured: boolean;
+                            /** Configuration Revision */
+                            configuration_revision: number;
+                            /** Connection Ref */
+                            connection_ref: string | null;
+                            /** Auth Mode */
+                            auth_mode: ("password" | "api_token") | null;
+                            /** Credential Present */
+                            credential_present: boolean;
+                            /**
+                             * Connection Status
+                             * @enum {string}
+                             */
+                            connection_status: "UNCONFIGURED" | "CONFIGURED" | "VERIFIED" | "ERROR";
+                            /** Checked At */
+                            checked_at: string | null;
+                            /** @default null */
+                            capabilities: {
+                                /**
+                                 * Probe Status
+                                 * @enum {string}
+                                 */
+                                probe_status: "VERIFIED" | "PARTIAL" | "FAILED";
+                                /** Version */
+                                version: string | null;
+                                /** Adapter */
+                                adapter: ("legacy_3_1" | "api_token") | null;
+                                /**
+                                 * Subscription List
+                                 * @enum {string}
+                                 */
+                                subscription_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Detail
+                                 * @enum {string}
+                                 */
+                                subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Submit
+                                 * @enum {string}
+                                 */
+                                subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Modify
+                                 * @enum {string}
+                                 */
+                                subscription_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Enable
+                                 * @enum {string}
+                                 */
+                                subscription_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Disable
+                                 * @enum {string}
+                                 */
+                                subscription_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Delete
+                                 * @enum {string}
+                                 */
+                                subscription_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss List
+                                 * @enum {string}
+                                 */
+                                rss_list: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Modify
+                                 * @enum {string}
+                                 */
+                                rss_modify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Enable
+                                 * @enum {string}
+                                 */
+                                rss_enable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Disable
+                                 * @enum {string}
+                                 */
+                                rss_disable: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Delete
+                                 * @enum {string}
+                                 */
+                                rss_delete: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Rss Refresh
+                                 * @enum {string}
+                                 */
+                                rss_refresh: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * External Verify
+                                 * @enum {string}
+                                 */
+                                external_verify: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /** Checked At */
+                                checked_at: string | null;
+                                /** Safe Message */
+                                safe_message: string | null;
+                            } | null;
+                        };
+                    };
+                };
+            };
+            /** @description validation_error: 请求参数校验失败 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "validation_error",
+                     *       "error_message": "请求参数校验失败",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description configuration_revision_conflict: Auto Bangumi 配置已变化，请重新读取后重试 / connection_in_use: Auto Bangumi 连接正在使用中 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "configuration_revision_conflict",
+                     *       "error_message": "Auto Bangumi 配置已变化，请重新读取后重试",
+                     *       "error_data": {
+                     *         "failed_step": "示例步骤"
+                     *       }
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Ok
+                         * @description Always false for failures.
+                         */
+                        ok: boolean;
+                        /** Error Type */
+                        error_type: string;
+                        /** Error Message */
+                        error_message: string;
+                        /**
+                         * Error Data
+                         * @default null
+                         */
+                        error_data: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description storage_error: Auto Bangumi 配置存储不可用 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "ok": false,
+                     *       "error_type": "storage_error",
+                     *       "error_message": "Auto Bangumi 配置存储不可用",
                      *       "error_data": {
                      *         "failed_step": "示例步骤"
                      *       }

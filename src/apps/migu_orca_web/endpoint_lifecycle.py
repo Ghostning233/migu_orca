@@ -23,6 +23,9 @@ def _entry(lifecycle: str, relation: str, authority: str) -> EndpointLifecycle:
 # Keys intentionally use Flask's spelling.  OpenAPI and the markdown inventory
 # are projections of this registry and must not grow an independent list.
 ENDPOINT_LIFECYCLE: Final[dict[tuple[str, str], EndpointLifecycle]] = {
+    ("GET", "/api/v1/settings/autobangumi"): _entry(_PRIMARY, "部署端 Auto Bangumi 安全摘要读取", "Deployment config repository"),
+    ("PUT", "/api/v1/settings/autobangumi"): _entry(_PRIMARY, "部署端 Auto Bangumi 配置保存", "Deployment config repository"),
+    ("DELETE", "/api/v1/settings/autobangumi"): _entry(_PRIMARY, "部署端 Auto Bangumi 配置清除", "Deployment config repository"),
     ("POST", "/api/v1/autobangumi/capabilities"): _entry(
         _PRIMARY,
         "只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持",

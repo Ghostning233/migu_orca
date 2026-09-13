@@ -35,7 +35,7 @@ def _inventory_lifecycle() -> dict[tuple[str, str], tuple[str, str, str]]:
     section = text.split("## 2.1 端点生命周期", 1)[1].split("## 3.", 1)[0]
     result: dict[tuple[str, str], tuple[str, str, str]] = {}
     for line in section.splitlines():
-        match = re.match(r"\|\s*(GET|POST)\s*\|\s*`([^`]+)`\s*\|\s*(PRIMARY|RECOVERY|COMPATIBILITY)\s*\|\s*([^|]+)\|\s*([^|]+)\|", line)
+        match = re.match(r"\|\s*(GET|POST|PUT|DELETE)\s*\|\s*`([^`]+)`\s*\|\s*(PRIMARY|RECOVERY|COMPATIBILITY)\s*\|\s*([^|]+)\|\s*([^|]+)\|", line)
         if match:
             result[(match.group(1), _normalized(match.group(2)))] = (
                 match.group(3), match.group(4).strip(), match.group(5).strip()

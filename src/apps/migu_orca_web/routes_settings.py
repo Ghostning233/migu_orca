@@ -18,6 +18,7 @@ from apps.migu_orca_web.schemas import (
     PreferenceQuery,
     PreferenceSavePayload,
 )
+from apps.migu_orca_web.serializers import serialize_autobangumi_connection_summary
 from apps.migu_orca_web.services import _storage_dir
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
@@ -42,26 +43,14 @@ from storage_engine.controllers.storage_config import load_storage_config
 
 
 def _require_json() -> None:
-    if not request.is_json:
+    if request.mimetype != "application/json":
         raise Stage1Error("validation_error", "请求必须使用 application/json", "parse_json")
-
-
-def _connection_summary(record: object) -> dict[str, object]:
-    configured = bool(getattr(record, "configured", False))
-    ref = getattr(record, "connection_ref", None)
-    return {
-        "configured": configured,
-        "credential_present": configured,
-        "auth_mode": getattr(getattr(record, "config", None), "auth_mode", None),
-        "connection_ref": str(ref) if ref is not None else None,
-        "configuration_revision": getattr(record, "configuration_revision"),
-    }
 
 
 @class_route(api_blueprint, "/api/v1/settings/autobangumi", methods=["GET"])
 class AutoBangumiConfigView(GetView):
     def get_object(self) -> dict[str, object]:
-        return _connection_summary(AutoBangumiConfigRepository().load())
+        return serialize_autobangumi_connection_summary(AutoBangumiConfigRepository().load())
 
 
 @class_route(api_blueprint, "/api/v1/settings/autobangumi", methods=["PUT"])
@@ -76,7 +65,7 @@ class AutoBangumiConfigSaveView(PostView):
         record = AutoBangumiConfigRepository().save(
             config, expected_configuration_revision=payload.expected_configuration_revision
         )
-        return _connection_summary(record)
+        return serialize_autobangumi_connection_summary(record)
 
     def put(self) -> object:
         return self.post()
@@ -93,7 +82,7 @@ class AutoBangumiConfigDeleteView(PostView):
         record = AutoBangumiConfigRepository().delete(
             expected_configuration_revision=payload.expected_configuration_revision
         )
-        return _connection_summary(record)
+        return serialize_autobangumi_connection_summary(record)
 
     def delete(self) -> object:
         return self.post()

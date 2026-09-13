@@ -39,6 +39,7 @@ from apps.migu_orca_web.api_contract import (
     ApiErrorEnvelope,
     AutoBangumiCapabilitiesDTO,
     AutoBangumiConnectionResultDTO,
+    AutoBangumiConnectionSummaryDTO,
     BatchAcceptResultDTO,
     BatchParseResultDTO,
     BatchQueueResultDTO,
@@ -296,6 +297,30 @@ _MANAGEMENT_ERRORS = {
     "409": {**{name: MANAGEMENT_ERROR_MESSAGES[name] for name in management_error_names_for_status(409)}},
 }
 
+_AUTOBANGUMI_CONNECTION_CONFIG = {
+    "oneOf": [
+        {
+            "type": "object", "additionalProperties": False,
+            "required": ["auth_mode", "base_url", "username", "password"],
+            "properties": {
+                "auth_mode": {"const": "password"},
+                "base_url": {"type": "string"},
+                "username": {"type": "string"},
+                "password": {"type": "string", "x-request-scoped": True, "writeOnly": True},
+            },
+        },
+        {
+            "type": "object", "additionalProperties": False,
+            "required": ["auth_mode", "base_url", "token"],
+            "properties": {
+                "auth_mode": {"const": "api_token"},
+                "base_url": {"type": "string"},
+                "token": {"type": "string", "x-request-scoped": True, "writeOnly": True},
+            },
+        },
+    ]
+}
+
 
 def _management_endpoint(operation_id: str, summary: str, *, extra: dict[str, Any] | None = None, required_extra: list[str] | None = None, scope: list[str] | None = None) -> dict[str, Any]:
     properties = {**_MANAGEMENT_COMMON, **(extra or {})}
@@ -383,6 +408,33 @@ def _modify_request_body() -> dict[str, Any]:
         "oneOf": [branch("SUBSCRIPTION", subscription_patch), branch("ASSOCIATED_RSS", rss_patch)],
     }
 _ENDPOINTS: dict[str, dict[str, Any]] = {
+    "GET /api/v1/settings/autobangumi": {
+        "operationId": "getAutoBangumiConnection",
+        "summary": "读取 Auto Bangumi 安全连接摘要",
+        "success": AutoBangumiConnectionSummaryDTO,
+        "errors": {"500": {"storage_error": "Auto Bangumi 配置存储不可用", "storage_json_error": "Auto Bangumi 配置内容无效"}},
+    },
+    "PUT /api/v1/settings/autobangumi": {
+        "operationId": "saveAutoBangumiConnection",
+        "summary": "保存 Auto Bangumi 部署连接",
+        "requestBody": {"type": "object", "additionalProperties": False, "required": ["confirm", "expected_configuration_revision", "config"], "properties": {
+            "confirm": {"const": True},
+            "expected_configuration_revision": {"type": "integer", "minimum": 0},
+            "config": _AUTOBANGUMI_CONNECTION_CONFIG,
+        }},
+        "success": AutoBangumiConnectionSummaryDTO,
+        "errors": {"400": {"validation_error": "请求参数校验失败", "config_error": "Auto Bangumi 配置无效"}, "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_in_use": "Auto Bangumi 连接正在使用中"}, "500": {"storage_error": "Auto Bangumi 配置存储不可用"}},
+    },
+    "DELETE /api/v1/settings/autobangumi": {
+        "operationId": "deleteAutoBangumiConnection",
+        "summary": "清除 Auto Bangumi 部署连接",
+        "requestBody": {"type": "object", "additionalProperties": False, "required": ["confirm", "expected_configuration_revision"], "properties": {
+            "confirm": {"const": True},
+            "expected_configuration_revision": {"type": "integer", "minimum": 0},
+        }},
+        "success": AutoBangumiConnectionSummaryDTO,
+        "errors": {"400": {"validation_error": "请求参数校验失败"}, "409": {"configuration_revision_conflict": "Auto Bangumi 配置已变化，请重新读取后重试", "connection_in_use": "Auto Bangumi 连接正在使用中"}, "500": {"storage_error": "Auto Bangumi 配置存储不可用"}},
+    },
     "POST /api/v1/tracking/items/<path:tracking_id>/modify": {
         **_management_endpoint("modifyTrackingItem", "修改外部追番方案", required_extra=["patch"]),
         "requestBody": _modify_request_body(),

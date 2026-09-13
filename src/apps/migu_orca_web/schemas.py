@@ -10,7 +10,7 @@ response DTOs stay in ``api_contract.py`` (which is the Stage 27 contract).
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr, field_validator, model_validator
 
 from tracking_engine.models.tracking import (
     TRACKING_STATUS_GROUP_ACTIVE,
@@ -429,24 +429,47 @@ class AutoBangumiTestConnectionPayload(BaseModel):
 
 class AutoBangumiConfigPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    auth_mode: Literal["password", "api_token"]
-    base_url: str
-    username: str | None = None
-    password: str | None = None
-    token: str | None = None
+    auth_mode: Literal["password", "api_token"] = Field(repr=False)
+    base_url: str = Field(repr=False)
+    username: str | None = Field(default=None, repr=False)
+    password: str | None = Field(default=None, repr=False)
+    token: str | None = Field(default=None, repr=False)
+
+    @model_validator(mode="after")
+    def validate_auth_union(self) -> AutoBangumiConfigPayload:
+        if self.base_url is None:
+            raise ValueError("base_url is required")
+        if self.auth_mode == "password":
+            if self.username is None or self.password is None or self.token is not None:
+                raise ValueError("password credentials required")
+        elif self.token is None or self.username is not None or self.password is not None:
+            raise ValueError("token credential required")
+        return self
 
 
 class AutoBangumiConfigSavePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    confirm: Literal[True]
+    confirm: StrictBool
     expected_configuration_revision: StrictInt = Field(ge=0)
     config: AutoBangumiConfigPayload
+
+    @model_validator(mode="after")
+    def require_literal_true(self) -> AutoBangumiConfigSavePayload:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
 
 
 class AutoBangumiConfigDeletePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    confirm: Literal[True]
+    confirm: StrictBool
     expected_configuration_revision: StrictInt = Field(ge=0)
+
+    @model_validator(mode="after")
+    def require_literal_true(self) -> AutoBangumiConfigDeletePayload:
+        if self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
 
 
 class AutoBangumiCapabilitiesConfigPayload(BaseModel):

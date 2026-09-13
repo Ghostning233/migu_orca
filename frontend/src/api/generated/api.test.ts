@@ -17,6 +17,9 @@ import type { PreviewPatch } from '@/features/workbench/candidateSearch'
 // drifts from the OpenAPI contract.
 
 const EXPECTED_OPERATION_IDS = [
+  'getAutoBangumiConnection',
+  'saveAutoBangumiConnection',
+  'deleteAutoBangumiConnection',
   'listRequests',
   'getRequestDetail',
   'getRequestSafeInfo',
@@ -63,6 +66,9 @@ describe('generated API client (US-198)', () => {
     // At type level: every expected operationId must exist on `operations`.
     type OperationKeys = keyof operations
     expectTypeOf<OperationKeys>().toEqualTypeOf<
+      | 'getAutoBangumiConnection'
+      | 'saveAutoBangumiConnection'
+      | 'deleteAutoBangumiConnection'
       | 'listRequests'
       | 'getRequestDetail'
       | 'getRequestSafeInfo'
@@ -108,6 +114,7 @@ describe('generated API client (US-198)', () => {
   it('generates paths entries for all API families', () => {
     type PathKeys = keyof paths
     expectTypeOf<PathKeys>().toEqualTypeOf<
+      | '/api/v1/settings/autobangumi'
       | '/api/v1/autobangumi/capabilities'
       | '/api/v1/autobangumi/test-connection'
       | '/api/v1/batches/parse'

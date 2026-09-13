@@ -113,6 +113,8 @@ _HTTP_CONFLICT_ERROR_TYPES = {
     "tracking_operation_in_progress",
     # US-245: a management operation already owns the record or key.
     "tracking_management_state_conflict",
+    "configuration_revision_conflict",
+    "connection_in_use",
 }
 _HTTP_CONFLICT_ERROR_TYPES.update(
     name

@@ -33,6 +33,7 @@ from mikan_engine.controllers.mikan_client import MikanCandidate
 from mikan_engine.controllers.mikan_poster_service import MikanPosterService
 from shared.errors import Stage1Error
 from shared.season_evidence import candidate_season_evidence
+from storage_engine.controllers.autobangumi_config_repository import AutoBangumiConfigRecord
 
 poster_service = MikanPosterService()
 
@@ -297,6 +298,21 @@ def _sanitize_ab_connection_summary(summary: dict[str, Any]) -> dict[str, Any]:
     )
     assert isinstance(sanitized, dict)
     return sanitized
+
+
+def serialize_autobangumi_connection_summary(record: AutoBangumiConfigRecord) -> dict[str, Any]:
+    """Serialize the deployment repository record through an explicit whitelist."""
+    configured = bool(getattr(record, "configured", False))
+    return {
+        "configured": configured,
+        "configuration_revision": getattr(record, "configuration_revision"),
+        "connection_ref": record.connection_ref,
+        "auth_mode": getattr(getattr(record, "config", None), "auth_mode", None),
+        "credential_present": configured,
+        "connection_status": "CONFIGURED" if configured else "UNCONFIGURED",
+        "checked_at": None,
+        "capabilities": None,
+    }
 
 
 # ---------------------------------------------------------------------------

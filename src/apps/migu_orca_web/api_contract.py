@@ -27,6 +27,7 @@ Scope notes
 """
 
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -1183,6 +1184,19 @@ class AutoBangumiCapabilitiesDTO(_StrictBase):
     external_verify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
     checked_at: str | None
     safe_message: str | None
+
+
+class AutoBangumiConnectionSummaryDTO(_StrictBase):
+    """Safe deployment configuration summary; never contains its address."""
+
+    configured: bool
+    configuration_revision: int
+    connection_ref: UUID | None
+    auth_mode: Literal["password", "api_token"] | None
+    credential_present: bool
+    connection_status: Literal["UNCONFIGURED", "CONFIGURED", "VERIFIED", "ERROR"]
+    checked_at: str | None
+    capabilities: AutoBangumiCapabilitiesDTO | None = None
 
 
 class TrackingSyncSummaryDTO(_StrictBase):

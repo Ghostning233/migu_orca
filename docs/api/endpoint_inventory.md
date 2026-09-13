@@ -75,6 +75,9 @@
 | POST | `/api/v1/preferences` | `migu_orca_web_api.PreferenceSaveView` | PreferenceSaveView |
 | GET | `/api/v1/corrections` | `migu_orca_web_api.CorrectionView` | CorrectionView |
 | POST | `/api/v1/corrections` | `migu_orca_web_api.CorrectionSaveView` | CorrectionSaveView |
+| GET | `/api/v1/settings/autobangumi` | `migu_orca_web_api.AutoBangumiConfigView` | AutoBangumiConfigView |
+| PUT | `/api/v1/settings/autobangumi` | `migu_orca_web_api.AutoBangumiConfigSaveView` | AutoBangumiConfigSaveView |
+| DELETE | `/api/v1/settings/autobangumi` | `migu_orca_web_api.AutoBangumiConfigDeleteView` | AutoBangumiConfigDeleteView |
 | POST | `/api/v1/batches/parse` | `migu_orca_web_api.BatchParseView` | BatchParseView |
 | POST | `/api/v1/batches/<batch_id>/save-confirm` | `migu_orca_web_api.BatchSaveConfirmView` | BatchSaveConfirmView |
 | POST | `/api/v1/batches/<batch_id>/accept` | `migu_orca_web_api.BatchAcceptView` | BatchAcceptView |
@@ -106,6 +109,9 @@
 
 | 方法 | OpenAPI path | 生命周期 | 替代关系或保留原因 | 数据权威 |
 | --- | --- | --- | --- | --- |
+| GET | `/api/v1/settings/autobangumi` | PRIMARY | 部署端 Auto Bangumi 安全摘要读取 | Deployment config repository |
+| PUT | `/api/v1/settings/autobangumi` | PRIMARY | 部署端 Auto Bangumi 配置保存 | Deployment config repository |
+| DELETE | `/api/v1/settings/autobangumi` | PRIMARY | 部署端 Auto Bangumi 配置清除 | Deployment config repository |
 | POST | `/api/v1/autobangumi/capabilities` | PRIMARY | 只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持 | Capability probe |
 | POST | `/api/v1/autobangumi/test-connection` | PRIMARY | 连接诊断，不替代管理写入校验 | Request-scoped probe |
 | POST | `/api/v1/qbittorrent/test-connection` | PRIMARY | 连接诊断 | Request-scoped probe |

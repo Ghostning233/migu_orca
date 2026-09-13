@@ -41,3 +41,45 @@ Started: 2026-09-13
 - 验证：`uv run pytest src/apps/migu_orca_web/views_test.py -q --disable-warnings --maxfail=1`（186 passed）；`uv run ruff check --fix ...` 后定向 Ruff 通过；`git diff --check` 通过；定向 compileall 通过。
 - 遗留风险：本轮未实现受信 Host/Origin 中间件、外部请求 lease 与保存配置探测（分别需继续完善 US-319/US-321）；OpenAPI/generated 契约尚未同步，不能视为 Stage 39 完成。
 - 可复用结论：部署配置 API 的公开摘要只允许 configured/credential_present/auth_mode/connection_ref/configuration_revision；任何配置读取都通过专用 repository，业务 storage_dir 不参与配置定位。
+
+## 2026-09-13 / US-318/319 修复 B2
+
+- 修复范围：共用 `ab_engine` 服务根规范化并拒绝伪 scheme/畸形 host；repository 保存边界完整重验直接构造模型，严格 regular/0600/fsize、tombstone 字段、version bool 与 canonical UUID；新增同 root 跨实例进程内配置 lease，快照/ref/revision 校验，活动 lease 时 save/delete 立即 `connection_in_use`。
+- HTTP/API：Flask 全局 `TRUSTED_HOSTS` 默认 loopback，仅服务端显式环境扩展；Origin 仅同源或显式可信 Origin，拒绝简单表单与非精确 JSON，恶意 Host 返回固定 JSON 错误；摘要固定 8 字段且配置状态为 `UNCONFIGURED`/`CONFIGURED`，confirm 使用严格 bool。
+- 契约：补齐 settings 三 operationId 的 registry/DTO/OpenAPI/inventory/generated TS，补充安全与 lease 回归测试。
+- 验证：`uv run pytest tests/api_contract/test_autobangumi_settings_security.py src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config_test.py -q`（43 passed）；`uv run pytest tests/api_contract/test_inventory_consistency.py tests/api_contract/test_openapi_runtime_consistency.py -q`（14 passed）；`uv run migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck`、受影响 Ruff 均通过。
+- 遗留风险：未接入 US-321 probe 或业务 operation/mapping 绑定；未运行全量 pytest、Vitest、浏览器和真实上游，符合本轮限定。US-318/319 `passes` 保持 false，等待主 Agent 独立审核。
+
+## 2026-09-13 / US-318/319 修复 B2 第二轮
+
+- 首次定向审核失败：`test_endpoint_lifecycle.py::test_inventory_projects_lifecycle_registry` 的 inventory parser 仅接受 GET/POST，且生命周期表缺少 settings 三行；另发现 settings BadRequest handler 会把普通格式错误误标为 untrusted_host。
+- 修复：parser 支持 PUT/DELETE并补生命周期 inventory；Host 错误仅由 Werkzeug SecurityError handler 处理；配置摘要显式 serializer 与非空 connection_status DTO；request 配置模型字段 repr 隐藏；repository 读取 fd 全路径关闭，原子替换成功后清除 temp ownership，lease ref 字符串要求 canonical UUID。
+- 验证：repo/AB/settings/lifecycle/inventory/OpenAPI/DTO 定向组合 `103 passed`；`views_test.py` `186 passed`；受影响 Ruff、`migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck`、`git diff --check` 均通过。
+- 遗留风险：仍未运行全量 pytest、Vitest、浏览器、真实上游；US-321 probe 与 US-320+ 绑定未实现。US-318/319 passes 继续保持 false。
+
+## 2026-09-13 / US-318/319 修复 B2 第三轮
+
+- 审核补缺：settings 安全测试与 lease 测试覆盖不足，DTO connection_ref 未声明 UUID，Origin 未做 effective-port canonical，settings 错误登记包含尚未暴露的 connection_ref_conflict。
+- 修复：新增严格 canonical origin/Host helper（默认端口归一化、userinfo/path/query/fragment/非法 host 拒绝），移除 classifier/OpenAPI 不可达 ref conflict；DTO 使用 UUID，serializer 直接接收 AutoBangumiConfigRecord；扩充 API PUT→restart GET→DELETE/CAS/lease/corruption/sensitive/form/origin 测试与 repository lease/temp ownership 测试。
+- 验证：repo+AB+settings `49 passed`；inventory+openapi_runtime+DTO+lifecycle+settings/repo `109 passed`；views_test `186 passed`；OpenAPI connection_ref 为 `format: uuid`；Ruff、OpenAPI check、frontend api:check/typecheck、git diff check 通过。
+- 遗留风险：未运行全量 pytest、Vitest、浏览器、真实上游；US-321 probe 与 US-320+ 绑定未实现。US-318/319 passes 保持 false。
+
+## 2026-09-13 / US-318/319 trusted IPv6 精确匹配微修复
+
+- 审核反例：Werkzeug 对 `[fd00::2]` 在 trusted `[fd00::1]` 下出现宽松匹配；同时 `localhost:5000` 被错误识别为 IPv6。
+- 修复：canonical Host 先解析正常 host:port，仅多冒号裸值按 IPv6 处理；返回不含端口的精确域名/IPv4/括号 IPv6。Flask TRUSTED_HOSTS 保留第一层，所有 `/api/v1/` 在 IO 前增加 canonical trusted 集合精确第二层。
+- 验证：`_canonical_host` 实测 localhost/IPv4/IPv6 与端口；settings security `7 passed`；views_test `186 passed`；Ruff、OpenAPI 重生成/check、frontend api:check、git diff check 通过。DELETE OpenAPI storage_error 500 已补回。
+
+## 2026-09-13 / US-318/319 最终 IPv6 微修复
+
+- 实证：`create_app('testing')` 使用 `Host: [::1]` 被错误拒绝；根因是 trusted host 列表使用未加括号 IPv6。
+- 修复：canonical Host helper 支持裸/括号 IPv6，默认 loopback 使用 Flask 期望的 `[::1]`，显式 `[fd00::1]` 可配置并仍拒绝非法 host。
+- 验证：settings security `7 passed`；`views_test.py` `186 passed`；base/security Ruff、OpenAPI check、git diff check 通过。
+
+## 2026-09-13 / US-318/319 主 Agent 独立审核通过
+
+- 审核结论：部署端 AB 配置 repository 与配置管理 API 满足本批 PRD；US-318、US-319 更新为 `passes=true`。US-320 未实现，保持 `false`，本批停止且不进入下一批。
+- 独立验证：`uv run pytest tests/api_contract/test_autobangumi_settings_security.py src/storage_engine/controllers/autobangumi_config_repository_test.py src/ab_engine/controllers/ab_config_test.py tests/api_contract/test_inventory_consistency.py tests/api_contract/test_openapi_runtime_consistency.py tests/api_contract/test_dto_contracts.py tests/api_contract/test_endpoint_lifecycle.py tests/api_contract/test_openapi_generation.py tests/api_contract/test_golden_contracts.py src/apps/migu_orca_web/views_test.py -q` → `378 passed`。
+- 独立静态与契约检查：受影响 Python 文件 Ruff 通过；`uv run migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck`、`git diff --check` 均通过。
+- 独立安全反例：默认/显式 IPv6 与端口 Host 正常；只信任 `[fd00::1]` 时 `[fd00::2]` 和恶意 Host 均返回固定 400；显式 Vite Origin 可用，`application/problem+json` 被拒绝；PUT/GET 响应、模型 repr 均不含 endpoint、账号或秘密 canary；OpenAPI `connection_ref` 为 UUID 格式。
+- 验证边界：未运行全量 pytest、Vitest、浏览器或真实上游；本批没有 UI 改动，完整门禁留到 Stage 收尾。US-321 探测与 US-320 operation/mapping 连接绑定仍未实现。

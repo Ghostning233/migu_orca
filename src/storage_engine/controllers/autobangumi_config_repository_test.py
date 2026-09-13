@@ -73,6 +73,40 @@ def test_stored_config_rejects_ambiguous_or_unsafe_roots(value: str) -> None:
     assert error.value.details == {"field": "base_url"}
 
 
+@pytest.mark.parametrize("value", ["mailto:80", "ftp:80", "http://", "http://bad host:80"])
+def test_service_root_rejects_pseudo_schemes_and_malformed_hosts(value: str) -> None:
+    with pytest.raises(Stage1Error):
+        normalize_service_root(value)
+
+
+def test_save_revalidates_directly_constructed_mixed_credentials(tmp_path: Path) -> None:
+    repository = AutoBangumiConfigRepository(tmp_path / "private-config")
+    malformed = StoredAutoBangumiConfig(
+        base_url="http://ab.example.invalid",
+        auth_mode="password",
+        username="u",
+        password="p",
+        token="unexpected",
+    )
+    with pytest.raises(Stage1Error):
+        repository.save(malformed, expected_configuration_revision=0)
+
+
+def test_tombstone_and_uuid_must_have_complete_canonical_shape(tmp_path: Path) -> None:
+    repository = AutoBangumiConfigRepository(tmp_path / "private-config")
+    repository.save(_config(), expected_configuration_revision=0)
+    payload = json.loads(repository.path.read_text(encoding="utf-8"))
+    payload["connection_ref"] = payload["connection_ref"].upper()
+    repository.path.write_text(json.dumps(payload), encoding="utf-8")
+    repository.path.chmod(0o600)
+    with pytest.raises(Stage1Error):
+        repository.load()
+    repository.path.write_text(json.dumps({"version": 1, "configuration_revision": 2, "configured": False}), encoding="utf-8")
+    repository.path.chmod(0o600)
+    with pytest.raises(Stage1Error):
+        repository.load()
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -133,6 +167,35 @@ def test_save_rebuild_delete_and_cas_are_revision_bound(tmp_path: Path) -> None:
     assert rebuilt.connection_ref != saved.connection_ref
 
 
+def test_shared_repository_lease_blocks_mutation_and_releases(tmp_path: Path) -> None:
+    first = AutoBangumiConfigRepository(tmp_path / "private-config")
+    second = AutoBangumiConfigRepository(tmp_path / "private-config")
+    saved = first.save(_config(), expected_configuration_revision=0)
+    with first.acquire_lease(connection_ref=saved.connection_ref, configuration_revision=1) as lease:
+        assert lease.record == saved
+        with pytest.raises(Stage1Error) as error:
+            second.delete(expected_configuration_revision=1)
+        assert error.value.error_type == "connection_in_use"
+    deleted = second.delete(expected_configuration_revision=1)
+    assert deleted.configuration_revision == 2
+
+
+def test_lease_blocks_save_and_rejects_stale_or_unconfigured_refs(tmp_path: Path) -> None:
+    repository = AutoBangumiConfigRepository(tmp_path / "private-config")
+    with pytest.raises(Stage1Error):
+        repository.acquire_lease()
+    saved = repository.save(_config(), expected_configuration_revision=0)
+    with pytest.raises(Stage1Error):
+        repository.acquire_lease(connection_ref=str(saved.connection_ref).upper(), configuration_revision=1)
+    with pytest.raises(Stage1Error):
+        repository.acquire_lease(connection_ref="00000000-0000-0000-0000-000000000000", configuration_revision=1)
+    with pytest.raises(Stage1Error):
+        repository.acquire_lease(connection_ref=saved.connection_ref, configuration_revision=0)
+    with pytest.raises(RuntimeError), repository.acquire_lease(connection_ref=saved.connection_ref, configuration_revision=1):
+        raise RuntimeError("release")
+    repository.delete(expected_configuration_revision=1)
+
+
 def test_atomic_write_failure_keeps_last_successful_value(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -157,6 +220,22 @@ def test_atomic_write_failure_keeps_last_successful_value(
     assert error.value.error_type == "storage_error"
     assert repository.load() == saved
     assert not (repository.root / ".autobangumi.json.tmp").exists()
+
+
+def test_successful_replace_does_not_remove_recreated_temp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repository = AutoBangumiConfigRepository(tmp_path / "private-config")
+    repository.save(_config(), expected_configuration_revision=0)
+    original_replace = os.replace
+
+    def replace_and_recreate(source: Path, target: Path) -> None:
+        original_replace(source, target)
+        temp = target.parent / ".autobangumi.json.tmp"
+        temp.write_text("attacker", encoding="utf-8")
+        temp.chmod(0o600)
+
+    monkeypatch.setattr(os, "replace", replace_and_recreate)
+    repository.save(_config(), expected_configuration_revision=1)
+    assert (repository.root / ".autobangumi.json.tmp").read_text(encoding="utf-8") == "attacker"
 
 
 def test_root_and_file_symlinks_fail_closed(tmp_path: Path) -> None:
