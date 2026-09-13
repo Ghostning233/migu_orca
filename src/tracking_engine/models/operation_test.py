@@ -9,6 +9,7 @@ serialized operations never carry sensitive content fields.
 """
 
 from dataclasses import replace
+from uuid import UUID
 
 import pytest
 
@@ -308,6 +309,56 @@ def test_storage_dict_round_trip_preserves_all_public_fields() -> None:
         "updated_at",
         "completed_at",
     }
+
+
+def test_v3_operation_round_trip_keeps_only_opaque_connection_ref() -> None:
+    connection_ref = "11111111-1111-4111-8111-111111111111"
+    operation = create_tracking_operation(
+        tracking_id=TRACKING_ID,
+        idempotency_key=IDEMPOTENCY_KEY,
+        expected_revision=5,
+        request_fingerprint=FINGERPRINT,
+        connection_ref=UUID(connection_ref),
+        now=NOW,
+    )
+
+    payload = operation_to_storage_dict(operation)
+    assert payload["schema_version"] == 3
+    assert payload["connection_ref"] == connection_ref
+    assert operation_from_storage_dict(payload) == operation
+    assert "secret" not in str(payload)
+
+
+def test_old_operation_versions_remain_readable_without_connection_binding() -> None:
+    old = operation_to_storage_dict(_operation())
+    for version in (1, 2):
+        fixture = {key: value for key, value in old.items() if key != "schema_version"}
+        fixture["schema_version"] = version
+        if version == 2:
+            fixture["operation"] = "MODIFY"
+            fixture.update({
+                "target_scope": "SUBSCRIPTION",
+                "previous_tracking_status": "ACTIVE",
+                "expected_external_fingerprint": "sha256:" + "a" * 64,
+            })
+        restored = operation_from_storage_dict(fixture)
+        assert restored.schema_version == version
+        assert restored.connection_ref is None
+
+
+@pytest.mark.parametrize(
+    "bad_ref", ["11111111-1111-4111-8111-11111111111", "abcdefab-cdef-4abc-8def-abcdefabcdef".upper(), "https://secret.invalid"]
+)
+def test_operation_rejects_noncanonical_connection_ref(bad_ref: str) -> None:
+    with pytest.raises(ValueError):
+        create_tracking_operation(
+            tracking_id=TRACKING_ID,
+            idempotency_key=IDEMPOTENCY_KEY,
+            expected_revision=5,
+            request_fingerprint=FINGERPRINT,
+            connection_ref=bad_ref,
+            now=NOW,
+        )
 
 
 def test_from_storage_round_trip_terminal_operation() -> None:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
+from uuid import UUID
 
 from ab_engine.models.management import ExternalSubscription
 from tracking_engine.models.tracking import (
@@ -53,10 +54,21 @@ class ReconcileDecision:
     subscription_id: str | None = None
     rss_ids: tuple[str, ...] = ()
 
-    def safe_mapping(self) -> dict[str, Any]:
-        """Return only fields permitted in ``ExternalMapping`` v1."""
-        return {
-            "schema_version": 1,
+    def safe_mapping(self, *, connection_ref: str | UUID | None = None) -> dict[str, Any]:
+        """Return a v1 legacy or v2 connection-bound safe mapping."""
+        if connection_ref is not None:
+            if isinstance(connection_ref, UUID):
+                connection_ref = str(connection_ref)
+            elif not isinstance(connection_ref, str):
+                raise ValueError("connection_ref must be a canonical UUID")
+            try:
+                parsed_ref = UUID(connection_ref)
+            except (ValueError, AttributeError):
+                raise ValueError("connection_ref must be a canonical UUID") from None
+            if str(parsed_ref) != connection_ref:
+                raise ValueError("connection_ref must be a canonical UUID")
+        mapping = {
+            "schema_version": 2 if connection_ref is not None else 1,
             "adapter": "legacy_3_1",
             "subscription_id": self.subscription_id,
             "rss_ids": list(self.rss_ids),
@@ -66,6 +78,9 @@ class ReconcileDecision:
             "missing_sync_count": 0,
             "last_verified_at": None,
         }
+        if connection_ref is not None:
+            mapping["connection_ref"] = connection_ref
+        return mapping
 
 
 def normalize_match_text(value: str | None) -> str | None:

@@ -52,6 +52,16 @@ def test_external_id_has_priority_and_produces_safe_mapping() -> None:
     assert "https://ab.invalid" not in repr(result)
 
 
+def test_reconcile_can_emit_a_connection_bound_mapping_without_external_details() -> None:
+    connection_ref = "11111111-1111-4111-8111-111111111111"
+    mapping = reconcile_subscription(external(), [local()]).safe_mapping(
+        connection_ref=connection_ref
+    )
+    assert mapping["schema_version"] == 2
+    assert mapping["connection_ref"] == connection_ref
+    assert "https://ab.invalid" not in str(mapping)
+
+
 def test_unique_exact_fields_match_and_conflicting_rss_does_not_match() -> None:
     result = reconcile_subscription(external(), [local()])
     assert result.match_reason == "EXACT_FIELDS"

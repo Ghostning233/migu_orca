@@ -48,6 +48,8 @@ TRACKING_ID = "trk_ba8abbe28fb5345ceccabd82850ee091"
 SECOND_TRACKING_ID = "trk_0f8fad5bd9cb469fa16570867728950e"
 FINGERPRINT = "sha256:abc123"
 SECOND_FINGERPRINT = "sha256:def456"
+CONNECTION_REF = "11111111-1111-4111-8111-111111111111"
+SECOND_CONNECTION_REF = "22222222-2222-4222-8222-222222222222"
 
 
 def _config(tmp_path: Path):
@@ -62,6 +64,7 @@ def _bind(
     expected_revision: int = 5,
     request_fingerprint: str = FINGERPRINT,
     operation: str = TRACKING_OPERATION_KIND_SUBMIT,
+    connection_ref: str | None = None,
     now: str = "2026-09-08T00:00:00+00:00",
 ) -> tuple[TrackingOperation, bool]:
     return bind_tracking_operation(
@@ -71,6 +74,7 @@ def _bind(
         idempotency_key=idempotency_key,
         expected_revision=expected_revision,
         request_fingerprint=request_fingerprint,
+        connection_ref=connection_ref,
         now=now,
     )
 
@@ -141,6 +145,18 @@ def test_same_key_different_fingerprint_raises_conflict(tmp_path: Path) -> None:
         load_tracking_operation(config, OPERATION_ID).request_fingerprint
         == FINGERPRINT
     )
+
+
+def test_same_key_different_connection_ref_raises_conflict(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    first, _ = _bind(config, connection_ref=CONNECTION_REF)
+
+    with pytest.raises(Stage1Error) as error:
+        _bind(config, connection_ref=SECOND_CONNECTION_REF)
+
+    assert error.value.error_type == "tracking_idempotency_conflict"
+    assert load_tracking_operation(config, OPERATION_ID).connection_ref == CONNECTION_REF
+    assert first.connection_ref == CONNECTION_REF
 
 
 def test_same_key_different_operation_kind_raises_conflict(tmp_path: Path) -> None:
@@ -322,6 +338,25 @@ def test_compare_and_swap_rejects_immutable_binding_change(tmp_path: Path) -> No
 
     assert error.value.error_type == "invalid_tracking_operation"
     assert error.value.details["field"] == "tracking_id"
+
+
+def test_compare_and_swap_rejects_connection_ref_binding_change(tmp_path: Path) -> None:
+    config = _config(tmp_path)
+    prepared, _ = _bind(config, connection_ref=CONNECTION_REF)
+    in_progress = transition_tracking_operation(
+        prepared,
+        state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+        now="2026-09-08T00:01:00+00:00",
+    )
+    tampered = replace(in_progress, connection_ref=SECOND_CONNECTION_REF)
+
+    with pytest.raises(Stage1Error) as error:
+        compare_and_swap_tracking_operation(
+            config, prepared.operation_id, prepared.state, tampered
+        )
+
+    assert error.value.error_type == "invalid_tracking_operation"
+    assert error.value.details["field"] == "connection_ref"
 
 
 def test_compare_and_swap_rejects_operation_id_mismatch(tmp_path: Path) -> None:

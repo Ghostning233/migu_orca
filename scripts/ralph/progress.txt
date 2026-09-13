@@ -83,3 +83,13 @@ Started: 2026-09-13
 - 独立静态与契约检查：受影响 Python 文件 Ruff 通过；`uv run migu-orca-openapi --check`、frontend `npm run api:check`、`npm run typecheck`、`git diff --check` 均通过。
 - 独立安全反例：默认/显式 IPv6 与端口 Host 正常；只信任 `[fd00::1]` 时 `[fd00::2]` 和恶意 Host 均返回固定 400；显式 Vite Origin 可用，`application/problem+json` 被拒绝；PUT/GET 响应、模型 repr 均不含 endpoint、账号或秘密 canary；OpenAPI `connection_ref` 为 UUID 格式。
 - 验证边界：未运行全量 pytest、Vitest、浏览器或真实上游；本批没有 UI 改动，完整门禁留到 Stage 收尾。US-321 探测与 US-320 operation/mapping 连接绑定仍未实现。
+
+## 2026-09-13 / US-320
+
+- 范围：TrackingOperation 升级 schema v3，新增 canonical UUID `connection_ref` 并纳入同键幂等绑定与 CAS 不可变字段；保留 operation v1/v2 读取及旧未绑定 legacy 分支。
+- 范围：ExternalMapping 升级 schema v2，新增必需 canonical UUID `connection_ref`；保留 mapping v1 原样读取，旧同步入口继续生成 legacy v1，新连接引用可生成 v2；reconcile 支持连接绑定映射输出。
+- 范围：管理目标在使用 v2 mapping 时要求当前精确 connection_ref，缺失、失配或旧未绑定映射统一安全拒绝，不将当前配置猜测绑定旧对象；没有向公共 serializer 暴露外部 ID、地址、账号或秘密。
+- 文件：`src/tracking_engine/models/operation.py`、`src/tracking_engine/models/tracking.py`、`src/storage_engine/controllers/operation_repository.py`、`src/ab_engine/controllers/reconcile.py`、`src/tracking_engine/controllers/management_target.py`、对应模型/repository/controller 测试及 `scripts/ralph/prd.json`。
+- 验证：核心模型/repository/target/reconcile 定向测试 `155 passed`；受影响 engine/storage/Web 管理回归 `488 passed`；API/追番回归 `57 passed`；全 `src` Ruff、`uv run python -m compileall -q src`、`git diff --check`、frontend `npm run typecheck` 均通过。
+- 遗留风险：US-321 起的保存连接探测、submit/sync/management/recovery service 对新 ref 的 HTTP 原子切换尚未实现；旧入口仍按 legacy 未绑定语义运行，需后续 story 在取得保存配置快照后传递并校验 ref。
+- 可复用结论：schema 版本校验必须按版本使用字段白名单；旧 operation/mapping 读取保留原 schema/ref 缺失状态，只有显式新连接入口生成 v3/v2；管理外部写前若无当前精确 ref 只能返回固定重新核验原因。

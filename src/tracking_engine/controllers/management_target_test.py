@@ -41,6 +41,62 @@ def test_mapping_drift_is_rejected_before_a_write() -> None:
     assert exc.value.error_type == "tracking_target_drift"
 
 
+def test_management_target_requires_the_current_connection_bound_mapping() -> None:
+    current = "11111111-1111-4111-8111-111111111111"
+    record = TrackingRecord(
+        tracking_id="trk_test",
+        external_mapping={
+            "schema_version": 2,
+            "adapter": "legacy_3_1",
+            "subscription_id": "sub-1",
+            "rss_ids": ["12", "2"],
+            "match_reason": "EXTERNAL_ID",
+            "external_deleted": False,
+            "enabled": True,
+            "missing_sync_count": 0,
+            "last_verified_at": None,
+            "connection_ref": current,
+        },
+    )
+    target = resolve_management_target(
+        record,
+        "SUBSCRIPTION",
+        [ExternalSubscription("sub-1", "番剧", 1, "组")],
+        [],
+        connection_ref=current,
+    )
+    assert target.subscription is not None
+
+    with pytest.raises(Stage1Error) as missing_current:
+        resolve_management_target(
+            record,
+            "SUBSCRIPTION",
+            [ExternalSubscription("sub-1", "番剧", 1, "组")],
+            [],
+        )
+    assert missing_current.value.error_type == "tracking_mapping_reverification_required"
+
+    with pytest.raises(Stage1Error) as mismatch:
+        resolve_management_target(
+            record,
+            "SUBSCRIPTION",
+            [ExternalSubscription("sub-1", "番剧", 1, "组")],
+            [],
+            connection_ref="22222222-2222-4222-8222-222222222222",
+        )
+    assert mismatch.value.error_type == "tracking_mapping_reverification_required"
+
+    with pytest.raises(Stage1Error) as legacy:
+        resolve_management_target(
+            _record(),
+            "SUBSCRIPTION",
+            [ExternalSubscription("sub-1", "番剧", 1, "组")],
+            [],
+            connection_ref=current,
+        )
+    assert legacy.value.error_type == "tracking_mapping_reverification_required"
+
+
 @pytest.mark.parametrize(
     "patch",
     [
