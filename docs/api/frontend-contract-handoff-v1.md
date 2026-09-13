@@ -25,7 +25,7 @@ F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。S
 
 ## 状态与动作
 
-列表/详情是本地 `TrackingRecord` 的安全投影，`available_actions` 只表达本地已知可执行性，不是外部授权。页面应使用 generated `code`、`style` 和 `requires_confirmation`，并在每次 POST 中让服务端重新探测 request-scoped capability。
+列表/详情是本地 `TrackingRecord` 的安全投影，`available_actions` 只表达本地已知可执行性，不是外部授权。页面应使用 generated `code`、`style` 和 `requires_confirmation`，并在每次 POST 中让服务端重新探测 request-scoped capability。提交/重试还必须检查 generated capability 的 `subscription_submit=SUPPORTED`，且 probe_status 为 VERIFIED；API Token、未知或失败探测保持不可执行。
 
 | 动作 | operationId | 需要 `confirm` | revision / 幂等 | 外部能力与恢复 |
 | --- | --- | --- | --- | --- |

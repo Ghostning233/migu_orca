@@ -64,13 +64,13 @@ async function focusSelection(): Promise<void> {
   ;(selected ?? listContainer.value)?.focus({ preventScroll: true })
 }
 
-function syncSelection(): void {
+function syncSelection(forceAbsentCheck = false): void {
   const queryId = queryTrackingId()
   const next = queryId && items.value.some(
     (item) => item.tracking_id === queryId && item.status !== 'EXTERNAL_DELETED',
   ) ? queryId : ''
   selectedTrackingId.value = next
-  if (queryId && !next && !loading.value) {
+  if (queryId && !next && (!loading.value || forceAbsentCheck)) {
     void router.replace(routeLocation('tracking'))
     void focusSelection()
   }
@@ -87,8 +87,8 @@ async function loadList(): Promise<void> {
     if (sequence !== loadSequence) return
     const previous = selectedTrackingId.value
     items.value = result?.items ?? []
-    syncSelection()
-    if (previous && selectedTrackingId.value !== previous) await focusSelection()
+    syncSelection(true)
+    if (selectedTrackingId.value && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
     if (sequence !== loadSequence) return
     failed.value = true
@@ -96,7 +96,6 @@ async function loadList(): Promise<void> {
   } finally {
     if (sequence === loadSequence) {
       loading.value = false
-      syncSelection()
     }
   }
 }
@@ -111,15 +110,22 @@ function clearFilters(): void {
   statusFilter.value = ''
 }
 
-onMounted(() => { void loadList() })
+onMounted(() => {
+  void loadList().then(() => {
+    if (selectedTrackingId.value) void focusSelection()
+  })
+})
 watch(() => route.query.tracking_id, () => {
   syncSelection()
   void focusSelection()
 })
+watch(selectedTrackingId, (trackingId) => {
+  if (trackingId) void focusSelection()
+}, { flush: 'post' })
 </script>
 
 <template>
-  <main id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
+  <section id="tracking-overview" class="tracking-overview" aria-labelledby="tracking-heading">
     <PanelSection title="追番管理" class="tracking-header">
       <template #actions>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList">刷新列表</BaseButton>
@@ -175,7 +181,7 @@ watch(() => route.query.tracking_id, () => {
         <EmptyState v-else message="选择一条追番记录查看安全检查器。" />
       </aside>
     </section>
-  </main>
+  </section>
 </template>
 
 <style scoped>

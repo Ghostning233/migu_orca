@@ -1169,6 +1169,7 @@ class AutoBangumiCapabilitiesDTO(_StrictBase):
     adapter: Literal["legacy_3_1", "api_token"] | None
     subscription_list: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
     subscription_detail: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
+    subscription_submit: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
     subscription_modify: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
     subscription_enable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]
     subscription_disable: Literal["SUPPORTED", "UNSUPPORTED", "UNKNOWN"]

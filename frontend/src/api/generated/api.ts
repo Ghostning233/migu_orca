@@ -765,6 +765,7 @@ export interface operations {
                      *         "adapter": "示例",
                      *         "subscription_list": "示例",
                      *         "subscription_detail": "示例",
+                     *         "subscription_submit": "示例",
                      *         "subscription_modify": "示例",
                      *         "subscription_enable": "示例",
                      *         "subscription_disable": "示例",
@@ -805,6 +806,11 @@ export interface operations {
                              * @enum {string}
                              */
                             subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                            /**
+                             * Subscription Submit
+                             * @enum {string}
+                             */
+                            subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
                             /**
                              * Subscription Modify
                              * @enum {string}
@@ -5355,6 +5361,7 @@ export interface operations {
                      *           "adapter": "示例",
                      *           "subscription_list": "示例",
                      *           "subscription_detail": "示例",
+                     *           "subscription_submit": "示例",
                      *           "subscription_modify": "示例",
                      *           "subscription_enable": "示例",
                      *           "subscription_disable": "示例",
@@ -5443,6 +5450,11 @@ export interface operations {
                                  * @enum {string}
                                  */
                                 subscription_detail: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
+                                /**
+                                 * Subscription Submit
+                                 * @enum {string}
+                                 */
+                                subscription_submit: "SUPPORTED" | "UNSUPPORTED" | "UNKNOWN";
                                 /**
                                  * Subscription Modify
                                  * @enum {string}
@@ -12368,15 +12380,77 @@ export interface operations {
                         title?: string | null;
                         season?: number | null;
                         subtitle_group?: string | null;
-                        filter_rule?: {
+                        filter_rule?: null | ({
                             must_contain?: string | null;
                             must_not_contain?: string | null;
                             use_regex?: boolean | null;
                             case_sensitive?: boolean | null;
-                        } | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
                         offset?: number | null;
                         expected_folder_name?: string | null;
-                    };
+                    } & ({
+                        title: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | Record<string, never>;
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | Record<string, never>;
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group: string | null;
+                        filter_rule?: null | Record<string, never>;
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule: null | Record<string, never>;
+                        offset?: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | Record<string, never>;
+                        offset: number | null;
+                        expected_folder_name?: string | null;
+                    } | {
+                        title?: string | null;
+                        season?: number | null;
+                        subtitle_group?: string | null;
+                        filter_rule?: null | Record<string, never>;
+                        offset?: number | null;
+                        expected_folder_name: string | null;
+                    });
                 } | {
                     /** @constant */
                     target_scope: "ASSOCIATED_RSS";
@@ -12398,7 +12472,19 @@ export interface operations {
                         name?: string | null;
                         aggregate?: boolean | null;
                         parser?: string | null;
-                    };
+                    } & ({
+                        name: string | null;
+                        aggregate?: boolean | null;
+                        parser?: string | null;
+                    } | {
+                        name?: string | null;
+                        aggregate: boolean | null;
+                        parser?: string | null;
+                    } | {
+                        name?: string | null;
+                        aggregate?: boolean | null;
+                        parser: string | null;
+                    });
                 };
             };
         };

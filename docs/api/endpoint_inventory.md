@@ -106,7 +106,7 @@
 
 | 方法 | OpenAPI path | 生命周期 | 替代关系或保留原因 | 数据权威 |
 | --- | --- | --- | --- | --- |
-| POST | `/api/v1/autobangumi/capabilities` | PRIMARY | 只读能力探测；管理写入时重新探测 | Capability probe |
+| POST | `/api/v1/autobangumi/capabilities` | PRIMARY | 只读能力探测；管理写入时重新探测；`subscription_submit` 仅由已验证的 3.1.18 password/legacy probe 支持 | Capability probe |
 | POST | `/api/v1/autobangumi/test-connection` | PRIMARY | 连接诊断，不替代管理写入校验 | Request-scoped probe |
 | POST | `/api/v1/qbittorrent/test-connection` | PRIMARY | 连接诊断 | Request-scoped probe |
 | GET | `/api/v1/preferences` | PRIMARY | 偏好读取 | Preference store |

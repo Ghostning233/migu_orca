@@ -78,6 +78,8 @@ generated 类型。F-G 设置简化、全局连接状态与最终发布收尾继
 3. 动作入口只来自当前详情 `available_actions`；未知 code/style/scope 一律不渲染并显示安全只读提示。
 4. 外部动作还必须满足当前页面会话 capability 对应键为 `SUPPORTED`；`UNKNOWN`、`UNSUPPORTED`、探测
    失败都不得显示可执行写按钮。客户端隐藏不是安全边界，服务端仍在每次 POST 内重新探测。
+   `SUBMIT`/`RETRY` 额外要求 `subscription_submit=SUPPORTED` 且本次 3.1.18 password/legacy probe 已验证；
+   API Token、未知或失败探测均保持不可执行。
 5. `EXTERNAL_ONLY` 可显示“仅存在于 Auto Bangumi”，没有 `request_id` 时不提供返回本地方案。
 
 ### D38-03：正式布局、筛选与选择

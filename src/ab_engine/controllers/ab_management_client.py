@@ -48,6 +48,7 @@ class Legacy31ManagementClient:
             capabilities = AutoBangumiCapabilities(
                 probe_status="VERIFIED", version=version, adapter="legacy_3_1",
                 subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
+                subscription_submit="SUPPORTED",
                 subscription_modify="SUPPORTED", subscription_enable="SUPPORTED",
                 subscription_disable="SUPPORTED", subscription_delete="SUPPORTED",
                 rss_list="SUPPORTED", rss_modify="SUPPORTED", rss_enable="SUPPORTED",
@@ -217,6 +218,7 @@ def _unknown_capabilities(adapter: Literal["legacy_3_1", "api_token"], version: 
     return AutoBangumiCapabilities(
         probe_status="VERIFIED", version=version, adapter=adapter,
         subscription_list="UNKNOWN", subscription_detail="UNKNOWN",
+        subscription_submit="UNKNOWN",
         rss_list="UNKNOWN", external_verify="UNKNOWN",
         safe_message="已完成连接探测，但未验证可用的管理能力",
     )
@@ -226,6 +228,7 @@ def _verified_legacy_capabilities(version: str) -> AutoBangumiCapabilities:
     return AutoBangumiCapabilities(
         probe_status="VERIFIED", version=version, adapter="legacy_3_1",
         subscription_list="SUPPORTED", subscription_detail="SUPPORTED",
+        subscription_submit="SUPPORTED",
         subscription_modify="SUPPORTED", subscription_enable="SUPPORTED",
         subscription_disable="SUPPORTED", subscription_delete="SUPPORTED",
         rss_list="SUPPORTED", rss_modify="SUPPORTED", rss_enable="SUPPORTED",
@@ -240,6 +243,7 @@ def failed_capabilities(*, adapter: Literal["legacy_3_1", "api_token"] | None = 
     return AutoBangumiCapabilities(
         probe_status="FAILED", version=None, adapter=adapter,
         subscription_list="UNKNOWN", subscription_detail="UNKNOWN",
+        subscription_submit="UNKNOWN",
         rss_list="UNKNOWN", external_verify="UNKNOWN",
         safe_message="Auto Bangumi 能力探测失败，已安全关闭未验证能力",
     )

@@ -88,13 +88,14 @@ def test_available_actions_empty_when_no_state_change_possible() -> None:
 
 
 def test_available_actions_expose_stage31_management_actions() -> None:
-    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_ACTIVE)] == [
+    mapping = {"subscription_id": "opaque-sub", "rss_ids": ["opaque-rss"]}
+    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_ACTIVE, mapping)] == [
         "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
     ]
-    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_DISABLED)] == [
+    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_DISABLED, mapping)] == [
         "SET_ENABLED", "DELETE_EXTERNAL",
     ]
-    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_EXTERNAL_ONLY)] == [
+    assert [item["code"] for item in tracking_available_actions(TRACKING_STATUS_EXTERNAL_ONLY, mapping)] == [
         "MODIFY", "SET_ENABLED", "REFRESH_RSS", "DELETE_EXTERNAL",
     ]
 

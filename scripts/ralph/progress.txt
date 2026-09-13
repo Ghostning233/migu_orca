@@ -44,4 +44,9 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - tracking 正式 query 只接受单一公开 `tracking_id`；列表仅由服务端返回项目确认选择，非法/不存在/已删除值清理且不自动切换。
   - UI 状态使用背景、边界、指示条与 aria-current，不使用 checkbox 或批量动作；检查器/详情和外部动作留给后续 stories。
   - 按 dev-browser 运行真实 Chromium 定向测试（2 passed）；定向 TrackingView/路由 Vitest（28 passed）、typecheck、单文件 lint 与 build 均通过。
+
+## [2026-09-13 09:35:00 CST] - Stage 38 审核修复（US-303～US-305）
+- 修复管理动作按 action 精确投影 target scopes；前端严格执行服务端 scope 与 capability 交集，SET_ENABLED 按当前方向判断，SUBMIT/RETRY 增加已验证的 `subscription_submit` 门控。
+- 修复 tracking_id/batch_id 互斥兼容路由、列表失败时保留合法选择、初次深链聚焦、真实时间稳定排序，并将 TrackingView 外层改为非嵌套 `section`。
+- OpenAPI/generated modify patch 联合现在编译期拒绝空 patch，filter_rule 非 null 也必须至少一个字段；同步 PRD、handoff 与契约测试。
 ---

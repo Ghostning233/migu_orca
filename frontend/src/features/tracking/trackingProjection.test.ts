@@ -26,7 +26,7 @@ function item(overrides: Partial<TrackingItem> = {}): TrackingItem {
 function capabilities(overrides: Partial<CapabilityResult> = {}): CapabilityResult {
   return {
     probe_status: 'VERIFIED', version: '3.1.18', adapter: 'legacy_3_1',
-    subscription_list: 'SUPPORTED', subscription_detail: 'SUPPORTED', subscription_modify: 'SUPPORTED',
+    subscription_list: 'SUPPORTED', subscription_detail: 'SUPPORTED', subscription_submit: 'SUPPORTED', subscription_modify: 'SUPPORTED',
     subscription_enable: 'SUPPORTED', subscription_disable: 'SUPPORTED', subscription_delete: 'SUPPORTED',
     rss_list: 'SUPPORTED', rss_modify: 'SUPPORTED', rss_enable: 'SUPPORTED', rss_disable: 'SUPPORTED',
     rss_delete: 'SUPPORTED', rss_refresh: 'SUPPORTED', external_verify: 'SUPPORTED',
@@ -60,10 +60,17 @@ describe('tracking projection (US-304)', () => {
     expect(filterTrackingItems(rows, { query: 'tracking-1' })).toHaveLength(0)
   })
 
-  it('sorts deterministically without mutating server order', () => {
-    const rows = [item({ tracking_id: 'b' }), item({ tracking_id: 'a' })]
-    expect(sortTrackingItems(rows).map((row) => row.tracking_id)).toEqual(['a', 'b'])
-    expect(rows.map((row) => row.tracking_id)).toEqual(['b', 'a'])
+  it('sorts parsed timestamps and keeps invalid/tied server order', () => {
+    const rows = [
+      item({ tracking_id: 'old', updated_at: '2026-09-12T08:00:00-08:00' }),
+      item({ tracking_id: 'new', updated_at: '2026-09-13T00:30:00+08:00' }),
+      item({ tracking_id: 'invalid-a', updated_at: 'not-a-date' }),
+      item({ tracking_id: 'invalid-b', updated_at: null }),
+    ]
+    expect(sortTrackingItems(rows).map((row) => row.tracking_id)).toEqual([
+      'new', 'old', 'invalid-a', 'invalid-b',
+    ])
+    expect(rows.map((row) => row.tracking_id)).toEqual(['old', 'new', 'invalid-a', 'invalid-b'])
   })
 
   it('fails closed for unknown action/style/scope and unsupported capability', () => {
@@ -75,7 +82,7 @@ describe('tracking projection (US-304)', () => {
     ] })
     expect(executableTrackingActions(rows, capabilities())).toHaveLength(1)
     expect(executableTrackingActions(rows, capabilities({ subscription_modify: 'UNKNOWN' }))).toHaveLength(0)
-    expect(executableTrackingActions(item({ available_actions: [action({ code: 'SUBMIT', target_scopes: [] })] }))).toHaveLength(1)
+    expect(executableTrackingActions(item({ available_actions: [action({ code: 'SUBMIT', target_scopes: [] })] }))).toHaveLength(0)
   })
 
   it('creates one revision-bound opaque intent and reuses its key on transport retry', () => {
@@ -86,5 +93,25 @@ describe('tracking projection (US-304)', () => {
     expect(intent?.idempotencyKey).toMatch(/^[A-Za-z0-9-]{8,128}$/)
     expect(reuseTrackingActionIntent(intent!)).toBe(intent)
     expect(createTrackingActionIntent(current, candidate, 'ASSOCIATED_RSS', capabilities())).toBeNull()
+  })
+
+  it('projects only supported scopes and gates submit on verified capability', () => {
+    const current = item({ available_actions: [
+      action({ target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }),
+      action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }),
+      action({ code: 'SUBMIT', target_scopes: [] }),
+    ] })
+    const projected = executableTrackingActions(current, capabilities({ rss_modify: 'UNKNOWN', subscription_submit: 'UNSUPPORTED' }))
+    expect(projected[0]?.target_scopes).toEqual(['SUBSCRIPTION'])
+    expect(projected.some((candidate) => candidate.code === 'SUBMIT')).toBe(false)
+    expect(createTrackingActionIntent(current, projected[0]!, 'ASSOCIATED_RSS', capabilities({ rss_modify: 'UNKNOWN' }))).toBeNull()
+    expect(createTrackingActionIntent(current, { ...projected[0]!, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'] }, 'ASSOCIATED_RSS', capabilities({ rss_modify: 'UNKNOWN' }))).toBeNull()
+  })
+
+  it('uses disable capability for active and enable capability for disabled', () => {
+    const active = item({ status: 'ACTIVE', available_actions: [action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION'] })] })
+    const disabled = item({ status: 'DISABLED', available_actions: [action({ code: 'SET_ENABLED', target_scopes: ['SUBSCRIPTION'] })] })
+    expect(executableTrackingActions(active, capabilities({ subscription_enable: 'UNKNOWN' }))).toHaveLength(1)
+    expect(executableTrackingActions(disabled, capabilities({ subscription_enable: 'UNKNOWN' }))).toHaveLength(0)
   })
 })

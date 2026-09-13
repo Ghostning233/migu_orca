@@ -103,17 +103,22 @@ export function filterTrackingItems(
   })
 }
 
-/** Stable local ordering with tracking_id as the final deterministic tie-break. */
+/** Sort valid timestamps in real time; invalid/missing values stay at the end. */
 export function sortTrackingItems(items: readonly TrackingItem[]): TrackingItem[] {
   return items.slice().sort((left, right) => {
-    const updated = String(right.updated_at ?? '').localeCompare(String(left.updated_at ?? ''))
-    if (updated) return updated
-    const title = String(left.title ?? '').localeCompare(String(right.title ?? ''), 'zh-CN')
-    if (title) return title
-    const status = String(left.status ?? '').localeCompare(String(right.status ?? ''), 'en')
-    if (status) return status
-    return String(left.tracking_id).localeCompare(String(right.tracking_id), 'en')
+    const leftTime = parseUpdatedAt(left.updated_at)
+    const rightTime = parseUpdatedAt(right.updated_at)
+    if (leftTime === null && rightTime === null) return 0
+    if (leftTime === null) return 1
+    if (rightTime === null) return -1
+    return rightTime - leftTime
   })
+}
+
+function parseUpdatedAt(value: TrackingItem['updated_at']): number | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? null : timestamp
 }
 
 function supported(capabilities: CapabilityResult | null | undefined, field: keyof CapabilityResult): boolean {
@@ -133,10 +138,26 @@ export function executableTrackingActions(
     if (scopes.length !== rawScopes.length || new Set(scopes).size !== scopes.length) continue
     const capability = MANAGEMENT_CAPABILITY[action.code]
     if (capability) {
-      if (!capabilities || scopes.length === 0 || !scopes.some((scope) => {
-        const field = capability[scope]
+      if (!capabilities || scopes.length === 0) continue
+      const supportedScopes = scopes.filter((scope) => {
+        let field: keyof CapabilityResult | undefined = capability[scope]
+        if (action.code === 'SET_ENABLED') {
+          if (item.status === 'DISABLED') {
+            field = scope === 'SUBSCRIPTION' ? 'subscription_enable' : 'rss_enable'
+          } else if (item.status === 'ACTIVE' || item.status === 'EXTERNAL_ONLY') {
+            field = scope === 'SUBSCRIPTION' ? 'subscription_disable' : 'rss_disable'
+          } else {
+            field = undefined
+          }
+        }
         return field !== undefined && supported(capabilities, field)
-      })) continue
+      })
+      if (!supportedScopes.length) continue
+      result.push({ ...action, target_scopes: supportedScopes })
+      continue
+    }
+    if (action.code === 'SUBMIT' || action.code === 'RETRY') {
+      if (scopes.length > 0 || !supported(capabilities, 'subscription_submit')) continue
     } else if (scopes.length > 0) {
       continue
     }
@@ -160,11 +181,16 @@ export function createTrackingActionIntent(
   capabilities?: CapabilityResult | null,
 ): TrackingActionIntent | null {
   const executable = executableTrackingActions(item, capabilities)
-  if (!executable.some((candidate) => candidate.code === action.code)) return null
-  if (targetScope !== undefined && !(action.target_scopes ?? []).includes(targetScope)) return null
+  const projected = executable.find((candidate) => candidate === action || (
+    candidate.code === action.code && candidate.label === action.label && candidate.style === action.style &&
+    candidate.requires_confirmation === action.requires_confirmation &&
+    JSON.stringify(candidate.target_scopes ?? []) === JSON.stringify(action.target_scopes ?? [])
+  ))
+  if (!projected) return null
+  if (targetScope !== undefined && !(projected.target_scopes ?? []).includes(targetScope)) return null
   if (!Number.isInteger(item.revision) || item.revision < 1) return null
   return {
-    action: action.code,
+    action: projected.code,
     ...(targetScope ? { targetScope } : {}),
     expectedRevision: item.revision,
     confirm: true,

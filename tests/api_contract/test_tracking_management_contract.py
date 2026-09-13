@@ -97,11 +97,18 @@ def test_modify_patch_is_strictly_discriminated_by_scope() -> None:
         })
 
 
-def test_management_action_scopes_are_server_computed_without_mapping_values() -> None:
+def test_management_action_scopes_are_server_computed_per_action_without_mapping_values() -> None:
     from apps.migu_orca_web.tracking_serializers import tracking_available_actions
 
     actions = tracking_available_actions(
         "ACTIVE", {"subscription_id": "opaque-sub", "rss_ids": ["opaque-rss"]}
     )
-    assert all(item["target_scopes"] == ["SUBSCRIPTION", "ASSOCIATED_RSS"] for item in actions)
+    by_code = {item["code"]: item["target_scopes"] for item in actions}
+    assert by_code["MODIFY"] == ["SUBSCRIPTION", "ASSOCIATED_RSS"]
+    assert by_code["SET_ENABLED"] == ["SUBSCRIPTION", "ASSOCIATED_RSS"]
+    assert by_code["DELETE_EXTERNAL"] == ["SUBSCRIPTION", "ASSOCIATED_RSS"]
+    assert by_code["REFRESH_RSS"] == ["ASSOCIATED_RSS"]
     assert all("opaque" not in str(item) for item in actions)
+    subscription_only = tracking_available_actions("ACTIVE", {"subscription_id": "opaque-sub", "rss_ids": []})
+    assert "REFRESH_RSS" not in {item["code"] for item in subscription_only}
+    assert tracking_available_actions("ACTIVE", None) == []

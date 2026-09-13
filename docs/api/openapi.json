@@ -83,6 +83,15 @@
                           "title": "Subscription Detail",
                           "type": "string"
                         },
+                        "subscription_submit": {
+                          "enum": [
+                            "SUPPORTED",
+                            "UNSUPPORTED",
+                            "UNKNOWN"
+                          ],
+                          "title": "Subscription Submit",
+                          "type": "string"
+                        },
                         "subscription_modify": {
                           "enum": [
                             "SUPPORTED",
@@ -211,6 +220,7 @@
                         "adapter",
                         "subscription_list",
                         "subscription_detail",
+                        "subscription_submit",
                         "subscription_modify",
                         "subscription_enable",
                         "subscription_disable",
@@ -238,6 +248,7 @@
                     "adapter": "示例",
                     "subscription_list": "示例",
                     "subscription_detail": "示例",
+                    "subscription_submit": "示例",
                     "subscription_modify": "示例",
                     "subscription_enable": "示例",
                     "subscription_disable": "示例",
@@ -9082,6 +9093,15 @@
                               "title": "Subscription Detail",
                               "type": "string"
                             },
+                            "subscription_submit": {
+                              "enum": [
+                                "SUPPORTED",
+                                "UNSUPPORTED",
+                                "UNKNOWN"
+                              ],
+                              "title": "Subscription Submit",
+                              "type": "string"
+                            },
                             "subscription_modify": {
                               "enum": [
                                 "SUPPORTED",
@@ -9210,6 +9230,7 @@
                             "adapter",
                             "subscription_list",
                             "subscription_detail",
+                            "subscription_submit",
                             "subscription_modify",
                             "subscription_enable",
                             "subscription_disable",
@@ -9523,6 +9544,7 @@
                       "adapter": "示例",
                       "subscription_list": "示例",
                       "subscription_detail": "示例",
+                      "subscription_submit": "示例",
                       "subscription_modify": "示例",
                       "subscription_enable": "示例",
                       "subscription_disable": "示例",
@@ -23676,38 +23698,175 @@
                             ]
                           },
                           "filter_rule": {
-                            "type": [
-                              "object",
-                              "null"
-                            ],
-                            "additionalProperties": false,
-                            "properties": {
-                              "must_contain": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
+                            "anyOf": [
+                              {
+                                "type": "null"
                               },
-                              "must_not_contain": {
-                                "type": [
-                                  "string",
-                                  "null"
-                                ]
-                              },
-                              "use_regex": {
-                                "type": [
-                                  "boolean",
-                                  "null"
-                                ]
-                              },
-                              "case_sensitive": {
-                                "type": [
-                                  "boolean",
-                                  "null"
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "properties": {
+                                  "must_contain": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "must_not_contain": {
+                                    "type": [
+                                      "string",
+                                      "null"
+                                    ]
+                                  },
+                                  "use_regex": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  },
+                                  "case_sensitive": {
+                                    "type": [
+                                      "boolean",
+                                      "null"
+                                    ]
+                                  }
+                                },
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "must_contain": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "must_not_contain": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "use_regex": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "case_sensitive": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "must_contain"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "must_contain": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "must_not_contain": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "use_regex": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "case_sensitive": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "must_not_contain"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "must_contain": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "must_not_contain": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "use_regex": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "case_sensitive": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "use_regex"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "must_contain": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "must_not_contain": {
+                                        "type": [
+                                          "string",
+                                          "null"
+                                        ]
+                                      },
+                                      "use_regex": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "case_sensitive": {
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "case_sensitive"
+                                    ]
+                                  }
                                 ]
                               }
-                            },
-                            "minProperties": 1
+                            ]
                           },
                           "offset": {
                             "type": [
@@ -23723,7 +23882,320 @@
                             ]
                           }
                         },
-                        "minProperties": 1
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "title": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "season": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "subtitle_group": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "filter_rule": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "offset": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "expected_folder_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "title"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "title": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "season": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "subtitle_group": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "filter_rule": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "offset": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "expected_folder_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "season"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "title": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "season": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "subtitle_group": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "filter_rule": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "offset": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "expected_folder_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "subtitle_group"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "title": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "season": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "subtitle_group": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "filter_rule": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "offset": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "expected_folder_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "filter_rule"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "title": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "season": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "subtitle_group": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "filter_rule": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "offset": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "expected_folder_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "offset"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "title": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "season": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0,
+                                "maximum": 100
+                              },
+                              "subtitle_group": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "filter_rule": {
+                                "anyOf": [
+                                  {
+                                    "type": "null"
+                                  },
+                                  {
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "offset": {
+                                "type": [
+                                  "integer",
+                                  "null"
+                                ],
+                                "minimum": 0
+                              },
+                              "expected_folder_name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "expected_folder_name"
+                            ]
+                          }
+                        ]
                       }
                     }
                   },
@@ -23819,7 +24291,89 @@
                             ]
                           }
                         },
-                        "minProperties": 1
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "aggregate": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "parser": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "aggregate": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "parser": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "aggregate"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "properties": {
+                              "name": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              },
+                              "aggregate": {
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "parser": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "parser"
+                            ]
+                          }
+                        ]
                       }
                     }
                   }

@@ -1,4 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { nextTick } from 'vue'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -49,9 +50,19 @@ describe('TrackingView formal overview (US-305)', () => {
   it('selects a legal tracking id and keeps it as a single aria-current row', async () => {
     apiGet.mockResolvedValue({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
     const { wrapper, router } = await mountTracking({ tracking_id: 'tracking-1' })
+    await nextTick()
     expect(router.currentRoute.value.fullPath).toBe('/tracking?tracking_id=tracking-1')
     expect(wrapper.find('[aria-current="true"]').attributes('data-tracking-id')).toBe('tracking-1')
+    expect(document.activeElement).toBe(wrapper.find('[aria-current="true"]').element)
     expect(wrapper.find('.tracking-inspector-placeholder').text()).toContain('葬送的芙莉莲')
+  })
+
+  it('keeps a legal tracking query when the list request fails', async () => {
+    apiGet.mockRejectedValueOnce(new Error('private upstream detail'))
+    const { wrapper, router } = await mountTracking({ tracking_id: 'tracking-1' })
+    expect(router.currentRoute.value.fullPath).toBe('/tracking?tracking_id=tracking-1')
+    expect(wrapper.text()).toContain('暂时无法读取本地追番列表')
+    expect(wrapper.text()).not.toContain('private upstream detail')
   })
 
   it('cleans an unknown tracking query and shows fixed error/empty states', async () => {

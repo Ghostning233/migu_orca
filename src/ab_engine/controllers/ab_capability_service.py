@@ -41,6 +41,7 @@ def probe_capabilities(
             AutoBangumiCapabilities(
                 probe_status="PARTIAL", version=version, adapter="api_token",
                 subscription_list="UNKNOWN", subscription_detail="UNKNOWN",
+                subscription_submit="UNSUPPORTED",
                 rss_list="UNKNOWN", external_verify="UNKNOWN",
                 safe_message="API Token 仅验证连接状态，管理读取能力保持未知",
             )

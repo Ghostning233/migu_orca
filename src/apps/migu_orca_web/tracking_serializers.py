@@ -81,18 +81,35 @@ def tracking_available_actions(
         )
     elif management_actions_for_status(status):
         scopes = _available_target_scopes(mapping)
+        # The mapping contains two independent target kinds.  Never advertise
+        # an RSS refresh against a subscription merely because that
+        # subscription also has an RSS mapping.
+        scopes_by_action = {
+            "MODIFY": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
+            "SET_ENABLED": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
+            "DELETE_EXTERNAL": {"SUBSCRIPTION", "ASSOCIATED_RSS"},
+            "REFRESH_RSS": {"ASSOCIATED_RSS"},
+        }
         if "MODIFY" in management_actions_for_status(status):
-            actions.append(_action("MODIFY", "修改外部订阅", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=scopes))
+            target_scopes = [scope for scope in scopes if scope in scopes_by_action["MODIFY"]]
+            if target_scopes:
+                actions.append(_action("MODIFY", "修改外部订阅", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=target_scopes))
         if "SET_ENABLED" in management_actions_for_status(status):
-            actions.append(_action(
-                "SET_ENABLED", "启用外部订阅" if status == TRACKING_STATUS_DISABLED else "停用外部订阅",
-                _STYLE_PRIMARY if status == TRACKING_STATUS_DISABLED else _STYLE_SECONDARY,
-                requires_confirmation=True, target_scopes=scopes,
-            ))
+            target_scopes = [scope for scope in scopes if scope in scopes_by_action["SET_ENABLED"]]
+            if target_scopes:
+                actions.append(_action(
+                    "SET_ENABLED", "启用外部订阅" if status == TRACKING_STATUS_DISABLED else "停用外部订阅",
+                    _STYLE_PRIMARY if status == TRACKING_STATUS_DISABLED else _STYLE_SECONDARY,
+                    requires_confirmation=True, target_scopes=target_scopes,
+                ))
         if "REFRESH_RSS" in management_actions_for_status(status):
-            actions.append(_action("REFRESH_RSS", "刷新关联 RSS", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=scopes))
+            target_scopes = [scope for scope in scopes if scope in scopes_by_action["REFRESH_RSS"]]
+            if target_scopes:
+                actions.append(_action("REFRESH_RSS", "刷新关联 RSS", _STYLE_SECONDARY, requires_confirmation=True, target_scopes=target_scopes))
         if "DELETE_EXTERNAL" in management_actions_for_status(status):
-            actions.append(_action("DELETE_EXTERNAL", "删除外部订阅", _STYLE_DANGER, requires_confirmation=True, target_scopes=scopes))
+            target_scopes = [scope for scope in scopes if scope in scopes_by_action["DELETE_EXTERNAL"]]
+            if target_scopes:
+                actions.append(_action("DELETE_EXTERNAL", "删除外部订阅", _STYLE_DANGER, requires_confirmation=True, target_scopes=target_scopes))
     # REVALIDATING / SUBMITTING / EXTERNAL_DELETED / EXTERNAL_ONLY have no
     # currently-executable state-changing action.
     return actions

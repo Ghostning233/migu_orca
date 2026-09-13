@@ -20,6 +20,7 @@ class AutoBangumiCapabilities:
     adapter: Literal["legacy_3_1", "api_token"] | None
     subscription_list: CapabilityState
     subscription_detail: CapabilityState
+    subscription_submit: CapabilityState = "UNKNOWN"
     subscription_modify: CapabilityState = "UNKNOWN"
     subscription_enable: CapabilityState = "UNKNOWN"
     subscription_disable: CapabilityState = "UNKNOWN"
@@ -42,6 +43,7 @@ class AutoBangumiCapabilities:
             "adapter": self.adapter,
             "subscription_list": self.subscription_list,
             "subscription_detail": self.subscription_detail,
+            "subscription_submit": self.subscription_submit,
             "subscription_modify": self.subscription_modify,
             "subscription_enable": self.subscription_enable,
             "subscription_disable": self.subscription_disable,

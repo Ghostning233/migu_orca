@@ -316,6 +316,12 @@ def _management_endpoint(operation_id: str, summary: str, *, extra: dict[str, An
 def _modify_request_body() -> dict[str, Any]:
     """Strict scope-discriminated request union for external modify."""
     common = {key: value for key, value in _MANAGEMENT_COMMON.items() if key != "tracking_id"}
+    filter_properties = {
+        "must_contain": {"type": ["string", "null"]},
+        "must_not_contain": {"type": ["string", "null"]},
+        "use_regex": {"type": ["boolean", "null"]},
+        "case_sensitive": {"type": ["boolean", "null"]},
+    }
     subscription_patch = {
         "type": "object",
         "additionalProperties": False,
@@ -324,20 +330,33 @@ def _modify_request_body() -> dict[str, Any]:
             "season": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
             "subtitle_group": {"type": ["string", "null"]},
             "filter_rule": {
-                "type": ["object", "null"],
-                "additionalProperties": False,
-                "properties": {
-                    "must_contain": {"type": ["string", "null"]},
-                    "must_not_contain": {"type": ["string", "null"]},
-                    "use_regex": {"type": ["boolean", "null"]},
-                    "case_sensitive": {"type": ["boolean", "null"]},
-                },
-                "minProperties": 1,
+                "anyOf": [
+                    {"type": "null"},
+                    {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": filter_properties,
+                        "oneOf": [
+                            {"type": "object", "additionalProperties": False, "properties": filter_properties, "required": [field]}
+                            for field in filter_properties
+                        ],
+                    },
+                ],
             },
             "offset": {"type": ["integer", "null"], "minimum": 0},
             "expected_folder_name": {"type": ["string", "null"]},
         },
-        "minProperties": 1,
+        "oneOf": [
+            {"type": "object", "additionalProperties": False, "properties": {
+                "title": {"type": ["string", "null"]},
+                "season": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
+                "subtitle_group": {"type": ["string", "null"]},
+                "filter_rule": {"anyOf": [{"type": "null"}, {"type": "object"}]},
+                "offset": {"type": ["integer", "null"], "minimum": 0},
+                "expected_folder_name": {"type": ["string", "null"]},
+            }, "required": [field]}
+            for field in ("title", "season", "subtitle_group", "filter_rule", "offset", "expected_folder_name")
+        ],
     }
     rss_patch = {
         "type": "object",
@@ -347,7 +366,14 @@ def _modify_request_body() -> dict[str, Any]:
             "aggregate": {"type": ["boolean", "null"]},
             "parser": {"type": ["string", "null"]},
         },
-        "minProperties": 1,
+        "oneOf": [
+            {"type": "object", "additionalProperties": False, "properties": {
+                "name": {"type": ["string", "null"]},
+                "aggregate": {"type": ["boolean", "null"]},
+                "parser": {"type": ["string", "null"]},
+            }, "required": [field]}
+            for field in ("name", "aggregate", "parser")
+        ],
     }
 
     def branch(scope: str, patch: dict[str, Any]) -> dict[str, Any]:
