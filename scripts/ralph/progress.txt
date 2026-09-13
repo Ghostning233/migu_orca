@@ -23,5 +23,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - generated 请求体必须由 OpenAPI oneOf 保持 scope 与 patch 字段绑定；前端只从 operations 派生类型。
   - target_scopes 只能由本地映射是否存在计算，绝不把映射值带入公开动作对象。
-  - 定向验证：tracking contract tests、OpenAPI drift check、frontend api:check、typecheck 均通过。
+- 定向验证：tracking contract tests、OpenAPI drift check、frontend api:check、typecheck 均通过。
+---
+
+## [2026-09-13 09:15:00 CST] - US-304
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: 新增 generated-only tracking 投影与动作意图纯函数，覆盖状态总览、公开标题/字幕组搜索、服务端状态筛选、稳定排序、未知值降级、scope/capability 交集与内存幂等意图复用。
+- Files changed: `frontend/src/features/tracking/trackingProjection.ts` 与对应 Vitest；`scripts/ralph/prd.json`、`progress.txt`。
+- **Learnings for future iterations:**
+  - 管理动作必须同时满足服务端 target_scopes 与当前 capability=SUPPORTED，未知动作/style/scope/capability 直接不渲染。
+  - idempotency key 只随局部 intent 返回，transport retry 原样复用，不提供 URL/storage/log 写入接口。
+  - 定向验证：trackingProjection Vitest、单文件 ESLint、typecheck 均通过。
 ---
