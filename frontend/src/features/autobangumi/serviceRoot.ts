@@ -9,6 +9,11 @@ export const AUTO_BANGUMI_SERVICE_ROOT_HELP =
   '可填写 http(s)://主机:端口，或局域网主机:端口；只能填写服务根地址。'
 
 const HTTP_PROTOCOLS = new Set(['http:', 'https:'])
+const NON_HTTP_SCHEMES = new Set([
+  'about', 'blob', 'chrome', 'content', 'data', 'file', 'ftp', 'gopher', 'imap',
+  'javascript', 'ldap', 'mailto', 'ms-appx', 'ms-appx-web', 'rtsp', 'sftp',
+  'smtp', 'ssh', 'tel', 'urn', 'vbscript', 'ws', 'wss',
+])
 
 export interface ServiceRootValidation {
   value: string | null
@@ -25,9 +30,25 @@ export function normalizeAutoBangumiServiceRoot(input: string): string | null {
   const raw = input.trim()
   if (!raw || /[\s\u0000-\u001f\u007f]/.test(raw)) return null
 
-  const hasScheme = /^[a-z][a-z\d+.-]*:/i.test(raw)
-  if (hasScheme && !/^https?:\/\//i.test(raw)) return null
-  const candidate = hasScheme ? raw : `http://${raw}`
+  const schemeWithAuthority = raw.match(/^([a-z][a-z\d+.-]*):\/\//i)
+  const schemePrefix = raw.match(/^([a-z][a-z\d+.-]*):/i)
+  const scheme = (schemeWithAuthority?.[1] ?? schemePrefix?.[1])?.toLowerCase()
+  // A scheme-qualified value must use the unambiguous `scheme://authority`
+  // spelling.  Bare `host:port` remains valid, but known non-HTTP schemes
+  // must not be reinterpreted as a hostname merely because their suffix is
+  // numeric (for example, `javascript:7892`).
+  if (schemeWithAuthority && (!scheme || !HTTP_PROTOCOLS.has(`${scheme}:`))) return null
+  if (schemePrefix && !schemeWithAuthority
+    && (scheme === 'http' || scheme === 'https' || (scheme && NON_HTTP_SCHEMES.has(scheme)))) return null
+  const authorityPrefixLength = schemeWithAuthority?.[0].length ?? 0
+  const authorityAndTail = raw.slice(authorityPrefixLength)
+  const pathStart = authorityAndTail.search(/[/?#]/)
+  const authority = pathStart === -1 ? authorityAndTail : authorityAndTail.slice(0, pathStart)
+  const tail = pathStart === -1 ? '' : authorityAndTail.slice(pathStart)
+  // URL parsing normalizes dot segments and backslashes.  Validate the raw
+  // spelling first so only an absent path or exactly one root slash survives.
+  if (!authority || (tail !== '' && tail !== '/') || raw.includes('\\')) return null
+  const candidate = schemeWithAuthority ? raw : `http://${raw}`
   let parsed: URL
   try {
     parsed = new URL(candidate)
@@ -49,7 +70,6 @@ export function normalizeAutoBangumiServiceRoot(input: string): string | null {
 
   // URL accepts port 0 and normalizes some spellings.  Require an explicit
   // decimal port, when present, to be within the TCP range.
-  const authority = raw.replace(/^[a-z][a-z\d+.-]*:\/\//i, '').split(/[/?#]/, 1)[0] ?? ''
   const portMarker = authority.lastIndexOf(':')
   const bracketed = authority.startsWith('[')
   const explicitPort = bracketed

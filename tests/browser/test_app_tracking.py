@@ -1785,6 +1785,9 @@ CANARY_ENDPOINT = "https://canary-endpoint.invalid"
 CANARY_USER = "canary-user-31337"
 CANARY_PASSWORD = "canary-password-31337"
 CANARY_VALUES = (CANARY_ENDPOINT, CANARY_USER, CANARY_PASSWORD)
+LAN_ENDPOINT_CANARY = "lan-endpoint-canary.invalid:7890"
+LAN_PASSWORD_CANARY = "lan-password-canary-31337"
+LAN_CANARY_VALUES = (LAN_ENDPOINT_CANARY, f"http://{LAN_ENDPOINT_CANARY}", LAN_PASSWORD_CANARY)
 
 # Identifiers only the retired `QueueView` ever rendered.  The component stays in
 # the repo for rollback (Stage 38 §10.2), but it must never ship again: the
@@ -1825,12 +1828,15 @@ def _browser_surfaces(page: Page) -> dict[str, str]:
     )
 
 
-def _assert_no_canary(surfaces: dict[str, str], console: list[str], where: str) -> None:
+def _assert_no_canary(
+    surfaces: dict[str, str], console: list[str], where: str,
+    canaries: tuple[str, ...] = CANARY_VALUES,
+) -> None:
     for name, value in surfaces.items():
-        for canary in CANARY_VALUES:
+        for canary in canaries:
             assert canary not in value, f"{canary} leaked into {where}.{name}"
     for entry in console:
-        for canary in CANARY_VALUES:
+        for canary in canaries:
             assert canary not in entry, f"{canary} leaked into the console: {entry}"
 
 
@@ -1894,6 +1900,9 @@ class TestAppTrackingCompatAndRuntimeExit:
         _require_dist()
         _mock_list(page)
         captured: dict[str, Any] = {}
+        console: list[str] = []
+        page.on("console", lambda message: console.append(f"{message.type}:{message.text}"))
+        page.on("pageerror", lambda error: console.append(f"pageerror:{error}"))
 
         def probe(route: Any, request: Any) -> None:
             captured["body"] = request.post_data_json
@@ -1913,19 +1922,17 @@ class TestAppTrackingCompatAndRuntimeExit:
         expect(page.locator("#tracking-connect")).to_be_visible()
         assert page.locator(".tracking-connection-status").count() == 0
         page.locator("#tracking-connect").click()
-        page.locator("#tracking-ab-base-url").fill("192.168.1.20:7890")
-        page.locator("#tracking-ab-username").fill("user")
-        page.locator("#tracking-ab-password").fill("lan-password-canary")
+        page.locator("#tracking-ab-base-url").fill(LAN_ENDPOINT_CANARY)
+        page.locator("#tracking-ab-username").fill("lan-user-canary-31337")
+        page.locator("#tracking-ab-password").fill(LAN_PASSWORD_CANARY)
         page.locator("#tracking-ab-probe").click()
         connection = page.locator(".tracking-connection-status")
         expect(connection).to_contain_text("当前页面已连接 Auto Bangumi")
         expect(page.locator("#tracking-capability-summary")).to_be_visible()
         expect(page.locator(".tracking-clear-connection")).to_be_visible()
-        assert captured["body"]["ab_config"]["base_url"] == "http://192.168.1.20:7890"
-        expect(page.locator("body")).not_to_contain_text("192.168.1.20:7890")
-        expect(page.locator("body")).not_to_contain_text("lan-password-canary")
+        assert captured["body"]["ab_config"]["base_url"] == f"http://{LAN_ENDPOINT_CANARY}"
+        _assert_no_canary(_browser_surfaces(page), console, "LAN connection", LAN_CANARY_VALUES)
         assert page.url == f"{live_server_url}/app/tracking"
-        assert page.evaluate("() => ({ls: Object.keys(localStorage), ss: Object.keys(sessionStorage)})") == {"ls": [], "ss": []}
 
 
 def _probe_handler(route: Any, request: Any) -> None:
