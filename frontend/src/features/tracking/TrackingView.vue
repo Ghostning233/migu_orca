@@ -130,6 +130,10 @@ const writePending = ref(false)
 let writeIntent: TrackingActionIntent | null = null
 let writeSequence = 0
 let writeController: AbortController | null = null
+// Explicitly clearing credentials destroys the config.  An unresolved intent
+// remains a tombstone, but can never be replayed with a newly connected account.
+const writeReplayBlocked = ref(false)
+let writeConfigSnapshot: ProbeBody['ab_config'] | null = null
 // Unknown-result recovery (US-312).  Like the write family, the page owns the
 // request (only VERIFY_EXTERNAL needs the page credential) and the single
 // page-level intent; no recovery key or credential is ever stored here beyond
@@ -151,6 +155,8 @@ const managementPending = ref(false)
 let managementIntent: TrackingManagementIntent | null = null
 let managementSequence = 0
 let managementController: AbortController | null = null
+const managementReplayBlocked = ref(false)
+let managementConfigSnapshot: ProbeBody['ab_config'] | null = null
 // List reads and server-confirmed tracking writes have independent lifecycles:
 // `listSequence` only invalidates stale list responses, while `writeGeneration`
 // marks the revision a sync (or a local revalidate) already applied.  A list
@@ -195,7 +201,9 @@ const selectedHidden = computed(() => Boolean(
  * on, so it can never leak onto another item.
  */
 const INTENT_BLOCKED_MESSAGE =
-  '上一次外部操作的结果仍未确认，在确认或恢复之前不能发起不同的外部操作；请先使用只读回查或恢复得出结论，或点击“清除连接”后重新连接再试。'
+  '上一次外部操作的结果仍未确认，在确认或恢复之前不能发起不同的外部操作；请先使用只读回查或恢复得出结论。'
+const REPLAY_BLOCKED_MESSAGE =
+  '该外部操作绑定的连接已被清除或更换，结果确认前不能使用新连接重试写入；请继续使用只读回查或恢复。'
 
 const blockedIntentNotice = ref<{ trackingId: string; message: string } | null>(null)
 
@@ -227,6 +235,54 @@ function hasPendingIntentLock(): boolean {
 /** State the fixed reason a locked intent refused a different request. */
 function blockIntent(trackingId: string): void {
   blockedIntentNotice.value = { trackingId, message: INTENT_BLOCKED_MESSAGE }
+}
+
+function blockReplay(trackingId: string): void {
+  blockedIntentNotice.value = { trackingId, message: REPLAY_BLOCKED_MESSAGE }
+}
+
+function sameSessionConfig(
+  left: ProbeBody['ab_config'],
+  right: ProbeBody['ab_config'],
+): boolean {
+  return left.auth_mode === right.auth_mode
+    && left.base_url === right.base_url
+    && left.username === right.username
+    && left.password === right.password
+    && left.token === right.token
+    && left.fallback_enabled === right.fallback_enabled
+}
+
+function invalidateWriteReplayOnConnectionChange(): void {
+  const session = writeSession.value
+  if (!session || !writeIntent || (!writeSessionKeepsIntent(session.state) && session.state !== 'IN_FLIGHT')) return
+  writeReplayBlocked.value = true
+  writeConfigSnapshot = null
+  if (writeLoading.value) {
+    writeSequence += 1
+    writeController?.abort()
+    writeController = null
+    writeLoading.value = false
+    writePending.value = false
+    writeSession.value = createWriteSession(session.trackingId, session.action, 'UNKNOWN')
+  }
+}
+
+function invalidateManagementReplayOnConnectionChange(): void {
+  const session = managementSession.value
+  if (!session || !managementIntent || (!managementSessionKeepsIntent(session) && session.state !== 'IN_FLIGHT')) return
+  managementReplayBlocked.value = true
+  managementConfigSnapshot = null
+  if (managementLoading.value) {
+    managementSequence += 1
+    managementController?.abort()
+    managementController = null
+    managementLoading.value = false
+    managementPending.value = false
+    managementSession.value = createManagementSession(
+      session.trackingId, session.action, session.targetScope, 'UNKNOWN', true,
+    )
+  }
 }
 
 /** The notice shown on the selected record; empty while nothing is blocked. */
@@ -383,27 +439,94 @@ function clearFilters(): void {
 }
 
 function onConnected(value: { config: ProbeBody['ab_config']; capabilities: CapabilityResult }): void {
+  if (writeConfigSnapshot && !sameSessionConfig(writeConfigSnapshot, value.config)) {
+    invalidateWriteReplayOnConnectionChange()
+  }
+  if (managementConfigSnapshot && !sameSessionConfig(managementConfigSnapshot, value.config)) {
+    invalidateManagementReplayOnConnectionChange()
+  }
   sessionConfig.value = value.config
   sessionCapabilities.value = value.capabilities
   credentialDialogOpen.value = false
 }
 
 /**
- * Clearing the page session drops every page-level intent (the locked write key
- * and the recovery lock).  The server record stays authoritative: the record's
- * own status and actions are re-read from the server on demand, so nothing is
- * lost or assumed.
+ * Clearing the page session destroys credentials while preserving unresolved
+ * intents as non-replayable tombstones. The server record remains authoritative
+ * and can only be settled through read-only verification or recovery.
  */
 function clearConnection(): void {
   credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
   cancelSync()
-  resetWrite()
-  resetRecovery()
-  resetManagement()
+  preserveWriteLockAfterClear()
+  preserveRecoveryLockAfterClear()
+  preserveManagementLockAfterClear()
   syncMessage.value = ''
   syncSummary.value = null
+}
+
+function preserveWriteLockAfterClear(): void {
+  const session = writeSession.value
+  const unresolved = Boolean(
+    writeLoading.value || (session && (session.state === 'IN_FLIGHT' || writeSessionKeepsIntent(session.state))),
+  )
+  if (!unresolved || !writeIntent || !session) {
+    resetWrite()
+    return
+  }
+  writeSequence += 1
+  writeController?.abort()
+  writeController = null
+  writePending.value = false
+  writeLoading.value = false
+  writeReplayBlocked.value = true
+  writeConfigSnapshot = null
+  writeSession.value = createWriteSession(session.trackingId, session.action, 'UNKNOWN')
+}
+
+function preserveRecoveryLockAfterClear(): void {
+  const session = recoverySession.value
+  if (!session || (!recoveryLoading.value && !recoverySessionKeepsLock(session.state))) {
+    resetRecovery()
+    return
+  }
+  recoverySequence += 1
+  recoveryController?.abort()
+  recoveryController = null
+  recoveryPending.value = false
+  recoveryLoading.value = false
+  recoverySession.value = createRecoverySession(session.trackingId, session.action, 'UNKNOWN')
+}
+
+function preserveManagementLockAfterClear(): void {
+  const session = managementSession.value
+  const unresolved = Boolean(
+    managementLoading.value || (session && (session.state === 'IN_FLIGHT' || managementSessionKeepsIntent(session))),
+  )
+  if (!unresolved || !managementIntent || !session) {
+    resetManagement()
+    return
+  }
+  managementSequence += 1
+  managementController?.abort()
+  managementController = null
+  managementPending.value = false
+  managementLoading.value = false
+  managementReplayBlocked.value = true
+  managementConfigSnapshot = null
+  managementSession.value = createManagementSession(
+    session.trackingId, session.action, session.targetScope, 'UNKNOWN', true,
+  )
+}
+
+/** A clear/reconnect never releases an old write; only a confirmed recovery does. */
+function releaseSourceIntentLocks(trackingId: string): void {
+  const write = writeSession.value
+  if (write?.trackingId === trackingId && writeSessionKeepsIntent(write.state)) resetWrite()
+  const management = managementSession.value
+  if (management?.trackingId === trackingId && managementSessionKeepsIntent(management)) resetManagement()
 }
 
 function cancelSync(): void {
@@ -489,6 +612,8 @@ function resetWrite(): void {
   writePending.value = false
   writeLoading.value = false
   writeSession.value = null
+  writeReplayBlocked.value = false
+  writeConfigSnapshot = null
   blockedIntentNotice.value = null
 }
 
@@ -510,6 +635,8 @@ function resetManagement(): void {
   managementPending.value = false
   managementLoading.value = false
   managementSession.value = null
+  managementReplayBlocked.value = false
+  managementConfigSnapshot = null
   blockedIntentNotice.value = null
 }
 
@@ -535,16 +662,28 @@ async function recheckAfterAction(trackingId: string, refreshList = false): Prom
  * action code, so a retry can never be sent with submit copy (or the reverse).
  */
 async function runTrackingWrite(payload: { action: TrackingAction; item: TrackingItem }): Promise<void> {
+  const trackingId = payload.item.tracking_id
   // A confirmation is already open, or an external write/recovery is already
   // running: one page-level intent at a time, and no second dialog can displace
   // the first (D38-09.4: an active recovery blocks submit/retry).
   if (writePending.value || writeLoading.value || recoveryPending.value || recoveryLoading.value
     || managementPending.value || managementLoading.value) return
+  if (writeReplayBlocked.value) {
+    blockReplay(trackingId)
+    return
+  }
   const config = sessionConfig.value
   const capabilities = sessionCapabilities.value
   // No page credential session means no external write at all.
   if (!config || !capabilities) return
-  const trackingId = payload.item.tracking_id
+  const sameItemRecovery = recoverySession.value?.trackingId === trackingId
+    && recoverySessionKeepsLock(recoverySession.value.state)
+  const sameItemManagement = managementSession.value?.trackingId === trackingId
+    && managementSessionKeepsIntent(managementSession.value)
+  if (sameItemRecovery || sameItemManagement) {
+    blockIntent(trackingId)
+    return
+  }
   // Any *other* record still holding the page's single unresolved intent refuses
   // this request — with a stated next step instead of a silent no-op.
   if (otherItemIntentOwner(trackingId)) {
@@ -587,7 +726,13 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
   // subscription; a definite failure always mints a fresh one.
   const intent = locked ?? createTrackingActionIntent(payload.item, payload.action, undefined, sessionCapabilities.value)
   if (!intent) return
+  const requestConfig = locked ? writeConfigSnapshot : sessionConfig.value
+  if (!requestConfig) {
+    blockReplay(trackingId)
+    return
+  }
   writeIntent = intent
+  if (!locked) writeConfigSnapshot = { ...requestConfig }
   const sequence = ++writeSequence
   const controller = new AbortController()
   writeController?.abort()
@@ -600,7 +745,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       expected_revision: intent.expectedRevision,
       idempotency_key: intent.idempotencyKey,
       confirm: true,
-      ab_config: config,
+      ab_config: requestConfig,
       ...(storageDir ? { storage_dir: storageDir } : {}),
     }
     const result = await api.post<TrackingWriteResult>(WRITE_ACTION_ENDPOINTS[action], {
@@ -629,7 +774,7 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       return
     }
     if (isDefiniteWriteRejection(apiError)) {
-      // D38-08.5: a structured non-409 4xx is a definite refusal raised before
+      // D38-08.5: a documented JSON 400/404 is a definite refusal raised before
       // the external boundary — Auto Bangumi was never written. This is *not*
       // "结果未知": the intent is released (so the page-level write lock no
       // longer blocks other items, and the next confirmation mints a fresh key)
@@ -722,6 +867,9 @@ async function runTrackingRecovery(
     // inspector shows the recovered status and its next legitimate action.
     applyReturnedTracking(result.tracking)
     recoverySession.value = projectRecoveryOutcome(trackingId, intent.action, result)
+    if (recoverySession.value.state === 'ACTIVE' || recoverySession.value.state === 'SUBMIT_FAILED') {
+      releaseSourceIntentLocks(trackingId)
+    }
     await recheckAfterAction(trackingId)
   } catch (error) {
     if (sequence !== recoverySequence) return
@@ -735,7 +883,7 @@ async function runTrackingRecovery(
       return
     }
     if (isDefiniteWriteRejection(apiError)) {
-      // A structured non-409 4xx is decided before any state change.
+      // A documented JSON 400/404 is decided before any state change.
       recoverySession.value = createRecoverySession(trackingId, intent.action, 'REJECTED')
       await recheckAfterAction(trackingId, true)
       return
@@ -769,8 +917,13 @@ async function runTrackingManagement(payload: {
   targetScope: TrackingManagementScope
   patch: unknown
 }): Promise<void> {
+  const trackingId = payload.item.tracking_id
   if (managementPending.value || managementLoading.value || writePending.value || writeLoading.value
     || recoveryPending.value || recoveryLoading.value) return
+  if (managementReplayBlocked.value) {
+    blockReplay(trackingId)
+    return
+  }
   const config = sessionConfig.value
   const capabilities = sessionCapabilities.value
   // No page credential session means no external management write at all.
@@ -782,7 +935,14 @@ async function runTrackingManagement(payload: {
   const action = requested
   const targetScope = payload.targetScope
   if (!isTrackingManagementScope(targetScope)) return
-  const trackingId = payload.item.tracking_id
+  const sameItemWrite = writeSession.value?.trackingId === trackingId
+    && writeSessionKeepsIntent(writeSession.value.state)
+  const sameItemRecovery = recoverySession.value?.trackingId === trackingId
+    && recoverySessionKeepsLock(recoverySession.value.state)
+  if (sameItemWrite || sameItemRecovery) {
+    blockIntent(trackingId)
+    return
+  }
   // Any other record still holding the page's single unresolved intent refuses
   // this management request — with a stated reason, not a silent no-op.
   if (otherItemIntentOwner(trackingId)) {
@@ -826,12 +986,18 @@ async function runTrackingManagement(payload: {
   // Cancelling the impact confirmation sends zero requests.
   if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
 
+  const requestConfig = locked ? managementConfigSnapshot : sessionConfig.value
+  if (!requestConfig) {
+    blockReplay(trackingId)
+    return
+  }
   managementIntent = intent
+  if (!locked) managementConfigSnapshot = { ...requestConfig }
   // A body the page cannot build safely (no server address, missing scope
   // patch, no known enable direction) is refused here, before any in-flight
   // session exists: it sends zero requests and converges on a definite failure
   // instead of leaving the panel stuck on "正在提交外部修改，请稍候…".
-  const body = createTrackingManagementBody(intent, sessionConfig.value, storageQuery().storage_dir)
+  const body = createTrackingManagementBody(intent, requestConfig, storageQuery().storage_dir)
   if (!body) {
     managementIntent = null
     managementSession.value = createManagementUnbuildableSession(trackingId, action, targetScope)

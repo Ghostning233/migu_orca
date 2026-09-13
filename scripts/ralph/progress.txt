@@ -300,3 +300,15 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 建议实现侧后续加固（本提交**未**改，仅记录理由）：`ConfirmDialog.confirm()` 的 `requestAnimationFrame(() => activate())` 在「弹窗已可见但尚未聚焦」之间存在一个窗口，期间键盘事件仍可能落到触发按钮上（焦点陷阱的 keydown 监听也尚未挂上），对 danger 弹窗是真实但极短的风险。可考虑 `await nextTick()` 后再 `activate()`（或 `activate()` 内 `await nextTick()`），在 Vue 渲染完成的同一微任务尾声聚焦；不过 rAF 能确保 Teleport 目标已完成布局，改成 `nextTick` 需评估 inert/焦点恢复时序，属独立实现的改动，应由主 Agent/实现侧决定，不由本测试修复提交夹带。
 - 定向验证：最小失败用例重复 3 次 `uv run pytest "tests/browser/test_app_tracking.py::TestAppTrackingRecovery::test_local_auto_and_manual_verdict_stay_separate_and_safe" -q` → 3/3 passed（1.38s / 1.46s / 1.33s，无 flake）；全量 `uv run pytest tests/browser/ -q` → **212 passed in 81.80s**（真实 Chromium，含本次改用例）；`uv run ruff check tests/browser` → All checks passed；`uv run ruff check src tests` → All checks passed；`git diff --check` → 干净（exit 0）。因只改测试、未碰前端源文件，未重跑前端门禁（构建仅用于上面的反向验证，dist 已还原为干净源码构建）。
 ---
+
+## [2026-09-13 16:00:00 CST] - Stage 38 合并后安全审核修复
+- TrackingView 清除连接会销毁凭据并中止在途敏感请求，但保留 UNKNOWN/RECOVERY_REQUIRED 未决 intent tombstone；重连不得复用旧 key/revision 发起 submit 或 management。恢复得到明确 ACTIVE/SUBMIT_FAILED 时才释放源锁；非 JSON、网络、取消、408/429 等结果统一保持未知。
+- ConfirmDialog 使用 Vue `nextTick` 及代际守卫激活焦点陷阱，卸载时解除 inert/keydown 并收敛 pending promise；Ralph 完成判断改为末条非空 token + 非空 userStories 且 passes 严格全 true。归档同步本记录。
+- 定向 Vitest 144 passed；typecheck、lint、build 通过；受影响 Chromium 3 passed；Ralph guard 三种输入均符合预期；未改后端/OpenAPI，未生成产物。
+---
+
+## [2026-09-13 16:15:00 CST] - Stage 38 合并后审计修复（二）
+- TrackingView 为未决 write/management intent 绑定页面内存中的 AB 配置快照；相同配置可继续使用原快照重试，清除连接或探测到不同账号/端点后销毁快照并转为不可重放 tombstone，点击时给出固定恢复提示且不打开确认框、不发写请求。恢复明确终态才释放源锁。
+- 补充 submit/management 不同配置与清除后重连零写请求回归，以及 submit 未知结果经 MARK_FAILED 后用最新 revision、新 key 重试；保留 ConfirmDialog、UNKNOWN 分类和严格 Ralph guard。
+- 最小验证：TrackingView/trackingProjection Vitest 通过；typecheck/lint 通过；根目录误生成 node_modules 仅含 `.vite`，已移出仓库；归档按原文同步。
+---

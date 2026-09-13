@@ -14,7 +14,7 @@
 //
 // The title/body copy is supplied by the caller and must stay safe Chinese
 // business language; this component never logs or persists anything.
-import { computed, ref, useId } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId } from 'vue'
 
 import { useFocusTrap } from '@/app/composables/useFocusTrap'
 
@@ -30,6 +30,7 @@ interface ConfirmState {
 const open = ref(false)
 const state = ref<ConfirmState | null>(null)
 const dialogEl = ref<HTMLElement | null>(null)
+let dialogGeneration = 0
 
 const titleId = useId()
 const bodyId = useId()
@@ -48,25 +49,40 @@ function confirm(options: {
   cancelLabel?: string
   danger?: boolean
 }): Promise<boolean> {
+  const generation = ++dialogGeneration
   if (open.value) {
     state.value?.resolve(false)
   }
   return new Promise((resolve) => {
-    state.value = { ...options, resolve }
+    const nextState = { ...options, resolve }
+    state.value = nextState
     open.value = true
-    // Focus trap runs after the dialog is rendered so the DOM exists.
-    requestAnimationFrame(() => activate())
+    // Vue's nextTick is the DOM update boundary. The generation and state
+    // guards prevent a replacement/close before the tick from activating a
+    // stale trap and making the page inert again.
+    void nextTick().then(() => {
+      if (generation === dialogGeneration && open.value && state.value?.resolve === resolve) activate()
+    })
   })
 }
 
 function close(result: boolean): void {
   if (!open.value) return
+  dialogGeneration += 1
   deactivate()
   open.value = false
   const resolver = state.value?.resolve
   state.value = null
   resolver?.(result)
 }
+
+onBeforeUnmount(() => {
+  dialogGeneration += 1
+  deactivate()
+  state.value?.resolve(false)
+  state.value = null
+  open.value = false
+})
 
 function onConfirm(): void {
   close(true)
