@@ -618,8 +618,8 @@ class SavedTrackingRecoveryInput(BaseModel):
     expected_revision: StrictInt = Field(ge=1)
     action: Literal["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"]
     confirm: StrictBool = False
-    connection_ref: UUID
-    configuration_revision: StrictInt = Field(ge=0)
+    connection_ref: UUID | None = None
+    configuration_revision: StrictInt | None = Field(default=None, ge=0)
     storage_dir: str | None = None
 
     @field_validator("tracking_id")
@@ -647,6 +647,12 @@ class SavedTrackingRecoveryInput(BaseModel):
     def _manual_confirmation(self) -> SavedTrackingRecoveryInput:
         if self.action in {"MARK_SUCCEEDED", "MARK_FAILED"} and self.confirm is not True:
             raise ValueError("confirm must be true")
+        supplied = self.model_fields_set
+        if self.action == "VERIFY_EXTERNAL":
+            if self.connection_ref is None or self.configuration_revision is None:
+                raise ValueError("VERIFY_EXTERNAL requires saved connection generation")
+        elif supplied & {"connection_ref", "configuration_revision"}:
+            raise ValueError("local recovery cannot include saved connection generation")
         return self
 
 

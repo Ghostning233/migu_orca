@@ -30,12 +30,15 @@ name, path, credential, URL, magnet or raw upstream text is ever returned.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from ab_engine.controllers.ab_config import AutoBangumiConfig
 from ab_engine.controllers.ab_http_client import UrlopenAutoBangumiHttpTransport
 from ab_engine.controllers.ab_management_client import Legacy31ManagementClient
+from ab_engine.controllers.reconcile import ReconcileDecision, normalize_match_text
 from ab_engine.models.management import ExternalSubscription
+from apps.migu_orca_web.save_confirm_service import compute_request_fingerprint
 from apps.migu_orca_web.serializers import serialize_request_safe_info
 from apps.migu_orca_web.tracking_management_service import recover_tracking_management
 from apps.migu_orca_web.tracking_migration_service import run_tracking_migration
@@ -50,6 +53,7 @@ from shared.errors import Stage1Error
 from storage_engine.controllers.operation_repository import (
     compare_and_swap_tracking_operation,
     load_tracking_operation,
+    recover_tracking_operation,
 )
 from storage_engine.controllers.request_repository import load_request_snapshot
 from storage_engine.controllers.storage_config import StorageConfig
@@ -111,50 +115,71 @@ def _verify_external(
     timestamp: str,
     ab_config: AutoBangumiConfig,
     management_client: Any | None,
+    connection_ref: str | None = None,
+    expected_operation: TrackingOperation | None = None,
+    expected_record_revision: int | None = None,
 ) -> dict[str, Any]:
     """Read-only recovery against one verified management snapshot."""
     try:
         client = management_client or _management_client(ab_config)
         capabilities, subscriptions, _rss = client.read_snapshot()
-        if (
-            capabilities.probe_status != "VERIFIED"
-            or capabilities.subscription_list != "SUPPORTED"
-            or capabilities.external_verify != "SUPPORTED"
-        ):
-            return _verification_needs_manual(
-                config, record=record, request=request, checked_revision=checked_revision,
-                timestamp=timestamp, reason="external_capability_unknown",
+        operation_kind = _load_current_operation(config, record)
+        capability_ok = (capabilities.probe_status == "VERIFIED"
+                         and capabilities.subscription_list == "SUPPORTED"
+                         and capabilities.external_verify == "SUPPORTED")
+        if not capability_ok:
+            matches = []
+        else:
+            matches = _external_matches(
+                record, subscriptions, request=request, connection_ref=connection_ref,
+                is_submit=operation_kind is not None and operation_kind.operation == "SUBMIT",
             )
-        matches = _external_matches(record, subscriptions)
-        if len(matches) != 1:
-            return _verification_needs_manual(
-                config, record=record, request=request, checked_revision=checked_revision,
-                timestamp=timestamp,
-                reason="external_match_missing" if not matches else "external_match_ambiguous",
-            )
-        external = matches[0]
-        return _persist_recovery_outcome(
-            config,
-            action=RECOVERY_ACTION_VERIFY_EXTERNAL,
-            record=record,
-            operation=_load_current_operation(config, record),
-            target_status=TRACKING_STATUS_DISABLED if external.deleted else TRACKING_STATUS_ACTIVE,
-            audit_action=TRACKING_AUDIT_RECOVERY_EXTERNAL_VERIFIED,
-            audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
-            reason_code="external_verified_disabled" if external.deleted else "external_verified_active",
-            safe_message="已只读核验 Auto Bangumi 状态并恢复追番记录",
-            target_operation_state=TRACKING_OPERATION_STATE_SUCCEEDED,
-            request=request,
-            checked_revision=checked_revision,
-            needs_manual=False,
-            timestamp=timestamp,
-        )
+    except (TimeoutError, ConnectionError, OSError, ValueError):
+        return _verification_needs_manual(config, record=record, request=request,
+            checked_revision=checked_revision, timestamp=timestamp,
+            reason="external_verification_failed")
     except Exception:
-        reason = "external_verification_failed"
-        return _verification_needs_manual(
-            config, record=record, request=request, checked_revision=checked_revision,
-            timestamp=timestamp, reason=reason,
-        )
+        raise
+    if not capability_ok:
+        return _verification_needs_manual(config, record=record, request=request,
+            checked_revision=checked_revision, timestamp=timestamp,
+            reason="external_capability_unknown")
+    if len(matches) != 1:
+        return _verification_needs_manual(config, record=record, request=request,
+            checked_revision=checked_revision, timestamp=timestamp,
+            reason="external_match_missing" if not matches else "external_match_ambiguous")
+    external = matches[0]
+    if expected_operation is not None:
+        current_record = load_tracking_record(config, record.tracking_id)
+        current_operation = _load_current_operation(config, current_record)
+        current_request = _tolerant_load_request(config, current_record)
+        if (current_record.revision != expected_record_revision
+                or current_record.current_operation_id != expected_operation.operation_id
+                or current_operation is None
+                or current_operation.operation_id != expected_operation.operation_id
+                or current_operation.tracking_id != expected_operation.tracking_id
+                or current_operation.operation != expected_operation.operation
+                or current_operation.state != expected_operation.state
+                or current_operation.connection_ref != expected_operation.connection_ref
+                or current_operation.request_fingerprint != expected_operation.request_fingerprint
+                or not isinstance(current_request, dict)
+                or current_request.get("request_id") != (request or {}).get("request_id")
+                or compute_request_fingerprint(current_request) != expected_operation.request_fingerprint):
+            raise Stage1Error("tracking_connection_mismatch", "外部核验期间历史操作已变化", _RECOVER_FAILED_STEP)
+    if connection_ref is not None and operation_kind is not None and operation_kind.operation == "SUBMIT":
+        decision = ReconcileDecision(external_id=external.external_id, tracking_id=record.tracking_id,
+            status=TRACKING_STATUS_ACTIVE, match_reason="EXTERNAL_ID",
+            subscription_id=external.external_id, rss_ids=external.rss_ids)
+        mapping = decision.safe_mapping(connection_ref=connection_ref)
+        mapping["last_verified_at"] = timestamp
+        record = replace(record, external_mapping=mapping)
+    return _persist_recovery_outcome(
+        config, action=RECOVERY_ACTION_VERIFY_EXTERNAL, record=record,
+        operation=operation_kind, target_status=TRACKING_STATUS_DISABLED if external.deleted else TRACKING_STATUS_ACTIVE,
+        audit_action=TRACKING_AUDIT_RECOVERY_EXTERNAL_VERIFIED, audit_actor=TRACKING_AUDIT_ACTOR_SYSTEM,
+        reason_code="external_verified_disabled" if external.deleted else "external_verified_active",
+        safe_message="已只读核验 Auto Bangumi 状态并恢复追番记录", target_operation_state=TRACKING_OPERATION_STATE_SUCCEEDED,
+        request=request, checked_revision=checked_revision, needs_manual=False, timestamp=timestamp)
 
 
 def _management_client(config: AutoBangumiConfig) -> Legacy31ManagementClient:
@@ -164,12 +189,34 @@ def _management_client(config: AutoBangumiConfig) -> Legacy31ManagementClient:
 
 
 def _external_matches(
-    record: TrackingRecord, subscriptions: list[ExternalSubscription]
+    record: TrackingRecord, subscriptions: list[ExternalSubscription], *, request: dict[str, Any] | None = None,
+    connection_ref: str | None = None, is_submit: bool = False,
 ) -> list[ExternalSubscription]:
     mapping = record.external_mapping if isinstance(record.external_mapping, dict) else {}
+    if connection_ref is not None and not is_submit and (mapping.get("schema_version") != 2 or mapping.get("connection_ref") != connection_ref):
+        return []
     external_id = mapping.get("subscription_id")
+    if connection_ref is not None:
+        if not isinstance(request, dict):
+            return []
+        confirmable = request.get("confirmable_config")
+        selected_url = confirmable.get("selected_rss_url") if isinstance(confirmable, dict) else None
+        summary = record.plan_summary
+        title, season, group = summary.get("title"), summary.get("season"), summary.get("subtitle_group")
+        if (not isinstance(selected_url, str) or not selected_url.strip()
+                or not isinstance(title, str) or not title.strip()
+                or not isinstance(season, int) or isinstance(season, bool) or season < 1
+                or not isinstance(group, str) or not group.strip()):
+            return []
+        return [item for item in subscriptions if item.season == season and item.subtitle_group is not None
+                and isinstance(item.title, str) and item.title.strip()
+                and normalize_match_text(item.title) == normalize_match_text(title)
+                and normalize_match_text(item.subtitle_group) == normalize_match_text(group)
+                and selected_url in item.rss_urls]
     if isinstance(external_id, str) and external_id:
         return [item for item in subscriptions if item.external_id == external_id]
+    if connection_ref is not None:
+        return []
     summary = record.plan_summary
     title = summary.get("title")
     season = summary.get("season")
@@ -230,6 +277,9 @@ def run_tracking_recover(
     now: str | None = None,
     ab_config: AutoBangumiConfig | None = None,
     management_client: Any | None = None,
+    connection_ref: str | None = None,
+    expected_operation_id: str | None = None,
+    expected_operation_kind: str | None = None,
 ) -> dict[str, Any]:
     """Run one explicit recovery for a tracking item.
 
@@ -268,6 +318,26 @@ def run_tracking_recover(
         )
 
     operation = _load_current_operation(config, record)
+    if expected_operation_id is not None:
+        if (operation is None or operation.operation_id != expected_operation_id
+                or operation.tracking_id != record.tracking_id
+                or (expected_operation_kind is not None and operation.operation != expected_operation_kind)
+                or (connection_ref is not None and operation.connection_ref != connection_ref)
+                or operation.state not in {"IN_PROGRESS", "OUTCOME_UNKNOWN", "RECOVERY_REQUIRED"}):
+            raise Stage1Error("tracking_connection_mismatch", "历史操作绑定已变化，不能进行外部核验", _RECOVER_FAILED_STEP)
+        if operation.operation == "SUBMIT":
+            request = load_request_snapshot(config, record.request_id) if record.request_id else None
+            if not isinstance(request, dict) or compute_request_fingerprint(request) != operation.request_fingerprint:
+                raise Stage1Error("tracking_connection_mismatch", "历史请求已变化，不能进行外部核验", _RECOVER_FAILED_STEP)
+            mapping = record.external_mapping
+            if mapping is not None and (not isinstance(mapping, dict) or mapping.get("schema_version") != 2
+                                        or mapping.get("connection_ref") != connection_ref):
+                raise Stage1Error("tracking_connection_mismatch", "历史映射未绑定当前连接", _RECOVER_FAILED_STEP)
+        elif connection_ref is not None:
+            mapping = record.external_mapping
+            if (not isinstance(mapping, dict) or mapping.get("schema_version") != 2
+                    or mapping.get("connection_ref") != connection_ref):
+                raise Stage1Error("tracking_connection_mismatch", "历史映射未绑定当前连接", _RECOVER_FAILED_STEP)
     if action == RECOVERY_ACTION_VERIFY_EXTERNAL and operation is not None and operation.operation in {
         "MODIFY", "SET_ENABLED", "DELETE_EXTERNAL", "REFRESH_RSS"
     }:
@@ -283,7 +353,8 @@ def run_tracking_recover(
                 timestamp=timestamp, reason="management_capability_unknown",
             )
         result = recover_tracking_management(
-            config, record=record, operation=operation, management_client=client, now=timestamp
+            config, record=record, operation=operation, management_client=client, now=timestamp,
+            connection_ref=connection_ref,
         )
         resolved_record = load_tracking_record(config, tracking_id)
         result.update(
@@ -313,6 +384,9 @@ def run_tracking_recover(
             timestamp=timestamp,
             ab_config=ab_config,
             management_client=management_client,
+            connection_ref=connection_ref,
+            expected_operation=operation,
+            expected_record_revision=checked_revision,
         )
 
     if action == RECOVERY_ACTION_AUTO:
@@ -548,25 +622,25 @@ def _terminalize_in_flight_operation(
     the terminal recovery verdict so the durable operation record matches the
     recovered tracking state.
     """
-    if operation is None or operation.state != TRACKING_OPERATION_STATE_IN_PROGRESS:
+    if operation is None or operation.state not in {
+        TRACKING_OPERATION_STATE_IN_PROGRESS, "OUTCOME_UNKNOWN", TRACKING_OPERATION_STATE_RECOVERY_REQUIRED
+    }:
         return
     terminal_state = _operation_terminal_for(target_operation_state)
     try:
-        compare_and_swap_tracking_operation(
-            config,
-            operation.operation_id,
-            expected_state=TRACKING_OPERATION_STATE_IN_PROGRESS,
-            record=transition_tracking_operation(
-                operation,
-                state=terminal_state,
-                error_type=error_type,
-                now=timestamp,
-            ),
-        )
+        if operation.state in {"OUTCOME_UNKNOWN", TRACKING_OPERATION_STATE_RECOVERY_REQUIRED}:
+            recover_tracking_operation(config, operation.operation_id, operation.state,
+                                       target_state=terminal_state, error_type=error_type, now=timestamp)
+        else:
+            compare_and_swap_tracking_operation(
+                config, operation.operation_id,
+                expected_state=TRACKING_OPERATION_STATE_IN_PROGRESS,
+                record=transition_tracking_operation(
+                    operation, state=terminal_state, error_type=error_type, now=timestamp))
     except Stage1Error:
-        # A concurrent actor already advanced/failed the operation; the record
-        # outcome above is authoritative and the operation is now terminal.
-        return
+        # A concurrent actor may have advanced the operation; surface storage
+        # failures so callers cannot claim the old snapshot was durably settled.
+        raise
 
 
 def _operation_terminal_for(target_operation_state: str) -> str:

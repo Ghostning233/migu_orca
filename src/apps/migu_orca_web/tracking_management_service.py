@@ -269,6 +269,8 @@ def run_tracking_management(
             resolved_config, operation_record.operation_id, TRACKING_OPERATION_STATE_PREPARED,
             transition_tracking_operation(operation_record, state=TRACKING_OPERATION_STATE_IN_PROGRESS, now=now),
         )
+    except Stage1Error:
+        raise
     except Exception:
         # The external boundary was never crossed.  Compensate the durable
         # PREPARED binding and its record pointer before surfacing the failure.
@@ -318,7 +320,7 @@ def run_tracking_management(
                 operation_id=in_progress.operation_id, reason="management_verified", now=now)
         try:
             actual = readback(operation, target_scope, target) if readback is not None else _readback_target(management_client, record, target_scope, operation, connection_ref=connection_ref)
-            readback_outcome = _classify_target_readback(operation, target_scope, target, actual, binding.expected_external_fingerprint)
+            readback_outcome = _classify_target_readback(operation, target_scope, actual, binding.expected_external_fingerprint)
         except Exception:
             readback_outcome = MANAGEMENT_OUTCOME_UNKNOWN
         return _finish_management(config=resolved_config, record=started,
@@ -335,6 +337,7 @@ def recover_tracking_management(
     operation: TrackingOperation,
     management_client: ManagementSnapshotClient,
     now: str | None = None,
+    connection_ref: str | None = None,
 ) -> dict[str, Any]:
     """Verify one uncertain management operation without issuing a write.
 
@@ -342,13 +345,20 @@ def recover_tracking_management(
     projection.  In particular, this function does not accept an idempotency
     key or construct a replacement operation.
     """
-    if operation.tracking_id != record.tracking_id or operation.operation not in {
+    if (operation.tracking_id != record.tracking_id
+        or (connection_ref is not None and operation.connection_ref != connection_ref)
+        or operation.operation not in {
         TRACKING_OPERATION_KIND_MODIFY,
         TRACKING_OPERATION_KIND_SET_ENABLED,
         TRACKING_OPERATION_KIND_DELETE_EXTERNAL,
         TRACKING_OPERATION_KIND_REFRESH_RSS,
-    } or operation.target_scope is None:
+    } or operation.target_scope is None):
         return _management_recovery_result(record, operation, "RECOVERY_REQUIRED", True)
+    if connection_ref is not None:
+        try:
+            validate_management_mapping(record, connection_ref)
+        except Exception:
+            return _management_recovery_result(record, operation, "RECOVERY_REQUIRED", True)
     if operation.state not in {
         TRACKING_OPERATION_STATE_IN_PROGRESS,
         "OUTCOME_UNKNOWN",
@@ -365,12 +375,15 @@ def recover_tracking_management(
                 successful=False,
             )
         target = _readback_target(
-            management_client, record, operation.target_scope, operation.operation
+            management_client, record, operation.target_scope, operation.operation,
+            connection_ref=connection_ref,
         )
         outcome = _classify_target_readback(
-            operation.operation, operation.target_scope, target, target,
+            operation.operation, operation.target_scope, target,
             operation.expected_external_fingerprint or "",
         )
+    except Stage1Error:
+        raise
     except Exception:
         return _persist_management_recovery(
             config, record, operation, "RECOVERY_REQUIRED", "management_readback_failed", now,
@@ -546,6 +559,8 @@ def _run_management_write(
 def _readback_target(client: ManagementSnapshotClient | None, record: TrackingRecord, scope: str, operation: str, *, connection_ref: str | None = None) -> Any:
     if client is None:
         raise Stage1Error("tracking_management_readback_missing", "管理操作缺少外部回查", "tracking_management")
+    if connection_ref is not None:
+        validate_management_mapping(record, connection_ref)
     _caps, subscriptions, rss_items = client.read_snapshot()
     mapping = record.external_mapping or {}
     if operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL:
@@ -575,7 +590,7 @@ def _projection_digest(value: Any, action: str, scope: str) -> str:
     return canonical_management_fingerprint(action=action, target_scope=scope, expected_projection=value)
 
 
-def _classify_target_readback(operation: str, scope: str, target: ResolvedManagementTarget, actual: Any, expected: str) -> str:
+def _classify_target_readback(operation: str, scope: str, actual: Any, expected: str) -> str:
     if operation == TRACKING_OPERATION_KIND_REFRESH_RSS:
         return MANAGEMENT_OUTCOME_UNKNOWN
     if operation == TRACKING_OPERATION_KIND_DELETE_EXTERNAL:

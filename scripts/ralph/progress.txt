@@ -225,3 +225,12 @@ Started: 2026-09-13
 - 验证：`uv run pytest src/apps/migu_orca_web/tracking_recovery_service_test.py -q --disable-warnings --maxfail=1` → 19 passed；保存恢复 schema 正负例检查通过；受影响 Ruff、定向 compileall、`git diff --check` 通过。
 - 遗留风险：尚未切换 recover HTTP/generated/前端调用者；未运行全量测试、浏览器或真实 Auto Bangumi。后续 US-330 负责原子切换并移除临时 `ab_config`。
 - 可复用结论：VERIFY_EXTERNAL 必须以 operation 持久化 ref 作为唯一归属证据，并把配置 lease 覆盖至只读核验全过程；AUTO/人工恢复不能因为存在 saved 引用而读取或要求 AB 秘密。
+
+## 2026-09-14 / US-325 独立审核、竞态修复与补证通过
+
+- 首轮 Ralph 只提供了保存连接 wrapper，主 Agent 撤销完成标记；后续审核发现 SUBMIT 意图证据、management readback、存储异常边界与 operation 竞态保护不足，均在本故事范围内修复后重新验收。
+- 修复：VERIFY_EXTERNAL 绑定原 operation 的连接引用、类型、状态和 Request fingerprint；SUBMIT 只用原 selected RSS、标题、季度、字幕组的完整唯一证据生成同 ref mapping v2。外部读取后再次核对 tracking revision、current operation、状态、ref 与 Request fingerprint，竞态变化不落成功结果；原 OUTCOME_UNKNOWN/RECOVERY_REQUIRED operation 可被同一次只读确认合法终结，不创建新 operation 或幂等键。
+- management 恢复改为用真实只读快照与 operation 保存的期望摘要比较；DELETE 仅在目标消失时确认成功，RSS 部分删除和 REFRESH_RSS 保持结果未知。持久化异常与外部读取异常分离，避免把本地存储故障作为上游失败后二次盲写。AUTO 与人工动作继续完全不读取部署配置。
+- 补证：saved recovery 专属测试覆盖严格 schema、本地零配置、SUBMIT 三种未知状态、错误/缺失连接、四类 management 只读恢复、operation 竞态、仓储故障前零外部读取、原 operation/key 不变及安全输出。主 Agent运行 saved/core/management 组合 `68 passed`；受影响 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。
+- 独立审核确认无 P0/P1 阻断，US-325 更新为 passes=true。剩余 P2 为 JSON 双文件补偿的极端再次失败、坏 RSS mapping 的更严格输入诊断及更完整 lease 故障注入；均保持 fail closed，不构成本故事阻断。未运行全量、浏览器或真实 AB；HTTP/generated 原子切换仍留 US-330，未 push/PR/merge。
+- 可复用结论：未知外部结果的只读恢复必须在外部读取前后验证同一个 operation 快照；存储错误不能落入外部失败 fallback；测试必须先固定 Request 再绑定 fingerprint，不能通过改写意图夹具制造假成功。
