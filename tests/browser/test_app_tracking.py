@@ -1233,3 +1233,317 @@ class TestAppTrackingRecovery:
         expect(page.locator("body")).not_to_contain_text("secret-password")
         expect(page.locator("body")).not_to_contain_text("secret-user")
         expect(page.locator("body")).not_to_contain_text("VERIFY_EXTERNAL")
+
+
+def _management_actions(status: str = "ACTIVE") -> list[dict[str, Any]]:
+    """The server-computed actions a US-314 record offers for its own status."""
+    enabled = status == "DISABLED"
+    return [
+        {"code": "SET_ENABLED", "label": "启用外部订阅" if enabled else "停用外部订阅",
+         "style": "PRIMARY" if enabled else "SECONDARY", "requires_confirmation": True,
+         "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
+        {"code": "REFRESH_RSS", "label": "刷新关联 RSS", "style": "SECONDARY",
+         "requires_confirmation": True, "target_scopes": ["ASSOCIATED_RSS"]},
+        # The server offers the per-record external delete here too; wiring it is
+        # its own story, so this page must never render or send it (US-314).
+        {"code": "DELETE_EXTERNAL", "label": "删除外部订阅", "style": "DANGER",
+         "requires_confirmation": True, "target_scopes": ["SUBSCRIPTION", "ASSOCIATED_RSS"]},
+    ]
+
+
+def _action_detail(revision: int, status: str = "ACTIVE") -> dict[str, Any]:
+    """The full ``getTrackingItemDetail`` envelope for one US-314 revision."""
+    return {"ok": True, "result": {
+        **_item("tracking-a", "葬送的芙莉莲"),
+        "status": status,
+        "status_label": "已停用" if status == "DISABLED" else "追番中",
+        "available_actions": _management_actions(status),
+        "revision": revision,
+        "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+        "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+        "safe_info": None, "current_operation": None, "revalidation_issues": [],
+        "external_mapping": {"match_reason": "标题与季度匹配", "enabled": status != "DISABLED",
+                             "external_deleted": False},
+        "audit_events": [], "warnings": [],
+    }}
+
+
+def _action_success_payload(action: str, status_label: str, revision: int) -> dict[str, Any]:
+    return {"ok": True, "result": {
+        "action": action, "management_status": "SUCCEEDED", "needs_manual": False,
+        "safe_message": "Auto Bangumi 管理操作已完成并通过回查", "operation_id": "operation-actions",
+        "operation": None,
+        "tracking": {
+            **_item("tracking-a", "葬送的芙莉莲"), "status_label": status_label, "revision": revision,
+        },
+    }}
+
+
+class TestAppTrackingManagementActions:
+    """US-314: enable/disable and associated-RSS refresh in a real Chromium session."""
+
+    def test_explicit_enable_needs_a_chosen_target_and_sends_only_set_enabled(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        enables: list[dict[str, Any]] = []
+        state = {"revision": 1}
+
+        def detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_action_detail(state["revision"]), ensure_ascii=False),
+            )
+
+        def set_enabled(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            enables.append(json.loads(request.post_data or "{}"))
+            state["revision"] = 2
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_action_success_payload("SET_ENABLED", "已停用外部订阅", 2), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", _modify_probe)
+        # Registered after the broader tracking routes: later routes win.
+        page.route("**/api/v1/tracking/items/tracking-a/set-enabled", set_enabled)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        # Server-computed and capability-gated: no session, no action at all.
+        expect(page.locator("#tracking-set-enabled-submit")).to_have_count(0)
+        expect(page.locator("#tracking-refresh-rss-submit")).to_have_count(0)
+        expect(page.locator(".tracking-management-actions-section")).to_contain_text("需要先在页面连接")
+
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("secret-user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-set-enabled-submit")
+        # Both server-offered targets are named in user copy, never as raw enums.
+        section = page.locator(".tracking-management-actions-section")
+        expect(section).to_contain_text("外部番剧订阅")
+        expect(section).to_contain_text("关联 RSS")
+        expect(section).not_to_contain_text("SUBSCRIPTION")
+        expect(section).not_to_contain_text("ASSOCIATED_RSS")
+        assert not enables, enables
+        # DELETE_EXTERNAL is server-offered but not wired by this page: it has
+        # no control at all and never becomes a request.
+        assert page.locator("[id*='delete-external']").count() == 0, "delete control rendered"
+        assert section.locator("button.danger-button").count() == 0, section.inner_text()
+
+        # The enable/disable target is the user's explicit choice: nothing is
+        # pre-selected and nothing can be sent before one is picked.
+        expect(page.locator("#tracking-set-enabled-submit")).to_be_disabled()
+        expect(section).to_contain_text("请先明确选择启停目标")
+        page.locator("#tracking-set-enabled-scope-SUBSCRIPTION").check()
+        expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()
+
+        page.locator("#tracking-set-enabled-submit").click()
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("不修改 MiGuOrca 本地方案")
+        assert not enables, enables
+        page.locator(".confirm-dialog-actions button").filter(has_text="取消").click()
+        assert not enables, enables
+
+        page.locator("#tracking-set-enabled-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认停用订阅").click()
+        page.wait_for_selector("#tracking-management-result")
+
+        expect(page.locator("#tracking-management-result")).to_contain_text("外部启停已完成")
+        expect(page.locator("#tracking-management-result")).not_to_contain_text("SUCCEEDED")
+        assert len(enables) == 1, enables
+        body = enables[0]
+        assert body["target_scope"] == "SUBSCRIPTION", body
+        # The direction comes from the record status, and the body carries no
+        # patch, no external id and no second scope.
+        assert body["enabled"] is False, body
+        assert "patch" not in body, body
+        assert body["confirm"] is True, body
+        assert body["expected_revision"] == 1, body
+        assert body["ab_config"]["password"] == "secret-password", body
+        key = body["idempotency_key"]
+        assert isinstance(key, str) and len(key) >= 8, body
+        expect(page.locator(".tracking-list-item").first).to_contain_text("已停用外部订阅")
+        expect(page.locator("body")).not_to_contain_text("secret-password")
+        expect(page.locator("body")).not_to_contain_text("secret-user")
+        expect(page.locator("body")).not_to_contain_text(key)
+        assert not [url for url in page.url.split() if "modify" in url], page.url
+
+    def test_explicit_refresh_only_touches_the_current_record(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        refreshes: list[dict[str, Any]] = []
+        posted: list[str] = []
+        page.on("request", lambda request: posted.append(request.url) if request.method == "POST" else None)
+        state = {"revision": 1}
+
+        def detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_action_detail(state["revision"]), ensure_ascii=False),
+            )
+
+        def refresh(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            refreshes.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_action_success_payload("REFRESH_RSS", "已刷新关联 RSS", 2), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", _modify_probe)
+        page.route("**/api/v1/tracking/items/tracking-a/refresh", refresh)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-refresh-rss-submit")
+
+        page.locator("#tracking-refresh-rss-submit").click()
+        expect(page.locator(".confirm-dialog-message")).to_contain_text("不会刷新全局 RSS")
+        assert not refreshes, refreshes
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认刷新关联 RSS").click()
+        page.wait_for_selector("#tracking-management-result")
+
+        expect(page.locator("#tracking-management-result")).to_contain_text("关联 RSS 刷新已完成")
+        assert len(refreshes) == 1, refreshes
+        body = refreshes[0]
+        assert body["target_scope"] == "ASSOCIATED_RSS", body
+        assert "patch" not in body and "enabled" not in body, body
+        assert body["confirm"] is True, body
+        # Only the current record's own refresh route was ever called: there is
+        # no global refresh, and no subscription/modify/delete write happened.
+        write_calls = [
+            url for url in posted
+            if "/api/v1/" in url and "/autobangumi/capabilities" not in url
+        ]
+        assert len(write_calls) == 1, write_calls
+        assert write_calls[0].endswith("/api/v1/tracking/items/tracking-a/refresh"), write_calls
+        assert not [url for url in posted if "refresh/all" in url or "/modify" in url], posted
+        assert not [url for url in posted if "/delete-external" in url], posted
+        # The batch record keeps its own tracking id in the deep link.
+        expect(page).to_have_url(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+
+    def test_partial_refresh_is_unresolved_and_only_read_back(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        refreshes: list[dict[str, Any]] = []
+        state = {"revision": 1, "detail_reads": 0}
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_action_detail(state["revision"]), ensure_ascii=False),
+            )
+
+        def refresh(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            refreshes.append(json.loads(request.post_data or "{}"))
+            if len(refreshes) == 1:
+                # A batch with accepted and rejected upstream writes: the server
+                # reports recovery required, never success.
+                route.fulfill(
+                    status=200, content_type="application/json",
+                    body=json.dumps({"ok": True, "result": {
+                        "action": "REFRESH_RSS", "management_status": "RECOVERY_REQUIRED",
+                        "needs_manual": True, "safe_message": "外部管理结果未知，请人工恢复；不会自动重试",
+                        "operation_id": "operation-actions", "operation": None,
+                        "tracking": {**_item("tracking-a", "葬送的芙莉莲"),
+                                     "status_label": "需要恢复", "revision": 2},
+                    }}, ensure_ascii=False),
+                )
+                return
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_action_success_payload("REFRESH_RSS", "已刷新关联 RSS", 3), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", _modify_probe)
+        page.route("**/api/v1/tracking/items/tracking-a/refresh", refresh)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-refresh-rss-submit")
+
+        page.locator("#tracking-refresh-rss-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认刷新关联 RSS").click()
+        page.wait_for_selector("#tracking-management-result")
+
+        result = page.locator("#tracking-management-result")
+        expect(result).to_contain_text("关联 RSS 刷新结果未知")
+        expect(result).to_contain_text("只读回查")
+        expect(result).not_to_contain_text("已完成")
+        expect(page.locator("#tracking-management-manual-notice")).to_contain_text("独立核对")
+        expect(page.locator("body")).not_to_contain_text("RECOVERY_REQUIRED")
+        # Nothing was resent automatically; the page only re-read both views.
+        assert len(refreshes) == 1, refreshes
+        assert state["detail_reads"] >= 2, state
+
+        # The user confirms again: the locked intent is replayed verbatim.
+        page.locator("#tracking-refresh-rss-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认刷新关联 RSS").click()
+        page.wait_for_selector("#tracking-management-result:has-text('关联 RSS 刷新已完成')")
+        assert len(refreshes) == 2, refreshes
+        assert refreshes[1]["idempotency_key"] == refreshes[0]["idempotency_key"], refreshes
+        assert refreshes[1]["expected_revision"] == refreshes[0]["expected_revision"], refreshes
+
+    def test_capability_degradation_hides_only_the_unproven_action(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            payload = _probe_capabilities()
+            payload["rss_disable"] = "UNSUPPORTED"
+            payload["rss_refresh"] = "UNKNOWN"
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"ok": True, "result": payload}, ensure_ascii=False),
+            )
+
+        def detail(route: Any, request: Any) -> None:
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(_action_detail(1), ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-set-enabled-scope-SUBSCRIPTION")
+
+        section = page.locator(".tracking-management-actions-section")
+        # The RSS scope of the disable direction is dropped, and the unproven
+        # refresh is not rendered at all — each with its own read-only reason.
+        expect(page.locator("#tracking-set-enabled-scope-ASSOCIATED_RSS")).to_have_count(0)
+        expect(page.locator("#tracking-refresh-rss-submit")).to_have_count(0)
+        expect(section).to_contain_text("已降级为只读")
+        # The remaining action still works: choosing the target enables it.
+        expect(page.locator("#tracking-set-enabled-submit")).to_be_disabled()
+        page.locator("#tracking-set-enabled-scope-SUBSCRIPTION").check()
+        expect(page.locator("#tracking-set-enabled-submit")).to_be_enabled()

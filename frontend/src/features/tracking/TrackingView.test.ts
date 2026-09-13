@@ -1704,3 +1704,266 @@ describe('TrackingView external modify (US-313)', () => {
     expect(wrapper.find('.tracking-connection-status').exists()).toBe(false)
   })
 })
+
+const setEnabledAction = {
+  code: 'SET_ENABLED', label: '停用外部订阅', style: 'SECONDARY',
+  requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+}
+const enableAction = { ...setEnabledAction, label: '启用外部订阅', style: 'PRIMARY' }
+const refreshAction = {
+  code: 'REFRESH_RSS', label: '刷新关联 RSS', style: 'SECONDARY',
+  requires_confirmation: true, target_scopes: ['ASSOCIATED_RSS'],
+}
+
+/** A detail record that offers the two US-314 management actions. */
+function actionDetail(overrides: Record<string, unknown> = {}) {
+  return {
+    ...modifyDetail(),
+    available_actions: [setEnabledAction, refreshAction],
+    ...overrides,
+  }
+}
+
+/** The authoritative summary either US-314 endpoint returns. */
+function actionPayload(action: string, overrides: Record<string, unknown> = {}) {
+  return {
+    action, management_status: 'SUCCEEDED', needs_manual: false,
+    safe_message: 'Auto Bangumi 管理操作已完成并通过回查', operation_id: 'operation-actions',
+    operation: null,
+    tracking: { ...item('tracking-1', '葬送的芙莉莲'), status_label: '已停用', revision: 2 },
+    ...overrides,
+  }
+}
+
+function postedBodies(endpoint: string): Record<string, unknown>[] {
+  return apiPost.mock.calls
+    .filter((call) => call[0] === endpoint)
+    .map((call) => (call[1]?.body ?? {}) as Record<string, unknown>)
+}
+
+function actionEndpoints(): string[] {
+  return apiPost.mock.calls
+    .map((call) => String(call[0]))
+    .filter((path) => path !== '/api/v1/autobangumi/capabilities')
+}
+
+describe('TrackingView external enable and RSS refresh (US-314)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  it('never offers enable or refresh without a live session or the proven capability', async () => {
+    serveApi(() => actionDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    // No page credential session yet: neither action is rendered, no request.
+    expect(wrapper.find('#tracking-set-enabled-submit').exists()).toBe(false)
+    expect(wrapper.find('#tracking-refresh-rss-submit').exists()).toBe(false)
+    expect(wrapper.find('.tracking-management-actions-section').text()).toContain('需要先在页面连接 Auto Bangumi')
+
+    await connect(wrapper)
+    // Connecting never enables, disables or refreshes anything on its own.
+    expect(actionEndpoints()).toEqual([])
+    expect(wrapper.find('#tracking-set-enabled-submit').exists()).toBe(true)
+    expect(wrapper.find('#tracking-refresh-rss-submit').exists()).toBe(true)
+  })
+
+  it('requires an explicit enable/disable target and sends only that scope', async () => {
+    serveApi(() => actionDetail())
+    apiPost.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce(actionPayload('SET_ENABLED'))
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    const section = wrapper.find('.tracking-management-actions-section')
+    expect(section.text()).toContain('外部番剧订阅')
+    expect(section.text()).toContain('关联 RSS')
+    expect(section.text()).not.toContain('ASSOCIATED_RSS')
+    expect(section.text()).not.toContain('SUBSCRIPTION')
+    // No target is pre-selected: the choice is the user's.
+    expect(wrapper.find('#tracking-set-enabled-submit').attributes('disabled')).toBeDefined()
+    expect(section.text()).toContain('请先明确选择启停目标')
+
+    await wrapper.find('#tracking-set-enabled-scope-ASSOCIATED_RSS').setValue()
+    expect(wrapper.find('#tracking-set-enabled-submit').attributes('disabled')).toBeUndefined()
+    const confirmed = answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-set-enabled-submit').trigger('submit')
+    await flushPromises()
+
+    // The confirmation names the action, the scope and the direction actually
+    // taken from the record's status, and says it only affects Auto Bangumi.
+    const options = confirmed.mock.calls[0]?.[0] as { title: string; message: string; confirmLabel: string }
+    expect(options.confirmLabel).toBe('确认停用 RSS')
+    expect(options.message).toContain('只影响 Auto Bangumi 外部 RSS')
+    expect(options.message).toContain('不修改 MiGuOrca 本地方案')
+
+    const bodies = postedBodies('/api/v1/tracking/items/{tracking_id}/set-enabled')
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0]).toEqual({
+      target_scope: 'ASSOCIATED_RSS',
+      enabled: false,
+      expected_revision: 1,
+      idempotency_key: expect.any(String),
+      confirm: true,
+      ab_config: {
+        auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user',
+        password: 'pass', fallback_enabled: false,
+      },
+    })
+    // The body cannot express a patch, an external id or the other scope.
+    expect(Object.keys(bodies[0] ?? {}).sort()).toEqual(
+      ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+    )
+    expect(wrapper.find('#tracking-management-result').text()).toContain('外部启停已完成')
+    expect(wrapper.find('#tracking-list-container').text()).toContain('已停用')
+    expect(wrapper.text()).not.toContain('pass')
+    expect(wrapper.text()).not.toContain(String(bodies[0]?.idempotency_key))
+  })
+
+  it('derives the enable direction from the record status, not from the button', async () => {
+    serveApi(() => actionDetail({
+      status: 'DISABLED', status_label: '已停用', available_actions: [enableAction, refreshAction],
+    }))
+    apiPost.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce(actionPayload('SET_ENABLED'))
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-set-enabled-scope-SUBSCRIPTION').setValue()
+    const confirmed = answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-set-enabled-submit').trigger('submit')
+    await flushPromises()
+    expect((confirmed.mock.calls[0]?.[0] as { confirmLabel: string }).confirmLabel).toBe('确认启用订阅')
+    expect(postedBodies('/api/v1/tracking/items/{tracking_id}/set-enabled')[0]).toMatchObject({
+      target_scope: 'SUBSCRIPTION', enabled: true,
+    })
+  })
+
+  it('drops the scope whose own direction capability is not proven', async () => {
+    serveApi(() => actionDetail())
+    // The session proves only the subscription disable capability.
+    apiPost.mockResolvedValueOnce(capabilities({ rss_disable: 'UNSUPPORTED' }))
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    expect(wrapper.find('#tracking-set-enabled-scope-SUBSCRIPTION').exists()).toBe(true)
+    expect(wrapper.find('#tracking-set-enabled-scope-ASSOCIATED_RSS').exists()).toBe(false)
+
+    // A proven enable capability cannot stand in for the disable direction, and
+    // an unproven refresh hides the refresh action entirely.
+    apiPost.mockReset()
+    apiPost.mockResolvedValueOnce(capabilities({ rss_refresh: 'UNKNOWN' }))
+    const second = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(second.wrapper)
+    expect(second.wrapper.find('#tracking-refresh-rss-submit').exists()).toBe(false)
+    expect(second.wrapper.find('.tracking-management-actions-section').text()).toContain('已降级为只读')
+  })
+
+  it('refreshes only the current record own associated RSS', async () => {
+    serveApi(() => actionDetail())
+    apiPost.mockResolvedValueOnce(capabilities()).mockResolvedValueOnce(actionPayload('REFRESH_RSS'))
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    const confirmed = answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-refresh-rss-submit').trigger('submit')
+    await flushPromises()
+    const options = confirmed.mock.calls[0]?.[0] as { confirmLabel: string; message: string }
+    expect(options.confirmLabel).toBe('确认刷新关联 RSS')
+    expect(options.message).toContain('不会刷新全局 RSS')
+
+    // One per-record refresh, and nothing else: no global refresh route, no
+    // subscription route, no delete route.
+    expect(actionEndpoints()).toEqual(['/api/v1/tracking/items/{tracking_id}/refresh'])
+    expect(postedBodies('/api/v1/tracking/items/{tracking_id}/refresh')[0]).toEqual({
+      target_scope: 'ASSOCIATED_RSS',
+      expected_revision: 1,
+      idempotency_key: expect.any(String),
+      confirm: true,
+      ab_config: {
+        auth_mode: 'password', base_url: 'https://ab.invalid', username: 'user',
+        password: 'pass', fallback_enabled: false,
+      },
+    })
+    expect(wrapper.find('#tracking-management-result').text()).toContain('关联 RSS 刷新已完成')
+  })
+
+  it('treats a partial or unknown refresh result as unresolved and never resends', async () => {
+    serveApi(() => actionDetail())
+    // A partial batch (one accepted, one rejected upstream) is reported by the
+    // server as an unknown outcome; the page must not read it as success.
+    apiPost.mockResolvedValueOnce(capabilities())
+      .mockResolvedValueOnce(actionPayload('REFRESH_RSS', {
+        management_status: 'RECOVERY_REQUIRED', needs_manual: true,
+      }))
+      .mockResolvedValueOnce(actionPayload('REFRESH_RSS'))
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-refresh-rss-submit').trigger('submit')
+    await flushPromises()
+    const result = wrapper.find('#tracking-management-result')
+    expect(result.classes()).toContain('is-unknown')
+    expect(result.text()).toContain('关联 RSS 刷新结果未知')
+    expect(result.text()).toContain('只读回查')
+    expect(result.text()).not.toContain('已完成')
+    expect(result.text()).not.toContain('RECOVERY_REQUIRED')
+    expect(result.find('#tracking-management-manual-notice').exists()).toBe(true)
+    const bodies = postedBodies('/api/v1/tracking/items/{tracking_id}/refresh')
+    expect(bodies).toHaveLength(1)
+
+    // An explicit second confirmation replays the very same key and revision.
+    await wrapper.find('#tracking-refresh-rss-submit').trigger('submit')
+    await flushPromises()
+    const replays = postedBodies('/api/v1/tracking/items/{tracking_id}/refresh')
+    expect(replays).toHaveLength(2)
+    expect(replays[1]?.idempotency_key).toBe(replays[0]?.idempotency_key)
+    expect(replays[1]?.expected_revision).toBe(replays[0]?.expected_revision)
+    expect(wrapper.find('#tracking-management-result').text()).toContain('关联 RSS 刷新已完成')
+  })
+
+  it('frees the page lock after a definite refusal and mints a new key', async () => {
+    serveApi(() => actionDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+      .mockRejectedValueOnce(rejectedError)
+      .mockRejectedValueOnce(conflictError)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-set-enabled-scope-SUBSCRIPTION').setValue()
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-set-enabled-submit').trigger('submit')
+    await flushPromises()
+    const result = wrapper.find('#tracking-management-result')
+    expect(result.classes()).toContain('is-rejected')
+    expect(result.text()).toContain('本次未改变 Auto Bangumi 的启用状态')
+    expect(result.text()).not.toContain('结果未知')
+
+    // The refusal released the intent, so the next confirmation mints a fresh
+    // key — and a 409 is refused before the external boundary just the same,
+    // re-reading both views instead of resending anything.
+    await wrapper.find('#tracking-set-enabled-scope-SUBSCRIPTION').setValue()
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-set-enabled-submit').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('#tracking-management-result').text()).toContain('未提交到 Auto Bangumi')
+    expect(wrapper.text()).not.toContain('tracking_revision_conflict')
+
+    const bodies = postedBodies('/api/v1/tracking/items/{tracking_id}/set-enabled')
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+  })
+
+  it('sends zero requests when the user cancels the impact confirmation', async () => {
+    serveApi(() => actionDetail())
+    apiPost.mockResolvedValueOnce(capabilities())
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+
+    await wrapper.find('#tracking-set-enabled-scope-SUBSCRIPTION').setValue()
+    answerConfirm(wrapper, false)
+    await wrapper.find('#tracking-set-enabled-submit').trigger('submit')
+    await flushPromises()
+    answerConfirm(wrapper, false)
+    await wrapper.find('#tracking-refresh-rss-submit').trigger('submit')
+    await flushPromises()
+    expect(actionEndpoints()).toEqual([])
+    expect(wrapper.find('#tracking-management-result').exists()).toBe(false)
+  })
+})

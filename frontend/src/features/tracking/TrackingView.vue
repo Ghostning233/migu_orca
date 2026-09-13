@@ -28,7 +28,6 @@ import {
   createWriteSession,
   filterTrackingItems,
   isDefiniteWriteRejection,
-  isManagementActionCode,
   isRecoveryActionCode,
   isTrackingManagementScope,
   isWriteActionCode,
@@ -61,16 +60,18 @@ import {
   type TrackingWriteSession,
 } from './trackingProjection'
 import {
-  createModifyConflictSession,
-  createModifyInFlightSession,
-  createModifyRejectedSession,
+  createManagementConflictSession,
+  createManagementInFlightSession,
+  createManagementRejectedSession,
+  createTrackingManagementActionIntent,
   createTrackingManagementBody,
-  createTrackingManagementIntent,
+  isSendableManagementActionCode,
   MANAGEMENT_ACTION_ENDPOINTS,
-  MODIFY_SCOPE_CONFIRMATIONS,
-  projectModifyOutcome,
+  managementConfirmation,
+  projectManagementOutcome,
+  sameManagementRequest,
   type TrackingManagementIntent,
-  type TrackingModifyResult,
+  type TrackingManagementResult,
 } from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
 import CredentialSessionDialog from './CredentialSessionDialog.vue'
@@ -128,11 +129,12 @@ const recoveryLoading = ref(false)
 const recoveryPending = ref(false)
 let recoverySequence = 0
 let recoveryController: AbortController | null = null
-// External management writes (US-313).  MODIFY shares the page credential, the
-// impact confirmation, the latest revision and the single page-level intent
-// with the submit family; only the endpoint, the request body and the server
-// verdict differ (management_status instead of outcome).  The patch lives only
-// in the locked in-memory intent and the single POST body.
+// External management writes (US-313, US-314).  MODIFY, SET_ENABLED and
+// REFRESH_RSS share the page credential, the impact confirmation, the latest
+// revision and the single page-level intent with the submit family; only the
+// endpoint, the request body and the server verdict differ (management_status
+// instead of outcome).  The patch, the enable direction and the refresh scope
+// live only in the locked in-memory intent and the single POST body.
 const managementSession = ref<TrackingManagementSession | null>(null)
 const managementLoading = ref(false)
 const managementPending = ref(false)
@@ -618,14 +620,15 @@ async function runTrackingRecovery(
 }
 
 /**
- * Run one explicit external management write (US-313).
+ * Run one explicit external management write (US-313, US-314).
  *
- * ``MODIFY`` is the management action this story sends.  It reuses everything
- * the submit family already guarantees: the live page credential, the latest
- * revision, an impact confirmation, one opaque key per confirmation, the single
- * page-level intent, the returned-tracking convergence and a read-only read-back
- * — never an automatic resend.  The endpoint and the request body are both bound
- * to the scope the user chose, so a scope can only ever send its own patch.
+ * ``MODIFY``, ``SET_ENABLED`` and ``REFRESH_RSS`` share this single path.  It
+ * reuses everything the submit family already guarantees: the live page
+ * credential, the latest revision, an impact confirmation, one opaque key per
+ * confirmation, the single page-level intent, the returned-tracking convergence
+ * and a read-only read-back — never an automatic resend.  The endpoint, the
+ * request body and the confirmation copy are all bound to the validated intent,
+ * so an action can never send another action's request or copy.
  */
 async function runTrackingManagement(payload: {
   action: TrackingAction
@@ -640,8 +643,9 @@ async function runTrackingManagement(payload: {
   // No page credential session means no external management write at all.
   if (!config || !capabilities) return
   const requested = payload.action.code
-  // Only the management actions this page can actually send are accepted.
-  if (!isManagementActionCode(requested)) return
+  // Only the management actions this page can actually send are accepted;
+  // DELETE_EXTERNAL waits for its own story and still sends zero requests.
+  if (!isSendableManagementActionCode(requested)) return
   const action = requested
   const targetScope = payload.targetScope
   if (!isTrackingManagementScope(targetScope)) return
@@ -652,28 +656,30 @@ async function runTrackingManagement(payload: {
   if (openRecovery && openRecovery.trackingId !== trackingId && recoverySessionKeepsLock(openRecovery.state)) return
   const openManagement = managementSession.value
   if (openManagement && openManagement.trackingId !== trackingId && managementSessionKeepsIntent(openManagement)) return
-  // A locked intent still owns the single opaque key *and* the scope/patch it
-  // was confirmed with. Replaying it under a different scope or patch would
-  // send something the user did not ask for, and minting a new key while the
-  // external result is unresolved could apply the change twice — so a
-  // mismatching request does nothing at all.
-  const locked = managementIntent && managementSession.value?.trackingId === trackingId ? managementIntent : null
-  if (locked && (locked.action !== action || locked.targetScope !== targetScope
-    || JSON.stringify(locked.patch) !== JSON.stringify(payload.patch))) return
 
   // The page re-validates the emitted request against the current server
-  // projection: the action and scope must still be offered for this revision
-  // and the live session must still prove the capability.
-  const intent = locked ?? createTrackingManagementIntent(
+  // projection: the action and scope must still be offered for this revision,
+  // the live session must still prove the capability, the patch must belong to
+  // the chosen scope and the enable direction must still be the one the
+  // record's own status implies.
+  const projectedIntent = createTrackingManagementActionIntent(
     payload.item, action, targetScope, payload.patch, capabilities,
   )
-  if (!intent) return
+  if (!projectedIntent) return
+  // A locked intent still owns the single opaque key *and* the request it was
+  // confirmed with. Replaying it for a different scope, patch or direction
+  // would send something the user did not ask for, and minting a new key while
+  // the external result is unresolved could apply the change twice — so a
+  // mismatching request does nothing at all.
+  const locked = managementIntent && managementSession.value?.trackingId === trackingId ? managementIntent : null
+  if (locked && !sameManagementRequest(locked, projectedIntent)) return
+  const intent = locked ?? projectedIntent
 
   managementPending.value = true
   let confirmed = false
   try {
     confirmed = (await confirmDialog.value?.confirm({
-      ...MODIFY_SCOPE_CONFIRMATIONS[targetScope], cancelLabel: '取消',
+      ...managementConfirmation(intent), cancelLabel: '取消',
     })) ?? false
   } finally {
     managementPending.value = false
@@ -687,19 +693,19 @@ async function runTrackingManagement(payload: {
   managementController?.abort()
   managementController = controller
   managementLoading.value = true
-  managementSession.value = createModifyInFlightSession(trackingId, targetScope)
+  managementSession.value = createManagementInFlightSession(trackingId, action, targetScope)
   try {
     // A body the page cannot build safely (no server address, missing scope
-    // patch) is not sent at all.
+    // patch, no known enable direction) is not sent at all.
     const body = createTrackingManagementBody(intent, sessionConfig.value, storageQuery().storage_dir)
     if (!body) return
-    const result = await api.post<TrackingModifyResult>(MANAGEMENT_ACTION_ENDPOINTS[intent.action], {
+    const result = await api.post<TrackingManagementResult>(MANAGEMENT_ACTION_ENDPOINTS[intent.action], {
       path: { tracking_id: trackingId }, body, signal: controller.signal,
     })
     if (sequence !== managementSequence) return
     // The returned tracking converges the list row without a second list read.
     applyReturnedTracking(result.tracking)
-    const session = projectModifyOutcome(trackingId, targetScope, result)
+    const session = projectManagementOutcome(trackingId, intent.action, targetScope, result)
     managementSession.value = session
     if (!managementSessionKeepsIntent(session)) managementIntent = null
     await recheckAfterAction(trackingId)
@@ -714,17 +720,17 @@ async function runTrackingManagement(payload: {
       // tracking, so re-read both and require a new explicit confirmation —
       // nothing is ever resent on the user's behalf.
       managementIntent = null
-      managementSession.value = createModifyConflictSession(trackingId, targetScope, apiError.type)
+      managementSession.value = createManagementConflictSession(trackingId, action, targetScope, apiError.type)
       await recheckAfterAction(trackingId, true)
       return
     }
     if (isDefiniteWriteRejection(apiError)) {
       // A structured non-409 4xx is a definite refusal raised before the
-      // external boundary, so Auto Bangumi was never modified. The intent is
+      // external boundary, so Auto Bangumi was never touched. The intent is
       // released (other items are no longer blocked and the next confirmation
       // mints a fresh key) and the page only reads the latest state back.
       managementIntent = null
-      managementSession.value = createModifyRejectedSession(trackingId, targetScope)
+      managementSession.value = createManagementRejectedSession(trackingId, action, targetScope)
       await recheckAfterAction(trackingId, true)
       return
     }

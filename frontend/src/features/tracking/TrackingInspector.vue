@@ -13,6 +13,7 @@ import {
   createTrackingActionIntent,
   executableTrackingActions,
   MANAGEMENT_NEEDS_MANUAL_NOTICE,
+  MANAGEMENT_SCOPE_LABELS,
   projectRevalidateIssues,
   projectTrackingActionScopes,
   RECOVERY_NEEDS_MANUAL_NOTICE,
@@ -20,6 +21,7 @@ import {
   type TrackingAction,
   type TrackingActionIntent,
   type TrackingItem,
+  type TrackingManagementActionCode,
   type TrackingManagementScope,
   type TrackingManagementSession,
   type TrackingRecoveryActionCode,
@@ -29,6 +31,12 @@ import {
   type TrackingRevalidateResult,
   type TrackingWriteSession,
 } from './trackingProjection'
+import {
+  isSendableManagementActionCode,
+  MANAGEMENT_ACTIONS_HELP,
+  type SendableManagementActionCode,
+} from './trackingManagement'
+import TrackingManagementActions from './TrackingManagementActions.vue'
 import TrackingModifyForm from './TrackingModifyForm.vue'
 
 type TrackingDetail = NonNullable<
@@ -175,6 +183,11 @@ const thisManagement = computed(() => (
     ? props.managementSession
     : null
 ))
+/** The modify result is rendered next to the modify form; the rest next to the actions. */
+const thisModify = computed(() => (thisManagement.value?.action === 'MODIFY' ? thisManagement.value : null))
+const thisManagementAction = computed(() => (
+  thisManagement.value && thisManagement.value.action !== 'MODIFY' ? thisManagement.value : null
+))
 
 /** This item's own conflicting action is in flight: all of them bump its revision. */
 const itemActionInFlight = computed(() => (
@@ -193,35 +206,56 @@ function requestRecovery(action: TrackingRecoveryActionCode): void {
   emit('recovery-requested', { action, item: detail.value })
 }
 
-// -- external modify (US-313) ------------------------------------------------
-// MODIFY is server-computed with explicit target scopes, so it is projected
-// exactly like the other management actions: it needs the page credential
-// session and the matching capability for the scope the user wants to change.
-// The form owns the field selection and builds the strict, scope-specific
-// patch; the page owns the request, confirmation, revision and idempotency.
-const modifyAction = computed(() => (
-  detail.value && props.credentialReady === true
-    ? executableTrackingActions(detail.value, props.capabilities).find((action) => action.code === 'MODIFY') ?? null
-    : null
-))
-/** The server-offered scopes this page can actually request, in server order. */
-function offeredScopes(action: TrackingAction): TrackingManagementScope[] {
-  if (!detail.value) return []
-  return (action.target_scopes ?? [])
-    .filter((scope): scope is 'SUBSCRIPTION' | 'ASSOCIATED_RSS' =>
-      scope === 'SUBSCRIPTION' || scope === 'ASSOCIATED_RSS')
-    .filter((scope) => projectTrackingActionScopes(detail.value!, action.code, scope, props.capabilities).length > 0)
+// -- external management writes (US-313, US-314) -----------------------------
+// Every management action the page sends (MODIFY, SET_ENABLED, REFRESH_RSS) is
+// server-computed with explicit target scopes, so each one is projected the same
+// way: it needs the page credential session and the matching capability for the
+// scope the user wants to act on.  The forms own the user's explicit choice (the
+// fields to change, the enable/disable target, the refresh), emit it with the
+// latest revision, and the page owns the request, confirmation and idempotency.
+// An action this page does not send (DELETE_EXTERNAL) is never offered at all.
+
+/** One management action together with the scopes this page may request for it. */
+interface ManagementOfferView {
+  code: SendableManagementActionCode
+  action: TrackingAction
+  scopes: TrackingManagementScope[]
 }
-const modifyScopes = computed(() => (modifyAction.value ? offeredScopes(modifyAction.value) : []))
-const modifyScopeLabels: Record<TrackingManagementScope, string> = {
-  SUBSCRIPTION: '外部番剧订阅', ASSOCIATED_RSS: '关联 RSS',
-}
-const modifyOffered = computed(() => Boolean(modifyAction.value && modifyScopes.value.length))
-const modifyHint = computed(() => {
-  if (props.credentialReady !== true) return '需要先在页面连接 Auto Bangumi，才能修改外部方案。'
-  const offered = (detail.value?.available_actions ?? []).some((action) => action.code === 'MODIFY')
-  return offered ? '当前连接未确认修改能力，已降级为只读。' : '当前状态不可修改外部方案。'
+
+const managementOffers = computed<ManagementOfferView[]>(() => {
+  if (!detail.value || props.credentialReady !== true) return []
+  const offers: ManagementOfferView[] = []
+  for (const action of executableTrackingActions(detail.value, props.capabilities)) {
+    if (!isSendableManagementActionCode(action.code)) continue
+    const code = action.code
+    const scopes = (action.target_scopes ?? [])
+      .filter((scope): scope is TrackingManagementScope =>
+        scope === 'SUBSCRIPTION' || scope === 'ASSOCIATED_RSS')
+      .filter((scope) => projectTrackingActionScopes(detail.value!, code, scope, props.capabilities).length > 0)
+    if (scopes.length) offers.push({ code, action, scopes })
+  }
+  return offers
 })
+
+function offerFor(code: SendableManagementActionCode): ManagementOfferView | null {
+  return managementOffers.value.find((offer) => offer.code === code) ?? null
+}
+
+const modifyOffer = computed(() => offerFor('MODIFY'))
+const setEnabledOffer = computed(() => offerFor('SET_ENABLED'))
+const refreshOffer = computed(() => offerFor('REFRESH_RSS'))
+const modifyScopes = computed(() => modifyOffer.value?.scopes ?? [])
+
+/** Fixed read-only degradation copy when the live session cannot offer an action. */
+function managementHint(code: TrackingManagementActionCode, verb: string): string {
+  if (props.credentialReady !== true) return `需要先在页面连接 Auto Bangumi，才能${verb}。`
+  const offered = (detail.value?.available_actions ?? []).some((action) => action.code === code)
+  return offered ? '当前连接未确认该能力，已降级为只读。' : `当前状态不可${verb}。`
+}
+
+const modifyHint = computed(() => managementHint('MODIFY', '修改外部方案'))
+const setEnabledHint = computed(() => managementHint('SET_ENABLED', '启停外部订阅或关联 RSS'))
+const refreshHint = computed(() => managementHint('REFRESH_RSS', '刷新关联 RSS'))
 
 function requestManagement(payload: {
   action: TrackingAction
@@ -230,15 +264,16 @@ function requestManagement(payload: {
   patch: unknown
 }): void {
   if (actionBusy.value || !detail.value) return
-  const action = modifyAction.value
-  // The emitted action object must still be the server-projected one and the
-  // scope must still be requestable for this very revision: a stale form emit
-  // after a revision change is dropped instead of being sent.
-  if (!action || action.code !== payload.action.code) return
-  if (!offeredScopes(action).includes(payload.targetScope)) return
+  // The emitted action object must still be one of the server-projected offers
+  // and the scope must still be requestable for this very revision: a stale
+  // form emit after a revision change is dropped instead of being sent.
+  const offer = managementOffers.value.find((candidate) => candidate.action === payload.action)
+    ?? managementOffers.value.find((candidate) => candidate.code === payload.action.code)
+  if (!offer) return
+  if (!offer.scopes.includes(payload.targetScope)) return
   if (payload.item.tracking_id !== props.trackingId || payload.item.revision !== detail.value.revision) return
   emit('management-requested', {
-    action, item: detail.value, targetScope: payload.targetScope, patch: payload.patch,
+    action: offer.action, item: detail.value, targetScope: payload.targetScope, patch: payload.patch,
   })
 }
 
@@ -490,14 +525,14 @@ defineExpose({ reload: () => fetchDetail(true) })
 
       <section class="tracking-inspector-section tracking-modify-section" aria-labelledby="tracking-modify-heading">
         <h4 id="tracking-modify-heading">修改 Auto Bangumi 外部方案</h4>
-        <template v-if="modifyOffered && modifyAction">
+        <template v-if="modifyOffer">
           <p class="field-help">
             可用修改范围（只影响 Auto Bangumi 外部对象，不显示外部 ID）：
-            <span v-for="scope in modifyScopes" :key="scope" class="tracking-modify-scope">{{ modifyScopeLabels[scope] }}</span>
+            <span v-for="scope in modifyScopes" :key="scope" class="tracking-modify-scope">{{ MANAGEMENT_SCOPE_LABELS[scope] }}</span>
           </p>
           <TrackingModifyForm
             :item="detail"
-            :action="modifyAction"
+            :action="modifyOffer.action"
             :busy="actionBusy"
             :loading="managementInFlight"
             @submit="requestManagement"
@@ -505,19 +540,38 @@ defineExpose({ reload: () => fetchDetail(true) })
         </template>
         <p v-else class="field-help">{{ modifyHint }}</p>
         <div
-          v-if="thisManagement"
+          v-if="thisModify"
           id="tracking-modify-result"
           class="tracking-modify-result"
-          :class="`is-${thisManagement.state.toLowerCase()}`"
+          :class="`is-${thisModify.state.toLowerCase()}`"
           role="status"
         >
           <p class="tracking-modify-verdict">
-            本次目标：{{ modifyScopeLabels[thisManagement.targetScope] }}。{{ thisManagement.message }}
+            本次目标：{{ MANAGEMENT_SCOPE_LABELS[thisModify.targetScope] }}。{{ thisModify.message }}
           </p>
-          <p v-if="thisManagement.needsManual" id="tracking-modify-manual-notice" class="tracking-modify-manual">
+          <p v-if="thisModify.needsManual" id="tracking-modify-manual-notice" class="tracking-modify-manual">
             {{ MANAGEMENT_NEEDS_MANUAL_NOTICE }}
           </p>
         </div>
+      </section>
+
+      <section
+        class="tracking-inspector-section tracking-management-actions-section"
+        aria-labelledby="tracking-management-actions-heading"
+      >
+        <h4 id="tracking-management-actions-heading">启停与关联 RSS 刷新</h4>
+        <p class="field-help">{{ MANAGEMENT_ACTIONS_HELP }}</p>
+        <TrackingManagementActions
+          :item="detail"
+          :set-enabled="setEnabledOffer?.action ?? null"
+          :refresh-rss="refreshOffer?.action ?? null"
+          :set-enabled-hint="setEnabledHint"
+          :refresh-hint="refreshHint"
+          :result="thisManagementAction"
+          :busy="actionBusy"
+          :loading="managementInFlight"
+          @submit="requestManagement"
+        />
       </section>
 
       <section

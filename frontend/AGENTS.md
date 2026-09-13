@@ -407,9 +407,37 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `filter_rule` 的两个布尔开关总是随规则一起提交（Auto Bangumi 的 filter 是单条排除表达式），
   两个文本条件只在各自勾选时提交。表单在 `tracking_id:revision` 变化时整体重置 —— 写结果回查会让
   revision 前进，所以**写后再提交必须先重新勾选字段**（测试里不要假设旧选择还在）。
+- **启停与关联 RSS 刷新（US-314）**：`SET_ENABLED`/`REFRESH_RSS` 与 `MODIFY` 共用
+  `TrackingView.runTrackingManagement` 一条管理写路径，但**意图是多态联合**
+  （`TrackingManagementIntent`，按 action code 判别）：只有 `MODIFY` 带 `patch`，只有
+  `SET_ENABLED` 带 `enabled`，`REFRESH_RSS` 的 `targetScope` 被类型固定为 `ASSOCIATED_RSS`。
+  启停方向**不来自 emit**，而是 `managementEnableDirection(item.status)` 从服务端记录状态推导
+  （`DISABLED`→启用，`ACTIVE`/`EXTERNAL_ONLY`→停用，其余一律 null 即零请求）；刷新没有全局面板，
+  端点就是 `MANAGEMENT_ACTION_ENDPOINTS.REFRESH_RSS`，请求体由 `createTrackingManagementBody`
+  单点构造且**不含** `patch`/`enabled`。
+- **发送集合是页面自己的闸门（US-314）**：`SENDABLE_MANAGEMENT_ACTION_CODES`
+  （MODIFY/SET_ENABLED/REFRESH_RSS）决定哪些动作能离开页面，`DELETE_EXTERNAL` **不在其中**；
+  inspector 用 `isSendableManagementActionCode` 过滤 offer，页面在 `runTrackingManagement`
+  再过滤一次，所以 DELETE_EXTERNAL 即使出现在 `available_actions` 里也既不渲染、也不发请求
+  （等 US-315）。
+- **锁定意图的重放判据（US-314）**：`sameManagementRequest()` 比较 action + targetScope +
+  patch + enabled，**故意不比较** `expectedRevision` 与 `idempotencyKey` —— 服务端在外部边界
+  **之前**就把 revision +1 落盘，所以结果未知后回查到的 revision 必然前进，重放必须整份复用锁定
+  意图（key + 旧 revision），否则会被判同键不同绑定。写动作新增 `enabled`/方向语义时，
+  这个比对和确认文案（`managementConfirmation(intent)`，按 action+scope+方向取固定表）都要一起扩。
+- **管理结果文案按 action 分表（US-314）**：`MANAGEMENT_ACTION_MESSAGES` 在 `trackingProjection`
+  里按 action code × state 二维固定，一个刷新结果绝不会说「已应用本次修改」；`managementConflictMessage(errorType, action)`
+  只对 `tracking_management_patch_invalid` 做按动作的措辞覆盖（其余 409 与动作无关）。
 - 浏览器测试：`tests/browser/test_app_tracking.py`。Playwright **后注册的 route 优先**，
-  所以 revalidate/recover/modify 这类写端点要在 `_mock_list()` 之后单独 `page.route` 注册；否则会被
-  更宽的 `**/api/v1/tracking/items*` 通配吃掉。`/modify` 还要注册在
+  所以 revalidate/recover/modify/set-enabled/refresh 这类写端点要在 `_mock_list()` 之后单独
+  `page.route` 注册；否则会被更宽的 `**/api/v1/tracking/items*` 通配吃掉。写端点还要注册在
   `**/api/v1/tracking/items/tracking-a` **之后**。详情路由的 mock 必须返回完整 envelope
   （`{"ok": true, "result": {...}}`）；只返回裸对象会让客户端按 envelope 校验失败并渲染
   「追番详情读取失败」。
+- 新写动作的浏览器用例模板：`_management_actions()` 故意同时返回 `DELETE_EXTERNAL`，页面必须
+  「有 offer 也不渲染、也不发送」；`_action_detail()` / `_action_success_payload()` 是 US-314
+  的详情与安全结果 mock，新故事可在此基础上加字段。
+- CSS 类命名避免父子同名：inspector 里的 `<section>` 用 `-section` 后缀
+  （`tracking-modify-section` / `tracking-management-actions-section`），子组件根节点用短名
+  （`tracking-modify` / `tracking-management-actions`）。同名会让 Playwright 的
+  `.locator()` 触发 strict mode violation（两个元素）。

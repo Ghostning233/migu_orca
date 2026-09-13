@@ -4,25 +4,30 @@ import type { CapabilityResult, TrackingItem } from './trackingProjection'
 import {
   buildRssPatch,
   buildSubscriptionPatch,
-  createModifyConflictSession,
-  createModifyInFlightSession,
-  createModifyRejectedSession,
+  createManagementConflictSession,
+  createManagementInFlightSession,
+  createManagementRejectedSession,
+  createTrackingManagementActionIntent,
   createTrackingManagementBody,
   createTrackingManagementIntent,
+  createTrackingRefreshRssIntent,
+  createTrackingSetEnabledIntent,
   emptyRssForm,
   emptySubscriptionForm,
   isModifyActionCode,
   isUnsafePatchValue,
   MANAGEMENT_ACTION_ENDPOINTS,
+  managementConfirmation,
   managementPatchPresent,
   MODIFY_FORM_HELP,
   MODIFY_SCOPE_CONFIRMATIONS,
-  projectModifyOutcome,
+  projectManagementOutcome,
   rssTextValue,
+  sameManagementRequest,
   setRssTextValue,
   setSubscriptionTextValue,
   subscriptionTextValue,
-  type TrackingModifyResult,
+  type TrackingManagementResult,
   type TrackingRssForm,
   type TrackingSubscriptionForm,
 } from './trackingManagement'
@@ -62,7 +67,7 @@ const abConfig = {
   password: 'secret', fallback_enabled: false,
 }
 
-function modifyResult(overrides: Partial<TrackingModifyResult> = {}): TrackingModifyResult {
+function modifyResult(overrides: Partial<TrackingManagementResult> = {}): TrackingManagementResult {
   return {
     action: 'MODIFY', management_status: 'SUCCEEDED', needs_manual: false, safe_message: '管理操作已完成',
     operation_id: 'operation-1', operation: null,
@@ -245,7 +250,8 @@ describe('tracking modify request (US-313)', () => {
     expect(Object.keys(rssBody ?? {}).sort()).toEqual(
       ['target_scope', 'patch', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
     )
-    expect(Object.keys(rssBody?.patch ?? {})).toEqual(['name'])
+    const rssPatch = rssBody && 'patch' in rssBody ? rssBody.patch : null
+    expect(Object.keys(rssPatch ?? {})).toEqual(['name'])
 
     // A session without a server address is never turned into a request.
     expect(createTrackingManagementBody(subscription, { ...abConfig, base_url: undefined })).toBeNull()
@@ -254,13 +260,13 @@ describe('tracking modify request (US-313)', () => {
 
 describe('tracking modify result (US-313)', () => {
   it('reports the server management status as fixed Chinese copy only', () => {
-    const succeeded = projectModifyOutcome('tracking-1', 'SUBSCRIPTION', modifyResult())
+    const succeeded = projectManagementOutcome('tracking-1', 'MODIFY', 'SUBSCRIPTION', modifyResult())
     expect(succeeded).toMatchObject({ state: 'SUCCEEDED', targetScope: 'SUBSCRIPTION', needsManual: false })
     expect(succeeded.message).toContain('已应用本次修改')
     expect(succeeded.message).not.toContain('SUCCEEDED')
     expect(succeeded.message).not.toContain('管理操作已完成')
 
-    const failed = projectModifyOutcome('tracking-1', 'ASSOCIATED_RSS', modifyResult({
+    const failed = projectManagementOutcome('tracking-1', 'MODIFY', 'ASSOCIATED_RSS', modifyResult({
       management_status: 'FAILED', safe_message: 'Auto Bangumi 未应用管理操作',
     }))
     expect(failed).toMatchObject({ state: 'FAILED', targetScope: 'ASSOCIATED_RSS' })
@@ -270,7 +276,7 @@ describe('tracking modify result (US-313)', () => {
 
   it('treats every other management status as an unresolved result', () => {
     for (const status of ['PREPARED', 'IN_PROGRESS', 'OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED']) {
-      const session = projectModifyOutcome('tracking-1', 'SUBSCRIPTION', modifyResult({
+      const session = projectManagementOutcome('tracking-1', 'MODIFY', 'SUBSCRIPTION', modifyResult({
         management_status: status as never,
       }))
       expect(session.state).toBe('UNKNOWN')
@@ -280,7 +286,7 @@ describe('tracking modify result (US-313)', () => {
       expect(session.message).not.toContain(status)
     }
     // A management_status outside the documented enum is never a success.
-    const unknown = projectModifyOutcome('tracking-1', 'SUBSCRIPTION', modifyResult({
+    const unknown = projectManagementOutcome('tracking-1', 'MODIFY', 'SUBSCRIPTION', modifyResult({
       management_status: 'SOMETHING_NEW' as never,
     }))
     expect(unknown.state).toBe('UNKNOWN')
@@ -288,19 +294,19 @@ describe('tracking modify result (US-313)', () => {
   })
 
   it('keeps the raw conflict type and raw status out of the page copy', () => {
-    const conflict = createModifyConflictSession('tracking-1', 'SUBSCRIPTION', 'tracking_target_drift')
+    const conflict = createManagementConflictSession('tracking-1', 'MODIFY', 'SUBSCRIPTION', 'tracking_target_drift')
     expect(conflict.state).toBe('CONFLICT')
     expect(conflict.message).toContain('外部对象已变化')
     expect(conflict.message).not.toContain('tracking_target_drift')
-    const fallback = createModifyConflictSession('tracking-1', 'SUBSCRIPTION', 'brand_new_conflict')
+    const fallback = createManagementConflictSession('tracking-1', 'MODIFY', 'SUBSCRIPTION', 'brand_new_conflict')
     expect(fallback.message).toContain('未提交到 Auto Bangumi')
     expect(fallback.message).not.toContain('brand_new_conflict')
 
-    const rejected = createModifyRejectedSession('tracking-1', 'ASSOCIATED_RSS')
+    const rejected = createManagementRejectedSession('tracking-1', 'MODIFY', 'ASSOCIATED_RSS')
     expect(rejected.state).toBe('REJECTED')
     expect(rejected.message).toContain('未修改 Auto Bangumi 外部订阅')
 
-    const inFlight = createModifyInFlightSession('tracking-1', 'SUBSCRIPTION')
+    const inFlight = createManagementInFlightSession('tracking-1', 'MODIFY', 'SUBSCRIPTION')
     expect(inFlight.state).toBe('IN_FLIGHT')
     expect(inFlight.message).toContain('正在提交外部修改')
   })
@@ -316,5 +322,264 @@ describe('tracking modify result (US-313)', () => {
     expect(MODIFY_SCOPE_CONFIRMATIONS.SUBSCRIPTION.message).toContain('可能改变后续下载')
     expect(MODIFY_SCOPE_CONFIRMATIONS.ASSOCIATED_RSS.message).toContain('关联 RSS')
     expect(MODIFY_FORM_HELP).toContain('不读取 Auto Bangumi 的当前值')
+  })
+})
+
+// -- US-314: enable/disable and associated-RSS refresh -----------------------
+
+const ENABLE_ACTION = {
+  code: 'SET_ENABLED', label: '启用外部订阅', style: 'PRIMARY',
+  requires_confirmation: true, target_scopes: ['SUBSCRIPTION', 'ASSOCIATED_RSS'],
+} satisfies ItemAction
+const DISABLE_ACTION = { ...ENABLE_ACTION, label: '停用外部订阅', style: 'SECONDARY' } satisfies ItemAction
+const REFRESH_ACTION = {
+  code: 'REFRESH_RSS', label: '刷新关联 RSS', style: 'SECONDARY',
+  requires_confirmation: true, target_scopes: ['ASSOCIATED_RSS'],
+} satisfies ItemAction
+
+const BOTH_SCOPES = ['SUBSCRIPTION', 'ASSOCIATED_RSS'] as const
+
+function enableDetail(overrides: Partial<TrackingItem> = {}): TrackingItem {
+  return item({ status: 'DISABLED', status_label: '已停用', available_actions: [ENABLE_ACTION], ...overrides })
+}
+
+describe('tracking set-enabled request (US-314)', () => {
+  it('derives the direction from the record status, never from the caller', () => {
+    expect(createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities()))
+      .toMatchObject({ action: 'SET_ENABLED', targetScope: 'SUBSCRIPTION', enabled: true, patch: null })
+
+    for (const status of ['ACTIVE', 'EXTERNAL_ONLY'] as const) {
+      expect(createTrackingSetEnabledIntent(
+        item({ status, available_actions: [DISABLE_ACTION] }), 'SUBSCRIPTION', capabilities(),
+      )).toMatchObject({ enabled: false })
+    }
+    // A status that names no direction never becomes a request even when the
+    // action object claims to offer one.
+    for (const status of ['PENDING_SUBMIT', 'SUBMITTING', 'UNKNOWN'] as const) {
+      expect(createTrackingSetEnabledIntent(
+        item({ status, available_actions: [ENABLE_ACTION] }), 'SUBSCRIPTION', capabilities(),
+      )).toBeNull()
+    }
+    expect(createTrackingSetEnabledIntent(item({ revision: 0, status: 'DISABLED' }), 'SUBSCRIPTION', capabilities()))
+      .toBeNull()
+  })
+
+  it('intersects the server-offered scope with the capability of that direction', () => {
+    const record = enableDetail()
+    expect(createTrackingSetEnabledIntent(
+      record, 'ASSOCIATED_RSS', capabilities({ rss_enable: 'UNSUPPORTED' }),
+    )).toBeNull()
+    expect(createTrackingSetEnabledIntent(
+      record, 'ASSOCIATED_RSS', capabilities({ rss_enable: 'UNKNOWN' }),
+    )).toBeNull()
+    expect(createTrackingSetEnabledIntent(record, 'ASSOCIATED_RSS', capabilities()))
+      .toMatchObject({ targetScope: 'ASSOCIATED_RSS', enabled: true })
+    // A scope the server did not offer is refused even with the capability.
+    expect(createTrackingSetEnabledIntent(
+      enableDetail({ available_actions: [{ ...ENABLE_ACTION, target_scopes: ['SUBSCRIPTION'] }] }),
+      'ASSOCIATED_RSS', capabilities(),
+    )).toBeNull()
+    // The enable direction needs the *enable* capability; the disable direction
+    // needs only the disable one, so a proven enable alone cannot disable.
+    const active = item({ status: 'ACTIVE', available_actions: [DISABLE_ACTION] })
+    expect(createTrackingSetEnabledIntent(active, 'SUBSCRIPTION', capabilities({
+      subscription_enable: 'UNSUPPORTED',
+    }))).toMatchObject({ enabled: false })
+    expect(createTrackingSetEnabledIntent(active, 'SUBSCRIPTION', capabilities({
+      subscription_disable: 'UNSUPPORTED',
+    }))).toBeNull()
+    expect(createTrackingSetEnabledIntent(active, 'SUBSCRIPTION', null)).toBeNull()
+  })
+
+  it('builds only the boolean direction for the chosen scope', () => {
+    const intent = createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities())!
+    const body = createTrackingManagementBody(intent, abConfig, 'profile')
+    expect(body).toEqual({
+      target_scope: 'SUBSCRIPTION',
+      enabled: true,
+      expected_revision: 4,
+      idempotency_key: intent.idempotencyKey,
+      confirm: true,
+      ab_config: abConfig,
+      storage_dir: 'profile',
+    })
+    // The body has no patch field at all: an enable can never carry form fields.
+    expect(Object.keys(body ?? {}).sort()).toEqual(
+      ['target_scope', 'enabled', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config', 'storage_dir'].sort(),
+    )
+    expect(createTrackingManagementBody(intent, { ...abConfig, base_url: undefined })).toBeNull()
+  })
+})
+
+describe('tracking refresh request (US-314)', () => {
+  it('only ever targets the current record own associated RSS', () => {
+    const intent = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }), capabilities())
+    expect(intent).toMatchObject({
+      action: 'REFRESH_RSS', targetScope: 'ASSOCIATED_RSS', patch: null, enabled: null,
+    })
+    const body = createTrackingManagementBody(intent!, abConfig)
+    expect(body).toEqual({
+      target_scope: 'ASSOCIATED_RSS',
+      expected_revision: 4,
+      idempotency_key: intent!.idempotencyKey,
+      confirm: true,
+      ab_config: abConfig,
+    })
+    // No patch, no enabled, no scope choice: the refresh body cannot express
+    // another target, and there is no global refresh route to fall back to.
+    expect(Object.keys(body ?? {}).sort()).toEqual(
+      ['target_scope', 'expected_revision', 'idempotency_key', 'confirm', 'ab_config'].sort(),
+    )
+  })
+
+  it('fails closed without the server action or the proven refresh capability', () => {
+    expect(createTrackingRefreshRssIntent(item(), capabilities())).toBeNull()
+    for (const value of ['UNSUPPORTED', 'UNKNOWN'] as const) {
+      expect(createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }),
+        capabilities({ rss_refresh: value }))).toBeNull()
+    }
+    expect(createTrackingRefreshRssIntent(
+      item({ available_actions: [REFRESH_ACTION] }), capabilities({ probe_status: 'PARTIAL' }),
+    )).toBeNull()
+    // The server would never offer a subscription refresh; if it did, the scope
+    // intersection drops it instead of sending it.
+    expect(createTrackingRefreshRssIntent(
+      item({ available_actions: [{ ...REFRESH_ACTION, target_scopes: ['SUBSCRIPTION'] }] }), capabilities(),
+    )).toBeNull()
+    expect(createTrackingRefreshRssIntent(
+      item({ revision: 0, available_actions: [REFRESH_ACTION] }), capabilities(),
+    )).toBeNull()
+  })
+})
+
+describe('tracking management dispatch and locking (US-314)', () => {
+  it('dispatches only the actions this page sends, and never DELETE_EXTERNAL', () => {
+    const record = item({
+      available_actions: [
+        { code: 'DELETE_EXTERNAL', label: '删除外部订阅', style: 'DANGER', requires_confirmation: true, target_scopes: [...BOTH_SCOPES] },
+        DISABLE_ACTION, REFRESH_ACTION,
+      ],
+    })
+    expect(createTrackingManagementActionIntent(record, 'DELETE_EXTERNAL', 'SUBSCRIPTION', null, capabilities()))
+      .toBeNull()
+    expect(createTrackingManagementActionIntent(record, 'SET_ENABLED', 'SUBSCRIPTION', null, capabilities()))
+      .toMatchObject({ action: 'SET_ENABLED', enabled: false })
+    expect(createTrackingManagementActionIntent(record, 'REFRESH_RSS', 'ASSOCIATED_RSS', null, capabilities()))
+      .toMatchObject({ action: 'REFRESH_RSS', targetScope: 'ASSOCIATED_RSS' })
+  })
+
+  it('replays a locked intent only for the identical request, revision aside', () => {
+    const record = enableDetail()
+    const first = createTrackingSetEnabledIntent(record, 'SUBSCRIPTION', capabilities())!
+    // The record moved on while the first request was in flight, so the fresh
+    // intent carries another revision and another key. The request itself is
+    // unchanged, which is exactly what a locked replay must recognise.
+    const bumped = createTrackingSetEnabledIntent(
+      { ...record, revision: 9 }, 'SUBSCRIPTION', capabilities(),
+    )!
+    expect(bumped.expectedRevision).toBe(9)
+    expect(bumped.idempotencyKey).not.toBe(first.idempotencyKey)
+    expect(sameManagementRequest(first, bumped)).toBe(true)
+
+    // A different scope, a different direction or a different action is not the
+    // same request, however identical the rest of the envelope looks.
+    const otherScope = createTrackingSetEnabledIntent(record, 'ASSOCIATED_RSS', capabilities())!
+    expect(sameManagementRequest(first, otherScope)).toBe(false)
+    const otherDirection = createTrackingSetEnabledIntent(
+      item({ status: 'ACTIVE', available_actions: [DISABLE_ACTION] }), 'ASSOCIATED_RSS', capabilities(),
+    )!
+    expect(otherDirection.enabled).toBe(false)
+    expect(sameManagementRequest(otherScope, otherDirection)).toBe(false)
+    const modify = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities())!
+    expect(sameManagementRequest(first, modify)).toBe(false)
+
+    const otherPatch = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'y' }, capabilities())!
+    const samePatchLater = createTrackingManagementIntent(
+      item({ revision: 9 }), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities(),
+    )!
+    expect(sameManagementRequest(modify, otherPatch)).toBe(false)
+    expect(sameManagementRequest(modify, samePatchLater)).toBe(true)
+  })
+})
+
+describe('tracking management copy and results (US-314)', () => {
+  it('names the action, the scope and the direction in each confirmation', () => {
+    const enable = createTrackingSetEnabledIntent(enableDetail(), 'SUBSCRIPTION', capabilities())!
+    expect(managementConfirmation(enable)).toEqual({
+      title: '启用 Auto Bangumi 番剧订阅',
+      message: expect.stringContaining('不修改 MiGuOrca 本地方案'),
+      confirmLabel: '确认启用订阅',
+    })
+    const disable = createTrackingSetEnabledIntent(
+      item({ status: 'ACTIVE', available_actions: [DISABLE_ACTION] }), 'ASSOCIATED_RSS', capabilities(),
+    )!
+    const disableCopy = managementConfirmation(disable)
+    expect(disableCopy.title).toContain('停用')
+    expect(disableCopy.message).toContain('关联 RSS')
+    expect(disableCopy.confirmLabel).toBe('确认停用 RSS')
+
+    const refresh = createTrackingRefreshRssIntent(item({ available_actions: [REFRESH_ACTION] }), capabilities())!
+    const refreshCopy = managementConfirmation(refresh)
+    expect(refreshCopy.message).toContain('不会刷新全局 RSS')
+    expect(refreshCopy.confirmLabel).toBe('确认刷新关联 RSS')
+
+    const modify = createTrackingManagementIntent(item(), 'MODIFY', 'SUBSCRIPTION', { title: 'x' }, capabilities())!
+    expect(managementConfirmation(modify)).toEqual(MODIFY_SCOPE_CONFIRMATIONS.SUBSCRIPTION)
+  })
+
+  it('reports success and definite failure in the wording of the action that was sent', () => {
+    const enabled = projectManagementOutcome('tracking-1', 'SET_ENABLED', 'SUBSCRIPTION', modifyResult({
+      action: 'SET_ENABLED', management_status: 'SUCCEEDED',
+    }))
+    expect(enabled).toMatchObject({ action: 'SET_ENABLED', state: 'SUCCEEDED', needsManual: false })
+    expect(enabled.message).toContain('已应用本次启用或停用')
+    expect(enabled.message).not.toContain('修改')
+
+    const refreshed = projectManagementOutcome('tracking-1', 'REFRESH_RSS', 'ASSOCIATED_RSS', modifyResult({
+      action: 'REFRESH_RSS', management_status: 'FAILED', safe_message: 'Auto Bangumi 未应用管理操作',
+    }))
+    expect(refreshed).toMatchObject({ action: 'REFRESH_RSS', state: 'FAILED' })
+    expect(refreshed.message).toContain('未接受本次刷新')
+    expect(refreshed.message).not.toContain('FAILED')
+  })
+
+  it('treats a partial, in-flight or undocumented result as unknown for every action', () => {
+    for (const action of ['MODIFY', 'SET_ENABLED', 'REFRESH_RSS'] as const) {
+      for (const status of ['PREPARED', 'IN_PROGRESS', 'OUTCOME_UNKNOWN', 'RECOVERY_REQUIRED']) {
+        const session = projectManagementOutcome('tracking-1', action, 'SUBSCRIPTION', modifyResult({
+          management_status: status as never,
+        }))
+        expect(session.state).toBe('UNKNOWN')
+        expect(session.needsManual).toBe(true)
+        expect(session.message).toContain('只读回查')
+        expect(session.message).not.toContain('已应用')
+        expect(session.message).not.toContain(status)
+      }
+    }
+  })
+
+  it('keeps the raw conflict type and the modify-only wording out of enable/refresh copy', () => {
+    const conflict = createManagementConflictSession(
+      'tracking-1', 'REFRESH_RSS', 'ASSOCIATED_RSS', 'tracking_management_patch_invalid',
+    )
+    expect(conflict.state).toBe('CONFLICT')
+    expect(conflict.message).toContain('本次刷新请求未通过服务端校验')
+    expect(conflict.message).not.toContain('修改内容')
+    expect(conflict.message).not.toContain('tracking_management_patch_invalid')
+
+    const enableConflict = createManagementConflictSession(
+      'tracking-1', 'SET_ENABLED', 'SUBSCRIPTION', 'tracking_target_drift',
+    )
+    expect(enableConflict.message).toContain('外部对象已变化')
+    expect(enableConflict.message).not.toContain('tracking_target_drift')
+
+    const rejected = createManagementRejectedSession('tracking-1', 'SET_ENABLED', 'SUBSCRIPTION')
+    expect(rejected.state).toBe('REJECTED')
+    expect(rejected.message).toContain('未改变 Auto Bangumi 的启用状态')
+    expect(rejected.message).not.toContain('修改')
+
+    const inFlight = createManagementInFlightSession('tracking-1', 'REFRESH_RSS', 'ASSOCIATED_RSS')
+    expect(inFlight.state).toBe('IN_FLIGHT')
+    expect(inFlight.message).toContain('正在请求刷新关联 RSS')
   })
 })

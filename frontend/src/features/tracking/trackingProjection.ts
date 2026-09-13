@@ -116,6 +116,19 @@ export function isTrackingManagementScope(value: unknown): value is TrackingMana
   return value === 'SUBSCRIPTION' || value === 'ASSOCIATED_RSS'
 }
 
+/** Fixed Chinese labels for the two management scopes; the raw enum never renders. */
+export const MANAGEMENT_SCOPE_LABELS = {
+  SUBSCRIPTION: '外部番剧订阅',
+  ASSOCIATED_RSS: '关联 RSS',
+} as const satisfies Record<TrackingManagementScope, string>
+
+/** The enable/disable direction implied by the record's own server status. */
+export function managementEnableDirection(status: unknown): boolean | null {
+  if (status === 'DISABLED') return true
+  if (status === 'ACTIVE' || status === 'EXTERNAL_ONLY') return false
+  return null
+}
+
 const MANAGEMENT_ACTION_CODES = new Set<TrackingActionCode>(['MODIFY', 'SET_ENABLED', 'REFRESH_RSS', 'DELETE_EXTERNAL'])
 
 /**
@@ -863,20 +876,58 @@ export type TrackingManagementState =
 
 export interface TrackingManagementSession {
   readonly trackingId: string
-  readonly action: TrackingActionCode
+  readonly action: TrackingManagementActionCode
   readonly targetScope: TrackingManagementScope
   readonly state: TrackingManagementState
   readonly needsManual: boolean
   readonly message: string
 }
 
-const MANAGEMENT_MESSAGES: Record<TrackingManagementState, string> = {
-  IN_FLIGHT: '正在提交外部修改，请稍候…',
-  SUCCEEDED: '外部修改已完成：Auto Bangumi 已应用本次修改。',
-  FAILED: '外部修改明确失败，Auto Bangumi 未应用本次修改；可核对后重新发起。',
-  CONFLICT: '追番记录已变化或当前状态不允许本次管理操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
-  REJECTED: '服务端明确拒绝了本次管理请求，本次未修改 Auto Bangumi 外部订阅；正在刷新最新详情，请重新确认。',
-  UNKNOWN: '外部修改结果未知，正在只读回查；未确认生效前不会自动重试。',
+/**
+ * One fixed message table per action (US-314).
+ *
+ * Every management action must state exactly what it did or did not do, so the
+ * copy is bound to the action code the page sent rather than shared: an RSS
+ * refresh never claims a subscription was changed, and an enable/disable never
+ * claims a field was modified.  The action is a management code, so the table is
+ * total over the whole family.
+ */
+const MANAGEMENT_ACTION_MESSAGES: Record<
+  TrackingManagementActionCode,
+  Record<TrackingManagementState, string>
+> = {
+  MODIFY: {
+    IN_FLIGHT: '正在提交外部修改，请稍候…',
+    SUCCEEDED: '外部修改已完成：Auto Bangumi 已应用本次修改。',
+    FAILED: '外部修改明确失败，Auto Bangumi 未应用本次修改；可核对后重新发起。',
+    CONFLICT: '追番记录已变化或当前状态不允许本次管理操作，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+    REJECTED: '服务端明确拒绝了本次管理请求，本次未修改 Auto Bangumi 外部订阅；正在刷新最新详情，请重新确认。',
+    UNKNOWN: '外部修改结果未知，正在只读回查；未确认生效前不会自动重试。',
+  },
+  SET_ENABLED: {
+    IN_FLIGHT: '正在提交外部启停，请稍候…',
+    SUCCEEDED: '外部启停已完成：Auto Bangumi 已应用本次启用或停用。',
+    FAILED: '外部启停明确失败，Auto Bangumi 未应用本次启用或停用；可核对后重新发起。',
+    CONFLICT: '追番记录已变化或当前状态不允许本次启停，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+    REJECTED: '服务端明确拒绝了本次启停请求，本次未改变 Auto Bangumi 的启用状态；正在刷新最新详情，请重新确认。',
+    UNKNOWN: '外部启停结果未知，正在只读回查；未确认生效前不会自动重试。',
+  },
+  REFRESH_RSS: {
+    IN_FLIGHT: '正在请求刷新关联 RSS，请稍候…',
+    SUCCEEDED: '关联 RSS 刷新已完成：Auto Bangumi 已接受本次刷新请求。',
+    FAILED: '关联 RSS 刷新明确失败，Auto Bangumi 未接受本次刷新；可核对后重新发起。',
+    CONFLICT: '追番记录已变化或当前状态不允许刷新关联 RSS，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+    REJECTED: '服务端明确拒绝了本次刷新请求，本次未刷新 Auto Bangumi 关联 RSS；正在刷新最新详情，请重新确认。',
+    UNKNOWN: '关联 RSS 刷新结果未知，正在只读回查；未确认完成前不会自动重试。',
+  },
+  DELETE_EXTERNAL: {
+    IN_FLIGHT: '正在提交外部删除，请稍候…',
+    SUCCEEDED: '外部删除已完成：Auto Bangumi 已删除该外部对象。',
+    FAILED: '外部删除明确失败，Auto Bangumi 未删除该外部对象；可核对后重新发起。',
+    CONFLICT: '追番记录已变化或当前状态不允许本次删除，本次未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+    REJECTED: '服务端明确拒绝了本次删除请求，本次未删除 Auto Bangumi 外部对象；正在刷新最新详情，请重新确认。',
+    UNKNOWN: '外部删除结果未知，正在只读回查；未确认删除前不会自动重试。',
+  },
 }
 
 /**
@@ -916,11 +967,38 @@ const MANAGEMENT_CONFLICT_MESSAGES: Record<TrackingManagementConflictType, strin
     '该记录缺少外部关联信息，本次未提交到 Auto Bangumi；正在刷新最新详情。',
 }
 
+/**
+ * The few conflicts whose next step names the request itself (US-314).
+ *
+ * Every other management conflict is action-agnostic (revision/idempotency/
+ * state/target), so only the validation conflict gets per-action copy — it is
+ * the one whose wording would otherwise describe an enable or a refresh as a
+ * "修改".
+ */
+const MANAGEMENT_CONFLICT_ACTION_MESSAGES: Partial<
+  Record<TrackingManagementActionCode, Partial<Record<TrackingManagementConflictType, string>>>
+> = {
+  SET_ENABLED: {
+    tracking_management_patch_invalid:
+      '本次启停请求未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  },
+  REFRESH_RSS: {
+    tracking_management_patch_invalid:
+      '本次刷新请求未通过服务端校验，未提交到 Auto Bangumi；正在刷新最新详情，请重新确认。',
+  },
+}
+
 /** Fixed next step for one documented management conflict; unknown types fail closed. */
-export function managementConflictMessage(errorType: unknown): string {
-  return typeof errorType === 'string' && (MANAGEMENT_CONFLICT_TYPES as readonly string[]).includes(errorType)
-    ? MANAGEMENT_CONFLICT_MESSAGES[errorType as TrackingManagementConflictType]
-    : MANAGEMENT_CONFLICT_FALLBACK_MESSAGE
+export function managementConflictMessage(
+  errorType: unknown,
+  action?: TrackingManagementActionCode,
+): string {
+  if (typeof errorType !== 'string' || !(MANAGEMENT_CONFLICT_TYPES as readonly string[]).includes(errorType)) {
+    return MANAGEMENT_CONFLICT_FALLBACK_MESSAGE
+  }
+  const conflict = errorType as TrackingManagementConflictType
+  return (action && MANAGEMENT_CONFLICT_ACTION_MESSAGES[action]?.[conflict])
+    ?? MANAGEMENT_CONFLICT_MESSAGES[conflict]
 }
 
 /**
@@ -934,7 +1012,7 @@ export function managementConflictMessage(errorType: unknown): string {
  */
 export function createManagementSession(
   trackingId: string,
-  action: TrackingActionCode,
+  action: TrackingManagementActionCode,
   targetScope: TrackingManagementScope,
   state: TrackingManagementState,
   needsManual = false,
@@ -943,7 +1021,7 @@ export function createManagementSession(
   return {
     trackingId, action, targetScope, state,
     needsManual,
-    message: message ?? MANAGEMENT_MESSAGES[state],
+    message: message ?? MANAGEMENT_ACTION_MESSAGES[action][state],
   }
 }
 

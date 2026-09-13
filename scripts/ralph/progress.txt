@@ -16,6 +16,7 @@ Started: Sun Sep 13 08:40:00 CST 2026
 - 幂等重放绑定是 **idempotency_key + expected_revision**（服务端 `_guard_replay_binding` 先于 `_guard_expected_revision`）：transport 重试必须整份复用锁定 intent（含 revision），只复用 key 会被判同键不同绑定 409。submit 家族的全部 409 都发生在外部边界之前，即「未提交到 Auto Bangumi」；按 `error_type` 给固定中文，并固定「重读列表+重读详情 → 要求重新确认」，绝不静默重发。
 - 外部写的请求/确认/key/结果面板固定在 `TrackingView`（凭据所在实例），**不要**把 `ab_config` 当 prop 传给 inspector；inspector 只按 `credentialReady + capabilities + available_actions` 投影按钮并 emit intent（携带最新 detail revision），写后回查用 inspector `defineExpose` 的 `reload()`，绝不用 `detailRevision`/`:key` 重挂载（会丢写结果面板）。
 - DELETE_EXTERNAL 始终逐条操作且请求无 `file` 字段，必须明确并实际保留本地 Request、tracking、审计、任务和已下载媒体。
+- 浏览器测试里 inspector 的外层 `<section>` 与子组件根节点**不能同名**：section 一律带 `-section` 后缀（如 `tracking-modify-section` / `tracking-management-actions-section`），子组件根用短名。同名会让 Playwright `.locator()` 触发 strict mode violation（解析到 2 个元素），症状是断言莫名报 “resolved to 2 elements”。
 - “已更新集数”固定为待开发；不得根据资源数、RSS、下载或文件名猜测。自动化只用 fake/route mock，不连接真实 MiKan、Auto Bangumi 或 qBittorrent。
 - 已知遗留红灯（**不是** US-309～US-315 引入，也不要在这些 story 里顺手修）：`/app/tracking` 已被 US-305 替换为 TrackingView，但 `tests/browser/test_app_queue.py`、`tests/browser/test_app_feature_parity.py`、`tests/browser/test_app_responsive_a11y.py`、`tests/browser/test_app_shell.py`、`tests/browser/test_app_workbench.py` 里约 30 条用例仍按旧 QueueView 选择器（`#batch-queue-list` / `#batch-queue-count` / `#tracking-detail-target`）断言该路由。旧入口退出、兼容定位与这些浏览器用例的迁移统一由 US-316 收口，US-317 跑完整 Chromium 门禁。普通 story 只跑定向检查，不要因为看到这批红灯而扩大范围。
 
@@ -191,4 +192,19 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - Playwright 详情 route 的 mock 必须返回**完整 envelope**（`{"ok": true, "result": {...}}`）：只返回裸对象时统一 transport 的 envelope 校验会失败，页面渲染「追番详情读取失败」，症状看起来像按钮/表单没实现。新增 `_modify_detail()` 时踩过一次，已由 `_mock_list()` 的既有写法对照修正。
   - 反向验证（突变 5 项，全部证明新用例是承重的）：① 端点映射改成 `/revalidate` → 2 个单测 + 5 个页面用例红；② `buildSubscriptionPatch` 放行空 patch → 2 例红；③ `projectModifyOutcome` 把一切当成功 → 1 例红；④ scope 投影去掉 capability 门控 → 10 例红；⑤ 锁定 intent 的 scope/patch 比对放宽 → **未变红**（设计上由 `offeredScopes` + 表单重置挡住，比对是纵深防御而非唯一闸门），因此保留比对但如实记录它当前不可达。
 - 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（45 files / 536 tests）、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（16 passed，真实 Chromium）、`git diff --check` 全部通过。
+---
+
+## [2026-09-13 11:35:00 CST] - US-314
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: 启停与关联 RSS 刷新。`TrackingManagementIntent` 改为按 action code 判别的多态联合（只有 MODIFY 带 `patch`、只有 SET_ENABLED 带 `enabled`、REFRESH_RSS 的 `targetScope` 被类型固定为 `ASSOCIATED_RSS`）；新增 `createTrackingSetEnabledIntent`（方向由 `managementEnableDirection(item.status)` 从服务端记录状态推导）、`createTrackingRefreshRssIntent`（无 scope 参数，只作用于当前 tracking 的关联 RSS）、`createTrackingManagementActionIntent` 作为页面唯一入口、`sameManagementRequest` 作为锁定重放判据；`SENDABLE_MANAGEMENT_ACTION_CODES` 让 DELETE_EXTERNAL 既不可渲染也不可发送。新增 `TrackingManagementActions.vue`（启停目标单选 + 刷新按钮 + 结果面板），`TrackingInspector` 改为 offer 模型（`managementOffers`/`offerFor`）并给每个不可用动作各自渲染只读降级原因。
+- 文案与结果：`MANAGEMENT_ACTION_MESSAGES` 改为 action × state 二维固定表（刷新结果不会说「已应用本次修改」）；`managementConfirmation(intent)` 按 action+scope+方向取固定确认文案（刷新额外声明「不会刷新全局 RSS」）；`managementConflictMessage(errorType, action)` 只对 `tracking_management_patch_invalid` 做按动作措辞覆盖。
+- Files changed: `frontend/src/features/tracking/trackingProjection.ts`、`trackingManagement.ts`、`TrackingInspector.vue`、`TrackingManagementActions.vue`（新）、`TrackingView.vue` 及三个 Vitest（+19 例）；`tests/browser/test_app_tracking.py`（+4 例真实 Chromium，另附 `_management_actions`/`_action_detail`/`_action_success_payload` mock）；`frontend/AGENTS.md`；Ralph 状态文件。**未改后端契约、未新增端点或迁移、未改 DELETE_EXTERNAL 任何边界。**
+- **Learnings for future iterations:**
+  - 启停方向绝不能由 emit 传入：`managementEnableDirection(item.status)` 只认 `DISABLED`（启用）/`ACTIVE`/`EXTERNAL_ONLY`（停用），其余状态返回 null 即零请求；`executableTrackingActions` 的 SET_ENABLED 分支也按方向选 capability（enable 用 `subscription_enable`/`rss_enable`，disable 用 `disable`），所以「证明过 enable」不能替代 disable。
+  - `sameManagementRequest` 故意不比较 `expectedRevision`/`idempotencyKey`：服务端在外部边界**之前**就把 revision +1 落盘，未知结果回查后的 revision 必然前进，锁定重放必须整份复用（key + 旧 revision）。新增写动作字段（如 enabled）时必须同步扩这个比对，否则会「按新参数复用旧 key」。
+  - 页面必须自己持有 `SENDABLE_MANAGEMENT_ACTION_CODES` 闸门：inspector 过滤 offer + 页面 `runTrackingManagement` 再过滤一次。浏览器用例把 DELETE_EXTERNAL 放进 mock 的 `available_actions`，断言它既不渲染（无 `[id*='delete-external']`、section 内无 `danger-button`）也不发送。
+  - 父子同名 CSS 类会让 Playwright strict mode 直接报错（`.tracking-management-actions` 同时命中 inspector 的 `<section>` 与子组件根 `<div>`）；沿用既有约定：section 用 `-section` 后缀。
+  - 降级提示要**逐动作**渲染（`v-if` 表单 / `v-else` 提示），否则某个动作能力未证实时它会静默消失、用户看不到原因。
+  - 反向验证（5 项突变，全部证明新用例承重）：① `SET_ENABLED` 端点改指 `/modify` → 3 个页面用例红；② `managementEnableDirection` 恒真 → 6 例红（单测 + 页面）；③ 提交默认取第一个启停目标（去掉显式选择）→ 1 例红；④ SET_ENABLED 确认恒用「启用」文案 → 2 例红；⑤ 去掉 REFRESH_RSS 能力门控 → 1 例红；另在 dist 上把 `REFRESH_RSS` 端点改指 `/modify`，2 个真实 Chromium 用例红。
+- 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（45 files / 555 tests）、`npm run build`、`uv run ruff check tests/browser/test_app_tracking.py`、`uv run pytest tests/browser/test_app_tracking.py -q`（20 passed，真实 Chromium）、`git diff --check` 全部通过。
 ---
