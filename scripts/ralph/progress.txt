@@ -70,3 +70,10 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - **Learnings for future iterations:**
   - 成功探测后关闭对话框，只在页面状态提示 VERIFIED；服务地址、账号、凭据不进入 DOM 展示，失败仅显示固定中文并保留可修正输入。
   - 定向验证：CredentialSessionDialog/TrackingInspector/TrackingView Vitest 10 passed、typecheck、build、单文件 lint 通过；真实 Chromium 凭据探测与清除用例通过。
+
+## [2026-09-13 10:30:00 CST] - US-308
+- What was implemented: 在页面级已探测会话下新增显式二次确认的 Auto Bangumi 同步，调用 generated `syncTrackingItems(confirm=true)`；同步单飞，成功以服务端安全 `items/summary` 收敛列表并通过详情代际回查，失败、PARTIAL、能力 UNKNOWN 保留旧列表并给出只读降级提示。
+- Files changed: `TrackingView.vue`/定向 Vitest、tracking Chromium route-mock 测试、Ralph 状态文件。
+- **Learnings for future iterations:**
+  - 初始页面只读本地列表；连接探测或同步都不会自动触发外部动作，敏感配置只留在当前页面内存，确认取消仍保持原列表。
+  - 定向验证：TrackingView/TrackingInspector/CredentialSessionDialog Vitest 12 passed、typecheck、单文件 lint、ruff、build 通过；真实 Chromium 显式确认/同步与旧列表安全边界用例通过。

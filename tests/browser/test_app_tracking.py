@@ -158,3 +158,57 @@ class TestAppTrackingStage38:
         page.locator("#tracking-connect").click()
         expect(page.locator("#tracking-ab-password")).to_have_value("")
         expect(page.locator("body")).not_to_contain_text("secret-password")
+
+    def test_sync_requires_connected_session_and_second_confirmation(self, page: Page, live_server_url: str) -> None:
+        _require_dist()
+        _mock_list(page)
+        sync_calls: list[dict[str, Any]] = []
+
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+                "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED", "subscription_submit": "SUPPORTED",
+                "subscription_modify": "SUPPORTED", "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+                "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+                "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED", "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+                "checked_at": None, "safe_message": "已完成安全探测",
+            }}, ensure_ascii=False))
+
+        def sync(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            sync_calls.append(json.loads(request.post_data or "{}"))
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "sync_status": "COMPLETE", "checked_at": "2026-09-13T01:00:00+00:00",
+                "capabilities": {
+                    "probe_status": "VERIFIED", "version": "3.1.18", "adapter": "legacy_3_1",
+                    "subscription_list": "SUPPORTED", "subscription_detail": "SUPPORTED", "subscription_submit": "SUPPORTED",
+                    "subscription_modify": "SUPPORTED", "subscription_enable": "SUPPORTED", "subscription_disable": "SUPPORTED",
+                    "subscription_delete": "SUPPORTED", "rss_list": "SUPPORTED", "rss_modify": "SUPPORTED", "rss_enable": "SUPPORTED",
+                    "rss_disable": "SUPPORTED", "rss_delete": "SUPPORTED", "rss_refresh": "SUPPORTED", "external_verify": "SUPPORTED",
+                    "checked_at": None, "safe_message": "同步安全摘要",
+                },
+                "summary": {"checked": 1, "created": 0, "updated": 1, "unchanged": 0, "external_only": 0, "failed": 0, "unreadable": 0},
+                "items": [_item("tracking-a", "同步后的记录")], "warnings": [],
+            }}, ensure_ascii=False))
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.route("**/api/v1/tracking/sync", sync)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector("#tracking-overview")
+        expect(page.locator("#tracking-sync")).to_have_count(0)
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://private.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("secret-password")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-sync")
+        page.locator("#tracking-sync").click()
+        assert not sync_calls
+        expect(page.locator(".confirm-dialog")).to_be_visible()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认同步").click()
+        expect(page.locator("#tracking-sync-status")).to_contain_text("同步完成")
+        expect(page.locator(".tracking-list-item")).to_contain_text("同步后的记录")
+        assert len(sync_calls) == 1
+        assert sync_calls[0]["confirm"] is True
+        expect(page.locator("body")).not_to_contain_text("secret-password")

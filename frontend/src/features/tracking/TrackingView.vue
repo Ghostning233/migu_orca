@@ -8,6 +8,7 @@ import type { operations } from '@/api/generated/api'
 import EmptyState from '@/components/feedback/EmptyState.vue'
 import ErrorState from '@/components/feedback/ErrorState.vue'
 import LoadingState from '@/components/feedback/LoadingState.vue'
+import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import BaseButton from '@/components/forms/BaseButton.vue'
 import BaseInput from '@/components/forms/BaseInput.vue'
 import BaseSelect from '@/components/forms/BaseSelect.vue'
@@ -34,6 +35,12 @@ type ProbeBody = NonNullable<
 type CapabilityResult = NonNullable<
   operations['probeAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
+type SyncBody = NonNullable<
+  operations['syncTrackingItems']['requestBody']['content']['application/json']
+>
+type SyncResult = NonNullable<
+  operations['syncTrackingItems']['responses']['200']['content']['application/json']['result']
+>
 
 const route = useRoute()
 const router = useRouter()
@@ -48,7 +55,13 @@ const credentialDialogOpen = ref(false)
 const credentialDialog = ref<InstanceType<typeof CredentialSessionDialog> | null>(null)
 const sessionConfig = ref<ProbeBody['ab_config'] | null>(null)
 const sessionCapabilities = ref<CapabilityResult | null>(null)
-let loadSequence = 0
+const syncLoading = ref(false)
+const syncMessage = ref('')
+const syncSummary = ref<SyncResult['summary'] | null>(null)
+const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
+const detailRevision = ref(0)
+let dataSequence = 0
+let syncSequence = 0
 
 const statusLabels: Record<TrackingStatusGroup, string> = {
   PENDING: '待处理', PROCESSING: '处理中', ACTIVE: '追番中',
@@ -89,24 +102,28 @@ function syncSelection(forceAbsentCheck = false): void {
 }
 
 async function loadList(): Promise<void> {
-  const sequence = ++loadSequence
+  if (syncLoading.value) {
+    syncSequence += 1
+    syncLoading.value = false
+  }
+  const sequence = ++dataSequence
   loading.value = true
   failed.value = false
   try {
     const result = await api.get<ListResult>('/api/v1/tracking/items', {
       query: { ...storageQuery(), sort: 'updated_at' },
     })
-    if (sequence !== loadSequence) return
+    if (sequence !== dataSequence) return
     const previous = selectedTrackingId.value
     items.value = result?.items ?? []
     syncSelection(true)
     if (selectedTrackingId.value && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
-    if (sequence !== loadSequence) return
+    if (sequence !== dataSequence) return
     failed.value = true
     void error
   } finally {
-    if (sequence === loadSequence) {
+    if (sequence === dataSequence) {
       loading.value = false
     }
   }
@@ -132,6 +149,62 @@ function clearConnection(): void {
   credentialDialog.value?.clearSession()
   sessionConfig.value = null
   sessionCapabilities.value = null
+  dataSequence += 1
+  syncSequence += 1
+  syncLoading.value = false
+  syncMessage.value = ''
+  syncSummary.value = null
+}
+
+const capabilityFields: Array<keyof CapabilityResult> = [
+  'subscription_list', 'subscription_detail', 'subscription_submit', 'subscription_modify',
+  'subscription_enable', 'subscription_disable', 'subscription_delete', 'rss_list', 'rss_modify',
+  'rss_enable', 'rss_disable', 'rss_delete', 'rss_refresh', 'external_verify',
+]
+
+function hasUnknownCapability(capabilities: CapabilityResult): boolean {
+  return capabilities.probe_status !== 'VERIFIED'
+    || capabilityFields.some((field) => capabilities[field] === 'UNKNOWN')
+}
+
+async function syncTracking(): Promise<void> {
+  if (syncLoading.value || !sessionConfig.value || !sessionCapabilities.value) return
+  const confirmed = await confirmDialog.value?.confirm({
+    title: '同步 Auto Bangumi',
+    message: '将使用本页面已探测的连接读取外部追番并更新本地安全摘要，是否继续？',
+    confirmLabel: '确认同步',
+    cancelLabel: '取消',
+  })
+  if (!confirmed || !sessionConfig.value || !sessionCapabilities.value) return
+  const sequence = ++syncSequence
+  const dataRevision = ++dataSequence
+  loading.value = false
+  syncLoading.value = true
+  syncMessage.value = ''
+  try {
+    const body: SyncBody = { ab_config: sessionConfig.value, confirm: true }
+    const result = await api.post<SyncResult>('/api/v1/tracking/sync', { body })
+    if (sequence !== syncSequence || dataRevision !== dataSequence) return
+    syncSummary.value = result.summary
+    const degraded = result.sync_status !== 'COMPLETE' || hasUnknownCapability(result.capabilities)
+    if (!degraded && result.items) {
+      items.value = result.items
+      detailRevision.value += 1
+      syncSelection(true)
+      syncMessage.value = `同步完成：检查 ${result.summary.checked} 条，新增 ${result.summary.created} 条，更新 ${result.summary.updated} 条。`
+    } else {
+      syncMessage.value = result.sync_status === 'PARTIAL'
+        ? '同步部分完成，已保留原有本地列表；可重连或再次同步。'
+        : '同步未完成，已保留原有本地列表；可重连、重探测或再次同步。'
+    }
+    sessionCapabilities.value = result.capabilities
+  } catch (error) {
+    if (sequence !== syncSequence || dataRevision !== dataSequence) return
+    syncMessage.value = '同步 Auto Bangumi 失败，已保留原有本地列表；可重连或再次同步。'
+    void error
+  } finally {
+    if (sequence === syncSequence && dataRevision === dataSequence) syncLoading.value = false
+  }
 }
 
 onMounted(() => {
@@ -153,6 +226,7 @@ watch(selectedTrackingId, (trackingId) => {
     <PanelSection title="追番管理" class="tracking-header">
       <template #actions>
         <BaseButton id="tracking-connect" variant="secondary" @click="credentialDialogOpen = true">连接 Auto Bangumi</BaseButton>
+        <BaseButton v-if="sessionCapabilities" id="tracking-sync" variant="secondary" :loading="syncLoading" :disabled="syncLoading" @click="syncTracking">同步 Auto Bangumi</BaseButton>
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
@@ -198,7 +272,7 @@ watch(selectedTrackingId, (trackingId) => {
       </PanelSection>
 
       <aside class="tracking-inspector" aria-labelledby="tracking-inspector-heading">
-        <TrackingInspector v-if="selectedItem" :tracking-id="selectedItem.tracking_id" />
+        <TrackingInspector v-if="selectedItem" :key="`${selectedItem.tracking_id}:${detailRevision}`" :tracking-id="selectedItem.tracking_id" />
         <template v-else>
           <h2 id="tracking-inspector-heading">检查器</h2>
           <EmptyState message="选择一条追番记录查看安全检查器。" />
@@ -209,7 +283,10 @@ watch(selectedTrackingId, (trackingId) => {
       当前页面已连接 Auto Bangumi（{{ sessionCapabilities.probe_status }}），仅在用户明确操作时使用。
       <button type="button" class="tracking-clear-connection" @click="clearConnection">清除连接</button>
     </p>
+    <p v-if="syncMessage" id="tracking-sync-status" class="tracking-sync-status" role="status">{{ syncMessage }}</p>
+    <p v-if="syncSummary" class="tracking-sync-summary" role="status">本次安全同步摘要：检查 {{ syncSummary.checked }}，新增 {{ syncSummary.created }}，更新 {{ syncSummary.updated }}，未变化 {{ syncSummary.unchanged }}。</p>
     <CredentialSessionDialog ref="credentialDialog" v-model:open="credentialDialogOpen" @connected="onConnected" />
+    <ConfirmDialog ref="confirmDialog" />
   </section>
 </template>
 
@@ -243,6 +320,7 @@ watch(selectedTrackingId, (trackingId) => {
 .tracking-inspector-placeholder h3, .tracking-inspector-placeholder p { margin: 0; }
 .tracking-connection-status { margin: 0; color: var(--color-text-muted); }
 .tracking-clear-connection { margin-left: .5rem; color: var(--color-primary); text-decoration: underline; }
+.tracking-sync-status, .tracking-sync-summary { margin: 0; color: var(--color-text-muted); }
 @media (max-width: 1280px) { .tracking-workspace { grid-template-columns: minmax(0, 1.35fr) minmax(16rem, 1fr); } }
 @media (max-width: 800px) {
   .tracking-status-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
