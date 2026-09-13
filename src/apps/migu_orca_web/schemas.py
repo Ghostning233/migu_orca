@@ -427,6 +427,28 @@ class AutoBangumiTestConnectionPayload(BaseModel):
     ab_config: RequestAbConfigPayload
 
 
+class AutoBangumiConfigPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    auth_mode: Literal["password", "api_token"]
+    base_url: str
+    username: str | None = None
+    password: str | None = None
+    token: str | None = None
+
+
+class AutoBangumiConfigSavePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: Literal[True]
+    expected_configuration_revision: StrictInt = Field(ge=0)
+    config: AutoBangumiConfigPayload
+
+
+class AutoBangumiConfigDeletePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirm: Literal[True]
+    expected_configuration_revision: StrictInt = Field(ge=0)
+
+
 class AutoBangumiCapabilitiesConfigPayload(BaseModel):
     """Strict nested config for the capability endpoint only."""
 

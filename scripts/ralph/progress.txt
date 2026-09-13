@@ -33,3 +33,11 @@ Started: 2026-09-13
   directory/file 权限验证按 POSIX 受限存储语义实现，Windows 凭据设施不在本阶段。
 - 可复用结论：配置 root 必须保留词法路径并在每次 IO 前检查父路径符号链接；读写均使用
   `lstat`/`O_NOFOLLOW`，写临时文件先 fsync 再 `os.replace`，CAS 冲突只返回 revision 元数据。
+
+## 2026-09-13 / US-319
+
+- 范围：部分实现 `/api/v1/settings/autobangumi` 的 GET/PUT/DELETE 配置管理入口；PUT/DELETE 强制 `confirm=true` 与 configuration revision CAS，输入严格禁止未知字段，保存使用完整 password/API Token 联合。因验收仍有缺口，本 story 未完成。
+- 文件：`src/apps/migu_orca_web/routes_settings.py`、`src/apps/migu_orca_web/schemas.py`、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest src/apps/migu_orca_web/views_test.py -q --disable-warnings --maxfail=1`（186 passed）；`uv run ruff check --fix ...` 后定向 Ruff 通过；`git diff --check` 通过；定向 compileall 通过。
+- 遗留风险：本轮未实现受信 Host/Origin 中间件、外部请求 lease 与保存配置探测（分别需继续完善 US-319/US-321）；OpenAPI/generated 契约尚未同步，不能视为 Stage 39 完成。
+- 可复用结论：部署配置 API 的公开摘要只允许 configured/credential_present/auth_mode/connection_ref/configuration_revision；任何配置读取都通过专用 repository，业务 storage_dir 不参与配置定位。

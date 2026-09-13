@@ -7,8 +7,12 @@ only non-sensitive user preferences and title corrections through the shared
 storage repositories.
 """
 
+from flask import request
+
 from apps.migu_orca_web.blueprints import api_blueprint
 from apps.migu_orca_web.schemas import (
+    AutoBangumiConfigDeletePayload,
+    AutoBangumiConfigSavePayload,
     CorrectionQuery,
     CorrectionSavePayload,
     PreferenceQuery,
@@ -18,6 +22,10 @@ from apps.migu_orca_web.services import _storage_dir
 from extensions.flask_api import class_route
 from extensions.flask_api.views import GetView, PostView
 from shared.errors import Stage1Error
+from storage_engine.controllers.autobangumi_config_repository import (
+    AutoBangumiConfigRepository,
+    build_stored_autobangumi_config,
+)
 from storage_engine.controllers.correction_repository import (
     build_correction_from_api,
     load_corrections,
@@ -31,6 +39,64 @@ from storage_engine.controllers.preference_repository import (
     serialize_preferences,
 )
 from storage_engine.controllers.storage_config import load_storage_config
+
+
+def _require_json() -> None:
+    if not request.is_json:
+        raise Stage1Error("validation_error", "请求必须使用 application/json", "parse_json")
+
+
+def _connection_summary(record: object) -> dict[str, object]:
+    configured = bool(getattr(record, "configured", False))
+    ref = getattr(record, "connection_ref", None)
+    return {
+        "configured": configured,
+        "credential_present": configured,
+        "auth_mode": getattr(getattr(record, "config", None), "auth_mode", None),
+        "connection_ref": str(ref) if ref is not None else None,
+        "configuration_revision": getattr(record, "configuration_revision"),
+    }
+
+
+@class_route(api_blueprint, "/api/v1/settings/autobangumi", methods=["GET"])
+class AutoBangumiConfigView(GetView):
+    def get_object(self) -> dict[str, object]:
+        return _connection_summary(AutoBangumiConfigRepository().load())
+
+
+@class_route(api_blueprint, "/api/v1/settings/autobangumi", methods=["PUT"])
+class AutoBangumiConfigSaveView(PostView):
+    request_validator_model = AutoBangumiConfigSavePayload
+
+    def save(self) -> dict[str, object]:
+        _require_json()
+        assert isinstance(self.request_validator_model, AutoBangumiConfigSavePayload)
+        payload = self.request_validator_model
+        config = build_stored_autobangumi_config(payload.config.model_dump(exclude_none=True))
+        record = AutoBangumiConfigRepository().save(
+            config, expected_configuration_revision=payload.expected_configuration_revision
+        )
+        return _connection_summary(record)
+
+    def put(self) -> object:
+        return self.post()
+
+
+@class_route(api_blueprint, "/api/v1/settings/autobangumi", methods=["DELETE"])
+class AutoBangumiConfigDeleteView(PostView):
+    request_validator_model = AutoBangumiConfigDeletePayload
+
+    def save(self) -> dict[str, object]:
+        _require_json()
+        assert isinstance(self.request_validator_model, AutoBangumiConfigDeletePayload)
+        payload = self.request_validator_model
+        record = AutoBangumiConfigRepository().delete(
+            expected_configuration_revision=payload.expected_configuration_revision
+        )
+        return _connection_summary(record)
+
+    def delete(self) -> object:
+        return self.post()
 
 
 @class_route(api_blueprint, "/api/v1/preferences", methods=["GET"])
