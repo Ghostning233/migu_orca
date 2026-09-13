@@ -119,8 +119,12 @@ def test_app_spa_navigation_between_routes(page: Page, live_server_url: str) -> 
 
     page.get_by_role("link", name="追番管理", exact=True).click()
     page.wait_for_url("**/app/tracking", timeout=5000)
-    assert page.locator("#batch-queue-count").count() >= 1
-    assert page.locator("#batch-queue-list").count() >= 1
+    # US-316: the tracking link mounts the formal tracking screen, never the
+    # retired queue view.
+    page.wait_for_selector("#tracking-overview")
+    assert page.locator("#tracking-status-heading").count() >= 1
+    assert page.locator("#tracking-refresh").count() >= 1
+    assert page.locator("#batch-queue-list").count() == 0
 
     page.get_by_role("link", name="设置", exact=True).click()
     page.wait_for_url("**/app/settings", timeout=5000)

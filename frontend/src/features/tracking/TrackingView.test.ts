@@ -2291,3 +2291,119 @@ describe('TrackingView per-record external delete (US-315)', () => {
     expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
   })
 })
+
+describe('TrackingView retired batch deep link (US-316)', () => {
+  beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
+
+  function queuePayload(requestIds: readonly unknown[]) {
+    return {
+      batch_id: 'batch-legacy',
+      queue: {
+        queue_id: 'queue-legacy', batch_id: 'batch-legacy',
+        items: requestIds.map((requestId, index) => ({ item_id: `item-${index}`, request_id: requestId })),
+      },
+    }
+  }
+
+  it('locates a retired batch_id once through the queue public request_id', async () => {
+    apiGet.mockResolvedValueOnce({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
+    apiGet.mockResolvedValueOnce(queuePayload(['request-tracking-1']) as never)
+    apiGet.mockResolvedValueOnce(detail() as never)
+    const { wrapper, router } = await mountTracking({ batch_id: 'batch-legacy' })
+    await flushPromises()
+
+    expect(apiGet).toHaveBeenNthCalledWith(2, '/api/v1/batches/{batch_id}/queue', {
+      path: { batch_id: 'batch-legacy' }, query: {},
+    })
+    // The legacy query is consumed: only the tracking_id survives as the
+    // authority for the selected record.
+    expect(router.currentRoute.value.fullPath).toBe('/tracking?tracking_id=tracking-1')
+    expect(wrapper.find('#tracking-compat-notice').exists()).toBe(false)
+    expect(wrapper.find('[aria-current="true"]').attributes('data-tracking-id')).toBe('tracking-1')
+    // Locating never touches an external action of any kind.
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('states a fixed next step when the batch cannot be located and consumes the query', async () => {
+    apiGet.mockResolvedValueOnce({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
+    // A title that matches the list is still not an identity: only request_id counts.
+    apiGet.mockResolvedValueOnce(queuePayload(['葬送的芙莉莲', 'request-unknown']) as never)
+    const { wrapper, router } = await mountTracking({ batch_id: 'batch-legacy' })
+    await flushPromises()
+
+    expect(router.currentRoute.value.fullPath).toBe('/tracking')
+    const notice = wrapper.find('#tracking-compat-notice')
+    expect(notice.attributes('role')).toBe('status')
+    expect(notice.text()).toContain('旧的批量入口已退出')
+    expect(notice.text()).not.toContain('batch-legacy')
+    expect(wrapper.find('[aria-current="true"]').exists()).toBe(false)
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('never renders server text when the legacy batch read fails', async () => {
+    apiGet.mockResolvedValueOnce({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
+    apiGet.mockRejectedValueOnce(new Error('sensitive upstream queue detail'))
+    const { wrapper, router } = await mountTracking({ batch_id: 'batch-legacy' })
+    await flushPromises()
+
+    expect(router.currentRoute.value.fullPath).toBe('/tracking')
+    const notice = wrapper.find('#tracking-compat-notice')
+    expect(notice.text()).toContain('暂时无法读取该批次')
+    expect(wrapper.text()).not.toContain('sensitive upstream queue detail')
+    expect(apiPost).not.toHaveBeenCalled()
+  })
+
+  it('does not read the legacy queue when there is no batch_id', async () => {
+    apiGet.mockResolvedValue({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
+    const { wrapper } = await mountTracking()
+    await flushPromises()
+    expect(apiGet).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('#tracking-compat-notice').exists()).toBe(false)
+  })
+
+  it('never steals a selection the user made while the legacy read was in flight', async () => {
+    const queueResolvers: Array<(value: unknown) => void> = []
+    apiGet.mockResolvedValueOnce({
+      items: [item('tracking-1', '葬送的芙莉莲'), item('tracking-2', '咒术回战')],
+      summary: {}, warnings: [],
+    } as never)
+    apiGet.mockImplementationOnce(() => new Promise((resolve) => { queueResolvers.push(resolve) }) as never)
+    apiGet.mockResolvedValue({ ...detail(), tracking_id: 'tracking-2' } as never)
+    const { wrapper, router } = await mountTracking({ batch_id: 'batch-legacy' })
+    await flushPromises()
+
+    // The user picks their own record while the retired batch read is pending.
+    await wrapper.find('[data-tracking-id="tracking-2"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/tracking?tracking_id=tracking-2')
+
+    // The late compat answer points at a *different* record: it must not bounce
+    // the page away from the one the user chose.
+    queueResolvers[0]?.(queuePayload(['request-tracking-1']))
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/tracking?tracking_id=tracking-2')
+    expect(wrapper.find('#tracking-compat-notice').exists()).toBe(false)
+  })
+
+  it('never drops a user selection when the legacy read fails late', async () => {
+    const queueRejectors: Array<(error: unknown) => void> = []
+    apiGet.mockResolvedValueOnce({
+      items: [item('tracking-1', '葬送的芙莉莲'), item('tracking-2', '咒术回战')],
+      summary: {}, warnings: [],
+    } as never)
+    apiGet.mockImplementationOnce(() => new Promise((_resolve, reject) => { queueRejectors.push(reject) }) as never)
+    apiGet.mockResolvedValue({ ...detail(), tracking_id: 'tracking-2' } as never)
+    const { wrapper, router } = await mountTracking({ batch_id: 'batch-legacy' })
+    await flushPromises()
+
+    await wrapper.find('[data-tracking-id="tracking-2"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/tracking?tracking_id=tracking-2')
+
+    queueRejectors[0]?.(new Error('private queue detail'))
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/tracking?tracking_id=tracking-2')
+    expect(wrapper.find('#tracking-compat-notice').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('private queue detail')
+  })
+})

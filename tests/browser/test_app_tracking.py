@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -1771,3 +1772,624 @@ class TestAppTrackingExternalDelete:
         assert deletes[0]["target_scope"] == "ASSOCIATED_RSS", deletes
         assert "file" not in deletes[0], deletes
         expect(page.locator("#tracking-delete-external-result")).to_contain_text("外部删除已完成")
+
+
+# ---------------------------------------------------------------------------
+# US-316: compatibility exit, viewport/keyboard/a11y convergence, canary.
+# ---------------------------------------------------------------------------
+
+CANARY_ENDPOINT = "https://canary-endpoint.invalid"
+CANARY_USER = "canary-user-31337"
+CANARY_PASSWORD = "canary-password-31337"
+CANARY_VALUES = (CANARY_ENDPOINT, CANARY_USER, CANARY_PASSWORD)
+
+# Identifiers only the retired `QueueView` ever rendered.  The component stays in
+# the repo for rollback (Stage 38 §10.2), but it must never ship again: the
+# tracking screen's own ids are `tracking-*`.
+RETIRED_QUEUE_MARKERS = (
+    "batch-queue-list",
+    "batch-queue-submit-form",
+    "batch-queue-item-recover",
+    "正在读取提交前队列",
+)
+
+
+def _browser_surfaces(page: Page) -> dict[str, str]:
+    """Every browser surface a credential must never reach (US-316).
+
+    The credential dialog's own subtree is removed from the markup surface: while
+    the user is still correcting a failed connection attempt the values they
+    typed necessarily live in the form they own, and must appear nowhere else.
+    The live field values are still reported so a caller can assert on them too.
+    """
+    return page.evaluate(
+        """() => {
+          const dialog = document.querySelector('.credential-dialog-backdrop')
+          const withoutForm = dialog
+            ? document.body.innerHTML.replace(dialog.innerHTML, '')
+            : document.body.innerHTML
+          return {
+            text: document.body.innerText,
+            html: withoutForm,
+            fields: Array.from(document.querySelectorAll('input, textarea'))
+              .map((el) => el.value).join('|'),
+            url: window.location.href,
+            history: JSON.stringify(window.history.state),
+            local: JSON.stringify(window.localStorage),
+            session: JSON.stringify(window.sessionStorage),
+          }
+        }"""
+    )
+
+
+def _assert_no_canary(surfaces: dict[str, str], console: list[str], where: str) -> None:
+    for name, value in surfaces.items():
+        for canary in CANARY_VALUES:
+            assert canary not in value, f"{canary} leaked into {where}.{name}"
+    for entry in console:
+        for canary in CANARY_VALUES:
+            assert canary not in entry, f"{canary} leaked into the console: {entry}"
+
+
+def _submit_detail(revision: int) -> dict[str, Any]:
+    """A detail that offers the server-computed SUBMIT action (US-316 flows)."""
+    return {"ok": True, "result": {
+        **_item("tracking-a", "葬送的芙莉莲"),
+        "status": "PENDING_SUBMIT", "status_label": "待提交", "revision": revision,
+        "available_actions": [
+            {"code": "REVALIDATE", "label": "重新复核", "style": "SECONDARY",
+             "requires_confirmation": False, "target_scopes": []},
+            {"code": "SUBMIT", "label": "提交到 Auto Bangumi", "style": "PRIMARY",
+             "requires_confirmation": True, "target_scopes": []},
+        ],
+        "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+        "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+        "safe_info": None, "current_operation": None, "revalidation_issues": [],
+        "external_mapping": None, "audit_events": [], "warnings": [],
+    }}
+
+
+class TestAppTrackingCompatAndRuntimeExit:
+    """US-316: the retired queue runtime entry and its bundle evidence."""
+
+    def test_built_bundle_ships_the_tracking_chunk_and_no_retired_queue_runtime(self) -> None:
+        """Reference search + bundle evidence that the queue left the runtime."""
+        _require_dist()
+        assets = REPO_ROOT / "frontend" / "dist" / "assets"
+        scripts = sorted(assets.glob("*.js"))
+        assert scripts, "no production JS chunks found"
+
+        # The tracking screen is its own lazy chunk, so the upgrade really is
+        # the tracking page and not a renamed queue.
+        assert any(path.name.startswith("TrackingView-") for path in scripts), [
+            path.name for path in scripts
+        ]
+        # No sourcemap or trace artifact is part of the build.
+        assert not list((REPO_ROOT / "frontend" / "dist").rglob("*.map"))
+        assert not list((REPO_ROOT / "frontend" / "dist").rglob("*.zip"))
+
+        bundle = "\n".join(path.read_text(encoding="utf-8") for path in scripts)
+        for marker in RETIRED_QUEUE_MARKERS:
+            assert marker not in bundle, f"retired queue runtime marker shipped: {marker}"
+
+    def test_no_dist_trace_or_screenshot_artifact_is_tracked(self) -> None:
+        """AC: dist, trace, screenshots and storage artifacts stay out of git."""
+        _require_dist()
+        tracked = subprocess.run(
+            ["git", "ls-files"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+        ).stdout.splitlines()
+        assert tracked
+        assert [path for path in tracked if path.startswith("frontend/dist/")] == []
+        assert [path for path in tracked if path.endswith(".map")] == []
+        for marker in ("test-results/", "playwright-report/", ".playwright/", "trace.zip"):
+            assert [path for path in tracked if marker in path] == [], marker
+
+    def test_global_connection_chip_is_deferred_and_the_page_carries_its_own_state(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """D38-12.3: the mockups' global chip waits for F-G; the page owns state."""
+        _require_dist()
+        _mock_list(page)
+        page.route("**/api/v1/autobangumi/capabilities", _probe_handler)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector("#tracking-overview")
+
+        # No global connection chip exists yet (deferred to F-G, recorded as a
+        # visual deviation); nothing may claim a cross-page connection state.
+        for selector in ("#app-connection-chip", ".connection-chip", "[data-connection-chip]"):
+            assert page.locator(selector).count() == 0, selector
+
+        # The tracking page itself carries the equivalent session state and the
+        # only entry point that can create it.
+        expect(page.locator("#tracking-connect")).to_be_visible()
+        assert page.locator(".tracking-connection-status").count() == 0
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://ab.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("pass")
+        page.locator("#tracking-ab-probe").click()
+        connection = page.locator(".tracking-connection-status")
+        expect(connection).to_contain_text("当前页面已连接 Auto Bangumi")
+        expect(page.locator("#tracking-capability-summary")).to_be_visible()
+        expect(page.locator(".tracking-clear-connection")).to_be_visible()
+
+
+def _probe_handler(route: Any, request: Any) -> None:
+    """Answer the capability probe with a fully supported 3.1.18 session."""
+    assert request.method == "POST"
+    route.fulfill(
+        status=200, content_type="application/json",
+        body=json.dumps({"ok": True, "result": _probe_capabilities()}, ensure_ascii=False),
+    )
+
+
+class TestAppTrackingViewportJourney:
+    """US-316: the key journey completes at every desktop size and at 200%."""
+
+    @pytest.mark.parametrize("viewport", [(1280, 720), (1440, 900), (1920, 1080)])
+    @pytest.mark.parametrize("zoom", [1, 2])
+    def test_key_journey_completes_at_desktop_viewports_and_200_percent(
+        self, page: Page, live_server_url: str, viewport: tuple[int, int], zoom: int
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        page.set_viewport_size({"width": viewport[0], "height": viewport[1]})
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector("#tracking-overview")
+        if zoom != 1:
+            # A 2x page scale models the desktop 200% effective CSS viewport.
+            page.evaluate("(value) => { document.documentElement.style.zoom = String(value) }", zoom)
+
+        # Filter, list, inspector, connection entry and refresh all stay usable.
+        page.locator("#tracking-search").fill("芙莉莲")
+        expect(page.locator(".tracking-list-item")).to_have_count(1)
+        page.locator(".tracking-list-item").first.click()
+        page.wait_for_url("**/app/tracking?tracking_id=tracking-a")
+        expect(page.locator(".tracking-inspector-detail")).to_contain_text("葬送的芙莉莲")
+        expect(page.locator('[aria-current="true"]')).to_have_count(1)
+        for control in ("#tracking-connect", "#tracking-refresh", "#tracking-status-heading",
+                        "#tracking-inspector-title"):
+            expect(page.locator(control)).to_be_visible()
+        page.locator("#tracking-search").fill("")
+        expect(page.locator(".tracking-list-item")).to_have_count(2)
+
+        body_width = page.evaluate("() => document.body.scrollWidth")
+        assert body_width <= viewport[0], f"overflow at {viewport} zoom={zoom}: {body_width}"
+
+    def test_keyboard_path_reaches_the_list_filters_and_selection(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """Keyboard: skip link, labelled filters and Enter-driven selection."""
+        _require_dist()
+        _mock_list(page)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector("#tracking-overview")
+
+        page.keyboard.press("Tab")
+        assert page.evaluate("() => document.activeElement?.id || ''") == "skip-link"
+
+        # The filter controls are programmatically labelled (not placeholder-only).
+        expect(page.locator("label[for='tracking-search']")).to_have_count(1)
+        expect(page.locator("label[for='tracking-status-filter']")).to_have_count(1)
+        page.locator("#tracking-status-filter").focus()
+        assert page.evaluate("() => document.activeElement?.id || ''") == "tracking-status-filter"
+
+        # A list row is a real button: focus it and select it from the keyboard.
+        row = page.locator(".tracking-list-item").first
+        row.focus()
+        page.keyboard.press("Enter")
+        page.wait_for_url("**/app/tracking?tracking_id=tracking-a")
+        expect(page.locator('[aria-current="true"]')).to_have_count(1)
+        assert page.evaluate(
+            "() => document.activeElement?.getAttribute('data-tracking-id') || ''"
+        ) == "tracking-a"
+
+    def test_aria_live_regions_cover_list_status_and_action_results(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        """aria-live/status coverage exists for counts, sync and every result."""
+        _require_dist()
+        _mock_list(page)
+        page.route("**/api/v1/autobangumi/capabilities", _probe_handler)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector("#tracking-overview")
+
+        assert page.locator(".tracking-count").get_attribute("aria-live") == "polite"
+        assert page.locator(".tracking-status-total").get_attribute("role") == "status"
+
+        # Sync feedback is announced politely, and never only by color.
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://ab.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("pass")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-sync")
+        assert page.locator(".tracking-connection-status").get_attribute("aria-labelledby") is not None
+        assert page.locator(".tracking-sync-status").count() == 0
+        page.locator("#tracking-sync").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="取消").click()
+        # Cancelling sends zero requests and leaves no result panel behind.
+        assert page.locator(".tracking-sync-status").count() == 0
+
+
+    @pytest.mark.parametrize("viewport", [(1280, 720), (1440, 900), (1920, 1080)])
+    @pytest.mark.parametrize("zoom", [1, 2])
+    def test_connect_sync_submit_recover_and_danger_actions_complete_at_every_size(
+        self, page: Page, live_server_url: str, viewport: tuple[int, int], zoom: int
+    ) -> None:
+        """D38-12.4: 连接、同步、提交、恢复与危险操作在每个桌面尺寸/200% 都可完成。
+
+        Every step is driven with a real click (Playwright fails a click on a
+        control the layout made unreachable), and the page must never overflow.
+        """
+        _require_dist()
+        _mock_list(page)
+        state = {"revision": 1, "phase": "submit"}
+
+        def detail(route: Any, request: Any) -> None:
+            phase = state["phase"]
+            if phase == "submit":
+                actions = [{"code": "SUBMIT", "label": "提交到 Auto Bangumi", "style": "PRIMARY",
+                            "requires_confirmation": True, "target_scopes": []}]
+                status, label = "PENDING_SUBMIT", "待提交"
+            elif phase == "recover":
+                actions = _recovery_actions()
+                status, label = "RECOVERY_REQUIRED", "需要恢复"
+            else:
+                actions = _delete_actions()
+                status, label = "ACTIVE", "追番中"
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                **_item("tracking-a", "葬送的芙莉莲"),
+                "status": status, "status_label": label, "revision": state["revision"],
+                "available_actions": actions,
+                "origin": "single", "batch_id": None, "created_at": "2026-09-01T00:00:00+00:00",
+                "updated_at": "2026-09-13T00:00:00+00:00", "last_synced_at": None,
+                "safe_info": None, "current_operation": None, "revalidation_issues": [],
+                "external_mapping": {"match_reason": "标题与季度匹配", "enabled": True,
+                                     "external_deleted": False},
+                "audit_events": [], "warnings": [],
+            }}, ensure_ascii=False))
+
+        def submit(route: Any, request: Any) -> None:
+            state["phase"] = "recover"
+            state["revision"] += 1
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "outcome": "ACTIVE", "checked_revision": 1,
+                "next_revision": state["revision"], "checked_at": "2026-09-13T03:00:00+00:00",
+                "operation_id": "operation-viewport", "issues": [],
+                "tracking": {**_item("tracking-a", "葬送的芙莉莲"), "status_label": "已提交外部订阅",
+                             "revision": state["revision"]},
+            }}, ensure_ascii=False))
+
+        def recover(route: Any, request: Any) -> None:
+            state["phase"] = "delete"
+            state["revision"] += 1
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "action": "AUTO", "outcome": "ACTIVE",
+                "checked_revision": state["revision"] - 1, "next_revision": state["revision"],
+                "checked_at": "2026-09-13T06:00:00+00:00", "operation_id": "operation-viewport",
+                "needs_manual": False,
+                "tracking": {**_item("tracking-a", "葬送的芙莉莲"), "status_label": "已恢复",
+                             "revision": state["revision"]},
+            }}, ensure_ascii=False))
+
+        def delete_external(route: Any, request: Any) -> None:
+            state["revision"] += 1
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps(_delete_success_payload(state["revision"]), ensure_ascii=False))
+
+        def sync(route: Any, request: Any) -> None:
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "sync_status": "COMPLETE", "checked_at": "2026-09-13T01:00:00+00:00",
+                "capabilities": _probe_capabilities(),
+                "summary": {"checked": 1, "created": 0, "updated": 1, "unchanged": 0,
+                            "external_only": 0, "failed": 0, "unreadable": 0},
+                "items": [_item("tracking-a", "葬送的芙莉莲")], "warnings": [],
+            }}, ensure_ascii=False))
+
+        page.route("**/api/v1/autobangumi/capabilities", _modify_probe)
+        page.route("**/api/v1/tracking/sync", sync)
+        page.route("**/api/v1/tracking/items/tracking-a/delete-external", delete_external)
+        page.route("**/api/v1/tracking/items/tracking-a/recover", recover)
+        page.route("**/api/v1/tracking/items/tracking-a/submit", submit)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+
+        page.set_viewport_size({"width": viewport[0], "height": viewport[1]})
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        if zoom != 1:
+            page.evaluate("(value) => { document.documentElement.style.zoom = String(value) }", zoom)
+
+        def click_and_check(selector: str, confirm: str, result_selector: str, expected: str) -> None:
+            """Click one control, confirm it, and require its safe result panel."""
+            page.locator(selector).click()
+            page.locator(".confirm-dialog-actions button").filter(has_text=confirm).click()
+            result = page.locator(result_selector)
+            page.wait_for_selector(result_selector)
+            expect(result).to_contain_text(expected)
+
+        # 1) connect, 2) sync (both explicitly confirmed by the user).
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill("https://ab.invalid")
+        page.locator("#tracking-ab-username").fill("user")
+        page.locator("#tracking-ab-password").fill("pass")
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-sync")
+        click_and_check("#tracking-sync", "确认同步", "#tracking-sync-status", "同步完成")
+        # 3) submit, 4) recover, 5) the danger delete — each completes here.
+        click_and_check("#tracking-submit", "确认提交", "#tracking-submit-result", "提交成功")
+        page.wait_for_selector("#tracking-recover-auto")
+        page.locator("#tracking-recover-auto").click()
+        page.wait_for_selector("#tracking-recovery-result")
+        expect(page.locator("#tracking-recovery-result")).to_contain_text("恢复完成")
+        page.wait_for_selector("#tracking-delete-external-submit")
+        page.locator("#tracking-delete-external-scope-SUBSCRIPTION").check()
+        page.locator("#tracking-delete-external-submit").click()
+        expect(page.locator(".confirm-dialog .danger-button")).to_have_count(1)
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认删除外部对象").click()
+        page.wait_for_selector("#tracking-delete-external-result")
+        expect(page.locator("#tracking-delete-external-result")).to_contain_text("外部删除已完成")
+        # The local record survives the external delete.
+        expect(page.locator(".tracking-list-item").first).to_contain_text("外部已删除")
+
+        body_width = page.evaluate("() => document.body.scrollWidth")
+        assert body_width <= viewport[0], f"overflow at {viewport} zoom={zoom}: {body_width}"
+        if zoom == 1:
+            for selector in ("#tracking-connect", "#tracking-sync", "#tracking-refresh",
+                             "#tracking-list-container", ".tracking-inspector-detail"):
+                box = page.locator(selector).bounding_box()
+                assert box is not None, selector
+                assert box["x"] >= 0 and box["x"] + box["width"] <= viewport[0], (selector, box)
+
+
+class TestAppTrackingSensitiveCanary:
+    """US-316: canary credentials never reach any browser surface.
+
+    The canary values below are fake and are used *only* here.  They travel the
+    real success path (probe → sync → submit) and a failure/recovery path
+    (transport-unknown submit → local recovery), and the assertions cover the
+    DOM (text, markup and live field values), the URL, history state, both
+    web-storage areas and the console.  The single POST body is the one place a
+    credential is allowed, and that is asserted too so the check cannot pass
+    vacuously.
+    """
+
+    @staticmethod
+    def _connect_with_canaries(page: Page, probes: list[dict[str, Any]]) -> None:
+        def probe(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            probes.append(json.loads(request.post_data or "{}"))
+            route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps({"ok": True, "result": _probe_capabilities()}, ensure_ascii=False),
+            )
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill(CANARY_ENDPOINT)
+        page.locator("#tracking-ab-username").fill(CANARY_USER)
+        page.locator("#tracking-ab-password").fill(CANARY_PASSWORD)
+        page.locator("#tracking-ab-probe").click()
+        page.wait_for_selector("#tracking-sync")
+        # A successful probe tears the sensitive fields down with the dialog.
+        assert page.locator("#tracking-ab-password").count() == 0
+        assert page.locator(".credential-dialog-backdrop").count() == 0
+
+    def test_canary_success_flow_stays_off_every_browser_surface(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        console: list[str] = []
+        page.on("console", lambda message: console.append(f"{message.type}:{message.text}"))
+        page.on("pageerror", lambda error: console.append(f"pageerror:{error}"))
+        probes: list[dict[str, Any]] = []
+        submits: list[dict[str, Any]] = []
+
+        def submit(route: Any, request: Any) -> None:
+            assert request.method == "POST"
+            submits.append(json.loads(request.post_data or "{}"))
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "outcome": "ACTIVE", "checked_revision": 1, "next_revision": 2,
+                "checked_at": "2026-09-13T03:00:00+00:00", "operation_id": "operation-canary", "issues": [],
+                "tracking": {
+                    **_item("tracking-a", "葬送的芙莉莲"), "status_label": "已提交外部订阅", "revision": 2,
+                },
+            }}, ensure_ascii=False))
+
+        page.route("**/api/v1/tracking/items/tracking-a/submit", submit)
+        page.route("**/api/v1/tracking/items/tracking-a", lambda route, request: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps(_submit_detail(1), ensure_ascii=False),
+        ))
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        self._connect_with_canaries(page, probes)
+
+        page.locator("#tracking-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认提交").click()
+        page.wait_for_selector("#tracking-submit-result")
+        expect(page.locator("#tracking-submit-result")).to_contain_text("提交成功")
+
+        # The credentials really did travel — in the request body only.
+        assert probes[0]["ab_config"]["password"] == CANARY_PASSWORD, probes
+        assert probes[0]["ab_config"]["base_url"] == CANARY_ENDPOINT, probes
+        assert submits[0]["ab_config"]["username"] == CANARY_USER, submits
+
+        _assert_no_canary(_browser_surfaces(page), console, "success flow")
+        assert page.url.endswith("/app/tracking?tracking_id=tracking-a")
+
+    def test_canary_unknown_result_and_local_recovery_stay_off_every_browser_surface(
+        self, page: Page, live_server_url: str
+    ) -> None:
+        _require_dist()
+        _mock_list(page)
+        console: list[str] = []
+        page.on("console", lambda message: console.append(f"{message.type}:{message.text}"))
+        page.on("pageerror", lambda error: console.append(f"pageerror:{error}"))
+        probes: list[dict[str, Any]] = []
+        state = {"revision": 1, "detail_reads": 0, "aborted": False}
+
+        def detail(route: Any, request: Any) -> None:
+            state["detail_reads"] += 1
+            # After the unresolved submit the record is recoverable, so the
+            # recovery surface appears with the same live page session.
+            actions = _recovery_actions() if state["aborted"] else _submit_detail(state["revision"])["result"]["available_actions"]
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                **(_recovery_item("tracking-a", "葬送的芙莉莲", revision=state["revision"])
+                   if state["aborted"] else _submit_detail(state["revision"])["result"]),
+                "available_actions": actions,
+            }}, ensure_ascii=False))
+
+        def submit(route: Any, request: Any) -> None:
+            assert json.loads(request.post_data or "{}")["ab_config"]["password"] == CANARY_PASSWORD
+            state["aborted"] = True
+            route.abort()
+
+        def recover(route: Any, request: Any) -> None:
+            body = json.loads(request.post_data or "{}")
+            # A local recovery never carries the page credential.
+            assert "ab_config" not in body, body
+            state["revision"] = 2
+            route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "result": {
+                "tracking_id": "tracking-a", "action": body["action"], "outcome": "ACTIVE",
+                "checked_revision": 1, "next_revision": 2, "checked_at": "2026-09-13T06:05:00+00:00",
+                "operation_id": "operation-canary", "needs_manual": False,
+                "tracking": {
+                    **_item("tracking-a", "葬送的芙莉莲"), "status_label": "已恢复",
+                    "revision": 2, "available_actions": [],
+                },
+            }}, ensure_ascii=False))
+
+        page.route("**/api/v1/tracking/items/tracking-a/submit", submit)
+        page.route("**/api/v1/tracking/items/tracking-a/recover", recover)
+        page.route("**/api/v1/tracking/items/tracking-a", detail)
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        self._connect_with_canaries(page, probes)
+
+        page.locator("#tracking-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认提交").click()
+        page.wait_for_selector("#tracking-submit-result.is-unknown")
+        expect(page.locator("#tracking-submit-result")).to_contain_text("结果未知")
+        # Nothing was resent on the user's behalf.
+        assert state["detail_reads"] >= 2, state
+
+        page.wait_for_selector("#tracking-recover-auto")
+        page.locator("#tracking-recover-auto").click()
+        page.wait_for_selector("#tracking-recovery-result")
+        expect(page.locator("#tracking-recovery-result")).to_contain_text("恢复完成")
+        # The returned tracking converges the list row (the DTO stays authority).
+        expect(page.locator(".tracking-list-item").first).to_contain_text("已恢复")
+
+        _assert_no_canary(_browser_surfaces(page), console, "unknown/recovery flow")
+        assert page.url.endswith("/app/tracking?tracking_id=tracking-a")
+
+    @staticmethod
+    def _fill_canary_session(page: Page) -> None:
+        page.locator("#tracking-connect").click()
+        page.locator("#tracking-ab-base-url").fill(CANARY_ENDPOINT)
+        page.locator("#tracking-ab-username").fill(CANARY_USER)
+        page.locator("#tracking-ab-password").fill(CANARY_PASSWORD)
+        page.locator("#tracking-ab-probe").click()
+
+    @pytest.mark.parametrize("failure", ["auth", "validation", "timeout", "non_json"])
+    def test_canary_stays_off_every_surface_when_the_probe_fails(
+        self, page: Page, live_server_url: str, failure: str
+    ) -> None:
+        """认证失败 / 校验失败 / timeout / 非 JSON 都不泄漏 canary。"""
+        _require_dist()
+        _mock_list(page)
+        console: list[str] = []
+        page.on("console", lambda message: console.append(f"{message.type}:{message.text}"))
+        page.on("pageerror", lambda error: console.append(f"pageerror:{error}"))
+
+        def probe(route: Any, request: Any) -> None:
+            body = json.loads(request.post_data or "{}")
+            # The credential is only ever in the request body, even on failure.
+            assert body["ab_config"]["password"] == CANARY_PASSWORD
+            if failure == "auth":
+                route.fulfill(status=401, content_type="application/json", body=json.dumps(
+                    {"ok": False, "error_type": "ab_auth_failed",
+                     "error_message": "Unauthorized: token canary-token-31337"}))
+            elif failure == "validation":
+                route.fulfill(status=400, content_type="application/json", body=json.dumps(
+                    {"ok": False, "error_type": "ab_request_invalid",
+                     "error_message": f"base_url {CANARY_ENDPOINT} 不合法"}))
+            elif failure == "timeout":
+                route.abort()
+            else:
+                route.fulfill(status=200, content_type="text/html",
+                              body=f"<html><body>proxy error for {CANARY_USER}</body></html>")
+
+        page.route("**/api/v1/autobangumi/capabilities", probe)
+        page.goto(f"{live_server_url}/app/tracking")
+        page.wait_for_selector("#tracking-overview")
+        self._fill_canary_session(page)
+
+        # A failed probe keeps a fixed Chinese message and a correctable form.
+        error = page.locator(".credential-dialog-error")
+        expect(error).to_be_visible()
+        expect(error).to_have_attribute("role", "alert")
+        expect(error).not_to_contain_text("Unauthorized")
+        expect(error).not_to_contain_text("ab_auth_failed")
+
+        surfaces = _browser_surfaces(page)
+        # The user's own not-yet-submitted form is the one place the value they
+        # just typed may still live; every other surface stays clean.
+        surfaces.pop("fields")
+        _assert_no_canary(surfaces, console, f"failed probe ({failure})")
+
+        # Cancelling destroys the sensitive fields entirely.
+        page.locator(".credential-dialog-actions button").filter(has_text="取消").click()
+        assert page.locator("#tracking-ab-password").count() == 0
+        _assert_no_canary(_browser_surfaces(page), console, f"cancelled probe ({failure})")
+
+    @pytest.mark.parametrize("failure", ["conflict", "non_json", "timeout"])
+    def test_canary_stays_off_every_surface_when_the_submit_fails(
+        self, page: Page, live_server_url: str, failure: str
+    ) -> None:
+        """冲突 / 非 JSON / transport 未知都不泄漏 canary。"""
+        _require_dist()
+        _mock_list(page)
+        console: list[str] = []
+        page.on("console", lambda message: console.append(f"{message.type}:{message.text}"))
+        page.on("pageerror", lambda error: console.append(f"pageerror:{error}"))
+        probes: list[dict[str, Any]] = []
+
+        def submit(route: Any, request: Any) -> None:
+            body = json.loads(request.post_data or "{}")
+            assert body["ab_config"]["password"] == CANARY_PASSWORD
+            if failure == "conflict":
+                route.fulfill(status=409, content_type="application/json", body=json.dumps(
+                    {"ok": False, "error_type": "tracking_revision_conflict",
+                     "error_message": f"conflict for {CANARY_ENDPOINT}"}))
+            elif failure == "non_json":
+                route.fulfill(status=502, content_type="text/html",
+                              body=f"<html><body>bad gateway {CANARY_PASSWORD}</body></html>")
+            else:
+                route.abort()
+
+        page.route("**/api/v1/tracking/items/tracking-a/submit", submit)
+        page.route("**/api/v1/tracking/items/tracking-a", lambda route, request: route.fulfill(
+            status=200, content_type="application/json",
+            body=json.dumps(_submit_detail(1), ensure_ascii=False),
+        ))
+        page.goto(f"{live_server_url}/app/tracking?tracking_id=tracking-a")
+        page.wait_for_selector("#tracking-overview")
+        self._connect_with_canaries(page, probes)
+
+        page.locator("#tracking-submit").click()
+        page.locator(".confirm-dialog-actions button").filter(has_text="确认提交").click()
+        result = page.locator("#tracking-submit-result")
+        page.wait_for_selector("#tracking-submit-result")
+        if failure == "conflict":
+            expect(result).to_contain_text("本次未提交到 Auto Bangumi")
+            expect(result).not_to_contain_text("tracking_revision_conflict")
+        elif failure == "non_json":
+            expect(result).to_contain_text("结果未知")
+        else:
+            expect(result).to_contain_text("结果未知")
+
+        _assert_no_canary(_browser_surfaces(page), console, f"failed submit ({failure})")
+        assert probes and probes[0]["ab_config"]["password"] == CANARY_PASSWORD, probes

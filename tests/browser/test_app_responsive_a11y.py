@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 from playwright.sync_api import Page, expect
@@ -70,9 +71,61 @@ def _nav_targets() -> list[tuple[str, str]]:
     return [
         ("添加番剧", "#workbench-heading"),
         ("追番方案", "#request-list-container"),
-        ("追番管理", "#batch-queue-list"),
+        # US-316: 追番管理 mounts the formal tracking screen, not the retired queue.
+        ("追番管理", "#tracking-overview"),
         ("设置", "#settings-heading"),
     ]
+
+
+def _mock_tracking_list(page: Page, items: list[dict[str, Any]]) -> None:
+    """Serve the generated tracking list projection (US-316 viewport/a11y work)."""
+    def handler(route: Any, request: Any) -> None:
+        if request.method != "GET" or "/api/v1/tracking/items" not in request.url:
+            route.continue_()
+            return
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "items": items,
+                        "summary": {
+                            "total": len(items), "pending": 0, "processing": 0,
+                            "active": len(items), "needs_attention": len(items),
+                            "unreadable": 0,
+                        },
+                        "warnings": [],
+                    },
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+    page.route("**/api/v1/tracking/items*", handler)
+
+
+def _tracking_item(tracking_id: str, title: str, status: str, status_label: str,
+                   status_group: str) -> dict[str, Any]:
+    return {
+        "tracking_id": tracking_id,
+        "request_id": f"request-{tracking_id}",
+        "title": title,
+        "season": 1,
+        "subtitle_group": "喵萌奶茶屋",
+        "poster_path": None,
+        "status": status,
+        "status_label": status_label,
+        "status_group": status_group,
+        "available_actions": [],
+        "valid_resource_count": 2,
+        "updated_episode": None,
+        "updated_episode_status": "NOT_IMPLEMENTED",
+        "total_episodes": 28,
+        "revision": 1,
+        "updated_at": "2026-09-13T00:00:00+00:00",
+    }
 
 
 class TestCrossFeatureResponsive:
@@ -83,7 +136,7 @@ class TestCrossFeatureResponsive:
         [
             ("/app/add", "#workbench-heading"),
             ("/app/plans", "#request-list-container"),
-            ("/app/tracking", "#batch-queue-list"),
+            ("/app/tracking", "#tracking-overview"),
             ("/app/settings", "#settings-heading"),
         ],
     )
@@ -120,59 +173,34 @@ class TestCrossFeatureResponsive:
     def test_status_has_text_label_not_color_only(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
-        """Queue status chips carry a text label (not color-only state)."""
+        """Tracking status is carried by a text label, never by color alone."""
         set_storage_preferences(page, storage_dir)
-        _goto(page, live_server_url, "/app/tracking?batch_id=batch-spa")
+        _mock_tracking_list(page, [
+            _tracking_item("tracking-active", "葬送的芙莉莲", "ACTIVE", "追番中", "ACTIVE"),
+            _tracking_item("tracking-failed", "咒术回战", "SUBMIT_FAILED", "提交失败", "ATTENTION"),
+        ])
+        _goto(page, live_server_url, "/app/tracking")
 
-        page.route(
-            "**/api/v1/batches/batch-spa/queue*",
-            lambda route: route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "ok": True,
-                        "result": {
-                            "queue": {
-                                "queue_id": "queue-batch-spa",
-                                "batch_id": "batch-spa",
-                                "items": [
-                                    {
-                                        "queue_id": "queue-batch-spa",
-                                        "batch_id": "batch-spa",
-                                        "item_id": "item-1",
-                                        "request_id": "req-1",
-                                        "title": "葬送的芙莉莲 第四季",
-                                        "status": "SUCCEEDED",
-                                        "status_label": "提交成功",
-                                        "attempts": 1,
-                                        "last_error": None,
-                                        "ab_result_summary": None,
-                                        "created_at": "2026-08-19T00:00:00+00:00",
-                                        "updated_at": "2026-08-19T00:00:00+00:00",
-                                    }
-                                ],
-                            }
-                        },
-                    },
-                    ensure_ascii=False,
-                ),
-            ),
-        )
-
-        page.reload()
-        expect(page.locator(".batch-queue-status")).to_contain_text("提交成功")
-        # The chip also has a status class beyond the base (color is not the
-        # only signal — the text label is present).
-        status = page.locator(".batch-queue-status")
-        assert "batch-queue-status-" in (status.get_attribute("class") or "")
+        rows = page.locator(".tracking-list-item")
+        expect(rows).to_have_count(2)
+        expect(rows.nth(0)).to_contain_text("追番中")
+        expect(rows.nth(1)).to_contain_text("提交失败")
+        # The status overview states every group in text as well.
+        overview = page.locator("#tracking-status-heading").locator("..")
+        for label in ("待处理", "处理中", "追番中", "需处理", "已停用/已删除"):
+            expect(overview).to_contain_text(label)
+        # The decorative color bar is hidden from assistive tech: the text label
+        # is the state signal, not the color.
+        assert page.locator(".tracking-list-indicator").first.get_attribute("aria-hidden") == "true"
+        # Selection is announced through aria-current, not only through color.
+        expect(page.locator("#tracking-list-container")).to_have_attribute("aria-label", "追番记录列表")
 
     @pytest.mark.parametrize(
         "path, selector",
         [
             ("/app/add", "#workbench-heading"),
             ("/app/plans", "#request-list-container"),
-            ("/app/tracking", "#batch-queue-list"),
+            ("/app/tracking", "#tracking-overview"),
             ("/app/settings", "#settings-heading"),
         ],
     )
@@ -438,38 +466,72 @@ class TestKeyboardAndFocus:
 class TestReducedMotionAndFeedback:
     """AC: reduced motion 用户仍获得可用反馈（加载与按钮状态不只靠动画）.
 
-    Uses conftest's server-side ``test-slow-queue`` route (the same pattern as
-    the queue in-flight tests) so the loading state is observable without
-    touching real external services. A ``time.sleep`` inside a ``page.route``
-    handler would block Playwright's dispatcher thread, so the delay lives on
-    the Flask test server instead.
+    The tracking list read is held open by the route handler itself, so the
+    loading state is observable without a server-side delay route (a
+    ``time.sleep`` inside a route handler would block Playwright's dispatcher
+    thread and hide the state again).  Nothing external is contacted.
     """
+
+    def _hold_tracking_list(self, page: Page) -> list[Any]:
+        """Hold the tracking list request open; return the pending routes."""
+        held: list[Any] = []
+
+        def handler(route: Any, _request: Any) -> None:
+            held.append(route)
+
+        page.route("**/api/v1/tracking/items*", handler)
+        return held
 
     def test_reduced_motion_loading_state_still_readable(
         self, page: Page, live_server_url: str
     ) -> None:
         """With prefers-reduced-motion, the loading spinner stops animating but
         the text message remains (aria-busy + visible copy)."""
+        _require_dist()
         page.emulate_media(reduced_motion="reduce")
-        _goto(page, live_server_url, "/app/tracking?batch_id=test-slow-queue")
+        held = self._hold_tracking_list(page)
 
-        loading = page.locator(".loading-state", has_text="正在读取提交前队列")
+        page.goto(f"{live_server_url}/app/tracking")
+        loading = page.locator(".loading-state", has_text="正在读取追番列表")
         expect(loading).to_be_visible()
         expect(loading).to_have_attribute("aria-busy", "true")
-        expect(loading).to_contain_text("正在读取提交前队列")
+        expect(loading).to_contain_text("正在读取追番列表")
+        # The spinner is suppressed, not the state: the copy is the signal.
+        assert page.evaluate(
+            "() => getComputedStyle(document.querySelector('.loading-spinner')).animationName"
+        ) == "none"
+
+        assert held, "the tracking list request was never issued"
+        held[0].fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+        )
+        page.wait_for_selector(".empty-state")
 
     def test_reduced_motion_button_spinner_still_disabled(
         self, page: Page, live_server_url: str
     ) -> None:
         """A loading button shows aria-busy + disabled text even when the
         spinner animation is suppressed by reduced-motion."""
+        _require_dist()
         page.emulate_media(reduced_motion="reduce")
-        _goto(page, live_server_url, "/app/tracking?batch_id=test-slow-queue")
+        held = self._hold_tracking_list(page)
 
-        # The refresh button is loading while the slow queue read is in flight.
-        refresh = page.locator("#batch-queue-refresh")
+        page.goto(f"{live_server_url}/app/tracking")
+        # The refresh button is loading while the tracking list read is in flight.
+        refresh = page.locator("#tracking-refresh")
         expect(refresh).to_be_disabled()
         expect(refresh).to_have_attribute("aria-busy", "true")
+        assert refresh.inner_text().strip() != ""
+
+        assert held, "the tracking list request was never issued"
+        held[0].fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"ok": True, "result": {"items": [], "summary": {}, "warnings": []}}),
+        )
+        expect(refresh).to_be_enabled()
 
 
 class TestRuntimeQuality:

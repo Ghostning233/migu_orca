@@ -251,8 +251,15 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   class 落到原生 input 上），浏览器测试直接 `.batch-card-checkbox-row` 即可，
   不要写成 `.batch-card-checkbox-row input`；全选用 `#batch-select-all-checkbox`。
 
-## 提交队列（US-206）
+## 提交队列（US-206，US-316 已退出默认运行时）
 
+- **US-316 起本项目不再有队列页面**：`features/queue/QueueView.vue` 已从路由与默认运行时
+  退出（`/app/tracking` 由 `TrackingView` 接管，`/app/queue` 只是重定向）。组件与
+  `queueWorkbench.ts` 按 Stage 38 §10.2 **保留在仓库**用于回退，但**任何模块都不得再导入
+  `features/queue`**（`src/app/router/index.test.ts` 的引用搜索用例守护），也不会进入
+  production bundle（`tests/browser/test_app_tracking.py` 的 bundle 用例断言 dist 中不含
+  `batch-queue-*`/`正在读取提交前队列` 等队列专属标记）。旧 `batch_id` 深链只按下面的
+  US-316 兼容定位处理。以下 US-206 描述只作为历史语义与兼容端点参考保留。
 - 提交队列在 `features/queue/QueueView.vue`（`/app/tracking`）。纯函数逻辑收敛到
   `features/queue/queueWorkbench.ts`（`queueStatusLabel`/`queueStatusClass`/
   `queueItemSummary`/`queueItemCanRetry`/`queueItemCanRecover`/`buildAbConfig`/
@@ -274,10 +281,11 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 失败语义（legacy parity）：HTTP 级失败**保留敏感输入与确认勾选**便于重试，只显示
   固定中文反馈（绝不渲染服务端 `error_message`/`error_type`）；队列读取失败显示
   脱敏错误态 + 重试。
-- 浏览器测试：`tests/browser/test_app_queue.py`（真实 Chromium）。mock 队列读取用
-  `page.route("**/api/v1/batches/{batch_id}/queue*", ...)`（注意 `*` 通配 storage_dir
-  query）；in-flight 用 conftest 的 `test-slow-submit`/`test-slow-retry` 延迟路由
-  （不 mock，真实返回 400）；SPA 通知断言用 `.global-notification:not(:empty)`。
+- 浏览器测试：`tests/browser/test_app_queue.py`（真实 Chromium）**在 US-316 已改写为旧
+  入口兼容套件**：旧 `/app/queue` 重定向、`batch_id` 一次性定位、不可定位的固定提示，以及
+  「后端兼容端点仍可用」。历史队列流程的 in-flight/mock 写法（`test-slow-submit` 等延迟路由）
+  随队列用例一起退出；需要观察 loading 时用 held route（见 US-316 一节）。
+  SPA 通知断言用 `.global-notification:not(:empty)`。
 
 ## 跨功能收敛（US-207）
 
@@ -294,9 +302,10 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 状态不只靠颜色：status chip 必须带中文文本 label（如 `提交成功`）+ 状态 class，
   不能只改背景色。
 - reduced-motion：LoadingState/BaseButton spinner 在 `prefers-reduced-motion:
-  reduce` 下停动画但文本与 `aria-busy`/disabled 保留。浏览器测试用 conftest 的
-  服务端延迟路由（`test-slow-queue` 等）观察 loading——`time.sleep` 不能写在
-  `page.route` handler 里（会阻塞 Playwright 分发线程，loading 永远不可见）。
+  reduce` 下停动画但文本与 `aria-busy`/disabled 保留。观察 loading 用 **held route**
+  （handler 存下 `route`，断言完再 `fulfill`，见 US-316 一节）；`time.sleep` 不能写在
+  `page.route` handler 里（会阻塞 Playwright 分发线程，loading 永远不可见），所以
+  conftest 的 `test-slow-*` 延迟路由已随队列用例一并移除。
 - production build：vite.config.ts 用 functional `manualChunks` 把 `node_modules`
   打进 `vendor-*.js`（不要用 object 形式，会把全部依赖并成一个 chunk 破坏懒加载）；
   `sourcemap: false` 且 dist 永不提交 `.map`（`*.map` 已 gitignore）。
@@ -304,9 +313,11 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   （Vite 内容哈希文件名不可变），SPA shell 与其它 `/app/*` 返回 `no-cache`
   （部署换哈希后不会 pin 旧资源）。改 `routes_app.py` 后同步
   `src/apps/migu_orca_web/app_routes_test.py` 的缓存头断言。
-- 浏览器收敛测试文件：`tests/browser/test_app_responsive_a11y.py`（22 例）——
-  四路由 × 三视口无横向溢出、skip link、右侧候选详情焦点、状态文本、reduced-motion、
-  vendor chunk、无 sourcemap、缓存头。它**不重复**各 feature 的业务断言。
+- 浏览器收敛测试文件：`tests/browser/test_app_responsive_a11y.py`——
+  四路由 × 视口无横向溢出、skip link、右侧候选详情焦点、状态文本（US-316 起断言的是
+  tracking 列表的状态 label 与 `aria-hidden` 装饰条）、reduced-motion（held route）、
+  vendor chunk、无 sourcemap、缓存头。它**不重复**各 feature 的业务断言；tracking 专属的
+  多视口/200%/键盘/canary 收敛在 `tests/browser/test_app_tracking.py` 的 US-316 用例里。
 
 ## 正式追番管理（Stage 38，US-305 起）
 
@@ -454,3 +465,50 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `tracking-delete-external-section`），子组件根节点用短名
   （`tracking-modify` / `tracking-management-actions` / `tracking-external-delete`）。同名会让
   Playwright 的 `.locator()` 触发 strict mode violation（两个元素）。
+
+### 兼容、安全与视觉收敛（US-316）
+
+- **旧 queue 运行时入口已退出**，但**没有删除任何后端兼容 endpoint**（`/api/v1/batches/*`
+  的 accept/queue/submit/retry/recover 仍在，`tests/browser/test_app_queue.py` 现在只验证
+  旧路由重定向、一次性兼容定位与「兼容端点仍可用」）。`QueueView.vue` 与 `queueWorkbench.ts`
+  按 Stage 38 §10.2 留在仓库供回退，**不得**再被任何模块导入；`RouteParityBaseline.view`
+  联合里也已移除 `QueueView`。
+- **旧 `batch_id` 深链只在 `trackingCompat.ts` 里一次性定位**：`/app/queue?batch_id=...`
+  先被路由重定向到 `/app/tracking?batch_id=...`，`TrackingView.resolveBatchCompat()` 再读
+  `getBatchQueue`（兼容投影），**只取每个队列项的公开 `request_id`**
+  （`projectQueueRequestIds`），用 `locateTrackingIdForBatch` 在本地 tracking 列表里按
+  `request_id` 相等定位（跳过 `EXTERNAL_DELETED`），绝不按标题/季度/文件名猜。定位成功用
+  `router.replace` 换成 `?tracking_id=...`（旧参数被消费，URL 里不再有第二个权威）；失败或
+  读取异常都用固定中文提示（`BATCH_COMPAT_NOT_LOCATED` / `BATCH_COMPAT_READ_FAILED`，
+  渲染在 `#tracking-compat-notice`，`role="status"`，**不含任何 id**）。状态、动作、选择始终
+  来自 tracking DTO —— 浏览器用例用「旧队列标题/状态不得出现」守住这条。
+- **多视口与 200%**：`tests/browser/test_app_tracking.py` 的
+  `TestAppTrackingViewportJourney` 在 1280×720 / 1440×900 / 1920×1080 × zoom 1/2 下跑两条
+  链路：只读关键旅程（筛选 → 单选 → 检查器 → 连接入口 → 刷新）与 D38-12.4 的完整链路
+  （连接 → 同步 → 提交 → 恢复 → danger 删除，每步真实 click + 固定中文结果面板断言），
+  并断言 `body.scrollWidth` 不超视口（zoom=1 时另断言关键控件 bounding box 在视口内）。
+  zoom 用 `document.documentElement.style.zoom = '2'` 模拟桌面 200%（与
+  `test_app_responsive_a11y.py` 同款）；「可完成」以**真实 click 成功**为准 ——
+  控件若被布局挤到不可点，Playwright 的 click 会直接失败。
+- **键盘/焦点/aria-live**：skip link 是首个 Tab 目标；筛选项都带 `for` 关联的 label；
+  列表项是原生 button，聚焦后 Enter 即可选中并把焦点留在 `[aria-current="true"]`（`aria-current`
+  而非仅颜色）；计数 `aria-live="polite"`、总览与所有结果面板 `role="status"`。
+- **观察 loading 的正确姿势（US-316 起）**：不要再为 tracking 加服务端延迟路由，改用
+  **held route** —— `page.route` handler 只把 `route` 存进列表（不 fulfill），
+  断言完 `.loading-state`/`aria-busy` 后再 `held[0].fulfill(...)`。`time.sleep` 写在 handler
+  里会阻塞 Playwright 分发线程，loading 永远看不到。reduced-motion 用例按此重写。
+- **敏感 canary**：`TestAppTrackingSensitiveCanary` 用固定的假凭据跑「探测 → 同步 → 提交成功」
+  与「提交 transport 未知 → 本地恢复」两条链路，断言 canary 不出现在 DOM 文本/标记/活动
+  输入值、URL、`history.state`、localStorage/sessionStorage 与 console（含 pageerror）；
+  同时断言凭据**确实**出现在单次 POST body 里，避免用例变成空断言。凭据对话框探测成功后会
+  整体卸载（`#tracking-ab-password`/`.credential-dialog-backdrop` 计数为 0），不要再断言
+  「字段值为空」。
+- **不提交 artifact**：`test_no_dist_trace_or_screenshot_artifact_is_tracked` 用
+  `git ls-files` 断言 `frontend/dist/`、`*.map`、`test-results/`、`playwright-report/`、
+  `trace.zip` 都不在版本控制里。
+- **视觉偏差（延后 F-G）**：两张 tracking 效果图的**全局「已连接」chip 在页头由 F-G 提供**，
+  Stage 38 不实现；tracking 页内以等价物代替 —— `#tracking-connect` 入口 +
+  `.tracking-connection-status`（含 `#tracking-capability-summary` 中文能力摘要）与
+  `清除连接`。`test_global_connection_chip_is_deferred_and_the_page_carries_its_own_state`
+  固化这条偏差：页头不得出现全局连接 chip，页内状态与入口必须存在。F-G 补全局 chip 时，必须
+  同步更新该用例与本节记录。

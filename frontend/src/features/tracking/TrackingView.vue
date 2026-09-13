@@ -76,9 +76,18 @@ import {
 } from './trackingManagement'
 import TrackingInspector from './TrackingInspector.vue'
 import CredentialSessionDialog from './CredentialSessionDialog.vue'
+import {
+  BATCH_COMPAT_NOT_LOCATED,
+  BATCH_COMPAT_READ_FAILED,
+  locateTrackingIdForBatch,
+  projectQueueRequestIds,
+} from './trackingCompat'
 
 type ListResult = NonNullable<
   operations['listTrackingItems']['responses']['200']['content']['application/json']['result']
+>
+type BatchQueueResult = NonNullable<
+  operations['getBatchQueue']['responses']['200']['content']['application/json']['result']
 >
 type ProbeBody = NonNullable<
   operations['probeAutoBangumiCapabilities']['requestBody']['content']['application/json']
@@ -151,6 +160,10 @@ let listSequence = 0
 let writeGeneration = 0
 let syncSequence = 0
 let syncController: AbortController | null = null
+// Retired queue deep links (US-316): the one-time compat read is tracked by its
+// own sequence so a route change can never let a stale location win.
+const compatNotice = ref('')
+let compatSequence = 0
 
 const statusLabels: Record<TrackingStatusGroup, string> = {
   PENDING: '待处理', PROCESSING: '处理中', ACTIVE: '追番中',
@@ -250,6 +263,53 @@ const inspectorIntentBusy = computed(() => {
 function queryTrackingId(): string | null {
   const value = route.query.tracking_id
   return typeof value === 'string' ? value.trim() || null : null
+}
+
+function queryBatchId(): string | null {
+  const value = route.query.batch_id
+  return typeof value === 'string' ? value.trim() || null : null
+}
+
+/**
+ * One-time compatibility location for a retired `batch_id` deep link (US-316).
+ *
+ * `/app/queue?batch_id=...` no longer mounts the queue page; it redirects here.
+ * The only identifier that retired surface ever published publicly is each queue
+ * item's `request_id`, so that is the only thing this reads — the location never
+ * decides status, actions or the external picture, which stay with the tracking
+ * DTO through the normal list + inspector path. The query is consumed either
+ * way, so a stale `batch_id` can neither re-run nor survive as a second source
+ * of truth, and a batch that cannot be located only produces a fixed next step.
+ */
+async function resolveBatchCompat(): Promise<void> {
+  const batchId = queryBatchId()
+  if (!batchId) return
+  const sequence = ++compatSequence
+  compatNotice.value = ''
+  let located: string | null = null
+  let readFailed = false
+  try {
+    const result = await api.get<BatchQueueResult>('/api/v1/batches/{batch_id}/queue', {
+      path: { batch_id: batchId }, query: { ...storageQuery() },
+    })
+    if (sequence !== compatSequence) return
+    located = locateTrackingIdForBatch(projectQueueRequestIds(result), items.value)
+  } catch {
+    if (sequence !== compatSequence) return
+    readFailed = true
+  }
+  if (located) {
+    // A record the user picked while the legacy read was in flight already won:
+    // the location must never steal a selection the user made themselves.
+    if (queryTrackingId()) return
+    // The public tracking_id replaces the legacy batch_id: the deep link is
+    // spent, and every later read of this page is tracking-authoritative.
+    await router.replace(routeLocation('tracking', { tracking_id: located }))
+    return
+  }
+  if (queryTrackingId()) return
+  compatNotice.value = readFailed ? BATCH_COMPAT_READ_FAILED : BATCH_COMPAT_NOT_LOCATED
+  await router.replace(routeLocation('tracking'))
 }
 
 async function focusSelection(): Promise<void> {
@@ -836,12 +896,19 @@ async function runTrackingManagement(payload: {
 
 onMounted(() => {
   void loadList().then(() => {
+    // A legacy batch link is located against the freshly read local list, so the
+    // compat read never races the tracking list it maps onto.
+    if (queryBatchId()) return resolveBatchCompat()
     if (selectedTrackingId.value) void focusSelection()
   })
 })
 watch(() => route.query.tracking_id, () => {
+  if (queryBatchId()) return
   syncSelection()
   void focusSelection()
+})
+watch(() => route.query.batch_id, () => {
+  void resolveBatchCompat()
 })
 watch(selectedTrackingId, (trackingId) => {
   if (trackingId) void focusSelection()
@@ -853,6 +920,7 @@ watch([writeSession, recoverySession, managementSession], () => {
   if (blockedIntentNotice.value && !hasPendingIntentLock()) blockedIntentNotice.value = null
 })
 onBeforeUnmount(() => {
+  compatSequence += 1
   cancelSync()
   resetWrite()
   resetRecovery()
@@ -872,6 +940,7 @@ onBeforeUnmount(() => {
         <BaseButton id="tracking-refresh" variant="secondary" :loading="loading" @click="loadList()">刷新列表</BaseButton>
       </template>
       <p id="tracking-heading" class="tracking-lede">查看本地追番状态。选择单条记录后，右侧将显示检查器入口。</p>
+      <p v-if="compatNotice" id="tracking-compat-notice" class="tracking-compat-notice" role="status">{{ compatNotice }}</p>
     </PanelSection>
 
     <section class="tracking-status-overview" aria-labelledby="tracking-status-heading">
@@ -969,6 +1038,7 @@ onBeforeUnmount(() => {
 .tracking-status-card:hover, .tracking-status-card:focus-visible, .tracking-status-card.is-selected { border-color: var(--color-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 18%, transparent); }
 .tracking-status-card strong { font-size: 1.35rem; }
 .tracking-status-total, .tracking-count { margin: 0; color: var(--color-text-muted); }
+.tracking-compat-notice { margin: var(--space-3) 0 0; padding: var(--space-3); border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface-subtle); color: var(--color-text-muted); }
 .tracking-workspace { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(17rem, 1fr); gap: var(--space-5); align-items: start; }
 .tracking-list-panel { min-width: 0; }
 .tracking-filters { display: grid; grid-template-columns: auto minmax(10rem, 1fr) auto minmax(8rem, .7fr) auto; gap: .65rem; align-items: center; margin-bottom: var(--space-4); }

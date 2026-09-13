@@ -158,74 +158,15 @@ def app() -> Any:
 def _register_test_routes(app: Any) -> None:
     """Register browser-test-only routes on the shared Flask app.
 
-    These routes exist only for the test session and never touch sensitive
-    config: they return fixed Chinese error payloads and a controlled delay,
-    so browser tests can observe transient UI states deterministically.
+    US-316 removed the four ``test-slow-*`` batch/queue delay routes: their only
+    consumers were the retired queue browser tests (the queue left the default
+    runtime in Stage 38, and its remaining coverage lives on the tracking page).
+    Deliberately left as the single hook for session-scoped test routes so a
+    future browser test can add one here instead of mocking a delay client-side
+    (a ``time.sleep`` inside a ``page.route`` handler blocks Playwright's
+    dispatcher thread and hides the very loading state under test).
     """
-
-    @app.route("/api/v1/batches/test-slow-accept/accept", methods=["POST"])
-    def _slow_batch_accept() -> tuple[Any, int]:
-        # 让接受请求保持 ~1.5s，浏览器测试可稳定观察 in-flight 的 loading/disabled 状态。
-        time.sleep(1.5)
-        return (
-            {
-                "ok": False,
-                "error_message": "批量接受失败：服务器内部错误",
-                "error_type": "batch_accept_failed",
-            },
-            400,
-        )
-
-    @app.route("/api/v1/batches/test-slow-submit/submit", methods=["POST"])
-    def _slow_batch_submit() -> tuple[Any, int]:
-        # 让提交请求保持 ~1.5s，浏览器测试可稳定观察提交中的 loading/disabled 状态。
-        # 返回 400，同时覆盖“失败保留输入便于重试”的断言。永不触碰敏感配置。
-        time.sleep(1.5)
-        return (
-            {
-                "ok": False,
-                "error_message": "Auto Bangumi 批量提交失败：连接超时",
-                "error_type": "ab_connection_failed",
-            },
-            400,
-        )
-
-    @app.route("/api/v1/batches/test-slow-retry/retry", methods=["POST"])
-    def _slow_batch_retry() -> tuple[Any, int]:
-        # 让单项重试请求保持 ~1.5s，浏览器测试可稳定观察 in-flight 的 loading/disabled 状态。
-        # 返回 400，同时覆盖“重试失败保留输入便于再次重试”的断言。永不触碰敏感配置。
-        time.sleep(1.5)
-        return (
-            {
-                "ok": False,
-                "error_message": "Auto Bangumi 单项重试失败：连接超时",
-                "error_type": "ab_connection_failed",
-            },
-            400,
-        )
-
-    @app.route("/api/v1/batches/test-slow-queue/queue", methods=["GET"])
-    def _slow_batch_queue() -> tuple[Any, int]:
-        # 让队列读取保持 ~1.5s，浏览器测试可稳定观察 LoadingState（US-207
-        # reduced-motion 收敛：加载文案 + aria-busy 不只靠 spinner 动画）。
-        # 永不触碰敏感配置。
-        time.sleep(1.5)
-        return (
-            {
-                "ok": True,
-                "result": {
-                    "batch_id": "test-slow-queue",
-                    "queue": {
-                        "queue_id": "queue-test-slow-queue",
-                        "batch_id": "test-slow-queue",
-                        "created_at": "2026-08-19T00:00:00+00:00",
-                        "updated_at": "2026-08-19T00:00:00+00:00",
-                        "items": [],
-                    },
-                },
-            },
-            200,
-        )
+    del app  # no test-only routes are needed at the moment
 
 
 @pytest.fixture(scope="session")
