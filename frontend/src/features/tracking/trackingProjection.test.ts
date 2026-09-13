@@ -8,6 +8,7 @@ import {
   createWriteSession,
   executableTrackingActions,
   filterTrackingItems,
+  isDefiniteWriteRejection,
   isWriteActionCode,
   probeStatusLabel,
   projectCapabilitySummary,
@@ -238,7 +239,40 @@ describe('tracking write session projection (US-310)', () => {
     expect(writeSessionKeepsIntent('SUBMIT_FAILED')).toBe(false)
     expect(writeSessionKeepsIntent('NEEDS_RECONFIRM')).toBe(false)
     expect(writeSessionKeepsIntent('CONFLICT')).toBe(false)
+    expect(writeSessionKeepsIntent('REJECTED')).toBe(false)
     expect(writeSessionKeepsIntent('IN_FLIGHT')).toBe(false)
+  })
+
+  it('treats only a structured non-409 4xx as a definite pre-write rejection', () => {
+    // D38-08.5: these are refused before the external boundary.
+    expect(isDefiniteWriteRejection({ status: 400, httpError: true })).toBe(true)
+    expect(isDefiniteWriteRejection({ status: 404, httpError: true })).toBe(true)
+    expect(isDefiniteWriteRejection({ status: 422, httpError: true })).toBe(true)
+    // 409 keeps its own conflict branch and must never become a plain refusal.
+    expect(isDefiniteWriteRejection({ status: 409, httpError: true })).toBe(false)
+    // Everything that may already have crossed the external boundary stays
+    // unknown: 5xx, network failure, timeout, and any unreadable status.
+    expect(isDefiniteWriteRejection({ status: 500, httpError: true })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: 502, httpError: true })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: 504, httpError: true })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: 0, httpError: false })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: 400, httpError: false })).toBe(false)
+    expect(isDefiniteWriteRejection({ status: Number.NaN, httpError: true })).toBe(false)
+  })
+
+  it('renders a fixed refusal copy that never claims an external subscription', () => {
+    const session = createWriteSession('tracking-1', 'SUBMIT', 'REJECTED')
+    expect(session.state).toBe('REJECTED')
+    expect(session.message).toBe(writeSessionMessage('REJECTED'))
+    expect(session.message).toContain('本次未创建 Auto Bangumi 外部订阅')
+    expect(session.message).toContain('重新确认')
+    // Neither the raw client state nor a raw HTTP status may reach the DOM, and
+    // the copy must not hint that a subscription may already exist.
+    expect(session.message).not.toContain('REJECTED')
+    expect(session.message).not.toContain('400')
+    expect(session.message).not.toContain('409')
+    expect(session.message).not.toMatch(/可能.*创建/)
+    expect(session.message).not.toContain('结果未知')
   })
 
   it('creates an in-flight session without leaking any request material', () => {

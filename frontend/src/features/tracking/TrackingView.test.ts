@@ -488,6 +488,11 @@ const conflictError = {
 const unknownError = {
   type: 'network_error', message: '网络请求失败', status: 0, cancelled: false, httpError: false,
 }
+// A structured non-409 4xx the server decides *before* the external boundary:
+// the request is definitely refused and Auto Bangumi was never written.
+const rejectedError = {
+  type: 'tracking_storage_error', message: '写请求被拒绝', status: 400, cancelled: false, httpError: true,
+}
 
 describe('TrackingView explicit submission (US-310)', () => {
   beforeEach(() => { apiGet.mockReset(); apiPost.mockReset() })
@@ -616,6 +621,132 @@ describe('TrackingView explicit submission (US-310)', () => {
     expect(bodies).toHaveLength(2)
     expect(bodies[1]?.idempotency_key).toBe(bodies[0]?.idempotency_key)
     expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+  })
+
+  it('treats a structured non-409 4xx as a definite refusal, not an unknown result', async () => {
+    for (const status of [400, 404]) {
+      apiGet.mockReset()
+      apiPost.mockReset()
+      serveApi(() => submitDetail())
+      apiPost.mockResolvedValueOnce(capabilities() as never)
+        .mockRejectedValueOnce({
+          type: 'tracking_storage_error', message: '服务端已拒绝本次写入',
+          status, cancelled: false, httpError: true,
+        } as never)
+        .mockResolvedValueOnce(submitPayload() as never)
+      const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+      await connect(wrapper)
+      const before = reads()
+      answerConfirm(wrapper, true)
+      await wrapper.find('#tracking-submit').trigger('click')
+      await flushPromises()
+
+      // Fixed Chinese refusal copy, rendered through the inspector's is-rejected
+      // state: the raw error_type and the raw status never reach the DOM, and
+      // the copy never pretends a subscription may still have been created.
+      const result = wrapper.find('#tracking-submit-result')
+      expect(result.classes()).toContain('is-rejected')
+      expect(result.text()).toContain('服务端明确拒绝了本次请求')
+      expect(result.text()).toContain('本次未创建 Auto Bangumi 外部订阅')
+      expect(result.text()).toContain('重新确认')
+      expect(result.text()).not.toContain('tracking_storage_error')
+      expect(result.text()).not.toContain(String(status))
+      expect(wrapper.text()).not.toContain('结果未知')
+      // Definite refusal: no automatic resend, and only a read-back convergence.
+      expect(submittedBodies()).toHaveLength(1)
+      expect(reads().list).toBe(before.list + 1)
+      expect(reads().detail).toBe(before.detail + 1)
+
+      // The refusal released the intent: the next explicit confirmation on the
+      // very same item mints a fresh key instead of replaying the refused one.
+      answerConfirm(wrapper, true)
+      await wrapper.find('#tracking-submit').trigger('click')
+      await flushPromises()
+      const bodies = submittedBodies()
+      expect(bodies).toHaveLength(2)
+      expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+      wrapper.unmount()
+    }
+  })
+
+  it('releases the page write lock after a 4xx refusal so another item can submit', async () => {
+    let currentDetail: unknown = submitDetail()
+    apiGet.mockImplementation((url: string) => Promise.resolve(
+      (url === '/api/v1/tracking/items'
+        ? { items: [item('tracking-1', '葬送的芙莉莲'), item('tracking-2', '咒术回战')], summary: {}, warnings: [] }
+        : currentDetail) as never,
+    ))
+    apiPost.mockResolvedValueOnce(capabilities() as never)
+      .mockRejectedValueOnce(rejectedError as never)
+      .mockResolvedValueOnce(submitPayload({
+        tracking_id: 'tracking-2',
+        tracking: { ...item('tracking-2', '咒术回战'), revision: 8 },
+      }) as never)
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await connect(wrapper)
+    answerConfirm(wrapper, true)
+    await wrapper.find('#tracking-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-submit-result').classes()).toContain('is-rejected')
+
+    // Switch to the untouched record: because a refusal keeps no intent, the
+    // page-level write lock must not disable its submit action.
+    currentDetail = {
+      ...submitDetail(), tracking_id: 'tracking-2', request_id: 'request-tracking-2',
+      title: '咒术回战', revision: 7,
+    }
+    await wrapper.findAll('.tracking-list-item')[1]?.trigger('click')
+    await flushPromises()
+    const otherSubmit = wrapper.find('#tracking-submit')
+    expect(otherSubmit.exists()).toBe(true)
+    expect(otherSubmit.attributes('disabled')).toBeUndefined()
+
+    answerConfirm(wrapper, true)
+    await otherSubmit.trigger('click')
+    await flushPromises()
+    const bodies = submittedBodies()
+    expect(bodies).toHaveLength(2)
+    expect(bodies[1]?.expected_revision).toBe(7)
+    expect(bodies[1]?.idempotency_key).not.toBe(bodies[0]?.idempotency_key)
+  })
+
+  it('keeps a 5xx, network or timeout result unknown with the locked key', async () => {
+    const cases: Array<[string, Record<string, unknown>]> = [
+      ['server_error', { type: 'server_error', message: '服务端错误', status: 500, cancelled: false, httpError: true }],
+      ['network_error', unknownError],
+      ['request_timeout', { type: 'request_timeout', message: '请求超时，请稍后重试', status: 0, cancelled: false, httpError: false }],
+    ]
+    for (const [type, failure] of cases) {
+      apiGet.mockReset()
+      apiPost.mockReset()
+      serveApi(() => submitDetail({ revision: 4 }))
+      apiPost.mockResolvedValueOnce(capabilities() as never)
+        .mockRejectedValueOnce(failure as never)
+        .mockResolvedValueOnce(submitPayload() as never)
+      const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+      await connect(wrapper)
+      answerConfirm(wrapper, true)
+      await wrapper.find('#tracking-submit').trigger('click')
+      await flushPromises()
+
+      // Still indeterminate: no resend, the intent stays locked.
+      expect(submittedBodies()).toHaveLength(1)
+      const result = wrapper.find('#tracking-submit-result')
+      expect(result.classes()).toContain('is-unknown')
+      expect(result.text()).toContain('提交结果未知')
+      expect(wrapper.text()).not.toContain(type)
+
+      // The explicit retry replays the very same key and revision binding.
+      answerConfirm(wrapper, true)
+      await wrapper.find('#tracking-submit').trigger('click')
+      await flushPromises()
+      const bodies = submittedBodies()
+      expect(bodies).toHaveLength(2)
+      expect(bodies[1]?.idempotency_key).toBe(bodies[0]?.idempotency_key)
+      expect(bodies[1]?.expected_revision).toBe(bodies[0]?.expected_revision)
+      expect(wrapper.find('#tracking-submit-result').text()).toContain('提交成功')
+      wrapper.unmount()
+    }
   })
 
   it('drops the spent intent and requires a new confirmation on a conflict', async () => {

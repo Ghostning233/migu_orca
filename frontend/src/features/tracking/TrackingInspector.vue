@@ -385,7 +385,7 @@ defineExpose({ reload: () => fetchDetail(true) })
 .tracking-submit { gap: .65rem; }
 .tracking-submit-result { display: grid; gap: .4rem; padding: var(--space-3); border: 1px solid var(--color-border-subtle); border-left: 0.3rem solid var(--color-text-muted); border-radius: var(--radius-sm); background: var(--color-surface-raised); }
 .tracking-submit-result.is-active { border-left-color: var(--color-feedback-success-border); }
-.tracking-submit-result.is-submit_failed, .tracking-submit-result.is-conflict, .tracking-submit-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
+.tracking-submit-result.is-submit_failed, .tracking-submit-result.is-conflict, .tracking-submit-result.is-rejected, .tracking-submit-result.is-unknown { border-left-color: var(--color-feedback-error-border); }
 .tracking-submit-result.is-needs_reconfirm, .tracking-submit-result.is-verifying_external, .tracking-submit-result.is-recovery_required { border-left-color: var(--color-accent-emphasis); }
 .tracking-submit-verdict { font-weight: 600; }
 .tracking-submit-issues { padding-left: 1.2rem; }

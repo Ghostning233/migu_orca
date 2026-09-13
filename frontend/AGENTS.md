@@ -351,10 +351,18 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   都发生在外部边界之前，因此冲突即「未提交到 Auto Bangumi」；每种类型有固定中文下一步
   （`writeConflictMessage`，未知类型回退 `WRITE_CONFLICT_FALLBACK_MESSAGE`）。冲突体里的
   tracking 不权威，页面固定「重读列表 + 重读详情 → 要求重新确认」，绝不静默重发。
+- **确定拒绝态（Stage 38 审核修复 / D38-08.5）**：结构化 HTTP 4xx（**409 除外**，
+  `isDefiniteWriteRejection`）在外部写入边界之前返回，是**确定拒绝**而非「结果未知」，
+  固定落到 `TrackingWriteState` 的 `REJECTED`（`WRITE_MESSAGES` 固定中文，绝不渲染服务端
+  `error_type`/原始状态，也不暗示可能已创建订阅）。该态 `writeSessionKeepsIntent()` 为 false：
+  释放页面级 intent（其他条目不再被写锁挡住），下一次确认生成**新 key**；仍然只读回查
+  （`recheckAfterWrite(trackingId, true)`），绝不自动重发。只有网络失败/timeout/非 JSON/5xx/
+  不可读的 status 才继续走 `UNKNOWN` 并保留锁定 intent。
 - **幂等 key 生命周期（US-310/US-311）**：一次用户确认一个 key；只有
   `writeSessionKeepsIntent()` 为 true（`UNKNOWN`/`VERIFYING_EXTERNAL`/`RECOVERY_REQUIRED`）
   才保留锁定的 intent，显式重试复用**同 key 同 expected_revision**（服务端按 key+revision
-  判定重放，换 revision 会被判为同键不同绑定）；`ACTIVE`/`SUBMIT_FAILED`/`NEEDS_RECONFIRM`/`CONFLICT`
+  判定重放，换 revision 会被判为同键不同绑定）；`ACTIVE`/`SUBMIT_FAILED`/`NEEDS_RECONFIRM`/
+  `CONFLICT`/`REJECTED`
   一律释放 intent，下一次确认生成新 key。锁定期间若用户点到**另一个** action，直接不发请求
   （既不换 key 也不按新动作重放）。外部写单飞：请求中只禁用外部写动作，
   选择/筛选/刷新/其他条目的本地复核保持可用。

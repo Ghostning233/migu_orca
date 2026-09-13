@@ -22,6 +22,7 @@ import {
   createWriteConflictSession,
   createWriteSession,
   filterTrackingItems,
+  isDefiniteWriteRejection,
   isWriteActionCode,
   probeStatusLabel,
   projectCapabilitySummary,
@@ -405,6 +406,17 @@ async function runTrackingWrite(payload: { action: TrackingAction; item: Trackin
       // nothing is ever resent on the user's behalf.
       writeIntent = null
       writeSession.value = createWriteConflictSession(trackingId, action, apiError.type)
+      await recheckAfterWrite(trackingId, true)
+      return
+    }
+    if (isDefiniteWriteRejection(apiError)) {
+      // D38-08.5: a structured non-409 4xx is a definite refusal raised before
+      // the external boundary — Auto Bangumi was never written. This is *not*
+      // "结果未知": the intent is released (so the page-level write lock no
+      // longer blocks other items, and the next confirmation mints a fresh key)
+      // and the page only reads the latest state back. Nothing is ever resent.
+      writeIntent = null
+      writeSession.value = createWriteSession(trackingId, action, 'REJECTED')
       await recheckAfterWrite(trackingId, true)
       return
     }

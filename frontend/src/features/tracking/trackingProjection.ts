@@ -390,9 +390,10 @@ export function isWriteActionCode(value: TrackingActionCode): value is TrackingW
  *
  * The page-level write session below describes one item-scoped external write:
  * ``state`` is either the persisted business outcome the server returned, the
- * in-flight marker, or one of the two client-side states that mean "the server
- * never gave us a definite answer" (a conflict, or an unreadable result).
- * Fixed Chinese copy only — the raw server enum never reaches the DOM.
+ * in-flight marker, or one of the three client-side states that describe what
+ * the server refused/told us (a conflict, a definite pre-write HTTP rejection,
+ * or an unreadable result). Fixed Chinese copy only — the raw server enum never
+ * reaches the DOM.
  */
 export const SUBMIT_OUTCOMES = [
   'ACTIVE', 'SUBMIT_FAILED', 'NEEDS_RECONFIRM', 'VERIFYING_EXTERNAL', 'RECOVERY_REQUIRED',
@@ -400,8 +401,13 @@ export const SUBMIT_OUTCOMES = [
 
 export type TrackingSubmitOutcome = (typeof SUBMIT_OUTCOMES)[number]
 
-/** ``UNKNOWN`` also covers a transport result we could not read at all. */
-export type TrackingWriteState = 'IN_FLIGHT' | TrackingSubmitOutcome | 'CONFLICT' | 'UNKNOWN'
+/**
+ * ``UNKNOWN`` also covers a transport result we could not read at all.
+ * ``REJECTED`` is the definite counterpart: a structured non-409 HTTP 4xx the
+ * server returned *before* the external boundary (D38-08.5), so Auto Bangumi
+ * was provably never written.
+ */
+export type TrackingWriteState = 'IN_FLIGHT' | TrackingSubmitOutcome | 'CONFLICT' | 'REJECTED' | 'UNKNOWN'
 
 export interface TrackingWriteSession {
   readonly trackingId: string
@@ -448,6 +454,10 @@ const WRITE_MESSAGES: Record<TrackingWriteState, string> = {
   VERIFYING_EXTERNAL: '外部提交结果未知，正在只读回查；请勿重复提交。',
   RECOVERY_REQUIRED: '本地结果未完成落盘，需要恢复；请勿重复提交。',
   CONFLICT: WRITE_CONFLICT_FALLBACK_MESSAGE,
+  // A structured non-409 4xx is decided before the external boundary, so the
+  // copy states plainly that nothing was created; the raw error_type/status is
+  // deliberately never rendered.
+  REJECTED: '服务端明确拒绝了本次请求，本次未创建 Auto Bangumi 外部订阅；正在刷新最新详情，请重新确认后再提交。',
   UNKNOWN: '提交结果未知，正在只读回查；未确认生效前不会再次提交。',
 }
 
@@ -491,6 +501,19 @@ export function createWriteConflictSession(
 }
 
 /**
+ * True only for a structured, non-409 HTTP 4xx (D38-08.5).
+ *
+ * Every documented submit-family 4xx other than 409 is raised before the
+ * external boundary, so Auto Bangumi was never called with the request: that is
+ * a definite refusal ("本次未创建外部订阅"), not the indeterminate ``UNKNOWN``
+ * result. A network failure, timeout, non-JSON body, 5xx, or a status we cannot
+ * read stays ``UNKNOWN`` because it may already have reached the boundary.
+ */
+export function isDefiniteWriteRejection(error: { status: number; httpError: boolean }): boolean {
+  return error.httpError === true && error.status >= 400 && error.status < 500 && error.status !== 409
+}
+
+/**
  * Project one HTTP 200 submit-family result. An outcome we do not recognize is
  * treated exactly like an unreadable transport result: read back, never
  * resubmit blind.
@@ -509,8 +532,9 @@ export function projectWriteOutcome(
  *
  * These are the states where a transport retry must reuse the *same* opaque key:
  * the external call may already have happened, so minting a new key could create
- * a second subscription.  Every definite outcome (including an explicit failure)
- * releases the intent so the next user confirmation gets a fresh key.
+ * a second subscription.  Every definite result (an explicit business failure
+ * and a pre-write HTTP rejection alike) releases the intent so the next user
+ * confirmation gets a fresh key.
  */
 export function writeSessionKeepsIntent(state: TrackingWriteState): boolean {
   return state === 'UNKNOWN' || state === 'VERIFYING_EXTERNAL' || state === 'RECOVERY_REQUIRED'
