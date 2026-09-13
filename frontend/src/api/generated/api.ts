@@ -12412,42 +12412,192 @@ export interface operations {
                         title: string | null;
                         season?: number | null;
                         subtitle_group?: string | null;
-                        filter_rule?: null | Record<string, never>;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
                         offset?: number | null;
                         expected_folder_name?: string | null;
                     } | {
                         title?: string | null;
                         season: number | null;
                         subtitle_group?: string | null;
-                        filter_rule?: null | Record<string, never>;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
                         offset?: number | null;
                         expected_folder_name?: string | null;
                     } | {
                         title?: string | null;
                         season?: number | null;
                         subtitle_group: string | null;
-                        filter_rule?: null | Record<string, never>;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
                         offset?: number | null;
                         expected_folder_name?: string | null;
                     } | {
                         title?: string | null;
                         season?: number | null;
                         subtitle_group?: string | null;
-                        filter_rule: null | Record<string, never>;
+                        filter_rule: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
                         offset?: number | null;
                         expected_folder_name?: string | null;
                     } | {
                         title?: string | null;
                         season?: number | null;
                         subtitle_group?: string | null;
-                        filter_rule?: null | Record<string, never>;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
                         offset: number | null;
                         expected_folder_name?: string | null;
                     } | {
                         title?: string | null;
                         season?: number | null;
                         subtitle_group?: string | null;
-                        filter_rule?: null | Record<string, never>;
+                        filter_rule?: null | ({
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } & ({
+                            must_contain: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex: boolean | null;
+                            case_sensitive?: boolean | null;
+                        } | {
+                            must_contain?: string | null;
+                            must_not_contain?: string | null;
+                            use_regex?: boolean | null;
+                            case_sensitive: boolean | null;
+                        }));
                         offset?: number | null;
                         expected_folder_name: string | null;
                     });

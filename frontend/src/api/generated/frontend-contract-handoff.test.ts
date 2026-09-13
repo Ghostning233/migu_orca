@@ -82,6 +82,16 @@ describe('versioned frontend contract handoff (US-255)', () => {
       patch: {},
     }
     void emptyRssModify
+    const multiFieldModify: JsonBody<'modifyTrackingItem'> = {
+      target_scope: 'SUBSCRIPTION', expected_revision: 1,
+      idempotency_key: 'intent-test', confirm: true,
+      ab_config: { auth_mode: 'password', fallback_enabled: false },
+      patch: {
+        title: '更新标题', season: 2,
+        filter_rule: { must_contain: '1080p', use_regex: false },
+      },
+    }
+    void multiFieldModify
     expectTypeOf<TrackingAction['requires_confirmation']>().toEqualTypeOf<boolean>()
     expectTypeOf<TrackingResult['updated_episode']>().toEqualTypeOf<null>()
     expectTypeOf<components['schemas']['ApiErrorEnvelope']>().toMatchTypeOf<{

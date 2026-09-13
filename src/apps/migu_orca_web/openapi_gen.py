@@ -322,10 +322,7 @@ def _modify_request_body() -> dict[str, Any]:
         "use_regex": {"type": ["boolean", "null"]},
         "case_sensitive": {"type": ["boolean", "null"]},
     }
-    subscription_patch = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
+    subscription_properties = {
             "title": {"type": ["string", "null"]},
             "season": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
             "subtitle_group": {"type": ["string", "null"]},
@@ -333,46 +330,40 @@ def _modify_request_body() -> dict[str, Any]:
                 "anyOf": [
                     {"type": "null"},
                     {
-                        "type": "object",
-                        "additionalProperties": False,
-                        "properties": filter_properties,
-                        "oneOf": [
-                            {"type": "object", "additionalProperties": False, "properties": filter_properties, "required": [field]}
-                            for field in filter_properties
+                        "allOf": [
+                            {"type": "object", "additionalProperties": False, "properties": filter_properties},
+                            {"anyOf": [
+                                {"type": "object", "additionalProperties": False, "properties": filter_properties, "required": [field]}
+                                for field in filter_properties
+                            ]},
                         ],
                     },
                 ],
             },
             "offset": {"type": ["integer", "null"], "minimum": 0},
             "expected_folder_name": {"type": ["string", "null"]},
-        },
-        "oneOf": [
-            {"type": "object", "additionalProperties": False, "properties": {
-                "title": {"type": ["string", "null"]},
-                "season": {"type": ["integer", "null"], "minimum": 0, "maximum": 100},
-                "subtitle_group": {"type": ["string", "null"]},
-                "filter_rule": {"anyOf": [{"type": "null"}, {"type": "object"}]},
-                "offset": {"type": ["integer", "null"], "minimum": 0},
-                "expected_folder_name": {"type": ["string", "null"]},
-            }, "required": [field]}
-            for field in ("title", "season", "subtitle_group", "filter_rule", "offset", "expected_folder_name")
+    }
+    subscription_patch = {
+        "allOf": [
+            {"type": "object", "additionalProperties": False, "properties": subscription_properties},
+            {"anyOf": [
+                {"type": "object", "additionalProperties": False, "properties": subscription_properties, "required": [field]}
+                for field in subscription_properties
+            ]},
         ],
     }
+    rss_properties = {
+        "name": {"type": ["string", "null"]},
+        "aggregate": {"type": ["boolean", "null"]},
+        "parser": {"type": ["string", "null"]},
+    }
     rss_patch = {
-        "type": "object",
-        "additionalProperties": False,
-        "properties": {
-            "name": {"type": ["string", "null"]},
-            "aggregate": {"type": ["boolean", "null"]},
-            "parser": {"type": ["string", "null"]},
-        },
-        "oneOf": [
-            {"type": "object", "additionalProperties": False, "properties": {
-                "name": {"type": ["string", "null"]},
-                "aggregate": {"type": ["boolean", "null"]},
-                "parser": {"type": ["string", "null"]},
-            }, "required": [field]}
-            for field in ("name", "aggregate", "parser")
+        "allOf": [
+            {"type": "object", "additionalProperties": False, "properties": rss_properties},
+            {"anyOf": [
+                {"type": "object", "additionalProperties": False, "properties": rss_properties, "required": [field]}
+                for field in rss_properties
+            ]},
         ],
     }
 

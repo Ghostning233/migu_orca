@@ -49,4 +49,8 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - 修复管理动作按 action 精确投影 target scopes；前端严格执行服务端 scope 与 capability 交集，SET_ENABLED 按当前方向判断，SUBMIT/RETRY 增加已验证的 `subscription_submit` 门控。
 - 修复 tracking_id/batch_id 互斥兼容路由、列表失败时保留合法选择、初次深链聚焦、真实时间稳定排序，并将 TrackingView 外层改为非嵌套 `section`。
 - OpenAPI/generated modify patch 联合现在编译期拒绝空 patch，filter_rule 非 null 也必须至少一个字段；同步 PRD、handoff 与契约测试。
+
+## [2026-09-13 09:45:00 CST] - Stage 38 第二轮审核修复（US-303～US-305）
+- 修正 modify patch 内部约束：subscription、RSS 及非空 filter_rule 均使用 `allOf` 基础字段加 `anyOf` 至少一个字段，允许合法多字段修改；仅保留外层 target_scope 的 `oneOf`。
+- 补充 OpenAPI 结构/运行时契约测试，以及 generated TypeScript 多字段正向赋值和空 patch/filter_rule 负向断言。
 ---
