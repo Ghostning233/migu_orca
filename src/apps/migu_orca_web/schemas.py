@@ -610,6 +610,46 @@ class SavedTrackingSyncInput(BaseModel):
         return self
 
 
+class SavedTrackingRecoveryInput(BaseModel):
+    """Strict recovery handoff for a server-owned AB connection."""
+
+    model_config = ConfigDict(extra="forbid")
+    tracking_id: StrictStr
+    expected_revision: StrictInt = Field(ge=1)
+    action: Literal["AUTO", "MARK_SUCCEEDED", "MARK_FAILED", "VERIFY_EXTERNAL"]
+    confirm: StrictBool = False
+    connection_ref: UUID
+    configuration_revision: StrictInt = Field(ge=0)
+    storage_dir: str | None = None
+
+    @field_validator("tracking_id")
+    @classmethod
+    def _clean_recovery_tracking_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("tracking_id cannot be empty")
+        return value
+
+    @field_validator("connection_ref", mode="before")
+    @classmethod
+    def _require_canonical_recovery_ref(cls, value: Any) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("connection_ref 必须是规范 UUID")
+        try:
+            parsed = UUID(value)
+        except (ValueError, AttributeError, TypeError) as exc:
+            raise ValueError("connection_ref 必须是规范 UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("connection_ref 必须是规范 UUID")
+        return value
+
+    @model_validator(mode="after")
+    def _manual_confirmation(self) -> SavedTrackingRecoveryInput:
+        if self.action in {"MARK_SUCCEEDED", "MARK_FAILED"} and self.confirm is not True:
+            raise ValueError("confirm must be true")
+        return self
+
+
 class QbittorrentConfigPayload(BaseModel):
     endpoint: str
     username: str

@@ -216,3 +216,12 @@ Started: 2026-09-13
 - 主 Agent 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_management_service_test.py src/apps/migu_orca_web/tracking_management_service_test.py src/apps/migu_orca_web/tracking_management_routes_test.py src/apps/migu_orca_web/tracking_management_integration_test.py src/tracking_engine/controllers/management_target_test.py src/tracking_engine/controllers/management_operation_test.py -q --maxfail=1 --tb=short` → 90 passed；八个受影响代码/测试文件 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 通过。
 - 独立审核确认无剩余业务阻断，US-324 恢复 passes=true。未运行全量/浏览器/真实 AB，HTTP/generated 请求迁移仍留 US-329。当前批次尚余 US-325/326，各限一次 Ralph 迭代，逐故事审核；未 push/PR/merge。
 - 可复用结论：新增入口必须以真实新 service 与本地临时 repository 测试，不能以旧 core 测试替代；拒绝旧 key 时不能把已完成历史 operation 改成待恢复。终态读取复用权威协调器，不复制重放状态机。
+
+## 2026-09-14 / US-325
+
+- 范围：新增 `SavedTrackingRecoveryInput` 严格引用模型与 `run_saved_tracking_recovery` 服务入口。AUTO、MARK_SUCCEEDED、MARK_FAILED 仅复用本地恢复协调器，不解析 AB 配置；VERIFY_EXTERNAL 仅接受规范 `connection_ref + configuration_revision`。
+- 实现：外部核验先确认当前 operation 存在且原始连接引用严格匹配，再在 Auto Bangumi 配置 repository lease 内取得 immutable 配置并构造只读管理客户端；配置变更、清除、旧未绑定 operation 均在外部调用前拒绝或由 repository fail closed。现有 recover HTTP/generated 输入保持不变，待 US-330 原子切换。
+- 文件：`src/apps/migu_orca_web/schemas.py`、`src/apps/migu_orca_web/tracking_saved_recovery_service.py`、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest src/apps/migu_orca_web/tracking_recovery_service_test.py -q --disable-warnings --maxfail=1` → 19 passed；保存恢复 schema 正负例检查通过；受影响 Ruff、定向 compileall、`git diff --check` 通过。
+- 遗留风险：尚未切换 recover HTTP/generated/前端调用者；未运行全量测试、浏览器或真实 Auto Bangumi。后续 US-330 负责原子切换并移除临时 `ab_config`。
+- 可复用结论：VERIFY_EXTERNAL 必须以 operation 持久化 ref 作为唯一归属证据，并把配置 lease 覆盖至只读核验全过程；AUTO/人工恢复不能因为存在 saved 引用而读取或要求 AB 秘密。
