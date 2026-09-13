@@ -149,10 +149,17 @@ def pytest_collection_modifyitems(
 
 
 @pytest.fixture(scope="session")
-def app() -> Any:
+def app(tmp_path_factory: pytest.TempPathFactory) -> Any:
+    config_root = tmp_path_factory.mktemp("web-config")
+    previous_config_root = os.environ.get("MIGU_ORCA_WEB_CONFIG_ROOT")
+    os.environ["MIGU_ORCA_WEB_CONFIG_ROOT"] = str(config_root)
     app = create_app("testing")
     _register_test_routes(app)
-    return app
+    yield app
+    if previous_config_root is None:
+        os.environ.pop("MIGU_ORCA_WEB_CONFIG_ROOT", None)
+    else:
+        os.environ["MIGU_ORCA_WEB_CONFIG_ROOT"] = previous_config_root
 
 
 def _register_test_routes(app: Any) -> None:

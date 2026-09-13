@@ -29,6 +29,12 @@ def client() -> FlaskClient:
 
 
 @pytest.fixture(autouse=True)
+def _web_config_root(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep deployment credentials isolated from the developer workspace."""
+    monkeypatch.setenv("MIGU_ORCA_WEB_CONFIG_ROOT", str(tmp_path / "config"))
+
+
+@pytest.fixture(autouse=True)
 def _web_storage_root(tmp_path: Path) -> None:
     """US-193: point the Web storage root at the test tmp dir.
 

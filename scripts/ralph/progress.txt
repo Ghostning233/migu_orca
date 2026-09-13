@@ -234,3 +234,11 @@ Started: 2026-09-13
 - 补证：saved recovery 专属测试覆盖严格 schema、本地零配置、SUBMIT 三种未知状态、错误/缺失连接、四类 management 只读恢复、operation 竞态、仓储故障前零外部读取、原 operation/key 不变及安全输出。主 Agent运行 saved/core/management 组合 `68 passed`；受影响 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。
 - 独立审核确认无 P0/P1 阻断，US-325 更新为 passes=true。剩余 P2 为 JSON 双文件补偿的极端再次失败、坏 RSS mapping 的更严格输入诊断及更完整 lease 故障注入；均保持 fail closed，不构成本故事阻断。未运行全量、浏览器或真实 AB；HTTP/generated 原子切换仍留 US-330，未 push/PR/merge。
 - 可复用结论：未知外部结果的只读恢复必须在外部读取前后验证同一个 operation 快照；存储错误不能落入外部失败 fallback；测试必须先固定 Request 再绑定 fingerprint，不能通过改写意图夹具制造假成功。
+
+## 2026-09-14 / US-326
+
+- 范围：完成 US-318～US-325 后端交接前的测试隔离补强；API contract fixture 与 browser session fixture 均使用临时 `MIGU_ORCA_WEB_CONFIG_ROOT`，避免读取或写入开发者默认配置目录。
+- 文件：`tests/api_contract/conftest.py`、`tests/browser/conftest.py`、`scripts/ralph/prd.json`。
+- 验证：`uv run pytest tests/api_contract/test_autobangumi_settings_security.py tests/api_contract/test_saved_autobangumi_probe.py tests/api_contract/test_endpoint_lifecycle.py -q --maxfail=1` → `18 passed`；Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过。按 US-326 范围未重跑全量后端/前端/Chromium 门禁。
+- 遗留风险：未运行真实 Chromium 与真实 Auto Bangumi；旧业务 HTTP/generated 输入仍按 PRD 保持可编译，待后续 US-328～US-330 原子切换。
+- 可复用结论：涉及部署端秘密的 contract/browser fixture 必须显式注入临时服务端配置根；session-scoped Flask fixture 需在整个 live server 生命周期保留环境变量，结束后恢复原值。
