@@ -307,3 +307,29 @@ npm run build                 # 先 typecheck 再 vite build → dist/
 - 浏览器收敛测试文件：`tests/browser/test_app_responsive_a11y.py`（22 例）——
   四路由 × 三视口无横向溢出、skip link、右侧候选详情焦点、状态文本、reduced-motion、
   vendor chunk、无 sourcemap、缓存头。它**不重复**各 feature 的业务断言。
+
+## 正式追番管理（Stage 38，US-305 起）
+
+- 页面在 `features/tracking/`：`TrackingView.vue`（状态总览 + 单选列表 + 右侧检查器）、
+  `TrackingInspector.vue`（安全详情 + 本地方案动作）、`trackingProjection.ts`（API-free
+  投影/意图纯函数）、`CredentialSessionDialog.vue`（页面级凭据会话）。列表与详情的权威
+  分别是 generated `listTrackingItems` / `getTrackingItemDetail`。
+- **列表读取与「服务端确认的写结果」必须各有请求代际**：`listSequence` 只让更新的列表
+  请求作废旧列表响应，`writeGeneration` 在写入服务端返回的 tracking 时递增，让**写之前**
+  发出的列表响应作废。共用一个代际会导致同步/复核结果被普通刷新丢弃并卡死按钮。
+- 返回值收敛统一走「服务端返回的 tracking 覆盖该条摘要」：inspector 通过
+  `@tracking-updated` 把 `result.tracking` 交给 `TrackingView.applyReturnedTracking`
+  （按 `tracking_id` 原位替换 + 递增 `writeGeneration`），不再二次 GET 详情；因此
+  `TrackingView` 的 inspector `:key` 不因写结果变化（否则会重挂载并丢掉写结果面板）。
+- 动作只由 `executableTrackingActions()` 投影：未知 code/style/scope 直接不渲染。
+  `REVALIDATE` 是**纯本地**动作（无 scope、无 capability 门控，不要求页面连接）；
+  `SUBMIT`/`RETRY` 需要 `subscription_submit=SUPPORTED`；管理动作需要 service-computed
+  `target_scopes` 与对应 `SUPPORTED` 能力。
+- **REVALIDATE 语义（US-309）**：body 只含最新 `expected_revision` 与相对 `storage_dir`
+  （**无** `ab_config`）；`ready=false` 是 HTTP 200 业务结果，用服务端 §11.5 `issues`
+  说明「尚未向 Auto Bangumi 创建订阅」（`projectRevalidateIssues` 只渲染已知 code，
+  未知 code 丢弃）；409 必须先清空意图、重新 GET 详情、再要求用户重新确认，绝不静默重发；
+  transport 失败保留意图以便显式重试复用同一 revision。
+- 浏览器测试：`tests/browser/test_app_tracking.py`。Playwright **后注册的 route 优先**，
+  所以 revalidate 这类写端点要在 `_mock_list()` 之后单独 `page.route` 注册；否则会被
+  更宽的 `**/api/v1/tracking/items*` 通配吃掉。

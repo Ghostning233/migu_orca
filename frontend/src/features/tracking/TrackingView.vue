@@ -65,12 +65,13 @@ const syncMessage = ref('')
 const syncSummary = ref<SyncResult['summary'] | null>(null)
 const confirmDialog = ref<InstanceType<typeof ConfirmDialog> | null>(null)
 const detailRevision = ref(0)
-// List and sync have independent lifecycles: `listSequence` only invalidates
-// stale list responses, while `syncGeneration` marks the revision a sync wrote.
-// A list response started before a sync must never overwrite synced data, and a
-// list refresh must never discard a sync result.
+// List reads and server-confirmed tracking writes have independent lifecycles:
+// `listSequence` only invalidates stale list responses, while `writeGeneration`
+// marks the revision a sync (or a local revalidate) already applied.  A list
+// response started before a write must never overwrite it, and a list refresh
+// must never discard a write result.
 let listSequence = 0
-let syncGeneration = 0
+let writeGeneration = 0
 let syncSequence = 0
 let syncController: AbortController | null = null
 
@@ -117,20 +118,20 @@ function syncSelection(forceAbsentCheck = false): void {
 
 async function loadList(): Promise<void> {
   const sequence = ++listSequence
-  const generation = syncGeneration
+  const generation = writeGeneration
   loading.value = true
   failed.value = false
   try {
     const result = await api.get<ListResult>('/api/v1/tracking/items', {
       query: { ...storageQuery(), sort: 'updated_at' },
     })
-    if (sequence !== listSequence || generation !== syncGeneration) return
+    if (sequence !== listSequence || generation !== writeGeneration) return
     const previous = selectedTrackingId.value
     items.value = result?.items ?? []
     syncSelection(true)
     if (selectedTrackingId.value && selectedTrackingId.value !== previous) await focusSelection()
   } catch (error) {
-    if (sequence !== listSequence || generation !== syncGeneration) return
+    if (sequence !== listSequence || generation !== writeGeneration) return
     failed.value = true
     void error
   } finally {
@@ -138,6 +139,22 @@ async function loadList(): Promise<void> {
       loading.value = false
     }
   }
+}
+
+/**
+ * Converge one list item with the server-returned tracking summary (US-309).
+ *
+ * The write bumps `writeGeneration` so a list response that started before it
+ * can never restore the superseded revision.
+ */
+function applyReturnedTracking(tracking: TrackingItem): void {
+  if (!tracking || typeof tracking.tracking_id !== 'string') return
+  const index = items.value.findIndex((item) => item.tracking_id === tracking.tracking_id)
+  if (index === -1) return
+  writeGeneration += 1
+  const next = items.value.slice()
+  next[index] = tracking
+  items.value = next
 }
 
 function selectItem(trackingId: string): void {
@@ -215,7 +232,7 @@ async function syncTracking(): Promise<void> {
     syncSummary.value = result.summary
     if (!degraded && result.items) {
       // Writing the synced revision invalidates list responses already in flight.
-      syncGeneration += 1
+      writeGeneration += 1
       items.value = result.items
       detailRevision.value += 1
       syncSelection(true)
@@ -311,7 +328,12 @@ onBeforeUnmount(() => {
       </PanelSection>
 
       <aside class="tracking-inspector" aria-labelledby="tracking-inspector-heading">
-        <TrackingInspector v-if="selectedItem" :key="`${selectedItem.tracking_id}:${detailRevision}`" :tracking-id="selectedItem.tracking_id" />
+        <TrackingInspector
+          v-if="selectedItem"
+          :key="`${selectedItem.tracking_id}:${detailRevision}`"
+          :tracking-id="selectedItem.tracking_id"
+          @tracking-updated="applyReturnedTracking"
+        />
         <template v-else>
           <h2 id="tracking-inspector-heading">检查器</h2>
           <EmptyState message="选择一条追番记录查看安全检查器。" />

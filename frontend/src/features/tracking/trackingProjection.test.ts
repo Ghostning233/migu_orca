@@ -8,6 +8,7 @@ import {
   filterTrackingItems,
   probeStatusLabel,
   projectCapabilitySummary,
+  projectRevalidateIssues,
   projectTrackingOverview,
   reuseTrackingActionIntent,
   sortTrackingItems,
@@ -152,5 +153,23 @@ describe('capability display projection (US-307 review fix)', () => {
     expect(capabilityVersionLabel(capabilities({ version: '   ' }))).toBe('未确认')
     expect(capabilityVersionLabel(capabilities({ version: 'https://private.invalid' }))).toBe('未确认')
     expect(capabilityVersionLabel(capabilities({ version: '3.1.18 (legacy)' }))).toBe('未确认')
+  })
+
+  it('keeps only the documented §11.5 issue codes and fails closed otherwise', () => {
+    const issues = projectRevalidateIssues([
+      { code: 'REQUEST_CHANGED', message: ' 本地方案已变化 ', recovery_action: 'SUBMIT' },
+      { code: 'REQUEST_CHANGED', message: '重复项被丢弃' },
+      { code: 'NOT_A_REAL_CODE', message: 'https://private.invalid/leak' },
+      { code: 'NO_VALID_RESOURCES', message: '   ' },
+      null,
+      'REQUEST_MISSING',
+    ])
+    expect(issues).toEqual([
+      { code: 'REQUEST_CHANGED', message: '本地方案已变化' },
+      { code: 'NO_VALID_RESOURCES', message: '本地方案尚未通过提交前复核。' },
+    ])
+    expect(JSON.stringify(issues)).not.toContain('private.invalid')
+    expect(projectRevalidateIssues(undefined)).toEqual([])
+    expect(projectRevalidateIssues({ code: 'REQUEST_CHANGED' })).toEqual([])
   })
 })

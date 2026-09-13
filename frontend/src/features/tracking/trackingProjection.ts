@@ -1,5 +1,5 @@
 /**
- * API-free tracking page projection and intent helpers (US-304).
+ * API-free tracking page projection and intent helpers (US-304, US-309).
  *
  * This module only consumes generated OpenAPI operation types. It never
  * performs transport, reconstructs server state, or stores an intent/key.
@@ -18,6 +18,13 @@ export type CapabilityResult = NonNullable<
   operations['probeAutoBangumiCapabilities']['responses']['200']['content']['application/json']['result']
 >
 export type CapabilityState = CapabilityResult['subscription_modify']
+export type TrackingRevalidateBody = NonNullable<
+  operations['revalidateTrackingItem']['requestBody']['content']['application/json']
+>
+export type TrackingRevalidateResult = NonNullable<
+  operations['revalidateTrackingItem']['responses']['200']['content']['application/json']['result']
+>
+export type TrackingRevalidateIssue = NonNullable<TrackingRevalidateResult['issues']>[number]
 
 export const TRACKING_STATUS_GROUPS = [
   'PENDING', 'PROCESSING', 'ACTIVE', 'ATTENTION', 'INACTIVE',
@@ -268,4 +275,50 @@ export function projectCapabilitySummary(capabilities: CapabilityResult): Capabi
     label: field.label,
     state: capabilityState(capabilities[field.key]),
   }))
+}
+
+/**
+ * Revalidation issue projection (US-309).
+ *
+ * ``ready=false`` is an HTTP 200 business result, so the server's fixed §11.5
+ * issue list is the only explanation of why no external subscription exists.
+ * Only the documented code enum is renderable: an unrecognized code is dropped
+ * rather than echoing an unvetted server string into the DOM, and a known code
+ * whose message is missing falls back to fixed Chinese copy.
+ */
+export const REVALIDATE_ISSUE_CODES = [
+  'REQUEST_MISSING', 'REQUEST_NOT_ACCEPTED', 'REQUEST_CHANGED', 'TITLE_MISSING',
+  'SEASON_REVIEW_REQUIRED', 'MIKAN_SELECTION_MISSING', 'SUBTITLE_GROUP_MISSING',
+  'NO_VALID_RESOURCES', 'EXTERNAL_ALREADY_LINKED', 'OPERATION_IN_PROGRESS',
+  'TRACKING_STATE_INVALID',
+] as const satisfies readonly TrackingRevalidateIssue['code'][]
+
+export interface TrackingRevalidateIssueView {
+  code: TrackingRevalidateIssue['code']
+  message: string
+}
+
+const KNOWN_REVALIDATE_ISSUE_CODES = new Set<string>(REVALIDATE_ISSUE_CODES)
+
+/** Fixed copy used when a known code arrives without a usable message. */
+export const REVALIDATE_ISSUE_FALLBACK_MESSAGE = '本地方案尚未通过提交前复核。'
+
+/** True only for the documented §11.5 issue code enum. */
+export function isKnownRevalidateIssueCode(value: unknown): value is TrackingRevalidateIssue['code'] {
+  return typeof value === 'string' && KNOWN_REVALIDATE_ISSUE_CODES.has(value)
+}
+
+/** Project the §11.5 issue list, keeping server order and dropping unknown codes. */
+export function projectRevalidateIssues(issues: unknown): TrackingRevalidateIssueView[] {
+  if (!Array.isArray(issues)) return []
+  const views: TrackingRevalidateIssueView[] = []
+  const seen = new Set<string>()
+  for (const issue of issues) {
+    const candidate = issue as { code?: unknown; message?: unknown } | null
+    if (!candidate || !isKnownRevalidateIssueCode(candidate.code) || seen.has(candidate.code)) continue
+    seen.add(candidate.code)
+    const message = typeof candidate.message === 'string' ? candidate.message.trim() : ''
+    views.push({ code: candidate.code, message: message || REVALIDATE_ISSUE_FALLBACK_MESSAGE })
+  }
+  return views
 }

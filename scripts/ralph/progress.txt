@@ -103,3 +103,14 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 仅比对单行不足以发现漂移，`test_inventory_projects_lifecycle_registry` 的全量 dict 相等才是权威守护；本次全量比对确认「Omitting 38 identical items」，仅该行曾被改坏。
 - 定向验证：`uv run pytest tests/api_contract/test_endpoint_lifecycle.py -q`（5 passed）、`uv run pytest -q -m "not browser"`（1640 passed，0 failed）、`uv run ruff check src tests`（All checks passed）、`uv run migu-orca-openapi --check`（OpenAPI up to date，exit 0）、`git diff --check`（exit 0）。
 ---
+
+## [2026-09-13 10:35:00 CST] - US-309
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: 在 `TrackingInspector` 接入 REVALIDATE 本地复核闭环：动作由服务端 `available_actions` 投影（无 scope/capability 门控、不要求页面连接）；请求只发最新 `expected_revision` 与相对 `storage_dir`（无 `ab_config`、不访问外部）；`ready=false` 作为 200 业务结果渲染服务端 §11.5 `issues` 并固定说明「尚未向 Auto Bangumi 创建订阅」；用返回 `tracking` 原子收敛检查器与列表（`@tracking-updated` → `applyReturnedTracking`，无二次详情读取）；409 清空意图、回查详情并要求重新确认；transport 失败保留意图供显式重试复用；深链文案改为「返回修改方案」，外部孤立项单独说明不可返回原因。
+- Files changed: `frontend/src/features/tracking/TrackingInspector.vue`、`TrackingView.vue`（`syncGeneration` 更名 `writeGeneration` + `applyReturnedTracking`）、`trackingProjection.ts`（`projectRevalidateIssues`/`REVALIDATE_ISSUE_CODES`/`TrackingRevalidate*` 类型）及三个 Vitest；`tests/browser/test_app_tracking.py`（+2 例真实 Chromium）；`frontend/AGENTS.md`；Ralph 状态文件。
+- **Learnings for future iterations:**
+  - 列表响应代际与「写结果代际」必须分开：`listSequence` 管列表、`writeGeneration` 管服务端返回的 tracking 写入。所有 US-310～US-315 的写动作都应复用 `applyReturnedTracking`（原位替换 + 递增 `writeGeneration`），且不要动 inspector 的 `:key`（`detailRevision`），否则会重挂载并丢掉写结果面板。
+  - `projectRevalidateIssues` 只渲染已知 §11.5 code，未知 code 直接丢弃（fail closed），空 message 回退固定中文；服务端 issue message 是固定文案表，可安全渲染。
+  - Playwright route **后注册优先**：revalidate POST 要单独 `page.route` 注册在 `_mock_list()` 之后，否则被 `**/api/v1/tracking/items*` 吃掉。
+- 定向验证：TrackingInspector/TrackingView/trackingProjection Vitest（42 passed）、typecheck、lint、build、`npm run api:check` 通过；`uv run pytest tests/browser/test_app_tracking.py -q`（6 passed，真实 Chromium）；`git diff --check` 干净。
+---

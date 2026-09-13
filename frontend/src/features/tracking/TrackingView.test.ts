@@ -8,7 +8,10 @@ import { api } from '@/api/client'
 import ConfirmDialog from '@/components/feedback/ConfirmDialog.vue'
 import TrackingView from './TrackingView.vue'
 
-vi.mock('@/api/client', () => ({ api: { get: vi.fn(), post: vi.fn() } }))
+vi.mock('@/api/client', () => ({
+  api: { get: vi.fn(), post: vi.fn() },
+  toApiError: (error: unknown) => error,
+}))
 const apiGet = vi.mocked(api.get)
 const apiPost = vi.mocked(api.post)
 
@@ -29,6 +32,32 @@ function detail() {
     created_at: '2026-09-12T00:00:00Z', last_synced_at: null, safe_info: null,
     current_operation: null, revalidation_issues: [], external_mapping: null,
     audit_events: [], warnings: [],
+  }
+}
+
+const revalidateAction = {
+  code: 'REVALIDATE', label: '重新复核', style: 'SECONDARY',
+  requires_confirmation: false, target_scopes: [],
+}
+
+/** A detail record that offers the server-computed local revalidate action. */
+function revalidateDetail(overrides: Record<string, unknown> = {}) {
+  return { ...detail(), available_actions: [revalidateAction], ...overrides }
+}
+
+/** The authoritative summary the revalidate endpoint returns after the check. */
+function revalidateSummary(overrides: Record<string, unknown> = {}) {
+  return {
+    ...item('tracking-1', '葬送的芙莉莲'), status: 'NEEDS_RECONFIRM', status_label: '需重新确认',
+    status_group: 'ATTENTION', revision: 3, available_actions: [revalidateAction], ...overrides,
+  }
+}
+
+function revalidatePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    tracking_id: 'tracking-1', ready: true, checked_revision: 1, next_revision: 1,
+    checked_at: '2026-09-13T02:00:00Z', next_status: 'PENDING_SUBMIT', issues: [],
+    tracking: revalidateSummary(), ...overrides,
   }
 }
 
@@ -365,5 +394,42 @@ describe('TrackingView formal overview (US-305)', () => {
     expect(message).not.toContain('同步未完成')
     expect(wrapper.find('.tracking-list-item').text()).toContain('旧本地记录')
     expect(wrapper.text()).not.toContain('同步后的记录')
+  })
+
+  it('converges the list item from the revalidate result without remounting the inspector', async () => {
+    apiGet.mockResolvedValueOnce({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
+      .mockResolvedValueOnce(revalidateDetail() as never)
+    apiPost.mockResolvedValueOnce(revalidatePayload() as never)
+
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    expect(wrapper.find('.tracking-list-item').text()).toContain('追番中')
+
+    await wrapper.find('#tracking-revalidate').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('#tracking-revalidate-result').text()).toContain('复核通过')
+    expect(wrapper.find('.tracking-list-item').text()).toContain('需重新确认')
+    // The returned tracking converges in place — no second detail read.
+    expect(apiGet).toHaveBeenCalledTimes(2)
+  })
+
+  it('never lets a list response started before a revalidate restore the old revision', async () => {
+    let resolveList: ((value: unknown) => void) | undefined
+    apiGet.mockResolvedValueOnce({ items: [item('tracking-1', '葬送的芙莉莲')], summary: {}, warnings: [] } as never)
+      .mockResolvedValueOnce(revalidateDetail() as never)
+      .mockReturnValueOnce(new Promise((resolve) => { resolveList = resolve }) as never)
+    apiPost.mockResolvedValueOnce(revalidatePayload() as never)
+
+    const { wrapper } = await mountTracking({ tracking_id: 'tracking-1' })
+    await wrapper.find('#tracking-refresh').trigger('click')
+    await wrapper.find('#tracking-revalidate').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('#tracking-revalidate-result').text()).toContain('复核通过')
+
+    resolveList?.({ items: [item('tracking-1', '陈旧列表')], summary: {}, warnings: [] })
+    await flushPromises()
+    expect(wrapper.find('.tracking-list-item').text()).toContain('需重新确认')
+    expect(wrapper.text()).not.toContain('陈旧列表')
+    expect(wrapper.find('.tracking-list-state').exists()).toBe(false)
   })
 })
