@@ -195,6 +195,7 @@ describe('BatchWorkbenchView parse (US-205)', () => {
 
     expect(apiPost).toHaveBeenCalledWith('/api/v1/batches/parse', {
       body: { raw_input: '萌王S4\n路哥S4\n杖剑谭S2', storage_dir: null },
+      timeoutMs: 420000,
     })
     const cards = wrapper.findAll('.batch-draft-card')
     expect(cards).toHaveLength(3)
@@ -214,6 +215,38 @@ describe('BatchWorkbenchView parse (US-205)', () => {
 
     expect(wrapper.find('#batch-parse-progress').text()).toContain('1 / 1 部')
     expect(wrapper.find('.batch-draft-card').classes()).toContain('is-current')
+  })
+
+  it('shows an honest long-running wait and blocks duplicate batch parses', async () => {
+    let resolveParse!: (value: ParseResult) => void
+    const pending = new Promise<ParseResult>((resolve) => { resolveParse = resolve })
+    apiPost.mockImplementation(() => pending)
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4\n路哥S4')
+    void wrapper.find('#batch-parse-submit').trigger('click')
+    await nextTick()
+    await wrapper.find('#batch-parse-submit').trigger('click')
+
+    expect(apiPost).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('#batch-parse-result').text()).toContain('逐项处理')
+    expect(wrapper.find('#batch-parse-result').text()).toContain('数分钟')
+    resolveParse(parseResult())
+    await flushPromises()
+  })
+
+  it('maps a per-item MiKan timeout to fixed feedback without raw error text', async () => {
+    apiPost.mockResolvedValue(parseResult({
+      items: [batchItem({
+        status: 'FAILED',
+        error: { error_type: 'mikan_timeout', details: { category: 'mikan_search' }, error_message: 'raw upstream text' },
+      })],
+    }))
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.batch-candidate-feedback').text()).toContain('MiKan 上游响应超时')
+    expect(wrapper.text()).not.toContain('raw upstream text')
   })
 
   it('filters visibility without clearing selection or the current detail', async () => {
@@ -269,7 +302,24 @@ describe('BatchWorkbenchView parse (US-205)', () => {
     await flushPromises()
 
     expect(wrapper.find('.error-state').text()).toContain('批量草案获取失败')
+    expect(wrapper.text()).toContain('应用内部处理异常')
     expect(wrapper.text()).not.toContain('server_error')
+  })
+
+  it.each([
+    ['request_timeout', '等待超时'],
+    ['network_error', '网络或连接不可用'],
+    ['server_error', '应用内部处理异常'],
+  ])('maps top-level %s to fixed batch feedback', async (type, expected) => {
+    apiPost.mockRejectedValue({ type, message: `raw canary https://private.invalid/${type}` })
+    const { wrapper } = await mountBatch()
+    await wrapper.find('#batch-raw-input').setValue('萌王S4')
+    await wrapper.find('#batch-parse-submit').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain(expected)
+    expect(wrapper.text()).not.toContain('private.invalid')
+    expect(wrapper.text()).not.toContain(type)
   })
 
   it('pushes batch_id into the URL and restores it on refresh', async () => {
@@ -371,7 +421,9 @@ describe('BatchWorkbenchView candidate & draft (US-205)', () => {
     await detailCandidates.find('.candidate-select').trigger('click')
     await flushPromises()
 
-    expect(apiPost).toHaveBeenCalledWith('/api/v1/requests', expect.objectContaining({}))
+    expect(apiPost).toHaveBeenCalledWith('/api/v1/requests', expect.objectContaining({
+      timeoutMs: 240000,
+    }))
     expect(card.find('.batch-card-status').text()).toContain('草案')
     // The draft_id never enters the DOM.
     expect(wrapper.text()).not.toContain('opaque-draft')

@@ -293,7 +293,7 @@ class TestAppBatchParse:
         expect(empty.locator(".batch-card-status")).to_contain_text("未找到候选")
         expect(failed.locator(".batch-card-status")).to_contain_text("搜索失败")
         expect(failed.locator(".batch-candidate-feedback")).to_contain_text(
-            "搜索失败。可重新获取批量草案后重试。"
+            "该条目候选搜索失败，请稍后重试。"
         )
         # The raw error_type never leaks into the DOM.
         body_text = page.locator("body").inner_text()
@@ -313,8 +313,10 @@ class TestAppBatchParse:
         page.click("#batch-parse-submit")
 
         expect(page.locator("#batch-parse-result")).to_contain_text(
-            "正在搜索 2 个批量条目的 MiKan 候选"
+            "正在逐项搜索 2 个批量条目的 MiKan 候选"
         )
+        expect(page.locator("#batch-parse-result")).to_contain_text("逐项处理")
+        expect(page.locator("#batch-parse-result")).to_contain_text("数分钟")
         assert pending
         pending[0].fulfill(
             status=200,

@@ -323,3 +323,9 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
 - 在 URL 解析前按原始输入校验 authority 后只能无路径或单个 `/`，拒绝点段、编码点段、重复斜杠、反斜杠及其他歧义路径；补充三个入口与独立 endpoint/password canary 的回归覆盖，检查 DOM、URL、history、localStorage、sessionStorage 和 console。
 - 定向验证：相关 Vitest 91 passed；typecheck、lint、build、Ruff 通过；真实 Chromium canary route-mock 1 passed；未访问真实外部服务。
 ---
+
+## [2026-09-13 19:40:00 CST] - MiKan 反馈与工作台等待体验审核修复
+- 反馈分类按应用内部错误、标题解析、RSS 资源读取/解析、MiKan 页面格式、上游服务及网络分别给出固定中文；支持 `ApiError.details.details.category`，`request_cancelled` 单独显示已取消；`storage_error`/`storage_json_error` 等本地错误不再归因于 MiKan，原始错误文本不进入界面。
+- 单番搜索、直连生成和候选草案生成共用页面忙锁；批量解析入口增加 `parseLoading` 防重，等待提示明确逐项处理且较大批量可能需要数分钟；非有限批量计数安全回退，批量/单番草案请求保持 240000ms 超时预算。
+- 定向 Vitest 6 文件 129 passed；typecheck、lint、build、Ruff 通过。未运行浏览器测试（由独立 Agent 执行），未改 AB、契约形状、后端并发或 RSS 业务。
+---

@@ -239,6 +239,45 @@ class TestAppWorkbenchSingleSearch:
         expect(page.locator("#mikan-candidate-search-result")).to_contain_text("未找到候选合集")
         expect(page.locator("#mikan-candidate-search-result")).to_contain_text("直连合集")
 
+    def test_generated_failed_result_is_not_mislabeled_as_empty(
+        self, page: Page, live_server_url: str, storage_dir: Path
+    ) -> None:
+        console_messages: list[str] = []
+        page.on("console", lambda message: console_messages.append(message.text))
+        page.route(
+            "**/api/v1/mikan/candidates",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=_candidate_result_json(
+                    "芙莉莲",
+                    [],
+                    status="FAILED",
+                    error={
+                        "error_type": "mikan_timeout",
+                        "error_message": "raw https://secret.example/rss?password=password-canary",
+                        "details": {"category": "mikan_search"},
+                    },
+                ),
+            ),
+        )
+        set_storage_preferences(page, storage_dir)
+        _goto_workbench(page, live_server_url)
+
+        page.fill("#mikan-candidate-query", "芙莉莲")
+        page.click("#mikan-candidate-search-submit")
+
+        result = page.locator("#mikan-candidate-search-result")
+        expect(result).to_contain_text("MiKan 上游响应超时")
+        expect(result).not_to_contain_text("未找到候选合集")
+        body_text = page.locator("body").inner_text()
+        assert "secret.example" not in body_text
+        assert "password-canary" not in body_text
+        assert "secret.example" not in page.url
+        assert "password-canary" not in str(page.evaluate("() => history.state"))
+        assert "secret.example" not in str(page.evaluate("() => JSON.stringify(localStorage) + JSON.stringify(sessionStorage)"))
+        assert all("secret.example" not in message and "password-canary" not in message for message in console_messages)
+
     def test_search_failure_shows_sanitized_error_and_retry(
         self, page: Page, live_server_url: str, storage_dir: Path
     ) -> None:
