@@ -158,3 +158,33 @@ Started: 2026-09-13
 - 验证：`uv run pytest src/apps/migu_orca_web/tracking_saved_sync_service_test.py src/apps/migu_orca_web/tracking_sync_service_test.py -q --disable-warnings --maxfail=1`（5 passed）；受影响 Ruff 与 `git diff --check` 通过。
 - 遗留风险：尚未切换 sync HTTP/generated/前端调用者；双实例归属歧义、旧未绑定映射的只读核验及完整 API drift/Chromium 门禁留待后续 story/阶段验收。
 - 可复用结论：保存连接业务 service 必须在同一 repository lease 内创建 adapter 并运行整个外部只读同步；mapping 的连接归属只能来自本次 immutable snapshot，不能由外部 ID、标题或旧状态推断。
+
+## 2026-09-14 / US-323 修复B
+
+- 修复：saved-ref 同步仅接受当前连接的外部 ID；跨 ref/旧未绑定映射必须从原 Request 以内存 RSS URL 取得完整严格证据并唯一去歧义，否则保留本地记录并不判删除；current operation 缺失、损坏或处于 PREPARED/IN_PROGRESS/OUTCOME_UNKNOWN/RECOVERY_REQUIRED 时不改状态、mapping 或锁。saved 非 VERIFIED 能力结果 fail closed；新 external-only tracking ID 按 connection_ref 隔离，legacy ID 保持兼容；同 ref orphan 才可合并。
+- 文件：`src/ab_engine/controllers/reconcile.py`、`src/apps/migu_orca_web/tracking_sync_service.py`、`src/tracking_engine/models/tracking.py` 及对应回归测试；补充 `tracking_saved_submission_service_test.py` 严格输入测试。`scripts/ralph/prd.json` 仅保留主 Agent 设置的 US-323=false。
+- 验证：`uv run pytest src/apps/migu_orca_web/tracking_sync_service_test.py src/ab_engine/controllers/reconcile_test.py src/apps/migu_orca_web/tracking_saved_sync_service_test.py src/apps/migu_orca_web/tracking_saved_submission_service_test.py src/tracking_engine/models/tracking_test.py -q --disable-warnings --maxfail=1` → `52 passed`；受影响 Ruff 与 `git diff --check` 通过；`uv run migu-orca-openapi --check` → OpenAPI up to date；frontend `npm run api:check && npm run typecheck` 通过。
+- 遗留风险：本轮未提交；sync HTTP/generated 原子切换仍待 US-330；未运行全量测试、浏览器或真实 AB。US-322/US-323 均保持 false 待主 Agent 审核。
+
+### US-323 修复B补充收敛
+
+- 根据复核收敛：跨 ref 证据仅读取 Request `confirmable_config.selected_rss_url` 的 request-scoped 值；标题、正整数 season、非空字幕组及 RSS 必须完整一致；同一 local 被多个 external 命中时全部降为固定 `EXTERNAL_MATCH_UNPROVEN`，不连写；ref 隔离 ID 使用 canonical UUID 校验及 v2 namespace，legacy v1 ID 不变。
+- 验证：上述定向 pytest `52 passed`；受影响 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过；未提交，US-322/US-323 保持 false。
+
+## 2026-09-14 / 第二批独立审核检查点：未通过，停止
+
+- 主 Agent 独立复跑 reconcile/sync/saved submit/tracking 模型组合 `52 passed`，`git diff --check` 通过；测试通过不等于验收完整。US-322/323 均保持 `passes=false`，不进入 US-324，修复工作区未提交。
+- US-323 剩余阻断：同 ref 但已失效外部 ID 的映射仍可仅凭展示字段重绑，必须补严格 RSS/去歧义证据；重复 external ID 未整体拒绝，可能写入 EXTERNAL_ONLY；单个未证明 decision 全局跳过所有 missing 处理，应改为局部保护并验证收敛。
+- US-322 剩余验证缺口：重建 repository 后重放、持久化失败后 lease 释放、本地 NEEDS_RECONFIRM 无外调、unknown 换新 key 保护及旧未绑定意图拒绝尚未补齐真实 service 测试。US-323 双实例/旧引用/全路径 lease/冲突写入计数等 service 证据也不足。
+- 第二轮修复记录中的通过结果仅为所列定向检查，不构成故事通过；不得据此前 Ralph 状态或 Agent 自述继续下一批。未 push、PR、merge，未访问真实上游。
+
+### US-323 修复B第二轮复核收敛
+
+- 修复：双向重复命中先统计全部 local 命中，再将所有冲突 decision 降为 `EXTERNAL_ONLY/EXTERNAL_DELETED` 且不带 tracking_id；saved pending 保护覆盖既定状态与无 operation_id，并在空外部列表时给固定未证明 warning；缺失处理在 saved 未证明同步时整体保守跳过。US-322 状态明确保持 false。
+- 验证：定向 pytest `52 passed`；受影响 Ruff、`git diff --check`、`uv run migu-orca-openapi --check`、frontend `npm run api:check && npm run typecheck` 均通过；未提交。
+
+## 2026-09-14 / US-322 定向补证与独立审核通过
+
+- 仅补充 saved submission service 测试：repository 重建后重放不增加外调；外调成功但持久化失败保留 RECOVERY_REQUIRED 且后续配置保存成功证明 lease 释放；NEEDS_RECONFIRM 无外调；unknown 换新 key 拒绝；未绑定 operation 不能被 saved ref 认领。
+- 主 Agent 独立运行 `uv run pytest src/apps/migu_orca_web/tracking_saved_submission_service_test.py src/apps/migu_orca_web/tracking_submission_service_test.py src/apps/migu_orca_web/tracking_recovery_service_test.py src/storage_engine/controllers/operation_repository_test.py -q --maxfail=1` → `80 passed`；Ruff、OpenAPI check、frontend api:check/typecheck 通过。
+- US-322 更新为 passes=true；US-323 保持 false，已有未提交同步修复保留，不纳入 US-322 精确提交。未运行全量、浏览器或真实上游。
