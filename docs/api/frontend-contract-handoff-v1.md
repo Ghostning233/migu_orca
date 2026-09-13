@@ -2,7 +2,7 @@
 
 版本：`v1`（Stage 32 B-D）
 来源：`docs/api/openapi.json` → `frontend/src/api/generated/api.ts`
-范围：F-B～F-F 的页面边界；本文不实现正式页面。
+范围：F-B～F-F 的页面边界；F-B～F-F 均已交付（Stage 34～38），本文只描述消费规则，不重复实现细节。
 
 ## 使用规则
 
@@ -21,7 +21,8 @@
 | F-E 追番方案 | 列表、详情、安全信息、复核 | `listTrackingItems`、`getTrackingItemDetail`、`getRequestSafeInfo`、`revalidateTrackingItem` | 对应 `operations[...]` 的 query/path/body 与 `result` |
 | F-F 正式追番管理 | 同步、提交/重试/恢复、修改、启停、刷新、外部删除 | `syncTrackingItems`、`submitTrackingItem`、`retryTrackingItem`、`recoverTrackingItem`、`modifyTrackingItem`、`setTrackingItemEnabled`、`refreshTrackingRss`、`deleteExternalTrackingItem` | 对应 `operations[...]`；Stage 38 US-303 先补严格 modify patch 与安全 target scopes |
 
-F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。Stage 33 的 `QueueView` 兼容挂载只代表旧队列可访问，不等于正式追番管理完成。
+F-F 是 handoff 的消费边界：Stage 38 已按本表交付正式追番管理页，见本文末节。Stage 33 的 `QueueView`
+兼容挂载曾只代表旧队列可访问，现已退出默认运行时。
 
 ## 状态与动作
 
@@ -56,13 +57,18 @@ F-F 是 handoff 的消费边界，不表示本阶段已经交付管理页面。S
 - F-E 使用 tracking list/detail 和 safe-info；`safe_info` 是白名单展示数据，不能推断外部原始响应或本地路径。
 - 所有 tracking 投影以 `TrackingRecord` 为唯一外部提交权威；旧 queue/AB 结果仅为兼容投影或迁移证据。
 
-## F-F 启动条件与 Stage 38 补口
+## F-F 交付状态与 Stage 38 补口
 
-Stage 32 已合入，F-A～F-E 也已完成，因此 F-F 已规划为 Stage 38。US-303 已补齐 generated
-`modifyTrackingItem` 的 scope-discriminated 严格 patch 联合与 `available_actions[].target_scopes`：patch
-至少包含一个字段并拒绝跨 scope/未知字段，target scopes 只表达当前本地映射的公开 scope（不包含外部
-ID/URL/RSS）；本次补口不新增管理动作、状态、endpoint 或外部语义。
-补口通过 API drift check 与 typecheck 后再实现正式页面；Stage 33 的 QueueView 兼容挂载仍不等于管理页面完成。
+Stage 38（US-303～US-317）已完成 F-F 并归档。US-303 补齐了 generated `modifyTrackingItem` 的
+scope-discriminated 严格 patch 联合与 `available_actions[].target_scopes`：patch 至少包含一个字段并拒绝
+跨 scope/未知字段，target scopes 只表达当前本地映射的公开 scope（不包含外部 ID/URL/RSS）；本次补口
+没有新增管理动作、状态、endpoint 或外部语义。
+
+正式页面 `/app/tracking` 已消费上表全部 F-F operation：`TrackingView` 持有页面级临时凭据会话与所有
+外部写生命周期，`TrackingInspector` 只渲染安全详情并按 `available_actions`/`target_scopes`/本次
+capability 投影动作。`QueueView` 已退出默认运行时（组件按 Stage 38 §10.2 保留供回退），旧
+`batch_id` 深链只做一次性兼容定位，**所有** `/api/v1/batches/*` 兼容端点保持可用；旧入口的最终收敛
+连同全局连接状态一起交给 F-G，见 `docs/MiGuOrca_stage38_tracking_management_PRD.md` §11～§12。
 
 ## 集数占位
 

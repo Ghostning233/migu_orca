@@ -24,6 +24,9 @@ Started: Sun Sep 13 08:40:00 CST 2026
 - 浏览器测试里观察 loading 一律用 **held route**：`page.route` handler 只把 `route` 存进列表（不 fulfill），断言完 `.loading-state`/`aria-busy`/按钮 disabled 后再 `held[0].fulfill(...)`。`time.sleep` 写在 handler 里会阻塞 Playwright 分发线程，loading 永远看不到；conftest 的 `test-slow-*` 延迟路由已随队列用例移除。
 - 旧入口「退出默认运行时但保留组件供回退」需要三重证据，缺一不可：① Vitest 引用搜索（扫 `frontend/src`，禁止队列目录外出现 `features/queue/` 导入）；② bundle 标记（Chromium 读 `frontend/dist/assets/*.js`，断言只有旧页面才会渲染的 id/文案不存在）；③ 路由重定向（Vitest + Chromium 都断言旧路径落到新页）。**后端兼容 endpoint 一律不删**。
 - 敏感 canary 断言的正确边界：排除「用户正在填写的凭据表单自身」——用 `body.innerHTML.replace(dialog.innerHTML, '')` 得到「表单之外」的标记面，再断言 URL/history/localStorage/sessionStorage/console 与活动输入值。同时必须断言凭据**确实**出现在单次 POST body 里，否则用例会退化成永真的空断言。
+- **归档不是 `ralph.sh` 的自动行为**：脚本只在分支切换时归档「上一个」run，因此最终 story 必须自己把当前 `prd.json`（全部 `passes=true`）与 `progress.txt` 复制到 `scripts/ralph/archive/<date>-<stage-name>/`，否则归档会缺最终 story 状态。
+- **Stage 收尾的长期文档清单固定为 8 处**，漏一处就会残留「已规划，待开发」：README 头部状态段 + Ralph 状态链、`docs/backlog.md` 的阶段总表与 BL 小节、`docs/MiGuOrca_future_stages.md` 的阶段清单/依赖段/数量判断、`docs/MiGuOrca_frontend_ux_implementation_PRD.md` 的文档信息与状态注记、`docs/frontend-ux-refactor-work-goals.md` 状态表、`docs/modules/M13-web-ui-PRD.md` 阶段表、`docs/api/frontend-contract-handoff-v1.md`、对应 `docs/MiGuOrca_stageNN_*.md` 自身（状态 + 完成记录 + handoff 顺延一节）。
+- **完整门禁只在最终 story 跑一次**，且跑浏览器套件前必须先 `npm run build` 并确认仓库根 `.migu_orca/storage` 不存在。Stage 38 基线：后端非浏览器 1640 passed / 212 deselected、前端 46 files / 586 tests、真实 Chromium 212 passed。
 
 ## [2026-09-13 09:10:00 CST] - US-303
 Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
@@ -265,4 +268,18 @@ Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
   - 异步 UI 竞态用例要**能区分两种结果**才有意义：最初写的「兼容读晚到不抢选择」用例里，用户选的和兼容读指向同一条记录，去掉守卫也照样绿；改成两条不同记录后才真正承重（见下面突变 ④）。
   - 反向验证（4 项突变，全部实际运行并确认红）：① `locateTrackingIdForBatch` 改成按 title 匹配 → `trackingCompat` 3 例 + `TrackingView` 2 例 Vitest 红，重新 build 后 2 个 Chromium 深链用例（parity / queue）红；② 不可定位分支不消费 `batch_id` → `TrackingView` 2 例红；③ 把 `@/features/queue/QueueView.vue` 重新 import 回 router → 引用搜索用例红（这是「退出运行时」的可执行闸门）；④ 去掉 `resolveBatchCompat` 的两处 `queryTrackingId()` 守卫 → 新增的 2 个竞态用例红。
 - 定向验证：`npm run typecheck`、`npm run lint`、`npm run api:check`、`npm run test:unit -- --run`（46 files / 586 tests）、`npm run build`；`uv run ruff check src tests`、`uv run python -m compileall -q src tests`、`uv run pytest -q -m "not browser"`（1640 passed）；全量真实 Chromium：`uv run pytest tests/browser/ -q` → **212 passed**（含新迁移与新增用例）；定向 `test_app_feature_parity.py + test_app_queue.py + test_app_tracking.py` 59 passed；`git diff --check` 干净，`git status` 无 dist/trace/截图/凭据/storage 产物。
+---
+
+## [2026-09-13 13:20:00 CST] - US-317
+Thread: https://ampcode.com/threads/$AMP_CURRENT_THREAD_ID
+- What was implemented: Stage 38 最终门禁、文档归档与 F-G handoff。逐项映射 US-303～US-316 的提交与验收证据，运行完整前端/后端非浏览器/真实 Chromium 门禁，同步长期文档与 AGENTS，归档 Ralph 状态，并把 F-G 范围限定为 Settings 简化、全局连接/跨页、旧入口最终收敛、文档和候选发布 Gate 5。
+- 门禁（干净工作区一次通过）：`uv run python -m compileall -q src tests` 通过；`uv run ruff check src tests` → All checks passed；`uv run migu-orca-openapi --check` → OpenAPI up to date；`uv run pytest -q -m "not browser"` → **1640 passed, 212 deselected**；`npm run api:check`／`typecheck`／`lint`（--max-warnings 0）全部通过；`npm run test:unit -- --run` → **46 files / 586 tests passed**；`npm run build` 通过（产物含 `TrackingView-*.js`，无 `batch-queue-*`）；`uv run pytest tests/browser/ -q` → **212 passed in 85.36s**（真实 Chromium，覆盖正常/复核失败/同步/提交/重试/恢复/四类管理动作/旧路由兼容定位/三档桌面视口与 200%/敏感 canary）；`git diff --check` 干净。
+- 视觉对照：逐项比对 `tracking-management-v2.png` 与 `tracking-revalidation-failed-v1.png`，记录已对齐项与两条已知偏差（全局连接 chip 延后 F-G；列表无封面缩略图列，因安全投影不提供海报字段）。
+- Files changed: `docs/MiGuOrca_stage38_tracking_management_PRD.md`（状态 → 已完成；新增 §11 完成记录/证据映射/门禁/视觉偏差/归档，F-G handoff 顺延为 §12）、`README.md`、`docs/backlog.md`、`docs/frontend-ux-refactor-work-goals.md`、`docs/MiGuOrca_future_stages.md`、`docs/MiGuOrca_frontend_ux_implementation_PRD.md`、`docs/modules/M13-web-ui-PRD.md`、`docs/api/frontend-contract-handoff-v1.md`、`frontend/AGENTS.md`；新增 `scripts/ralph/archive/2026-09-13-stage38-tracking-management/`；`scripts/ralph/prd.json`、`progress.txt`。**未改任何源码、后端契约、端点或测试。**
+- **Learnings for future iterations:**
+  - 归档不是 `ralph.sh` 的自动行为：脚本只在**分支切换时**归档上一个 run，所以最终 story 必须自己把当前的 `prd.json`（US-303～US-317 全 `passes=true`）与 `progress.txt` 复制进 `archive/<date>-<stage-name>/`，否则归档会缺最终 story 状态。
+  - 完成记录里的证据映射用「短哈希 + 主要产物 + 定向证据」三列就够；审核/修复提交（`8543e42`/`9e968d4`/`872e390`/`2f60203`/`dedf16d`/`c40eacb`/`ff94cc4`）要跟着被修复的 story 一起列，否则「story、提交历史、工作区一致」这条无法自证。
+  - 跑浏览器套件前先 `npm run build` 并确认 `.migu_orca/storage` 不存在；本次全量 212 passed 是本 Stage 的计数基线，后续若下降应先跑最小失败用例。
+  - 长期文档需要同步的是 8 处（README 头部状态段 + Ralph 状态链、backlog BL-026 两处、future_stages 的 Stage 清单/依赖段、frontend_ux_implementation_PRD 文档信息与状态注记、work-goals 状态表、M13 阶段表、contract handoff 的 F-F 小节），漏掉任何一处都会让「F-F 已规划」残留。
+- 定向验证：完整门禁如上；`git status` 无 `dist/`、trace、截图、凭据或本地 storage artifact（由 `test_no_dist_trace_or_screenshot_artifact_is_tracked` 用 `git ls-files` 固化）。
 ---

@@ -5,7 +5,7 @@
 | 项目 | 内容 |
 | --- | --- |
 | 文档类型 | 候选执行 PRD / Gate 4 输入 |
-| 当前状态 | F-A～F-E 已完成为 Stage 33～37（US-257～US-302）；F-F 已规划为 Stage 38，F-G 待评审 |
+| 当前状态 | F-A～F-F 已完成为 Stage 33～38（US-257～US-317）；F-G 待评审 |
 | 创建日期 | 2026-09-07 |
 | Backlog | BL-026 |
 | 优先级 | P1；各切片按后端依赖分别解锁 |
@@ -18,7 +18,7 @@
 执行边界见 `docs/MiGuOrca_stage34_shared_review_core_PRD.md`；F-C/F-D 已完成为 Stage 35/36，
 执行边界分别见 `docs/MiGuOrca_stage35_single_anime_journey_PRD.md` 与
 `docs/MiGuOrca_stage36_batch_review_journey_PRD.md`；F-E 已冻结为 Stage 37，执行边界见
-`docs/MiGuOrca_stage37_plans_safe_info_PRD.md`；F-F 已冻结为 Stage 38，执行边界见
+`docs/MiGuOrca_stage37_plans_safe_info_PRD.md`；F-F 已作为 Stage 38 交付并归档，完成记录与 handoff 见
 `docs/MiGuOrca_stage38_tracking_management_PRD.md`；F-G 仍需独立评审。实现 Agent
 每次只接收一个切片及其已经冻结的 API，不得一边写页面一边设计后端契约。
 
@@ -258,8 +258,8 @@ CredentialSessionDialog  当前页面内存凭据和连接引导
 > 执行 PRD 见 `docs/MiGuOrca_stage37_plans_safe_info_PRD.md`；它接管已保存 Request 的真实 SafeInfo、
 > 列表—详情、共享修改、复制再用和只读 tracking 链接，但不接任何外部管理动作。
 >
-> 状态注记（2026-09-13）：F-F 已规划为 Stage 38（US-303～US-317），执行 PRD 见
-> `docs/MiGuOrca_stage38_tracking_management_PRD.md`；F-G 不进入该阶段。
+> 状态注记（2026-09-13）：F-F 已作为 Stage 38（US-303～US-317）完成并归档，完成记录、门禁、
+> 视觉偏差与 F-G handoff 见 `docs/MiGuOrca_stage38_tracking_management_PRD.md`；F-G 不进入该阶段。
 
 ## 10. PR 与回退边界
 

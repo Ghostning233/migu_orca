@@ -3,11 +3,15 @@
 MiGuOrca 的 Vue 3 + TypeScript(strict) + Vite 前端工程。依赖与命令全部走 npm（`npm ci`），
 与后端 `uv` 分离；**不得**混用多个 lockfile（`package-lock.json` 是唯一来源）。
 
-## Stage 38 当前执行边界
+## Stage 38 执行边界（已完成并归档，2026-09-13）
 
-- 当前执行 PRD 是 `docs/MiGuOrca_stage38_tracking_management_PRD.md`，分支固定为
-  `ralph/stage38-tracking-management`，stories 为 US-303～US-317。
-- Stage 38 只实现 F-F 正式追番管理；F-G Settings 简化、全局连接状态、跨页收敛和发布 Gate 5 不进入本阶段。
+- 执行 PRD 是 `docs/MiGuOrca_stage38_tracking_management_PRD.md`，分支为
+  `ralph/stage38-tracking-management`，stories US-303～US-317 全部 `passes=true`。完成记录、逐 story
+  证据映射、最终门禁结果、视觉偏差与 F-G handoff 见该 PRD §11～§12；Ralph 状态归档在
+  `scripts/ralph/archive/2026-09-13-stage38-tracking-management/`。
+- Stage 38 只实现 F-F 正式追番管理；F-G Settings 简化、全局连接状态、跨页收敛、旧入口最终收敛和发布
+  Gate 5 不进入本阶段。本节的约束对 F-G 之前的**任何**后续改动继续有效（尤其是下面的凭据、写幂等、
+  删除与视觉偏差边界）。
 - US-303 仅补齐严格 generated modify patch 联合与 server-computed `target_scopes`；不得新增 endpoint、状态、持久化 schema、外部动作或业务语义。其余 stories 不得继续扩展后端契约。
 - 列表/详情只消费 generated tracking DTO；动作只取 `available_actions + target_scopes + 当前 capability` 交集。未知值 fail closed，不手写 DTO 或猜 scope。
 - 凭据只存在 TrackingView 实例与单次 POST body；外部动作必须显式触发并复用 revision、confirm、单意图 idempotency、回查和结果未知保护。
@@ -512,3 +516,16 @@ npm run build                 # 先 typecheck 再 vite build → dist/
   `清除连接`。`test_global_connection_chip_is_deferred_and_the_page_carries_its_own_state`
   固化这条偏差：页头不得出现全局连接 chip，页内状态与入口必须存在。F-G 补全局 chip 时，必须
   同步更新该用例与本节记录。
+
+### 最终门禁与归档（US-317）
+
+- Stage 38 的完整门禁只在 US-317 运行一次：`compileall`、`ruff`、`migu-orca-openapi --check`、
+  `pytest -m "not browser"`、`api:check`、`typecheck`、`lint`、`test:unit --run`、`build`、
+  `pytest tests/browser/`（真实 Chromium）与 `git diff --check`。跑浏览器套件前必须**先构建**
+  `frontend/dist`，并确认仓库根 `.migu_orca/storage` 不存在（陈旧 saved Request 会挂掉空列表用例）。
+- 计数基线（2026-09-13，全量一次通过）：后端非浏览器 1640 passed / 212 deselected；前端
+  46 files / 586 tests；真实 Chromium 212 passed。改动后若计数下降，先跑最小失败用例定位，不要
+  直接重跑全套。
+- Ralph 状态归档在 `scripts/ralph/archive/2026-09-13-stage38-tracking-management/`，其 `prd.json`
+  必须与最终 story 状态一致（US-303～US-317 全 `passes=true`）。归档是 Stage 收尾的一部分，
+  不是 `ralph.sh` 的自动行为（脚本只在分支切换时归档**上一个** run）。

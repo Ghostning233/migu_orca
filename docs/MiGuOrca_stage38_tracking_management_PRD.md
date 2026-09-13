@@ -7,7 +7,7 @@
 | Stage | 38 |
 | 工作包 | F-F：正式追番管理 |
 | Backlog | BL-026 |
-| 状态 | 已规划，待开发 |
+| 状态 | 已完成（2026-09-13） |
 | 目标分支 | `ralph/stage38-tracking-management` |
 | Ralph stories | US-303～US-317 |
 | 实时基线 | `origin/main` 合并提交 `7bb2f24`（Stage 37 已合入） |
@@ -327,9 +327,103 @@ git diff --check
 4. US-303～US-317 全部 `passes=true`、五轮独立审核无阻断、完整门禁通过后才标记完成并归档。
 5. Ralph 开发/修复 Agent 不 push、不创建 PR、不合并、不清理分支；最终推送合并只由用户授权的 Agent C 执行。
 
-## 11. F-G handoff
+## 11. Stage 38 完成记录
+
+US-303～US-317 全部 `passes=true`；分支 `ralph/stage38-tracking-management` 的每个 story 都有独立
+`feat: US-xxx` 提交，工作区在该分支上保持干净。下表逐项映射 story、提交与验收证据（提交哈希为
+本阶段分支上的短哈希，审核/修复提交单列）。
+
+| Story | 提交 | 主要产物 | 验收证据（定向） |
+| --- | --- | --- | --- |
+| US-303 | `e63a2fc`（修复 `8543e42`、`9e968d4`） | `schemas.py`、`tracking_serializers.py`、`openapi_gen.py`、`docs/api/openapi.json`、`frontend/src/api/generated/api.ts`、`docs/api/endpoint_inventory.md`、`frontend-contract-handoff-v1.md` | `test_tracking_management_contract.py`（含 `test_modify_patch_is_strictly_discriminated_by_scope`、`test_openapi_modify_patch_allows_multiple_fields_but_requires_one`、`test_management_action_scopes_are_server_computed_per_action_without_mapping_values`）；API drift check、typecheck |
+| US-304 | `1612243` | `trackingProjection.ts` + Vitest | 状态总览/搜索/筛选/稳定排序、未知值 fail closed、scope×capability 交集、opaque key 生命周期 Vitest |
+| US-305 | `f89fc00` | `TrackingView.vue`、`app/router/catalog.ts`、`tests/browser/test_app_tracking.py` | `TrackingView.test.ts`、`catalog.test.ts`；Chromium `test_formal_overview_single_select_and_filter`、`test_invalid_query_and_list_failure_are_safe` |
+| US-306 | `fc13e5a` | `TrackingInspector.vue` + Vitest | 详情代际/取消、局部失败、EXTERNAL_ONLY、方案深链；Chromium 检查器用例 |
+| US-307 | `ccfe22f`（修复 `872e390`、`2f60203`） | `CredentialSessionDialog.vue` + Vitest | 页面内存凭据、探测降级、取消/切模/清除/卸载销毁；Chromium `test_credential_session_probe_is_explicit_and_clearable` |
+| US-308 | `d8d3d9c`（修复 `2f60203`、`dedf16d`） | `TrackingView.vue` 同步链路 + Vitest | 显式确认、单飞、`items/summary` 收敛、失败/PARTIAL/UNKNOWN 保留旧列表；Chromium `test_sync_requires_connected_session_and_second_confirmation` |
+| US-309 | `db0fe21` | `TrackingInspector.vue` 复核区、`trackingProjection.ts` issues 投影 | 无凭据/无外部调用、`ready=false` 业务结果、409 回查、方案深链；Chromium `test_local_revalidate_reports_issues_and_never_creates_a_subscription`、`test_revalidate_conflict_refreshes_detail_and_requires_new_confirmation` |
+| US-310 | `3e30aba`（修复 `c40eacb`） | 写会话投影 + `TrackingView.runTrackingWrite` | 影响确认、单意图 key、单飞、outcome 分流、写后回查、非 409 4xx 确定拒绝态；Chromium `test_explicit_submit_confirms_once_and_keeps_the_key_in_page_memory` |
+| US-311 | `fefe1b8`（修复 `c40eacb`） | RETRY 端点/文案绑定表 + 重放绑定 | 明确失败新 key、transport 重试同 key 同 revision、409 冲突收敛；Chromium `test_explicit_retry_*`、`test_retry_transport_unknown_locks_the_key_and_only_reads_back`、`test_retry_conflict_converges_on_server_tracking_and_needs_a_new_key` |
+| US-312 | `a6376c7`（修复 `ff94cc4`） | 恢复会话投影 + `TrackingInspector` 恢复区 | AUTO/MARK_*/VERIFY_EXTERNAL 分离、needs_manual 保持锁定、禁止 submit/retry/management；Chromium `TestAppTrackingRecovery` 2 例 |
+| US-313 | `e1374a6`（修复 `ff94cc4`） | `trackingManagement.ts`、`TrackingModifyForm.vue` | 两种 scope 分离表单、空/跨 scope/非法 patch 零请求、`management_status` 收敛；Chromium `test_explicit_modify_sends_only_the_selected_scope_patch`、`test_modify_unknown_result_locks_the_intent_and_never_resends`、`test_modify_conflict_rereads_both_views_and_needs_a_new_key`、`test_modify_capability_degradation_hides_the_scope` |
+| US-314 | `24e8c75` | `TrackingManagementActions.vue`、启停方向推导、REFRESH_RSS 单条作用域 | 目标显式选择、能力降级逐动作提示、部分/未知结果只读回查；Chromium `TestAppTrackingManagementActions` 4 例 |
+| US-315 | `381ec9a` | `TrackingExternalDelete.vue`、delete body 无 `file` | 单条 scope 选择、danger 确认、本地 Request/tracking/审计/媒体保留、`EXTERNAL_DELETED` 留在列表；Chromium `TestAppTrackingExternalDelete` 2 例 |
+| US-316 | `b36745f` | `trackingCompat.ts`、路由/运行时退出、浏览器用例迁移与新增（22 → 48 例） | 引用搜索 + bundle 标记 + 路由重定向三重证据；多视口/200%、键盘/aria-live、敏感 canary、无 artifact；Chromium `TestAppTrackingCompatAndRuntimeExit`/`ViewportJourney`/`SensitiveCanary` |
+| US-317 | 本提交 | 本完成记录、长期文档与 Ralph 归档 | 完整门禁（见下）与人工视觉对照 |
+
+### 11.1 AC-16～AC-22 映射
+
+交互规格 `docs/design/frontend-ux-interaction-spec.md` 中 F-F 相关的 7 条验收场景逐项映射如下：
+
+| AC | 场景 | 覆盖 story | 证据 |
+| --- | --- | --- | --- |
+| AC-16 | Auto Bangumi 未连接时进入管理/提交 | US-307、US-310 | 未连接时外部写动作不渲染，`#tracking-connect` 提供连接入口；连接成功只回到动作上下文，**不自动提交**（Chromium `test_explicit_submit_confirms_once_and_keeps_the_key_in_page_memory` 断言连接后仍需一次显式确认） |
+| AC-17 | 待提交上下文已过期 | US-309、US-310 | `revalidate` 的 `ready=false` 是 200 业务结果并说明「尚未向 Auto Bangumi 创建订阅」；submit 的 `NEEDS_RECONFIRM` 走返回修改方案；两条路径都零外部写入且深链 `/app/plans?request_id=...` |
+| AC-18 | 外部提交超时且结果未知 | US-310、US-311、US-312 | 结果不明保留锁定 intent、只读回查，transport 重试整份复用同 key + 同 `expected_revision`，外部只可能产生一个订阅（Chromium `test_retry_transport_unknown_locks_the_key_and_only_reads_back` 断言两次请求的 key 与 revision 完全相等） |
+| AC-19 | 连接 3.1.18 后执行列表/详情/编辑/启停/删除/RSS 刷新 | US-313、US-314、US-315 | 四个管理动作在 `subscription_*`/`rss_*` capability 为 `SUPPORTED` 时按 `target_scopes` 渲染，结果按 `management_status` 收敛，错误按条隔离（单条 4xx 不锁死其他条目） |
+| AC-20 | 连接未知/部分能力版本 | US-307、US-308、US-313、US-314、US-315 | 只显示已证实支持的操作，未证实的能力各自渲染只读降级原因；探测失败/`PARTIAL`/`UNKNOWN` 保留旧列表并给出重连、重探测或再次同步入口，不误报为空（Chromium `test_modify_capability_degradation_hides_the_scope`、`test_capability_degradation_hides_only_the_unproven_action`、`test_delete_capability_degradation_hides_only_the_unproven_scope`） |
+| AC-21 | 删除有已下载媒体的外部订阅 | US-315 | 二次确认固定说明只删外部对象、保留本地 Request/tracking/审计/任务与已下载媒体；请求无 `file` 字段；取消零请求、默认焦点为取消（Chromium `test_delete_needs_a_chosen_target_and_keeps_every_local_record`） |
+| AC-22 | 敏感源数据检查页面/DOM/日志 trace | US-316 | `TestAppTrackingSensitiveCanary` 9 例覆盖探测成功/失败、同步、提交成功、transport 未知与恢复，断言 canary 不进 DOM 文本与「移除对话框子树后」的标记、URL、`history.state`、localStorage/sessionStorage、console；只用白名单安全字段渲染 |
+
+### 11.2 最终门禁结果
+
+全部命令均在本分支最后一次提交前于干净工作区运行并一次通过：
+
+```bash
+uv run python -m compileall -q src tests   # 通过
+uv run ruff check src tests                # All checks passed!
+uv run migu-orca-openapi --check           # OpenAPI up to date.
+uv run pytest -q -m "not browser"          # 1640 passed, 212 deselected
+cd frontend
+npm run api:check                          # 通过（无生成漂移）
+npm run typecheck                          # 通过
+npm run lint                               # 通过（--max-warnings 0）
+npm run test:unit -- --run                 # 46 files / 586 tests passed
+npm run build                              # 通过
+cd ..
+uv run pytest tests/browser/ -q            # 212 passed in 85.36s
+git diff --check                           # 通过
+```
+
+真实 Chromium 全量套件（`uv run pytest tests/browser/ -q`）在构建后的 `frontend/dist` 上运行，
+覆盖正常态、复核失败态、能力降级、同步、提交/重试、结果未知恢复、MODIFY/SET_ENABLED/REFRESH_RSS/
+DELETE_EXTERNAL、旧入口兼容定位、三档桌面视口与 200% 缩放，以及敏感 canary；其中追番专属
+`tests/browser/test_app_tracking.py` 48 例、旧入口兼容 `tests/browser/test_app_queue.py` 4 例。
+自动化全程只使用项目 fake/route mock，不连接真实 MiKan、Auto Bangumi 或 qBittorrent；逐 story 的
+定向用例见上表，执行细节与学习记录见 `scripts/ralph/progress.txt` 的 US-317 条目。
+
+### 11.3 视觉对照与已知偏差
+
+对照 `docs/design/assets/frontend-ux/tracking-management-v2.png`（正常态）与
+`tracking-revalidation-failed-v1.png`（复核失败态）：
+
+- 已对齐：状态总览（待提交/追番中/已停用/失败，复核失败态首格为「需确认」）、约 58%～64% 列表 +
+  右侧 sticky 检查器、单选列表（无 checkbox）、「番剧 / 状态 / 最近更新」列语义、检查器的
+  `字幕组 / 有效资源 / 更新进度（待开发）`、方案入口与主行动按钮、复核失败态的安全说明
+  「未向 Auto Bangumi 创建订阅」。
+- **已知偏差（延后 F-G）**：两张效果图页头的全局「已连接」chip 不属于 Stage 38。tracking 页内以
+  `#tracking-connect` 入口 + `.tracking-connection-status`（含 `#tracking-capability-summary`
+  中文能力摘要）与「清除连接」等价承载，由
+  `test_global_connection_chip_is_deferred_and_the_page_carries_its_own_state` 固化。F-G 补齐全局
+  chip 时必须同步更新该用例与 `frontend/AGENTS.md` 的记录。
+- 列表未实现封面缩略图列（效果图有），因为 tracking DTO 的安全投影不提供海报字段；不为此新增
+  契约或读取本地绝对路径。
+
+### 11.4 归档与工作区一致性
+
+- Ralph 状态归档在 `scripts/ralph/archive/2026-09-13-stage38-tracking-management/`，
+  `prd.json` 中 US-303～US-317 全部 `passes=true`，与 `progress.txt` 的完成记录一致。
+- 后端契约只做加法补口：未新增 endpoint、状态、持久化 schema 或外部动作；未删除任何旧
+  `/api/v1/batches/*` 兼容端点。
+- 未提交 `frontend/dist/`、sourcemap、trace、截图、真实凭据或本地 storage artifact
+  （由 `test_no_dist_trace_or_screenshot_artifact_is_tracked` 用 `git ls-files` 固化）。
+
+## 12. F-G handoff
 
 - F-G 只负责 Settings 简化、移除旧 Settings/Queue 业务提交入口、全局非敏感连接状态、跨页导航徽标、
   旧路由最终收敛、完整用户文档与候选发布 Gate 5。
+- Stage 38 已把 `QueueView` 移出默认运行时但**保留组件与后端兼容端点**；F-G 负责旧入口的最终收敛，
+  收敛前不得删除后端兼容契约。
+- Stage 38 遗留的全局连接 chip 偏差、跨页连接状态与导航徽标由 F-G 统一实现。
 - “已更新集数”继续属于 BL-020，不进入 F-G；移动端、服务端批量现场恢复与真实 LLM provider 继续独立评审。
 - 若 Stage 38 实现暴露新的后端语义缺口，必须停下评审，不允许前端猜测或手写临时 DTO。
